@@ -18,7 +18,6 @@ import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
 import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
-import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.NavBarLabelsBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
@@ -37,6 +36,7 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
 import java.io.IOException
@@ -1549,6 +1549,45 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
+    fun `observeImagePickerMode defaults to PHOTO_PICKER on an empty store`() = runTest(dispatcher) {
+        repository.observeImagePickerMode().test {
+            assertEquals(ImagePickerMode.PHOTO_PICKER, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `setImagePickerMode persists and round-trips all picker modes`() = runTest(dispatcher) {
+        repository.setImagePickerMode(ImagePickerMode.DOCUMENT_PICKER)
+        repository.observeImagePickerMode().test {
+            assertEquals(ImagePickerMode.DOCUMENT_PICKER, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setImagePickerMode(ImagePickerMode.PHOTO_PICKER_GET_CONTENT)
+        repository.observeImagePickerMode().test {
+            assertEquals(ImagePickerMode.PHOTO_PICKER_GET_CONTENT, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        repository.setImagePickerMode(ImagePickerMode.PHOTO_PICKER)
+        repository.observeImagePickerMode().test {
+            assertEquals(ImagePickerMode.PHOTO_PICKER, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `corrupt image_picker_mode value falls back to PHOTO_PICKER instead of crashing`() = runTest(dispatcher) {
+        dataStore.edit { prefs -> prefs[stringPreferencesKey("image_picker_mode")] = "HOLODECK" }
+
+        repository.observeImagePickerMode().test {
+            assertEquals(ImagePickerMode.PHOTO_PICKER, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `observeWritingSurfacePreset defaults to FULL_EDITOR on an empty store`() = runTest(dispatcher) {
         // #951 — FULL_EDITOR is the default (the quick-reply sheet is experimental opt-in),
         // never the enum's first ordinal by chance.
@@ -1684,44 +1723,15 @@ class DataStoreUserPreferencesRepositoryTest {
     }
 
     @Test
-    fun `observeMediaDisplayProfile defaults to M on an empty store`() = runTest(dispatcher) {
-        // #973 ([AMENDEMENT-v1.5-2]) — M (×1,5) is the default chosen by XaTriX, never the
-        // enum's first ordinal by chance.
-        repository.observeMediaDisplayProfile().test {
-            assertEquals(MediaDisplayProfile.M, awaitItem())
-            cancelAndIgnoreRemainingEvents()
-        }
-    }
-
-    @Test
-    fun `setMediaDisplayProfile persists and round-trips S then L then M`() = runTest(dispatcher) {
-        repository.setMediaDisplayProfile(MediaDisplayProfile.S)
-        repository.observeMediaDisplayProfile().test {
-            assertEquals(MediaDisplayProfile.S, awaitItem())
-            cancelAndIgnoreRemainingEvents()
-        }
-
-        repository.setMediaDisplayProfile(MediaDisplayProfile.L)
-        repository.observeMediaDisplayProfile().test {
-            assertEquals(MediaDisplayProfile.L, awaitItem())
-            cancelAndIgnoreRemainingEvents()
-        }
-
-        repository.setMediaDisplayProfile(MediaDisplayProfile.M)
-        repository.observeMediaDisplayProfile().test {
-            assertEquals(MediaDisplayProfile.M, awaitItem())
-            cancelAndIgnoreRemainingEvents()
-        }
-    }
-
-    @Test
-    fun `corrupt media_display_profile value falls back to M instead of crashing`() = runTest(dispatcher) {
-        // #973 — an unknown value (older build / manual edit) must degrade to M, not crash valueOf.
-        dataStore.edit { prefs -> prefs[stringPreferencesKey("media_display_profile")] = "XXL" }
-
-        repository.observeMediaDisplayProfile().test {
-            assertEquals(MediaDisplayProfile.M, awaitItem())
-            cancelAndIgnoreRemainingEvents()
+    fun `retired GIF preference is ignored and preserved for every stored value`() = runTest(dispatcher) {
+        val key = stringPreferencesKey("media_display_profile")
+        listOf("S", "M", "L", "XXL", "").forEach { stored ->
+            dataStore.edit { it[key] = stored }
+            assertEquals(PostImageMaxWidth.DEFAULT, repository.observePostImageMaxWidth().first())
+            repository.setPostImageMaxWidth(PostImageMaxWidth.P100)
+            assertEquals(PostImageMaxWidth.P100, repository.observePostImageMaxWidth().first())
+            assertEquals(stored, dataStore.data.first()[key])
+            repository.setPostImageMaxWidth(PostImageMaxWidth.DEFAULT)
         }
     }
 

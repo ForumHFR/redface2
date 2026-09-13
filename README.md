@@ -17,10 +17,10 @@ Les apps bêta et dev de F-Droid ont des identifiants distincts et cohabitent su
 
 ## État
 
-- **Bêta publique 0.50.2** (1er septembre 2026) : sondages, liens HFR, modération et rôles du staff, vue forum, citations, fiabilité.
-- **Canal dev 0.52.x** : sous-menu Couleurs (presets, hexa, tons de fond, AMOLED, Material You), zoom interactif, largeur des images.
+- **Bêta publique 0.58.0** (13 septembre 2026) : images plus larges dans les posts (plafond par densité), un seul décodage par image et géométrie stable, images reho.st et `http://` des anciens posts de retour, « Réessayer » sur chaque image indisponible, sélecteur d'images au choix, journal Diagnostic de l'upload.
+- **Canal dev** : aligné sur la bêta (0.58.0) au 13 septembre 2026 ; il reçoit les releases dev suivantes avant leur promotion.
 - **Livré** : connexion HFR, drapeaux (favoris, lus, non lus, MultiMP), catégories et sous-catégories, lecture de sujet (pagination, ancres, recherche intra-sujet, deep links), écriture (répondre, citer, citer plusieurs, éditer, créer un sujet, sondages, upload d'images, smileys), messages privés et MultiMP (lecture, réponse, citation, membres), profils, liste noire, réglages (affichage, densité, images, couleurs, réseau et cache, proxy), cache Room et prefetch non authentifié.
-- **Organisation du travail** : les phases 0 à 4 de la [roadmap](https://forumhfr.github.io/redface2/specs/roadmap) sont livrées comme épics ; le suivi se fait désormais par milestones de vue (*Vue · Topic 2*, *Vue · Éditeur 2*, *Vue · Drapeaux 2*, *Vue · MP 1*, *Vue · Réglages 1*, *Vue · Compte HFR 1*, *Infra & dette*). Reste ouvert : architecture d'extensions ([#7](https://github.com/ForumHFR/redface2/issues/7)), sync MPStorage entre appareils ([#6](https://github.com/ForumHFR/redface2/issues/6)).
+- **Organisation du travail** : les phases 0 à 4 de la [roadmap](https://forumhfr.github.io/redface2/specs/roadmap) sont livrées comme épics ; le suivi se fait désormais par milestones de vue (*Vue · Topic 2*, *Vue · Éditeur 2*, *Vue · Drapeaux 2*, *Vue · Forum 1*, *Vue · MP 1*, *Vue · Réglages 1*, *Vue · Compte HFR 1*, *Infra & dette*). Reste ouvert : architecture d'extensions ([#7](https://github.com/ForumHFR/redface2/issues/7)), sync MPStorage entre appareils ([#6](https://github.com/ForumHFR/redface2/issues/6)).
 - **Historique** : [`app/CHANGELOG.md`](app/CHANGELOG.md) (une entrée par release), [`CHANGELOG.md`](CHANGELOG.md) (versions des specs).
 
 Suivi communautaire sur HFR : [topic bêta](https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=23&post=35395&page=1) (retours utilisateurs) et [topic dev](https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=23&post=35421&page=1) (changelogs et tests du canal dev).

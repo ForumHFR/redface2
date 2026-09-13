@@ -1,6 +1,5 @@
 package fr.forumhfr.redface2.core.ui.post
 
-import android.util.Log
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -23,7 +22,8 @@ internal const val MEDIA_GEOMETRY_LOG_TAG = "PostMediaGeometry"
  *  - [failedFresh] → the occurrence composes the §6 error state and NEVER a painter node, so no
  *    network attempt can fire (the pre-#960 pipeline re-attempted per occurrence and per key()
  *    bump);
- *  - terminal success → [renderPainter] without any settlement (Coil serves its caches);
+ *  - terminal success → [renderPainter] from Coil's caches; an observed cache-miss error
+ *    fails the PAINTER axis so §6 still exposes a shared error slot and manual retry;
  *  - untried → the FIRST occurrence wins the reservation and reports the painter outcome through
  *    [onState]; concurrent occurrences hold the placeholder until the winner settles (the ledger's
  *    snapshot write recomposes them onto the settled branch).
@@ -39,9 +39,15 @@ internal class PainterAttempt(
     private val cache: IntrinsicMediaSizeCache,
     private val url: String,
     private val generation: Int,
+    private val isContentMedia: Boolean = true,
 ) {
     private var granted by mutableStateOf(false)
     private var settled = false
+    private var active = true
+
+    /** E3 — includes the pending first frame; terminal painter states remove the announcement. */
+    var loading by mutableStateOf(true)
+        private set
 
     /** Fresh painter failure on record — compose the error state, never a painter node. */
     val failedFresh: Boolean
@@ -62,16 +68,19 @@ internal class PainterAttempt(
     }
 
     /**
-     * Settles the granted attempt on the painter's terminal states; loading/empty are ignored.
-     * The GEOMETRY deposit (G2) runs on EVERY success — granted, settled or terminal — because
-     * the pair is immutable-true and the deposit is idempotent first-pair: this is what heals a
-     * FIFO-evicted cache entry when a terminal painter re-renders (Sol P2, O1 — the §6 locked
-     * slot survives eviction), and the §7 re-decode's callback can never apply a second
-     * correction through it. Guard asymmetry (deliberate, Sol P2): the PAINTER settlement is
-     * grant- AND generation-guarded; the G2-derived PROBE settlement is generation-guarded ONLY
-     * (any truthful painter success may satisfy the measurement need, grant or not).
+     * #960 P2 (Sol, O1) originally healed FIFO eviction from any successful painter callback;
+     * E1 also records errors after success, E3 tracks loading for a11y. v1.6-10 preserves those
+     * outcome gates but removes cache-based geometry authority and the §7 G2 re-decode.
+     * Current live callbacks alone can settle outcomes or geometry. G2 deposits into the
+     * ledger, whose first pair survives memo eviction, retries and divergent later painters.
+     * No callback may use a stale result to fix or enrich the current generation.
      */
     fun onState(state: AsyncImagePainter.State) {
+        if (!active || ledger.generationOf(url) != generation) {
+            loading = false
+            return
+        }
+        loading = state !is AsyncImagePainter.State.Success && state !is AsyncImagePainter.State.Error
         when (state) {
             is AsyncImagePainter.State.Success -> {
                 settlePainterGeometry(state)
@@ -85,6 +94,8 @@ internal class PainterAttempt(
                 if (granted && !settled) {
                     settled = true
                     ledger.settleFailure(url, generation, MediaAttemptKind.PAINTER, System.currentTimeMillis())
+                } else if (renderPainter) {
+                    ledger.failPainterAfterSuccess(url, generation, System.currentTimeMillis())
                 }
             }
 
@@ -93,34 +104,25 @@ internal class PainterAttempt(
     }
 
     /**
-     * #960 P2 — G2 (contrat v1.5 §6, « probe KO, painter OK »): the painter's ORIENTED image
-     * dimensions (`coil3.Image.width/height`, the §3 normative source) produce THE unique box
-     * correction when they are the FIRST valid pair (`putSuccessIfAbsent` — a later disagreeing
-     * pair is logged, never applied), and settle the PROBE axis too: the measurement need is
-     * met, the url becomes stable forever (no TTL advancement, no replayed probe). A success
-     * WITHOUT usable geometry deposits nothing and leaves the probe axis retryable (C1) — §6
-     * « aucune dimension exploitable → boîte cold CONSERVÉE ».
-     *
-     * #973 — the painter deposit carries NO MIME (only the probe's header decode identifies the
-     * container), and `putSuccessIfAbsent` guarantees it can never RECLASSIFY an entry the probe
-     * already fixed — in either direction (« AUCUN reclassement tardif »).
+     * #960 P2 — G2 (§6, probe KO / painter OK) supplies the oriented image dimensions. No usable
+     * dimensions means no deposit and the cold box stays. v1.6-10 accepts the first current pair
+     * in the ledger, which survives memo eviction and keeps the measurement need satisfied.
+     * #973 ([AMENDEMENT-v1.5-2]) — a painter never supplies MIME or reclassifies known MIME;
+     * v1.6-10 now permits a later reliable current probe to enrich the missing MIME only.
      */
     private fun settlePainterGeometry(state: AsyncImagePainter.State.Success) {
         val image = state.result.image
-        if (image.width <= 0 || image.height <= 0) return
-        val painterSize = IntSize(image.width, image.height)
-        val deposited = cache.putSuccessIfAbsent(url, IntrinsicMediaMetadata(painterSize, mimeType = null))
-        if (!deposited && cache.get(url)?.size != painterSize) {
-            Log.d(
-                MEDIA_GEOMETRY_LOG_TAG,
-                "geometry disagreement: kept=${cache.get(url)?.size} painter=$painterSize " +
-                    "(first valid pair wins, §3)",
-            )
+        val metadata = IntrinsicMediaMetadata(IntSize(image.width, image.height), null)
+        if (isContentMedia) {
+            ledger.acceptGeometry(url, generation, metadata, MediaAttemptKind.PAINTER, cache)
+        } else if (image.width > 0 && image.height > 0) {
+            cache.putSuccessIfAbsent(url, metadata)
+            ledger.settleSuccess(url, generation, MediaAttemptKind.PROBE)
         }
-        ledger.settleSuccess(url, generation, MediaAttemptKind.PROBE)
     }
 
     fun rollbackIfUnsettled() {
+        active = false
         if (granted && !settled) ledger.rollbackReservation(url, generation, MediaAttemptKind.PAINTER)
     }
 }
@@ -131,11 +133,18 @@ internal class PainterAttempt(
  * painter node, replacing the pre-#960 screen-wide `key(refreshGeneration)` bumps.
  */
 @Composable
-internal fun rememberPainterAttempt(url: String): PainterAttempt {
+internal fun rememberPainterAttempt(
+    url: String,
+    enabled: Boolean = true,
+    requestContext: Any? = null,
+    isContentMedia: Boolean = false,
+): PainterAttempt {
     val ledger = LocalMediaAttemptLedger.current
     val cache = LocalIntrinsicMediaSizeCache.current
     val generation = ledger.generationOf(url)
-    val attempt = remember(ledger, cache, url, generation) { PainterAttempt(ledger, cache, url, generation) }
+    val attempt = remember(ledger, cache, url, generation, requestContext, isContentMedia) {
+        PainterAttempt(ledger, cache, url, generation, isContentMedia)
+    }
     // Keyed on failedFresh: when a recomposition observes the failure EXPIRED (fresh → false)
     // the effect re-runs and the reservation path consults C1 — reopening the axis in a new
     // generation instead of leaving a no-longer-fresh, still-failed axis stuck on the placeholder.
@@ -148,8 +157,8 @@ internal fun rememberPainterAttempt(url: String): PainterAttempt {
     // `Failed`, not untried, and must keep reaching `reserveIfUntried()` to consult C1.
     val failedFresh = attempt.failedFresh
     val untried = ledger.isUntried(url, MediaAttemptKind.PAINTER)
-    LaunchedEffect(attempt, failedFresh, untried) {
-        if (!failedFresh) attempt.reserveIfUntried()
+    LaunchedEffect(attempt, failedFresh, untried, enabled) {
+        if (enabled && !failedFresh) attempt.reserveIfUntried()
     }
     DisposableEffect(attempt) { onDispose { attempt.rollbackIfUnsettled() } }
     return attempt

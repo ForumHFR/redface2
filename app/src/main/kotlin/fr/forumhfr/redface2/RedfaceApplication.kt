@@ -10,7 +10,7 @@ import coil3.svg.SvgDecoder
 import dagger.hilt.android.HiltAndroidApp
 import fr.forumhfr.redface2.core.data.cache.CacheInvalidator
 import fr.forumhfr.redface2.core.data.editor.DraftRetentionPurger
-import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
+import fr.forumhfr.redface2.core.network.qualifiers.ImageClient
 import javax.inject.Inject
 import okhttp3.OkHttpClient
 
@@ -21,7 +21,7 @@ import okhttp3.OkHttpClient
  * GIF smileys and `[img]` GIFs animate at the call site without each composable having to know
  * (cf. issue #109). Decoders are cheap and global; per-call-site override would defeat the point.
  *
- * `coil-network-okhttp` is registered with the anonymous OkHttp client so image loads share the
+ * `coil-network-okhttp` is registered with the dedicated image OkHttp client so image loads share the
  * same timeout / user-agent configuration as the rest of the HFR traffic. The user proxy is
  * installed via a host-scoped `ProxySelector` that routes only
  * `hardware.fr` / `*.hardware.fr` through the configured proxy ; external `[img]` hosts
@@ -39,15 +39,15 @@ class RedfaceApplication : Application(), SingletonImageLoader.Factory {
     @Inject lateinit var draftRetentionPurger: DraftRetentionPurger
 
     @Inject
-    @AnonymousClient
+    @ImageClient
     lateinit var imageClient: OkHttpClient
 
     override fun newImageLoader(context: PlatformContext): ImageLoader =
         ImageLoader.Builder(context)
             .components {
-                // Share the anonymous client with the rest of HFR traffic: same timeouts / UA, no
-                // auth cookies leaked to external [img] hosts. The ProxySelector inside the client
-                // routes only HFR through the user proxy ; external hosts stay direct.
+                // Share the dedicated cookie-less image client with gallery saves. Its HTTP
+                // interceptors upgrade reho.st while the source URL (and Coil disk key) stays
+                // untouched. The ProxySelector routes only HFR through the user proxy.
                 add(OkHttpNetworkFetcherFactory(callFactory = { imageClient }))
                 add(AnimatedImageDecoder.Factory())
                 // #960 P4 — SVG [img] payloads. The header-only intrinsic probe cannot read SVG

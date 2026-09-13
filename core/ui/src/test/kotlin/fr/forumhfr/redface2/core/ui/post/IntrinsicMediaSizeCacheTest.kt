@@ -12,9 +12,8 @@ import org.junit.Test
  * Failure memoization moved OUT of this cache with #960 — the TTL/retry/generation contract of
  * dead URLs is the [MediaAttemptLedger]'s and is pinned by [MediaAttemptLedgerTest].
  *
- * #973 ([AMENDEMENT-v1.5-2]): the entry is the ATOMIC [IntrinsicMediaMetadata] — size + probe
- * MIME deposited in one write. The first-deposit authority now also pins the MIME: no late
- * reclassification, in either direction, once an entry landed.
+ * Content geometry and MIME merging belong to [MediaGeometryLedgerTest]. This bounded cache
+ * only memoizes accepted metadata; a cache replacement is not a geometry decision.
  */
 class IntrinsicMediaSizeCacheTest {
 
@@ -41,9 +40,8 @@ class IntrinsicMediaSizeCacheTest {
     }
 
     @Test
-    fun `putSuccessIfAbsent never overwrites the first valid pair`() {
-        // §3/§6 (G2): the FIRST valid oriented pair fixes the box — no second correction when
-        // the other source (probe vs painter) later disagrees.
+    fun `putSuccessIfAbsent leaves an existing memo untouched`() {
+        // The legacy smiley memo operation remains available; it does not own content geometry.
         val cache = DefaultIntrinsicMediaSizeCache()
         cache.putSuccess("u", metadata(800, 600))
         assertFalse(cache.putSuccessIfAbsent("u", metadata(320, 240)))
@@ -51,24 +49,11 @@ class IntrinsicMediaSizeCacheTest {
     }
 
     @Test
-    fun `a mime-less late deposit never erases the probe's mime (no late reclassification)`() {
-        // #973: the probe landed first with `image/gif`; a later painter G2 deposit (which never
-        // carries a MIME) must not strip it — the FIRST valid metadata is authoritative as a
-        // WHOLE, there is no field-level patching.
+    fun `memo can reflect the ledger mime enrichment in one replacement`() {
         val cache = DefaultIntrinsicMediaSizeCache()
-        cache.putSuccessIfAbsent("u", metadata(320, 240, "image/gif"))
-        assertFalse(cache.putSuccessIfAbsent("u", metadata(320, 240, mimeType = null)))
+        cache.putSuccess("u", metadata(320, 240))
+        cache.putSuccess("u", metadata(320, 240, "image/gif"))
         assertEquals(metadata(320, 240, "image/gif"), cache.get("u"))
-    }
-
-    @Test
-    fun `a late deposit carrying a mime never reclassifies a mime-less entry`() {
-        // #973: the painter fixed the entry first (no MIME); a probe landing later must not
-        // promote the entry to `image/gif` after the box is fixed — « AUCUN reclassement tardif ».
-        val cache = DefaultIntrinsicMediaSizeCache()
-        cache.putSuccessIfAbsent("u", metadata(320, 240, mimeType = null))
-        assertFalse(cache.putSuccessIfAbsent("u", metadata(320, 240, "image/gif")))
-        assertEquals(metadata(320, 240, mimeType = null), cache.get("u"))
     }
 
     @Test

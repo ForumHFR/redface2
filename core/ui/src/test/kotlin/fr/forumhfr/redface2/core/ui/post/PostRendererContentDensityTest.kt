@@ -1,0 +1,231 @@
+package fr.forumhfr.redface2.core.ui.post
+
+import android.content.Context
+import androidx.compose.foundation.layout.Column
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.test.getBoundsInRoot
+import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.IntSize
+import androidx.test.core.app.ApplicationProvider
+import coil3.ColorImage
+import coil3.ImageLoader
+import coil3.SingletonImageLoader
+import coil3.annotation.DelicateCoilApi
+import coil3.intercept.Interceptor
+import coil3.request.ImageResult
+import coil3.size.Size
+import coil3.test.FakeImageLoaderEngine
+import fr.forumhfr.redface2.core.model.PostBlock
+import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.PostInline
+import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import java.util.concurrent.CopyOnWriteArrayList
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+
+/** #876 v1.6-1: the renderer wires the same ceiling before any px-to-dp/sp conversion. */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+class PostRendererContentDensityTest {
+
+    private val ledger = MediaAttemptLedger()
+
+    @get:Rule
+    val composeTestRule = createComposeRule()
+
+    private val rootUrl = "https://images.example.org/"
+    private val recordedDecodeSizes = CopyOnWriteArrayList<Pair<String, Size>>()
+
+    @OptIn(DelicateCoilApi::class)
+    @Before
+    fun installFakeImageLoader() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val engine = FakeImageLoaderEngine.Builder()
+            .intercept(
+                { it is String && it.startsWith(rootUrl) },
+                ColorImage(0xFF2E7D32.toInt(), width = 80, height = 60),
+            )
+            .build()
+        val recorder = object : Interceptor {
+            override suspend fun intercept(chain: Interceptor.Chain): ImageResult {
+                val data = chain.request.data
+                if (data is String && chain.request.decoderFactory !is ProbeMetadataDecoder.Factory) {
+                    recordedDecodeSizes.add(data to chain.size)
+                }
+                return chain.proceed()
+            }
+        }
+        SingletonImageLoader.setUnsafe(
+            ImageLoader.Builder(context).components { add(recorder); add(engine) }.build(),
+        )
+    }
+
+    private fun content(name: String, inline: Boolean = false): PostContent {
+        val image = PostInline.InlineImage(url = rootUrl + name, description = name)
+        return PostContent(
+            blocks = listOf(
+                PostBlock.Paragraph(
+                    inlines = if (inline) listOf(PostInline.Text("avant "), image, PostInline.Text(" après"))
+                    else listOf(image),
+                ),
+            ),
+        )
+    }
+
+    private fun assertNativeDp(name: String) {
+        val bounds = composeTestRule.onNodeWithContentDescription(name).getBoundsInRoot()
+        assertEquals(name, 80f, (bounds.right - bounds.left).value, 1.1f)
+        assertEquals(name, 60f, (bounds.bottom - bounds.top).value, 1.1f)
+    }
+
+    @Test
+    fun `GIF without extension lying extension static GIF and missing MIME share the static ceiling`() {
+        // Metadata variants deliberately share the same native pair. Real GIF bytes are covered
+        // by IntrinsicMediaProbeTest; this test exercises their sizing at the renderer boundary.
+        val cases = listOf(
+            "without-extension" to "image/gif",
+            "gif-behind.jpg" to "image/gif",
+            "static.gif" to "image/gif",
+            "jpeg-behind.gif" to "image/jpeg",
+            "painter-only.gif" to null,
+        )
+        ledger.apply {
+            cases.forEach { (name, mime) ->
+                ledger.acceptGeometry(
+                    rootUrl + name, 0, IntrinsicMediaMetadata(IntSize(80, 60), mime), MediaAttemptKind.PROBE,
+                )
+            }
+        }
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(LocalMediaAttemptLedger provides ledger) {
+                    Column { cases.forEach { (name, _) -> PostRenderer(content(name)) } }
+                }
+            }
+        }
+        cases.forEach { (name, _) -> assertNativeDp(name) }
+    }
+
+    @Test
+    fun `inline content is enlarged once and its painter still requests native pixels`() {
+        val name = "inline.gif"
+        ledger.apply {
+            ledger.acceptGeometry(
+                rootUrl + name, 0, IntrinsicMediaMetadata(IntSize(80, 60), "image/gif"), MediaAttemptKind.PROBE,
+            )
+        }
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(LocalMediaAttemptLedger provides ledger) {
+                    PostRenderer(content(name, inline = true))
+                }
+            }
+        }
+        assertNativeDp(name)
+        composeTestRule.waitForIdle()
+        val sizes = recordedDecodeSizes.filter { it.first == rootUrl + name }.map { it.second }
+        assertTrue("the inline painter must have run", sizes.isNotEmpty())
+        sizes.forEach { assertEquals(Size(80, 60), it) }
+    }
+
+    @Test
+    fun `inline image drawn bounds never exceed the physical display box across density and font scale`() {
+        val name = "inline-bounds.png"
+        val native = IntSize(80, 60)
+        ledger.apply {
+            ledger.acceptGeometry(
+                rootUrl + name, 0, IntrinsicMediaMetadata(native, "image/png"), MediaAttemptKind.PROBE,
+            )
+        }
+        var density by mutableStateOf(2.625f)
+        var fontScale by mutableStateOf(1f)
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(
+                    LocalDensity provides Density(density, fontScale),
+                    LocalMediaAttemptLedger provides ledger,
+                ) {
+                    PostRenderer(content(name, inline = true))
+                }
+            }
+        }
+
+        listOf(2.625f, 3f).forEach { testedDensity ->
+            listOf(1f, 1.3f, 2f).forEach { testedFontScale ->
+                composeTestRule.runOnIdle {
+                    density = testedDensity
+                    fontScale = testedFontScale
+                }
+                composeTestRule.waitForIdle()
+
+                val expected = imageDisplaySizePx(
+                    nativePx = native,
+                    maxWidthPx = Int.MAX_VALUE,
+                    maxHeightPx = Int.MAX_VALUE,
+                    contentCeiling = contentUpscaleCeiling(testedDensity),
+                )
+                val drawn = composeTestRule.onNodeWithContentDescription(name)
+                    .fetchSemanticsNode().boundsInRoot
+                assertTrue(
+                    "inline width exceeds its display box at density=$testedDensity, " +
+                        "fontScale=$testedFontScale: drawn=${drawn.width}px expected=${expected.width}px",
+                    drawn.width <= expected.width + MAX_DRAW_OVERSHOOT_PX,
+                )
+                assertTrue(
+                    "inline height exceeds its display box at density=$testedDensity, " +
+                        "fontScale=$testedFontScale: drawn=${drawn.height}px expected=${expected.height}px",
+                    drawn.height <= expected.height + MAX_DRAW_OVERSHOOT_PX,
+                )
+            }
+        }
+    }
+
+    @Test
+    fun `changing density recomputes the block box without requesting an enlarged decode`() {
+        val name = "density.jpg"
+        ledger.apply {
+            ledger.acceptGeometry(
+                rootUrl + name, 0, IntrinsicMediaMetadata(IntSize(80, 60), "image/jpeg"), MediaAttemptKind.PROBE,
+            )
+        }
+        var density by mutableStateOf(1f)
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(
+                    LocalDensity provides Density(density, 1f),
+                    LocalMediaAttemptLedger provides ledger,
+                ) {
+                    PostRenderer(content(name))
+                }
+            }
+        }
+        composeTestRule.waitForIdle()
+        val before = composeTestRule.onNodeWithContentDescription(name).fetchSemanticsNode().boundsInRoot
+        assertEquals(80f, before.width, 1f)
+        composeTestRule.runOnIdle { density = 3f }
+        composeTestRule.waitForIdle()
+        val after = composeTestRule.onNodeWithContentDescription(name).fetchSemanticsNode().boundsInRoot
+        assertEquals(240f, after.width, 1f)
+        assertEquals(180f, after.height, 1f)
+        val sizes = recordedDecodeSizes.filter { it.first == rootUrl + name }.map { it.second }
+        assertEquals(listOf(Size(80, 60), Size(80, 60)), sizes)
+    }
+
+    private companion object {
+        const val MAX_DRAW_OVERSHOOT_PX = 1f
+    }
+}

@@ -8,7 +8,28 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ## [Unreleased]
 
-_Rien pour l'instant._
+---
+
+## v0.13.0 — 2026-09-13
+
+**Contrat images v1.6 et promotion bêta 0.58.0** : cette version consigne l'entrée du contrat de rendu des images dans le dépôt (audit [#876](https://github.com/ForumHFR/redface2/issues/876), chapeau [#1334](https://github.com/ForumHFR/redface2/issues/1334), 12-13/09/2026) et la passe de fraîcheur des pages d'entrée à la promotion bêta 0.58.0, plus l'hygiène du 08/09 restée en « Unreleased ».
+
+### Added
+- `docs/specs/images.md` : contrat normatif du rendu des images dans les posts (topologie bloc/inline, sizing, états anti-CLS, décodage, smileys, interactions), v1.6 avec amendements v1.6-1 à v1.6-13 (plafond d'agrandissement par densité, option A ; dérives D1-D8 ; autorité géométrique et séquençage probe/painter ; Referer et https reho.st ; images http ; client image dédié). Source canonique depuis le 12/09/2026, les versions antérieures vivaient hors dépôt ; référencé depuis `docs/index.md`.
+
+### Changed (promotion bêta 0.58.0, 2026-09-13)
+- Pages d'entrée (`README.md`, `AGENTS.md`, `docs/index.md`, `docs/guides/contributing.md`) : état du projet = bêta publique **0.58.0**, canal dev aligné sur la bêta.
+- `docs/specs/roadmap.md` : phase 4 requalifiée « bêtas 0.18.0 → 0.58.0 » ; [#1040](https://github.com/ForumHFR/redface2/issues/1040) : les huit lots sont clos (le détail du lot 7 le disait déjà).
+- `docs/specs/images.md` : sous-titre aligné sur l'historique (v1.6-1 à v1.6-13, 12-13/09/2026).
+- `docs/specs/reading-parity.md` : la sonde d'en-tête est un budget de timeout de 30 s hors terminaison du nettoyage, pas une borne dure.
+- `docs/guides/contributing.md` : description réelle du filtre CI doc-only (filtre d'exclusion `every` puis filtre de ré-inclusion `some`), l'affirmation « la dernière règle qui matche gagne » retirée.
+- `docs/_config.yml` : footer v0.13.0.
+
+### Changed (hygiène 2026-09-08)
+- Pages d'entrée (`README.md`, `AGENTS.md`, `docs/index.md`, `docs/guides/contributing.md`) : état du projet = bêta publique **0.55.0** (2026-09-07), canal dev aligné sur la bêta ; milestone *Vue · Forum 1* ajouté à la liste des milestones de vue.
+- `docs/specs/roadmap.md` : phase 4 requalifiée « bêtas 0.18.0 → 0.55.0 » ; jalon « Dogfood rendu smileys (#131 / #175) » coché (clos depuis 05-06/2026, rendu adaptatif livré par #175).
+- `docs/guides/known-issues.md` : le compromis F4 (#953) pointe vers son issue de suivi #1323.
+- Templates d'issue : labels `feature` / `discussion` (inexistants) remplacés par `enhancement` / `spec, question`.
 
 ---
 

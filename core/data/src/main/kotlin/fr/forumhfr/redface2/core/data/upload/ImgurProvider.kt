@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.data.upload
 
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.ImageUpload
 import fr.forumhfr.redface2.core.domain.upload.UploadException
@@ -44,6 +45,7 @@ internal class ImgurProvider @Inject constructor(
     @param:UploadJson private val json: Json,
     private val userPreferencesRepository: UserPreferencesRepository,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    private val diagnostics: DiagnosticsLog,
     @param:Named(IMGUR_BASE_URL) private val baseUrl: String,
 ) : UploadProvider {
 
@@ -64,12 +66,14 @@ internal class ImgurProvider @Inject constructor(
         if (image.mimeType != GIF_MIME && image.bytes.size > MAX_BYTES) {
             throw UploadException.TooLarge(MAX_BYTES)
         }
+        val sentFilename = image.displayName ?: DEFAULT_FILENAME
+        val partContentType = image.mimeType.toMediaTypeOrNull()
         val body = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
             .addFormDataPart(
                 name = "image",
-                filename = image.displayName ?: DEFAULT_FILENAME,
-                body = image.bytes.toRequestBody(image.mimeType.toMediaTypeOrNull()),
+                filename = sentFilename,
+                body = image.bytes.toRequestBody(partContentType),
             )
             .build()
         val request = Request.Builder()
@@ -77,12 +81,19 @@ internal class ImgurProvider @Inject constructor(
             .header("Authorization", "Client-ID $resolvedClientId")
             .post(body)
             .build()
+        diagnostics.record(
+            DiagnosticsLog.Level.INFO,
+            LOG_TAG,
+            UploadProviderDiagnostics.request(sentFilename, partContentType?.toString(), image.bytes.size),
+        )
+        val startedAtNanos = System.nanoTime()
         val response = runCatching { client.newCall(request).execute() }
             .getOrElse { throw UploadException.Network(it) }
         response.use { resp ->
             // Best-effort body read: a truncated / timed-out body must NOT leak a raw IOException
             // past the UploadException contract (#474, Codex review). A null body is fine — a non-2xx
             // still reports its HTTP status below, and a 2xx with no parseable body falls to Malformed.
+            val responseContentType = resp.body.contentType()?.toString()
             val raw = runCatching { resp.body.string() }.getOrNull()
             val envelope = raw?.let { runCatching { json.decodeFromString<ImgurEnvelope>(it) }.getOrNull() }
             // A `success:false` envelope is an application-level refusal even on a 2xx transport:
@@ -92,14 +103,72 @@ internal class ImgurProvider @Inject constructor(
             // such a refusal — falling back to the HTTP code when imgur omits it (Codex review #474).
             if (envelope?.success == false) {
                 val status = envelope.status.takeIf { it != 0 } ?: resp.code
+                recordFailure(
+                    code = resp.code,
+                    contentType = responseContentType,
+                    startedAtNanos = startedAtNanos,
+                    result = "rejected_status_$status",
+                    failureBody = raw,
+                )
                 throw UploadException.Server(status, id, envelope.data?.errorMessage)
             }
-            if (!resp.isSuccessful) throw UploadException.Server(resp.code, id, envelope?.data?.errorMessage)
-            val data = (envelope ?: throw UploadException.Malformed(id)).data
-                ?: throw UploadException.Malformed(id)
+            if (!resp.isSuccessful) {
+                recordFailure(
+                    code = resp.code,
+                    contentType = responseContentType,
+                    startedAtNanos = startedAtNanos,
+                    result = "http_error",
+                    failureBody = raw,
+                )
+                throw UploadException.Server(resp.code, id, envelope?.data?.errorMessage)
+            }
+            if (envelope == null) {
+                recordFailure(
+                    code = resp.code,
+                    contentType = responseContentType,
+                    startedAtNanos = startedAtNanos,
+                    result = "unparseable",
+                    failureBody = raw,
+                )
+                throw UploadException.Malformed(id)
+            }
+            val data = envelope.data
+            if (data == null) {
+                recordFailure(
+                    code = resp.code,
+                    contentType = responseContentType,
+                    startedAtNanos = startedAtNanos,
+                    result = "missing_data",
+                    failureBody = raw,
+                )
+                throw UploadException.Malformed(id)
+            }
+            val imageUrl = data.link
+            if (imageUrl == null) {
+                recordFailure(
+                    code = resp.code,
+                    contentType = responseContentType,
+                    startedAtNanos = startedAtNanos,
+                    result = "missing_link",
+                    failureBody = raw,
+                )
+                throw UploadException.Malformed(id)
+            }
+            diagnostics.record(
+                DiagnosticsLog.Level.INFO,
+                LOG_TAG,
+                UploadProviderDiagnostics.response(
+                    trace = UploadProviderDiagnostics.responseTrace(
+                        code = resp.code,
+                        contentType = responseContentType,
+                        startedAtNanos = startedAtNanos,
+                        result = "ok",
+                    ),
+                ),
+            )
             UploadedImage(
                 provider = id,
-                imageUrl = data.link ?: throw UploadException.Malformed(id),
+                imageUrl = imageUrl,
                 thumbnailUrl = null,
                 // imgur exposes size variants via URL suffixes, but the v1 contract does not derive
                 // them — the editor's reduced mode falls back to the full link for imgur.
@@ -124,10 +193,33 @@ internal class ImgurProvider @Inject constructor(
         runCatching { client.newCall(request).execute().use { it.isSuccessful } }.getOrDefault(false)
     }
 
+    private fun recordFailure(
+        code: Int,
+        contentType: String?,
+        startedAtNanos: Long,
+        result: String,
+        failureBody: String?,
+    ) {
+        diagnostics.record(
+            DiagnosticsLog.Level.WARN,
+            LOG_TAG,
+            UploadProviderDiagnostics.response(
+                trace = UploadProviderDiagnostics.responseTrace(
+                    code = code,
+                    contentType = contentType,
+                    startedAtNanos = startedAtNanos,
+                    result = result,
+                ),
+                failureBody = failureBody ?: "unavailable",
+            ),
+        )
+    }
+
     internal companion object {
         /** Named binding key for the imgur API base URL (overridden in tests). */
         const val IMGUR_BASE_URL = "imgur_base_url"
         const val DEFAULT_BASE_URL = "https://api.imgur.com"
+        private const val LOG_TAG = "Imgur"
         private const val DEFAULT_FILENAME = "upload"
 
         /**

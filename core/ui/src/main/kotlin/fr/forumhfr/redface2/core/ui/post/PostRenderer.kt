@@ -65,6 +65,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.AnnotatedString
@@ -108,7 +109,6 @@ import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
 import fr.forumhfr.redface2.core.ui.theme.LocalEgoQuotePseudo
 import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
 import fr.forumhfr.redface2.core.ui.theme.LocalIgnoreInlineColors
-import fr.forumhfr.redface2.core.ui.theme.LocalMediaDisplayProfile
 import fr.forumhfr.redface2.core.ui.theme.LocalPostImageCorners
 import fr.forumhfr.redface2.core.ui.theme.LocalPostImageMaxWidth
 import fr.forumhfr.redface2.core.ui.theme.LocalReadingTileOutline
@@ -117,6 +117,7 @@ import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyKind
+import fr.forumhfr.redface2.core.model.isCcImageUrl
 import kotlin.math.roundToInt
 
 /**
@@ -400,16 +401,14 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
         return
     }
 
-    // #175 — media paragraph: adaptive smiley sizing. Read each smiley's measured native size from the
-    // URL cache; the reads are tracked snapshot reads, so when a measurement lands the SnapshotStateMap
-    // write recomposes this block and only the inline-content Map (not the AnnotatedString) is rebuilt
-    // at the final size. Cold/miss → a provisional fallback to minimise reflow (builtin ~16, perso 70×50).
+    // #175 adaptive smileys retain their snapshot-observable FIFO memo. #224 inline content
+    // now reads the process authority exclusively (v1.6-10); eviction/MIME cannot reopen its slot.
     val sizeCache = LocalIntrinsicMediaSizeCache.current
-    // #175 perso smileys + #224 (option A) inline images — both sized by their measured intrinsic size.
-    val measurableUrls = remember(inlines) {
-        collectMeasurableSmileyUrls(inlines) + collectMeasurableImageUrls(inlines)
-    }
-    val measuredSizes: Map<String, IntSize?> = measurableUrls.associateWith { sizeCache.get(it)?.size }
+    val ledger = LocalMediaAttemptLedger.current
+    val smileyUrls = remember(inlines) { collectMeasurableSmileyUrls(inlines) }
+    val imageUrls = remember(inlines) { collectMeasurableImageUrls(inlines) }
+    val smileySizes = smileyUrls.associateWith { sizeCache.get(it)?.size }
+    val imageSizes = imageUrls.associateWith { ledger.geometryOf(it)?.size }
 
     // #416 — a smiley URL with a FRESH FAILURE on record is DEAD (HFR's BBCode engine turns any
     // unknown `:code:` into an <img> that 404s) : its token replaces the sprite as body-sized text.
@@ -419,7 +418,6 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     // The reads track the ledger's SnapshotStateMap, so a failure landing recomposes this block ;
     // the AnnotatedString stays invariant (#175 pivot), only the inline-content map and the
     // placeholder box change.
-    val ledger = LocalMediaAttemptLedger.current
     val allSmileyUrls = remember(inlines) { collectSmileyUrls(inlines) }
     val deadSmileyUrls: Set<String> = allSmileyUrls.filterTo(HashSet()) {
         val now = System.currentTimeMillis()
@@ -427,19 +425,15 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
             ledger.isFailedFresh(it, MediaAttemptKind.PAINTER, now)
     }
 
-    // Measure the not-yet-known URLs. Coil's execute() is a main-safe suspend call (it dispatches its
-    // own I/O). Public posts reuse the singleton loader's disk bytes for the subsequent painter; MP
-    // media deliberately disables disk caching, so a cold measurable URL costs a header probe plus
-    // the render fetch (#1096). A dead URL settles a PROBE failure on the ledger (TTL) so it is not
-    // re-fetched. #813/#960 — the urls' ledger GENERATIONS key the effect (tracked reads): a
-    // re-parsed page yields a structurally EQUAL `inlines` (remember keeps the same set instance),
-    // so without them the effect never relaunched after a scoped retry bumped a failed url.
+    // Content probes are owned by each rendered occurrence's plan (including promoted blocks).
+    // Perso smileys keep the shared historical measure effect, including the MP disk policy.
+    // #813/#960: generations re-key the effect even when refreshed inlines compare equal.
     val platformContext = LocalPlatformContext.current
     val mediaDiskCachePolicy = LocalPostMediaDiskCachePolicy.current
-    val mediaGenerations = measurableUrls.map { ledger.generationOf(it) }
-    LaunchedEffect(measurableUrls, mediaGenerations, mediaDiskCachePolicy) {
+    val mediaGenerations = smileyUrls.map { ledger.generationOf(it) }
+    LaunchedEffect(smileyUrls, mediaGenerations, mediaDiskCachePolicy) {
         val loader = SingletonImageLoader.get(platformContext)
-        measurableUrls.forEach { url ->
+        smileyUrls.forEach { url ->
             measureAndCacheIntrinsicMediaSize(
                 url = url,
                 cache = sizeCache,
@@ -447,6 +441,7 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
                 context = platformContext,
                 imageLoader = loader,
                 diskCachePolicy = mediaDiskCachePolicy,
+                isContentMedia = false,
             )
         }
     }
@@ -457,7 +452,7 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
     // the ORIGINAL inlines render through the historical prose path, byte-for-byte unchanged.
     val segments = remember(inlines) { partitionParagraph(inlines) }
     if (segments.none { it is ParagraphSegment.MediaRun }) {
-        ParagraphProse(inlines, annotated, measuredSizes, deadSmileyUrls)
+        ParagraphProse(inlines, annotated, smileySizes, imageSizes, deadSmileyUrls)
         return
     }
     // §4 — ONE spacing mechanism : 8 dp between a run and its neighbour segment (outer Column),
@@ -474,7 +469,9 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
                         buildInlineText(segment.inlines, linkStyles, imageAlt, ignoreColors, isDark)
                     }
                     if (segmentAnnotated.text.isNotBlank() || hasInlineMedia(segment.inlines)) {
-                        ParagraphProse(segment.inlines, segmentAnnotated, measuredSizes, deadSmileyUrls)
+                        ParagraphProse(
+                            segment.inlines, segmentAnnotated, smileySizes, imageSizes, deadSmileyUrls,
+                        )
                     }
                 }
 
@@ -504,7 +501,8 @@ private fun ParagraphBlock(inlines: List<PostInline>) {
 private fun ParagraphProse(
     inlines: List<PostInline>,
     annotated: AnnotatedString,
-    measuredSizes: Map<String, IntSize?>,
+    smileySizes: Map<String, IntSize?>,
+    imageSizes: Map<String, IntSize?>,
     deadSmileyUrls: Set<String>,
 ) {
     val readingColors = readingContentColors()
@@ -530,19 +528,16 @@ private fun ParagraphProse(
         // current density × fontScale. Converted once here — the only place density is known.
         val postImageMaxWidth = LocalPostImageMaxWidth.current
         val inlineImageHorizontalPaddingPx = with(density) {
-            (INLINE_IMAGE_HORIZONTAL_PADDING * 2).roundToPx()
+            INLINE_IMAGE_HORIZONTAL_PADDING.roundToPx() * 2
         }
         val maxImageWidthPx = with(density) {
             inlineImageMaxWidthPx(maxWidth.toPx(), postImageMaxWidth, inlineImageHorizontalPaddingPx)
         }
-        val maxImageHeightPx = with(density) { INLINE_IMAGE_MAX_HEIGHT_SP.sp.toPx() }.roundToInt()
-        // §4 v1.4 (#957) — total horizontal placeholder padding of a content image (4 dp/side),
-        // converted once to the sp placeholder unit at the current density/fontScale.
-        val inlineImagePaddingSp = with(density) {
-            (INLINE_IMAGE_HORIZONTAL_PADDING * 2).toSp().value.roundToInt()
-        }
+        // Keep fractional caps through G2's ceil256 (512.2px must select 768px, not 512px).
+        val maxImageHeightPx = with(density) { INLINE_IMAGE_MAX_HEIGHT_SP.sp.toPx() }
         val inlineContent = remember(
-            inlines, measuredSizes, deadSmileyUrls, maxMediaWidthSp, maxImageWidthPx, maxImageHeightPx, density,
+            inlines, smileySizes, imageSizes, deadSmileyUrls,
+            maxMediaWidthSp, maxImageWidthPx, maxImageHeightPx, density,
         ) {
             collectInlineMedia(
                 inlines,
@@ -553,13 +548,13 @@ private fun ParagraphProse(
                         // laid out, otherwise the text is clipped to the sprite footprint.
                         PostMediaDisplayPolicy.deadSmileyTokenBox(smiley.kind.token(), maxMediaWidthSp)
                     } else {
-                        smileyDisplayBox(smiley, measuredSizes, maxMediaWidthSp)
+                        smileyDisplayBox(smiley, smileySizes, maxMediaWidthSp)
                     }
                 },
                 imageBox = { image ->
                     imageDisplayBox(
-                        image, measuredSizes, maxMediaWidthSp,
-                        maxImageWidthPx, maxImageHeightPx, density, inlineImagePaddingSp,
+                        image, imageSizes, maxMediaWidthSp,
+                        maxImageWidthPx, maxImageHeightPx, density, INLINE_IMAGE_HORIZONTAL_PADDING * 2,
                     )
                 },
                 deadSmileyUrls = deadSmileyUrls,
@@ -1081,7 +1076,7 @@ private fun ImageBlock(block: PostBlock.Image) = BlockImage(url = block.url, des
  * AND keeps its tap-through instead of being kept as a small inline thumbnail.
  *
  * #610/#842 — a MEASURED image renders in a box of EXACTLY its parity display size
- * ([imageDisplaySizePx] §3: native PHYSICAL size, no upscale, width ≤ fImage × column, height ≤
+ * ([imageDisplaySizePx] §3 v1.6-1: density-bounded upscale, width ≤ fImage × column, height ≤
  * the clamped useful-height cap [rememberBlockImageColdCapDp]), centred. A not-yet-measured
  * image (cold cache / failed measurement) sits in the deterministic §6 COLD slot
  * ([coldBlockSlotDp], since #957 — formerly the legacy [160, 480] dp grow-on-load slot).
@@ -1101,90 +1096,58 @@ private fun ImageBlock(block: PostBlock.Image) = BlockImage(url = block.url, des
 @Suppress("CyclomaticComplexMethod")
 @Composable
 private fun BlockImage(url: String, description: String?, linkUrl: String? = null) {
+    // E2 — old persisted ASTs may still contain a cc PostBlock.Image. Route it through the
+    // inline #256 fast-path before any block geometry, probe or animation gate is composed.
+    if (isCcImageUrl(url)) {
+        val image = PostInline.InlineImage(url, description)
+        ParagraphBlock(listOf(if (linkUrl != null) PostInline.Link(linkUrl, listOf(image)) else image))
+        return
+    }
     val uriHandler = LocalUriHandler.current
     val openLabel = stringResource(R.string.post_image_open_link)
+    val alt = description?.takeIf(String::isNotBlank) ?: stringResource(R.string.post_inline_image_alt)
+    val loadingLabel = stringResource(R.string.post_image_loading)
     val animationsEnabled = rememberAnimationsEnabled()
 
-    // #249 — reserve the exact final box from the measured intrinsic size when known. The cache is fed by
-    // the #175/#224 paragraph measure effect AND, since #249 follow-up, by the effect just below for
-    // standalone PostBlock.Image. Until a measurement lands (cold cache) it is null and the §6 COLD
-    // slot (v1.4, #957) is used for that first frame.
-    val sizeCache = LocalIntrinsicMediaSizeCache.current
-    // #973 (§8 [AMENDEMENT-v1.5-2]) — the ATOMIC metadata: the size drives the §3 box, the probe
-    // MIME decides `eligibleGifBloc` below (never the URL extension; null MIME = non-eligible).
-    val metadata: IntrinsicMediaMetadata? = sizeCache.get(url)
-    val measured: IntSize? = metadata?.size
-    // #249 follow-up — a standalone PostBlock.Image is NOT covered by the paragraph measure effect, so
-    // without this its intrinsic size never lands in the cache: the measured box never resolves, the
-    // image stays in the §6 cold slot forever and loses both the exact parity box (#610) and the
-    // reserved loading space (#249 anti-CLS). Measure it here through the same guarded seam the
-    // paragraph effect uses; the SnapshotStateMap write then recomposes this block onto the exact-box
-    // path.
+    val ledger = LocalMediaAttemptLedger.current
+    // #249/#610 exact reserved box, #957 cold slot. #973 [AMENDEMENT-v1.5-2] added MIME metadata;
+    // v1.6-10 reads dimensions from the ledger only. MIME never participates in sizing.
+    // #813/#960 retry parity with inline content now lives in rememberContentMediaPlan.
+    val measured = ledger.geometryOf(url)?.size
     val platformContext = LocalPlatformContext.current
     val mediaDiskCachePolicy = LocalPostMediaDiskCachePolicy.current
-    // #813/#960 parity (gate #957 r1, bloquant) : a structurally-promoted image renders here, so
-    // the block path must honour the ledger exactly like the inline path — the measure effect
-    // re-keys on the url's GENERATION (tracked read) and the painter attempt below is recreated
-    // on a scoped retry.
-    val ledger = LocalMediaAttemptLedger.current
-    val mediaGeneration = ledger.generationOf(url)
-    LaunchedEffect(url, sizeCache, platformContext, mediaGeneration, mediaDiskCachePolicy) {
-        measureAndCacheIntrinsicMediaSize(
-            url = url,
-            cache = sizeCache,
-            ledger = ledger,
-            context = platformContext,
-            imageLoader = SingletonImageLoader.get(platformContext),
-            diskCachePolicy = mediaDiskCachePolicy,
-        )
-    }
 
     // #842 — the block height cap is recalibrated for mobile (relative to the viewport), read here
     // where the screen height is known; #610's flat 200 dp squeezed square/portrait photos to ~48 %
     // width on phones (the width cap ≈ 90 % never got a chance to bind).
-    // #959 (§3, [Lot0-3]) — the MEASURED path now shares the CLAMPED useful-height cap with the
-    // cold slot (the window-following metric the host reads from containerSize + insets); the
-    // legacy screen-fraction cap (#842, `max(400, 0.5 × screenHeightDp)`) is gone — it could
-    // exceed a short window (split-screen) where the clamp follows it.
+    // §3 [Lot0-3, v1.5-5] — measured and cold paths share
+    // min(usefulHeight, max(400 dp, 0.70 × usefulHeight)), from containerSize minus occupied insets.
+    // Keep the cap fractional until the final layout sizing (E9).
     val capBlocDp = rememberBlockImageColdCapDp()
     val blockDensity = LocalDensity.current
-    // #973 (§8) — `mGif`: an eligible block GIF (probe MIME on the atomic metadata) takes the
-    // display-profile factor as its §3 scale ceiling; everything else keeps the strict 1f.
-    // The COLD path below is untouched by construction: no metadata → no measured box, the §6
-    // slot is deterministic (no dimensions, no MIME — no factor).
-    val mediaDisplayProfile = LocalMediaDisplayProfile.current
+    // §3 v1.6-1 — the first measured box already uses the content ceiling. The cold slot
+    // below is unchanged; neither MIME nor a wrapping link can trigger a second correction.
+    val contentCeiling = contentUpscaleCeiling(blockDensity.density)
     val postImageMaxWidth = LocalPostImageMaxWidth.current
     val imageCornerShape = cornerShapeFor(LocalPostImageCorners.current)
-    val gifCeiling = if (metadata?.mimeType == GIF_MIME_TYPE) mediaDisplayProfile.factor else 1f
-    // #876 (§8 [AMENDEMENT-v1.5-4]) — `mApercu`: an eligible LINKED PREVIEW (a thumbnail wrapped
-    // in a link to a DISTINCT resource of the SAME host, native axis ≤ 400 px — the pure guard
-    // [isEligibleLinkedPreview]) may spread one source pixel over `min(densité, 3)` screen pixels,
-    // so it finally occupies its source dimensions in dp. The dimensions handed to the guard are
-    // the CACHE's (§3 authority, already EXIF-oriented) and the MIME plays no part here.
-    val previewCeiling = if (isEligibleLinkedPreview(url = url, linkUrl = linkUrl, nativePx = measured)) {
-        linkedPreviewUpscaleCeiling(blockDensity.density)
-    } else {
-        1f
-    }
-    // `mEffectif = max(mApercu, mGif)` — the two multipliers relax the SAME no-upscale ceiling and
-    // the largest wins; they must NEVER multiply (an eligible linked GIF is ×3 under M as under S,
-    // never ×4,5). That `max` is ALSO the `1,0` floor: [linkedPreviewUpscaleCeiling] deliberately
-    // returns the raw density, so without it a screen density below 1 would SHRINK the image.
-    val scaleCeiling = maxOf(gifCeiling, previewCeiling)
     // contentAlignment centres the (usually narrower-than-column, #610) exact box on its own line —
     // the same visual centring the pre-#610 full-width Fit letterboxing produced.
     BoxWithConstraints(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
         // #959 (§3) — the measured box is the PHYSICAL-pixel equation (imageDisplaySizePx: single
-        // scale, height derived from the rounded width, no physical upscale), caps converted to px
+        // scale, height derived from the rounded width, density-bounded upscale), caps converted to px
         // here and the result converted back to dp at this Compose boundary; anti-CLS: it is also
         // the reserved loading slot. Cold falls back to the deterministic §6 slot below.
-        val displayPx = measured?.let {
-            with(blockDensity) {
-                val maxWidthPx = imageMaxWidthPx(maxWidth.toPx(), postImageMaxWidth)
-                val maxHeightPx = capBlocDp.dp.roundToPx()
-                imageDisplaySizePx(it, maxWidthPx, maxHeightPx, scaleCeiling)
-            }
+        val mediaConstraints = with(blockDensity) {
+            ContentMediaConstraints(
+                imageMaxWidthPx(maxWidth.toPx(), postImageMaxWidth), capBlocDp.dp.toPx(), contentCeiling,
+            )
         }
+        val displayPx = measured?.let {
+            imageDisplaySizePx(
+                it, mediaConstraints.maxWidthPx, mediaConstraints.maxHeightPx, mediaConstraints.contentCeiling,
+            )
+        }
+        val plan = rememberContentMediaPlan(url, mediaConstraints)
         val sizeModifier = if (displayPx != null) {
             with(blockDensity) { Modifier.size(displayPx.width.toDp(), displayPx.height.toDp()) }
         } else {
@@ -1269,31 +1232,24 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
             .clip(imageCornerShape)
             .background(MaterialTheme.colorScheme.surfaceContainerHighest)
             .then(interactionModifier)
-        // #959 (§7) — measured: decode at the explicit calculator size, KEYED into the remember so
-        // cold→measured recreates request + painter (exactly one new decode). Cold: constraint-
-        // driven as before (the §6 slot is fixed until the measurement lands).
-        val decodeSize = measured?.let { decodeSizePx(displayPx!!.width, it) }
-        val request = remember(url, animationsEnabled, platformContext, decodeSize, mediaDiskCachePolicy) {
-            ImageRequest.Builder(platformContext)
-                .data(url)
-                .diskCachePolicy(mediaDiskCachePolicy.coilPolicy)
-                // #249 — fondu natif Coil dans la box déjà dimensionnée → zéro saut. Désactivé quand le
-                // système demande de réduire les animations (apparition directe, §4 de l'issue).
-                .crossfade(animationsEnabled)
-                .apply {
-                    if (decodeSize != null) {
-                        size(decodeSize.width, decodeSize.height)
-                        scale(Scale.FIT)
-                        precision(Precision.INEXACT)
-                    }
-                }
-                .build()
+        // The plan fixes the target once. A G2 geometry deposit changes the box only, never
+        // the request; recompositions and MIME enrichment cannot trigger another decode.
+        val decodeSize = plan.decodeSize
+        val request = remember(plan, platformContext, decodeSize, animationsEnabled, mediaDiskCachePolicy) {
+            decodeSize?.let {
+                ImageRequest.Builder(platformContext)
+                    .data(url)
+                    .diskCachePolicy(mediaDiskCachePolicy.coilPolicy)
+                    .crossfade(animationsEnabled)
+                    .size(it.width, it.height)
+                    .scale(Scale.FIT)
+                    .precision(Precision.INEXACT)
+                    .build()
+            }
         }
-        // #960 (§6) — the painter ATTEMPT gates the node (replaces the pre-#960 screen-wide
-        // key(refreshGeneration) bump): a fresh failure composes the §6 error state WITHOUT any
-        // painter — no network re-attempt per occurrence or recomposition — and a scoped retry
-        // recreates the attempt (its remember keys the url's generation), hence the painter.
-        val attempt = rememberPainterAttempt(url)
+        val attempt = rememberPainterAttempt(
+            url, enabled = request != null, requestContext = plan, isContentMedia = true,
+        )
         when {
             attempt.failedFresh -> {
                 // §6 P3 — error state INSIDE the reserved box (anti-CLS, A11Y-5: contractual
@@ -1320,42 +1276,55 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
                 }
             }
 
-            attempt.renderPainter -> SubcomposeAsyncImage(
-                model = request,
-                // A11Y-2 (annexe a11y #876) — the HFR alt when present, otherwise the localized
-                // generic fallback; never null, never the raw URL. The error slot swaps in the
-                // contractual error wording (ImageBlockError) on the same containing node.
-                contentDescription = description?.takeIf(String::isNotBlank)
-                    ?: stringResource(R.string.post_inline_image_alt),
-                contentScale = ContentScale.Fit,
-                modifier = containerModifier,
-                loading = {
-                    // Both branches have an exactly-sized box (measured parity #610 OR the §6 cold
-                    // slot #957), so the shimmer always fills it — the legacy min→intrinsic
-                    // grow-on-load is gone with the min/max slot.
-                    ImageShimmer(animated = animationsEnabled, modifier = Modifier.fillMaxSize())
-                },
-                error = { state ->
-                    // The settlement recomposes this node onto the failedFresh branch above; this
-                    // slot only covers the transient frame in between (same wording). SideEffect:
-                    // never write snapshot state during composition.
-                    SideEffect { attempt.onState(state) }
-                    ImageBlockError(description)
-                },
-                success = { state ->
-                    // #959 (§3 GIF) — hand the Animatable behind the result to the gate.
-                    SideEffect {
-                        gifGate.onState(state)
-                        attempt.onState(state)
-                    }
-                    SubcomposeAsyncImageContent()
-                },
-            )
+            attempt.renderPainter && request != null -> key(attempt) {
+                SubcomposeAsyncImage(
+                    model = request,
+                    // A11Y-2 (annexe a11y #876) — the HFR alt when present, otherwise the localized
+                    // generic fallback; never null, never the raw URL. The error slot swaps in the
+                    // contractual error wording (ImageBlockError) on the same containing node.
+                    contentDescription = alt,
+                    contentScale = ContentScale.Fit,
+                    modifier = containerModifier.semantics {
+                        // The custom loading slot has no SubcomposeAsyncImageContent to carry alt/role.
+                        if (attempt.loading) {
+                            contentDescription = alt
+                            role = Role.Image
+                            stateDescription = loadingLabel
+                        }
+                    },
+                    loading = { state ->
+                        SideEffect { attempt.onState(state) }
+                        // Both branches have an exactly-sized box (measured parity #610 OR the §6 cold
+                        // slot #957), so the shimmer always fills it — the legacy min→intrinsic
+                        // grow-on-load is gone with the min/max slot.
+                        ImageShimmer(animated = animationsEnabled, modifier = Modifier.fillMaxSize())
+                    },
+                    error = { state ->
+                        // The settlement recomposes this node onto the failedFresh branch above; this
+                        // slot only covers the transient frame in between (same wording). SideEffect:
+                        // never write snapshot state during composition.
+                        SideEffect { attempt.onState(state) }
+                        ImageBlockError(description)
+                    },
+                    success = { state ->
+                        // #959 (§3 GIF) — hand the Animatable behind the result to the gate.
+                        SideEffect {
+                            gifGate.onState(state)
+                            attempt.onState(state)
+                        }
+                        SubcomposeAsyncImageContent()
+                    },
+                )
+            }
 
             else ->
                 // Grant pending (first frame) or another occurrence's attempt in flight: hold the
                 // reserved box with the loading treatment until the ledger settles.
-                Box(modifier = containerModifier) {
+                Box(modifier = containerModifier.semantics {
+                    contentDescription = alt
+                    role = Role.Image
+                    stateDescription = loadingLabel
+                }) {
                     ImageShimmer(animated = animationsEnabled, modifier = Modifier.fillMaxSize())
                 }
         }
@@ -1378,13 +1347,21 @@ internal fun ImageBlockError(description: String?) {
             },
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = description?.takeIf(String::isNotBlank)?.let {
-                stringResource(R.string.post_image_error_with_alt, it)
-            } ?: stringResource(R.string.post_image_error),
-            style = MaterialTheme.typography.labelSmall,
-            color = readingColors.onBodyVariant,
-        )
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Icon(
+                painter = painterResource(R.drawable.ic_ms_broken_image),
+                contentDescription = null,
+                tint = readingColors.onBodyVariant,
+                modifier = Modifier.size(24.dp),
+            )
+            Text(
+                text = description?.takeIf(String::isNotBlank)?.let {
+                    stringResource(R.string.post_image_error_with_alt, it)
+                } ?: stringResource(R.string.post_image_error),
+                style = MaterialTheme.typography.labelSmall,
+                color = readingColors.onBodyVariant,
+            )
+        }
     }
 }
 
@@ -1824,8 +1801,8 @@ private inline fun AnnotatedString.Builder.withStyles(styles: List<SpanStyle>, b
 /**
  * Builds the `InlineTextContent` map keyed by the same IDs [buildInlineText] emits (the MediaCounter
  * symmetry invariant). [smileyBox] resolves the placeholder size for each smiley: the production
- * caller ([ParagraphBlock]) passes a cache-backed resolver (#175 intrinsic sizing), while tests can
- * pass a stub. The default keeps the legacy fixed buckets as the cold fallback.
+ * caller ([ParagraphBlock]) passes the #175 smiley memo resolver and, since v1.6-10, a ledger-backed
+ * content resolver. Tests can pass a stub; the default keeps the legacy fixed cold buckets.
  */
 internal fun collectInlineMedia(
     inlines: List<PostInline>,
@@ -1983,23 +1960,20 @@ private fun collectMeasurableImageUrl(inline: PostInline, urls: MutableSet<Strin
 }
 
 /**
- * #175 — resolve a smiley's placeholder box: measured native size (no-upscale + absolute cap) when
- * known, else a provisional fallback (pre-seeded builtin / dominant 70×50 perso) to minimise reflow
- * while the measurement is in flight. Finally clamped to [maxWidthSp] (RF1's relative `max-width:90%`)
- * so a large perso cannot overflow a narrow quote line.
+ * #175 — builtins always use their known size, even when a content image shares their URL (E8).
+ * Perso use measured native size (no-upscale + absolute cap), else the provisional 70×50 fallback.
+ * Both are clamped to [maxWidthSp] (RF1's relative `max-width:90%`) to fit narrow quote lines.
  */
-private fun smileyDisplayBox(
+internal fun smileyDisplayBox(
     smiley: PostInline.Smiley,
     measured: Map<String, IntSize?>,
     maxWidthSp: Int,
 ): InlineMediaBox {
-    val size = smiley.imageUrl?.let { measured[it] }
-    val base = if (size != null) {
-        intrinsicSmileyDisplaySize(PixelSize(size.width, size.height))
-    } else {
-        when (smiley.kind) {
-            is SmileyKind.Builtin -> builtinPreseedSize
-            is SmileyKind.Perso -> persoColdFallbackSize
+    val base = when (smiley.kind) {
+        is SmileyKind.Builtin -> builtinPreseedSize
+        is SmileyKind.Perso -> {
+            val size = smiley.imageUrl?.let { measured[it] }
+            if (size != null) intrinsicSmileyDisplaySize(PixelSize(size.width, size.height)) else persoColdFallbackSize
         }
     }
     val capped = capToWidth(base, maxWidthSp)
@@ -2007,21 +1981,18 @@ private fun smileyDisplayBox(
 }
 
 /**
- * #959 (Lot 3, contrat v1.5 §3) — resolve an inline `[img]` placeholder box. The MEASURED path is
- * density-aware and works entirely in PHYSICAL pixels through [imageDisplaySizePx] (no-upscale =
- * 1 source px never spreads past 1 screen px; the pre-#959 "native px as sp" model upscaled every
- * bitmap by ×density): the caller passes the caps in px ([maxImageWidthPx] = fImage × container,
- * or the inline padding-reserved cap from [inlineImageMaxWidthPx], [maxImageHeightPx] = 200 sp in
- * px) and the result converts back to sp HERE, through [density] (÷ density × fontScale), so the
- * physical size is stable under any density/fontScale. The legibility floor is GONE from the
- * measured path (cadrage Sol r1):
+ * §3 v1.6-1 — resolve an inline `[img]` placeholder box in physical pixels with the same
+ * density ceiling as block content. The caller passes the width cap (including reserved padding)
+ * and the 200 sp height cap in pixels. The result converts back through [density]'s real inverse
+ * font scaling; fontScale affects the cap and conversion, never the enlargement ceiling.
+ * The measured bitmap has no legibility floor:
  * [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP] only shapes the placeholder SLOTS below.
  *
  * #253 — while the measurement is in flight (cold cache / miss) the SLOT falls back to a small
  * square of [INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP] (≈ one text line, sp: it is a text-line
  * hitbox, not an image size) rather than the old 240×180 bucket — the dominant cold case (a
- * 16×16 emoji) is already at its final size, zero flash. Still relative-capped ([maxWidthSp]) so
- * the fallback never overflows a narrow quote. Mirrors [smileyDisplayBox].
+ * 16×16 emoji) is already at its final size, zero flash. The cold square obeys [maxWidthSp]
+ * and [maxImageWidthPx], which reserves the §4 padding inside the text column (§14.3).
  *
  * #256 — a URL carrying the `hfr-cc-image=true` marker short-circuits ALL of the above: fixed
  * one-line square, no measurement involved (see [isCcImageUrl] and the fast-path comment below).
@@ -2036,12 +2007,12 @@ internal fun imageDisplayBox(
     // §3 px caps of the MEASURED path: fImage × container width, and the 200 sp inline height,
     // both converted to physical px by the caller (the only place density is known).
     maxImageWidthPx: Int,
-    maxImageHeightPx: Int,
+    maxImageHeightPx: Float,
     // px→sp boundary conversion of the measured result (density × fontScale).
     density: Density,
-    // §4 v1.4 (#957) — TOTAL horizontal padding (4 dp each side, sp-converted by the caller)
-    // added to the PLACEHOLDER of a content image; the bitmap box is untouched. Zero for cc.
-    horizontalPaddingSp: Int = 0,
+    // §4 v1.4 (#957) — TOTAL horizontal padding (4 dp each side), added to the PLACEHOLDER of a
+    // content image in the same dp operation as its bitmap width. The bitmap box is untouched.
+    horizontalPadding: Dp = 0.dp,
 ): InlineMediaBox {
     // #256 — render-time fast-path: a URL carrying the `hfr-cc-image=true` marker declares itself a
     // community cc-image emoji (a one-line glyph). Pin its box to the one-line square immediately —
@@ -2058,6 +2029,9 @@ internal fun imageDisplayBox(
         )
         return InlineMediaBox(fixed.width.sp, fixed.height.sp)
     }
+    val contentConstraints = ContentMediaConstraints(
+        maxImageWidthPx, maxImageHeightPx, contentUpscaleCeiling(density.density),
+    )
     val size = measured[image.url]
     if (size == null) {
         // #253 cold-fallback SLOT: a one-line square, not the 240×180 bucket (no giant Fit flash).
@@ -2065,7 +2039,15 @@ internal fun imageDisplayBox(
             PixelSize(INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP, INLINE_IMAGE_PLACEHOLDER_MIN_HEIGHT_SP),
             maxWidthSp,
         )
-        return InlineMediaBox((cold.width + horizontalPaddingSp).sp, cold.height.sp)
+        // E9 (§14.3) — the cold slot also fits Wdispo minus the 4 dp padding on each side.
+        // Reuse the physical width cap and Density's inverse conversion (including fontScale).
+        val paddedCapSp = with(density) { maxImageWidthPx.toDp().toSp().value }
+        val sideSp = minOf(cold.width.toFloat(), paddedCapSp).coerceAtLeast(1f).sp
+        return with(density) {
+            InlineMediaBox(
+                (sideSp.toDp() + horizontalPadding).toSp(), sideSp, contentConstraints = contentConstraints,
+            )
+        }
     }
     // §3 — the physical-pixel equation (single scale, height derived from the rounded width),
     // then the px→sp boundary conversion; §4 padding rides the PLACEHOLDER width only.
@@ -2074,14 +2056,17 @@ internal fun imageDisplayBox(
     // NON-LINEAR font-scaling table. The text stack applies the same table forward at layout,
     // so the round-trip lands back on the computed physical pixels exactly. (A hand-rolled
     // linear px/(density×fontScale) drifted at fontScale > 1 on API 34+ — refused.)
-    val px = imageDisplaySizePx(size, maxImageWidthPx, maxImageHeightPx)
+    val px = imageDisplaySizePx(
+        size, maxImageWidthPx, maxImageHeightPx, contentCeiling = contentUpscaleCeiling(density.density),
+    )
     return with(density) {
         InlineMediaBox(
-            placeholderWidth = (px.width.toDp().toSp().value + horizontalPaddingSp).sp,
+            placeholderWidth = (px.width.toDp() + horizontalPadding).toSp(),
             placeholderHeight = px.height.toDp().toSp(),
-            // §7 — the decode size travels WITH the display box: same native pair, same displayed
-            // width, so the request key flips exactly when the decode target changes.
+            // Suggested measured target / box-ready bit. The occurrence's plan owns the actual
+            // request target, which may already be frozen as G2 when this box becomes exact.
             decodeSize = decodeSizePx(px.width, size),
+            contentConstraints = contentConstraints,
         )
     }
 }
@@ -2125,9 +2110,9 @@ internal fun imageInlineContent(
             placeholderVerticalAlign = PlaceholderVerticalAlign.TextBottom,
         ),
     ) {
-        // The image fills the placeholder via fillMaxSize() (ContentScale.Fit) so the rendered size
-        // tracks the sp-based placeholder under any fontScale; the no-upscale rule lives in the BOX
-        // sizing (imageDisplayBox), not the content scale.
+        // The image node fills the placeholder so its measured bounds track the sp box under any
+        // fontScale. Measured content uses Fit inside the density-bounded box; a G2 cold painter
+        // uses Inside until usable dimensions settle, so the 16 sp slot never forces an upscale.
         //
         // #257/#610/#959 — decode at the EXPLICIT §7 size instead of letting Coil resolve it from
         // the placeholder constraints (constraint-driven sizing re-decoded on every box change and
@@ -2135,23 +2120,23 @@ internal fun imageInlineContent(
         // smaller) path.
         val context = LocalPlatformContext.current
         val mediaDiskCachePolicy = LocalPostMediaDiskCachePolicy.current
-        // #959 (§7) — the decode size is the calculator's output carried by the box (bucketed
-        // width, common-factor caps, height derived from the final width). It KEYS the remember:
-        // cold→measured flips the key and recreates request + painter = exactly one new decode
-        // (Sol r1 blocker #4 — no reliance on the refresh generation alone). The cold/cc slots
-        // (decodeSize == null) decode at one 256 bucket — the slot is a one-line square, and the
-        // measured request takes over as soon as the header-only probe lands.
-        val request = remember(image.url, context, box.decodeSize, mediaDiskCachePolicy) {
-            ImageRequest.Builder(context)
-                .data(image.url)
-                .diskCachePolicy(mediaDiskCachePolicy.coilPolicy)
-                .size(
-                    box.decodeSize?.width ?: DECODE_BUCKET_PX,
-                    box.decodeSize?.height ?: DECODE_BUCKET_PX,
-                )
-                .scale(Scale.FIT)
-                .precision(Precision.INEXACT)
-                .build()
+        val isCcImage = isCcImageUrl(image.url)
+        val plan = if (isCcImage) null else rememberContentMediaPlan(
+            image.url,
+            // Legacy direct InlineTextContent callers may supply a box without host caps.
+            box.contentConstraints ?: ContentMediaConstraints(DECODE_BUCKET_PX, DECODE_BUCKET_PX.toFloat()),
+        )
+        val decodeSize = if (isCcImage) IntSize(DECODE_BUCKET_PX, DECODE_BUCKET_PX) else plan?.decodeSize
+        val request = remember(image.url, context, plan, decodeSize, mediaDiskCachePolicy) {
+            decodeSize?.let {
+                ImageRequest.Builder(context)
+                    .data(image.url)
+                    .diskCachePolicy(mediaDiskCachePolicy.coilPolicy)
+                    .size(it.width, it.height)
+                    .scale(Scale.FIT)
+                    .precision(Precision.INEXACT)
+                    .build()
+            }
         }
         // #831/#958 (Lot 2, §5) — the lambda of an InlineTextContent is @Composable, so the
         // CompositionLocals are read HERE, without touching the invariant AnnotatedString (#175)
@@ -2246,35 +2231,48 @@ internal fun imageInlineContent(
         // painter — no network re-attempt per occurrence or recomposition (P3 will put the §6
         // error slot + manual retry here) — and a scoped retry recreates the attempt (its
         // remember keys the url's generation), hence a fresh AsyncImage node.
-        val attempt = rememberPainterAttempt(image.url)
-        val showPainter = !attempt.failedFresh && attempt.renderPainter
+        val attempt = rememberPainterAttempt(
+            image.url, enabled = request != null, requestContext = plan, isContentMedia = !isCcImage,
+        )
+        val showPainter = request != null && !attempt.failedFresh && attempt.renderPainter
         // A11Y-2 (annexe a11y #876) — the HFR alt when present, otherwise the localized generic
         // fallback; never null, never the raw URL. When the gate withholds the painter the BOX
         // carries a description so the media never disappears from the semantics tree.
         val alt = image.description?.takeIf(String::isNotBlank)
             ?: stringResource(R.string.post_inline_image_alt)
+        val loadingLabel = stringResource(R.string.post_image_loading)
         Box(Modifier.fillMaxSize().then(paddingModifier)) {
             when {
-                showPainter -> AsyncImage(
-                    model = request,
-                    contentDescription = alt,
-                    contentScale = PostMediaDisplayPolicy.inlineImageContentScale,
-                    onState = { state ->
-                        attempt.onState(state)
-                        gifGate?.onState?.invoke(state)
-                    },
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .then(gifGate?.modifier ?: Modifier)
-                        .then(interactionModifier),
-                )
+                showPainter -> key(attempt) {
+                    AsyncImage(
+                        model = request,
+                        contentDescription = alt,
+                        contentScale = inlineImageContentScale(
+                            boxReady = box.decodeSize != null,
+                            isCcImage = isCcImageUrl(image.url),
+                        ),
+                        onState = { state ->
+                            attempt.onState(state)
+                            gifGate?.onState?.invoke(state)
+                        },
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .semantics { if (attempt.loading) stateDescription = loadingLabel }
+                            .then(gifGate?.modifier ?: Modifier)
+                            .then(interactionModifier),
+                    )
+                }
 
                 // §6 P3 — inline error slot INSIDE the reserved placeholder (anti-CLS) + the
                 // universal per-URL manual retry, same stance as the block slot above.
                 attempt.failedFresh -> InlineImageErrorSlot(url = image.url, description = image.description)
 
                 // Attempt pending / another occurrence in flight: hold the placeholder.
-                else -> Box(Modifier.fillMaxSize().semantics { contentDescription = alt })
+                else -> Box(Modifier.fillMaxSize().semantics {
+                    contentDescription = alt
+                    role = Role.Image
+                    stateDescription = loadingLabel
+                })
             }
         }
     }

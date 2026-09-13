@@ -8,7 +8,6 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
-import kotlin.math.roundToInt
 
 /**
  * #876/#957 (Lot 1B) — block-image COLD cap per the frozen contract v1.4 §3
@@ -34,12 +33,12 @@ internal fun usefulWindowHeightPx(containerHeightPx: Int, topInsetPx: Int, botto
 private const val BLOCK_IMAGE_COLD_CAP_USEFUL_HEIGHT_FRACTION = 0.70f
 
 /** `capBlocPx = min(hauteurUtilePx, max(400dp→px, 0,70 × hauteurUtilePx))`. */
-internal fun blockImageColdCapPx(usefulHeightPx: Int, floor400DpPx: Int): Int =
+internal fun blockImageColdCapPx(usefulHeightPx: Int, floor400DpPx: Float): Float =
     minOf(
-        usefulHeightPx,
+        usefulHeightPx.toFloat(),
         maxOf(
             floor400DpPx,
-            (usefulHeightPx * BLOCK_IMAGE_COLD_CAP_USEFUL_HEIGHT_FRACTION).roundToInt(),
+            usefulHeightPx * BLOCK_IMAGE_COLD_CAP_USEFUL_HEIGHT_FRACTION,
         ),
     )
 
@@ -71,7 +70,7 @@ internal fun rememberBlockImageColdCapDp(): Float {
     val cutout = WindowInsets.displayCutout
     val topPx = maxOf(systemBars.getTop(density), cutout.getTop(density))
     val bottomPx = maxOf(systemBars.getBottom(density), cutout.getBottom(density))
-    val floorPx = with(density) { 400.dp.roundToPx() }
+    val floorPx = with(density) { 400.dp.toPx() }
     val capPx = blockImageColdCapPx(
         usefulHeightPx = usefulWindowHeightPx(containerHeightPx, topPx, bottomPx),
         floor400DpPx = floorPx,

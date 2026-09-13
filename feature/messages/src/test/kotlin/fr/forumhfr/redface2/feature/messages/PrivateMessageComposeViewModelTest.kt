@@ -4,6 +4,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
@@ -58,6 +59,7 @@ class PrivateMessageComposeViewModelTest {
             every { observeConfirmBeforePosting() } returns MutableStateFlow(confirmBeforePosting)
             // #459 — the composer now mirrors the image-insert preference on init.
             every { observeEditorImageInsert() } returns MutableStateFlow(EditorImageInsert.REDUCED)
+            every { observeImagePickerMode() } returns MutableStateFlow(ImagePickerMode.DEFAULT)
         }
 
     /** Mirrors the standalone composer's parsed shape (fixture `mp_compose_form.html`). */

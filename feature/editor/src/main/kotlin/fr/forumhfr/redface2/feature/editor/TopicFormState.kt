@@ -6,6 +6,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.editor.validateBbcodeDraft
 import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.write.TopicFormSubcategoryChoice
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 
@@ -104,6 +105,8 @@ data class TopicFormState(
     val uploadError: UploadError? = null,
     /** #459 — « n/N » batch counter (null for a single image) ; mirrors [PostEditorState.uploadProgress]. */
     val uploadProgress: UploadProgress? = null,
+    /** #1128 — observed continuously so the next image pick uses the current preference. */
+    val imagePickerMode: ImagePickerMode = ImagePickerMode.DEFAULT,
 ) {
     /**
      * Submit is allowed when the mode-specific routing context is complete,

@@ -1,6 +1,5 @@
 package fr.forumhfr.redface2.core.ui.post
 
-import android.util.Log
 import androidx.compose.ui.unit.IntSize
 import coil3.ImageLoader
 import coil3.PlatformContext
@@ -9,8 +8,10 @@ import coil3.request.ImageRequest
 import coil3.request.SuccessResult
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.withTimeout
 
 /**
  * #175/#257/#959 — probe a media's NATIVE ORIENTED dimensions via a **header-only** decode
@@ -26,8 +27,8 @@ import kotlinx.coroutines.ensureActive
  * served to a render request (and a cached render bitmap must not short-circuit the probe with
  * its possibly-resized dimensions — the §3 "first valid pair" authority stays with the probe).
  * The disk policy comes from the rendering host. Public posts keep it active so the downloaded
- * bytes serve the subsequent render decode. Private-message media disables disk reads and writes;
- * the probe still succeeds, but its later painter must fetch the media again (#1096).
+ * bytes serve the subsequent render decode. Content in private messages bypasses this probe
+ * entirely (v1.6-10); private smiley probes retain their disk-disabled behavior (#1096).
  * `execute()` is main-safe (Coil dispatches its own I/O); the caller invokes it from a
  * `LaunchedEffect` and caches the result by URL. Returns `null` on error / non-positive
  * dimensions. The returned size is in SOURCE PIXELS — the §3 equation consumes it as physical px.
@@ -63,29 +64,18 @@ internal suspend fun measureIntrinsicMediaSize(
 }
 
 /**
- * #249 follow-up / #960 (§6) — measure [url], store a success in [cache] and settle the outcome on
- * the PROBE axis of [ledger]. Single shared seam for every caller that feeds the intrinsic-size
- * cache: the paragraph measure effect (#175/#224 — smileys + inline images) AND the standalone
- * `PostBlock.Image` effect. Keeping one implementation prevents the two paths from drifting.
- *
- * The ledger is the single source of truth for failures and generations (#960, Sol r3):
- *  - a cached success or a FRESH probe failure short-circuits without a probe;
- *  - consulting the generation applies C1 (an EXPIRED failure atomically opens a new generation);
- *  - the probe runs only under a granted reservation — ONE attempt per (URL, generation), the
- *    settlement carries the reserved generation so a stale result (the user retried mid-probe)
- *    is discarded by the ledger instead of the legacy failure-epoch guard;
- *  - a CANCELLED probe rolls its reservation back (a cancelled try is not a try) — nothing keeps
- *    the axis in-flight forever.
- *
- * The cache guard is a non-atomic check-then-act, so two callers racing on the SAME cold URL (the
- * BlockImage effect vs the paragraph effect, or two on-screen copies) could each consult before
- * the first result lands; the reservation makes the race harmless, and [inFlightMeasurements]
- * keeps the LOSER AWAITING the winner's ticket instead of returning: when a generation bump
- * cancels the winning effect mid-probe, a plain "loser returns" would leave the URL cold with
- * nobody left to probe it (#813) — the loser waking up on the ticket re-runs the guards and
- * becomes the new winner (the rollback reopened the axis). Process-wide; keyed by URL.
+ * #249 follow-up / #960 (§6) — shared probe seam for #175/#224 paragraphs and standalone blocks.
+ * #813: a surviving occurrence waits for the winner's ticket and takes over after rollback;
+ * returning immediately on a lost reservation would leave it cold after the winner is disposed.
+ * v1.6-10 retains that protocol while content sizing authority moves from the memo to the ledger.
+ * The key includes the ledger identity for isolated renderer/test scopes. It deliberately spans
+ * generations: a replacement waits for the old execution to terminate before probing again.
  */
-private val inFlightMeasurements = ConcurrentHashMap<String, CompletableDeferred<Unit>>()
+private data class MeasurementKey(val ledger: MediaAttemptLedger, val url: String)
+private val inFlightMeasurements = ConcurrentHashMap<MeasurementKey, CompletableDeferred<Unit>>()
+
+/** v1.6-10 — dedicated content-probe budget; owner cancellation remains a rollback. */
+internal const val CONTENT_MEDIA_PROBE_TIMEOUT_MILLIS = 30_000L
 
 // LongParameterList: the trailing `probe` is a test-only seam (cancellation-race pins); the real
 // parameters are the url, its pipeline collaborators and the host's persistence policy — grouping
@@ -98,31 +88,35 @@ internal suspend fun measureAndCacheIntrinsicMediaSize(
     context: PlatformContext,
     imageLoader: ImageLoader,
     diskCachePolicy: PostMediaDiskCachePolicy = PostMediaDiskCachePolicy.ENABLED,
+    isContentMedia: Boolean = true,
     // Injectable for the cancellation-race tests only — production callers keep the default.
     probe: suspend (String, PlatformContext, ImageLoader) -> IntrinsicMediaMetadata? =
         { probeUrl, probeContext, loader ->
             measureIntrinsicMediaSize(probeUrl, probeContext, loader, diskCachePolicy)
         },
 ) {
+    if (isContentMedia && diskCachePolicy == PostMediaDiskCachePolicy.DISABLED) return
+    val key = MeasurementKey(ledger, url)
     while (true) {
         val now = System.currentTimeMillis()
-        if (cache.get(url) != null || ledger.isFailedFresh(url, MediaAttemptKind.PROBE, now)) return
+        val known = if (isContentMedia) ledger.geometryOf(url) != null else cache.get(url) != null
+        if (known || ledger.isFailedFresh(url, MediaAttemptKind.PROBE, now)) return
         val ticket = CompletableDeferred<Unit>()
-        val winner = inFlightMeasurements.putIfAbsent(url, ticket)
+        val winner = inFlightMeasurements.putIfAbsent(key, ticket)
         if (winner != null) {
             // Lost the race — wait for the in-flight probe to settle (result OR cancellation),
             // then loop: a landed result short-circuits on the guards, a cancelled probe rolled
             // its reservation back and this caller takes over.
             winner.await()
-            continue
+        } else {
+            try {
+                probeUnderReservation(url, cache, ledger, context, imageLoader, probe, now, isContentMedia)
+            } finally {
+                inFlightMeasurements.remove(key, ticket)
+                ticket.complete(Unit)
+            }
+            break
         }
-        try {
-            probeUnderReservation(url, cache, ledger, context, imageLoader, probe, now)
-        } finally {
-            inFlightMeasurements.remove(url, ticket)
-            ticket.complete(Unit)
-        }
-        return
     }
 }
 
@@ -136,11 +130,12 @@ private suspend fun probeUnderReservation(
     imageLoader: ImageLoader,
     probe: suspend (String, PlatformContext, ImageLoader) -> IntrinsicMediaMetadata?,
     nowMillis: Long,
+    isContentMedia: Boolean,
 ) {
-    // Eviction repair (Sol P2, O1): the caller only reaches this point when the cache has no
-    // geometry for [url]; a terminally-succeeded probe axis then has no backing truth anymore
-    // (FIFO eviction) and must reopen, or the §6 locked slot would stay cold forever.
-    if (ledger.hasSucceeded(url, MediaAttemptKind.PROBE)) ledger.reopenForLostGeometry(url)
+    // Only smileys still size from the FIFO memo; content authority never reopens on eviction.
+    if (!isContentMedia && ledger.hasSucceeded(url, MediaAttemptKind.PROBE)) {
+        ledger.reopenSmileyProbeForLostMemo(url)
+    }
     // C1 — consulting may open a new generation when the recorded failure has expired; the
     // reservation is then taken against the CURRENT generation. A denied reservation means the
     // axis settled while this caller raced through the guards — nothing to do.
@@ -148,23 +143,22 @@ private suspend fun probeUnderReservation(
     if (!ledger.tryReserve(url, generation, MediaAttemptKind.PROBE)) return
     var settled = false
     try {
-        val metadata = probe(url, context, imageLoader)
-        // Belt for a probe that swallowed cancellation: never publish a result on behalf of a
-        // dead effect.
+        val metadata = if (isContentMedia) {
+            probeWithDeadline { probe(url, context, imageLoader) }
+        } else {
+            probe(url, context, imageLoader)
+        }
+        // A dead owner must not publish, even when an implementation swallowed cancellation.
         currentCoroutineContext().ensureActive()
-        if (metadata != null) {
-            // §3/§6 — first-pair authority: a concurrent G2 painter deposit may have fixed the
-            // box already; the probe's disagreeing metadata is then logged, never applied —
-            // #973: the MIME included (no late reclassification of a fixed entry).
-            val deposited = cache.putSuccessIfAbsent(url, metadata)
-            if (!deposited && cache.get(url)?.size != metadata.size) {
-                Log.d(
-                    MEDIA_GEOMETRY_LOG_TAG,
-                    "geometry disagreement: kept=${cache.get(url)?.size} probe=${metadata.size} " +
-                        "(first valid pair wins, §3)",
-                )
+        if (metadata != null && metadata.size.width > 0 && metadata.size.height > 0) {
+            if (isContentMedia) {
+                // #960 P2 first pair; #973 [AMENDEMENT-v1.5-2] atomic metadata. v1.6-10 moves
+                // the merge to the ledger: dimensions stay fixed, only null MIME may be enriched.
+                ledger.acceptGeometry(url, generation, metadata, MediaAttemptKind.PROBE, cache)
+            } else if (ledger.generationOf(url) == generation) {
+                cache.putSuccessIfAbsent(url, metadata)
+                ledger.settleSuccess(url, generation, MediaAttemptKind.PROBE)
             }
-            ledger.settleSuccess(url, generation, MediaAttemptKind.PROBE)
         } else {
             ledger.settleFailure(url, generation, MediaAttemptKind.PROBE, System.currentTimeMillis())
         }
@@ -175,3 +169,20 @@ private suspend fun probeUnderReservation(
         if (!settled) ledger.rollbackReservation(url, generation, MediaAttemptKind.PROBE)
     }
 }
+
+/**
+ * withTimeout returns/throws only after its child execution has terminated, including cleanup.
+ * Publish failure afterwards: observing a settled PROBE is sufficient to safely authorize G2.
+ * An outer owner cancellation is rethrown, so it takes the rollback path instead of failure.
+ */
+private suspend fun probeWithDeadline(probe: suspend () -> IntrinsicMediaMetadata?): IntrinsicMediaMetadata? =
+    try {
+        withTimeout(CONTENT_MEDIA_PROBE_TIMEOUT_MILLIS) {
+            val metadata = probe()
+            currentCoroutineContext().ensureActive()
+            metadata
+        }
+    } catch (_: TimeoutCancellationException) {
+        currentCoroutineContext().ensureActive()
+        null
+    }

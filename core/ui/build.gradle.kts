@@ -48,6 +48,8 @@ dependencies {
 
     api(platform(libs.androidx.compose.bom))
     api(libs.androidx.compose.material3)
+    // #1128 — shared photo / document picker launchers for every editor surface.
+    implementation(libs.androidx.activity.compose)
     // #1040 — androidx.core.net.toUri for the shared image-menu host label and browser Intent.
     implementation(libs.androidx.core.ktx)
     implementation(libs.materialKolor.utilities)
@@ -76,6 +78,9 @@ dependencies {
     // #960 P4 — the exotic-formats integration test drives the REAL SvgDecoder (prod parity:
     // RedfaceApplication registers it in the singleton loader).
     testImplementation(libs.coil.svg)
+    // v1.6-10 — real animated GIF decoder and independent HTTP transfer counting.
+    testImplementation(libs.coil.gif)
+    testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.kotlinx.coroutines.test)
     // #130 — Robolectric runtime hosts `createComposeRule()` on JVM ; the manifest is debug-only
     // and pulls the Activity surrogate the rule mounts internally ; the BOM platform aligns the

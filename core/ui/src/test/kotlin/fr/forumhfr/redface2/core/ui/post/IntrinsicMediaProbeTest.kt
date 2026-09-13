@@ -2,12 +2,23 @@ package fr.forumhfr.redface2.core.ui.post
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.drawable.Animatable
 import androidx.compose.ui.unit.IntSize
 import androidx.exifinterface.media.ExifInterface
 import androidx.test.core.app.ApplicationProvider
 import coil3.BitmapImage
 import coil3.ColorImage
 import coil3.ImageLoader
+import coil3.asDrawable
+import coil3.gif.AnimatedImageDecoder
+import coil3.request.CachePolicy
+import coil3.request.ImageRequest
+import coil3.request.SuccessResult
+import coil3.request.allowHardware
+import coil3.request.bitmapConfig
+import coil3.size.Precision
+import coil3.size.Scale
+import coil3.svg.SvgDecoder
 import coil3.test.FakeImageLoaderEngine
 import java.io.File
 import kotlinx.coroutines.test.runTest
@@ -15,6 +26,7 @@ import okio.FileSystem
 import okio.Path.Companion.toPath
 import okio.use
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -63,6 +75,146 @@ class IntrinsicMediaProbeTest {
     }
 
     private fun loader(): ImageLoader = ImageLoader.Builder(context).build()
+
+    @Test
+    fun `enlarged content requests and obtains native bitmap pixels from the real decoder`() = runTest {
+        val file = pngFile(80, 60)
+        val imageLoader = loader()
+        val native = measureIntrinsicMediaSize(file.absolutePath, context, imageLoader)!!.size
+        listOf(1f, 2f, 2.625f, 3f, 3.5f).forEach { density ->
+            val display = imageDisplaySizePx(native, 1200, 1200, contentUpscaleCeiling(density))
+            val decode = decodeSizePx(display.width, native)
+            assertEquals(IntSize(80, 60), decode)
+            val request = coil3.request.ImageRequest.Builder(context)
+                .data(file.absolutePath)
+                .size(decode.width, decode.height)
+                .scale(coil3.size.Scale.FIT)
+                .precision(coil3.size.Precision.INEXACT)
+                .memoryCachePolicy(coil3.request.CachePolicy.DISABLED)
+                .build()
+            val result = imageLoader.execute(request) as coil3.request.SuccessResult
+            assertTrue(result.image is BitmapImage)
+            assertEquals(80, result.image.width)
+            assertEquals(60, result.image.height)
+        }
+    }
+
+    @Test
+    fun `SVG with dimensions viewBox or neither uses real G2 decoding and a frozen rectangular target`() = runTest {
+        listOf(
+            "width=\"100\" height=\"60\"",
+            "viewBox=\"0 0 100 60\"",
+            "width=\"100\" height=\"60\" viewBox=\"0 0 100 60\"",
+            "",
+        ).forEach { attributes ->
+            val file = File.createTempFile("probe-svg", ".svg").apply {
+                writeText(
+                    """<svg xmlns="http://www.w3.org/2000/svg" $attributes>""" +
+                        """<rect width="100" height="60" fill="red"/></svg>""",
+                )
+                deleteOnExit()
+            }
+            val imageLoader = ImageLoader.Builder(context).components { add(SvgDecoder.Factory()) }.build()
+            try {
+                assertNull(measureIntrinsicMediaSize(file.absolutePath, context, imageLoader))
+                val plan = ContentMediaPlan(g2DecodeSizePx(ContentMediaConstraints(300, 700f)))
+                assertEquals(IntSize(512, 768), plan.decodeSize)
+                val image = render(file, imageLoader, checkNotNull(plan.decodeSize)).image
+                assertTrue(image.width > 0 && image.height > 0)
+                if (attributes.isNotEmpty()) {
+                    assertEquals(100f / 60f, image.width.toFloat() / image.height, 0.02f)
+                }
+                val ledger = MediaAttemptLedger()
+                ledger.acceptGeometry(
+                    file.absolutePath, 0, IntrinsicMediaMetadata(IntSize(image.width, image.height), null),
+                    MediaAttemptKind.PAINTER,
+                )
+                plan.resolve(decodeSizePx(image.width, checkNotNull(ledger.geometryOf(file.absolutePath)).size))
+                assertEquals(IntSize(512, 768), plan.decodeSize)
+            } finally {
+                imageLoader.shutdown()
+            }
+        }
+    }
+
+    @Test
+    fun `animated GIF without extension or with a lying extension gets header geometry before animation`() = runTest {
+        val original = gifFile(".gif").readBytes()
+        // Two valid GIF frames (GCE + image data), preserving the real container signature.
+        val animated = original.dropLast(1).toByteArray() + original.copyOfRange(19, original.lastIndex) +
+            byteArrayOf(0x3B)
+        listOf("", ".jpg").forEach { extension ->
+            val file = File.createTempFile("animated-probe", extension).apply {
+                writeBytes(animated)
+                deleteOnExit()
+            }
+            val imageLoader = ImageLoader.Builder(context).components { add(AnimatedImageDecoder.Factory()) }.build()
+            try {
+                val metadata = checkNotNull(measureIntrinsicMediaSize(file.absolutePath, context, imageLoader))
+                assertEquals(IntrinsicMediaMetadata(IntSize(1, 1), "image/gif"), metadata)
+                val target = contentMediaDecodeTarget(
+                    metadata.size, true, PostMediaDiskCachePolicy.ENABLED, ContentMediaConstraints(1024, 600f, 3f),
+                )
+                assertEquals(IntSize(1, 1), target)
+                val image = render(file, imageLoader, checkNotNull(target)).image
+                assertEquals(1, image.width)
+                assertEquals(1, image.height)
+                val drawable = image.asDrawable(context.resources)
+                assertTrue("real animated decoder, independent of extension", drawable is Animatable)
+                assertFalse((drawable as Animatable).isRunning)
+            } finally {
+                imageLoader.shutdown()
+            }
+        }
+    }
+
+    @Test
+    fun `EXIF large source and F16 requests retain oriented dimensions and bounded targets`() = runTest {
+        val imageLoader = loader()
+        try {
+            val oriented = jpegFile(1200, 900, ExifInterface.ORIENTATION_ROTATE_90)
+            val native = checkNotNull(measureIntrinsicMediaSize(oriented.absolutePath, context, imageLoader)).size
+            assertEquals(IntSize(900, 1200), native)
+            val target = decodeSizePx(300, native)
+            assertEquals(IntSize(512, 683), target)
+            val image = render(oriented, imageLoader, target).image
+            assertTrue(image.width < image.height)
+            assertEquals(0.75f, image.width.toFloat() / image.height, 0.02f)
+
+            val large = pngFile(4000, 3000)
+            val largeNative = checkNotNull(measureIntrinsicMediaSize(large.absolutePath, context, imageLoader)).size
+            assertEquals(IntSize(4000, 3000), largeNative)
+            val largeTarget = decodeSizePx(3000, largeNative)
+            assertEquals(IntSize(2048, 1536), largeTarget)
+            val largeImage = render(large, imageLoader, largeTarget).image
+            assertTrue(largeImage.width <= 2048 && largeImage.height <= 2048)
+            assertEquals(4f / 3f, largeImage.width.toFloat() / largeImage.height, 0.02f)
+
+            val f16 = imageLoader.execute(
+                renderRequest(large, largeTarget).newBuilder()
+                    .bitmapConfig(Bitmap.Config.RGBA_F16)
+                    .allowHardware(false)
+                    .build(),
+            ) as SuccessResult
+            assertTrue(f16.image is BitmapImage)
+            assertEquals(Bitmap.Config.RGBA_F16, (f16.image as BitmapImage).bitmap.config)
+            assertTrue(f16.image.width <= 2048 && f16.image.height <= 2048)
+            assertEquals(largeNative, measureIntrinsicMediaSize(large.absolutePath, context, imageLoader)?.size)
+        } finally {
+            imageLoader.shutdown()
+        }
+    }
+
+    private fun renderRequest(file: File, target: IntSize): ImageRequest = ImageRequest.Builder(context)
+        .data(file.absolutePath)
+        .size(target.width, target.height)
+        .scale(Scale.FIT)
+        .precision(Precision.INEXACT)
+        .memoryCachePolicy(CachePolicy.DISABLED)
+        .build()
+
+    private suspend fun render(file: File, loader: ImageLoader, target: IntSize): SuccessResult =
+        loader.execute(renderRequest(file, target)) as SuccessResult
 
     @Test
     fun `the probe reports native dimensions PAST the former 1024 bound - no clipping`() = runTest {
@@ -137,7 +289,7 @@ class IntrinsicMediaProbeTest {
         // Gate Sol r1 (blocker #1): ExifInterface does not support GIF — an unguarded call made
         // the probe fail, so a real GIF never got a measured box (nor an animation). #973
         // ([AMENDEMENT-v1.5-2]): the same probe now carries the decoded MIME atomically with the
-        // dimensions — `image/gif` is what makes a block media profile-eligible in wave 2.
+        // dimensions. MIME is metadata only; it never participates in content sizing.
         val file = gifFile(".gif")
         val metadata = measureIntrinsicMediaSize(file.absolutePath, context, loader())
         assertEquals(IntrinsicMediaMetadata(IntSize(1, 1), "image/gif"), metadata)

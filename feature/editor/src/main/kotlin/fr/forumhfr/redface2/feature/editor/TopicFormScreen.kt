@@ -1,5 +1,5 @@
 package fr.forumhfr.redface2.feature.editor
-import fr.forumhfr.redface2.core.ui.editor.MAX_IMAGES_PER_UPLOAD
+import fr.forumhfr.redface2.core.ui.editor.rememberEditorImagePicker
 import fr.forumhfr.redface2.core.ui.editor.UploadProgressLabel
 import fr.forumhfr.redface2.core.ui.editor.bannerText
 
@@ -7,9 +7,6 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -154,12 +151,8 @@ internal fun TopicFormContent(
 ) {
     var imageUrlDialogOpen by remember { mutableStateOf(false) }
     var optionsSheetOpen by remember { mutableStateOf(false) }
-    // #459 — modern photo picker (no runtime permission), same contract as PostEditorContent:
-    // multi-select returns a (possibly empty) List<Uri>, handed to the VM as Uri strings.
-    val pickImagesLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickMultipleVisualMedia(MAX_IMAGES_PER_UPLOAD),
-    ) { uris ->
-        if (uris.isNotEmpty()) onIntent(TopicFormIntent.ImagesPicked(uris.map { it.toString() }))
+    val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode) { uris ->
+        onIntent(TopicFormIntent.ImagesPicked(uris))
     }
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -206,11 +199,7 @@ internal fun TopicFormContent(
                     onAction = { onIntent(TopicFormIntent.ToolbarActionClicked(it)) },
                     onImageUrlRequested = { imageUrlDialogOpen = true },
                     // #459 — upload wiring, same affordance as the reply editor.
-                    onImageUploadRequested = {
-                        pickImagesLauncher.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                        )
-                    },
+                    onImageUploadRequested = launchImagePicker,
                     uploading = state.isUploading,
                 )
                 // #459 — « n/N » batch counter while a multi-image upload is in flight.

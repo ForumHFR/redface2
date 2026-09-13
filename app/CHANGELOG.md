@@ -16,6 +16,157 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.58.0` — `open` (bêta) — 2026-09-13
+
+Promotion bêta du lot développé en dev de `0.56.0` à `0.57.7`, depuis la précédente bêta `0.55.0`. Le détail par version dev figure dans les entrées ci-dessous. Review de promotion : Opus 5 (deux passes), Sol 5.6 (review puis challenge) et Fable 5.1 sur la PR [#1366](https://github.com/ForumHFR/redface2/pull/1366) ; les réserves convergentes (rédaction du journal Diagnostic, mécanique de promotion, pages publiques) sont levées par la `0.57.7` et par cette entrée. Restent ouvertes pour les retours des testeurs : [#988](https://github.com/ForumHFR/redface2/issues/988) (photos refusées à l'envoi), [#1128](https://github.com/ForumHFR/redface2/issues/1128) (sélecteur d'images), [#1343](https://github.com/ForumHFR/redface2/issues/1343) (recette QHD+).
+
+### Images : taille et rendu (chapeau [#1334](https://github.com/ForumHFR/redface2/issues/1334) — [#1343](https://github.com/ForumHFR/redface2/issues/1343), [#1335](https://github.com/ForumHFR/redface2/issues/1335), [#1336](https://github.com/ForumHFR/redface2/issues/1336), [#1337](https://github.com/ForumHFR/redface2/issues/1337), [#1338](https://github.com/ForumHFR/redface2/issues/1338), [#1339](https://github.com/ForumHFR/redface2/issues/1339), [#1340](https://github.com/ForumHFR/redface2/issues/1340), [#1341](https://github.com/ForumHFR/redface2/issues/1341), [#1342](https://github.com/ForumHFR/redface2/issues/1342), [#1344](https://github.com/ForumHFR/redface2/issues/1344), [#1369](https://github.com/ForumHFR/redface2/issues/1369))
+
+- **Images plus larges** : une image plus petite que la colonne est agrandie jusqu'à `min(densité, 3)`, comme un navigateur ou Redface 1, au lieu de rester à ses pixels natifs (une photo de 820 px passe de 85 % à 95 % de la colonne à densité 3) ; caps de largeur et de hauteur inchangés, smileys et cc-images intouchés. **Retiré** : le profil d'agrandissement des GIF (S/M/L) de Réglages → Affichage, absorbé par ce plafond ; la préférence enregistrée est ignorée.
+- **Un seul décodage par image à froid, géométrie stable** : la cible de décodage est figée à sa première résolution ; sans géométrie connue, le painter attend la sonde d'en-tête (budget de 30 s, hors terminaison ; un hôte trop lent bascule sur le slot d'erreur) puis décode une seule fois. La géométrie mesurée vit pour la durée du process : plus de saut tardif ni de re-sonde après éviction du cache. Le type MIME n'est plus déduit de l'URL (GIF sans extension).
+- **Échec de chargement partagé par URL** : image évincée ou hôte hors ligne → chaque occurrence affiche « Image indisponible » avec « Réessayer » au lieu d'un cadre vide ; icône « image cassée » aussi sur le slot bloc.
+- **Retouches de rendu** : une cc-image isolée reste inline ; plus de ligne vide autour d'une image bloc quand les sauts de ligne sont imbriqués dans un style ; une image inline ne dépasse plus sa boîte d'un pixel ; plancher 1 sp du slot froid inline ; arrondis des caps bloc fractionnaires jusqu'au calcul final.
+- **Accessibilité** : les emplacements d'image en chargement annoncent l'alt, le rôle Image et l'état « Chargement » ; une occurrence détachée ou périmée cesse de l'annoncer.
+
+### Images : réseau ([#1350](https://github.com/ForumHFR/redface2/issues/1350), [#972](https://github.com/ForumHFR/redface2/issues/972), [#1359](https://github.com/ForumHFR/redface2/issues/1359), [#1367](https://github.com/ForumHFR/redface2/issues/1367), [#1368](https://github.com/ForumHFR/redface2/issues/1368))
+
+- **Les images reho.st reviennent** : l'app envoie le `Referer` hardware.fr exigé par reho.st, pour cet hôte seulement ; les `http://reho.st` sont chargées en https (même image, URL d'origine intacte dans le post et la visionneuse), à l'affichage comme à « Enregistrer l'image ».
+- **Les images `http://` des anciens posts s'affichent** (pages perso free.fr, chez-alice…) : l'application autorise le trafic en clair pour le chargement des images. Mesure avant code : 10 % des images http des vieux posts vivantes en http seulement, 85 % mortes. Garde-fous : les images passent par un client HTTP dédié, sans cookies, seul à suivre les redirections `https → http` ; les échanges avec HFR (session, écriture, envoi de fichiers, lectures anonymes) restent en https et refusent ces redirections, garde prouvée par un test de comportement. La permission cleartext est déclarée pour l'application entière (Android ne permet pas de la restreindre à un client) ; côté code, seul le chemin image l'emprunte.
+
+### Upload d'images ([#1128](https://github.com/ForumHFR/redface2/issues/1128), [#988](https://github.com/ForumHFR/redface2/issues/988))
+
+- **Réglages → Édition et publication → « Sélecteur d'images »** : sélecteur de photos Android (défaut, inchangé), sélecteur de photos avec « Parcourir » (à l'essai : selon le constructeur, une galerie ou un choix d'applications peut s'ouvrir à la place) ou explorateur de fichiers comme Redface 1 (il voit aussi les photos que le sélecteur de photos n'a pas encore remontées, vu sur Pixel). Sélection multiple plafonnée à 10 dans les trois modes.
+- **Journal Diagnostic de l'upload** (Réglages → Maintenance → Diagnostic) : chaque envoi vers l'hébergeur y écrit ses faits (origine du fichier sans identifiant, type MIME, taille annoncée et lue, code et durée de la réponse, exception éventuelle), sans changement des messages affichés ni du comportement d'envoi. Le journal est rédigé avant écriture (URL, URI, chemins, longues suites de chiffres et champs identifiants masqués) et peut être copié sur le forum tel quel ; il vit en mémoire seule : reproduire l'échec, puis « Copier » avant de quitter l'app.
+
+### Infra ([#1376](https://github.com/ForumHFR/redface2/issues/1376))
+
+- Test `RedfaceApplicationImageLoaderTest` rendu déterministe : le disk cache par défaut de Coil est partagé entre les JVM de test, la requête du test ignore désormais les caches.
+
+---
+
+## `0.57.7` — `internal` (dev) — 2026-09-13
+
+Rédaction du journal Diagnostic de l'upload (#988, PR #1384) — suite du challenge de promotion.
+
+### Corrigé
+
+- **Le journal Diagnostic de l'upload ne contient plus rien d'identifiant (#988)** — la 0.57.6 journalisait l'identifiant diberie de l'image envoyée (dont l'URL publique se déduit), les corps de réponse bruts des hébergeurs et les messages d'exception tels quels. Désormais : URL, URI `content://`, chemins, longues suites de chiffres et champs JSON identifiants sont masqués avant écriture, avec repli « tout masqué » en cas de doute ; le succès n'indique plus que la présence d'un identifiant. Le journal peut être copié sur le forum tel quel. Aucun changement pour l'utilisateur en dehors du contenu du journal.
+
+---
+
+## `0.57.6` — `internal` (dev) — 2026-09-13
+
+Instrumentation diagnostique de l'upload d'images (#988, PR #1377) et correctif d'un test instable (PR #1375).
+
+### Ajouté
+
+- **Journal Diagnostic de l'upload d'images (#988)** — chaque envoi vers l'hébergeur écrit ses faits dans Réglages → Maintenance → Diagnostic : origine du fichier (schéma et autorité du `content://`, jamais l'identifiant), type MIME renvoyé par le système ou repli `image/*`, extension, taille annoncée et taille lue, puis nom et type envoyés, code et type de la réponse, durée, début du corps en cas d'échec ; en cas d'exception, sa classe, son message et sa cause. Aucun changement des messages affichés ni du comportement d'envoi : on mesure avant de corriger. Pour aider : reproduire l'échec, puis ouvrir Diagnostic et « Copier » avant de quitter l'app (journal en mémoire seule).
+
+### Corrigé
+
+- **Test instable `RedfaceApplicationImageLoaderTest` (#1367, #1376)** — le disk cache par défaut de Coil est partagé entre les JVM de test ; la requête du test ignore désormais les caches.
+
+---
+
+## `0.57.5` — `internal` (dev) — 2026-09-13
+
+Lot F de l'audit du contrat de rendu des images (chapeau #1334, PR #1372) — correctifs issus de la review de la PR de promotion #1366, amendement v1.6-13 (PR #1371).
+
+### Corrigé
+
+- **Le clair n'est plus accessible aux lectures HFR anonymes (#1367)** — le chargement des images passe par un client HTTP dédié, sans cookies, seul à suivre les redirections `https → http` ; le client HFR anonyme (pages lues sans session, API REST) refuse désormais ces redirections comme les clients authentifié, mutation et upload. Garde prouvée par un test de comportement (serveur TLS répondant `302` vers `http://`, aucun client HFR ne suit) et non plus par la seule lecture du drapeau ; vérification live : aucun endpoint HFR ne redirige vers http. Précision sur la note de la 0.57.4 : la permission cleartext est déclarée pour l'application entière (Android ne permet pas de la restreindre à un client) ; côté code, seul le chemin image l'emprunte.
+- **« Enregistrer l'image » sur reho.st retrouve le cache et passe en https (#1368)** — la bascule `http://reho.st → https` quitte la chaîne Coil pour le client image lui-même : affichage et enregistrement partagent la même requête, la même clé de cache disque et le même transfert chiffré ; la règle d'hôte (reho.st et sous-domaines stricts) est la même que celle du Referer.
+- **Trois retouches du rendu (#1369)** — politique de cache disque de retour dans les clés de mémoïsation de la requête du bloc image ; plancher 1 sp du slot froid inline (plus de placeholder de largeur nulle) ; une occurrence détachée ou périmée cesse d'annoncer « Chargement » au lecteur d'écran.
+
+---
+
+## `0.57.4` — `internal` (dev) — 2026-09-13
+
+Lot E de l'audit du contrat de rendu des images (chapeau #1334, PR #1363) — amendement v1.6-12 (PR #1361), demande de XaTriX : « lire les images http ».
+
+### Corrigé
+
+- **Les images `http://` des anciens posts s'affichent (#1359, #972)** — l'application autorise le trafic en clair pour le chargement des images (configuration de sécurité réseau) : les hébergeurs encore vivants en http seulement (pages perso free.fr, chez-alice…) sont enfin rendus au lieu du slot « Image indisponible ». Mesure avant code : 10 % des images http des vieux posts étaient vivantes en http seulement, 85 % mortes. Garde-fous : les échanges avec HFR (session, écriture, envoi de fichiers) restent en https par construction et ne suivent aucune redirection vers http ; seul le client image anonyme, sans cookies, utilise le clair *(rectifié en 0.57.5 : la permission est déclarée pour l'application entière ; côté code, seul le chemin image l'emprunte)*. La bascule `http://reho.st` → https du lot D est conservée.
+
+---
+
+## `0.57.3` — `internal` (dev) — 2026-09-13
+
+Lot B de l'audit du contrat de rendu des images (chapeau #1334, PR #1360) — implémentation de l'amendement v1.6-10 (PR #1353) ; contrat v1.6-12 (images http, PR #1361) publié, code au lot E.
+
+### Corrigé
+
+- **Deux décodages painter par image à froid (#1338)** — la cible de décodage est figée à sa première résolution : géométrie connue → painter immédiat ; sinon le painter attend la fin de la sonde d'en-tête (budget de 30 s, hors terminaison) puis décode une seule fois à une cible rectangulaire figée. Une géométrie tardive ajuste la boîte, jamais la requête. En MP, plus de sonde d'en-tête : un seul transfert, un seul décodage.
+- **Verrou géométrique porté par un cache évictable (#1339)** — la géométrie d'une image de contenu vit désormais dans le registre des tentatives pour toute la durée du process : une éviction du cache ne peut plus re-sonder ni re-corriger une image visible. Les smileys gardent leur mémo.
+- **GIF sans extension et métadonnées (#1344)** — le type MIME n'est plus jamais déduit de l'URL ni corrigé après coup : il n'est complété que par une sonde fiable de la génération courante, un type connu est immuable, les résultats périmés sont ignorés ; le type ne dimensionne plus rien.
+
+---
+
+## `0.57.2` — `internal` (dev) — 2026-09-13
+
+Lots C et D de l'audit du contrat de rendu des images (chapeau #1334, PR #1354 et #1356) ; contrat amendé v1.6-10 (PR #1353, lot B à venir) et v1.6-11 (PR #1355).
+
+### Corrigé
+
+- **Aucune image reho.st ne s'affichait (#1350)** — reho.st exige un `Referer` hardware.fr : l'app l'envoie désormais, pour cet hôte seulement. **Images `http://reho.st` (#972)** — chargées en https (même image), l'URL d'origine restant intacte dans le post et la visionneuse ; les autres hôtes `http://` restent bloqués par Android.
+- **Ligne vide avant ou après une image bloc quand les sauts de ligne sont imbriqués dans un style (#1341)** — les séparateurs au bord d'un bloc sont consommés même à l'intérieur d'un gras, d'un italique, d'une couleur ou d'un lien ; les styles et les cibles de lien sont conservés.
+- **Image inline pouvant dépasser sa boîte d'un pixel (#1340)** — la largeur du bitmap et le padding sont convertis en sp en une seule opération ; sur le chemin de secours sans dimensions connues, un petit painter n'est plus agrandi par l'emplacement froid.
+- **Couverture de la matrice d'invariants (#1342, E10)** — correspondance des tests promis établie ; deux trous fermés : boîte d'un GIF invariante arrêt/animation, activation lecteur d'écran d'une image inline liée.
+
+---
+
+## `0.57.1` — `internal` (dev) — 2026-09-12
+
+Lot A de l'audit du contrat de rendu des images (chapeau #1334, PR #1351) : cinq écarts corrigés, sans changement de géométrie hors arrondis sub-pixel.
+
+### Corrigé
+
+- **Image évincée ou hôte hors ligne après un premier succès (#1335)** — l'échec du painter est désormais partagé par URL : chaque occurrence affiche le slot « Image indisponible » avec son « Réessayer » au lieu d'un cadre vide sans glyphe ni action. Un nouvel essai manuel rouvre une génération ; la géométrie mesurée et la sonde survivent.
+- **cc-image isolée promue en bloc (#1336)** — une image portant le marqueur `hfr-cc-image=true` reste inline même seule dans son paragraphe, sa citation ou son spoiler (parser) ; les anciens contenus persistés avec un bloc cc sont reroutés vers le rendu inline sans sonde.
+- **Accessibilité des slots en chargement (#1337)** — les emplacements d'image bloc et inline en attente annoncent l'alt, le rôle Image et l'état « Chargement » jusqu'au résultat, sans action fantôme.
+- **Smiley builtin partageant l'URL d'une image de contenu (#1342, E8)** — le smiley garde sa taille pré-semée.
+- **Arrondis des caps bloc (#1342, E9)** — les plafonds restent fractionnaires jusqu'au calcul final (plancher 400 dp et fraction 0,70 en Float) ; le slot inline froid respecte la largeur disponible padding déduit.
+
+### Modifié
+
+- Slot d'erreur d'une image bloc : icône « image cassée » au-dessus du libellé, comme le slot inline.
+
+---
+
+## `0.57.0` — `internal` (dev) — 2026-09-12
+
+Audit du contrat de rendu des images (v1.5) et protocole des 5 liens de tinc sur S10e (fil DEV) : les « images pas assez larges » viennent de la règle no-upscale en pixels physiques, pas d'un bug. Décision XaTriX : option A, contrat v1.6-1 ([#1343](https://github.com/ForumHFR/redface2/issues/1343), chapeau [#1334](https://github.com/ForumHFR/redface2/issues/1334)), plan challengé par Astra. Code Astra sous gate Fable, validation CI locale déportée sur la box de build ; PR [#1346](https://github.com/ForumHFR/redface2/pull/1346).
+
+### Modifié
+
+- **Images de contenu (bloc et inline) : plafond d'agrandissement par densité** — une image plus petite que la colonne peut désormais être agrandie jusqu'à `min(densité, 3)` (contrat v1.6-1, `max(1, min(densité, 3))`), comme un navigateur ou Redface 1, au lieu de rester à ses pixels natifs. Une photo de 820 px passe de 85 % à 95 % de la colonne sur un écran de densité 3, de 63 % à 95 % en QHD+. Caps de largeur (réglage 90/95/99/100 %) et de hauteur inchangés, décodage au natif inchangé, smileys et cc-images intouchés.
+
+### Retiré
+
+- **Réglages → Affichage → profil d'agrandissement des GIF (S/M/L)** — absorbé par le plafond par densité (S = M = L dès densité 2,5). La préférence enregistrée est ignorée, sans migration.
+
+---
+
+## `0.56.1` — `internal` (dev) — 2026-09-12
+
+Retour antiseptiqueIncolore (fil DEV, MetaPurge montre « Parcourir » sur le même sélecteur), vérification Sol, décision XaTriX. Code Astra sous gate Fable, validation locale = commande CI ; PR [#1332](https://github.com/ForumHFR/redface2/pull/1332) ([#1128](https://github.com/ForumHFR/redface2/issues/1128)).
+
+### Ajouté
+
+- **Réglages → Édition et publication → « Sélecteur d'images »** — troisième valeur à l'essai, **« Sélecteur de photos avec Parcourir »** : le même sélecteur de photos Android, ouvert par le mécanisme d'import `ACTION_GET_CONTENT`, ce qui fait apparaître le menu ⋮ → « Parcourir » vers l'explorateur (c'est ce que fait MetaPurge). Le défaut reste « Sélecteur de photos ». Selon le constructeur, une galerie ou un choix d'applications peut s'ouvrir à la place : retours multi-appareils attendus avant d'en faire le défaut. Sélection multiple plafonnée à 10 dans les trois modes.
+
+---
+
+## `0.56.0` — `internal` (dev) — 2026-09-12
+
+Retours thom@s, tomtomtls et antiseptiqueIncolore (Pixel), décision XaTriX. Code Astra sous gate Fable, validation locale = commande CI ; PR [#1329](https://github.com/ForumHFR/redface2/pull/1329) ([#1128](https://github.com/ForumHFR/redface2/issues/1128)).
+
+### Ajouté
+
+- **Réglages → Édition et publication → « Sélecteur d'images »** — choix entre le sélecteur de photos Android (défaut, inchangé) et l'explorateur de fichiers (comme Redface 1) pour l'upload d'images dans les quatre éditeurs (réponse, nouveau sujet, réponse MP, nouveau MP). L'explorateur lit le disque directement : il voit aussi les photos que le sélecteur de photos n'a pas encore remontées (base du picker en retard sur la galerie, vu sur Pixel). Sélection multiple plafonnée à 10 dans les deux modes. L'entrée « Parcourir » du sélecteur n'est pas activable par l'application : Android ne l'affiche qu'aux lancements par `ACTION_GET_CONTENT`.
+
+---
+
 ## `0.55.0` — `open` (bêta) — 2026-09-07
 
 Promotion bêta du lot développé en dev de `0.54.0` à `0.54.14` (plus le correctif [#1319](https://github.com/ForumHFR/redface2/issues/1319)), depuis la précédente bêta `0.53.6`. Le détail par version dev figure dans les entrées ci-dessous. Les issues du lot restent ouvertes jusqu'à validation par les retours des testeurs. Review de promotion : Astra, Opus 5 et Fable 5.1 sur la PR [#1317](https://github.com/ForumHFR/redface2/pull/1317).
@@ -38,7 +189,7 @@ Promotion bêta du lot développé en dev de `0.54.0` à `0.54.14` (plus le corr
 
 ### Infra ([#650](https://github.com/ForumHFR/redface2/issues/650), [#1307](https://github.com/ForumHFR/redface2/issues/1307))
 
-- CI allégée sur les PR documentation ; test DataStore instable rendu déterministe.
+- CI allégée sur les PR documentation — **requalifié le 08/09** : le filtre livré par #1267 était sans effet (quantificateur `some` de dorny/paths-filter, négations ignorées), la matrice tournait toujours ; corrigé sur `dev` par #1326 ([#650](https://github.com/ForumHFR/redface2/issues/650)), effectif à partir de la release dev suivante. Test DataStore instable rendu déterministe.
 
 ---
 

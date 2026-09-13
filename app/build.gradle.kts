@@ -53,7 +53,7 @@ android {
         // versionName is also surfaced in the app footer via BuildConfig.VERSION_NAME so
         // dogfood builds advertise their lineage to the user.
         versionCode = cliVersionCode ?: 72
-        versionName = "0.55.0"
+        versionName = "0.58.0"
 
         // Manifest placeholder so a side-by-side install (dogfood/preview overlay)
         // can override the launcher label without touching tracked manifest/strings.
@@ -173,6 +173,14 @@ android {
             // stamp ; release.md already documented this suffix — it now actually exists. The CD
             // injects -PversionCodeOverride at dispatch ; a local dev build stamps `local`.
             versionNameSuffix = "-dev." + (cliVersionCode?.toString() ?: "local")
+        }
+    }
+
+    testOptions {
+        unitTests {
+            // #1359 — NetworkSecurityConfigTest reads the packaged XML resource and the merged
+            // application manifest through Robolectric.
+            isIncludeAndroidResources = true
         }
     }
 

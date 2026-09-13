@@ -355,6 +355,7 @@ private fun SmileyCell(
                 ledger = ledger,
                 context = platformContext,
                 imageLoader = SingletonImageLoader.get(platformContext),
+                isContentMedia = false,
             )
         }
     }

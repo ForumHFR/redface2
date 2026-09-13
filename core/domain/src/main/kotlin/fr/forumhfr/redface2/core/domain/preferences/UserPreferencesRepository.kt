@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.domain.preferences
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import kotlinx.coroutines.flow.Flow
 
@@ -261,6 +262,15 @@ interface UserPreferencesRepository {
     suspend fun setWritingSurfacePreset(preset: WritingSurfacePreset)
 
     /**
+     * #1128 — explicit image selector for every editor, chosen in Settings. Default
+     * [ImagePickerMode.DEFAULT] preserves the photo picker; unknown stored values use that default.
+     */
+    fun observeImagePickerMode(): Flow<ImagePickerMode>
+
+    /** Persists [observeImagePickerMode]. Default [ImagePickerMode.DEFAULT] until the first call. */
+    suspend fun setImagePickerMode(mode: ImagePickerMode)
+
+    /**
      * Opt-in « DT » section on the Drapeaux screen: when `true`, a « DT » tab appears next
      * to the flag-type tabs. Placeholder for now — the content (the followed-discussions
      * list whose flags sync through the MPStorage document, #6) lands later. Default
@@ -498,20 +508,9 @@ interface UserPreferencesRepository {
     suspend fun setAppLauncherIcon(icon: AppLauncherIcon)
 
     /**
-     * Block-GIF display profile (#973, contrat images §8 [AMENDEMENT-v1.5-2]):
-     * [MediaDisplayProfile.M] (default, ×1,5) — the enlargement factor applied to eligible block
-     * GIFs by the post renderer (wired in wave 2). Observed by the renderer hosts and mirrored in
-     * Settings > Affichage. A corrupt / unknown stored value degrades to the M default.
-     */
-    fun observeMediaDisplayProfile(): Flow<MediaDisplayProfile>
-
-    /** Persists [observeMediaDisplayProfile]. Default [MediaDisplayProfile.M] until the first call. */
-    suspend fun setMediaDisplayProfile(profile: MediaDisplayProfile)
-
-    /**
      * Maximum content image width (#991): [PostImageMaxWidth.P95] (default) keeps the historical
      * fImage cap, while P90 / P99 / P100 let the user tighten or relax content images. This is
-     * independent from GIF enlargement and full-width posts.
+     * independent from full-width posts.
      */
     fun observePostImageMaxWidth(): Flow<PostImageMaxWidth>
 

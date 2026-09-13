@@ -1,4 +1,4 @@
-package fr.forumhfr.redface2.core.ui.post
+package fr.forumhfr.redface2.core.model
 
 import java.net.URLDecoder
 
@@ -8,13 +8,10 @@ import java.net.URLDecoder
  * `…/emojis-micro/<codepoint>.png?hfr-cc-image=true&raw=true`) to declare "this `[img]` is a
  * one-line emoji glyph, size it like text".
  *
- * The check is **render-time only** and applies to the ORIGINAL URL carried by the AST (the
- * `:core:parser` `sanitizeImageHref` preserves the query string verbatim, and any redirect target —
- * e.g. `raw.githubusercontent.com` — is a Coil concern that never reaches this code). It never
- * alters the AST, the link semantics, the MediaCounter symmetry or the §2 structural topology
- * (`partitionParagraph` has its own cc-marker boundary rule): its only consumers are the inline
- * SIZING fast-path in `imageDisplayBox` and the measurement-probe exclusion in
- * `collectMeasurableImageUrl` (both in PostRenderer).
+ * Shared by the parser and renderer: a marked image remains inline even when isolated in
+ * its container. The renderer also checks old persisted AST blocks before any measurement.
+ * Always inspect the ORIGINAL URL: sanitization preserves its query, while Coil redirects
+ * never reach this rule. Matching does not change the URL, link semantics or media count.
  *
  * Matching contract (pure JVM, no `android.net.Uri` — `:core:ui` unit tests run on the JVM):
  *  - only the **query** component is inspected: the substring between the first `?` and the first
@@ -34,7 +31,7 @@ import java.net.URLDecoder
  * ambiguity must resolve to NOT fast-pathing.
  */
 @Suppress("ReturnCount") // No-query guards + trailing verdict.
-internal fun isCcImageUrl(url: String): Boolean {
+fun isCcImageUrl(url: String): Boolean {
     val queryStart = url.indexOf('?')
     if (queryStart < 0) return false
     val fragmentStart = url.indexOf('#')

@@ -3,7 +3,6 @@ package fr.forumhfr.redface2.core.ui.theme
 import androidx.compose.runtime.Immutable
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
-import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
@@ -25,9 +24,6 @@ data class ReadingDisplaySettings(
     // #105 — whether the intra-page reading scrollbar is shown. `true` (default) keeps the
     // historical ascenseur; `false` hides it entirely (topic pages AND private-message threads).
     val showScrollbar: Boolean = true,
-    // #973 (§8 [AMENDEMENT-v1.5-2]) — enlargement profile of eligible block GIFs (S/M/L). Default
-    // M (×1,5), the shipped choice (XaTriX 26/07); provided as LocalMediaDisplayProfile.
-    val mediaDisplayProfile: MediaDisplayProfile = MediaDisplayProfile.M,
     // #991 — maximum fImage width of content images. Default P95 preserves the historical 0.95 cap
     // and is provided as LocalPostImageMaxWidth.
     val postImageMaxWidth: PostImageMaxWidth = PostImageMaxWidth.DEFAULT,

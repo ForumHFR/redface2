@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.SubCategory
 import fr.forumhfr.redface2.core.model.TopicListPage
@@ -1398,6 +1399,10 @@ class CategoryViewModelTest {
         val menusGate: CompletableDeferred<Unit>? = null,
         val stickyGate: CompletableDeferred<Unit>? = null,
     ) : UserPreferencesRepository by mockk(relaxed = true) {
+        // #1128 — explicit defaults also cover fakes that delegate the other preferences to MockK.
+        override fun observeImagePickerMode() = MutableStateFlow(ImagePickerMode.DEFAULT)
+        override suspend fun setImagePickerMode(mode: ImagePickerMode) = Unit
+
         private val stored = MutableStateFlow(initial)
         var setCalls: List<CategoryFlagFilter> = emptyList()
             private set

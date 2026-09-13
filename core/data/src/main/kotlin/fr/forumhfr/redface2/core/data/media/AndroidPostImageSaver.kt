@@ -9,7 +9,7 @@ import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.media.ImageSaveException
 import fr.forumhfr.redface2.core.domain.media.PostImageSaver
 import fr.forumhfr.redface2.core.domain.media.SavedPostImage
-import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
+import fr.forumhfr.redface2.core.network.qualifiers.ImageClient
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -31,7 +31,7 @@ import okio.buffer
  *     (`DiskCache.openSnapshot(url).data`, key = URL), so an animated GIF is saved animated and a
  *     JPEG keeps its original compression. The loader is resolved lazily via
  *     [SingletonImageLoader.get], same no-`:app`-dependency seam as `DefaultImageCacheMaintenance`;
- *  2. fallback: a network re-fetch on the [AnonymousClient] OkHttp client (the same client the
+ *  2. fallback: a network re-fetch on the [ImageClient] OkHttp client (the same client the
  *     image pipeline uses — no HFR auth cookies leaked to external image hosts). This is the
  *     expected path for MP media since #1096: their render and probe requests deliberately never
  *     populate Coil's disk cache, but « Enregistrer l'image » remains available at one extra fetch.
@@ -46,7 +46,7 @@ import okio.buffer
 internal class AndroidPostImageSaver @Inject constructor(
     @param:ApplicationContext private val context: Context,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
-    @param:AnonymousClient private val httpClient: OkHttpClient,
+    @param:ImageClient private val httpClient: OkHttpClient,
 ) : PostImageSaver {
 
     override suspend fun save(url: String): SavedPostImage = withContext(ioDispatcher) {

@@ -6,6 +6,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.editor.validateBbcodeDraft
 import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 
@@ -114,6 +115,8 @@ data class PostEditorState(
      * counter; a one-image upload keeps this null and only flips [isUploading].
      */
     val uploadProgress: UploadProgress? = null,
+    /** #1128 — observed continuously so the next image pick uses the current preference. */
+    val imagePickerMode: ImagePickerMode = ImagePickerMode.DEFAULT,
 ) {
     /**
      * Submission is allowed when : we know the routing context (page + subcat + topicId),

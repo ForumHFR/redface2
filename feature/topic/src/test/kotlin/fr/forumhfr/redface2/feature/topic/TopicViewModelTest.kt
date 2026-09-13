@@ -15,7 +15,6 @@ import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
-import fr.forumhfr.redface2.core.domain.preferences.MediaDisplayProfile
 import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
@@ -45,6 +44,7 @@ import fr.forumhfr.redface2.core.model.search.SearchRequest
 import fr.forumhfr.redface2.core.model.search.SearchResultPage
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.domain.write.ModerationRepository
 import fr.forumhfr.redface2.core.model.write.ModerationAlertState
@@ -6851,6 +6851,15 @@ internal class FakeUserPreferencesRepository(
 
     override suspend fun setWritingSurfacePreset(preset: WritingSurfacePreset) = Unit
 
+    // #1128 — keep interface fakes aligned with the shared image-selector preference.
+    private val imagePickerMode = MutableStateFlow(ImagePickerMode.DEFAULT)
+
+    override fun observeImagePickerMode(): Flow<ImagePickerMode> = imagePickerMode
+
+    override suspend fun setImagePickerMode(mode: ImagePickerMode) {
+        imagePickerMode.value = mode
+    }
+
     override fun observeShowDtSection(): Flow<Boolean> = MutableStateFlow(false)
 
     override suspend fun setShowDtSection(enabled: Boolean) = Unit
@@ -6947,11 +6956,6 @@ internal class FakeUserPreferencesRepository(
     override suspend fun setAppLauncherIcon(icon: AppLauncherIcon) = Unit
 
     // #973 — the block-GIF display profile is irrelevant to TopicViewModel; stubbed at the M default.
-    override fun observeMediaDisplayProfile(): Flow<MediaDisplayProfile> =
-        MutableStateFlow(MediaDisplayProfile.M)
-
-    override suspend fun setMediaDisplayProfile(profile: MediaDisplayProfile) = Unit
-
     override fun observePostImageMaxWidth(): Flow<PostImageMaxWidth> =
         MutableStateFlow(PostImageMaxWidth.DEFAULT)
 

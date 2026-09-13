@@ -1,9 +1,6 @@
 package fr.forumhfr.redface2.feature.messages
 
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,7 +29,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import fr.forumhfr.redface2.core.ui.editor.MAX_IMAGES_PER_UPLOAD
+import fr.forumhfr.redface2.core.ui.editor.rememberEditorImagePicker
 import fr.forumhfr.redface2.core.ui.editor.UploadProgressLabel
 import fr.forumhfr.redface2.core.ui.editor.bannerText
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
@@ -239,11 +236,8 @@ private fun ReplyEditorBody(
     onManageRecipients: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    // #459 — modern photo picker (no runtime permission), same contract as the topic-side editors.
-    val pickImagesLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickMultipleVisualMedia(MAX_IMAGES_PER_UPLOAD),
-    ) { uris ->
-        if (uris.isNotEmpty()) onImagesPicked(uris.map { it.toString() })
+    val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode) { uris ->
+        onImagesPicked(uris)
     }
     // No outer scroll : the draft field is weighted so it stretches down to the bar (same
     // extensible-field design as the post editor) ; long content scrolls in the field's own
@@ -269,11 +263,7 @@ private fun ReplyEditorBody(
         BbcodeToolbar(
             onAction = onToolbarAction,
             // #459 — upload wiring, same affordance as the topic-side editors.
-            onImageUploadRequested = {
-                pickImagesLauncher.launch(
-                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                )
-            },
+            onImageUploadRequested = launchImagePicker,
             uploading = state.isUploading,
         )
         // #459 — « n/N » batch counter while a multi-image upload is in flight.

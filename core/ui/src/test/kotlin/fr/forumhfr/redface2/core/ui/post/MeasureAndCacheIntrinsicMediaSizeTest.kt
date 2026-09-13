@@ -68,11 +68,11 @@ class MeasureAndCacheIntrinsicMediaSizeTest {
     }
 
     @Test
-    fun `a URL already in the cache is not re-measured`() = runTest {
+    fun `a URL already in the ledger is not re-measured`() = runTest {
         val cache = DefaultIntrinsicMediaSizeCache()
         val ledger = MediaAttemptLedger()
         val url = "https://hfr/photo.jpg"
-        cache.putSuccess(url, IntrinsicMediaMetadata(IntSize(800, 600), mimeType = null))
+        ledger.acceptGeometry(url, 0, IntrinsicMediaMetadata(IntSize(800, 600), null), MediaAttemptKind.PROBE, cache)
         // The fake loader would report a DIFFERENT size if a probe ran — proving a no-op if it doesn't.
         val loader = loaderReturning(url, ColorImage(width = 70, height = 50))
 
@@ -129,9 +129,9 @@ class MeasureAndCacheIntrinsicMediaSizeTest {
     }
 
     @Test
-    fun `an evicted geometry re-measures despite the terminal probe (Sol P2, O1)`() = runTest {
+    fun `memo eviction never reopens the content probe or loses geometry`() = runTest {
         // maxEntries=1: measuring u2 evicts u1's geometry while u1's probe axis stays Succeeded.
-        // The §6 locked slot must survive eviction: the seam reopens the probe and re-deposits.
+        // v1.6-10: the ledger retains authority and the seam never reopens PROBE.
         val cache = DefaultIntrinsicMediaSizeCache(maxEntries = 1)
         val ledger = MediaAttemptLedger()
         val u1 = "https://hfr/one.jpg"
@@ -153,8 +153,9 @@ class MeasureAndCacheIntrinsicMediaSizeTest {
             u1Probes++
             IntrinsicMediaMetadata(IntSize(320, 240), mimeType = null)
         }
-        assertEquals("the lost geometry must be re-measured", IntSize(320, 240), cache.get(u1)?.size)
-        assertEquals(2, u1Probes)
+        assertEquals(IntSize(320, 240), ledger.geometryOf(u1)?.size)
+        assertNull(cache.get(u1))
+        assertEquals(1, u1Probes)
         assertTrue(ledger.hasSucceeded(u1, MediaAttemptKind.PROBE))
     }
 
@@ -180,18 +181,20 @@ class MeasureAndCacheIntrinsicMediaSizeTest {
             }
             probing.await()
             // The painter's G2 settlement lands mid-probe (main thread in production).
-            cache.putSuccessIfAbsent(url, IntrinsicMediaMetadata(IntSize(320, 240), mimeType = null))
+            ledger.acceptGeometry(
+                url, 0, IntrinsicMediaMetadata(IntSize(320, 240), null), MediaAttemptKind.PAINTER, cache,
+            )
             ledger.settleSuccess(url, ledger.generationOf(url), MediaAttemptKind.PROBE)
             release.complete(Unit)
             job.join()
         }
 
         val cache = DefaultIntrinsicMediaSizeCache()
-        // Diverging probe success — even its MIME must not reclassify the fixed entry (#973).
+        // A reliable current probe enriches MIME without replacing the painter geometry.
         raceProbe(cache, IntrinsicMediaMetadata(IntSize(999, 111), "image/gif"))
         assertEquals(
-            "the FIRST metadata (G2) keeps the authority",
-            IntrinsicMediaMetadata(IntSize(320, 240), mimeType = null),
+            "the first geometry stays and the reliable MIME is enriched",
+            IntrinsicMediaMetadata(IntSize(320, 240), mimeType = "image/gif"),
             cache.get(url),
         )
         assertTrue(ledger.hasSucceeded(url, MediaAttemptKind.PROBE))
@@ -218,7 +221,7 @@ class MeasureAndCacheIntrinsicMediaSizeTest {
             }
         }
         probing.await()
-        cache.putSuccessIfAbsent(url, IntrinsicMediaMetadata(IntSize(320, 240), mimeType = null))
+        ledger.acceptGeometry(url, 0, IntrinsicMediaMetadata(IntSize(320, 240), null), MediaAttemptKind.PAINTER, cache)
         ledger.settleSuccess(url, ledger.generationOf(url), MediaAttemptKind.PROBE)
         release.complete(Unit)
         job.join()
@@ -243,7 +246,7 @@ class MeasureAndCacheIntrinsicMediaSizeTest {
             }
         }
         probing.await()
-        cache.putSuccessIfAbsent(url, IntrinsicMediaMetadata(IntSize(320, 240), mimeType = null))
+        ledger.acceptGeometry(url, 0, IntrinsicMediaMetadata(IntSize(320, 240), null), MediaAttemptKind.PAINTER, cache)
         ledger.settleSuccess(url, ledger.generationOf(url), MediaAttemptKind.PROBE)
         job.cancelAndJoin()
 

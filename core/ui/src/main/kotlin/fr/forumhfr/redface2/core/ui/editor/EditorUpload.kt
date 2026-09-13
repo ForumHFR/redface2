@@ -15,7 +15,7 @@ import fr.forumhfr.redface2.core.ui.R
  * progress label and one banner wording.
  */
 
-/** Ceiling of the photo picker's multi-select (`PickMultipleVisualMedia`), all editor surfaces. */
+/** Shared upload ceiling: native photo-picker limit, app-side cap for DocumentsUI (#1128). */
 const val MAX_IMAGES_PER_UPLOAD = 10
 
 /**

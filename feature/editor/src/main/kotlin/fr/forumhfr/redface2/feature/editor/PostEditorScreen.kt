@@ -1,7 +1,5 @@
 package fr.forumhfr.redface2.feature.editor
-import fr.forumhfr.redface2.core.ui.editor.MAX_IMAGES_PER_UPLOAD
-import fr.forumhfr.redface2.core.ui.editor.UploadError
-import fr.forumhfr.redface2.core.ui.editor.UploadProgress
+import fr.forumhfr.redface2.core.ui.editor.rememberEditorImagePicker
 import fr.forumhfr.redface2.core.ui.editor.UploadProgressLabel
 import fr.forumhfr.redface2.core.ui.editor.bannerText
 
@@ -9,9 +7,6 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import androidx.activity.compose.BackHandler
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -57,7 +52,6 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitActions
@@ -125,15 +119,8 @@ private fun PostEditorContent(
 ) {
     var imageUrlDialogOpen by remember { mutableStateOf(false) }
     var optionsSheetOpen by remember { mutableStateOf(false) }
-    // #459 PR2 — modern Android photo picker (no runtime permission). Multi-select variant: the
-    // contract returns a (possibly empty) List<Uri> ; we hand the platform-free VM each Uri's string
-    // and it reads + uploads them sequentially, inserting an [img] per success. API confirmed via
-    // Context7 (androidx ActivityResultContracts.PickMultipleVisualMedia(maxItems), input
-    // PickVisualMediaRequest, output List<Uri>). A single pick is just a one-element list.
-    val pickImagesLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickMultipleVisualMedia(MAX_IMAGES_PER_UPLOAD),
-    ) { uris ->
-        if (uris.isNotEmpty()) onIntent(PostEditorIntent.ImagesPicked(uris.map { it.toString() }))
+    val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode) { uris ->
+        onIntent(PostEditorIntent.ImagesPicked(uris))
     }
     // Reply (#145), Quote (#146) and Edit (#147) submit through HFR's reply/edit form ; the other
     // (defensive) modes show a disabled note instead of a submit bar.
@@ -167,11 +154,7 @@ private fun PostEditorContent(
                 BbcodeToolbar(
                     onAction = { action -> onIntent(PostEditorIntent.ToolbarActionClicked(action)) },
                     onImageUrlRequested = { imageUrlDialogOpen = true },
-                    onImageUploadRequested = {
-                        pickImagesLauncher.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                        )
-                    },
+                    onImageUploadRequested = launchImagePicker,
                     uploading = state.isUploading,
                 )
 

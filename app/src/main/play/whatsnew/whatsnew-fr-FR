@@ -1,7 +1,6 @@
-Redface 2 v0.55.0 — bêta.
-- Visionneuse d'images plein écran : zoom, partage, tap pour masquer la barre.
-- Alerter un post et consulter « Mes sanctions ».
-- Vue catégorie : encarts repliables.
-- Icône de l'application au choix (Classique, Redface 1).
-- Badge « +N » des drapeaux aligné sur le web, sondage visible après vote.
-- Nombreux correctifs : citations, navigation, super favoris par compte.
+Redface 2 v0.58.0 — bêta.
+- Images plus larges dans les posts (agrandissement jusqu'à la densité de l'écran), un seul décodage par image, plus de saut tardif.
+- Les images reho.st et les images http:// des anciens posts s'affichent de nouveau.
+- Image indisponible : « Réessayer » sur chaque occurrence.
+- Réglages → Édition : choix du sélecteur d'images (photos, Parcourir, explorateur).
+- Photo refusée à l'envoi ? Réglages → Maintenance → Diagnostic, « Copier », puis collez sur le forum.

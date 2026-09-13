@@ -71,10 +71,10 @@ graph TB
 
 ## État du projet
 
-- **Bêta publique 0.50.2** (1er septembre 2026, Play test ouvert + F-Droid) : sondages (vote, clôture par le créateur), liens HFR (ouverture externe sans rebond, gestionnaire par défaut), modération et rôles du staff, vue forum, citations et fiabilité. Détail par version dans [`app/CHANGELOG.md`](https://github.com/ForumHFR/redface2/blob/main/app/CHANGELOG.md).
-- **Canal dev 0.52.x** : Réglages → Affichage → Couleurs (huit presets d'accent, hexa, tons de fond clair et sombre, AMOLED, couleurs du système), zoom pincé interactif, largeur maximale des images et viewer plein écran (pinch/pan/double-tap).
+- **Bêta publique 0.58.0** (13 septembre 2026, Play test ouvert + F-Droid) : images plus larges dans les posts (plafond d'agrandissement par densité, [contrat v1.6]({{ site.baseurl }}/specs/images)), un seul décodage par image et géométrie stable, images reho.st et `http://` des anciens posts de retour, « Réessayer » sur chaque image indisponible, sélecteur d'images au choix (photos, Parcourir, explorateur), journal Diagnostic de l'upload. Détail par version dans [`app/CHANGELOG.md`](https://github.com/ForumHFR/redface2/blob/main/app/CHANGELOG.md).
+- **Canal dev** : aligné sur la bêta (0.58.0) au 13 septembre 2026 ; il reçoit les releases dev suivantes avant leur promotion en bêta.
 - **Livré** : les phases 0 à 3 de la [roadmap]({{ site.baseurl }}/specs/roadmap) (bootstrap ; lecture ; écriture ; messages privés et MultiMP, MPStorage en lecture et en écriture opt-in) et la refonte UI de la phase 4 (vues Drapeaux [#603](https://github.com/ForumHFR/redface2/issues/603) et Topic [#604](https://github.com/ForumHFR/redface2/issues/604), passe images [#876](https://github.com/ForumHFR/redface2/issues/876), EgoQuote et EgoPost [#874](https://github.com/ForumHFR/redface2/issues/874), surface de lecture partagée Topic → MP/DT [#1040](https://github.com/ForumHFR/redface2/issues/1040)). L'état fonction par fonction côté MP se lit dans la [matrice de parité]({{ site.baseurl }}/specs/reading-parity).
-- **Pilotage** : depuis juin 2026 le travail est suivi par milestones de vue (*Vue · Topic 2*, *Vue · Éditeur 2*, *Vue · Drapeaux 2*, *Vue · MP 1*, *Vue · Réglages 1*, *Vue · Compte HFR 1*, *Infra & dette*), les phases restant des épics thématiques. Restent ouverts en fond : l'architecture d'extensions ([#7](https://github.com/ForumHFR/redface2/issues/7)) et la sync MPStorage entre appareils ([#6](https://github.com/ForumHFR/redface2/issues/6)).
+- **Pilotage** : depuis juin 2026 le travail est suivi par milestones de vue (*Vue · Topic 2*, *Vue · Éditeur 2*, *Vue · Drapeaux 2*, *Vue · Forum 1*, *Vue · MP 1*, *Vue · Réglages 1*, *Vue · Compte HFR 1*, *Infra & dette*), les phases restant des épics thématiques. Restent ouverts en fond : l'architecture d'extensions ([#7](https://github.com/ForumHFR/redface2/issues/7)) et la sync MPStorage entre appareils ([#6](https://github.com/ForumHFR/redface2/issues/6)).
 
 Les specs restent la source de vérité du projet, mais elles doivent refléter le code réel : tout écart entre une page canonique et le repo est traité comme un bug de spec, pas comme une dette future. Voir [`/spec-reality`](https://github.com/ForumHFR/redface2/blob/main/.agents/skills/spec-reality/SKILL.md) pour la procédure d'audit cross-fichier.
 
@@ -96,6 +96,7 @@ Les contributions sont les bienvenues : ouvrez une issue, commentez les existant
 - [Protocole HFR]({{ site.baseurl }}/specs/protocol-hfr) — Contrats externes, endpoints et edge cases
 - [Roadmap]({{ site.baseurl }}/specs/roadmap) — Phases de développement
 - [Parité de lecture Topic ↔ MP]({{ site.baseurl }}/specs/reading-parity) — L'état de chaque fonction de lecture côté MP/DT
+- [Contrat de rendu des images]({{ site.baseurl }}/specs/images) — Topologie, sizing, états, décodage et smileys des images dans les posts (v1.6)
 - [Extensions communautaires]({{ site.baseurl }}/specs/extensions) — Les addons userscript qui deviennent natifs
 - [ADRs]({{ site.baseurl }}/adr) — Les décisions structurantes déjà prises
 

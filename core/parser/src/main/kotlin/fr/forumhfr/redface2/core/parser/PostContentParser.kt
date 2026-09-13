@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyKind
+import fr.forumhfr.redface2.core.model.isCcImageUrl
 import fr.forumhfr.redface2.core.parser.common.HfrSelectors
 import org.jsoup.nodes.Element
 import org.jsoup.nodes.Node
@@ -350,7 +351,7 @@ class PostContentParser {
 
     private fun isStandaloneImage(element: Element): Boolean {
         val parent = element.parent()
-        return parseSmiley(element) == null && parent != null &&
+        return parseSmiley(element) == null && !isCcImageUrl(element.attr("src")) && parent != null &&
             parent.childNodes().none { sibling -> sibling !== element && isContentSibling(sibling) }
     }
 

@@ -26,7 +26,7 @@ jobs:
       contents: read
       pull-requests: read
     outputs:
-      code: ${{ github.event_name == 'push' && 'true' || steps.filter.outputs.code }}
+      code: ${{ (github.event_name == 'push' || steps.filter.outputs.code == 'true' || steps.runtime_docs.outputs.docs == 'true') && 'true' || 'false' }}
     steps:
       - name: Detect non-documentation changes
         id: filter
@@ -34,6 +34,7 @@ jobs:
         uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
         # A version bump touches app/build.gradle.kts, so it deliberately remains a code PR.
         with:
+          predicate-quantifier: every
           filters: |
             code:
               - '**'
@@ -43,9 +44,18 @@ jobs:
               - '!**/play/whatsnew/**'
               - '!.github/ISSUE_TEMPLATE/**'
               - '!LICENSE*'
-              # Ré-inclusions (dorny: la DERNIÈRE règle qui matche gagne). Ces docs sont lues à
-              # l'exécution par `DocsConsistencyTest` (:app) : les exclure du filtre `code`
-              # désarmerait la garde de cohérence sur une PR qui ne touche qu'eux.
+
+      # Ces docs sont lues à l'exécution par `DocsConsistencyTest` (:app) : un filtre séparé
+      # en `some` les ré-inclut dans la sortie `code`, pour préserver la garde de cohérence.
+      # Le filtre précédent utilise `every` pour appliquer toutes les exclusions de documentation.
+      - name: Detect runtime documentation changes
+        id: runtime_docs
+        if: github.event_name == 'pull_request'
+        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
+        with:
+          predicate-quantifier: some
+          filters: |
+            docs:
               - 'docs/specs/**'
               - 'docs/guides/contributing.md'
               - 'AGENTS.md'

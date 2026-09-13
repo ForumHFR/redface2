@@ -9,6 +9,7 @@ import fr.forumhfr.redface2.core.network.HfrConstants
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
 import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
+import fr.forumhfr.redface2.core.network.qualifiers.ImageClient
 import fr.forumhfr.redface2.core.network.qualifiers.MutationClient
 import fr.forumhfr.redface2.core.network.qualifiers.UploadClient
 import java.time.Duration
@@ -46,6 +47,7 @@ object NetworkModule {
         cookieJar: CookieJar,
     ): OkHttpClient = baseClient.newBuilder()
         .cookieJar(cookieJar)
+        .followSslRedirects(false)
         .build()
 
     @Provides
@@ -56,6 +58,7 @@ object NetworkModule {
         cookieJar: CookieJar,
     ): OkHttpClient = baseClient.newBuilder()
         .cookieJar(cookieJar)
+        .followSslRedirects(false)
         .retryOnConnectionFailure(false)
         .build()
 
@@ -64,6 +67,23 @@ object NetworkModule {
     @AnonymousClient
     fun provideAnonymousClient(baseClient: OkHttpClient): OkHttpClient = baseClient.newBuilder()
         .cookieJar(CookieJar.NO_COOKIES)
+        .followRedirects(true)
+        .followSslRedirects(false)
+        .build()
+
+    /**
+     * Cookie-less image client shared by Coil and gallery saves. Unlike every HFR client, it may
+     * follow HTTPS-to-HTTP redirects because legacy image hosts still require that compatibility.
+     */
+    @Provides
+    @Singleton
+    @ImageClient
+    fun provideImageClient(baseClient: OkHttpClient): OkHttpClient = baseClient.newBuilder()
+        .cookieJar(CookieJar.NO_COOKIES)
+        .followRedirects(true)
+        .followSslRedirects(true)
+        .addInterceptor(RehostHttpsUpgradeInterceptor())
+        .addInterceptor(RefererInterceptor())
         .build()
 
     /**
@@ -78,6 +98,7 @@ object NetworkModule {
     @UploadClient
     fun provideUploadClient(baseClient: OkHttpClient): OkHttpClient = baseClient.newBuilder()
         .cookieJar(CookieJar.NO_COOKIES)
+        .followSslRedirects(false)
         .retryOnConnectionFailure(false)
         .writeTimeout(Duration.ofSeconds(UPLOAD_WRITE_TIMEOUT_SECONDS))
         .callTimeout(Duration.ofSeconds(UPLOAD_CALL_TIMEOUT_SECONDS))

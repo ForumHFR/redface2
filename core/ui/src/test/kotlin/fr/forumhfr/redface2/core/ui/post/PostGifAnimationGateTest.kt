@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
@@ -27,6 +29,7 @@ import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -105,6 +108,7 @@ class PostGifAnimationGateTest {
         topSpacerDp: Int = 0,
         lifecycleOwner: LifecycleOwner? = null,
     ) {
+        cache.get(gifUrl)?.let { ledger.acceptGeometry(gifUrl, 0, it, MediaAttemptKind.PROBE) }
         composeTestRule.setContent {
             val content = @androidx.compose.runtime.Composable {
                 RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
@@ -185,10 +189,13 @@ class PostGifAnimationGateTest {
         val drawable = FakeAnimatedDrawable()
         installLoader(drawable)
         val cache = measuredCache()
+        val ledger = MediaAttemptLedger().apply {
+            acceptGeometry(gifUrl, 0, checkNotNull(cache.get(gifUrl)), MediaAttemptKind.PROBE)
+        }
         val pushed = androidx.compose.runtime.mutableStateOf(false)
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
+                CompositionLocalProvider(LocalMediaAttemptLedger provides ledger) {
                     Column {
                         if (pushed.value) Spacer(Modifier.height(2000.dp))
                         PostRenderer(
@@ -234,5 +241,32 @@ class PostGifAnimationGateTest {
         owner.registry.currentState = Lifecycle.State.RESUMED
         composeTestRule.waitForIdle()
         assertTrue("the gif must start once the lifecycle reaches RESUMED", drawable.running)
+    }
+
+    @Test
+    fun `starting and stopping a measured gif never changes its layout box`() {
+        val drawable = FakeAnimatedDrawable()
+        installLoader(drawable)
+        val owner = object : LifecycleOwner {
+            val registry = LifecycleRegistry(this)
+            override val lifecycle: Lifecycle get() = registry
+        }
+        owner.registry.currentState = Lifecycle.State.CREATED
+        setGifPost(lifecycleOwner = owner)
+        composeTestRule.waitForIdle()
+        val stoppedBounds = composeTestRule.onNodeWithContentDescription("anim").getBoundsInRoot()
+
+        owner.registry.currentState = Lifecycle.State.RESUMED
+        composeTestRule.waitForIdle()
+        assertTrue(drawable.running)
+        val runningBounds = composeTestRule.onNodeWithContentDescription("anim").getBoundsInRoot()
+
+        owner.registry.currentState = Lifecycle.State.CREATED
+        composeTestRule.waitForIdle()
+        assertFalse(drawable.running)
+        val stoppedAgainBounds = composeTestRule.onNodeWithContentDescription("anim").getBoundsInRoot()
+
+        assertEquals(stoppedBounds, runningBounds)
+        assertEquals(stoppedBounds, stoppedAgainBounds)
     }
 }

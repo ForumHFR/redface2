@@ -22,7 +22,6 @@ import fr.forumhfr.redface2.core.ui.browser.LocalAlwaysAskLinkApp
 import fr.forumhfr.redface2.core.ui.theme.DisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalDisplayMetrics
 import fr.forumhfr.redface2.core.ui.theme.LocalFoldLongQuotes
-import fr.forumhfr.redface2.core.ui.theme.LocalMediaDisplayProfile
 import fr.forumhfr.redface2.core.ui.theme.LocalPostImageCorners
 import fr.forumhfr.redface2.core.ui.theme.LocalPostImageMaxWidth
 import fr.forumhfr.redface2.core.ui.theme.LocalReadingTileOutline
@@ -79,9 +78,6 @@ fun RedfaceTheme(
         // #105 — expose the « afficher l'ascenseur » preference to the reading scrollbar (read via
         // LocalShowScrollbar.current in LazyListScrollbar) so flipping the toggle hides/shows it.
         LocalShowScrollbar provides reading.showScrollbar,
-        // #973 — expose the block-GIF display profile to the post renderer (read via
-        // LocalMediaDisplayProfile.current in BlockImage) so switching S/M/L re-sizes eligible GIFs.
-        LocalMediaDisplayProfile provides reading.mediaDisplayProfile,
         // #991 — expose the maximum fImage width to all post content-image paths.
         LocalPostImageMaxWidth provides reading.postImageMaxWidth,
         // #985 — expose the selected corner shape to all post content-image paths.

@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.data.upload
 
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.ImageUpload
 import fr.forumhfr.redface2.core.domain.upload.UploadException
@@ -16,6 +17,7 @@ import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -29,6 +31,7 @@ import org.junit.Test
 class ImgurProviderTest {
 
     private lateinit var server: MockWebServer
+    private lateinit var diagnostics: DiagnosticsLog
     private lateinit var provider: ImgurProvider
 
     // The Client-ID preference, read by the provider on each call via observeImgurClientId().first().
@@ -40,11 +43,13 @@ class ImgurProviderTest {
     @Before
     fun setUp() {
         server = MockWebServer().apply { start() }
+        diagnostics = DiagnosticsLog()
         provider = ImgurProvider(
             client = OkHttpClient(),
             json = Json { ignoreUnknownKeys = true; explicitNulls = false },
             userPreferencesRepository = prefs,
             ioDispatcher = UnconfinedTestDispatcher(),
+            diagnostics = diagnostics,
             baseUrl = server.url("/").toString().trimEnd('/'),
         )
     }
@@ -59,6 +64,7 @@ class ImgurProviderTest {
         server.enqueue(
             MockResponse()
                 .setResponseCode(200)
+                .setHeader("Content-Type", "application/json")
                 .setBody(
                     """{"data":{"link":"https://i.imgur.com/abc.png","deletehash":"DELHASH"},
                        "success":true,"status":200}""",
@@ -72,6 +78,23 @@ class ImgurProviderTest {
         assertEquals("DELHASH", result.deleteHandle)
         assertEquals(null, result.thumbnailUrl)
         assertEquals(null, result.expiresAt)
+        val entries = diagnostics.entries.value.filter { it.tag == "Imgur" }
+        assertEquals(2, entries.size)
+        assertEquals(DiagnosticsLog.Level.INFO, entries[0].level)
+        assertEquals(DiagnosticsLog.Level.INFO, entries[1].level)
+        assertTrue(entries[0].message.contains("filename_ext=png filename_length=9"))
+        assertTrue(entries[0].message.contains("content_type=image/png bytes=4"))
+        assertFalse(entries[0].message.contains("photo.png"))
+        assertTrue(
+            entries[1].message.matches(
+                Regex("response code=200 content_type=application/json duration_ms=\\d+ result=ok"),
+            ),
+        )
+        val journal = entries.joinToString { it.message }
+        assertFalse(journal.contains("DELHASH"))
+        assertFalse(journal.contains("deletehash"))
+        assertFalse(journal.contains("link"))
+        assertFalse(journal.contains("https://"))
     }
 
     @Test
@@ -102,6 +125,29 @@ class ImgurProviderTest {
         assertTrue(error is UploadException.Server)
         assertEquals(500, (error as UploadException.Server).code)
         assertEquals(UploadProviderId.IMGUR, error.providerId)
+    }
+
+    @Test
+    fun `upload records only the first 300 body characters on an HTTP failure`() = runTest {
+        val raw = """{"data":{"link":"https://i.imgur.com/543526.png",""" +
+            """"deletehash":"DELETE543526","error":"name /storage/emulated/0/DCIM/private.jpg"},""" +
+            """"padding":"${"I".repeat(310)}TAIL"}"""
+        server.enqueue(MockResponse().setResponseCode(429).setBody(raw))
+
+        val error = runCatching { provider.upload(sampleImage()) }.exceptionOrNull()
+
+        assertTrue(error is UploadException.Server)
+        val responseEntry = diagnostics.entries.value.single {
+            it.tag == "Imgur" && it.level == DiagnosticsLog.Level.WARN
+        }
+        assertTrue(responseEntry.message.contains("code=429"))
+        assertTrue(responseEntry.message.contains("body={\"data\":{<redacted>,<redacted>,<redacted>}"))
+        assertFalse(responseEntry.message.contains("543526"))
+        assertFalse(responseEntry.message.contains("deletehash"))
+        assertFalse(responseEntry.message.contains("link"))
+        assertFalse(responseEntry.message.contains("https://"))
+        assertFalse(responseEntry.message.contains("private.jpg"))
+        assertFalse(responseEntry.message.contains("TAIL"))
     }
 
     @Test
