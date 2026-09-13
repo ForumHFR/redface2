@@ -1,2 +1,2 @@
-Redface 2 v0.57.5 — dev.
-- Images: cleartext stays confined to image loading (dedicated client; forum reads refuse any redirect to http); "Save image" on reho.st hits the cache and goes over https; no more phantom "Loading" announcement for screen readers.
+Redface 2 v0.57.6 — dev.
+- Image upload: detailed diagnostics trail (Settings → Maintenance → Diagnostics) to understand photos that refuse to upload (#988); reproduce, then "Copy" before leaving the app.
