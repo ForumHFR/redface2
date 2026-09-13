@@ -9,6 +9,7 @@ import fr.forumhfr.redface2.core.network.HfrConstants
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
 import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
+import fr.forumhfr.redface2.core.network.qualifiers.ImageClient
 import fr.forumhfr.redface2.core.network.qualifiers.MutationClient
 import fr.forumhfr.redface2.core.network.qualifiers.UploadClient
 import java.time.Duration
@@ -67,7 +68,21 @@ object NetworkModule {
     fun provideAnonymousClient(baseClient: OkHttpClient): OkHttpClient = baseClient.newBuilder()
         .cookieJar(CookieJar.NO_COOKIES)
         .followRedirects(true)
+        .followSslRedirects(false)
+        .build()
+
+    /**
+     * Cookie-less image client shared by Coil and gallery saves. Unlike every HFR client, it may
+     * follow HTTPS-to-HTTP redirects because legacy image hosts still require that compatibility.
+     */
+    @Provides
+    @Singleton
+    @ImageClient
+    fun provideImageClient(baseClient: OkHttpClient): OkHttpClient = baseClient.newBuilder()
+        .cookieJar(CookieJar.NO_COOKIES)
+        .followRedirects(true)
         .followSslRedirects(true)
+        .addInterceptor(RehostHttpsUpgradeInterceptor())
         .addInterceptor(RefererInterceptor())
         .build()
 

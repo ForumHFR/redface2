@@ -43,6 +43,14 @@ class InlineImageDisplayBoxTest {
     }
 
     @Test
+    fun `cold slot keeps a one sp floor when the available bitmap width collapses`() {
+        val b = box(null, maxImageWidthPx = 0, horizontalPadding = 8.dp)
+
+        assertEquals(9.sp, b.placeholderWidth)
+        assertEquals(1.sp, b.placeholderHeight)
+    }
+
+    @Test
     fun `E9 cold slot width cap uses the inverse font conversion`() {
         val density = Density(3f, 2f)
         val maxWidthPx = inlineImageMaxWidthPx(60f, PostImageMaxWidth.P100, horizontalPaddingPx = 24)

@@ -1235,7 +1235,7 @@ private fun BlockImage(url: String, description: String?, linkUrl: String? = nul
         // The plan fixes the target once. A G2 geometry deposit changes the box only, never
         // the request; recompositions and MIME enrichment cannot trigger another decode.
         val decodeSize = plan.decodeSize
-        val request = remember(plan, platformContext, decodeSize, animationsEnabled) {
+        val request = remember(plan, platformContext, decodeSize, animationsEnabled, mediaDiskCachePolicy) {
             decodeSize?.let {
                 ImageRequest.Builder(platformContext)
                     .data(url)
@@ -2042,7 +2042,7 @@ internal fun imageDisplayBox(
         // E9 (§14.3) — the cold slot also fits Wdispo minus the 4 dp padding on each side.
         // Reuse the physical width cap and Density's inverse conversion (including fontScale).
         val paddedCapSp = with(density) { maxImageWidthPx.toDp().toSp().value }
-        val sideSp = minOf(cold.width.toFloat(), paddedCapSp).coerceAtLeast(0f).sp
+        val sideSp = minOf(cold.width.toFloat(), paddedCapSp).coerceAtLeast(1f).sp
         return with(density) {
             InlineMediaBox(
                 (sideSp.toDp() + horizontalPadding).toSp(), sideSp, contentConstraints = contentConstraints,

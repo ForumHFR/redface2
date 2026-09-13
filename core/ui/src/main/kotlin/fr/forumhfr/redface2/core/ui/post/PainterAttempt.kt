@@ -76,7 +76,10 @@ internal class PainterAttempt(
      * No callback may use a stale result to fix or enrich the current generation.
      */
     fun onState(state: AsyncImagePainter.State) {
-        if (!active || ledger.generationOf(url) != generation) return
+        if (!active || ledger.generationOf(url) != generation) {
+            loading = false
+            return
+        }
         loading = state !is AsyncImagePainter.State.Success && state !is AsyncImagePainter.State.Error
         when (state) {
             is AsyncImagePainter.State.Success -> {

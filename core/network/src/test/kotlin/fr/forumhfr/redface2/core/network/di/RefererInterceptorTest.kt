@@ -30,10 +30,10 @@ class RefererInterceptorTest {
     }
 
     @Test
-    fun `http reho request carries the HFR referer`() {
+    fun `reho request presented directly to the interceptor carries the HFR referer`() {
         val request = executeRequest("reho.st")
 
-        assertEquals("http", request.requestUrl?.scheme)
+        // Unit seam only: the production image-client chain upgrades HTTP before this interceptor.
         assertEquals(HFR_REFERER, request.getHeader("Referer"))
     }
 

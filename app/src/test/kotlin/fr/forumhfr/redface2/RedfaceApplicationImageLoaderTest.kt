@@ -1,7 +1,12 @@
 package fr.forumhfr.redface2
 
 import coil3.gif.AnimatedImageDecoder
+import coil3.request.ErrorResult
+import coil3.request.ImageRequest
 import coil3.svg.SvgDecoder
+import java.io.IOException
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -24,13 +29,36 @@ import org.robolectric.RuntimeEnvironment
 class RedfaceApplicationImageLoaderTest {
 
     @Test
+    fun `the singleton loader routes network fetches through the injected image client`() = runTest {
+        val imageClientCalled = AtomicBoolean(false)
+        val imageClient = OkHttpClient.Builder()
+            .addInterceptor {
+                imageClientCalled.set(true)
+                throw IOException("test stops after reaching the dedicated image client")
+            }
+            .build()
+        val application = RedfaceApplication().apply { this.imageClient = imageClient }
+        val loader = application.newImageLoader(RuntimeEnvironment.getApplication())
+        val request = ImageRequest.Builder(RuntimeEnvironment.getApplication())
+            .data("https://images.invalid/image.png")
+            .build()
+
+        val result = loader.execute(request)
+
+        assertTrue(imageClientCalled.get())
+        assertTrue(result is ErrorResult)
+        // Coil registers its own engine interceptor; the app must add none of its own (#1368).
+        assertTrue(
+            "URL rewriting belongs to the image OkHttp client, not Coil (#1368)",
+            loader.components.interceptors.all { it::class.qualifiedName.orEmpty().startsWith("coil3.") },
+        )
+        loader.shutdown()
+    }
+
+    @Test
     fun `the singleton loader registers the gif and svg decoders`() {
         val application = RedfaceApplication().apply { imageClient = OkHttpClient() }
         val loader = application.newImageLoader(RuntimeEnvironment.getApplication())
-        assertTrue(
-            "the HTTPS image URL interceptor must stay registered (#972)",
-            loader.components.interceptors.any { it is HttpsImageUrlInterceptor },
-        )
         val factories = loader.components.decoderFactories
         assertTrue(
             "the animated GIF decoder must stay registered (#109)",

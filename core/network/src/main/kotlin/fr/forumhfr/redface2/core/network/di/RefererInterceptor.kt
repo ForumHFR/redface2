@@ -7,7 +7,7 @@ import okhttp3.Response
 internal class RefererInterceptor : Interceptor {
     override fun intercept(chain: Interceptor.Chain): Response {
         val request = chain.request()
-        if (REFERER_HOST_ALLOWLIST.none { request.url.host == it || request.url.host.endsWith(".$it") }) {
+        if (!isRehostHost(request.url.host)) {
             return chain.proceed(request)
         }
 
@@ -20,6 +20,10 @@ internal class RefererInterceptor : Interceptor {
 
     private companion object {
         const val HFR_REFERER = "https://forum.hardware.fr/"
-        val REFERER_HOST_ALLOWLIST = setOf("reho.st")
     }
 }
+
+/** Exact reho.st host or one of its strict subdomains; shared by upgrade and Referer policies. */
+internal fun isRehostHost(host: String): Boolean = host == REHOST_HOST || host.endsWith(".$REHOST_HOST")
+
+private const val REHOST_HOST = "reho.st"

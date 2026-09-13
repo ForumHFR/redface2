@@ -98,6 +98,19 @@ class PainterAttemptTest {
     }
 
     @Test
+    fun `a stale generation callback clears the loading announcement`() {
+        val ledger = MediaAttemptLedger()
+        val generation = ledger.generationOf(url)
+        val stale = PainterAttempt(ledger, DefaultIntrinsicMediaSizeCache(), url, generation)
+        assertTrue(stale.loading)
+        ledger.retryUrl(url)
+
+        stale.onState(AsyncImagePainter.State.Loading(ColorPainter(Color.Red)))
+
+        assertFalse(stale.loading)
+    }
+
+    @Test
     fun `E1 an ungranted cache success without geometry leaves the ledger unchanged`() {
         val ledger = MediaAttemptLedger()
         val generation = ledger.generationOf(url)
