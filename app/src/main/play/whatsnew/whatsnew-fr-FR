@@ -1,2 +1,2 @@
-Redface 2 v0.57.5 — dev.
-- Images : le trafic en clair reste réservé au chargement des images (client dédié ; les lectures du forum refusent toute redirection vers http) ; « Enregistrer l'image » sur reho.st retrouve le cache et passe en https ; plus d'annonce « Chargement » fantôme pour le lecteur d'écran.
+Redface 2 v0.57.6 — dev.
+- Upload d'images : journal de diagnostic détaillé (Réglages → Maintenance → Diagnostic) pour comprendre les photos qui refusent de s'envoyer (#988) ; reproduire, puis « Copier » avant de quitter l'app.

@@ -16,6 +16,20 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.57.6` — `internal` (dev) — 2026-09-13
+
+Instrumentation diagnostique de l'upload d'images (#988, PR #1377) et correctif d'un test instable (PR #1375).
+
+### Ajouté
+
+- **Journal Diagnostic de l'upload d'images (#988)** — chaque envoi vers l'hébergeur écrit ses faits dans Réglages → Maintenance → Diagnostic : origine du fichier (schéma et autorité du `content://`, jamais l'identifiant), type MIME renvoyé par le système ou repli `image/*`, extension, taille annoncée et taille lue, puis nom et type envoyés, code et type de la réponse, durée, début du corps en cas d'échec ; en cas d'exception, sa classe, son message et sa cause. Aucun changement des messages affichés ni du comportement d'envoi : on mesure avant de corriger. Pour aider : reproduire l'échec, puis ouvrir Diagnostic et « Copier » avant de quitter l'app (journal en mémoire seule).
+
+### Corrigé
+
+- **Test instable `RedfaceApplicationImageLoaderTest` (#1367, #1376)** — le disk cache par défaut de Coil est partagé entre les JVM de test ; la requête du test ignore désormais les caches.
+
+---
+
 ## `0.57.5` — `internal` (dev) — 2026-09-13
 
 Lot F de l'audit du contrat de rendu des images (chapeau #1334, PR #1372) — correctifs issus de la review de la PR de promotion #1366, amendement v1.6-13 (PR #1371).
