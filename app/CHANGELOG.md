@@ -16,6 +16,18 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.57.5` — `internal` (dev) — 2026-09-13
+
+Lot F de l'audit du contrat de rendu des images (chapeau #1334, PR #1372) — correctifs issus de la review de la PR de promotion #1366, amendement v1.6-13 (PR #1371).
+
+### Corrigé
+
+- **Le clair n'est plus accessible aux lectures HFR anonymes (#1367)** — le chargement des images passe par un client HTTP dédié, sans cookies, seul à suivre les redirections `https → http` ; le client HFR anonyme (pages lues sans session, API REST) refuse désormais ces redirections comme les clients authentifié, mutation et upload. Garde prouvée par un test de comportement (serveur TLS répondant `302` vers `http://`, aucun client HFR ne suit) et non plus par la seule lecture du drapeau ; vérification live : aucun endpoint HFR ne redirige vers http. Précision sur la note de la 0.57.4 : la permission cleartext est déclarée pour l'application entière (Android ne permet pas de la restreindre à un client) ; côté code, seul le chemin image l'emprunte.
+- **« Enregistrer l'image » sur reho.st retrouve le cache et passe en https (#1368)** — la bascule `http://reho.st → https` quitte la chaîne Coil pour le client image lui-même : affichage et enregistrement partagent la même requête, la même clé de cache disque et le même transfert chiffré ; la règle d'hôte (reho.st et sous-domaines stricts) est la même que celle du Referer.
+- **Trois retouches du rendu (#1369)** — politique de cache disque de retour dans les clés de mémoïsation de la requête du bloc image ; plancher 1 sp du slot froid inline (plus de placeholder de largeur nulle) ; une occurrence détachée ou périmée cesse d'annoncer « Chargement » au lecteur d'écran.
+
+---
+
 ## `0.57.4` — `internal` (dev) — 2026-09-13
 
 Lot E de l'audit du contrat de rendu des images (chapeau #1334, PR #1363) — amendement v1.6-12 (PR #1361), demande de XaTriX : « lire les images http ».
