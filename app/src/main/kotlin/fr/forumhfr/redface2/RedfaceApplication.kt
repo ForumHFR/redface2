@@ -45,6 +45,9 @@ class RedfaceApplication : Application(), SingletonImageLoader.Factory {
     override fun newImageLoader(context: PlatformContext): ImageLoader =
         ImageLoader.Builder(context)
             .components {
+                // Keep source URLs untouched in the parser/domain model, but avoid Android's
+                // cleartext block for hosts whose HTTPS endpoint is proven byte-equivalent.
+                add(HttpsImageUrlInterceptor())
                 // Share the anonymous client with the rest of HFR traffic: same timeouts / UA, no
                 // auth cookies leaked to external [img] hosts. The ProxySelector inside the client
                 // routes only HFR through the user proxy ; external hosts stay direct.
