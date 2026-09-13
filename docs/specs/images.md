@@ -730,6 +730,24 @@ sa source BBCode (`sujet-banc-posts-final.md`) et la recapture web
 Matrice invariant → cas → test automatique : `redface2-work/specs/matrice-invariants-876.md`
 (E9, complète §2-§7 + directives intouchables + dimension plateforme/API + trous connus).
 
+**Correspondance des classes de tests promises (E10, audit v1.5 → lot C, 13/09/2026)** : les dix
+noms de classes cités par la matrice (`PostRendererLinkedImageHitboxTest`, `PostMediaSpacingScreenshotTest`,
+`MediaDisplayBoxCalculatorTest`, `IntrinsicMediaSizeMeasurerTest`, `GifLayoutFreezeTest`,
+`PostImageTapActionTest`, `PostRendererImageSemanticsTest`, `MediaSlotStateTest`, `MediaDecodeRequestTest`,
+`MediaDecodeSizeCalculatorTest`) sont des noms PROMIS, pas des classes du dépôt. La table de
+correspondance nom promis → classes réelles (aucune classe vide créée ; deux trous fermés au lot C :
+boîte GIF invariante I3.8, activation I5.11 d'une image liée) est consignée dans #1342 (commentaire de
+clôture du 13/09/2026) et dans `redface2-work/specs/matrice-invariants-876.md`. Une future
+consolidation du banc renommera les colonnes « test » de la matrice sur les classes réelles.
+
+**État d'implémentation des amendements v1.6 (13/09/2026, clôture du mandat #1334)** : v1.6-1 (option A)
+livré dev 0.57.0 ; v1.6-2 à v1.6-9 (D1-D8) normatifs, sans code ; lot A (E1 E2 E3 E8 E9) dev 0.57.1 ;
+lot C (E6 E7 E10) et lot D (v1.6-11, Referer reho.st + réécriture https reho.st) dev 0.57.2 ;
+v1.6-10 (lot B : autorité géométrique du ledger, séquençage probe/painter 30 s, fusion des
+métadonnées, G2 rectangulaire figé) dev 0.57.3 ; v1.6-12 (lot E : images `http://` lues telles quelles,
+clair pour le client image) dev 0.57.4. Restent ouverts hors mandat : #1343 (recette QHD+),
+#1348 (Android 10), budget mémoire §7 (protocole E5) et banc B §14.
+
 ## 12. Plan d'opérations (lots — découpage Sol r1)
 
 | Lot | Contenu | Sortie |
