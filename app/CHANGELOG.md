@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.57.4` — `internal` (dev) — 2026-09-13
+
+Lot E de l'audit du contrat de rendu des images (chapeau #1334, PR #1363) — amendement v1.6-12 (PR #1361), demande de XaTriX : « lire les images http ».
+
+### Corrigé
+
+- **Les images `http://` des anciens posts s'affichent (#1359, #972)** — l'application autorise le trafic en clair pour le chargement des images (configuration de sécurité réseau) : les hébergeurs encore vivants en http seulement (pages perso free.fr, chez-alice…) sont enfin rendus au lieu du slot « Image indisponible ». Mesure avant code : 10 % des images http des vieux posts étaient vivantes en http seulement, 85 % mortes. Garde-fous : les échanges avec HFR (session, écriture, envoi de fichiers) restent en https par construction et ne suivent aucune redirection vers http ; seul le client image anonyme, sans cookies, utilise le clair. La bascule `http://reho.st` → https du lot D est conservée.
+
+---
+
 ## `0.57.3` — `internal` (dev) — 2026-09-13
 
 Lot B de l'audit du contrat de rendu des images (chapeau #1334, PR #1360) — implémentation de l'amendement v1.6-10 (PR #1353) ; contrat v1.6-12 (images http, PR #1361) publié, code au lot E.
