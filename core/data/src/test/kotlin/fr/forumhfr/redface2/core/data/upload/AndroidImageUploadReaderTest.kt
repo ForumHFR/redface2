@@ -11,6 +11,7 @@ import android.provider.OpenableColumns
 import androidx.test.core.app.ApplicationProvider
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.upload.UploadException
+import java.io.FileNotFoundException
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -109,6 +110,23 @@ class AndroidImageUploadReaderTest {
     }
 
     @Test
+    fun `read redacts a content URI from an opening failure warning`() = runTest {
+        val uri = Uri.parse("content://$AUTHORITY/12345")
+        provider.mimeType = "image/jpeg"
+        provider.openFailure = FileNotFoundException("open failed: $uri: ENOENT")
+
+        val error = runCatching { reader.read(uri.toString()) }.exceptionOrNull()
+
+        assertTrue(error is UploadException.Network)
+        val warning = diagnostics.entries.value.single {
+            it.tag == "UploadReader" && it.level == DiagnosticsLog.Level.WARN
+        }
+        assertTrue(warning.message.contains("open failed: <url>"))
+        assertFalse(warning.message.contains("://"))
+        assertFalse(warning.message.contains("12345"))
+    }
+
+    @Test
     fun `read records unavailable display name when the provider omits the column`() = runTest {
         val uri = Uri.parse("content://$AUTHORITY/no-display-name")
         provider.mimeType = "image/png"
@@ -133,7 +151,7 @@ class AndroidImageUploadReaderTest {
         var displayName: String? = null
         var declaredSize: Long? = null
         var exposeDisplayNameColumn: Boolean = true
-        var openFailure: RuntimeException? = null
+        var openFailure: Exception? = null
         var bytes: ByteArray = byteArrayOf()
         var openFileCallCount: Int = 0
 

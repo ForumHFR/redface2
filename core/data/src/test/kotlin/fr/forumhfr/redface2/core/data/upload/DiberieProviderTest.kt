@@ -81,10 +81,14 @@ class DiberieProviderTest {
             entries[1].message.matches(
                 Regex(
                     "response code=200 content_type=application/json duration_ms=\\d+ " +
-                        "result=ok picID=521196",
+                        "result=ok has_pic_id=true",
                 ),
             ),
         )
+        assertFalse(entries.joinToString { it.message }.contains("521196"))
+        assertFalse(entries.joinToString { it.message }.contains("picID"))
+        assertFalse(entries.joinToString { it.message }.contains("picURL"))
+        assertFalse(entries.joinToString { it.message }.contains("https://"))
     }
 
     @Test
@@ -93,18 +97,22 @@ class DiberieProviderTest {
             MockResponse()
                 .setResponseCode(200)
                 .setBody(
-                    """{"picID":521196,"picURL":"https://host/Picture/Get/f/521196",
-                       "thumbURL":"https://host/Picture/Get/t/521196"}""",
+                    """{"picID":543526,"picURL":"https://host/Picture/Get/f/543526",
+                       "thumbURL":"https://host/Picture/Get/t/543526"}""",
                 ),
         )
 
         val result = provider.upload(sampleImage())
 
         assertEquals(UploadProviderId.DIBERIE, result.provider)
-        assertEquals("https://host/Picture/Get/f/521196", result.imageUrl)
-        assertEquals("https://host/Picture/Get/t/521196", result.thumbnailUrl)
-        assertEquals("521196", result.deleteHandle)
+        assertEquals("https://host/Picture/Get/f/543526", result.imageUrl)
+        assertEquals("https://host/Picture/Get/t/543526", result.thumbnailUrl)
+        assertEquals("543526", result.deleteHandle)
         assertEquals(null, result.expiresAt)
+        val journal = diagnostics.entries.value.joinToString { it.message }
+        assertFalse(journal.contains("543526"))
+        assertFalse(journal.contains("picURL"))
+        assertFalse(journal.contains("https://"))
     }
 
     @Test
@@ -154,7 +162,8 @@ class DiberieProviderTest {
 
     @Test
     fun `upload records only the first 300 body characters on a 4xx response`() = runTest {
-        val raw = "R".repeat(310) + "TAIL"
+        val raw = """{"picID":543526,"picURL":"https://host/private/543526",""" +
+            """"padding":"${"R".repeat(310)}TAIL"}"""
         server.enqueue(MockResponse().setResponseCode(422).setBody(raw))
 
         val error = runCatching { provider.upload(sampleImage()) }.exceptionOrNull()
@@ -164,7 +173,10 @@ class DiberieProviderTest {
             it.tag == "Diberie" && it.level == DiagnosticsLog.Level.WARN
         }
         assertTrue(responseEntry.message.contains("code=422"))
-        assertTrue(responseEntry.message.contains("body=${raw.take(300)}"))
+        assertTrue(responseEntry.message.contains("body={<redacted>,<redacted>"))
+        assertFalse(responseEntry.message.contains("543526"))
+        assertFalse(responseEntry.message.contains("picURL"))
+        assertFalse(responseEntry.message.contains("https://"))
         assertFalse(responseEntry.message.contains("TAIL"))
     }
 
@@ -185,7 +197,8 @@ class DiberieProviderTest {
 
     @Test
     fun `upload maps a 200 without picID to UploadException Malformed`() = runTest {
-        val raw = """{"picURL":"https://host/x","padding":"${"P".repeat(350)}TAIL"}"""
+        val raw = """{"picID":null,"picURL":"https://host/x/543526",""" +
+            """"padding":"${"P".repeat(350)}TAIL"}"""
         server.enqueue(MockResponse().setResponseCode(200).setBody(raw))
 
         val error = runCatching { provider.upload(sampleImage()) }.exceptionOrNull()
@@ -194,8 +207,12 @@ class DiberieProviderTest {
         val responseEntry = diagnostics.entries.value.single {
             it.tag == "Diberie" && it.level == DiagnosticsLog.Level.WARN
         }
-        assertTrue(responseEntry.message.contains("result=missing_picID"))
-        assertTrue(responseEntry.message.contains("body=${raw.take(300)}"))
+        assertTrue(responseEntry.message.contains("result=missing_id"))
+        assertTrue(responseEntry.message.contains("body={<redacted>,<redacted>"))
+        assertFalse(responseEntry.message.contains("543526"))
+        assertFalse(responseEntry.message.contains("picID"))
+        assertFalse(responseEntry.message.contains("picURL"))
+        assertFalse(responseEntry.message.contains("https://"))
         assertFalse(responseEntry.message.contains("TAIL"))
     }
 

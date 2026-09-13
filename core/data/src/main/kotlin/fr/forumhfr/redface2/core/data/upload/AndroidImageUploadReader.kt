@@ -6,6 +6,7 @@ import android.net.Uri
 import android.provider.OpenableColumns
 import dagger.hilt.android.qualifiers.ApplicationContext
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticRedactor
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.upload.ImageUpload
 import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
@@ -57,10 +58,10 @@ internal class AndroidImageUploadReader @Inject constructor(
         } catch (e: CancellationException) {
             throw e
         } catch (e: UploadException) {
-            recordReadFailure(parsed, e)
+            recordReadFailure(e)
             throw e
         } catch (@Suppress("TooGenericExceptionCaught") e: Exception) {
-            recordReadFailure(parsed, e)
+            recordReadFailure(e)
             throw UploadException.Network(e)
         } finally {
             diagnostics.record(
@@ -162,13 +163,10 @@ internal class AndroidImageUploadReader @Inject constructor(
         }
     }
 
-    private fun recordReadFailure(uri: Uri, error: Exception) {
+    private fun recordReadFailure(error: Exception) {
         val prefix = if (error is SecurityException || error.cause is SecurityException) "permission " else ""
         val exceptionClass = error::class.qualifiedName ?: error.javaClass.name
-        val message = error.message
-            ?.replace(uri.toString(), safeSource(uri))
-            ?.take(MAX_LOGGED_ERROR_MESSAGE)
-            ?: "none"
+        val message = DiagnosticRedactor.redact(error.message ?: "none", MAX_LOGGED_ERROR_MESSAGE)
         val causeClass = error.cause?.let { cause ->
             cause::class.qualifiedName ?: cause.javaClass.name
         } ?: "none"
