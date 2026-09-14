@@ -103,17 +103,15 @@ class SystemBarsPolicyTest {
         chromeVisible = chromeVisible,
     )
 
+    // Two passes over the pairs rather than four nested loops: same 16 rows, half the nesting.
     private fun forEachCombination(block: (Boolean, Boolean, Boolean, Boolean) -> Unit) {
-        for (immersive in BOOLEANS) {
-            for (revealed in BOOLEANS) {
-                for (active in BOOLEANS) {
-                    for (chrome in BOOLEANS) {
-                        block(immersive, revealed, active, chrome)
-                    }
-                }
+        for ((immersive, revealed) in BOOLEAN_PAIRS) {
+            for ((active, chrome) in BOOLEAN_PAIRS) {
+                block(immersive, revealed, active, chrome)
             }
         }
     }
 }
 
 private val BOOLEANS = listOf(true, false)
+private val BOOLEAN_PAIRS = BOOLEANS.flatMap { first -> BOOLEANS.map { first to it } }
