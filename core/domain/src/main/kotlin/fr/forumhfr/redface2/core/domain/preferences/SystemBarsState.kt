@@ -29,8 +29,11 @@ data class SystemBarsState(
  * - the **navigation bar** follows the viewer chrome the same way, and is additionally hidden for
  *   the whole session when [immersive] is on — app-wide consistency wins over chrome symmetry
  *   (arbitrated by XaTriX on #1388: immersive ON + chrome visible ⇒ navigation bar hidden).
- *   [navBarRevealed] is the #518 follow-up scroll-driven reveal; it can only bring an immersive bar
- *   BACK, never hide one, and it never overrides the viewer's explicit fullscreen.
+ *   [navBarRevealed] is the #518 follow-up scroll-driven reveal. It belongs to the READING screens:
+ *   it can only bring an immersive bar back there, and it is IGNORED for as long as [viewerActive]
+ *   is true — « immersive ⇒ navigation bar hidden » holds in the viewer without exception, so a
+ *   topic left with a revealed bar cannot leak a visible bar into the viewer's first frame. The
+ *   reading facts come back on their own once the viewer is gone (the topic screen re-reports them).
  *
  * With [viewerActive] `false` the result is exactly the historical #518 behaviour:
  * `hideNavigationBar == immersive && !navBarRevealed`, status bar untouched.
@@ -38,6 +41,7 @@ data class SystemBarsState(
  * @param immersive the persisted #518 « hide the system navigation bar » setting
  *   ([UserPreferencesRepository.observeHideSystemNavBar]), off by default.
  * @param navBarRevealed the scroll-driven reveal decision ([shouldRevealNavBar]) of the active topic.
+ *   Ignored while [viewerActive] is true.
  * @param viewerActive whether the fullscreen image viewer is composed (an overlay or a modal route
  *   ABOVE it does not end that: the viewer is still on screen and keeps its window state).
  * @param chromeVisible the viewer's own bottom action bar; meaningless while [viewerActive] is false.
@@ -51,6 +55,6 @@ fun appSystemBars(
     val viewerFullscreen = viewerActive && !chromeVisible
     return SystemBarsState(
         hideStatusBar = viewerFullscreen,
-        hideNavigationBar = viewerFullscreen || (immersive && !navBarRevealed),
+        hideNavigationBar = viewerFullscreen || (immersive && (viewerActive || !navBarRevealed)),
     )
 }

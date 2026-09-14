@@ -48,8 +48,20 @@ class SystemBarsPolicyTest {
     }
 
     @Test
-    fun `a scroll reveal brings an immersive navigation bar back but never overrides fullscreen`() {
+    fun `a scroll reveal brings an immersive navigation bar back on the reading screens`() {
         assertFalse(
+            bars(immersive = true, navBarRevealed = true, viewerActive = false).hideNavigationBar,
+        )
+        assertTrue(
+            bars(immersive = true, navBarRevealed = false, viewerActive = false).hideNavigationBar,
+        )
+    }
+
+    @Test
+    fun `a scroll reveal is ignored for as long as the viewer is up`() {
+        // Decision C: « immersive ⇒ navigation bar hidden » holds in the viewer WITHOUT exception,
+        // so a topic left with a revealed bar cannot leak a visible bar into the viewer.
+        assertTrue(
             bars(immersive = true, navBarRevealed = true, viewerActive = true, chromeVisible = true)
                 .hideNavigationBar,
         )
@@ -61,6 +73,21 @@ class SystemBarsPolicyTest {
             bars(immersive = false, navBarRevealed = true, viewerActive = true, chromeVisible = false)
                 .hideNavigationBar,
         )
+        // Without the setting, a reveal changes nothing while the chrome is up either.
+        assertFalse(
+            bars(immersive = false, navBarRevealed = true, viewerActive = true, chromeVisible = true)
+                .hideNavigationBar,
+        )
+    }
+
+    @Test
+    fun `the reveal flag is inert over the whole viewer-active half of the table`() {
+        for ((immersive, chrome) in BOOLEAN_PAIRS) {
+            assertEquals(
+                bars(immersive, navBarRevealed = true, viewerActive = true, chromeVisible = chrome),
+                bars(immersive, navBarRevealed = false, viewerActive = true, chromeVisible = chrome),
+            )
+        }
     }
 
     @Test
