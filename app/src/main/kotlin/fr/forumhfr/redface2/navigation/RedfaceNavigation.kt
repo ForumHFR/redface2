@@ -983,9 +983,11 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
     // null only on the @Preview path (no host Activity), where the FAB also never renders.
     val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
     // #518 follow-up — scroll-driven reveal of the hidden system nav bar. The MODE is the user preference;
-    // the raw scroll FACTS are reported up by the active topic screen. RedfaceApp stays the single owner
-    // of the window bar (no dual ownership): it combines mode + facts via the pure shouldRevealNavBar and
-    // drives the window below. topicNavBarScroll resets when the active route is no longer a topic.
+    // the raw scroll FACTS are reported up by the active topic screen. RedfaceApp owns the window bars
+    // everywhere EXCEPT inside the fullscreen image viewer (#1388), which drives both bars from its own
+    // chrome state; ownership is handed over and back explicitly (see [ImmersiveNavBarWindowEffect]), so
+    // there is still never a moment where two owners fight. It combines mode + facts via the pure
+    // shouldRevealNavBar and drives the window below. topicNavBarScroll resets off-topic.
     val immersiveNavBarReveal by themeViewModel.immersiveNavBarReveal.collectAsStateWithLifecycle()
     var topicNavBarScroll by remember { mutableStateOf(NavBarScrollFacts()) }
     // Effective hide + scroll-report gate are pure helpers so RedfaceApp stays under detekt's complexity.
@@ -1011,23 +1013,15 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
             controller.isAppearanceLightStatusBars = !darkTheme
             controller.isAppearanceLightNavigationBars = !darkTheme
         }
-        // #518 — apply immersive mode whenever the EFFECTIVE hide state changes (the master toggle, or a
-        // scroll-driven reveal request flipping, #518 follow-up), and re-assert it on ON_RESUME (returning
-        // from another app / the recents screen restores the bar without a recomposition). The
-        // transient-bars-by-swipe behaviour handles user swipes; hiding sets the bottom inset to 0 so
-        // navigationBarsPadding() collapses cleanly, while a transient swipe-reveal does NOT change insets
-        // (no layout jump). Status bar and the in-app tab bar are untouched.
-        LaunchedEffect(hideNavBarNow) {
-            applyImmersiveNavBar(window, view, hideNavBarNow)
-        }
-        LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-            applyImmersiveNavBar(window, view, hideNavBarNow)
-        }
     }
     RedfaceTheme(
         darkTheme = darkTheme,
         themeColorPreferences = themeColorPreferences,
         alwaysAskLinkApp = alwaysAskLinkApp,
+        // #518/#1388 — the raw SETTING (not the effective hideNavBarNow): the viewer bounds its own
+        // bar policy with it, and the scroll-driven reveal is a topic-reading concern that is already
+        // reset off-topic by ResetNavBarScrollOffTopic.
+        hideSystemNavBar = hideSystemNavBar,
         reading = ReadingDisplaySettings(
             density = displayDensity,
             fontScale = fontScale,
@@ -1306,6 +1300,15 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
         // nav bar revealed off-topic. Returning to a topic re-emits its current facts on first frame. The
         // branch lives in the helper composable to keep RedfaceApp under detekt's complexity threshold.
         ResetNavBarScrollOffTopic(topRoute) { topicNavBarScroll = NavBarScrollFacts() }
+        // #518 / #1388 — apply immersive mode on the host window, unless the image viewer is the active
+        // destination and owns both bars itself. Placed here (rather than next to the theme resolution
+        // above) because the decision needs the active top route.
+        ImmersiveNavBarWindowEffect(
+            window = window,
+            view = view,
+            hide = hideNavBarNow,
+            suspended = topRoute.ownsWindowBars(),
+        )
         val adaptiveType = NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfo())
         val navLayoutType = resolveNavLayoutType(topRoute.hidesNavigationSuite(), adaptiveType)
         // #529 — consume the bottom nav-bar inset for the content only under a bottom-bar layout
@@ -3399,10 +3402,40 @@ internal tailrec fun Context.findActivity(): Activity? = when (this) {
 }
 
 /**
+ * #518 / #1388 — applies immersive mode on the host window, and hands the window over to the image
+ * viewer while it is the active destination.
+ *
+ * The state is applied whenever the EFFECTIVE hide state changes (the master toggle, or a scroll-driven
+ * reveal request flipping, #518 follow-up) and re-asserted on ON_RESUME — returning from another app or
+ * the recents screen restores the bar without a recomposition.
+ *
+ * [suspended] is the #1388 fix: the viewer drives BOTH bars from its own chrome state, so the shell must
+ * not re-assert its own underneath. Before that, coming back from a share sheet or the browser fired
+ * ON_RESUME here and re-showed the navigation bar over a viewer that believed it hidden. `suspended`
+ * flipping back to false when the viewer leaves also re-applies the shell state, so the hand-back is
+ * explicit rather than left to the viewer's own restore.
+ */
+@Composable
+private fun ImmersiveNavBarWindowEffect(window: Window?, view: View, hide: Boolean, suspended: Boolean) {
+    if (window == null || view.isInEditMode) return
+    LaunchedEffect(hide, suspended) {
+        if (!suspended) applyImmersiveNavBar(window, view, hide)
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        if (!suspended) applyImmersiveNavBar(window, view, hide)
+    }
+}
+
+/** #1388 — routes that take ownership of the window system bars away from the shell. */
+private fun NavKey?.ownsWindowBars(): Boolean = this is ImageViewerRoute
+
+/**
  * #518 — hide or show ONLY the bottom Android system navigation bar on [window]. Never touches
  * `Type.statusBars()` (the top bar stays) nor the in-app tab bar. When hiding, the behaviour is set to
  * [WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE] so a swipe from the bottom edge
- * re-reveals the bar transiently (documented Android behaviour) without changing layout insets.
+ * re-reveals the bar transiently (documented Android behaviour) without changing layout insets; hiding
+ * also sets the bottom inset to 0 so `navigationBarsPadding()` collapses cleanly, while a transient
+ * swipe-reveal does NOT change insets (no layout jump).
  */
 private fun applyImmersiveNavBar(window: Window, view: View, hide: Boolean) {
     val controller = WindowCompat.getInsetsController(window, view)
@@ -3415,8 +3448,10 @@ private fun applyImmersiveNavBar(window: Window, view: View, hide: Boolean) {
     }
 }
 
-// #494 — paramètres de transition (Claude + Codex). MotionScheme M3 absent en stable 1.4.x (1.5.0-alpha)
-// → easings « emphasized » locaux. Slide LÉGER (1/4 de largeur) pour ne pas singer le swipe topic.
+// #494 — paramètres de transition (Claude + Codex). L'interface `MotionScheme` EXISTE en material3 1.4.0,
+// mais l'accesseur `MaterialTheme.motionScheme` y est `internal` (échec de compilation constaté, #1388) :
+// inutilisable, d'où les easings « emphasized » locaux — à reprendre quand il deviendra public.
+// Slide LÉGER (1/4 de largeur) pour ne pas singer le swipe topic.
 private val EmphasizedDecelerate = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
 private val EmphasizedAccelerate = CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)
 private const val DRILL_MS = 320

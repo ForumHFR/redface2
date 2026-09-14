@@ -36,6 +36,7 @@ import fr.forumhfr.redface2.core.ui.theme.scaledForReading
 import fr.forumhfr.redface2.core.ui.theme.tileOutlineFor
 import fr.forumhfr.redface2.core.ui.theme.withRedfaceSlateTertiary
 import fr.forumhfr.redface2.core.ui.theme.withRedfaceSurfaceTones
+import fr.forumhfr.redface2.core.ui.viewer.LocalHideSystemNavBar
 
 @Composable
 // LongParameterList: a theme composable legitimately takes several orthogonal, defaulted inputs
@@ -53,6 +54,8 @@ fun RedfaceTheme(
     reading: ReadingDisplaySettings = ReadingDisplaySettings(),
     // #1207 — chooser policy is global and read by the external-link menu leaves.
     alwaysAskLinkApp: Boolean = false,
+    // #518/#1388 — immersive setting, read by the image viewer to bound its own system-bar policy.
+    hideSystemNavBar: Boolean = false,
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
@@ -86,6 +89,9 @@ fun RedfaceTheme(
         // SmileyPickerGrid) so switching the setting re-decorates the grid.
         LocalSmileyPickerDecoration provides reading.smileyPickerDecoration,
         LocalAlwaysAskLinkApp provides alwaysAskLinkApp,
+        // #518/#1388 — the viewer hides the navigation bar for the whole session when the user
+        // asked for immersive mode, and follows its own chrome otherwise (viewerSystemBars).
+        LocalHideSystemNavBar provides hideSystemNavBar,
     ) {
         MaterialTheme(
             colorScheme = colorScheme,
