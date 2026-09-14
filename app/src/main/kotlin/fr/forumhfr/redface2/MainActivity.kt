@@ -103,7 +103,9 @@ class MainActivity : ComponentActivity() {
         val background = redfaceBootstrapWindowBackground(this, dark, bootstrap.colorPreferences)
         window.setBackgroundDrawable(ColorDrawable(background.toArgb()))
         // enableEdgeToEdge() derived the bar ICON contrast from the OS uiMode ; align it with the
-        // bootstrap background right away — the #286 SideEffect re-asserts it once composed.
+        // bootstrap background right away. This is a cold-start SEED, written before any composition
+        // exists — not a second writer: from the first composed frame on, `SystemBarsOwnerEffect`
+        // (#1388) owns the window and re-asserts contrast, visibility and behaviour together.
         val insets = WindowCompat.getInsetsController(window, window.decorView)
         insets.isAppearanceLightStatusBars = !dark
         insets.isAppearanceLightNavigationBars = !dark

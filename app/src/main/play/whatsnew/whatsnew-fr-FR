@@ -1,6 +1,5 @@
-Redface 2 v0.58.0 — bêta.
-- Images plus larges dans les posts (agrandissement jusqu'à la densité de l'écran), un seul décodage par image, plus de saut tardif.
-- Les images reho.st et les images http:// des anciens posts s'affichent de nouveau.
-- Image indisponible : « Réessayer » sur chaque occurrence.
-- Réglages → Édition : choix du sélecteur d'images (photos, Parcourir, explorateur).
-- Photo refusée à l'envoi ? Réglages → Maintenance → Diagnostic, « Copier », puis collez sur le forum.
+Redface 2 v0.59.0 — dev.
+- Visionneuse d'images : la barre de navigation Android reste visible à l'ouverture, comme dans Google Photos.
+- Un tap masque la barre d'actions ET les barres système ensemble ; un second tap les ramène.
+- Fini le chevauchement entre la barre d'actions et la barre Android.
+- Mode immersif (Réglages → Affichage) : la barre de navigation reste masquée, visionneuse comprise.

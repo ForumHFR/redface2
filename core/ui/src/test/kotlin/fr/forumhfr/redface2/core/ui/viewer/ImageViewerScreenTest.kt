@@ -220,6 +220,31 @@ class ImageViewerScreenTest {
         assertEquals(close, closeAction().getUnclippedBoundsInRoot())
     }
 
+    // #1388 — the overlap report (thibw): with the bars « real » while the chrome shows, the action
+    // bar's own content must sit ABOVE the navigation bar, not under a transient one. Absolute
+    // positions, not relative ones: the bar itself stays pinned to the window bottom in both states.
+    @Test
+    fun `action bar content clears a visible navigation bar and drops back when it hides`() {
+        mountViewer()
+        val windowBottom = composeTestRule.onRoot().getUnclippedBoundsInRoot().bottom
+
+        applyInsets(navBottom = 48.dp, navigationVisible = true)
+
+        assertEquals(
+            windowBottom,
+            composeTestRule.onNodeWithTag(IMAGE_VIEWER_ACTIONS_TAG).getUnclippedBoundsInRoot().bottom,
+        )
+        assertEquals(windowBottom - 48.dp - 4.dp, closeAction().getUnclippedBoundsInRoot().bottom)
+
+        applyInsets()
+
+        assertEquals(
+            windowBottom,
+            composeTestRule.onNodeWithTag(IMAGE_VIEWER_ACTIONS_TAG).getUnclippedBoundsInRoot().bottom,
+        )
+        assertEquals(windowBottom - 4.dp, closeAction().getUnclippedBoundsInRoot().bottom)
+    }
+
     @Test
     fun `navigation already consumed by a parent is not added again`() {
         mountViewer(consumeNavigation = true)
@@ -254,9 +279,22 @@ class ImageViewerScreenTest {
     @Test
     fun recordDarkImage() = recordViewer(imageColor = android.graphics.Color.BLACK, suffix = "dark")
 
-    private fun recordViewer(imageColor: Int, suffix: String) {
+    // #1388 — the state users now get by default: chrome visible, so the Android navigation bar is
+    // visible too and its inset is real. Freezes « no overlap » visually.
+    @Test
+    fun recordVisibleNavigationBar() = recordViewer(
+        imageColor = android.graphics.Color.BLACK,
+        suffix = "nav_visible",
+        navigationVisible = true,
+    )
+
+    private fun recordViewer(imageColor: Int, suffix: String, navigationVisible: Boolean = false) {
         mountViewer(imageColor = imageColor)
-        applyInsets(topCutout = 48.dp)
+        applyInsets(
+            topCutout = 48.dp,
+            navBottom = if (navigationVisible) 48.dp else 0.dp,
+            navigationVisible = navigationVisible,
+        )
         composeTestRule.waitUntil(timeoutMillis = 5_000) {
             composeTestRule.onAllNodesWithTag(IMAGE_VIEWER_LOADING_TAG).fetchSemanticsNodes().isEmpty()
         }
