@@ -352,20 +352,27 @@ private fun MemoryOnlyZoomableImage(
 /**
  * #1388 — the viewer PUBLISHES what it wants of the window system bars and writes nothing itself:
  * [SystemBarsOwnerEffect], hosted by the app shell, is the single writer (see [ViewerBarsIntent] for
- * why). The intent is `active` for as long as this composable lives — an overlay or a modal route
- * pushed ABOVE the viewer therefore keeps its fullscreen — and drops on the real dispose, at the end
+ * why). The intent stands for as long as this composable lives — an overlay or a modal route pushed
+ * ABOVE the viewer therefore keeps its fullscreen — and is withdrawn on the real dispose, at the end
  * of the exit transition, which is what makes the shell the last writer.
+ *
+ * The registration is keyed by a per-instance [token] so two viewers overlapping during a transition
+ * never erase each other: leaving withdraws only this instance. A plain `remember` matches the
+ * holder's own lifetime — the holder is re-created with the theme on an activity re-creation, and so
+ * is this token, exactly like the `actionsVisible` it publishes.
  */
 @Composable
 private fun PublishViewerBarsIntent(chromeVisible: Boolean) {
     val intent = LocalViewerBarsIntent.current
-    DisposableEffect(intent, chromeVisible) {
-        intent.publish(active = true, chromeVisible = chromeVisible)
+    val token = remember { Any() }
+    DisposableEffect(intent, token, chromeVisible) {
+        intent.publish(token, chromeVisible)
         onDispose {}
     }
-    // Declared last and keyed on the holder alone so it runs ONCE, when the viewer really goes away.
-    DisposableEffect(intent) {
-        onDispose { intent.publish(active = false, chromeVisible = true) }
+    // Declared last and keyed on the holder + token alone so it runs ONCE, when this viewer really
+    // goes away — not on every chrome toggle.
+    DisposableEffect(intent, token) {
+        onDispose { intent.withdraw(token) }
     }
 }
 

@@ -8,10 +8,8 @@ import android.view.Window
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Stable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
@@ -37,24 +35,42 @@ import fr.forumhfr.redface2.core.domain.preferences.appSystemBars
  *
  * [active] is driven by the viewer's composition, not by the navigation stack: a bottom sheet or a
  * modal route ABOVE the viewer leaves it composed and therefore still in charge of the window.
+ *
+ * Registrations are keyed by an opaque producer TOKEN rather than collapsed into one global pair.
+ * Two viewers can overlap — `RedfaceNavHost` stacks image-viewer routes without a guard, and the
+ * outgoing one stays composed for its ~200 ms exit transition — and a single pair let the older one
+ * erase the newer one's intent on its way out. Each producer now withdraws only its own token, and
+ * the MOST RECENTLY registered one (the topmost on screen) provides [chromeVisible].
  */
 @Stable
 internal class ViewerBarsIntent {
 
-    /** Whether the fullscreen viewer is composed right now. */
-    var active: Boolean by mutableStateOf(false)
-        private set
+    private val registrations = mutableStateListOf<ViewerBarsRegistration>()
 
-    /** The viewer's own action-bar visibility. Meaningless — and forced back to `true` — while inactive. */
-    var chromeVisible: Boolean by mutableStateOf(true)
-        private set
+    /** Whether any fullscreen viewer is composed right now. */
+    val active: Boolean get() = registrations.isNotEmpty()
 
-    /** Published by the viewer on every chrome change and, as `false`, when it really leaves. */
-    fun publish(active: Boolean, chromeVisible: Boolean) {
-        this.active = active
-        this.chromeVisible = if (active) chromeVisible else true
+    /** The topmost viewer's action-bar visibility; `true` (a no-op for the policy) when there is none. */
+    val chromeVisible: Boolean get() = registrations.lastOrNull()?.chromeVisible ?: true
+
+    /**
+     * Registers [token] — or updates its value IN PLACE, so publishing a chrome change never
+     * reorders producers — as wanting [chromeVisible].
+     */
+    fun publish(token: Any, chromeVisible: Boolean) {
+        val registration = ViewerBarsRegistration(token, chromeVisible)
+        val index = registrations.indexOfFirst { it.token === token }
+        if (index >= 0) registrations[index] = registration else registrations += registration
+    }
+
+    /** Removes ONLY [token]; any other viewer still composed keeps its own intent. */
+    fun withdraw(token: Any) {
+        registrations.removeAll { it.token === token }
     }
 }
+
+/** One producer's published intent. [token] is compared by identity, never by value. */
+private data class ViewerBarsRegistration(val token: Any, val chromeVisible: Boolean)
 
 /**
  * Provided by `RedfaceTheme` so the viewer (a leaf of `:core:ui`) and the shell (`:app`) share one
@@ -106,7 +122,9 @@ internal val LocalSystemBarsController = staticCompositionLocalOf<SystemBarsCont
  * It combines the shell's own facts with the viewer's published intent through the pure
  * [appSystemBars], then applies the result. Because nothing else ever writes the window, every
  * transition ends with this effect: when the viewer disposes, its intent drops, this recomposes and
- * applies the shell state LAST — no snapshot to restore, no hand-back race.
+ * applies the shell state LAST — no snapshot to restore, no hand-back race. « The shell state » is
+ * the CURRENT one, not the one from before the viewer opened: a scroll-driven reveal that was active
+ * when the viewer opened is not replayed, the reading screen re-reports it on the next scroll.
  *
  * Swipe behaviour, tied to the policy: while nothing is hidden the window keeps `BEHAVIOR_DEFAULT`,
  * so the bars are real and dispatch their insets. As soon as a bar is hidden,
