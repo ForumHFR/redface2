@@ -6,9 +6,9 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * #518 + #1388 — pure policy [appSystemBars]: which system bars the single window owner hides, for
- * every combination of the immersive setting, the scroll-driven reveal, and the image viewer's
- * published intent.
+ * #518 + #1388 — pure policy [appSystemBars]: which system bars the single window owner hides, and
+ * how the visible ones are drawn, for every combination of the immersive setting, the scroll-driven
+ * reveal, the image viewer's published intent and the effective app theme.
  */
 class SystemBarsPolicyTest {
 
@@ -27,7 +27,12 @@ class SystemBarsPolicyTest {
     fun `the viewer chrome visible without the setting leaves both bars alone`() {
         val bars = bars(immersive = false, viewerActive = true, chromeVisible = true)
 
-        assertEquals(SystemBarsState(hideStatusBar = false, hideNavigationBar = false), bars)
+        // Nothing is hidden, yet the state is NOT the outside-the-viewer one: the icons go light for
+        // the black backdrop drawn under the bars.
+        assertEquals(
+            SystemBarsState(hideStatusBar = false, hideNavigationBar = false, lightSystemBarIcons = true),
+            bars,
+        )
         assertFalse(bars.anyHidden)
     }
 
@@ -35,7 +40,10 @@ class SystemBarsPolicyTest {
     fun `the viewer chrome hidden is a real fullscreen, setting or not`() {
         for (immersive in BOOLEANS) {
             val bars = bars(immersive = immersive, viewerActive = true, chromeVisible = false)
-            assertEquals(SystemBarsState(hideStatusBar = true, hideNavigationBar = true), bars)
+            assertEquals(
+                SystemBarsState(hideStatusBar = true, hideNavigationBar = true, lightSystemBarIcons = true),
+                bars,
+            )
             assertTrue(bars.anyHidden)
         }
     }
@@ -44,7 +52,10 @@ class SystemBarsPolicyTest {
     fun `the setting keeps the navigation bar hidden while the viewer chrome shows`() {
         val bars = bars(immersive = true, viewerActive = true, chromeVisible = true)
 
-        assertEquals(SystemBarsState(hideStatusBar = false, hideNavigationBar = true), bars)
+        assertEquals(
+            SystemBarsState(hideStatusBar = false, hideNavigationBar = true, lightSystemBarIcons = true),
+            bars,
+        )
     }
 
     @Test
@@ -103,6 +114,28 @@ class SystemBarsPolicyTest {
     }
 
     @Test
+    fun `the viewer forces light system bar icons whatever the theme, over the whole table`() {
+        // #1388 — the viewer paints a black backdrop, so the clock and the navigation glyphs are only
+        // legible in white. Outside it the contrast is the effective app theme (#286), nothing else.
+        forEachCombination { immersive, revealed, active, chrome ->
+            for (dark in BOOLEANS) {
+                val bars = bars(immersive, revealed, active, chrome, darkTheme = dark)
+                assertEquals(active || dark, bars.lightSystemBarIcons)
+            }
+        }
+    }
+
+    @Test
+    fun `the icon contrast is the only thing the theme decides`() {
+        forEachCombination { immersive, revealed, active, chrome ->
+            val light = bars(immersive, revealed, active, chrome, darkTheme = false)
+            val dark = bars(immersive, revealed, active, chrome, darkTheme = true)
+            assertEquals(light.hideStatusBar, dark.hideStatusBar)
+            assertEquals(light.hideNavigationBar, dark.hideNavigationBar)
+        }
+    }
+
+    @Test
     fun `the status bar is hidden exactly by the viewer fullscreen, over the whole table`() {
         forEachCombination { immersive, revealed, active, chrome ->
             val bars = bars(immersive, revealed, active, chrome)
@@ -123,11 +156,13 @@ class SystemBarsPolicyTest {
         navBarRevealed: Boolean = false,
         viewerActive: Boolean = false,
         chromeVisible: Boolean = true,
+        darkTheme: Boolean = false,
     ) = appSystemBars(
         immersive = immersive,
         navBarRevealed = navBarRevealed,
         viewerActive = viewerActive,
         chromeVisible = chromeVisible,
+        darkTheme = darkTheme,
     )
 
     // Two passes over the pairs rather than four nested loops: same 16 rows, half the nesting.

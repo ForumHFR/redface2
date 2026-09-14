@@ -80,15 +80,16 @@ private data class ViewerBarsRegistration(val token: Any, val chromeVisible: Boo
 internal val LocalViewerBarsIntent = staticCompositionLocalOf { ViewerBarsIntent() }
 
 /**
- * #518 / #1388 — narrow seam over [WindowInsetsControllerCompat], and the ONLY thing in the app that
- * hides or shows a system bar. Injectable so the requested state is observable from JVM tests:
- * Robolectric 4.16.1 ships no `ShadowWindowInsetsController`.
+ * #286 / #518 / #1388 — narrow seam over [WindowInsetsControllerCompat], and the ONLY thing in the app
+ * that touches a system bar once the app is composed: visibility, swipe behaviour AND icon contrast.
+ * Injectable so the requested state is observable from JVM tests: Robolectric 4.16.1 ships no
+ * `ShadowWindowInsetsController`.
  *
  * Deliberately one atomic mutator taking an absolute state: there is no « toggle » and no stored
  * snapshot anywhere, so a test asserts states in order, never a sequence of partial calls.
  */
 internal interface SystemBarsController {
-    /** Hides or shows each system bar per [bars] and sets [behavior]. */
+    /** Hides or shows each system bar per [bars], sets its icon contrast, and sets [behavior]. */
     fun applyBars(bars: SystemBarsState, behavior: Int)
 }
 
@@ -103,6 +104,10 @@ internal class WindowSystemBarsController(
         controller.systemBarsBehavior = behavior
         controller.setHidden(WindowInsetsCompat.Type.statusBars(), bars.hideStatusBar)
         controller.setHidden(WindowInsetsCompat.Type.navigationBars(), bars.hideNavigationBar)
+        // `isAppearanceLight*` describes the BACKGROUND behind the bar, so it is the negation of
+        // « draw the icons light ». Both bars share the contrast: the same surface is behind them.
+        controller.isAppearanceLightStatusBars = !bars.lightSystemBarIcons
+        controller.isAppearanceLightNavigationBars = !bars.lightSystemBarIcons
     }
 
     private fun WindowInsetsControllerCompat.setHidden(type: Int, hidden: Boolean) {
@@ -132,9 +137,15 @@ internal val LocalSystemBarsController = staticCompositionLocalOf<SystemBarsCont
  * TRANSIENTLY (translucent, auto-hiding, no inset change so no layout jump); the definitive way back
  * is the viewer tap, or leaving immersive mode.
  *
+ * Icon contrast (#286) goes through the same write: the app theme decides it everywhere but in the
+ * viewer, which paints a black backdrop and therefore always wants light icons. The shell used to
+ * assert it from a separate `SideEffect`, which was a SECOND writer of the window — and, since this
+ * lot made the bars visible over the viewer, a wrong one: a light theme put black glyphs on black.
+ *
  * Re-asserted on `ON_RESUME`: returning from another app, the recents screen, a share sheet or the
  * browser restores the bars without a recomposition.
  *
+ * @param darkTheme the EFFECTIVE app theme (#286), an input of the icon-contrast term.
  * @param viewerRouteActive the shell's own « the viewer is the active destination » fact. It only
  *   ever ADDS to [ViewerBarsIntent.active] (never revokes it), so the very first frame after an
  *   activity re-creation already carries the viewer state, before the viewer has published anything.
@@ -144,6 +155,7 @@ fun SystemBarsOwnerEffect(
     immersive: Boolean,
     navBarRevealed: Boolean,
     viewerRouteActive: Boolean,
+    darkTheme: Boolean,
 ) {
     val controller = rememberSystemBarsController() ?: return
     val intent = LocalViewerBarsIntent.current
@@ -152,6 +164,7 @@ fun SystemBarsOwnerEffect(
         navBarRevealed = navBarRevealed,
         viewerActive = intent.active || viewerRouteActive,
         chromeVisible = intent.chromeVisible,
+        darkTheme = darkTheme,
     )
     val behavior = if (bars.anyHidden) {
         WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
