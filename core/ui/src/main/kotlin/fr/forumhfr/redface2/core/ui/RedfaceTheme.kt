@@ -36,7 +36,8 @@ import fr.forumhfr.redface2.core.ui.theme.scaledForReading
 import fr.forumhfr.redface2.core.ui.theme.tileOutlineFor
 import fr.forumhfr.redface2.core.ui.theme.withRedfaceSlateTertiary
 import fr.forumhfr.redface2.core.ui.theme.withRedfaceSurfaceTones
-import fr.forumhfr.redface2.core.ui.viewer.LocalHideSystemNavBar
+import fr.forumhfr.redface2.core.ui.viewer.LocalViewerBarsIntent
+import fr.forumhfr.redface2.core.ui.viewer.ViewerBarsIntent
 
 @Composable
 // LongParameterList: a theme composable legitimately takes several orthogonal, defaulted inputs
@@ -54,8 +55,6 @@ fun RedfaceTheme(
     reading: ReadingDisplaySettings = ReadingDisplaySettings(),
     // #1207 — chooser policy is global and read by the external-link menu leaves.
     alwaysAskLinkApp: Boolean = false,
-    // #518/#1388 — immersive setting, read by the image viewer to bound its own system-bar policy.
-    hideSystemNavBar: Boolean = false,
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
 ) {
@@ -65,6 +64,7 @@ fun RedfaceTheme(
         accentColor = accentColor,
         dynamicColor = dynamicColor,
     )
+    val viewerBarsIntent = remember { ViewerBarsIntent() }
     val colorScheme = remember(context, darkTheme, resolvedColorPreferences) {
         redfaceColorScheme(context, darkTheme, resolvedColorPreferences)
     }
@@ -89,9 +89,11 @@ fun RedfaceTheme(
         // SmileyPickerGrid) so switching the setting re-decorates the grid.
         LocalSmileyPickerDecoration provides reading.smileyPickerDecoration,
         LocalAlwaysAskLinkApp provides alwaysAskLinkApp,
-        // #518/#1388 — the viewer hides the navigation bar for the whole session when the user
-        // asked for immersive mode, and follows its own chrome otherwise (viewerSystemBars).
-        LocalHideSystemNavBar provides hideSystemNavBar,
+        // #1388 — one holder shared by the fullscreen image viewer (which publishes its intent) and
+        // the shell's SystemBarsOwnerEffect (the single writer of the window system bars). Plain
+        // `remember`: an activity re-creation rebuilds it empty on purpose, because the viewer's own
+        // chrome state is not saved either — the shell seeds the first frame from its active route.
+        LocalViewerBarsIntent provides viewerBarsIntent,
     ) {
         MaterialTheme(
             colorScheme = colorScheme,

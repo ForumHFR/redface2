@@ -1,8 +1,5 @@
 package fr.forumhfr.redface2.core.ui.viewer
 
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
@@ -47,22 +44,16 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.core.view.WindowInsetsControllerCompat
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.compose.LifecycleEventEffect
 import coil3.compose.AsyncImage
 import coil3.memory.MemoryCache
 import coil3.request.CachePolicy
 import coil3.request.ImageRequest
-import fr.forumhfr.redface2.core.domain.preferences.ViewerBarsState
-import fr.forumhfr.redface2.core.domain.preferences.viewerSystemBars
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.browser.LocalAlwaysAskLinkApp
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
@@ -98,7 +89,7 @@ fun ImageViewerScreen(
     )
     val animationsEnabled = rememberAnimationsEnabled()
 
-    ViewerSystemBarsEffect(chromeVisible = actionsVisible, immersive = LocalHideSystemNavBar.current)
+    PublishViewerBarsIntent(chromeVisible = actionsVisible)
 
     Box(
         modifier = modifier
@@ -359,90 +350,23 @@ private fun MemoryOnlyZoomableImage(
 }
 
 /**
- * #1388 — the viewer drives BOTH system bars from the pure [viewerSystemBars] policy: the chrome
- * (its bottom action bar, #1308) and the Android bars appear and disappear together, bounded by the
- * #518 immersive setting ([LocalHideSystemNavBar]). Google Photos model, decided on #1388.
- *
- * Swipe behaviour, deliberately tied to the policy:
- * - as soon as every bar is shown, the window keeps its ENTRY behaviour (`BEHAVIOR_DEFAULT` in this
- *   app). The bars are then « real »: Android dispatches their insets, so the action bar is padded
- *   above the navigation bar instead of being overlaid by a transient bar — that is the #1388
- *   overlap report, fixed by construction rather than by an inset workaround;
- * - while anything is hidden, `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE` lets a swipe from the edge
- *   bring the bars back TRANSIENTLY (translucent, auto-hiding, no inset change, hence no layout
- *   jump under the image). The definitive way back is the tap, which restores both the chrome and
- *   the real bars. Same behaviour the rest of the app uses for #518.
- *
- * The window is re-asserted on `ON_RESUME`: coming back from the share sheet, the browser or the
- * save picker, Android restores the bars, and the shell deliberately stays out of the way while the
- * viewer is the active destination (`RedfaceApp`, #1388).
+ * #1388 — the viewer PUBLISHES what it wants of the window system bars and writes nothing itself:
+ * [SystemBarsOwnerEffect], hosted by the app shell, is the single writer (see [ViewerBarsIntent] for
+ * why). The intent is `active` for as long as this composable lives — an overlay or a modal route
+ * pushed ABOVE the viewer therefore keeps its fullscreen — and drops on the real dispose, at the end
+ * of the exit transition, which is what makes the shell the last writer.
  */
 @Composable
-private fun ViewerSystemBarsEffect(chromeVisible: Boolean, immersive: Boolean) {
-    val controller = rememberViewerSystemBarsController() ?: return
-    // Captured once, on entry: the bars the shell was showing, restored verbatim when the viewer
-    // leaves. `immersive` is only read here for the FALLBACK below, hence the single-key remember.
-    val entry = remember(controller) { controller.entrySystemBars(immersive) }
-    val bars = viewerSystemBars(immersive = immersive, chromeVisible = chromeVisible)
-    val behavior = if (bars.anyHidden) {
-        WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-    } else {
-        entry.behavior
-    }
-    DisposableEffect(controller, bars, behavior) {
-        controller.applyBars(bars, behavior)
+private fun PublishViewerBarsIntent(chromeVisible: Boolean) {
+    val intent = LocalViewerBarsIntent.current
+    DisposableEffect(intent, chromeVisible) {
+        intent.publish(active = true, chromeVisible = chromeVisible)
         onDispose {}
     }
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { controller.applyBars(bars, behavior) }
-    // Declared last and keyed on the controller alone so it runs ONCE, when the viewer really goes
-    // away — not on every chrome toggle.
-    DisposableEffect(controller) {
-        onDispose { controller.applyBars(entry.bars, entry.behavior) }
+    // Declared last and keyed on the holder alone so it runs ONCE, when the viewer really goes away.
+    DisposableEffect(intent) {
+        onDispose { intent.publish(active = false, chromeVisible = true) }
     }
-}
-
-/** The state to hand back to the shell when the viewer closes. */
-private data class ViewerBarsEntry(val bars: ViewerBarsState, val behavior: Int)
-
-/**
- * Entry snapshot. `getRootWindowInsets` can legitimately return `null` on the very first frame; the
- * previous code turned that into « both bars were visible », which SHOWED the navigation bar of a
- * #518 user on exit. There is no need to guess: outside the viewer the app root owns the window and
- * its state is exactly the policy at `chromeVisible = true` (status bar shown, navigation bar hidden
- * iff immersive), so that is the fallback. The behaviour itself is always readable.
- */
-private fun ViewerSystemBarsController.entrySystemBars(immersive: Boolean): ViewerBarsEntry {
-    val visibility = currentVisibility()
-    return ViewerBarsEntry(
-        bars = visibility?.let {
-            ViewerBarsState(
-                hideStatusBar = !it.statusBarVisible,
-                hideNavigationBar = !it.navigationBarVisible,
-            )
-        } ?: viewerSystemBars(immersive = immersive, chromeVisible = true),
-        behavior = currentBehavior(),
-    )
-}
-
-/**
- * The injected double when a test provides one ([LocalViewerSystemBarsController]), the host
- * Activity's window otherwise. `null` on hosts without an Activity (@Preview): the viewer then
- * simply never touches any window.
- */
-@Composable
-private fun rememberViewerSystemBarsController(): ViewerSystemBarsController? {
-    val injected = LocalViewerSystemBarsController.current
-    val view = LocalView.current
-    val window = LocalContext.current.findActivity()?.window
-    return remember(injected, window, view) {
-        injected ?: window?.let { WindowViewerSystemBarsController(it, view) }
-    }
-}
-
-private tailrec fun Context.findActivity(): Activity? = when (this) {
-    is Activity -> this
-    is ContextWrapper -> baseContext.findActivity()
-    else -> null
 }
 
 internal enum class ImageViewerLoadState { Loading, Ready, Error }
