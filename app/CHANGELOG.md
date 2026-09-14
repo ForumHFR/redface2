@@ -16,6 +16,19 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.59.0` — `internal` (dev) — 2026-09-14
+
+Visionneuse : les barres système suivent la barre d'actions, bornées par le réglage immersif ([#1388](https://github.com/ForumHFR/redface2/issues/1388)). Premier lot dev après la promotion bêta `0.58.0`.
+
+### Corrigé
+
+- **La visionneuse n'impose plus le plein écran ([#1388](https://github.com/ForumHFR/redface2/issues/1388))** — elle masquait les deux barres système à l'ouverture, sans regarder le réglage « mode immersif » (#518) ni la barre d'actions qu'un tap fait apparaître/disparaître depuis #1308. Désormais une policy pure `viewerSystemBars(immersive, chromeVisible)` décide : la barre d'état suit la barre d'actions, la barre de navigation Android la suit aussi mais reste masquée en permanence si le mode immersif est actif (arbitrage : cohérence avec le reste de l'app). Modèle Google Photos : à l'ouverture tout est visible, un tap fait tout disparaître ensemble, un second tap ramène tout. Signalé par nicko (×3) et thibw (×2).
+- **Plus de chevauchement entre la barre d'actions de la visionneuse et la barre Android (#1388)** — corrigé par construction : tant que rien n'est masqué, les barres système sont « réelles », Android dépêche leurs insets et la barre d'actions se pose au-dessus. Le mode transitoire (`BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`), qui ne dépêche aucun inset, n'est plus armé qu'en plein écran explicitement demandé.
+- **L'état des barres ne saute plus au retour d'un partage (#1388)** — le shell réappliquait son propre réglage à chaque `ON_RESUME`, y compris par-dessus une visionneuse ouverte (retour du partage, du navigateur ou du sélecteur de sauvegarde). La visionneuse possède désormais la fenêtre tant qu'elle est la destination active, et la rend explicitement en partant.
+- **Restauration fiable à la fermeture de la visionneuse (#1388)** — l'instantané des barres pouvait être illisible au premier frame ; le repli « les deux barres étaient visibles » rallumait la barre de navigation d'un utilisateur en mode immersif. Le repli est maintenant l'état réel du shell (barre d'état visible, barre de navigation masquée si et seulement si le mode immersif est actif).
+
+---
+
 ## `0.58.0` — `open` (bêta) — 2026-09-13
 
 Promotion bêta du lot développé en dev de `0.56.0` à `0.57.7`, depuis la précédente bêta `0.55.0`. Le détail par version dev figure dans les entrées ci-dessous. Review de promotion : Opus 5 (deux passes), Sol 5.6 (review puis challenge) et Fable 5.1 sur la PR [#1366](https://github.com/ForumHFR/redface2/pull/1366) ; les réserves convergentes (rédaction du journal Diagnostic, mécanique de promotion, pages publiques) sont levées par la `0.57.7` et par cette entrée. Restent ouvertes pour les retours des testeurs : [#988](https://github.com/ForumHFR/redface2/issues/988) (photos refusées à l'envoi), [#1128](https://github.com/ForumHFR/redface2/issues/1128) (sélecteur d'images), [#1343](https://github.com/ForumHFR/redface2/issues/1343) (recette QHD+).
