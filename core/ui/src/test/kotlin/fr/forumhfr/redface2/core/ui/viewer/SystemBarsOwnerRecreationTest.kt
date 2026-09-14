@@ -59,7 +59,11 @@ class SystemBarsOwnerRecreationTest {
             idleMainLooper()
 
             assertEquals(1, SystemBarsWindows.windows.size)
-            assertEquals(NAV_HIDDEN_LIGHT_ICONS, SystemBarsWindows.windows[0].applied.first())
+            val outgoing = SystemBarsWindows.windows[0]
+            assertEquals(NAV_HIDDEN_LIGHT_ICONS, outgoing.applied.first())
+            // Snapshot the RAW list: a repeat of the same state on the way out would be invisible to
+            // any assertion made after the fact, distinct() included.
+            val beforeRecreate = outgoing.applied.toList()
 
             scenario.recreate()
             idleMainLooper()
@@ -75,8 +79,9 @@ class SystemBarsOwnerRecreationTest {
             // rather than on the raw list because the activity is RESUMED, so the owner's ON_RESUME
             // re-assert legitimately repeats the identical state — a different one would show up here.
             assertEquals(listOf(NAV_HIDDEN_LIGHT_ICONS), rebuilt.distinct())
-            // The window that went away received nothing more on the way out.
-            assertEquals(listOf(NAV_HIDDEN_LIGHT_ICONS), SystemBarsWindows.windows[0].applied.distinct())
+            // The window that went away received NOTHING more on the way out — not even a redundant
+            // re-write of the state it already had.
+            assertEquals(beforeRecreate, outgoing.applied)
         }
     }
 
