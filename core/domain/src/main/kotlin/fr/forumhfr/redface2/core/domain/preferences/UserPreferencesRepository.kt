@@ -568,6 +568,11 @@ interface UserPreferencesRepository {
      * bottom edge re-reveals the bar transiently (Android `BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE`,
      * documented behaviour, not a bug), then it re-hides. Default `false`. Applied at the app root
      * ([fr.forumhfr.redface2.navigation.RedfaceApp]) on the host window, toggled in Settings > Affichage.
+     *
+     * Second consumer since #1388: the fullscreen image viewer. There the setting does not hide the
+     * bar outright — it BOUNDS the viewer's own policy ([viewerSystemBars]), which otherwise makes both
+     * system bars follow the viewer's action bar. `false` therefore means « the navigation bar is back
+     * as soon as the viewer chrome is showing », not « the viewer is never fullscreen ».
      */
     fun observeHideSystemNavBar(): Flow<Boolean>
 
