@@ -1,7 +1,6 @@
 package fr.forumhfr.redface2.core.ui.viewer
 
 import android.content.Context
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -12,13 +11,17 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.test.core.app.ApplicationProvider
 import coil3.ColorImage
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.annotation.DelicateCoilApi
 import coil3.test.FakeImageLoaderEngine
-import fr.forumhfr.redface2.core.domain.preferences.ViewerBarsState
+import fr.forumhfr.redface2.core.domain.preferences.SystemBarsState
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -31,186 +34,246 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * #1388 — which system bars the viewer asks the window for, per (#518 setting × chrome visibility),
- * and what it restores on the way out.
+ * #518 + #1388 — integration test of the two halves: the fullscreen viewer publishing its intent and
+ * the shell's [SystemBarsOwnerEffect] writing the window. Robolectric 4.16.1 ships no
+ * `ShadowWindowInsetsController`, so the requested state is observed through the injected
+ * [SystemBarsController] seam.
  *
- * Robolectric 4.16.1 ships no `ShadowWindowInsetsController`, so the requested state is only
- * observable through the injected [ViewerSystemBarsController] seam. The pure decision itself lives
- * in `:core:domain` (`ViewerSystemBarsTest`); this test pins the WIRING: entry, toggle, ON_RESUME
- * re-assert and restore.
+ * What it is here to prove — the single-writer invariant, reviewed on PR #1392:
+ * - the SHELL is always the last writer, in particular when the viewer leaves;
+ * - an overlay or a modal route ABOVE the viewer does not hand the window back to the shell's own
+ *   state, because the viewer is still composed;
+ * - replacing the controller (activity re-creation) re-applies the CURRENT state, never a snapshot;
+ * - a resume after an external change re-applies the current state.
+ *
+ * Assertions are on the ORDERED sequence of distinct states, never on `all { }`: the order and the
+ * moment of each write is exactly what was wrong before.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @OptIn(ExperimentalTestApi::class, DelicateCoilApi::class)
-class ImageViewerSystemBarsTest {
+class SystemBarsOwnerTest {
 
     @get:Rule
     val compose = createComposeRule()
 
-    private var mounted by mutableStateOf(true)
+    private var immersive by mutableStateOf(false)
+    private var navBarRevealed by mutableStateOf(false)
+    private var viewerRouteActive by mutableStateOf(false)
+    private var viewerMounted by mutableStateOf(false)
+    private var controller by mutableStateOf(RecordingSystemBarsController())
+    private val lifecycleOwner = object : LifecycleOwner {
+        val registry = LifecycleRegistry(this)
+        override val lifecycle: Lifecycle get() = registry
+    }
 
     @After
     fun resetImageLoader() = SingletonImageLoader.reset()
 
     @Test
-    fun `opening without the immersive setting leaves both bars alone`() {
-        val controller = RecordingSystemBarsController()
+    fun `without the viewer the shell applies the historical 518 state`() {
+        mountShell()
 
-        mountViewer(controller, immersive = false)
+        assertEquals(listOf(NOTHING_HIDDEN), controller.transitions)
 
-        assertOnly(controller, bars(status = false, navigation = false), BEHAVIOR_DEFAULT)
+        update { immersive = true }
+
+        assertEquals(listOf(NOTHING_HIDDEN, NAV_HIDDEN), controller.transitions)
+
+        update { navBarRevealed = true }
+
+        assertEquals(listOf(NOTHING_HIDDEN, NAV_HIDDEN, NOTHING_HIDDEN), controller.transitions)
     }
 
     @Test
-    fun `opening with the immersive setting keeps the navigation bar hidden`() {
-        val controller = RecordingSystemBarsController(
-            visibility = ViewerBarsVisibility(statusBarVisible = true, navigationBarVisible = false),
-            entryBehavior = TRANSIENT,
-        )
+    fun `open, tap and close write in order and the shell writes last`() {
+        mountShell()
+        openViewer()
 
-        mountViewer(controller, immersive = true)
+        assertEquals(listOf(NOTHING_HIDDEN), controller.transitions)
 
-        assertOnly(controller, bars(status = false, navigation = true), TRANSIENT)
+        tapImage()
+
+        assertEquals(listOf(NOTHING_HIDDEN, FULLSCREEN), controller.transitions)
+
+        // The pop flips the shell's top route while the viewer is still composed for its ~200 ms exit
+        // transition. Nothing must change: the viewer still owns the intent.
+        update { viewerRouteActive = false }
+
+        assertEquals(listOf(NOTHING_HIDDEN, FULLSCREEN), controller.transitions)
+
+        // Real dispose: the intent drops and the SHELL applies its own state, last.
+        update { viewerMounted = false }
+
+        assertEquals(listOf(NOTHING_HIDDEN, FULLSCREEN, NOTHING_HIDDEN), controller.transitions)
+        assertEquals(NOTHING_HIDDEN, controller.applied.last())
     }
 
     @Test
-    fun `a tap hides the chrome and both system bars together, and a second tap brings them back`() {
-        val controller = RecordingSystemBarsController()
-        mountViewer(controller, immersive = false)
-
+    fun `closing from fullscreen with the immersive setting hands back the immersive state`() {
+        immersive = true
+        mountShell()
+        openViewer()
         tapImage()
+        update {
+            viewerRouteActive = false
+            viewerMounted = false
+        }
 
-        assertEquals(bars(status = true, navigation = true), controller.applied.last().bars)
-        assertEquals(TRANSIENT, controller.applied.last().behavior)
-
-        tapImage()
-
-        assertEquals(bars(status = false, navigation = false), controller.applied.last().bars)
-        assertEquals(BEHAVIOR_DEFAULT, controller.applied.last().behavior)
+        assertEquals(listOf(NAV_HIDDEN, FULLSCREEN, NAV_HIDDEN), controller.transitions)
     }
 
     @Test
-    fun `the transient swipe behaviour is requested exactly while a bar is hidden`() {
-        val controller = RecordingSystemBarsController()
-        mountViewer(controller, immersive = false)
+    fun `an overlay above the viewer keeps its fullscreen`() {
+        mountShell()
+        openViewer()
+        tapImage()
 
+        // A bottom sheet or a modal route on top: the shell's active destination is no longer the
+        // viewer, but the viewer stays composed, so its intent — and its fullscreen — stand.
+        update { viewerRouteActive = false }
+        val duringOverlay = controller.applied.size
+
+        // Closing the overlay changes no key at all; nothing must be re-written either.
+        update { viewerRouteActive = true }
+
+        assertEquals(listOf(NOTHING_HIDDEN, FULLSCREEN), controller.transitions)
+        assertEquals(FULLSCREEN, controller.applied.last())
+        assertEquals("the overlay must not trigger any window write", duringOverlay, controller.applied.size)
+    }
+
+    @Test
+    fun `replacing the controller re-applies the current state instead of a stale snapshot`() {
+        mountShell()
+        openViewer()
         tapImage()
+
+        // Activity re-creation: a brand-new window controller, the viewer still mounted.
+        val replacement = RecordingSystemBarsController()
+        update { controller = replacement }
+
+        assertEquals(listOf(FULLSCREEN), replacement.transitions)
+
+        update {
+            viewerMounted = false
+            viewerRouteActive = false
+        }
+
+        assertEquals(listOf(FULLSCREEN, NOTHING_HIDDEN), replacement.transitions)
+    }
+
+    @Test
+    fun `a resume after an external change re-applies the current state`() {
+        mountShell()
+        openViewer()
         tapImage()
+        val beforeResume = controller.applied.size
+
+        // Android restored the bars behind our back while the share sheet / browser was up.
+        update {
+            lifecycleOwner.registry.currentState = Lifecycle.State.CREATED
+            lifecycleOwner.registry.currentState = Lifecycle.State.RESUMED
+        }
 
         assertTrue(
+            "ON_RESUME must re-assert the window state",
+            controller.applied.size > beforeResume,
+        )
+        assertEquals(FULLSCREEN, controller.applied.last())
+        assertEquals(listOf(NOTHING_HIDDEN, FULLSCREEN), controller.transitions)
+    }
+
+    @Test
+    fun `the transient behaviour is requested exactly while a bar is hidden`() {
+        immersive = true
+        mountShell()
+        openViewer()
+        tapImage()
+        tapImage()
+        update { immersive = false }
+
+        assertTrue(
+            "behaviour must follow anyHidden, got ${controller.applied}",
             controller.applied.all { (it.behavior == TRANSIENT) == it.bars.anyHidden },
         )
+        // Leaving immersive mode must restore BEHAVIOR_DEFAULT, not keep the transient one.
+        assertEquals(NOTHING_HIDDEN, controller.applied.last())
     }
 
-    @Test
-    fun `leaving the viewer restores the bars and the behaviour it found`() {
-        val controller = RecordingSystemBarsController(
-            visibility = ViewerBarsVisibility(statusBarVisible = true, navigationBarVisible = false),
-            entryBehavior = TRANSIENT,
-        )
-        mountViewer(controller, immersive = true)
-        tapImage()
+    private fun openViewer() = update {
+        viewerRouteActive = true
+        viewerMounted = true
+    }
 
-        compose.runOnIdle { mounted = false }
+    /** Every post-mount mutation goes through the test clock, so each assertion sees a settled tree. */
+    private fun update(block: () -> Unit) {
+        compose.runOnIdle(block)
         compose.waitForIdle()
-
-        assertEquals(bars(status = false, navigation = true), controller.applied.last().bars)
-        assertEquals(TRANSIENT, controller.applied.last().behavior)
     }
-
-    @Test
-    fun `an unreadable first frame restores the app state instead of guessing both bars visible`() {
-        val controller = RecordingSystemBarsController(visibility = null, entryBehavior = TRANSIENT)
-        mountViewer(controller, immersive = true)
-
-        compose.runOnIdle { mounted = false }
-        compose.waitForIdle()
-
-        // The historical fallback claimed « both bars were visible » and SHOWED the navigation bar
-        // of an immersive user on exit; the policy at chromeVisible = true is the right answer.
-        assertEquals(bars(status = false, navigation = true), controller.applied.last().bars)
-    }
-
-    @Test
-    fun `an unreadable first frame without the setting restores plain visible bars`() {
-        val controller = RecordingSystemBarsController(visibility = null)
-        mountViewer(controller, immersive = false)
-
-        compose.runOnIdle { mounted = false }
-        compose.waitForIdle()
-
-        assertEquals(bars(status = false, navigation = false), controller.applied.last().bars)
-    }
-
-    private fun assertOnly(controller: RecordingSystemBarsController, bars: ViewerBarsState, behavior: Int) {
-        assertTrue("no bar state was applied", controller.applied.isNotEmpty())
-        // ON_RESUME re-asserts the same state on mount; every application must agree.
-        assertTrue(
-            "unexpected applications: ${controller.applied}",
-            controller.applied.all { it.bars == bars && it.behavior == behavior },
-        )
-    }
-
-    private fun bars(status: Boolean, navigation: Boolean) =
-        ViewerBarsState(hideStatusBar = status, hideNavigationBar = navigation)
 
     private fun tapImage() {
         compose.onNodeWithTag(IMAGE_VIEWER_IMAGE_TAG).performSemanticsAction(SemanticsActions.OnClick) { it() }
         compose.waitForIdle()
     }
 
-    private fun mountViewer(controller: ViewerSystemBarsController, immersive: Boolean) {
+    private fun mountShell() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val engine = FakeImageLoaderEngine.Builder()
             .intercept(SOURCE_URL, ColorImage(android.graphics.Color.BLUE, width = 360, height = 780))
             .build()
         SingletonImageLoader.setUnsafe(ImageLoader.Builder(context).components { add(engine) }.build())
+        lifecycleOwner.registry.currentState = Lifecycle.State.RESUMED
         compose.setContent {
-            CompositionLocalProvider(LocalViewerSystemBarsController provides controller) {
-                RedfaceTheme(
-                    darkTheme = false,
-                    amoledTheme = false,
-                    dynamicColor = false,
-                    hideSystemNavBar = immersive,
-                ) {
-                    if (mounted) ViewerUnderTest()
+            CompositionLocalProvider(
+                LocalSystemBarsController provides controller,
+                LocalLifecycleOwner provides lifecycleOwner,
+            ) {
+                RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                    SystemBarsOwnerEffect(
+                        immersive = immersive,
+                        navBarRevealed = navBarRevealed,
+                        viewerRouteActive = viewerRouteActive,
+                    )
+                    if (viewerMounted) {
+                        ImageViewerScreen(
+                            request = ImageViewerRequest(SOURCE_URL, SOURCE_URL, SOURCE_URL, "photo", false),
+                            onClose = {},
+                            onSave = {},
+                        )
+                    }
                 }
             }
         }
         compose.waitForIdle()
     }
-
-    @Composable
-    private fun ViewerUnderTest() {
-        ImageViewerScreen(
-            request = ImageViewerRequest(SOURCE_URL, SOURCE_URL, SOURCE_URL, "photo", diskCache = false),
-            onClose = {},
-            onSave = {},
-        )
-    }
 }
 
-/** Records what the viewer asked the window for; no Robolectric shadow exposes it. */
-private class RecordingSystemBarsController(
-    private val visibility: ViewerBarsVisibility? =
-        ViewerBarsVisibility(statusBarVisible = true, navigationBarVisible = true),
-    private val entryBehavior: Int = BEHAVIOR_DEFAULT,
-) : ViewerSystemBarsController {
+/** Records every window write, in order; nothing else in the app may write the bars. */
+private class RecordingSystemBarsController : SystemBarsController {
 
     val applied = mutableListOf<AppliedBars>()
 
-    override fun currentVisibility(): ViewerBarsVisibility? = visibility
+    /**
+     * The applied states with consecutive duplicates removed: a re-assert of the SAME state (an
+     * ON_RESUME, a recomposition) is not a transition, while an unwanted flip always is.
+     */
+    val transitions: List<AppliedBars>
+        get() = applied.filterIndexed { index, value -> index == 0 || applied[index - 1] != value }
 
-    override fun currentBehavior(): Int = entryBehavior
-
-    override fun applyBars(bars: ViewerBarsState, behavior: Int) {
+    override fun applyBars(bars: SystemBarsState, behavior: Int) {
         applied += AppliedBars(bars, behavior)
     }
 }
 
-private data class AppliedBars(val bars: ViewerBarsState, val behavior: Int)
+private data class AppliedBars(val bars: SystemBarsState, val behavior: Int)
+
+private fun barsState(status: Boolean, navigation: Boolean, behavior: Int) =
+    AppliedBars(SystemBarsState(hideStatusBar = status, hideNavigationBar = navigation), behavior)
 
 private const val SOURCE_URL = "https://images.example.org/bars.jpg"
-private val BEHAVIOR_DEFAULT = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
+private val DEFAULT_BEHAVIOR = WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
 private val TRANSIENT = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+private val NOTHING_HIDDEN = barsState(status = false, navigation = false, behavior = DEFAULT_BEHAVIOR)
+private val NAV_HIDDEN = barsState(status = false, navigation = true, behavior = TRANSIENT)
+private val FULLSCREEN = barsState(status = true, navigation = true, behavior = TRANSIENT)

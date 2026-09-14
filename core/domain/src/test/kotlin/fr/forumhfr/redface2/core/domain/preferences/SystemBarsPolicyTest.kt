@@ -6,61 +6,114 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * #1388 — pure policy [viewerSystemBars]: which system bars the image viewer hides for each
- * combination of the #518 immersive setting and its own chrome (action bar) visibility.
+ * #518 + #1388 — pure policy [appSystemBars]: which system bars the single window owner hides, for
+ * every combination of the immersive setting, the scroll-driven reveal, and the image viewer's
+ * published intent.
  */
-class ViewerSystemBarsTest {
+class SystemBarsPolicyTest {
 
     @Test
-    fun `immersive off with the chrome visible hides nothing`() {
-        val bars = viewerSystemBars(immersive = false, chromeVisible = true)
+    fun `without the viewer the policy is exactly the historical 518 behaviour`() {
+        for (immersive in BOOLEANS) {
+            for (revealed in BOOLEANS) {
+                val bars = bars(immersive = immersive, navBarRevealed = revealed, viewerActive = false)
+                assertFalse("the status bar is never hidden outside the viewer", bars.hideStatusBar)
+                assertEquals(immersive && !revealed, bars.hideNavigationBar)
+            }
+        }
+    }
 
-        assertEquals(ViewerBarsState(hideStatusBar = false, hideNavigationBar = false), bars)
+    @Test
+    fun `the viewer chrome visible without the setting leaves both bars alone`() {
+        val bars = bars(immersive = false, viewerActive = true, chromeVisible = true)
+
+        assertEquals(SystemBarsState(hideStatusBar = false, hideNavigationBar = false), bars)
         assertFalse(bars.anyHidden)
     }
 
     @Test
-    fun `immersive off with the chrome hidden is a real fullscreen`() {
-        val bars = viewerSystemBars(immersive = false, chromeVisible = false)
-
-        assertEquals(ViewerBarsState(hideStatusBar = true, hideNavigationBar = true), bars)
-        assertTrue(bars.anyHidden)
+    fun `the viewer chrome hidden is a real fullscreen, setting or not`() {
+        for (immersive in BOOLEANS) {
+            val bars = bars(immersive = immersive, viewerActive = true, chromeVisible = false)
+            assertEquals(SystemBarsState(hideStatusBar = true, hideNavigationBar = true), bars)
+            assertTrue(bars.anyHidden)
+        }
     }
 
     @Test
-    fun `immersive on keeps the navigation bar hidden even while the chrome shows`() {
-        val bars = viewerSystemBars(immersive = true, chromeVisible = true)
+    fun `the setting keeps the navigation bar hidden while the viewer chrome shows`() {
+        val bars = bars(immersive = true, viewerActive = true, chromeVisible = true)
 
-        assertEquals(ViewerBarsState(hideStatusBar = false, hideNavigationBar = true), bars)
-        assertTrue(bars.anyHidden)
+        assertEquals(SystemBarsState(hideStatusBar = false, hideNavigationBar = true), bars)
     }
 
     @Test
-    fun `immersive on with the chrome hidden is a real fullscreen too`() {
-        val bars = viewerSystemBars(immersive = true, chromeVisible = false)
-
-        assertEquals(ViewerBarsState(hideStatusBar = true, hideNavigationBar = true), bars)
-        assertTrue(bars.anyHidden)
+    fun `a scroll reveal brings an immersive navigation bar back but never overrides fullscreen`() {
+        assertFalse(
+            bars(immersive = true, navBarRevealed = true, viewerActive = true, chromeVisible = true)
+                .hideNavigationBar,
+        )
+        assertTrue(
+            bars(immersive = true, navBarRevealed = true, viewerActive = true, chromeVisible = false)
+                .hideNavigationBar,
+        )
+        assertTrue(
+            bars(immersive = false, navBarRevealed = true, viewerActive = true, chromeVisible = false)
+                .hideNavigationBar,
+        )
     }
 
     @Test
-    fun `the status bar follows the chrome alone and the setting only binds the navigation bar`() {
-        for (immersive in listOf(true, false)) {
-            for (chromeVisible in listOf(true, false)) {
-                val bars = viewerSystemBars(immersive = immersive, chromeVisible = chromeVisible)
-                assertEquals(!chromeVisible, bars.hideStatusBar)
-                assertTrue(!chromeVisible || bars.hideNavigationBar == immersive)
+    fun `the chrome flag is inert while the viewer is not active`() {
+        for (immersive in BOOLEANS) {
+            for (revealed in BOOLEANS) {
+                assertEquals(
+                    bars(immersive, revealed, viewerActive = false, chromeVisible = true),
+                    bars(immersive, revealed, viewerActive = false, chromeVisible = false),
+                )
             }
+        }
+    }
+
+    @Test
+    fun `the status bar is hidden exactly by the viewer fullscreen, over the whole table`() {
+        forEachCombination { immersive, revealed, active, chrome ->
+            val bars = bars(immersive, revealed, active, chrome)
+            assertEquals(active && !chrome, bars.hideStatusBar)
         }
     }
 
     @Test
     fun `anyHidden is exactly the transient-swipe condition`() {
-        for (immersive in listOf(true, false)) {
-            for (chromeVisible in listOf(true, false)) {
-                val bars = viewerSystemBars(immersive = immersive, chromeVisible = chromeVisible)
-                assertEquals(bars.hideStatusBar || bars.hideNavigationBar, bars.anyHidden)
+        forEachCombination { immersive, revealed, active, chrome ->
+            val bars = bars(immersive, revealed, active, chrome)
+            assertEquals(bars.hideStatusBar || bars.hideNavigationBar, bars.anyHidden)
+        }
+    }
+
+    private fun bars(
+        immersive: Boolean,
+        navBarRevealed: Boolean = false,
+        viewerActive: Boolean = false,
+        chromeVisible: Boolean = true,
+    ) = appSystemBars(
+        immersive = immersive,
+        navBarRevealed = navBarRevealed,
+        viewerActive = viewerActive,
+        chromeVisible = chromeVisible,
+    )
+
+    private fun forEachCombination(block: (Boolean, Boolean, Boolean, Boolean) -> Unit) {
+        for (immersive in BOOLEANS) {
+            for (revealed in BOOLEANS) {
+                for (active in BOOLEANS) {
+                    for (chrome in BOOLEANS) {
+                        block(immersive, revealed, active, chrome)
+                    }
+                }
             }
         }
     }
 }
+
+private val BOOLEANS = listOf(true, false)
