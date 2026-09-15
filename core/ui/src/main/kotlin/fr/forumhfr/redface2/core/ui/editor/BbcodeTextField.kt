@@ -116,7 +116,7 @@ import androidx.compose.ui.unit.isFinite
  * and the inner text field (`TextLayoutResultProxy` compensates that one) or migrating to
  * `BasicTextField(TextFieldState, …)`, whose `TextFieldCoreModifierNode` owns a `ScrollState` and
  * scrolls it from the layout — i.e. bringing back the internal scroll that #422/#434 removed, which
- * is a chantier of its own and not a regression of this one.
+ * is a piece of work of its own (#1406), not a regression of this one.
  */
 @Suppress("LongParameterList") // Compose component API: optional defaulted params (modifier,
 // placeholder, fillViewport) are the idiomatic surface — a config holder would hurt call-sites.
@@ -391,8 +391,8 @@ private fun directionOf(from: Int, to: Int): SelectionFollowDirection =
  *
  * Without the lookahead a dragged edge is revealed flush against the viewport border, which shows
  * the user what they have already selected but nothing of what comes next. One line is deliberately
- * small: the reveal has to stay a smooth follow, not a page jump (the caret — [SelectionFollowDirection.NONE] —
- * keeps the exact #447 point 1 / #422 geometry).
+ * small: the reveal has to stay a smooth follow, not a page jump (the caret —
+ * [SelectionFollowDirection.NONE] — keeps the exact #447 point 1 / #422 geometry).
  */
 private fun TextLayoutResult.followRect(offset: Int, direction: SelectionFollowDirection): Rect {
     val caret = getCursorRect(offset)
