@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.59.2` — `local` — 2026-09-15
+
+Hotfix rédaction après le retour de Dintr-un lemn sur la v335 ([#447](https://github.com/ForumHFR/redface2/issues/447)).
+
+### Corrigé
+
+- **Le glissement des poignées de sélection ne perd plus le doigt ([#447](https://github.com/ForumHFR/redface2/issues/447), retour Dintr-un lemn)** — le suivi ajouté en 0.59.1 déplaçait le conteneur externe pendant le glissement. Or le gestionnaire legacy de `BasicTextField(TextFieldValue)` conserve l'origine du geste dans le repère du texte : quand l'ancêtre défile, ce repère s'éloigne du doigt et la poignée devient erratique. Le hotfix retire donc le suivi des sélections étendues, son choix du bord déplacé, sa ligne d'avance et son attente d'une frame de rendu. Le suivi du **curseur réduit** est conservé pendant la frappe, les insertions et les relayouts liés à l'IME ([#449](https://github.com/ForumHFR/redface2/issues/449), [#880](https://github.com/ForumHFR/redface2/issues/880)). Résidu assumé : pour étendre une sélection au-delà du viewport, il faut relâcher la poignée puis faire défiler manuellement ; la poignée d'un caret réduit garde le comportement de la 0.59.0. La solution durable reste [#1406](https://github.com/ForumHFR/redface2/issues/1406) : scroller interne entre la decoration box et l'inner field, ou migration vers `BasicTextField(TextFieldState)`.
+
+---
+
 ## `0.59.1` — `internal` (dev) — 2026-09-15
 
 Rédaction : l'affichage suit le bord de la sélection que l'on déplace ([#447](https://github.com/ForumHFR/redface2/issues/447), doublon [#1263](https://github.com/ForumHFR/redface2/issues/1263)).
