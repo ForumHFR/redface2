@@ -1,3 +1,3 @@
-Redface 2 v0.59.1 — dev.
-- Editor: the view now follows the selection edge you are moving, upwards included, and shows one line ahead.
-- The field no longer stays still while a selection is extended past the visible area.
+Redface 2 v0.59.2 — dev.
+- Editor: removed the selection following added in 0.59.1 because it disrupted handle dragging.
+- The collapsed caret is still followed while typing and inserting content.
