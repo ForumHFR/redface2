@@ -33,17 +33,21 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * #447 point 2 / #1263 — the externally scrolled viewport must follow the edge of the selection
- * that is being MOVED, not always `selection.end`.
+ * that is being MOVED, and must NOT read a programmatic selection as a dragged edge.
  *
  * The three editors share this contract through [BbcodeTextField]: the full-screen post and MP
  * editors use `fillViewport` (the field owns its scrollable column), `TopicFormScreen` uses the
  * default mode inside the caller's `verticalScroll`. Both are covered here.
  *
+ * A handle drag is only possible out of an EXISTING selection, so every drag scenario below starts
+ * from a non-collapsed selection (gate Sol: moving an edge out of a CARET is « select all » or a
+ * long press, not a handle).
+ *
  * What Robolectric can NOT exercise — and what stays out of this lot — is the CONTINUOUS
  * drag-to-scroll: the selection handles are rendered in their own `Popup` window and the legacy
  * `TextFieldSelectionManager` accumulates raw pointer deltas on a drag origin captured in the text
  * layout's coordinate space, so no amount of ancestor scrolling makes the drag itself advance.
- * See the KDoc of [BbcodeTextField].
+ * See the KDoc of [BbcodeTextField] and #1406.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
@@ -56,20 +60,24 @@ class BbcodeTextFieldSelectionFollowTest {
     private companion object {
         const val OUTER_SCROLL_TAG = "outer_scroll"
         val LONG_TEXT = (1..200).joinToString("\n") { "ligne $it" }
+
+        /** Start of an existing selection wide enough to own two handles, near the text end. */
+        val SELECTION_NEAR_END = LONG_TEXT.length - 300
     }
 
     @Test
-    fun `extending the selection backwards scrolls back up to the moving start edge`() {
+    fun `dragging the start handle up scrolls back to the moving start edge`() {
         val value = setFillViewportContent()
         focusField()
 
-        // Caret at the very end: the viewport is parked at the bottom (#447 point 1).
-        setSelection(value, TextRange(LONG_TEXT.length))
+        // An EXISTING selection near the end: the viewport is parked at the bottom.
+        setSelection(value, TextRange(SELECTION_NEAR_END, LONG_TEXT.length))
         val scrollAtEnd = scrollValue(BBCODE_FIELD_VIEWPORT_TAG)
         assertTrue("precondition: the viewport is parked at the bottom", scrollAtEnd > 0f)
 
-        // Start handle dragged all the way up: `end` never moves, only `start` does.
-        setSelection(value, TextRange(0, LONG_TEXT.length))
+        // Start handle dragged up to the first line: `end` never moves, only `start` does. Not a
+        // whole-text selection, so it stays a drag.
+        setSelection(value, TextRange(5, LONG_TEXT.length))
 
         val scrollAfter = scrollValue(BBCODE_FIELD_VIEWPORT_TAG)
         val maxValue = maxScrollValue(BBCODE_FIELD_VIEWPORT_TAG)
@@ -85,11 +93,11 @@ class BbcodeTextFieldSelectionFollowTest {
         val value = setOuterScrollContent()
         focusField()
 
-        setSelection(value, TextRange(LONG_TEXT.length))
+        setSelection(value, TextRange(SELECTION_NEAR_END, LONG_TEXT.length))
         val scrollAtEnd = scrollValue(OUTER_SCROLL_TAG)
         assertTrue("precondition: the outer column is parked at the bottom", scrollAtEnd > 0f)
 
-        setSelection(value, TextRange(0, LONG_TEXT.length))
+        setSelection(value, TextRange(5, LONG_TEXT.length))
 
         val scrollAfter = scrollValue(OUTER_SCROLL_TAG)
         val maxValue = maxScrollValue(OUTER_SCROLL_TAG)
@@ -101,27 +109,27 @@ class BbcodeTextFieldSelectionFollowTest {
     }
 
     @Test
-    fun `extending the selection forward reveals one line beyond the moving end edge`() {
+    fun `dragging the end handle forward reveals one line beyond it`() {
         val value = setFillViewportContent()
         focusField()
 
-        // Collapsed caret in the middle of the text: revealed WITHOUT lookahead, so it sits on
-        // the last visible line of the viewport.
+        // Existing selection in the middle of the text, revealed WITHOUT lookahead (it is new), so
+        // its end sits on the last visible line of the viewport.
         val middle = LONG_TEXT.indexOf("ligne 100") + "ligne 10".length
-        setSelection(value, TextRange(middle))
-        val caretScroll = scrollValue(BBCODE_FIELD_VIEWPORT_TAG)
+        setSelection(value, TextRange(middle, middle + 1))
+        val newSelectionScroll = scrollValue(BBCODE_FIELD_VIEWPORT_TAG)
         val maxValue = maxScrollValue(BBCODE_FIELD_VIEWPORT_TAG)
         assertTrue(
-            "precondition: the caret is revealed mid-text, away from both ends " +
-                "(scroll=$caretScroll max=$maxValue)",
-            caretScroll > 0f && caretScroll < maxValue * 0.9f,
+            "precondition: revealed mid-text, away from both ends " +
+                "(scroll=$newSelectionScroll max=$maxValue)",
+            newSelectionScroll > 0f && newSelectionScroll < maxValue * 0.9f,
         )
 
-        // Same line, but now the END edge is being extended forward: the viewport must show what
+        // Same line, but now the END edge is being dragged forward: the viewport must show what
         // comes NEXT instead of parking the edge flush against its bottom border.
-        setSelection(value, TextRange(middle, middle + 1))
+        setSelection(value, TextRange(middle, middle + 2))
 
-        val extendedScroll = scrollValue(BBCODE_FIELD_VIEWPORT_TAG)
+        val draggedScroll = scrollValue(BBCODE_FIELD_VIEWPORT_TAG)
         val viewportHeight = composeTestRule
             .onNodeWithTag(BBCODE_FIELD_VIEWPORT_TAG)
             .fetchSemanticsNode()
@@ -129,13 +137,13 @@ class BbcodeTextFieldSelectionFollowTest {
             .height
         assertTrue(
             "the viewport scrolled ahead of the moving END edge " +
-                "(caret=$caretScroll extended=$extendedScroll)",
-            extendedScroll > caretScroll,
+                "(new=$newSelectionScroll dragged=$draggedScroll)",
+            draggedScroll > newSelectionScroll,
         )
         assertTrue(
             "the lookahead stays around one text line, it is not a jump " +
-                "(delta=${extendedScroll - caretScroll} viewport=$viewportHeight)",
-            extendedScroll - caretScroll <= viewportHeight * 0.25f,
+                "(delta=${draggedScroll - newSelectionScroll} viewport=$viewportHeight)",
+            draggedScroll - newSelectionScroll <= viewportHeight * 0.25f,
         )
     }
 
@@ -150,7 +158,6 @@ class BbcodeTextFieldSelectionFollowTest {
             0f,
         )
 
-        // Caret moved, then a selection extended forward — both within the first visible lines.
         setSelection(value, TextRange(3))
         assertEquals(
             "moving the caret inside the visible area must not move the viewport",
@@ -163,6 +170,97 @@ class BbcodeTextFieldSelectionFollowTest {
         assertEquals(
             "extending a selection inside the visible area must not move the viewport",
             0f,
+            scrollValue(BBCODE_FIELD_VIEWPORT_TAG),
+            0f,
+        )
+    }
+
+    @Test
+    fun `select all from the end caret does not jump to the top`() {
+        // gate Sol : `(n,n) → (0,n)` moves only `start` but is NOT a start-handle drag — the end is
+        // already visible, so nothing must move.
+        val value = setFillViewportContent()
+        focusField()
+
+        setSelection(value, TextRange(LONG_TEXT.length))
+        val scrollAtEnd = scrollValue(BBCODE_FIELD_VIEWPORT_TAG)
+        assertTrue("precondition: the viewport is parked at the bottom", scrollAtEnd > 0f)
+
+        setSelection(value, TextRange(0, LONG_TEXT.length))
+
+        assertEquals(
+            "select all keeps the end in view instead of jumping to the top",
+            scrollAtEnd,
+            scrollValue(BBCODE_FIELD_VIEWPORT_TAG),
+            0f,
+        )
+    }
+
+    @Test
+    fun `select all from a selection already ending at the last character does not jump either`() {
+        // The case the collapsed-previous guard alone does not catch: `(k,n) → (0,n)`.
+        val value = setFillViewportContent()
+        focusField()
+
+        setSelection(value, TextRange(SELECTION_NEAR_END, LONG_TEXT.length))
+        val scrollAtEnd = scrollValue(BBCODE_FIELD_VIEWPORT_TAG)
+        assertTrue("precondition: the viewport is parked at the bottom", scrollAtEnd > 0f)
+
+        setSelection(value, TextRange(0, LONG_TEXT.length))
+
+        assertEquals(
+            "select all keeps the end in view instead of jumping to the top",
+            scrollAtEnd,
+            scrollValue(BBCODE_FIELD_VIEWPORT_TAG),
+            0f,
+        )
+    }
+
+    @Test
+    fun `select all from the start caret reveals the end`() {
+        val value = setFillViewportContent()
+        focusField()
+        assertEquals("precondition: nothing scrolled", 0f, scrollValue(BBCODE_FIELD_VIEWPORT_TAG), 0f)
+
+        setSelection(value, TextRange(0, LONG_TEXT.length))
+
+        val scrollAfter = scrollValue(BBCODE_FIELD_VIEWPORT_TAG)
+        val maxValue = maxScrollValue(BBCODE_FIELD_VIEWPORT_TAG)
+        assertTrue(
+            "select all reveals the focus end (after=$scrollAfter max=$maxValue)",
+            maxValue > 0f && scrollAfter >= maxValue * 0.95f,
+        )
+    }
+
+    @Test
+    fun `a burst of selections settles on the last one`() {
+        // gate Sol : the frame wait is not an atomicity guarantee, so pin what it IS meant to give
+        // — several selections landing before the frame settles leave the viewport on the LAST one,
+        // and it stays there (no oscillation between the transient targets).
+        val value = setFillViewportContent()
+        focusField()
+
+        val quarter = LONG_TEXT.indexOf("ligne 50")
+        val half = LONG_TEXT.indexOf("ligne 100")
+        composeTestRule.runOnUiThread {
+            value.value = value.value.copy(selection = TextRange(0, quarter))
+            value.value = value.value.copy(selection = TextRange(0, half))
+            value.value = value.value.copy(selection = TextRange(0, LONG_TEXT.length))
+        }
+        composeTestRule.waitForIdle()
+
+        val settled = scrollValue(BBCODE_FIELD_VIEWPORT_TAG)
+        val maxValue = maxScrollValue(BBCODE_FIELD_VIEWPORT_TAG)
+        assertTrue(
+            "the viewport settles on the LAST selection of the burst " +
+                "(settled=$settled max=$maxValue)",
+            maxValue > 0f && settled >= maxValue * 0.95f,
+        )
+
+        composeTestRule.waitForIdle()
+        assertEquals(
+            "and it stays there — no late scroll to a transient target",
+            settled,
             scrollValue(BBCODE_FIELD_VIEWPORT_TAG),
             0f,
         )
