@@ -219,12 +219,30 @@ class SelectionFollowTargetTest {
     }
 
     @Test
-    fun `an unchanged selection is re-revealed without lookahead and keeps the drag`() {
-        // #880 re-trigger (IME inset settles, new text layout): same selection, same target — and
-        // the drag in progress must survive it, the next move is still the same handle.
+    fun `an unchanged selection under a start drag is re-revealed on its start edge`() {
+        // #880 re-trigger (IME inset settles, new text layout): same selection, and the edge the
+        // user is working on must be the one re-revealed. gate Sol passe 3 : re-revealing `end`
+        // here sent the view to the far end of a long selection, and the next START move pulled it
+        // back — a visible oscillation. No lookahead: nothing is moving right now.
         assertEquals(
-            SelectionFollowTarget(60, SelectionFollowDirection.NONE, SelectionEdge.START),
+            SelectionFollowTarget(10, SelectionFollowDirection.NONE, SelectionEdge.START),
             target(state(TextRange(10, 60), movingEdge = SelectionEdge.START), TextRange(10, 60)),
+        )
+    }
+
+    @Test
+    fun `an unchanged selection under an end drag is re-revealed on its end edge`() {
+        assertEquals(
+            SelectionFollowTarget(60, SelectionFollowDirection.NONE, SelectionEdge.END),
+            target(state(TextRange(10, 60), movingEdge = SelectionEdge.END), TextRange(10, 60)),
+        )
+    }
+
+    @Test
+    fun `an unchanged selection with no drag in progress is re-revealed on its end edge`() {
+        assertEquals(
+            SelectionFollowTarget(60, SelectionFollowDirection.NONE, SelectionEdge.NONE),
+            target(state(TextRange(10, 60)), TextRange(10, 60)),
         )
     }
 }

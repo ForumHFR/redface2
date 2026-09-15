@@ -20,6 +20,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import org.junit.Assert.assertEquals
@@ -158,6 +159,58 @@ class BbcodeTextFieldSelectionFollowTest {
             "the drag keeps following START, the outer column stays at the top " +
                 "(after=$scrollAfter max=$maxValue)",
             scrollAfter <= maxValue * 0.05f,
+        )
+    }
+
+    @Test
+    fun `a relayout under a start drag keeps the viewport on the start edge`() {
+        // gate Sol passe 3 : the follow also re-fires on an UNCHANGED selection (IME inset
+        // settling, fresh text layout — #880). Re-revealing `end` there threw the view to the far
+        // end of the selection, and the next START move pulled it back up: oscillation.
+        val (value, width) = setResizableContent(fillViewport = true)
+        focusField()
+
+        setSelection(value, TextRange(SELECTION_NEAR_END, LONG_TEXT.length))
+        setSelection(value, TextRange(5, LONG_TEXT.length))
+        val atTop = scrollValue(BBCODE_FIELD_VIEWPORT_TAG)
+        assertTrue(
+            "precondition: the start drag brought the viewport to the top (scroll=$atTop)",
+            atTop <= maxScrollValue(BBCODE_FIELD_VIEWPORT_TAG) * 0.05f,
+        )
+
+        // Same selection, new text layout — what a viewport resize produces.
+        relayout(width)
+
+        val after = scrollValue(BBCODE_FIELD_VIEWPORT_TAG)
+        val maxValue = maxScrollValue(BBCODE_FIELD_VIEWPORT_TAG)
+        assertTrue(
+            "the relayout re-reveals the START edge, the viewport stays at the top " +
+                "(after=$after max=$maxValue)",
+            after <= maxValue * 0.05f,
+        )
+    }
+
+    @Test
+    fun `default mode also keeps the viewport on the start edge after a relayout`() {
+        val (value, width) = setResizableContent(fillViewport = false)
+        focusField()
+
+        setSelection(value, TextRange(SELECTION_NEAR_END, LONG_TEXT.length))
+        setSelection(value, TextRange(5, LONG_TEXT.length))
+        val atTop = scrollValue(OUTER_SCROLL_TAG)
+        assertTrue(
+            "precondition: the start drag brought the outer column to the top (scroll=$atTop)",
+            atTop <= maxScrollValue(OUTER_SCROLL_TAG) * 0.05f,
+        )
+
+        relayout(width)
+
+        val after = scrollValue(OUTER_SCROLL_TAG)
+        val maxValue = maxScrollValue(OUTER_SCROLL_TAG)
+        assertTrue(
+            "the relayout re-reveals the START edge, the outer column stays at the top " +
+                "(after=$after max=$maxValue)",
+            after <= maxValue * 0.05f,
         )
     }
 
@@ -363,6 +416,55 @@ class BbcodeTextFieldSelectionFollowTest {
             }
         }
         return value
+    }
+
+    /**
+     * Host whose WIDTH is state, so shrinking it re-lays out the text and re-fires the follow with
+     * an UNCHANGED selection — the Robolectric stand-in for the IME inset settling (#880), which
+     * the harness cannot dispatch on its own.
+     */
+    private fun setResizableContent(
+        fillViewport: Boolean,
+    ): Pair<MutableState<TextFieldValue>, MutableState<Dp>> {
+        lateinit var value: MutableState<TextFieldValue>
+        lateinit var width: MutableState<Dp>
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                Surface(color = MaterialTheme.colorScheme.surface) {
+                    value = remember { mutableStateOf(longTextValue()) }
+                    width = remember { mutableStateOf(320.dp) }
+                    Box(Modifier.size(width.value, 400.dp)) {
+                        if (fillViewport) {
+                            BbcodeTextField(
+                                value = value.value,
+                                onValueChange = { value.value = it },
+                                label = "Message",
+                                modifier = Modifier.fillMaxSize(),
+                                fillViewport = true,
+                            )
+                        } else {
+                            Column(
+                                modifier = Modifier
+                                    .verticalScroll(rememberScrollState())
+                                    .testTag(OUTER_SCROLL_TAG),
+                            ) {
+                                BbcodeTextField(
+                                    value = value.value,
+                                    onValueChange = { value.value = it },
+                                    label = "Message",
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return value to width
+    }
+
+    private fun relayout(width: MutableState<Dp>) {
+        composeTestRule.runOnIdle { width.value = 300.dp }
+        composeTestRule.waitForIdle()
     }
 
     private fun longTextValue() = TextFieldValue(text = LONG_TEXT, selection = TextRange.Zero)

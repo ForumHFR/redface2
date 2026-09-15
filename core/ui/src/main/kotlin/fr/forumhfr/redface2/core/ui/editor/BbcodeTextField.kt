@@ -400,6 +400,12 @@ internal data class SelectionFollowTarget(
  * the one [SelectionFollowState.movingEdge] already identified as being dragged. `(k,n) → (5,n) →
  * (0,n)` therefore keeps following START to the top, while `(n,n) → (0,n)` or `(k,n) → (0,n)` with
  * no drag in progress reveals `end`.
+ *
+ * Accepted limitation (gate Sol passe 3) : continuity needs one sampled step to latch onto. A START
+ * drag fast enough that the FIRST state sampled after the frame wait is already `(0,n)` is
+ * indistinguishable from « select all » by these inputs alone, and reveals `end`. Telling them apart
+ * would need the gesture itself, which this field cannot observe — the handles live in their own
+ * `Popup` (see the composable's KDoc and #1406).
  */
 internal fun selectionFollowTarget(
     previous: SelectionFollowState,
@@ -424,11 +430,15 @@ internal fun selectionFollowTarget(
             movingEdge = SelectionEdge.START,
         )
         // Nothing moved — an IME inset settling or a fresh layout re-triggered the follow (#880).
-        // Re-reveal the focus edge and keep the drag in progress, if any.
+        // Re-reveal the edge the user is working on (gate Sol passe 3 : re-revealing `end` under a
+        // START drag sent the view back down to the other end of a long selection, and the next
+        // START move pulled it up again — a visible oscillation), without lookahead since nothing
+        // is moving right now, and keep the drag in progress.
         SelectionEdge.NONE -> if (startMoved || endMoved) {
             newSelection
         } else {
-            SelectionFollowTarget(current.end, SelectionFollowDirection.NONE, previous.movingEdge)
+            val held = if (previous.movingEdge == SelectionEdge.START) current.start else current.end
+            SelectionFollowTarget(held, SelectionFollowDirection.NONE, previous.movingEdge)
         }
     }
 }
