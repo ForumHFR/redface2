@@ -1,5 +1,3 @@
-Redface 2 v0.59.0 — dev.
-- Visionneuse d'images : la barre de navigation Android reste visible à l'ouverture, comme dans Google Photos.
-- Un tap masque la barre d'actions ET les barres système ensemble ; un second tap les ramène.
-- Fini le chevauchement entre la barre d'actions et la barre Android.
-- Mode immersif (Réglages → Affichage) : la barre de navigation reste masquée, visionneuse comprise.
+Redface 2 v0.59.1 — dev.
+- Rédaction : l'affichage suit maintenant le bord de la sélection que vous déplacez, y compris vers le haut, et montre une ligne d'avance.
+- Le champ ne reste plus immobile pendant qu'on étend une sélection au-delà de la zone visible.

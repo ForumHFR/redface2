@@ -16,6 +16,17 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.59.1` — `internal` (dev) — 2026-09-15
+
+Rédaction : l'affichage suit le bord de la sélection que l'on déplace ([#447](https://github.com/ForumHFR/redface2/issues/447), doublon [#1263](https://github.com/ForumHFR/redface2/issues/1263)).
+
+### Corrigé
+
+- **L'affichage suit la sélection que l'on étend ([#447](https://github.com/ForumHFR/redface2/issues/447) point 2, [#1263](https://github.com/ForumHFR/redface2/issues/1263))** — le champ ne révélait que la fin de la sélection, or c'est le seul bord qui ne bouge PAS quand on tire la poignée du haut : la vue restait immobile pendant que la sélection grandissait hors écran (« on ne voit pas ce qu'on sélectionne », signalé par tinc, Dintr-un lemn et nicko, vidéos sur builds v125 et 301). L'éditeur suit désormais le bord réellement déplacé, dans le sens où il se déplace, avec une ligne d'avance pour voir où l'on va ; une sélection créée d'un coup (appui long sur un mot, tout sélectionner, insertion depuis la barre d'outils) révèle sa fin sans dépasser. Le suivi attend une image avant de choisir sa cible : une rafale de sélections pendant un glissement ne provoque plus qu'un défilement, vers l'état sur lequel l'image s'est arrêtée. Les trois éditeurs (message, sujet, MP) en bénéficient par le contrat commun `BbcodeTextField`.
+- **Non couvert** : le défilement CONTINU pendant qu'on maintient une poignée contre le bord de l'écran. Les poignées de sélection sont dessinées dans leur propre fenêtre `Popup` et le gestionnaire de sélection de Compose (`TextFieldSelectionManager`, foundation 1.11.2) ne contient aucun code de défilement : il cumule des deltas de pointeur bruts sur une origine capturée dans le repère du texte, si bien que faire défiler un conteneur parent désynchronise le glissement au lieu d'étendre la sélection. Le rendre possible suppose de redonner un défilement interne au champ (ce que #422/#434 avaient retiré) ou de migrer vers `BasicTextField(TextFieldState)` — chantier distinct, suivi par [#1406](https://github.com/ForumHFR/redface2/issues/1406).
+
+---
+
 ## `0.59.0` — `internal` (dev) — 2026-09-14
 
 Visionneuse : les barres système suivent la barre d'actions, bornées par le réglage immersif ([#1388](https://github.com/ForumHFR/redface2/issues/1388)). Premier lot dev après la promotion bêta `0.58.0`.
