@@ -26,6 +26,18 @@ fun imagePickerContractFor(mode: ImagePickerMode): ImagePickerContract = when (i
 fun <T> capPickedImages(uris: List<T>): List<T> = uris.take(MAX_IMAGES_PER_UPLOAD)
 
 /**
+ * Restores the pre-#988 per-contract limit after diagnostics have observed the raw callback. The
+ * photo-picker callback is trusted as-is; only the two contracts without a native ceiling are
+ * capped in application code.
+ */
+fun <T> pickedImagesForUpload(contract: ImagePickerContract, uris: List<T>): List<T> = when (contract) {
+    ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA -> uris
+    ImagePickerContract.OPEN_MULTIPLE_DOCUMENTS,
+    ImagePickerContract.GET_MULTIPLE_CONTENTS,
+    -> capPickedImages(uris)
+}
+
+/**
  * #1128 — shared selector for every editor. PickMultipleVisualMedia, OpenMultipleDocuments and
  * GetMultipleContents launchers all stay registered across preference changes, so a pending result
  * still reaches its callback. URI access is used immediately for upload; it does not need a

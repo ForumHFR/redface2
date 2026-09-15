@@ -2,7 +2,11 @@ package fr.forumhfr.redface2.core.domain.diagnostics
 
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 
-/** Records the platform-free image-picker boundary without retaining complete URI values. */
+/**
+ * Records the platform-free image-picker boundary without retaining complete URI values. A result
+ * with `count=0` cannot distinguish a deliberate cancellation from a picker failure because the
+ * Activity Result callbacks expose no result code.
+ */
 fun DiagnosticsLog.recordImagePickerEvent(event: ImagePickerEvent) {
     val message = when (event) {
         is ImagePickerEvent.Launched ->
@@ -11,7 +15,12 @@ fun DiagnosticsLog.recordImagePickerEvent(event: ImagePickerEvent) {
             val sources = event.uris
                 .map(DiagnosticRedactor::redactUriSource)
                 .distinct()
-                .joinToString(prefix = "[", postfix = "]")
+                .joinToString(
+                    prefix = "[",
+                    postfix = "]",
+                    limit = MAX_LOGGED_URI_SOURCES,
+                    truncated = "…",
+                )
             "result contract=${event.contract.diagnosticName} count=${event.uris.size} sources=$sources"
         }
     }
@@ -24,3 +33,4 @@ fun DiagnosticsLog.recordImagesPicked(count: Int) {
 }
 
 private const val IMAGE_PICKER_LOG_TAG = "ImagePicker"
+private const val MAX_LOGGED_URI_SOURCES = 5

@@ -18,29 +18,38 @@ object DiagnosticRedactor {
     }
 
     /**
-     * Reduces an Android picker URI to a redacted `scheme://authority` source. The path, query and
-     * fragment are discarded before redaction; malformed values and authorities containing user
-     * information fail closed.
+     * Reduces an Android picker URI to a redacted source. File URIs never expose their local name;
+     * other authorities are retained only when they look like Android content-provider names. The
+     * path, query and fragment are always discarded.
      */
     fun redactUriSource(uri: String): String {
         val separatorIndex = uri.indexOf(SCHEME_SEPARATOR)
         if (separatorIndex <= 0) return REDACTED_VALUE
         val scheme = uri.substring(0, separatorIndex)
+        val normalizedScheme = scheme.lowercase()
         val authority = uri
             .substring(separatorIndex + SCHEME_SEPARATOR.length)
             .substringBefore('/')
             .substringBefore('?')
             .substringBefore('#')
-        val componentsAreSafe = URI_SCHEME_PATTERN.matches(scheme) &&
-            URI_AUTHORITY_PATTERN.matches(authority) &&
-            !authority.contains('@')
-        return if (componentsAreSafe) {
-            val redactedScheme = redact(scheme.lowercase(), MAX_URI_COMPONENT_LENGTH)
-            val redactedAuthority = redact(authority, MAX_URI_COMPONENT_LENGTH)
-            "$redactedScheme$SCHEME_SEPARATOR$redactedAuthority"
+        val redactedAuthority = when {
+            normalizedScheme == FILE_SCHEME -> REDACTED_LOCAL_AUTHORITY
+            isProviderAuthority(authority) -> authority
+            else -> REDACTED_AUTHORITY
+        }
+        val schemeIsSafe = URI_SCHEME_PATTERN.matches(scheme) && scheme.length <= MAX_URI_COMPONENT_LENGTH
+        return if (schemeIsSafe) {
+            "$normalizedScheme$SCHEME_SEPARATOR$redactedAuthority"
         } else {
             REDACTED_VALUE
         }
+    }
+
+    private fun isProviderAuthority(authority: String): Boolean {
+        val formatIsSafe = URI_AUTHORITY_PATTERN.matches(authority) && authority.length <= MAX_URI_COMPONENT_LENGTH
+        if (!formatIsSafe) return false
+        val looksLikeProvider = authority.contains('.') || authority.lowercase() in PROVIDER_AUTHORITY_ALLOWLIST
+        return looksLikeProvider && !LONG_NUMBER_PATTERN.containsMatchIn(authority)
     }
 
     private val URL_PATTERN = Regex("""[a-z][a-z0-9+.-]*://[^\s"'<>]+""")
@@ -52,13 +61,24 @@ object DiagnosticRedactor {
         RegexOption.IGNORE_CASE,
     )
     private val URI_SCHEME_PATTERN = Regex("[A-Za-z][A-Za-z0-9+.-]*")
-    private val URI_AUTHORITY_PATTERN = Regex("[A-Za-z0-9._:-]+")
+    private val URI_AUTHORITY_PATTERN = Regex("[A-Za-z0-9._-]+")
+    private val PROVIDER_AUTHORITY_ALLOWLIST = setOf(
+        "media",
+        "com.android.providers.media.documents",
+        "com.android.providers.downloads.documents",
+        "com.android.externalstorage.documents",
+        "com.google.android.apps.photos.contentprovider",
+        "com.google.android.apps.docs.storage",
+    )
 
     private const val DEFAULT_MAX_LENGTH = 300
     private const val MAX_URI_COMPONENT_LENGTH = 120
     private const val SCHEME_SEPARATOR = "://"
+    private const val FILE_SCHEME = "file"
     private const val REDACTED_URL = "<url>"
     private const val REDACTED_PATH = "<path>"
     private const val REDACTED_NUMBER = "<n>"
     private const val REDACTED_VALUE = "<redacted>"
+    private const val REDACTED_AUTHORITY = "<redacted-authority>"
+    private const val REDACTED_LOCAL_AUTHORITY = "<local>"
 }

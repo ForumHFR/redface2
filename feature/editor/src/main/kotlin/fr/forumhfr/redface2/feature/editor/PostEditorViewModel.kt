@@ -42,9 +42,9 @@ import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
-import fr.forumhfr.redface2.core.ui.editor.capPickedImages
 import fr.forumhfr.redface2.core.ui.editor.imageInsertBbcodeOrNull
 import fr.forumhfr.redface2.core.ui.editor.insertBbcodeToken
+import fr.forumhfr.redface2.core.ui.editor.pickedImagesForUpload
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -586,7 +586,9 @@ class PostEditorViewModel @AssistedInject constructor(
     /** #988 — records the picker boundary, then preserves the existing upload filtering. */
     private fun onImagePickerEvent(event: ImagePickerEvent) {
         diagnostics.recordImagePickerEvent(event)
-        if (event is ImagePickerEvent.Result) onImagesPicked(capPickedImages(event.uris))
+        if (event is ImagePickerEvent.Result) {
+            onImagesPicked(pickedImagesForUpload(event.contract, event.uris))
+        }
     }
 
     /**

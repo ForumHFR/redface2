@@ -1022,60 +1022,74 @@ class PostEditorViewModelTest {
             authRepository = FakeAuthRepository(AuthState.Authenticated("alice")),
         )
         testScheduler.advanceUntilIdle()
-
         viewModel.submit(
-            PostEditorIntent.ImagePickerEventReceived(
-                ImagePickerEvent.Result(
-                    contract = ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA,
-                    uris = emptyList(),
-                ),
+            PostEditorIntent.ContentChanged(
+                TextFieldValue(text = "draft", selection = TextRange(1, 4)),
             ),
         )
         testScheduler.advanceUntilIdle()
+        val stateBefore = viewModel.state.value
 
-        assertEquals(0, imageUploadReader.readCalls)
-        assertEquals(0, uploadRepository.uploadCalls)
-        assertEquals(
-            listOf(
-                "result contract=PickMultipleVisualMedia count=0 sources=[]",
-                "onImagesPicked count=0",
-            ),
-            diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
-        )
+        viewModel.effects.test {
+            viewModel.submit(
+                PostEditorIntent.ImagePickerEventReceived(
+                    ImagePickerEvent.Result(
+                        contract = ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA,
+                        uris = emptyList(),
+                    ),
+                ),
+            )
+            testScheduler.advanceUntilIdle()
+
+            assertEquals(stateBefore, viewModel.state.value)
+            assertEquals(0, imageUploadReader.readCalls)
+            assertEquals(0, uploadRepository.uploadCalls)
+            assertEquals(
+                listOf(
+                    "result contract=PickMultipleVisualMedia count=0 sources=[]",
+                    "onImagesPicked count=0",
+                ),
+                diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
+            )
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     @Test
-    fun `picker result logs safe sources then uploads as before`() = runTest {
+    fun `photo picker result logs safe sources and uploads all eleven callback uris`() = runTest {
         val diagnostics = DiagnosticsLog()
         val viewModel = newReplyViewModel(
             diagnostics = diagnostics,
             authRepository = FakeAuthRepository(AuthState.Authenticated("alice")),
         )
         testScheduler.advanceUntilIdle()
+        val uris = (1..11).map {
+            "content://com.android.providers.media.documents/document/image%3A$it"
+        }
 
         viewModel.submit(
             PostEditorIntent.ImagePickerEventReceived(
                 ImagePickerEvent.Result(
-                    contract = ImagePickerContract.OPEN_MULTIPLE_DOCUMENTS,
-                    uris = listOf(
-                        "content://com.android.providers.media.documents/document/image%3A12345",
-                    ),
+                    contract = ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA,
+                    uris = uris,
                 ),
             ),
         )
         testScheduler.advanceUntilIdle()
 
-        assertEquals(1, uploadRepository.uploadCalls)
+        assertEquals(uris, imageUploadReader.readUris)
+        assertEquals(11, uploadRepository.uploadCalls)
         val messages = diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message }
         assertEquals(
             listOf(
-                "result contract=OpenMultipleDocuments count=1 " +
+                "result contract=PickMultipleVisualMedia count=11 " +
                     "sources=[content://com.android.providers.media.documents]",
-                "onImagesPicked count=1",
+                "onImagesPicked count=11",
             ),
             messages,
         )
-        assertFalse(messages.joinToString().contains("12345"))
+        assertFalse(messages.joinToString().contains("image%3A"))
         assertFalse(messages.joinToString().contains("document/"))
     }
 

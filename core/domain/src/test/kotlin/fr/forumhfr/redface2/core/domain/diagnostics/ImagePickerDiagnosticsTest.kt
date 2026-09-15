@@ -77,4 +77,34 @@ class ImagePickerDiagnosticsTest {
             diagnostics.entries.value.map { it.message },
         )
     }
+
+    @Test
+    fun `result limits the source list to five distinct authorities`() {
+        val diagnostics = DiagnosticsLog()
+        val authorities = listOf(
+            "media",
+            "com.android.providers.media.documents",
+            "com.android.providers.downloads.documents",
+            "com.android.externalstorage.documents",
+            "com.google.android.apps.photos.contentprovider",
+            "com.google.android.apps.docs.storage",
+        )
+
+        diagnostics.recordImagePickerEvent(
+            ImagePickerEvent.Result(
+                contract = ImagePickerContract.OPEN_MULTIPLE_DOCUMENTS,
+                uris = authorities.map { "content://$it/private/path" },
+            ),
+        )
+
+        assertEquals(
+            "result contract=OpenMultipleDocuments count=6 sources=[" +
+                "content://media, content://com.android.providers.media.documents, " +
+                "content://com.android.providers.downloads.documents, " +
+                "content://com.android.externalstorage.documents, " +
+                "content://com.google.android.apps.photos.contentprovider, …]",
+            diagnostics.entries.value.single().message,
+        )
+        assertFalse(diagnostics.entries.value.single().message.contains("apps.docs.storage"))
+    }
 }

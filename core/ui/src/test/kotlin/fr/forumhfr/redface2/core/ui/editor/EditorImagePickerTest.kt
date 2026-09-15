@@ -63,6 +63,27 @@ class EditorImagePickerTest {
     }
 
     @Test
+    fun `photo picker results keep all callback uris for upload`() {
+        val images = (1..11).toList()
+
+        assertEquals(images, pickedImagesForUpload(ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA, images))
+    }
+
+    @Test
+    fun `document and get content results keep the original application cap`() {
+        val images = (1..11).toList()
+
+        assertEquals(
+            (1..10).toList(),
+            pickedImagesForUpload(ImagePickerContract.OPEN_MULTIPLE_DOCUMENTS, images),
+        )
+        assertEquals(
+            (1..10).toList(),
+            pickedImagesForUpload(ImagePickerContract.GET_MULTIPLE_CONTENTS, images),
+        )
+    }
+
+    @Test
     fun `empty picker result is emitted before upload filtering`() {
         val events = mutableListOf<ImagePickerEvent>()
 

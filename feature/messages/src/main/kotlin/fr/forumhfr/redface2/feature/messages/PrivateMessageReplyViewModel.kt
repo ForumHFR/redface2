@@ -22,8 +22,8 @@ import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.ui.editor.UploadError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
-import fr.forumhfr.redface2.core.ui.editor.capPickedImages
 import fr.forumhfr.redface2.core.ui.editor.imageInsertBbcodeOrNull
+import fr.forumhfr.redface2.core.ui.editor.pickedImagesForUpload
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
@@ -635,7 +635,9 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     /** #988 — records the picker boundary, then preserves the existing upload filtering. */
     fun onImagePickerEvent(event: ImagePickerEvent) {
         diagnostics.recordImagePickerEvent(event)
-        if (event is ImagePickerEvent.Result) onImagesPicked(capPickedImages(event.uris))
+        if (event is ImagePickerEvent.Result) {
+            onImagesPicked(pickedImagesForUpload(event.contract, event.uris))
+        }
     }
 
     /**

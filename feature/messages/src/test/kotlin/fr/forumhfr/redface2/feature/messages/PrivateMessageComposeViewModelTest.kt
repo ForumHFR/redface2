@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.messages
 
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
@@ -143,21 +144,69 @@ class PrivateMessageComposeViewModelTest {
             diagnostics = diagnostics,
         )
         advanceUntilIdle()
+        vm.onContentChanged(
+            TextFieldValue(text = "draft", selection = TextRange(1, 4)),
+        )
+        advanceUntilIdle()
+        val stateBefore = vm.state.value
+
+        vm.effects.test {
+            vm.onImagePickerEvent(
+                ImagePickerEvent.Result(
+                    contract = ImagePickerContract.GET_MULTIPLE_CONTENTS,
+                    uris = emptyList(),
+                ),
+            )
+            advanceUntilIdle()
+
+            assertEquals(stateBefore, vm.state.value)
+            assertTrue(reader.readUris.isEmpty())
+            assertEquals(0, uploads.uploadCalls)
+            assertEquals(
+                listOf(
+                    "result contract=GetMultipleContents count=0 sources=[]",
+                    "onImagesPicked count=0",
+                ),
+                diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
+            )
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `get content result logs eleven raw uris then uploads the first ten`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val diagnostics = DiagnosticsLog()
+        val uploads = FakeUploadRepository()
+        val reader = FakeImageUploadReader()
+        val vm = viewModel(
+            repository = repository,
+            uploadRepository = uploads,
+            imageUploadReader = reader,
+            diagnostics = diagnostics,
+        )
+        advanceUntilIdle()
+        val uris = (1..11).map {
+            "content://com.google.android.apps.photos.contentprovider/private/photo-$it.jpg"
+        }
 
         vm.onImagePickerEvent(
             ImagePickerEvent.Result(
                 contract = ImagePickerContract.GET_MULTIPLE_CONTENTS,
-                uris = emptyList(),
+                uris = uris,
             ),
         )
         advanceUntilIdle()
 
-        assertTrue(reader.readUris.isEmpty())
-        assertEquals(0, uploads.uploadCalls)
+        assertEquals(uris.take(10), reader.readUris)
+        assertEquals(10, uploads.uploadCalls)
         assertEquals(
             listOf(
-                "result contract=GetMultipleContents count=0 sources=[]",
-                "onImagesPicked count=0",
+                "result contract=GetMultipleContents count=11 " +
+                    "sources=[content://com.google.android.apps.photos.contentprovider]",
+                "onImagesPicked count=10",
             ),
             diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
         )

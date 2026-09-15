@@ -80,8 +80,39 @@ class DiagnosticRedactorTest {
     }
 
     @Test
-    fun `redactUriSource fails closed for malformed or identifying authority`() {
+    fun `redactUriSource keeps only recognized provider-shaped authorities`() {
+        assertEquals("content://media", DiagnosticRedactor.redactUriSource("content://media/external/images/1"))
+        assertEquals(
+            "content://com.google.android.apps.photos.contentprovider",
+            DiagnosticRedactor.redactUriSource(
+                "content://com.google.android.apps.photos.contentprovider/secret-photo.jpg",
+            ),
+        )
+        assertEquals(
+            "content://<redacted-authority>",
+            DiagnosticRedactor.redactUriSource("content://alice-photos/private/photo.jpg"),
+        )
+    }
+
+    @Test
+    fun `redactUriSource hides local names and identifying authority syntax`() {
+        assertEquals("file://<local>", DiagnosticRedactor.redactUriSource("file://photo-alice.jpg"))
+        assertEquals(
+            "content://<redacted-authority>",
+            DiagnosticRedactor.redactUriSource("content://com.example.provider123456/private"),
+        )
+        assertEquals(
+            "content://<redacted-authority>",
+            DiagnosticRedactor.redactUriSource("content://user@example.test/private"),
+        )
+        assertEquals(
+            "content://<redacted-authority>",
+            DiagnosticRedactor.redactUriSource("content://alice%2Dphotos/private"),
+        )
+        assertEquals(
+            "content://<redacted-authority>",
+            DiagnosticRedactor.redactUriSource("content://com.${"a".repeat(121)}/private"),
+        )
         assertEquals("<redacted>", DiagnosticRedactor.redactUriSource("not-a-uri/private/photo.jpg"))
-        assertEquals("<redacted>", DiagnosticRedactor.redactUriSource("content://user@example.test/private"))
     }
 }

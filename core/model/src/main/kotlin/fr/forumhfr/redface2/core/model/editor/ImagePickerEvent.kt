@@ -10,7 +10,8 @@ enum class ImagePickerContract(val diagnosticName: String) {
 /**
  * Platform-free events emitted by the shared picker before editor-side filtering. In particular,
  * [Result] carries an empty [Result.uris] list when Android returns no selection, so diagnostics
- * can distinguish a picker cancellation/failure from a path that reached image upload.
+ * can locate the empty picker boundary. The callback carries no result code, so an empty result
+ * cannot distinguish deliberate cancellation from picker failure.
  */
 sealed interface ImagePickerEvent {
     data class Launched(
