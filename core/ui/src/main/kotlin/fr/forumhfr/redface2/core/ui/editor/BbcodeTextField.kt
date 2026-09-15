@@ -98,7 +98,10 @@ import androidx.compose.ui.unit.isFinite
  * [selectionFollowTarget]. `selection.end` alone (the point 1 implementation) is only the moving
  * edge when the END handle is dragged; dragging the START handle leaves `end` untouched, so the
  * viewport stayed still while the selection grew off-screen. The moving edge is revealed with a
- * one-line lookahead so the user sees where the selection is heading, not just where it stopped.
+ * one-line lookahead so the user sees where the selection is heading, not just where it stopped. A
+ * drag once identified is CARRIED (`SelectionFollowState.movingEdge`) so it keeps being followed to
+ * its end — a START handle pulled to offset 0 lands on a whole-text selection, which is « select
+ * all » only when no drag was under way.
  *
  * **What this does NOT give, and why** — the CONTINUOUS drag-to-scroll (hold a handle against the
  * viewport edge and have the text scroll under it) is out of reach under the CURRENT contract
@@ -241,13 +244,15 @@ private fun BbcodeFieldImpl(
     val bringCursorIntoView = remember { BringIntoViewRequester() }
     val focusRequester = remember { FocusRequester() }
     var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
-    // #447 point 2 — the last selection this field SAMPLED, i.e. the one the follow effect settled
-    // on and issued a request for. Not « the last selection actually revealed » (gate Sol) : the
-    // request is asynchronous and a newer key cancels it, so the scroll it asked for may never have
-    // landed. That is the right baseline anyway — the next comparison measures the edge that moved
-    // since the last decision. `null` until the first sample, so the open-time reveal keeps the
-    // plain #422/#555 behaviour. Read and written only from the follow effect, never in composition.
-    var sampledSelection by remember { mutableStateOf<TextRange?>(null) }
+    // #447 point 2 — what the last follow decision SAMPLED: the text, the selection, and the edge a
+    // drag was identified on. « Sampled », not « revealed » (gate Sol) : the request is asynchronous
+    // and a newer key cancels it, so the scroll it asked for may never have landed. That is the
+    // right baseline anyway — the next comparison measures the edge that moved since the last
+    // decision, and carrying the moving edge is what keeps a START handle dragged all the way to
+    // offset 0 a drag instead of a « select all » (gate Sol, passe 2). Empty until the first sample,
+    // so the open-time reveal keeps the plain #422/#555 behaviour. Read and written only from the
+    // follow effect, never in composition.
+    var followState by remember { mutableStateOf(SelectionFollowState()) }
 
     // #555 — programmatic focus on entry (one-shot). Without it an editor hydrated with existing
     // content never opens the IME: the caret sits at the end of the text but the field waits for a
@@ -284,10 +289,9 @@ private fun BbcodeFieldImpl(
         // atomicity guarantee (gate Sol) : a request already in flight can still be cancelled
         // mid-scroll — it makes transient targets much less likely, it does not forbid them.
         withFrameNanos { }
-        val textLength = layout.layoutInput.text.length
-        val target = selectionFollowTarget(sampledSelection, value.selection, textLength)
-        sampledSelection = value.selection
-        val offset = target.offset.coerceIn(0, textLength)
+        val target = selectionFollowTarget(followState, value.text, value.selection)
+        followState = SelectionFollowState(value.text, value.selection, target.movingEdge)
+        val offset = target.offset.coerceIn(0, layout.layoutInput.text.length)
         bringCursorIntoView.bringIntoView(layout.followRect(offset, target.direction))
     }
 
@@ -357,10 +361,24 @@ private fun BbcodeFieldImpl(
 /** Direction the followed selection edge is travelling in — drives the lookahead (#447 point 2). */
 internal enum class SelectionFollowDirection { NONE, FORWARD, BACKWARD }
 
-/** Text offset the viewport must reveal, and where that offset is heading. */
+/** Selection edge a drag has been identified on, carried from one decision to the next. */
+internal enum class SelectionEdge { NONE, START, END }
+
+/** What the field remembers between two follow decisions. */
+internal data class SelectionFollowState(
+    /** Text the [selection] belongs to — a different text resets the drag continuity. */
+    val text: String? = null,
+    /** Last selection SAMPLED (see the field's state comment), baseline of the next comparison. */
+    val selection: TextRange? = null,
+    /** Edge a drag was identified on, so the same drag keeps being followed as it continues. */
+    val movingEdge: SelectionEdge = SelectionEdge.NONE,
+)
+
+/** Text offset the viewport must reveal, where it is heading, and the drag to carry forward. */
 internal data class SelectionFollowTarget(
     val offset: Int,
     val direction: SelectionFollowDirection,
+    val movingEdge: SelectionEdge = SelectionEdge.NONE,
 )
 
 /**
@@ -371,46 +389,84 @@ internal data class SelectionFollowTarget(
  * put and the selection grows off-screen — « on ne voit pas ce qu'on sélectionne » (#1263).
  *
  * Two `TextRange` cannot tell universally where a mutation came from, so the rule reads a drag ONLY
- * where a drag is possible — an edge moving out of an EXISTING selection. Everything else is a
- * brand-new selection (long press on a word, select-all, a toolbar action re-selecting its inserted
- * tag) and reveals the focus edge without lookahead, so the view never overshoots a selection the
- * user did not drag. Two of those cases move a single edge and would otherwise be misread as a drag
- * (gate Sol) :
- * - [previous] collapsed — a caret has no handle to grab, so « select all » from the end caret
- *   (`(n,n) → (0,n)`) is a new selection, not a START handle pulled to the top;
- * - [current] covering the whole text — « select all » from a partial selection that already ended
- *   at the last character (`(k,n) → (0,n)`) likewise only moves `start`.
+ * where a drag is possible — an edge moving out of an EXISTING selection in the SAME text. Anything
+ * else is a brand-new selection (long press on a word, select-all, a toolbar action re-selecting its
+ * inserted tag, a text edit) and reveals the focus edge without lookahead, so the view never
+ * overshoots a selection the user did not drag.
+ *
+ * The delicate case is the whole-text selection, which « select all » and a START handle pulled to
+ * offset 0 both produce, and which both reach by moving a single edge. They are told apart by
+ * CONTINUITY (gate Sol, passe 2): a whole-text selection is only a drag when the edge that moved is
+ * the one [SelectionFollowState.movingEdge] already identified as being dragged. `(k,n) → (5,n) →
+ * (0,n)` therefore keeps following START to the top, while `(n,n) → (0,n)` or `(k,n) → (0,n)` with
+ * no drag in progress reveals `end`.
  */
 internal fun selectionFollowTarget(
-    previous: TextRange?,
+    previous: SelectionFollowState,
+    currentText: String,
     current: TextRange,
-    textLength: Int,
 ): SelectionFollowTarget {
-    val focusOnly = SelectionFollowTarget(current.end, SelectionFollowDirection.NONE)
-    if (previous == null || isNewSelection(previous, current, textLength)) return focusOnly
-    val startMoved = current.start != previous.start
-    val endMoved = current.end != previous.end
-    return when {
-        endMoved && !startMoved ->
-            SelectionFollowTarget(current.end, directionOf(previous.end, current.end))
-        startMoved && !endMoved ->
-            SelectionFollowTarget(current.start, directionOf(previous.start, current.start))
-        else -> focusOnly
+    val newSelection =
+        SelectionFollowTarget(current.end, SelectionFollowDirection.NONE, SelectionEdge.NONE)
+    val baseline = previous.dragBaseline(currentText)
+    if (baseline == null || current.collapsed) return newSelection
+    val startMoved = current.start != baseline.start
+    val endMoved = current.end != baseline.end
+    return when (draggedEdge(previous.movingEdge, startMoved, endMoved, current, currentText.length)) {
+        SelectionEdge.END -> SelectionFollowTarget(
+            offset = current.end,
+            direction = directionOf(baseline.end, current.end),
+            movingEdge = SelectionEdge.END,
+        )
+        SelectionEdge.START -> SelectionFollowTarget(
+            offset = current.start,
+            direction = directionOf(baseline.start, current.start),
+            movingEdge = SelectionEdge.START,
+        )
+        // Nothing moved — an IME inset settling or a fresh layout re-triggered the follow (#880).
+        // Re-reveal the focus edge and keep the drag in progress, if any.
+        SelectionEdge.NONE -> if (startMoved || endMoved) {
+            newSelection
+        } else {
+            SelectionFollowTarget(current.end, SelectionFollowDirection.NONE, previous.movingEdge)
+        }
     }
 }
 
 /**
- * True when [current] cannot be an edge dragged out of [previous] — a collapsed range (a caret has
- * no handle), a selection born from a caret, or a whole-text « select all ». Those reveal their
- * focus edge without lookahead instead of being read as a drag (gate Sol).
+ * The selection a drag could be continuing from: a non-collapsed selection sampled on the SAME text
+ * (a caret has no handle to grab, and an edited text renumbers every offset).
  */
-private fun isNewSelection(previous: TextRange, current: TextRange, textLength: Int): Boolean =
-    current.collapsed || previous.collapsed || current.coversWholeText(textLength)
+private fun SelectionFollowState.dragBaseline(currentText: String): TextRange? =
+    selection?.takeIf { text == currentText && !it.collapsed }
+
+/**
+ * Edge being dragged, or [SelectionEdge.NONE] when this is a new selection rather than a drag.
+ *
+ * Both edges moving at once (or neither) is never a drag. A single edge moving normally is — except
+ * when it lands on a whole-text selection, which is « select all » unless that same edge was already
+ * being dragged ([established]).
+ */
+private fun draggedEdge(
+    established: SelectionEdge,
+    startMoved: Boolean,
+    endMoved: Boolean,
+    current: TextRange,
+    textLength: Int,
+): SelectionEdge {
+    val edge = when {
+        startMoved == endMoved -> SelectionEdge.NONE
+        endMoved -> SelectionEdge.END
+        else -> SelectionEdge.START
+    }
+    val isSelectAll = current.coversWholeText(textLength) && established != edge
+    return if (isSelectAll) SelectionEdge.NONE else edge
+}
 
 private fun directionOf(from: Int, to: Int): SelectionFollowDirection =
     if (to > from) SelectionFollowDirection.FORWARD else SelectionFollowDirection.BACKWARD
 
-/** « Select all » — the one whole-text selection nobody produces by dragging an edge. */
+/** A selection spanning the whole text — « select all », unless a drag was already under way. */
 private fun TextRange.coversWholeText(textLength: Int): Boolean =
     textLength > 0 && min == 0 && max == textLength
 

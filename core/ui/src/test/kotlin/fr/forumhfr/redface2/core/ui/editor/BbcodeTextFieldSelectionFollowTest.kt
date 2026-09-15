@@ -109,6 +109,59 @@ class BbcodeTextFieldSelectionFollowTest {
     }
 
     @Test
+    fun `a start drag continued to the first character stays at the top`() {
+        // gate Sol passe 2 : `(k,n) → (5,n) → (0,n)`. The last step reaches a whole-text selection,
+        // which « select all » also produces — reading it as such revealed `end` and threw the view
+        // back to the BOTTOM, in the middle of a drag.
+        val value = setFillViewportContent()
+        focusField()
+
+        setSelection(value, TextRange(SELECTION_NEAR_END, LONG_TEXT.length))
+        setSelection(value, TextRange(5, LONG_TEXT.length))
+        val scrollMidDrag = scrollValue(BBCODE_FIELD_VIEWPORT_TAG)
+        val maxValue = maxScrollValue(BBCODE_FIELD_VIEWPORT_TAG)
+        assertTrue(
+            "precondition: the start drag brought the viewport to the top " +
+                "(scroll=$scrollMidDrag max=$maxValue)",
+            scrollMidDrag <= maxValue * 0.05f,
+        )
+
+        setSelection(value, TextRange(0, LONG_TEXT.length))
+
+        val scrollAfter = scrollValue(BBCODE_FIELD_VIEWPORT_TAG)
+        assertTrue(
+            "the drag keeps following START, the viewport stays at the top " +
+                "(after=$scrollAfter max=$maxValue)",
+            scrollAfter <= maxValue * 0.05f,
+        )
+    }
+
+    @Test
+    fun `default mode also keeps a start drag continued to the first character at the top`() {
+        val value = setOuterScrollContent()
+        focusField()
+
+        setSelection(value, TextRange(SELECTION_NEAR_END, LONG_TEXT.length))
+        setSelection(value, TextRange(5, LONG_TEXT.length))
+        val scrollMidDrag = scrollValue(OUTER_SCROLL_TAG)
+        val maxValue = maxScrollValue(OUTER_SCROLL_TAG)
+        assertTrue(
+            "precondition: the start drag brought the outer column to the top " +
+                "(scroll=$scrollMidDrag max=$maxValue)",
+            scrollMidDrag <= maxValue * 0.05f,
+        )
+
+        setSelection(value, TextRange(0, LONG_TEXT.length))
+
+        val scrollAfter = scrollValue(OUTER_SCROLL_TAG)
+        assertTrue(
+            "the drag keeps following START, the outer column stays at the top " +
+                "(after=$scrollAfter max=$maxValue)",
+            scrollAfter <= maxValue * 0.05f,
+        )
+    }
+
+    @Test
     fun `dragging the end handle forward reveals one line beyond it`() {
         val value = setFillViewportContent()
         focusField()
