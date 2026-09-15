@@ -3,6 +3,7 @@ import fr.forumhfr.redface2.core.ui.editor.UploadError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
 import androidx.compose.ui.text.input.TextFieldValue
+import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 
 /**
@@ -67,6 +68,9 @@ sealed interface PostEditorIntent {
      * the batch stops at the first failure, leaving the already-inserted images in place.
      */
     data class ImagesPicked(val uris: List<String>) : PostEditorIntent
+
+    /** #988 — launch/result boundary emitted by the shared picker before upload filtering. */
+    data class ImagePickerEventReceived(val event: ImagePickerEvent) : PostEditorIntent
 
     /** #459 PR2 — user dismissed the upload-error banner. Clears [PostEditorState.uploadError]. */
     data object UploadErrorDismissed : PostEditorIntent

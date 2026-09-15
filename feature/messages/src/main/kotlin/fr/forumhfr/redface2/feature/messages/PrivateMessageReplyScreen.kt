@@ -29,6 +29,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.ui.editor.rememberEditorImagePicker
 import fr.forumhfr.redface2.core.ui.editor.UploadProgressLabel
 import fr.forumhfr.redface2.core.ui.editor.bannerText
@@ -96,7 +97,7 @@ fun PrivateMessageReplyScreen(
         onRetryFormLoad = viewModel::retryFormLoad,
         onDraftRestore = viewModel::onDraftRestoreRequested,
         onDraftDiscard = viewModel::onDraftDiscardRequested,
-        onImagesPicked = viewModel::onImagesPicked,
+        onImagePickerEvent = viewModel::onImagePickerEvent,
         onUploadErrorDismissed = viewModel::onUploadErrorDismissed,
         onAddRecipient = viewModel::onAddRecipient,
         onRemoveRecipient = viewModel::onRemoveRecipient,
@@ -126,7 +127,7 @@ private fun PrivateMessageReplyContent(
     onDraftRestore: () -> Unit,
     onDraftDiscard: () -> Unit,
     // #459 — image upload wiring (photo picker launcher lives in the body composable).
-    onImagesPicked: (List<String>) -> Unit,
+    onImagePickerEvent: (ImagePickerEvent) -> Unit,
     onUploadErrorDismissed: () -> Unit,
     onAddRecipient: (String) -> Unit,
     onRemoveRecipient: (String) -> Unit,
@@ -164,7 +165,7 @@ private fun PrivateMessageReplyContent(
                         onErrorDismissed = onErrorDismissed,
                         onDraftRestore = onDraftRestore,
                         onDraftDiscard = onDraftDiscard,
-                        onImagesPicked = onImagesPicked,
+                        onImagePickerEvent = onImagePickerEvent,
                         onUploadErrorDismissed = onUploadErrorDismissed,
                         onManageRecipients = { recipientManagerOpen = true },
                         modifier = Modifier.weight(1f),
@@ -231,14 +232,12 @@ private fun ReplyEditorBody(
     onErrorDismissed: () -> Unit,
     onDraftRestore: () -> Unit,
     onDraftDiscard: () -> Unit,
-    onImagesPicked: (List<String>) -> Unit,
+    onImagePickerEvent: (ImagePickerEvent) -> Unit,
     onUploadErrorDismissed: () -> Unit,
     onManageRecipients: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode) { uris ->
-        onImagesPicked(uris)
-    }
+    val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode, onImagePickerEvent)
     // No outer scroll : the draft field is weighted so it stretches down to the bar (same
     // extensible-field design as the post editor) ; long content scrolls in the field's own
     // fillViewport column (#275/#410) and inside the preview pane.

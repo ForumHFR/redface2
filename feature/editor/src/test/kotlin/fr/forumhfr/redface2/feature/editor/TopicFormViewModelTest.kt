@@ -39,6 +39,8 @@ import fr.forumhfr.redface2.core.domain.upload.UploadedImage
 import fr.forumhfr.redface2.core.domain.upload.UploadedImageRecord
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerContract
+import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
@@ -1107,6 +1109,90 @@ class TopicFormViewModelTest {
     // the batch semantics themselves are pinned by PostEditorViewModelTest — here we prove the
     // topic-form copy is actually wired: authenticated pick uploads + inserts, anonymous is inert).
     // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `empty picker result logs the ViewModel entry without uploading`() = runTest {
+        val diagnostics = DiagnosticsLog()
+        val uploads = FakeUploadRepository()
+        val reader = FakeImageUploadReader()
+        val viewModel = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            diagnostics = diagnostics,
+            uploadRepository = uploads,
+            imageUploadReader = reader,
+        )
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(
+            TopicFormIntent.ContentChanged(
+                TextFieldValue(text = "draft", selection = TextRange(1, 4)),
+            ),
+        )
+        testScheduler.advanceUntilIdle()
+        val stateBefore = viewModel.state.value
+
+        viewModel.effects.test {
+            viewModel.submit(
+                TopicFormIntent.ImagePickerEventReceived(
+                    ImagePickerEvent.Result(
+                        contract = ImagePickerContract.GET_MULTIPLE_CONTENTS,
+                        uris = emptyList(),
+                    ),
+                ),
+            )
+            testScheduler.advanceUntilIdle()
+
+            assertEquals(stateBefore, viewModel.state.value)
+            assertTrue(reader.readUris.isEmpty())
+            assertEquals(0, uploads.uploadCalls)
+            assertEquals(
+                listOf(
+                    "result contract=GetMultipleContents count=0 sources=[]",
+                    "onImagesPicked count=0",
+                ),
+                diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
+            )
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `document picker logs eleven raw uris then uploads the first ten`() = runTest {
+        val diagnostics = DiagnosticsLog()
+        val uploads = FakeUploadRepository()
+        val reader = FakeImageUploadReader()
+        val viewModel = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            diagnostics = diagnostics,
+            uploadRepository = uploads,
+            imageUploadReader = reader,
+        )
+        testScheduler.advanceUntilIdle()
+        val uris = (1..11).map {
+            "content://com.android.providers.media.documents/document/image%3A$it"
+        }
+
+        viewModel.submit(
+            TopicFormIntent.ImagePickerEventReceived(
+                ImagePickerEvent.Result(
+                    contract = ImagePickerContract.OPEN_MULTIPLE_DOCUMENTS,
+                    uris = uris,
+                ),
+            ),
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(uris.take(10), reader.readUris)
+        assertEquals(10, uploads.uploadCalls)
+        assertEquals(
+            listOf(
+                "result contract=OpenMultipleDocuments count=11 " +
+                    "sources=[content://com.android.providers.media.documents]",
+                "onImagesPicked count=10",
+            ),
+            diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
+        )
+    }
 
     @Test
     fun `picked images upload and insert one img per success, in pick order (#459)`() = runTest {

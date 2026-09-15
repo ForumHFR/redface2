@@ -14,6 +14,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.diagnostics.recordImagePickerEvent
+import fr.forumhfr.redface2.core.domain.diagnostics.recordImagesPicked
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
@@ -27,6 +29,7 @@ import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.write.EditFirstPostContext
 import fr.forumhfr.redface2.core.model.write.NewTopicContext
 import fr.forumhfr.redface2.core.model.write.NewTopicSubmitResult
@@ -38,6 +41,7 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.imageInsertBbcodeOrNull
 import fr.forumhfr.redface2.core.ui.editor.insertBbcodeToken
+import fr.forumhfr.redface2.core.ui.editor.pickedImagesForUpload
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -320,6 +324,7 @@ class TopicFormViewModel @AssistedInject constructor(
             is TopicFormIntent.SmileySelected -> onSmileySelected(intent.token)
             is TopicFormIntent.ImageUrlInserted -> onImageUrlInserted(intent.url)
             is TopicFormIntent.ImagesPicked -> onImagesPicked(intent.uris)
+            is TopicFormIntent.ImagePickerEventReceived -> onImagePickerEvent(intent.event)
             TopicFormIntent.UploadErrorDismissed -> _state.update { it.copy(uploadError = null) }
             TopicFormIntent.DraftRestoreRequested -> onDraftRestoreRequested()
             TopicFormIntent.DraftDiscardRequested -> onDraftDiscardRequested()
@@ -469,6 +474,14 @@ class TopicFormViewModel @AssistedInject constructor(
         }
     }
 
+    /** #988 — records the picker boundary, then preserves the existing upload filtering. */
+    private fun onImagePickerEvent(event: ImagePickerEvent) {
+        diagnostics.recordImagePickerEvent(event)
+        if (event is ImagePickerEvent.Result) {
+            onImagesPicked(pickedImagesForUpload(event.contract, event.uris))
+        }
+    }
+
     /**
      * #459 — pick→read→upload→insert for the topic composer, copied from the proven
      * `PostEditorViewModel.onImagesPicked` contract (multi-image #490): the picked [uris] are read
@@ -480,6 +493,7 @@ class TopicFormViewModel @AssistedInject constructor(
      * than one image.
      */
     private fun onImagesPicked(uris: List<String>) {
+        diagnostics.recordImagesPicked(uris.size)
         val userId = activeUserId
         val targets = uris.filter { it.isNotBlank() }
         // One guard (ReturnCount): nothing in flight already, an authenticated owner, a non-empty pick.
