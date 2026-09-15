@@ -387,8 +387,13 @@ internal fun selectionFollowTarget(
     textLength: Int,
 ): SelectionFollowTarget {
     val focusOnly = SelectionFollowTarget(current.end, SelectionFollowDirection.NONE)
-    if (previous == null || current.collapsed) return focusOnly
-    if (previous.collapsed || current.coversWholeText(textLength)) return focusOnly
+    if (previous == null ||
+        current.collapsed ||
+        previous.collapsed ||
+        current.coversWholeText(textLength)
+    ) {
+        return focusOnly
+    }
     val startMoved = current.start != previous.start
     val endMoved = current.end != previous.end
     return when {
