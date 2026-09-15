@@ -1,5 +1,3 @@
-Redface 2 v0.59.0 — dev.
-- Image viewer: the Android navigation bar now stays visible when it opens, like Google Photos.
-- One tap hides the action bar AND the system bars together; another tap brings them back.
-- No more overlap between the viewer action bar and the Android bar.
-- Immersive mode (Settings > Display): the navigation bar stays hidden, viewer included.
+Redface 2 v0.59.1 — dev.
+- Editor: the view now follows the selection edge you are moving, upwards included, and shows one line ahead.
+- The field no longer stays still while a selection is extended past the visible area.
