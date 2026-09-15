@@ -387,13 +387,7 @@ internal fun selectionFollowTarget(
     textLength: Int,
 ): SelectionFollowTarget {
     val focusOnly = SelectionFollowTarget(current.end, SelectionFollowDirection.NONE)
-    if (previous == null ||
-        current.collapsed ||
-        previous.collapsed ||
-        current.coversWholeText(textLength)
-    ) {
-        return focusOnly
-    }
+    if (previous == null || isNewSelection(previous, current, textLength)) return focusOnly
     val startMoved = current.start != previous.start
     val endMoved = current.end != previous.end
     return when {
@@ -404,6 +398,14 @@ internal fun selectionFollowTarget(
         else -> focusOnly
     }
 }
+
+/**
+ * True when [current] cannot be an edge dragged out of [previous] — a collapsed range (a caret has
+ * no handle), a selection born from a caret, or a whole-text « select all ». Those reveal their
+ * focus edge without lookahead instead of being read as a drag (gate Sol).
+ */
+private fun isNewSelection(previous: TextRange, current: TextRange, textLength: Int): Boolean =
+    current.collapsed || previous.collapsed || current.coversWholeText(textLength)
 
 private fun directionOf(from: Int, to: Int): SelectionFollowDirection =
     if (to > from) SelectionFollowDirection.FORWARD else SelectionFollowDirection.BACKWARD
