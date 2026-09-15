@@ -151,8 +151,8 @@ internal fun TopicFormContent(
 ) {
     var imageUrlDialogOpen by remember { mutableStateOf(false) }
     var optionsSheetOpen by remember { mutableStateOf(false) }
-    val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode) { uris ->
-        onIntent(TopicFormIntent.ImagesPicked(uris))
+    val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode) { event ->
+        onIntent(TopicFormIntent.ImagePickerEventReceived(event))
     }
     Surface(
         modifier = modifier.fillMaxSize(),

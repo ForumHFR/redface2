@@ -66,4 +66,22 @@ class DiagnosticRedactorTest {
         assertEquals("<url> xxxx", redacted)
         assertTrue(redacted.length <= 10)
     }
+
+    @Test
+    fun `redactUriSource keeps only a safe scheme and authority`() {
+        val redacted = DiagnosticRedactor.redactUriSource(
+            "content://com.android.providers.media.documents/document/image%3A12345?token=secret",
+        )
+
+        assertEquals("content://com.android.providers.media.documents", redacted)
+        assertFalse(redacted.contains("document/"))
+        assertFalse(redacted.contains("12345"))
+        assertFalse(redacted.contains("secret"))
+    }
+
+    @Test
+    fun `redactUriSource fails closed for malformed or identifying authority`() {
+        assertEquals("<redacted>", DiagnosticRedactor.redactUriSource("not-a-uri/private/photo.jpg"))
+        assertEquals("<redacted>", DiagnosticRedactor.redactUriSource("content://user@example.test/private"))
+    }
 }

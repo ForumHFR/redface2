@@ -36,6 +36,8 @@ import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadException
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerContract
+import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
@@ -1011,6 +1013,71 @@ class PostEditorViewModelTest {
     }
 
     // ----- #459 PR2 : image upload from the photo picker ---------------------
+
+    @Test
+    fun `empty picker result is logged before being ignored`() = runTest {
+        val diagnostics = DiagnosticsLog()
+        val viewModel = newReplyViewModel(
+            diagnostics = diagnostics,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("alice")),
+        )
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(
+            PostEditorIntent.ImagePickerEventReceived(
+                ImagePickerEvent.Result(
+                    contract = ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA,
+                    uris = emptyList(),
+                ),
+            ),
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(0, imageUploadReader.readCalls)
+        assertEquals(0, uploadRepository.uploadCalls)
+        assertEquals(
+            listOf(
+                "result contract=PickMultipleVisualMedia count=0 sources=[]",
+                "onImagesPicked count=0",
+            ),
+            diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
+        )
+    }
+
+    @Test
+    fun `picker result logs safe sources then uploads as before`() = runTest {
+        val diagnostics = DiagnosticsLog()
+        val viewModel = newReplyViewModel(
+            diagnostics = diagnostics,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("alice")),
+        )
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(
+            PostEditorIntent.ImagePickerEventReceived(
+                ImagePickerEvent.Result(
+                    contract = ImagePickerContract.OPEN_MULTIPLE_DOCUMENTS,
+                    uris = listOf(
+                        "content://com.android.providers.media.documents/document/image%3A12345",
+                    ),
+                ),
+            ),
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(1, uploadRepository.uploadCalls)
+        val messages = diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message }
+        assertEquals(
+            listOf(
+                "result contract=OpenMultipleDocuments count=1 " +
+                    "sources=[content://com.android.providers.media.documents]",
+                "onImagesPicked count=1",
+            ),
+            messages,
+        )
+        assertFalse(messages.joinToString().contains("12345"))
+        assertFalse(messages.joinToString().contains("document/"))
+    }
 
     @Test
     fun `ImagePicked reads the uri uploads with the lowercased userId and inserts img at caret`() = runTest {

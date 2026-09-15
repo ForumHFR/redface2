@@ -11,14 +11,18 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.diagnostics.recordImagePickerEvent
+import fr.forumhfr.redface2.core.domain.diagnostics.recordImagesPicked
 import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadException
 import fr.forumhfr.redface2.core.domain.upload.UploadFailureDiagnostics
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.ui.editor.UploadError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
+import fr.forumhfr.redface2.core.ui.editor.capPickedImages
 import fr.forumhfr.redface2.core.ui.editor.imageInsertBbcodeOrNull
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
@@ -540,6 +544,12 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     )
 
 
+    /** #988 — records the picker boundary, then preserves the existing upload filtering. */
+    fun onImagePickerEvent(event: ImagePickerEvent) {
+        diagnostics.recordImagePickerEvent(event)
+        if (event is ImagePickerEvent.Result) onImagesPicked(capPickedImages(event.uris))
+    }
+
     /**
      * #459 — pick→read→upload→insert for this MP composer, same proven contract as
      * `PostEditorViewModel.onImagesPicked` (multi-image #490): sequential batch, one `[img]` per
@@ -548,6 +558,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
      * session or an upload already in flight are ignored.
      */
     fun onImagesPicked(uris: List<String>) {
+        diagnostics.recordImagesPicked(uris.size)
         val userId = activeUserId
         val targets = uris.filter { it.isNotBlank() }
         // One guard (ReturnCount): nothing in flight already, an authenticated owner, a non-empty pick.

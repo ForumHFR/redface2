@@ -119,8 +119,8 @@ private fun PostEditorContent(
 ) {
     var imageUrlDialogOpen by remember { mutableStateOf(false) }
     var optionsSheetOpen by remember { mutableStateOf(false) }
-    val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode) { uris ->
-        onIntent(PostEditorIntent.ImagesPicked(uris))
+    val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode) { event ->
+        onIntent(PostEditorIntent.ImagePickerEventReceived(event))
     }
     // Reply (#145), Quote (#146) and Edit (#147) submit through HFR's reply/edit form ; the other
     // (defensive) modes show a disabled note instead of a submit bar.

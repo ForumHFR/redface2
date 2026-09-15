@@ -39,6 +39,8 @@ import fr.forumhfr.redface2.core.domain.upload.UploadedImage
 import fr.forumhfr.redface2.core.domain.upload.UploadedImageRecord
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerContract
+import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
@@ -1107,6 +1109,40 @@ class TopicFormViewModelTest {
     // the batch semantics themselves are pinned by PostEditorViewModelTest — here we prove the
     // topic-form copy is actually wired: authenticated pick uploads + inserts, anonymous is inert).
     // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `empty picker result logs the ViewModel entry without uploading`() = runTest {
+        val diagnostics = DiagnosticsLog()
+        val uploads = FakeUploadRepository()
+        val reader = FakeImageUploadReader()
+        val viewModel = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            diagnostics = diagnostics,
+            uploadRepository = uploads,
+            imageUploadReader = reader,
+        )
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(
+            TopicFormIntent.ImagePickerEventReceived(
+                ImagePickerEvent.Result(
+                    contract = ImagePickerContract.GET_MULTIPLE_CONTENTS,
+                    uris = emptyList(),
+                ),
+            ),
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertTrue(reader.readUris.isEmpty())
+        assertEquals(0, uploads.uploadCalls)
+        assertEquals(
+            listOf(
+                "result contract=GetMultipleContents count=0 sources=[]",
+                "onImagesPicked count=0",
+            ),
+            diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
+        )
+    }
 
     @Test
     fun `picked images upload and insert one img per success, in pick order (#459)`() = runTest {

@@ -30,6 +30,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.ui.editor.rememberEditorImagePicker
 import fr.forumhfr.redface2.core.ui.editor.UploadProgressLabel
 import fr.forumhfr.redface2.core.ui.editor.bannerText
@@ -97,7 +98,7 @@ fun PrivateMessageComposeScreen(
         onRetryFormLoad = viewModel::retryFormLoad,
         onDraftRestore = viewModel::onDraftRestoreRequested,
         onDraftDiscard = viewModel::onDraftDiscardRequested,
-        onImagesPicked = viewModel::onImagesPicked,
+        onImagePickerEvent = viewModel::onImagePickerEvent,
         onUploadErrorDismissed = viewModel::onUploadErrorDismissed,
         smileyPicker = viewModel.smileyPicker,
         onSmileySelected = viewModel::onSmileySelected,
@@ -126,7 +127,7 @@ private fun PrivateMessageComposeContent(
     onDraftRestore: () -> Unit,
     onDraftDiscard: () -> Unit,
     // #459 — image upload wiring (photo picker launcher lives in the body composable).
-    onImagesPicked: (List<String>) -> Unit,
+    onImagePickerEvent: (ImagePickerEvent) -> Unit,
     onUploadErrorDismissed: () -> Unit,
     smileyPicker: SmileyPickerController,
     onSmileySelected: (String) -> Unit,
@@ -156,7 +157,7 @@ private fun PrivateMessageComposeContent(
                         onErrorDismissed = onErrorDismissed,
                         onDraftRestore = onDraftRestore,
                         onDraftDiscard = onDraftDiscard,
-                        onImagesPicked = onImagesPicked,
+                        onImagePickerEvent = onImagePickerEvent,
                         onUploadErrorDismissed = onUploadErrorDismissed,
                         modifier = Modifier.weight(1f),
                     )
@@ -211,13 +212,11 @@ private fun ComposeEditorBody(
     onErrorDismissed: () -> Unit,
     onDraftRestore: () -> Unit,
     onDraftDiscard: () -> Unit,
-    onImagesPicked: (List<String>) -> Unit,
+    onImagePickerEvent: (ImagePickerEvent) -> Unit,
     onUploadErrorDismissed: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode) { uris ->
-        onImagesPicked(uris)
-    }
+    val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode, onImagePickerEvent)
     // #275/#410 follow-up (dev v118 feedback, screen 520813) — compose is the ONE editor whose
     // fixed header (recipients + subject + toolbar, ~300dp) could squeeze the weighted draft
     // field to ~zero once the IME opened, with no outer scroll to bring it back into view: the

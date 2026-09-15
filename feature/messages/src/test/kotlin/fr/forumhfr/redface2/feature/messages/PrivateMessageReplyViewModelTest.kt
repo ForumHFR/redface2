@@ -4,6 +4,8 @@ import androidx.compose.ui.text.input.TextFieldValue
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerContract
+import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
@@ -143,6 +145,38 @@ class PrivateMessageReplyViewModelTest {
         assertEquals(2, uploads.uploadCalls)
         assertEquals(2, Regex("\\[img]").findAll(viewModel.state.value.draft.text).count())
         assertFalse(viewModel.state.value.isUploading)
+    }
+
+    @Test
+    fun `empty picker result is logged without starting an upload`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val diagnostics = DiagnosticsLog()
+        val uploads = FakeUploadRepository()
+        val reader = FakeImageUploadReader()
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), uploads, reader, diagnostics, smileyRepository(),
+        )
+        advanceUntilIdle()
+
+        viewModel.onImagePickerEvent(
+            ImagePickerEvent.Result(
+                contract = ImagePickerContract.OPEN_MULTIPLE_DOCUMENTS,
+                uris = emptyList(),
+            ),
+        )
+        advanceUntilIdle()
+
+        assertTrue(reader.readUris.isEmpty())
+        assertEquals(0, uploads.uploadCalls)
+        assertEquals(
+            listOf(
+                "result contract=OpenMultipleDocuments count=0 sources=[]",
+                "onImagesPicked count=0",
+            ),
+            diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
+        )
     }
 
     @Test

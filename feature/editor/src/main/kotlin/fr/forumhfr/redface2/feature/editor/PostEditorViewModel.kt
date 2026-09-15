@@ -14,6 +14,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.diagnostics.recordImagePickerEvent
+import fr.forumhfr.redface2.core.domain.diagnostics.recordImagesPicked
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
@@ -30,6 +32,7 @@ import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyContext
@@ -39,6 +42,7 @@ import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.capPickedImages
 import fr.forumhfr.redface2.core.ui.editor.imageInsertBbcodeOrNull
 import fr.forumhfr.redface2.core.ui.editor.insertBbcodeToken
 import java.io.IOException
@@ -407,6 +411,7 @@ class PostEditorViewModel @AssistedInject constructor(
             is PostEditorIntent.ImageUrlInserted -> onImageUrlInserted(intent.url)
             is PostEditorIntent.ImagePicked -> onImagePicked(intent.uri)
             is PostEditorIntent.ImagesPicked -> onImagesPicked(intent.uris)
+            is PostEditorIntent.ImagePickerEventReceived -> onImagePickerEvent(intent.event)
             PostEditorIntent.UploadErrorDismissed -> _state.update { it.copy(uploadError = null) }
             PostEditorIntent.DraftRestoreRequested -> onDraftRestoreRequested()
             PostEditorIntent.DraftDiscardRequested -> onDraftDiscardRequested()
@@ -578,6 +583,12 @@ class PostEditorViewModel @AssistedInject constructor(
      */
     private fun onImagePicked(uri: String) = onImagesPicked(listOf(uri))
 
+    /** #988 — records the picker boundary, then preserves the existing upload filtering. */
+    private fun onImagePickerEvent(event: ImagePickerEvent) {
+        diagnostics.recordImagePickerEvent(event)
+        if (event is ImagePickerEvent.Result) onImagesPicked(capPickedImages(event.uris))
+    }
+
     /**
      * Multi-image upload — uploads the picked [uris] sequentially (one in-flight at a time, same
      * job/gate as the single path) and inserts `[img]url[/img]` at the caret for each success, in
@@ -588,6 +599,7 @@ class PostEditorViewModel @AssistedInject constructor(
      * counter while more than one image is in the batch (null for a single image).
      */
     private fun onImagesPicked(uris: List<String>) {
+        diagnostics.recordImagesPicked(uris.size)
         val userId = activeUserId
         val targets = uris.filter { it.isNotBlank() }
         // One guard (ReturnCount): nothing in flight already, an authenticated owner, a non-empty pick.

@@ -17,6 +17,32 @@ object DiagnosticRedactor {
         return if (redacted.contains(SCHEME_SEPARATOR)) REDACTED_VALUE else redacted
     }
 
+    /**
+     * Reduces an Android picker URI to a redacted `scheme://authority` source. The path, query and
+     * fragment are discarded before redaction; malformed values and authorities containing user
+     * information fail closed.
+     */
+    fun redactUriSource(uri: String): String {
+        val separatorIndex = uri.indexOf(SCHEME_SEPARATOR)
+        if (separatorIndex <= 0) return REDACTED_VALUE
+        val scheme = uri.substring(0, separatorIndex)
+        val authority = uri
+            .substring(separatorIndex + SCHEME_SEPARATOR.length)
+            .substringBefore('/')
+            .substringBefore('?')
+            .substringBefore('#')
+        val componentsAreSafe = URI_SCHEME_PATTERN.matches(scheme) &&
+            URI_AUTHORITY_PATTERN.matches(authority) &&
+            !authority.contains('@')
+        return if (componentsAreSafe) {
+            val redactedScheme = redact(scheme.lowercase(), MAX_URI_COMPONENT_LENGTH)
+            val redactedAuthority = redact(authority, MAX_URI_COMPONENT_LENGTH)
+            "$redactedScheme$SCHEME_SEPARATOR$redactedAuthority"
+        } else {
+            REDACTED_VALUE
+        }
+    }
+
     private val URL_PATTERN = Regex("""[a-z][a-z0-9+.-]*://[^\s"'<>]+""")
     private val ABSOLUTE_PATH_PATTERN = Regex("""(/storage|/data|/sdcard|/mnt|/proc)[^\s"'<>]*""")
     private val LONG_NUMBER_PATTERN = Regex("""\d{5,}""")
@@ -25,8 +51,11 @@ object DiagnosticRedactor {
             """(?:"(?:\\.|[^"\\])*"|\{[^{}]*}|\[[^\[\]]*\]|[^,\s}\]]+)""",
         RegexOption.IGNORE_CASE,
     )
+    private val URI_SCHEME_PATTERN = Regex("[A-Za-z][A-Za-z0-9+.-]*")
+    private val URI_AUTHORITY_PATTERN = Regex("[A-Za-z0-9._:-]+")
 
     private const val DEFAULT_MAX_LENGTH = 300
+    private const val MAX_URI_COMPONENT_LENGTH = 120
     private const val SCHEME_SEPARATOR = "://"
     private const val REDACTED_URL = "<url>"
     private const val REDACTED_PATH = "<path>"

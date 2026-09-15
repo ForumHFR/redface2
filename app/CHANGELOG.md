@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.59.3` — `internal` (dev) — 2026-09-15
+
+Diagnostic du chemin de sélection d'images avant tout upload ([#988](https://github.com/ForumHFR/redface2/issues/988), contrat de sélecteur [#1128](https://github.com/ForumHFR/redface2/issues/1128)).
+
+### Diagnostic
+
+- **Le journal distingue désormais lancement, retour du sélecteur et entrée dans l'upload** — pour chacun des quatre éditeurs (réponse/édition de post, sujet, réponse MP et nouveau MP), le tag `ImagePicker` consigne le mode utilisateur et le contrat Activity Result effectivement lancé, puis chaque retour avant filtrage — y compris `count=0` — avec le nombre d'URI et leurs couples `schéma://autorité` distincts, enfin l'entrée de `onImagesPicked` avec son compte. L'événement structuré remonte donc une liste vide jusqu'au ViewModel, qui applique ensuite la garde existante : aucun upload ni message utilisateur supplémentaire. Aucun chemin, URI complète, paramètre de requête ou fragment n'est jamais écrit ; les sources bornées passent par `DiagnosticRedactor`. Cette instrumentation cible le trou observé dans la trace de tomtomtls, où deux tentatives montrent le formulaire de réponse mais aucune ligne `UploadReader` ni hébergeur ([#988](https://github.com/ForumHFR/redface2/issues/988)). **Aucun correctif fonctionnel dans cette version.**
+
+---
+
 ## `0.59.2` — `internal` (dev) — 2026-09-15
 
 Hotfix rédaction après le retour de Dintr-un lemn sur la v335 ([#447](https://github.com/ForumHFR/redface2/issues/447)).

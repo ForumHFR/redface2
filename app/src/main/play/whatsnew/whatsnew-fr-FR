@@ -1,3 +1,3 @@
-Redface 2 v0.59.2 — dev.
-- Rédaction : retrait du suivi de sélection ajouté en 0.59.1, qui perturbait le glissement des poignées.
-- Le curseur réduit reste suivi pendant la frappe et les insertions.
+Redface 2 v0.59.3 — dev.
+- Diagnostic : journal enrichi au lancement et au retour du sélecteur d'images pour analyser #988.
+- Seuls le contrat, le nombre et les sources sans chemin sont consignés ; aucun changement fonctionnel.

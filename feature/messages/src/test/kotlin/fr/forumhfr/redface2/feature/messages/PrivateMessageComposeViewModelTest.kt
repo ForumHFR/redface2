@@ -4,6 +4,8 @@ import androidx.compose.ui.text.input.TextFieldValue
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerContract
+import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
@@ -95,6 +97,7 @@ class PrivateMessageComposeViewModelTest {
         smileyRepository: SmileyRepository = mockk(relaxed = true),
         uploadRepository: UploadRepository = FakeUploadRepository(),
         imageUploadReader: ImageUploadReader = FakeImageUploadReader(),
+        diagnostics: DiagnosticsLog = DiagnosticsLog(),
     ): PrivateMessageComposeViewModel = PrivateMessageComposeViewModel(
         initialRecipient = initialRecipient,
         repository = repository,
@@ -104,7 +107,7 @@ class PrivateMessageComposeViewModelTest {
         authRepository = FakeAuthRepository(),
         uploadRepository = uploadRepository,
         imageUploadReader = imageUploadReader,
-        diagnostics = DiagnosticsLog(),
+        diagnostics = diagnostics,
         smileyRepository = smileyRepository,
     )
 
@@ -124,6 +127,40 @@ class PrivateMessageComposeViewModelTest {
         assertEquals(2, uploads.uploadCalls)
         assertEquals(2, Regex("\\[img]").findAll(vm.state.value.draft.text).count())
         assertFalse(vm.state.value.isUploading)
+    }
+
+    @Test
+    fun `empty picker result is logged without starting an upload`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val diagnostics = DiagnosticsLog()
+        val uploads = FakeUploadRepository()
+        val reader = FakeImageUploadReader()
+        val vm = viewModel(
+            repository = repository,
+            uploadRepository = uploads,
+            imageUploadReader = reader,
+            diagnostics = diagnostics,
+        )
+        advanceUntilIdle()
+
+        vm.onImagePickerEvent(
+            ImagePickerEvent.Result(
+                contract = ImagePickerContract.GET_MULTIPLE_CONTENTS,
+                uris = emptyList(),
+            ),
+        )
+        advanceUntilIdle()
+
+        assertTrue(reader.readUris.isEmpty())
+        assertEquals(0, uploads.uploadCalls)
+        assertEquals(
+            listOf(
+                "result contract=GetMultipleContents count=0 sources=[]",
+                "onImagesPicked count=0",
+            ),
+            diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
+        )
     }
 
     @Test
