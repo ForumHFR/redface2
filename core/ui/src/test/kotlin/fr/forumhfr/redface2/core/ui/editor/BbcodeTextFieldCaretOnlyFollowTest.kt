@@ -38,13 +38,23 @@ import org.robolectric.annotation.GraphicsMode
 /**
  * #447 hotfix — the externally scrolled [BbcodeTextField] follows collapsed carets only.
  *
- * The full-screen post and MP editors use [ScrollMode.FILL_VIEWPORT]; `TopicFormScreen` uses the
- * default field inside the caller's `verticalScroll` ([ScrollMode.OUTER]). Both paths keep caret
- * following from #449/#880, while every extended selection remains inert so dragging a legacy
- * `TextFieldValue` handle cannot scroll its coordinate system away from the finger.
+ * The full-screen post editor and MP reply use [ScrollMode.FILL_VIEWPORT]; `TopicFormScreen` and
+ * MP creation use the default field inside the caller's `verticalScroll` ([ScrollMode.OUTER]). Both
+ * paths keep caret following from #449/#880, while this component's requester stays inert for every
+ * extended selection so dragging a legacy `TextFieldValue` handle cannot scroll its coordinate
+ * system away from the finger.
  *
  * Robolectric changes selections as state because the platform handles live in a separate `Popup`.
  * The tests read the real [SemanticsProperties.VerticalScrollAxisRange] of each external scroller.
+ * They deliberately do not use a toolbar wrap to test text changes: legacy `CoreTextField` owns a
+ * separate `BringIntoViewRequester` and reveals its focused selection end when focused text changes,
+ * independently of this component's requester. [BbcodeFormatterTest] pins the atomic extended
+ * selection returned by a wrap; the relayout cases below isolate this component's follow effect by
+ * changing the text layout without changing the text.
+ *
+ * OUTER assertions use the stabilized scroll position as their baseline: at xxhdpi the initial
+ * collapsed-caret reveal can consume the floating label's 8 dp headroom (24 px) while remaining at
+ * the start of the text.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
@@ -109,14 +119,6 @@ class BbcodeTextFieldCaretOnlyFollowTest {
     fun `outer scroll follows an insertion that moves a collapsed caret`() =
         assertCollapsedCaretInsertionIsFollowed(ScrollMode.OUTER)
 
-    @Test
-    fun `fillViewport does not follow a toolbar wrap that preserves an extended selection`() =
-        assertToolbarWrapDoesNotScroll(ScrollMode.FILL_VIEWPORT)
-
-    @Test
-    fun `outer scroll does not follow a toolbar wrap that preserves an extended selection`() =
-        assertToolbarWrapDoesNotScroll(ScrollMode.OUTER)
-
     private fun assertCollapsedCaretIsRevealed(mode: ScrollMode) {
         val value = setContent(mode)
         focusField()
@@ -151,7 +153,7 @@ class BbcodeTextFieldCaretOnlyFollowTest {
         focusField()
         setSelection(value, TextRange(0, 5))
         val before = scrollValue(mode.tag)
-        assertEquals("precondition: the viewport starts at the top", 0f, before, 0f)
+        assertViewportNearStart(mode, before)
 
         setSelection(value, TextRange(0, LONG_TEXT.length))
 
@@ -161,10 +163,16 @@ class BbcodeTextFieldCaretOnlyFollowTest {
     private fun assertRelayoutDoesNotFollowExtendedSelection(mode: ScrollMode) {
         val (value, width) = setResizableContent(mode)
         focusField()
-        setSelection(value, TextRange(5, LONG_TEXT.length))
+        // Both selection edges stay near the start, then the viewport is parked at the opposite end.
+        // A relayout that followed either edge would therefore produce an observable jump upwards.
+        setSelection(value, TextRange(5, 20))
         scrollToEnd(mode.tag)
         val before = scrollValue(mode.tag)
-        assertTrue("precondition: the viewport was manually scrolled", before > 0f)
+        val max = maxScrollValue(mode.tag)
+        assertTrue(
+            "precondition: the viewport was manually scrolled away from both selection edges",
+            max > 0f && before >= max * 0.9f,
+        )
 
         relayout(width)
 
@@ -187,7 +195,7 @@ class BbcodeTextFieldCaretOnlyFollowTest {
         val value = setContent(mode)
         focusField()
         val before = scrollValue(mode.tag)
-        assertEquals("precondition: the caret and viewport start at the top", 0f, before, 0f)
+        assertViewportNearStart(mode, before)
 
         insertAtCaret(value, INSERTED_TEXT)
 
@@ -197,20 +205,6 @@ class BbcodeTextFieldCaretOnlyFollowTest {
                 "(mode=$mode before=$before after=$after)",
             after > before,
         )
-    }
-
-    private fun assertToolbarWrapDoesNotScroll(mode: ScrollMode) {
-        val value = setContent(mode)
-        focusField()
-        val selection = TextRange(LONG_TEXT.length - 200, LONG_TEXT.length - 100)
-        setSelection(value, selection)
-        val before = scrollValue(mode.tag)
-        assertEquals("precondition: the off-screen selection was ignored", 0f, before, 0f)
-
-        applyToolbarWrap(value, BbcodeAction.Bold)
-
-        assertTrue("the toolbar wrap preserves an extended selection", !value.value.selection.collapsed)
-        assertViewportUnchanged(mode, before, "toolbar wrap with an extended selection")
     }
 
     private fun setContent(mode: ScrollMode): MutableState<TextFieldValue> {
@@ -305,29 +299,20 @@ class BbcodeTextFieldCaretOnlyFollowTest {
         composeTestRule.waitForIdle()
     }
 
-    private fun applyToolbarWrap(value: MutableState<TextFieldValue>, action: BbcodeAction) {
-        composeTestRule.runOnIdle {
-            val current = value.value
-            val result = applyBbcodeAction(
-                action = action,
-                text = current.text,
-                selectionStart = current.selection.start,
-                selectionEnd = current.selection.end,
-            )
-            value.value = TextFieldValue(
-                text = result.text,
-                selection = TextRange(result.selectionStart, result.selectionEnd),
-            )
-        }
-        composeTestRule.waitForIdle()
-    }
-
     private fun assertViewportUnchanged(mode: ScrollMode, before: Float, action: String) {
         assertEquals(
             "$action must not move the external viewport in $mode",
             before,
             scrollValue(mode.tag),
             0f,
+        )
+    }
+
+    private fun assertViewportNearStart(mode: ScrollMode, value: Float) {
+        val max = maxScrollValue(mode.tag)
+        assertTrue(
+            "precondition: the initial viewport leaves room to scroll (mode=$mode value=$value max=$max)",
+            max > 0f && value <= max * 0.05f,
         )
     }
 
