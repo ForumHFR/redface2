@@ -4,6 +4,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.junit.runners.Parameterized
 
 class DiagnosticRedactorTest {
 
@@ -68,35 +70,7 @@ class DiagnosticRedactorTest {
     }
 
     @Test
-    fun `redactUriSource keeps only a safe scheme and authority`() {
-        val redacted = DiagnosticRedactor.redactUriSource(
-            "content://com.android.providers.media.documents/document/image%3A12345?token=secret",
-        )
-
-        assertEquals("content://com.android.providers.media.documents", redacted)
-        assertFalse(redacted.contains("document/"))
-        assertFalse(redacted.contains("12345"))
-        assertFalse(redacted.contains("secret"))
-    }
-
-    @Test
-    fun `redactUriSource keeps only recognized provider-shaped authorities`() {
-        assertEquals("content://media", DiagnosticRedactor.redactUriSource("content://media/external/images/1"))
-        assertEquals(
-            "content://com.google.android.apps.photos.contentprovider",
-            DiagnosticRedactor.redactUriSource(
-                "content://com.google.android.apps.photos.contentprovider/secret-photo.jpg",
-            ),
-        )
-        assertEquals(
-            "content://<redacted-authority>",
-            DiagnosticRedactor.redactUriSource("content://alice-photos/private/photo.jpg"),
-        )
-    }
-
-    @Test
     fun `redactUriSource hides local names and identifying authority syntax`() {
-        assertEquals("file://<local>", DiagnosticRedactor.redactUriSource("file://photo-alice.jpg"))
         assertEquals(
             "content://<redacted-authority>",
             DiagnosticRedactor.redactUriSource("content://com.example.provider123456/private"),
@@ -113,6 +87,103 @@ class DiagnosticRedactorTest {
             "content://<redacted-authority>",
             DiagnosticRedactor.redactUriSource("content://com.${"a".repeat(121)}/private"),
         )
-        assertEquals("<redacted>", DiagnosticRedactor.redactUriSource("not-a-uri/private/photo.jpg"))
+    }
+
+    @Test
+    fun `redactUriSource accepts Android resources without exposing their authority`() {
+        assertEquals(
+            "android.resource://<local>",
+            DiagnosticRedactor.redactUriSource("android.resource://fr.forumhfr.redface2/123"),
+        )
+    }
+}
+
+@RunWith(Parameterized::class)
+class DiagnosticRedactorAstraTableTest(
+    private val uri: String,
+    private val expected: String,
+) {
+
+    @Test
+    fun `redactUriSource matches the Astra review table`() {
+        assertEquals(expected, DiagnosticRedactor.redactUriSource(uri))
+    }
+
+    companion object {
+        @JvmStatic
+        @Parameterized.Parameters(name = "{index}: {0}")
+        fun astraCases(): List<Array<String>> = listOf(
+            arrayOf("file://photo-alice.jpg", "file://<local>"),
+            arrayOf("content://alice-photos/x", "content://<redacted-authority>"),
+            arrayOf("content://media/external/images/media/12345", "content://media"),
+            arrayOf(
+                "content://com.google.android.apps.photos.contentprovider/0/1/" +
+                    "content%3A%2F%2Fmedia%2F...",
+                "content://com.google.android.apps.photos.contentprovider",
+            ),
+            arrayOf(
+                "content://com.android.providers.media.documents/document/image%3A12345",
+                "content://com.android.providers.media.documents",
+            ),
+            arrayOf("content://0@media/x", "content://<redacted-authority>"),
+            arrayOf("content://media.example.com/x", "content://<redacted-authority>"),
+            arrayOf("not-a-uri/private/photo.jpg", "<redacted>"),
+            arrayOf("content:///x", "content://<redacted-authority>"),
+        )
+    }
+}
+
+@RunWith(Parameterized::class)
+class DiagnosticRedactorAllowlistBypassTest(
+    private val uri: String,
+    private val expected: String,
+) {
+
+    @Test
+    fun `redactUriSource rejects allowlist bypasses`() {
+        assertEquals(expected, DiagnosticRedactor.redactUriSource(uri))
+    }
+
+    companion object {
+        @JvmStatic
+        @Parameterized.Parameters(name = "{index}: {0}")
+        fun bypassCases(): List<Array<String>> = listOf(
+            arrayOf("content://photo-alice.jpg/x", "content://<redacted-authority>"),
+            arrayOf("content://com.alice1234.photos/x", "content://<redacted-authority>"),
+            arrayOf("photo-alice.jpg://media/x", "<redacted>"),
+            arrayOf("content://media.example.com/x", "content://<redacted-authority>"),
+        )
+    }
+}
+
+@RunWith(Parameterized::class)
+class DiagnosticRedactorProviderAllowlistTest(
+    private val authority: String,
+) {
+
+    @Test
+    fun `redactUriSource keeps an allowlisted provider authority`() {
+        assertEquals(
+            "content://$authority",
+            DiagnosticRedactor.redactUriSource("content://$authority/private/path?token=secret#fragment"),
+        )
+    }
+
+    companion object {
+        @JvmStatic
+        @Parameterized.Parameters(name = "{index}: {0}")
+        fun providerAuthorities(): List<Array<String>> = listOf(
+            arrayOf("media"),
+            arrayOf("downloads"),
+            arrayOf("com.android.providers.media.documents"),
+            arrayOf("com.android.providers.downloads.documents"),
+            arrayOf("com.android.externalstorage.documents"),
+            arrayOf("com.android.providers.media"),
+            arrayOf("com.google.android.apps.photos.contentprovider"),
+            arrayOf("com.google.android.apps.photos.content"),
+            arrayOf("com.google.android.apps.docs.storage"),
+            arrayOf("com.google.android.apps.docs.storage.legacy"),
+            arrayOf("com.android.providers.media.photopicker"),
+        )
     }
 }

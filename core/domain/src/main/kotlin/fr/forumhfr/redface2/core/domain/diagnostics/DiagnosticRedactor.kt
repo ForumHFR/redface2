@@ -18,39 +18,42 @@ object DiagnosticRedactor {
     }
 
     /**
-     * Reduces an Android picker URI to a redacted source. File URIs never expose their local name;
-     * other authorities are retained only when they look like Android content-provider names. The
-     * path, query and fragment are always discarded.
+     * Reduces an Android picker URI to a redacted source. File and Android resource URIs never
+     * expose their local authority. Content policy: « autorités hors liste blanche caviardées ».
+     * The path, query and fragment are always discarded.
      */
     fun redactUriSource(uri: String): String {
         val separatorIndex = uri.indexOf(SCHEME_SEPARATOR)
-        if (separatorIndex <= 0) return REDACTED_VALUE
-        val scheme = uri.substring(0, separatorIndex)
-        val normalizedScheme = scheme.lowercase()
-        val authority = uri
-            .substring(separatorIndex + SCHEME_SEPARATOR.length)
-            .substringBefore('/')
-            .substringBefore('?')
-            .substringBefore('#')
-        val redactedAuthority = when {
-            normalizedScheme == FILE_SCHEME -> REDACTED_LOCAL_AUTHORITY
-            isProviderAuthority(authority) -> authority
-            else -> REDACTED_AUTHORITY
-        }
-        val schemeIsSafe = URI_SCHEME_PATTERN.matches(scheme) && scheme.length <= MAX_URI_COMPONENT_LENGTH
-        return if (schemeIsSafe) {
-            "$normalizedScheme$SCHEME_SEPARATOR$redactedAuthority"
-        } else {
+        return if (separatorIndex <= 0) {
             REDACTED_VALUE
+        } else {
+            val normalizedScheme = uri.substring(0, separatorIndex).lowercase()
+            when (normalizedScheme) {
+                FILE_SCHEME -> "$FILE_SCHEME$SCHEME_SEPARATOR$REDACTED_LOCAL_AUTHORITY"
+                CONTENT_SCHEME -> {
+                    val authority = uri
+                        .substring(separatorIndex + SCHEME_SEPARATOR.length)
+                        .substringBefore('/')
+                        .substringBefore('?')
+                        .substringBefore('#')
+                    val redactedAuthority = if (isAllowedProviderAuthority(authority)) {
+                        authority
+                    } else {
+                        REDACTED_AUTHORITY
+                    }
+                    "$CONTENT_SCHEME$SCHEME_SEPARATOR$redactedAuthority"
+                }
+                ANDROID_RESOURCE_SCHEME ->
+                    "$ANDROID_RESOURCE_SCHEME$SCHEME_SEPARATOR$REDACTED_LOCAL_AUTHORITY"
+                else -> REDACTED_VALUE
+            }
         }
     }
 
-    private fun isProviderAuthority(authority: String): Boolean {
-        val formatIsSafe = URI_AUTHORITY_PATTERN.matches(authority) && authority.length <= MAX_URI_COMPONENT_LENGTH
-        if (!formatIsSafe) return false
-        val looksLikeProvider = authority.contains('.') || authority.lowercase() in PROVIDER_AUTHORITY_ALLOWLIST
-        return looksLikeProvider && !LONG_NUMBER_PATTERN.containsMatchIn(authority)
-    }
+    private fun isAllowedProviderAuthority(authority: String): Boolean =
+        authority in PROVIDER_AUTHORITY_ALLOWLIST &&
+            URI_AUTHORITY_PATTERN.matches(authority) &&
+            !LONG_NUMBER_PATTERN.containsMatchIn(authority)
 
     private val URL_PATTERN = Regex("""[a-z][a-z0-9+.-]*://[^\s"'<>]+""")
     private val ABSOLUTE_PATH_PATTERN = Regex("""(/storage|/data|/sdcard|/mnt|/proc)[^\s"'<>]*""")
@@ -60,21 +63,26 @@ object DiagnosticRedactor {
             """(?:"(?:\\.|[^"\\])*"|\{[^{}]*}|\[[^\[\]]*\]|[^,\s}\]]+)""",
         RegexOption.IGNORE_CASE,
     )
-    private val URI_SCHEME_PATTERN = Regex("[A-Za-z][A-Za-z0-9+.-]*")
     private val URI_AUTHORITY_PATTERN = Regex("[A-Za-z0-9._-]+")
     private val PROVIDER_AUTHORITY_ALLOWLIST = setOf(
         "media",
+        "downloads",
         "com.android.providers.media.documents",
         "com.android.providers.downloads.documents",
         "com.android.externalstorage.documents",
+        "com.android.providers.media",
         "com.google.android.apps.photos.contentprovider",
+        "com.google.android.apps.photos.content",
         "com.google.android.apps.docs.storage",
+        "com.google.android.apps.docs.storage.legacy",
+        "com.android.providers.media.photopicker",
     )
 
     private const val DEFAULT_MAX_LENGTH = 300
-    private const val MAX_URI_COMPONENT_LENGTH = 120
     private const val SCHEME_SEPARATOR = "://"
     private const val FILE_SCHEME = "file"
+    private const val CONTENT_SCHEME = "content"
+    private const val ANDROID_RESOURCE_SCHEME = "android.resource"
     private const val REDACTED_URL = "<url>"
     private const val REDACTED_PATH = "<path>"
     private const val REDACTED_NUMBER = "<n>"
