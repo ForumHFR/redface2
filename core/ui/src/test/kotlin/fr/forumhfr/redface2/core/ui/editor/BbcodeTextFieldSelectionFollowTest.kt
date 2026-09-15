@@ -13,10 +13,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
@@ -178,14 +180,23 @@ class BbcodeTextFieldSelectionFollowTest {
             atTop <= maxScrollValue(BBCODE_FIELD_VIEWPORT_TAG) * 0.05f,
         )
 
+        // Park the viewport at the OTHER end, selection untouched (gate Sol passe 4: asserting it
+        // stays at the top would also pass if the relayout stopped re-firing the follow at all).
+        scrollToEnd(BBCODE_FIELD_VIEWPORT_TAG)
+        val movedAway = scrollValue(BBCODE_FIELD_VIEWPORT_TAG)
+        assertTrue(
+            "precondition: the viewport is parked away from the followed edge (scroll=$movedAway)",
+            movedAway >= maxScrollValue(BBCODE_FIELD_VIEWPORT_TAG) * 0.9f,
+        )
+
         // Same selection, new text layout — what a viewport resize produces.
         relayout(width)
 
         val after = scrollValue(BBCODE_FIELD_VIEWPORT_TAG)
         val maxValue = maxScrollValue(BBCODE_FIELD_VIEWPORT_TAG)
         assertTrue(
-            "the relayout re-reveals the START edge, the viewport stays at the top " +
-                "(after=$after max=$maxValue)",
+            "the relayout re-reveals the START edge, the viewport comes back to the top " +
+                "(away=$movedAway after=$after max=$maxValue)",
             after <= maxValue * 0.05f,
         )
     }
@@ -203,13 +214,20 @@ class BbcodeTextFieldSelectionFollowTest {
             atTop <= maxScrollValue(OUTER_SCROLL_TAG) * 0.05f,
         )
 
+        scrollToEnd(OUTER_SCROLL_TAG)
+        val movedAway = scrollValue(OUTER_SCROLL_TAG)
+        assertTrue(
+            "precondition: the column is parked away from the followed edge (scroll=$movedAway)",
+            movedAway >= maxScrollValue(OUTER_SCROLL_TAG) * 0.9f,
+        )
+
         relayout(width)
 
         val after = scrollValue(OUTER_SCROLL_TAG)
         val maxValue = maxScrollValue(OUTER_SCROLL_TAG)
         assertTrue(
-            "the relayout re-reveals the START edge, the outer column stays at the top " +
-                "(after=$after max=$maxValue)",
+            "the relayout re-reveals the START edge, the outer column comes back to the top " +
+                "(away=$movedAway after=$after max=$maxValue)",
             after <= maxValue * 0.05f,
         )
     }
@@ -460,6 +478,14 @@ class BbcodeTextFieldSelectionFollowTest {
             }
         }
         return value to width
+    }
+
+    /** Moves the scrollable to its far end WITHOUT touching the selection or the text. */
+    private fun scrollToEnd(tag: String) {
+        composeTestRule.onNodeWithTag(tag).performSemanticsAction(SemanticsActions.ScrollBy) {
+            it(0f, 100_000f)
+        }
+        composeTestRule.waitForIdle()
     }
 
     private fun relayout(width: MutableState<Dp>) {
