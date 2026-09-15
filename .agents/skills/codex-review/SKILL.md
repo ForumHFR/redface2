@@ -9,6 +9,10 @@ disable-model-invocation: true
 
 Matérialise la cadence projet « le même agent ne produit + valide pas seul » ([AGENTS.md] § Cadence de validation). L'agent producteur (ex. Claude) fait **cadrer** l'approche (avant un chantier non-trivial), **relire** le diff, et **gater** avant merge par un agent distinct.
 
+> **Si tu es l'agent Codex invoqué par ce flow, tu ES le validateur distinct.** Ne relance ni `codex exec`, ni
+> `codex review`, ni aucun sous-agent « contre-review » : lis le dépôt (lecture seule), tranche, écris le verdict.
+> Constaté le 14/09/2026 (PR #1392) : un Codex qui lit ce fichier a enchaîné cinq sous-Codex jusqu'au timeout.
+
 > ⚠️ **Dépendance hors-repo, par conception.** L'implémentation de référence repose sur le CLI `codex` (harness-side, **non versionné** dans ce repo). Sur un agent qui n'a pas Codex, **dégrader** vers : un autre LLM distinct, une review humaine, ou `/code-review`. Ce skill décrit le **flow** (et la discipline), pas un binaire garanti présent.
 
 ## Flow A — dossier de faits (reviewer un plan / diff / prompt collé)
