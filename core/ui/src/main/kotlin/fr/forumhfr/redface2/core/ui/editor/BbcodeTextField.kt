@@ -26,15 +26,18 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
@@ -88,6 +91,32 @@ import androidx.compose.ui.unit.isFinite
  * lives on a wrapper `Box` around the inner text field; that wrapper MUST stay offset-free
  * (no padding/alignment of its own) so its coordinate space coincides with the text layout's —
  * the caret rect is expressed there, not in the decorated box's space.
+ *
+ * ## Selection follow (#447 point 2 / #1263)
+ *
+ * The same requester follows the edge of the selection that is being MOVED — see
+ * [selectionFollowTarget]. `selection.end` alone (the point 1 implementation) is only the moving
+ * edge when the END handle is dragged; dragging the START handle leaves `end` untouched, so the
+ * viewport stayed still while the selection grew off-screen. The moving edge is revealed with a
+ * one-line lookahead so the user sees where the selection is heading, not just where it stopped.
+ *
+ * **What this does NOT give, and why** — the CONTINUOUS drag-to-scroll (hold a handle against the
+ * viewport edge and have the text scroll under it) is out of reach for this field, and it is not a
+ * matter of scrolling the right container:
+ * - the selection handles are rendered in their own `Popup` window, so their drag events never
+ *   traverse this composable — it cannot even observe that a drag is in progress;
+ * - the legacy `TextFieldSelectionManager` (what `BasicTextField(TextFieldValue, …)` uses)
+ *   contains no scroll code at all — verified on foundation 1.11.2: it accumulates raw pointer
+ *   deltas onto a drag origin captured in the TEXT LAYOUT's coordinate space. Scrolling any
+ *   ancestor therefore desynchronises the drag from the finger by exactly the scrolled distance
+ *   instead of extending the selection, and the reachable offsets stay bounded by one screen of
+ *   finger travel.
+ *
+ * Giving the drag back its coordinate reference means putting a scroller BETWEEN the decoration box
+ * and the inner text field (`TextLayoutResultProxy` compensates that one) or migrating to
+ * `BasicTextField(TextFieldState, …)`, whose `TextFieldCoreModifierNode` owns a `ScrollState` and
+ * scrolls it from the layout — i.e. bringing back the internal scroll that #422/#434 removed, which
+ * is a chantier of its own and not a regression of this one.
  */
 @Suppress("LongParameterList") // Compose component API: optional defaulted params (modifier,
 // placeholder, fillViewport) are the idiomatic surface — a config holder would hurt call-sites.
@@ -210,6 +239,11 @@ private fun BbcodeFieldImpl(
     val bringCursorIntoView = remember { BringIntoViewRequester() }
     val focusRequester = remember { FocusRequester() }
     var textLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
+    // #447 point 2 — the selection this field last brought into view. Comparing the NEXT selection
+    // against it tells which edge is being moved (and in which direction); `null` until the first
+    // reveal, so the open-time reveal keeps the plain #422/#555 behaviour. Read and written only
+    // from the follow effect below, never during composition.
+    var revealedSelection by remember { mutableStateOf<TextRange?>(null) }
 
     // #555 — programmatic focus on entry (one-shot). Without it an editor hydrated with existing
     // content never opens the IME: the caret sits at the end of the text but the field waits for a
@@ -219,10 +253,10 @@ private fun BbcodeFieldImpl(
         if (autoFocus) focusRequester.requestFocus()
     }
 
-    // #447 — follow the caret through the EXTERNAL scrollable while typing. Keyed on the
-    // layout result (a new one lands after every text change) AND the selection (caret moves
-    // without relayout: taps, arrow keys), never on `value.text` alone — that would fire
-    // against the stale layout of the previous text.
+    // #447 — follow the caret (point 1) and the moving edge of the selection (point 2 / #1263)
+    // through the EXTERNAL scrollable. Keyed on the layout result (a new one lands after every
+    // text change) AND the selection (caret moves without relayout: taps, arrow keys, handles),
+    // never on `value.text` alone — that would fire against the stale layout of the previous text.
     //
     // #880 — ALSO keyed on the IME bottom inset. At the sheet → full-screen escalation the
     // resumed draft (and its end-of-text caret) lands ASYNC, after autoFocus already fired and
@@ -239,8 +273,16 @@ private fun BbcodeFieldImpl(
         // layout not delivered yet) would scroll to a meaningless rect : skip, the matching
         // `onTextLayout` re-keys this effect immediately after.
         if (layout.layoutInput.text.text != value.text) return@LaunchedEffect
-        val cursorOffset = value.selection.end.coerceIn(0, layout.layoutInput.text.length)
-        bringCursorIntoView.bringIntoView(layout.getCursorRect(cursorOffset))
+        // #447 point 2 — wait one frame before committing to a target. A drag emits a burst of
+        // selections and a focus gain can land one recomposition BEFORE the selection it comes
+        // with ; each key change cancels this effect during the wait, so only the state the frame
+        // actually settled on is ever scrolled to (no animation fighting, no scroll to a
+        // transient caret — the « saut en fin de message » class of report).
+        withFrameNanos { }
+        val target = selectionFollowTarget(previous = revealedSelection, current = value.selection)
+        revealedSelection = value.selection
+        val offset = target.offset.coerceIn(0, layout.layoutInput.text.length)
+        bringCursorIntoView.bringIntoView(layout.followRect(offset, target.direction))
     }
 
     // #872 — the floating label's headroom must follow the FONT scale, not a fixed dp : the
@@ -304,4 +346,70 @@ private fun BbcodeFieldImpl(
             )
         },
     )
+}
+
+/** Direction the followed selection edge is travelling in — drives the lookahead (#447 point 2). */
+internal enum class SelectionFollowDirection { NONE, FORWARD, BACKWARD }
+
+/** Text offset the viewport must reveal, and where that offset is heading. */
+internal data class SelectionFollowTarget(
+    val offset: Int,
+    val direction: SelectionFollowDirection,
+)
+
+/**
+ * #447 point 2 / #1263 — decide which edge of [current] the viewport must follow.
+ *
+ * `TextRange.start` is the anchor and `TextRange.end` the focus, so a field that always revealed
+ * `end` (the point 1 implementation) never moved while the START handle was dragged: `end` stays
+ * put and the selection grows off-screen — « on ne voit pas ce qu'on sélectionne » (#1263).
+ *
+ * Exactly one edge moving means a drag is under way, and the viewport follows THAT edge with a
+ * lookahead. Both edges moving at once is a brand-new selection (long press on a word, select-all,
+ * a toolbar action re-selecting its inserted tag): reveal the focus edge, without lookahead, so the
+ * view never overshoots a selection the user did not drag.
+ */
+internal fun selectionFollowTarget(previous: TextRange?, current: TextRange): SelectionFollowTarget {
+    val focusOnly = SelectionFollowTarget(current.end, SelectionFollowDirection.NONE)
+    if (previous == null || current.collapsed) return focusOnly
+    val startMoved = current.start != previous.start
+    val endMoved = current.end != previous.end
+    return when {
+        endMoved && !startMoved ->
+            SelectionFollowTarget(current.end, directionOf(previous.end, current.end))
+        startMoved && !endMoved ->
+            SelectionFollowTarget(current.start, directionOf(previous.start, current.start))
+        else -> focusOnly
+    }
+}
+
+private fun directionOf(from: Int, to: Int): SelectionFollowDirection =
+    if (to > from) SelectionFollowDirection.FORWARD else SelectionFollowDirection.BACKWARD
+
+/**
+ * Rect to bring into view for the caret at [offset], grown by one text line in [direction].
+ *
+ * Without the lookahead a dragged edge is revealed flush against the viewport border, which shows
+ * the user what they have already selected but nothing of what comes next. One line is deliberately
+ * small: the reveal has to stay a smooth follow, not a page jump (the caret — [SelectionFollowDirection.NONE] —
+ * keeps the exact #447 point 1 / #422 geometry).
+ */
+private fun TextLayoutResult.followRect(offset: Int, direction: SelectionFollowDirection): Rect {
+    val caret = getCursorRect(offset)
+    val lookahead = caret.height
+    return when (direction) {
+        SelectionFollowDirection.NONE -> caret
+        SelectionFollowDirection.FORWARD -> Rect(
+            left = caret.left,
+            top = caret.top,
+            right = caret.right,
+            bottom = minOf(caret.bottom + lookahead, size.height.toFloat()),
+        )
+        SelectionFollowDirection.BACKWARD -> Rect(
+            left = caret.left,
+            top = maxOf(caret.top - lookahead, 0f),
+            right = caret.right,
+            bottom = caret.bottom,
+        )
+    }
 }
