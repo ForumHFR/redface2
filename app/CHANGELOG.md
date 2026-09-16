@@ -16,6 +16,12 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.59.4` — `internal` (dev) — 2026-09-16
+
+Hotfix #988/#1402 : correction d'une regex du caviardage des diagnostics refusée par le moteur ICU d'Android (accolade non échappée) qui faisait planter l'app à chaque retour du sélecteur d'images depuis la 0.59.3 ; le rédacteur ne peut plus faire tomber l'app (fail-safe) ; garde de syntaxe en test.
+
+---
+
 ## `0.59.3` — `internal` (dev) — 2026-09-15
 
 Diagnostic du chemin de sélection d'images avant tout upload ([#988](https://github.com/ForumHFR/redface2/issues/988), contrat de sélecteur [#1128](https://github.com/ForumHFR/redface2/issues/1128)).

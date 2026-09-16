@@ -1,3 +1,2 @@
-Redface 2 v0.59.3 — dev.
-- Diagnostic : journal enrichi au lancement et au retour du sélecteur d'images pour analyser #988.
-- Seuls le contrat, le nombre et les sources sans chemin sont consignés ; aucun changement fonctionnel.
+Redface 2 v0.59.4 — dev.
+- Correctif urgent : le retour du sélecteur d'images ne plante plus ; le caviardage des diagnostics est fail-safe.
