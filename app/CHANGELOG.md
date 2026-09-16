@@ -18,7 +18,7 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ## `0.59.4` — `internal` (dev) — 2026-09-16
 
-Hotfix #988/#1402 : correction d'une regex du caviardage des diagnostics refusée par le moteur ICU d'Android (accolade non échappée) qui faisait planter l'app à chaque retour du sélecteur d'images depuis la 0.59.3 ; le rédacteur ne peut plus faire tomber l'app (fail-safe) ; garde de syntaxe en test.
+Hotfix #988/#1402 : correction d'une regex du caviardage des diagnostics refusée par le moteur ICU d'Android (accolade non échappée) qui faisait planter l'app à chaque retour du sélecteur d'images depuis la 0.59.3 ; une regex du rédacteur qui refuse de compiler ne fait plus planter l'app (repli fail-closed sur `<redacted>`) ; garde de syntaxe en test.
 
 ---
 

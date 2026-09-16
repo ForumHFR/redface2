@@ -50,7 +50,7 @@ Liste **vivante** des limitations connues de Redface 2 et des compromis **assum�
 
 ## Développement et tests
 
-- **Regex : Android utilise ICU, plus strict que la JVM.** Les accolades littérales `{` et `}` doivent être échappées, y compris dans une classe de caractères `[…]` ; les tests unitaires JVM ne détectent pas cet écart de syntaxe. La garde `DiagnosticRedactorPatternSyntaxTest` vérifie les sources des regex du caviardage des diagnostics.
+- **Regex : Android utilise ICU, plus strict que la JVM.** Les accolades littérales `{` et `}` doivent être échappées hors quantificateur (dans une classe de caractères `[…]` elles sont légales, mais la convention du projet les échappe aussi) ; les tests unitaires JVM ne détectent pas cet écart de syntaxe. La garde `DiagnosticRedactorPatternSyntaxTest` vérifie les sources des regex du caviardage des diagnostics.
 
 ## Messages privés et DT : compromis
 
