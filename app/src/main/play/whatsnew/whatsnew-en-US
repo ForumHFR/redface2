@@ -1,3 +1,2 @@
-Redface 2 v0.59.3 — dev.
-- Diagnostics: log image picker launches and results to investigate #988.
-- Only the contract, count, and path-free sources are recorded; there is no functional change.
+Redface 2 v0.59.4 — dev.
+- Urgent fix: the image picker no longer crashes the app on return; an invalid regex in diagnostic redaction no longer crashes the app.
