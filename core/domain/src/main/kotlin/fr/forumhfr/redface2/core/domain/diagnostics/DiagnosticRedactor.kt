@@ -100,8 +100,12 @@ object DiagnosticRedactor {
             compilePattern(IDENTIFYING_JSON_FIELD_PATTERN_SOURCE, setOf(RegexOption.IGNORE_CASE)),
         )
         return if (patterns.size == REDACT_PATTERN_COUNT) {
-            val (url, absolutePath, longNumber, identifyingJsonField) = patterns
-            RedactPatterns(url, absolutePath, longNumber, identifyingJsonField)
+            RedactPatterns(
+                url = patterns[0],
+                absolutePath = patterns[1],
+                longNumber = patterns[2],
+                identifyingJsonField = patterns[3],
+            )
         } else {
             null
         }
