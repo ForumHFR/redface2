@@ -21,6 +21,7 @@ import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -46,6 +47,7 @@ class BbcodeTextFieldCaretOnlyFollowTest {
 
     private companion object {
         const val TEXT = "0123456789"
+        const val MAX_PROBE_FRAMES = 12
     }
 
     @Test
@@ -126,8 +128,7 @@ class BbcodeTextFieldCaretOnlyFollowTest {
     fun `typing during the probe is rebased onto the real caret`() {
         val initial = TextFieldValue(TEXT, TextRange(6))
         val fixture = focusedFixture(initial)
-        startResizeProbe(fixture)
-        assertEquals(TextRange(5), displayedSelection())
+        startResizeProbe(fixture, TextRange(5))
 
         composeTestRule.onNode(hasSetTextAction()).performTextInput("X")
         composeTestRule.waitForIdle()
@@ -136,23 +137,21 @@ class BbcodeTextFieldCaretOnlyFollowTest {
         assertEquals(expected.text, fixture.value.value.text)
         assertEquals(expected.selection, fixture.value.value.selection)
         assertEquals(listOf(expected), fixture.emissions)
-        finishProbeFrames()
-        assertEquals(expected.selection, displayedSelection())
+        finishProbeFrames(expected.selection)
     }
 
     @Test
     fun `a parent value change during the probe cancels local restoration`() {
         val initial = TextFieldValue(TEXT, TextRange(6))
         val fixture = focusedFixture(initial)
-        startResizeProbe(fixture)
+        startResizeProbe(fixture, TextRange(5))
         val replacement = TextFieldValue("replacement", TextRange(3))
 
         composeTestRule.runOnIdle { fixture.value.value = replacement }
         composeTestRule.waitForIdle()
-        finishProbeFrames()
+        finishProbeFrames(replacement.selection)
 
         assertEquals(replacement, fixture.value.value)
-        assertEquals(replacement.selection, displayedSelection())
         assertTrue(fixture.emissions.isEmpty())
     }
 
@@ -171,27 +170,22 @@ class BbcodeTextFieldCaretOnlyFollowTest {
         composeTestRule.runOnIdle { fixture.height.value = 280.dp }
         composeTestRule.mainClock.advanceTimeByFrame()
         composeTestRule.mainClock.advanceTimeBy(FIELD_SIZE_SETTLE_MS + 1)
-        composeTestRule.mainClock.advanceTimeByFrame()
-        composeTestRule.waitForIdle()
+        awaitDisplayedSelection(TextRange(5), "probe")
 
-        assertEquals(TextRange(5), displayedSelection())
         assertTrue(fixture.emissions.isEmpty())
-        finishProbeFrames()
-        assertEquals(initial.selection, displayedSelection())
+        finishProbeFrames(initial.selection)
     }
 
     private fun assertLocalProbe(initial: TextFieldValue, probe: Int) {
         val fixture = focusedFixture(initial)
 
-        startResizeProbe(fixture)
+        startResizeProbe(fixture, TextRange(probe))
 
-        assertEquals(TextRange(probe), displayedSelection())
         assertEquals(initial, fixture.value.value)
         assertTrue("the rendering probe must not reach the ViewModel callback", fixture.emissions.isEmpty())
 
-        finishProbeFrames()
+        finishProbeFrames(initial.selection)
 
-        assertEquals(initial.selection, displayedSelection())
         assertEquals(initial, fixture.value.value)
         assertTrue(fixture.emissions.isEmpty())
     }
@@ -249,9 +243,29 @@ class BbcodeTextFieldCaretOnlyFollowTest {
         composeTestRule.waitForIdle()
     }
 
-    private fun startResizeProbe(fixture: FieldFixture) {
-        resizeAndSettle(fixture)
-        composeTestRule.waitForIdle()
+    // Frame-driven waits: the probe is displayed for exactly two frames, so the helpers advance
+    // one frame at a time until the expected selection shows up instead of counting frames.
+    private fun startResizeProbe(fixture: FieldFixture, probe: TextRange) {
+        composeTestRule.runOnIdle { fixture.height.value = 240.dp }
+        composeTestRule.mainClock.advanceTimeByFrame()
+        composeTestRule.mainClock.advanceTimeBy(FIELD_SIZE_SETTLE_MS + 1)
+        awaitDisplayedSelection(probe, "probe")
+    }
+
+    private fun finishProbeFrames(restored: TextRange) {
+        awaitDisplayedSelection(restored, "restore")
+    }
+
+    private fun awaitDisplayedSelection(expected: TextRange, stage: String) {
+        repeat(MAX_PROBE_FRAMES) {
+            composeTestRule.waitForIdle()
+            if (displayedSelection() == expected) return
+            composeTestRule.mainClock.advanceTimeByFrame()
+        }
+        fail(
+            "$stage: expected displayed selection $expected, " +
+                "got ${displayedSelection()} after $MAX_PROBE_FRAMES frames",
+        )
     }
 
     private fun resizeAndSettle(fixture: FieldFixture) {
@@ -259,12 +273,6 @@ class BbcodeTextFieldCaretOnlyFollowTest {
         composeTestRule.mainClock.advanceTimeByFrame()
         composeTestRule.mainClock.advanceTimeBy(FIELD_SIZE_SETTLE_MS + 1)
         // Render the probe once; the effect then waits for its second frame.
-        composeTestRule.mainClock.advanceTimeByFrame()
-        composeTestRule.waitForIdle()
-    }
-
-    private fun finishProbeFrames() {
-        composeTestRule.mainClock.advanceTimeByFrame()
         composeTestRule.mainClock.advanceTimeByFrame()
         composeTestRule.waitForIdle()
     }

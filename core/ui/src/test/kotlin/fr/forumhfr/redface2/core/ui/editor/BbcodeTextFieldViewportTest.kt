@@ -56,6 +56,7 @@ class BbcodeTextFieldViewportTest {
     val composeTestRule = createComposeRule()
 
     private companion object {
+        const val REANCHOR_FRAMES = 8
         const val FIELD_TAG = "bounded_bbcode_field"
         const val HOST_TAG = "bounded_bbcode_host"
         val LONG_TEXT = (1..200).joinToString("\n") { "line $it" }
@@ -136,7 +137,7 @@ class BbcodeTextFieldViewportTest {
         focusField()
 
         composeTestRule.runOnIdle { fixture.height.value = 180.dp }
-        composeTestRule.waitForIdle()
+        settleAndAwaitCaretInsideViewport()
 
         assertEquals(TextRange(middle), fixture.value.value.selection)
         assertCaretLineIsInsideViewport(middle)
@@ -155,7 +156,7 @@ class BbcodeTextFieldViewportTest {
         composeTestRule.runOnIdle { fixture.height.value = 400.dp }
         composeTestRule.waitForIdle()
         composeTestRule.runOnIdle { fixture.height.value = 160.dp }
-        composeTestRule.waitForIdle()
+        settleAndAwaitCaretInsideViewport()
 
         assertEquals(TextRange(caret), fixture.value.value.selection)
         assertCaretLineIsInsideViewport(caret)
@@ -241,6 +242,18 @@ class BbcodeTextFieldViewportTest {
             .fetchSemanticsNode()
             .config[SemanticsProperties.TextSelectionRange]
             .end
+    }
+
+    // The size settles after FIELD_SIZE_SETTLE_MS, then the two-frame probe re-anchors the
+    // internal scroller. The centre tap used by the assertion moves the caret, so this wait is
+    // time-driven only: a generous frame budget after the settle delay.
+    private fun settleAndAwaitCaretInsideViewport() {
+        composeTestRule.waitForIdle()
+        composeTestRule.mainClock.advanceTimeBy(FIELD_SIZE_SETTLE_MS + 1)
+        repeat(REANCHOR_FRAMES) {
+            composeTestRule.mainClock.advanceTimeByFrame()
+            composeTestRule.waitForIdle()
+        }
     }
 
     private fun assertCaretLineIsInsideViewport(caret: Int) {
