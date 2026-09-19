@@ -2,42 +2,43 @@ package fr.forumhfr.redface2.feature.messages
 
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
-import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.recordImagePickerEvent
 import fr.forumhfr.redface2.core.domain.diagnostics.recordImagesPicked
-import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
-import fr.forumhfr.redface2.core.domain.upload.UploadException
-import fr.forumhfr.redface2.core.domain.upload.UploadFailureDiagnostics
-import fr.forumhfr.redface2.core.domain.upload.UploadRepository
-import fr.forumhfr.redface2.core.model.AuthState
-import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
-import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
-import fr.forumhfr.redface2.core.ui.editor.UploadError
-import fr.forumhfr.redface2.core.ui.editor.UploadProgress
-import fr.forumhfr.redface2.core.ui.editor.imageInsertBbcodeOrNull
-import fr.forumhfr.redface2.core.ui.editor.pickedImagesForUpload
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
+import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
+import fr.forumhfr.redface2.core.domain.upload.UploadException
+import fr.forumhfr.redface2.core.domain.upload.UploadFailureDiagnostics
+import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
+import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
-import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
+import fr.forumhfr.redface2.core.ui.editor.UploadError
+import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.imageInsertBbcodeOrNull
 import fr.forumhfr.redface2.core.ui.editor.insertBbcodeToken
+import fr.forumhfr.redface2.core.ui.editor.pickedImagesForUpload
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -79,10 +80,15 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     private val imageUploadReader: ImageUploadReader,
     private val diagnostics: DiagnosticsLog,
     smileyRepository: SmileyRepository,
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
 
+    private val initialRecipients = initialRecipient.orEmpty().trim()
     private val _state = MutableStateFlow(
-        PrivateMessageComposeUiState(recipients = initialRecipient.orEmpty().trim()),
+        PrivateMessageComposeUiState(
+            recipients = initialRecipients,
+            recipientsHydratedContent = initialRecipients.takeIf { it.isNotBlank() },
+        ),
     )
     val state: StateFlow<PrivateMessageComposeUiState> = _state.asStateFlow()
 
@@ -166,9 +172,9 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     fun retryFormLoad() = loadForm()
 
     /**
-     * #405 — surface a cached draft (body + subject + recipients) on the banner, never auto-applied
-     * (a server-side `dest` prefill or seeded recipient would otherwise be clobbered). A draft is
-     * considered restorable when any of the three fields is non-blank.
+     * #405/#1415 — offer each cached body/subject/recipient version once. A routing or server-side
+     * `dest` prefill remains eligible while untouched; a real edit to any field suppresses the
+     * offer. The owner snapshot is captured even when the fingerprint guard filters the banner.
      */
     private fun restoreDraftIfAny() {
         viewModelScope.launch {
@@ -178,16 +184,37 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                 !draft.subject.isNullOrBlank() ||
                 !draft.recipients.isNullOrBlank()
             if (hasContent) {
-                _state.update {
-                    it.copy(
-                        restorableDraft = draft.body,
-                        restorableSubject = draft.subject,
-                        restorableRecipients = draft.recipients,
-                    )
+                val fingerprint = draft.restoreOfferFingerprint()
+                if (savedStateHandle.get<String>(DRAFT_RESTORE_OFFER_FINGERPRINT_KEY) == fingerprint) {
+                    return@launch
+                }
+                val canOffer = _state.value.canOfferDraftRestore(draft)
+                if (canOffer) {
+                    _state.update { current ->
+                        current.copy(
+                            restorableDraft = draft.body,
+                            restorableSubject = draft.subject,
+                            restorableRecipients = draft.recipients,
+                        )
+                    }
+                    savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] = fingerprint
                 }
             }
         }
     }
+
+    private fun PrivateMessageComposeUiState.canOfferDraftRestore(
+        cached: EditorDraftStore.Draft,
+    ): Boolean =
+        !matches(cached) &&
+            draft.text.isBlank() &&
+            subject.isBlank() &&
+            (recipients.isBlank() || recipients == recipientsHydratedContent)
+
+    private fun PrivateMessageComposeUiState.matches(cached: EditorDraftStore.Draft): Boolean =
+        draft.text == cached.body &&
+            subject == cached.subject.orEmpty() &&
+            recipients == cached.recipients.orEmpty()
 
     /**
      * #405 — debounced autosave of recipients + subject + body, flagged `isPrivate = true` so the
@@ -308,17 +335,26 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                     // expired hash_check must not clobber toggles (or a recipient edit) the user
                     // changed in between. Mirror of the reply editor's guard.
                     val hydrate = !current.optionsHydratedFromForm
+                    val nextRecipients = if (hydrate && current.recipients.isBlank()) {
+                        form.hiddenFields["dest"].orEmpty()
+                    } else {
+                        current.recipients
+                    }
+                    val keepRestoreOffer = current.restoreOfferDiffersFrom(nextRecipients)
                     current.copy(
                         isLoadingForm = false,
                         formAvailable = true,
                         formError = false,
                         // The composer's `dest` text input comes back through hiddenFields ; a
                         // server-side prefill (dest= in the GET) seeds the local field once.
-                        recipients = if (hydrate && current.recipients.isBlank()) {
-                            form.hiddenFields["dest"].orEmpty()
-                        } else {
-                            current.recipients
-                        },
+                        recipients = nextRecipients,
+                        recipientsHydratedContent = current.hydratedRecipientsContent(
+                            nextRecipients = nextRecipients,
+                            hydrate = hydrate,
+                        ),
+                        restorableDraft = current.restorableDraft.takeIf { keepRestoreOffer },
+                        restorableSubject = current.restorableSubject.takeIf { keepRestoreOffer },
+                        restorableRecipients = current.restorableRecipients.takeIf { keepRestoreOffer },
                         signatureEnabled = if (hydrate) {
                             form.options.signatureEnabled || form.hiddenFields["signature"] == "1"
                         } else {
@@ -349,15 +385,45 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         }
     }
 
+    private fun PrivateMessageComposeUiState.restoreOfferDiffersFrom(nextRecipients: String): Boolean =
+        restorableDraft != null &&
+            (
+                restorableDraft != draft.text ||
+                    restorableSubject.orEmpty() != subject ||
+                    restorableRecipients.orEmpty() != nextRecipients
+                )
+
+    private fun PrivateMessageComposeUiState.hydratedRecipientsContent(
+        nextRecipients: String,
+        hydrate: Boolean,
+    ): String? = if (hydrate && recipients.isBlank() && nextRecipients.isNotBlank()) {
+        nextRecipients
+    } else {
+        recipientsHydratedContent
+    }
+
     fun onRecipientsChanged(value: String) {
-        _state.update { it.copy(recipients = value) }
+        _state.update {
+            it.copy(
+                recipients = value,
+                restorableDraft = it.restorableDraft.takeIf { value.isBlank() },
+                restorableSubject = it.restorableSubject.takeIf { value.isBlank() },
+                restorableRecipients = it.restorableRecipients.takeIf { value.isBlank() },
+            )
+        }
         scheduleAutosave()
     }
 
     fun onSubjectChanged(value: String) {
         _state.update {
             // HFR's maxlength=70 — truncate instead of erroring so pasted text just clips.
-            it.copy(subject = value.take(PrivateMessageComposeUiState.SUBJECT_MAX_LENGTH))
+            val subject = value.take(PrivateMessageComposeUiState.SUBJECT_MAX_LENGTH)
+            it.copy(
+                subject = subject,
+                restorableDraft = it.restorableDraft.takeIf { subject.isBlank() },
+                restorableSubject = it.restorableSubject.takeIf { subject.isBlank() },
+                restorableRecipients = it.restorableRecipients.takeIf { subject.isBlank() },
+            )
         }
         scheduleAutosave()
     }
@@ -538,6 +604,9 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     ): PrivateMessageComposeUiState = copy(
         draft = updated,
         preview = if (isPreviewVisible) previewParser.parsePreview(updated.text) else preview,
+        restorableDraft = restorableDraft.takeIf { updated.text.isBlank() },
+        restorableSubject = restorableSubject.takeIf { updated.text.isBlank() },
+        restorableRecipients = restorableRecipients.takeIf { updated.text.isBlank() },
         // #459 — a fresh text edit dismisses a stale upload banner (a successful upload INSERTS
         // text via this path, which also clears any prior error) — parity with PostEditorState.
         uploadError = if (updated.text != draft.text) null else uploadError,
@@ -683,6 +752,8 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     }
 
     private companion object {
+        private const val DRAFT_RESTORE_OFFER_FINGERPRINT_KEY = "draft_restore_offer_fingerprint"
+
         // #405 — idle window after the last edit before the draft is persisted (cf. PostEditorViewModel).
         private const val AUTOSAVE_DEBOUNCE_MS = 750L
 

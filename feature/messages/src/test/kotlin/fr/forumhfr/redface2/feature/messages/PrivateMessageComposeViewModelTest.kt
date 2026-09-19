@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.messages
 
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
@@ -101,6 +102,7 @@ class PrivateMessageComposeViewModelTest {
         uploadRepository: UploadRepository = FakeUploadRepository(),
         imageUploadReader: ImageUploadReader = FakeImageUploadReader(),
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
+        savedStateHandle: SavedStateHandle = SavedStateHandle(),
     ): PrivateMessageComposeViewModel = PrivateMessageComposeViewModel(
         initialRecipient = initialRecipient,
         repository = repository,
@@ -112,6 +114,7 @@ class PrivateMessageComposeViewModelTest {
         imageUploadReader = imageUploadReader,
         diagnostics = diagnostics,
         smileyRepository = smileyRepository,
+        savedStateHandle = savedStateHandle,
     )
 
     @Test
@@ -511,6 +514,70 @@ class PrivateMessageComposeViewModelTest {
     }
 
     @Test
+    fun `recipient prefill does not hide a different stored compose draft`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm("bozoleclown") } returns composeForm(dest = "bozoleclown")
+        draftStore.preload(
+            EditorDraftKey.mpCompose(),
+            EditorDraftStore.Draft(
+                body = "rescued body",
+                subject = "rescued subject",
+                recipients = "rescued dest",
+                isPrivate = true,
+            ),
+        )
+
+        val vm = viewModel(repository, initialRecipient = "bozoleclown")
+        advanceUntilIdle()
+
+        assertEquals("bozoleclown", vm.state.value.recipients)
+        assertEquals("rescued body", vm.state.value.restorableDraft)
+        assertEquals("rescued subject", vm.state.value.restorableSubject)
+        assertEquals("rescued dest", vm.state.value.restorableRecipients)
+    }
+
+    @Test
+    fun `composer recreation with the same cached version does not reoffer and keeps autosave alive`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val savedStateHandle = SavedStateHandle()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        draftStore.preload(
+            EditorDraftKey.mpCompose(),
+            EditorDraftStore.Draft(body = "rescued MP", isPrivate = true),
+        )
+        val first = viewModel(repository, savedStateHandle = savedStateHandle)
+        advanceUntilIdle()
+        assertEquals("rescued MP", first.state.value.restorableDraft)
+
+        val recreated = viewModel(repository, savedStateHandle = savedStateHandle)
+        advanceUntilIdle()
+
+        assertEquals(null, recreated.state.value.restorableDraft)
+        recreated.onContentChanged(TextFieldValue("new live MP"))
+        advanceTimeBy(800L)
+        assertEquals("new live MP", draftStore.saved[EditorDraftKey.mpCompose()]?.body)
+        assertEquals("tester", draftStore.lastSavedOwner)
+    }
+
+    @Test
+    fun `composer process recreation offers a newer autosaved draft after live state was lost`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val savedStateHandle = SavedStateHandle()
+        val key = EditorDraftKey.mpCompose()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        draftStore.preload(key, EditorDraftStore.Draft(body = "first MP", isPrivate = true))
+        val first = viewModel(repository, savedStateHandle = savedStateHandle)
+        advanceUntilIdle()
+        assertEquals("first MP", first.state.value.restorableDraft)
+
+        draftStore.preload(key, EditorDraftStore.Draft(body = "new MP", isPrivate = true))
+        val recreated = viewModel(repository, savedStateHandle = savedStateHandle)
+        advanceUntilIdle()
+
+        assertEquals("new MP", recreated.state.value.restorableDraft)
+    }
+
+    @Test
     fun `a successful new-conversation submit deletes the cached draft`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchComposeForm(any()) } returns composeForm()
@@ -619,6 +686,8 @@ class PrivateMessageComposeViewModelTest {
     private class FakeEditorDraftStore : EditorDraftStore {
         val saved: MutableMap<String, EditorDraftStore.Draft> = mutableMapOf()
         val deletedKeys: MutableList<String> = mutableListOf()
+        var lastSavedOwner: String? = null
+            private set
 
         fun preload(key: String, draft: EditorDraftStore.Draft) {
             saved[key] = draft
@@ -629,6 +698,7 @@ class PrivateMessageComposeViewModelTest {
         override suspend fun load(owner: String?, key: String): EditorDraftStore.Draft? = saved[key]
 
         override suspend fun save(owner: String?, key: String, draft: EditorDraftStore.Draft) {
+            lastSavedOwner = owner
             saved[key] = draft
         }
 

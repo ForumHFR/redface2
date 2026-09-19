@@ -16,6 +16,13 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.59.6` — `internal` (dev) — 2026-09-19
+
+- **Un tap hors du texte relâche désormais la sélection dans les sujets et les messages privés ([#1391](https://github.com/ForumHFR/redface2/issues/1391))** — les conteneurs de sélection visibles ne sont recréés qu'après un appui long plausible, tandis que l'état interne des spoilers et médias est conservé.
+- **La proposition de restauration d'un brouillon reste unique sans perdre les autosauvegardes ([#1415](https://github.com/ForumHFR/redface2/issues/1415))** — les préremplissages serveur n'empêchent plus la bannière, une recréation ne la duplique pas et une version plus récente redevient proposée après perte de l'état vivant.
+
+---
+
 ## `0.59.5` — `internal` (dev) — 2026-09-19
 
 - **Android 10 : le clavier ne masque plus la saisie ([#1404](https://github.com/ForumHFR/redface2/issues/1404))** — sous API 29, la fenêtre demande `adjustResize` afin que l'inset IME atteigne l'éditeur ; Android 11 et versions ultérieures conservent le comportement `adjustNothing` choisi pour éviter le double déplacement sur Samsung.

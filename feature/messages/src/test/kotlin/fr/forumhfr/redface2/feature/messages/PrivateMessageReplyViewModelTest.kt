@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.messages
 
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
@@ -377,7 +378,7 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
-    fun `stored draft stays offered beside quote prefill and wins only on explicit restore`() = runTest {
+    fun `stored draft is offered alongside an untouched quote prefill`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         val prefill = "[quotemsg=1980000004,4,990001]Citation serveur[/quotemsg]\n"
         coEvery { repository.fetchReplyForm(any(), any()) } returns form(initialContent = prefill)
@@ -395,10 +396,6 @@ class PrivateMessageReplyViewModelTest {
 
         assertEquals(prefill, viewModel.state.value.draft.text)
         assertEquals("Ancien brouillon", viewModel.state.value.restorableDraft)
-
-        viewModel.onDraftRestoreRequested()
-        assertEquals("Ancien brouillon", viewModel.state.value.draft.text)
-        assertNull(viewModel.state.value.restorableDraft)
     }
 
     @Test
@@ -827,6 +824,59 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
+    fun `reply recreation with the same cached version does not reoffer and keeps autosave alive`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val savedStateHandle = SavedStateHandle()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        draftStore.preload(
+            EditorDraftKey.mpReply(request.threadId),
+            EditorDraftStore.Draft(body = "rescued MP", isPrivate = true),
+        )
+        val first = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(), savedStateHandle,
+        )
+        assertEquals("rescued MP", first.state.value.restorableDraft)
+
+        val recreated = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(), savedStateHandle,
+        )
+
+        assertNull(recreated.state.value.restorableDraft)
+        recreated.onContentChanged(TextFieldValue("new live MP"))
+        advanceTimeBy(800L)
+        assertEquals("new live MP", draftStore.saved[EditorDraftKey.mpReply(request.threadId)]?.body)
+        assertEquals("tester", draftStore.lastSavedOwner)
+    }
+
+    @Test
+    fun `reply process recreation offers a newer autosaved draft after live state was lost`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val savedStateHandle = SavedStateHandle()
+        val key = EditorDraftKey.mpReply(request.threadId)
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        draftStore.preload(key, EditorDraftStore.Draft(body = "first MP", isPrivate = true))
+        val first = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(), savedStateHandle,
+        )
+        assertEquals("first MP", first.state.value.restorableDraft)
+
+        draftStore.preload(key, EditorDraftStore.Draft(body = "new MP", isPrivate = true))
+        val recreated = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(), savedStateHandle,
+        )
+
+        assertEquals("new MP", recreated.state.value.restorableDraft)
+    }
+
+    @Test
     fun `discarding deletes the cached MP draft`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } returns form()
@@ -1205,6 +1255,8 @@ class PrivateMessageReplyViewModelTest {
     private class FakeEditorDraftStore : EditorDraftStore {
         val saved: MutableMap<String, EditorDraftStore.Draft> = mutableMapOf()
         val deletedKeys: MutableList<String> = mutableListOf()
+        var lastSavedOwner: String? = null
+            private set
 
         fun preload(key: String, draft: EditorDraftStore.Draft) {
             saved[key] = draft
@@ -1215,6 +1267,7 @@ class PrivateMessageReplyViewModelTest {
         override suspend fun load(owner: String?, key: String): EditorDraftStore.Draft? = saved[key]
 
         override suspend fun save(owner: String?, key: String, draft: EditorDraftStore.Draft) {
+            lastSavedOwner = owner
             saved[key] = draft
         }
 

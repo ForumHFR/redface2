@@ -61,8 +61,12 @@ data class TopicFormState(
      * but never clobbers the field the user had touched.
      */
     val subjectHydratedFromServer: Boolean = false,
+    /** Exact untouched subject received from HFR; null until a non-blank hydration lands. */
+    val subjectHydratedContent: String? = null,
     /** Mirror of [subjectHydratedFromServer] for the BBCode draft. */
     val draftHydratedFromServer: Boolean = false,
+    /** Exact untouched body received from HFR; null until a non-blank hydration lands. */
+    val draftHydratedContent: String? = null,
     /** Mirror of [PostEditorState.optionsHydratedFromForm] for the same anti-clobber reason. */
     val optionsHydratedFromForm: Boolean = false,
     /**
@@ -277,5 +281,8 @@ internal fun TopicFormState.withDraft(updated: TextFieldValue): TopicFormState =
     copy(
         draft = updated,
         validation = validateBbcodeDraft(updated.text),
+        // #1415 — editing the live body makes the cached row ineligible for a restore offer.
+        restorableDraft = restorableDraft.takeIf { updated.text.isBlank() },
+        restorableSubject = restorableSubject.takeIf { updated.text.isBlank() },
         submitError = if (updated.text != draft.text) null else submitError,
     )

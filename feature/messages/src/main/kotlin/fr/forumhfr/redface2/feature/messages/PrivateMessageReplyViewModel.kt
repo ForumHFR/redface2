@@ -2,44 +2,45 @@ package fr.forumhfr.redface2.feature.messages
 
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
-import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.recordImagePickerEvent
 import fr.forumhfr.redface2.core.domain.diagnostics.recordImagesPicked
-import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
-import fr.forumhfr.redface2.core.domain.upload.UploadException
-import fr.forumhfr.redface2.core.domain.upload.UploadFailureDiagnostics
-import fr.forumhfr.redface2.core.domain.upload.UploadRepository
-import fr.forumhfr.redface2.core.model.AuthState
-import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
-import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
-import fr.forumhfr.redface2.core.ui.editor.UploadError
-import fr.forumhfr.redface2.core.ui.editor.UploadProgress
-import fr.forumhfr.redface2.core.ui.editor.imageInsertBbcodeOrNull
-import fr.forumhfr.redface2.core.ui.editor.pickedImagesForUpload
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
+import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
+import fr.forumhfr.redface2.core.domain.upload.UploadException
+import fr.forumhfr.redface2.core.domain.upload.UploadFailureDiagnostics
+import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
+import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.write.PrivateMessageReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
-import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
+import fr.forumhfr.redface2.core.ui.editor.UploadError
+import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.imageInsertBbcodeOrNull
 import fr.forumhfr.redface2.core.ui.editor.insertBbcodeToken
+import fr.forumhfr.redface2.core.ui.editor.pickedImagesForUpload
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -81,6 +82,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     private val imageUploadReader: ImageUploadReader,
     private val diagnostics: DiagnosticsLog,
     smileyRepository: SmileyRepository,
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(PrivateMessageReplyUiState())
@@ -177,16 +179,29 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
 
     fun retryFormLoad() = loadForm()
 
-    /** #405 — surface a cached draft on the banner (never auto-applied). Empty drafts are ignored. */
+    /** #405/#1415 — offer each cached version once unless the user has already edited the field. */
     private fun restoreDraftIfAny() {
         viewModelScope.launch {
             draftOwner = draftStore.currentOwner()
-            val body = draftStore.load(draftOwner, draftKey)?.body
-            if (!body.isNullOrBlank()) {
-                _state.update { it.copy(restorableDraft = body) }
+            val draft = draftStore.load(draftOwner, draftKey) ?: return@launch
+            val body = draft.body
+            if (body.isNotBlank()) {
+                val fingerprint = draft.restoreOfferFingerprint()
+                if (savedStateHandle.get<String>(DRAFT_RESTORE_OFFER_FINGERPRINT_KEY) == fingerprint) {
+                    return@launch
+                }
+                val canOffer = _state.value.canOfferDraftRestore(body)
+                if (canOffer) {
+                    _state.update { current -> current.copy(restorableDraft = body) }
+                    savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] = fingerprint
+                }
             }
         }
     }
+
+    private fun PrivateMessageReplyUiState.canOfferDraftRestore(cachedBody: String): Boolean =
+        draft.text != cachedBody &&
+            (draft.text.isBlank() || draft.text == draftHydratedContent)
 
     /**
      * #405 — debounced autosave of the body, flagged `isPrivate = true` so the logout purge wipes
@@ -605,6 +620,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         copy(
             draft = updated,
             preview = if (isPreviewVisible) previewParser.parsePreview(updated.text) else preview,
+            restorableDraft = restorableDraft.takeIf { updated.text.isBlank() },
             // #459 — a fresh text edit dismisses a stale upload banner — parity with PostEditorState.
             uploadError = if (updated.text != draft.text) null else uploadError,
         )
@@ -616,19 +632,24 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     private fun PrivateMessageReplyUiState.withFormInitialContent(form: ReplyForm): PrivateMessageReplyUiState {
         if (draftHydratedFromForm) return this
         val initial = form.initialContent
-        return if (initial.isEmpty()) {
+        return if (initial.isBlank()) {
             copy(draftHydratedFromForm = true)
         } else {
             val existing = draft.text
-            val combined = if (existing.isEmpty()) {
+            val combined = if (existing.isBlank()) {
                 initial
             } else {
                 val separator = if (initial.endsWith('\n')) "\n" else "\n\n"
                 initial + separator + existing
             }
-            withDraftPreview(
+            val hydrated = withDraftPreview(
                 TextFieldValue(text = combined, selection = TextRange(combined.length)),
-            ).copy(draftHydratedFromForm = true)
+            )
+            hydrated.copy(
+                draftHydratedFromForm = true,
+                draftHydratedContent = combined.takeIf { existing.isBlank() },
+                restorableDraft = restorableDraft.takeIf { it != combined },
+            )
         }
     }
 
@@ -771,6 +792,8 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     }
 
     private companion object {
+        private const val DRAFT_RESTORE_OFFER_FINGERPRINT_KEY = "draft_restore_offer_fingerprint"
+
         // #405 — idle window after the last edit before the draft is persisted (cf. PostEditorViewModel).
         private const val AUTOSAVE_DEBOUNCE_MS = 750L
 

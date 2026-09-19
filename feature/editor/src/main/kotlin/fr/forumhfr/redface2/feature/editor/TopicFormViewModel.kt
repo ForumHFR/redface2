@@ -1,10 +1,8 @@
 package fr.forumhfr.redface2.feature.editor
-import fr.forumhfr.redface2.core.ui.editor.UploadError
-import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
-import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.assisted.Assisted
@@ -38,6 +36,9 @@ import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.model.write.TopicForm
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
+import fr.forumhfr.redface2.core.ui.editor.UploadError
+import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.imageInsertBbcodeOrNull
 import fr.forumhfr.redface2.core.ui.editor.insertBbcodeToken
@@ -89,6 +90,7 @@ class TopicFormViewModel @AssistedInject constructor(
     private val authRepository: AuthRepository,
     private val uploadRepository: UploadRepository,
     private val imageUploadReader: ImageUploadReader,
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
 
     private val _state: MutableStateFlow<TopicFormState> = MutableStateFlow(
@@ -208,22 +210,38 @@ class TopicFormViewModel @AssistedInject constructor(
     }
 
     /**
-     * #405 — surface a cached draft (subject + body) on the banner, never auto-applied (a server
-     * EditFirstPost prefill would otherwise be clobbered). Empty drafts (blank body AND subject)
-     * are ignored.
+     * #405/#1415 — offer each cached subject/body version once. Untouched EditFirstPost hydration
+     * remains eligible, while a real user edit suppresses the offer. The fingerprint survives
+     * process recreation but changes when a newer autosave replaced the hidden row.
      */
     private fun restoreDraftIfAny() {
-        val key = draftKey ?: return
         viewModelScope.launch {
             draftOwner = draftStore.currentOwner()
+            val key = draftKey ?: return@launch
             val draft = draftStore.load(draftOwner, key) ?: return@launch
             if (draft.body.isNotBlank() || !draft.subject.isNullOrBlank()) {
-                _state.update {
-                    it.copy(restorableDraft = draft.body, restorableSubject = draft.subject)
+                val fingerprint = draft.restoreOfferFingerprint()
+                if (savedStateHandle.get<String>(DRAFT_RESTORE_OFFER_FINGERPRINT_KEY) == fingerprint) {
+                    return@launch
+                }
+                val canOffer = _state.value.canOfferDraftRestore(draft)
+                if (canOffer) {
+                    _state.update { current ->
+                        current.copy(restorableDraft = draft.body, restorableSubject = draft.subject)
+                    }
+                    savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] = fingerprint
                 }
             }
         }
     }
+
+    private fun TopicFormState.canOfferDraftRestore(cached: EditorDraftStore.Draft): Boolean =
+        !matches(cached) &&
+            (draft.text.isBlank() || draft.text == draftHydratedContent) &&
+            (subject.text.isBlank() || subject.text == subjectHydratedContent)
+
+    private fun TopicFormState.matches(cached: EditorDraftStore.Draft): Boolean =
+        draft.text == cached.body && subject.text == cached.subject.orEmpty()
 
     /**
      * #405 — debounced autosave of subject + body. Blank body AND blank subject → delete the row.
@@ -571,6 +589,8 @@ class TopicFormViewModel @AssistedInject constructor(
         _state.update { current ->
             current.copy(
                 subject = value,
+                restorableDraft = current.restorableDraft.takeIf { value.text.isBlank() },
+                restorableSubject = current.restorableSubject.takeIf { value.text.isBlank() },
                 submitError = if (value.text != current.subject.text) null else current.submitError,
             )
         }
@@ -959,6 +979,14 @@ class TopicFormViewModel @AssistedInject constructor(
             this
         }
 
+    private fun <T> T.hydratedValue(serverValue: T, hydrate: Boolean): T =
+        if (hydrate) serverValue else this
+
+    private fun TopicFormState.restoreOfferDiffersFrom(
+        nextSubject: TextFieldValue,
+        nextDraft: TextFieldValue,
+    ): Boolean = restorableDraft != nextDraft.text || restorableSubject.orEmpty() != nextSubject.text
+
     private fun TopicFormState.withFormHydration(
         form: TopicForm,
         nextPreview: PostContent,
@@ -971,19 +999,24 @@ class TopicFormViewModel @AssistedInject constructor(
         val nextSubject = subject.hydratedWith(form.subject, hydrateSubject)
         val nextDraft = draft.hydratedWith(form.initialContent, hydrateDraft)
         val hydrateOptions = !optionsHydratedFromForm
+        val keepRestoreOffer = restoreOfferDiffersFrom(nextSubject, nextDraft)
         return copy(
             isLoadingForm = false,
             subject = nextSubject,
             draft = nextDraft,
+            restorableDraft = restorableDraft.takeIf { keepRestoreOffer },
+            restorableSubject = restorableSubject.takeIf { keepRestoreOffer },
             preview = if (hydrateDraft && isPreviewVisible) nextPreview else preview,
             subjectHydratedFromServer = subjectHydratedFromServer || hydrateSubject,
+            subjectHydratedContent = subjectHydratedContent.hydratedValue(nextSubject.text, hydrateSubject),
             draftHydratedFromServer = draftHydratedFromServer || hydrateDraft,
+            draftHydratedContent = draftHydratedContent.hydratedValue(nextDraft.text, hydrateDraft),
             // The form's `selectedSubcat` is `Int?` post-#149 :
             //  - Edit FP : non-null by `parseEditFirstPost` contract, kept as-is.
             //  - New : HFR serves no pre-selection, so `form.selectedSubcat` is
             //    null. We fall back to `subcat` (the entry chip from the
             //    request), letting the user override via the dropdown later.
-            selectedSubcat = if (hydrateOptions) form.selectedSubcat ?: subcat else selectedSubcat,
+            selectedSubcat = selectedSubcat.hydratedValue(form.selectedSubcat ?: subcat, hydrateOptions),
             subcategoryChoices = form.subcategoryChoices,
             // #213 — propagate whether HFR served a <select name=subcat>. A cat
             // without sub-category (false) is submittable with subcat=0 ; a cat
@@ -991,14 +1024,13 @@ class TopicFormViewModel @AssistedInject constructor(
             hasSubcategorySelect = form.hasSubcategorySelect,
             pollPresent = form.poll.present,
             pollEditable = form.poll.editableInThisVersion,
-            signatureEnabled = if (hydrateOptions) form.options.signatureEnabled else signatureEnabled,
-            smileyDisabled = if (hydrateOptions) form.options.smileyDisabled else smileyDisabled,
-            emailNotificationEnabled = if (hydrateOptions) {
-                form.options.emailNotificationEnabled
-            } else {
-                emailNotificationEnabled
-            },
-            msgIcon = if (hydrateOptions) form.msgIcon.toEditorMsgIcon() else msgIcon,
+            signatureEnabled = signatureEnabled.hydratedValue(form.options.signatureEnabled, hydrateOptions),
+            smileyDisabled = smileyDisabled.hydratedValue(form.options.smileyDisabled, hydrateOptions),
+            emailNotificationEnabled = emailNotificationEnabled.hydratedValue(
+                form.options.emailNotificationEnabled,
+                hydrateOptions,
+            ),
+            msgIcon = msgIcon.hydratedValue(form.msgIcon.toEditorMsgIcon(), hydrateOptions),
             optionsHydratedFromForm = true,
             // Propagate the parsed anonymous flag so `canSubmit` can refuse
             // the POST locally (the wire would refuse too, but we don't want
@@ -1033,6 +1065,7 @@ class TopicFormViewModel @AssistedInject constructor(
 
     private companion object {
         private const val LOG_TAG_VM = "TopicFormVM"
+        private const val DRAFT_RESTORE_OFFER_FINGERPRINT_KEY = "draft_restore_offer_fingerprint"
 
         // #405 — idle window after the last edit before the draft is persisted (cf. PostEditorViewModel).
         private const val AUTOSAVE_DEBOUNCE_MS = 750L
