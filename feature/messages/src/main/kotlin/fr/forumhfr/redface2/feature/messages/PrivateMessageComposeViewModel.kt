@@ -396,7 +396,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     private fun PrivateMessageComposeUiState.hydratedRecipientsContent(
         nextRecipients: String,
         hydrate: Boolean,
-    ): String = if (hydrate && recipients.isBlank() && nextRecipients.isNotBlank()) {
+    ): String? = if (hydrate && recipients.isBlank() && nextRecipients.isNotBlank()) {
         nextRecipients
     } else {
         recipientsHydratedContent
