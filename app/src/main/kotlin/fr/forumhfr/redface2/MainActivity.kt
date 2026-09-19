@@ -3,7 +3,9 @@ package fr.forumhfr.redface2
 import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.drawable.ColorDrawable
+import android.os.Build
 import android.os.Bundle
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.compose.setContent
@@ -38,6 +40,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
+        requestLegacyImeResize()
         super.onCreate(savedInstanceState)
         applyBootstrapWindowBackground()
         val restoredDeliveryId = savedInstanceState
@@ -51,6 +54,17 @@ class MainActivity : ComponentActivity() {
             RedfaceApp(intentDelivery = latestIntentDelivery)
         }
         reconcileLauncherIconOnStartup()
+    }
+
+    /**
+     * #1404/#624 — `adjustNothing` does not dispatch IME insets below Android 11. Requesting resize
+     * there restores the inset without changing the API 30+ manifest behaviour.
+     */
+    @Suppress("DEPRECATION")
+    private fun requestLegacyImeResize() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
+            window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        }
     }
 
     private fun reconcileLauncherIconOnStartup() {
