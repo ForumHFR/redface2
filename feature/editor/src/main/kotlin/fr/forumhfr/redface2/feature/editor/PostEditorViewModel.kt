@@ -588,8 +588,9 @@ class PostEditorViewModel @AssistedInject constructor(
         diagnostics.recordImagePickerEvent(event)
         if (event is ImagePickerEvent.Result) {
             val pickedImages = pickedImagesForUpload(event.contract, event.uris)
+            val showEmptyPickerBanner = pickedImages.isEmpty() && uploadJob?.isActive != true
             onImagesPicked(pickedImages)
-            if (pickedImages.isEmpty()) {
+            if (showEmptyPickerBanner) {
                 _state.update { it.copy(uploadError = UploadError.NoImageReceived) }
             }
         }

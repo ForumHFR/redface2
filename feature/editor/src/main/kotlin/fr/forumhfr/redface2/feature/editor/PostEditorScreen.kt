@@ -512,9 +512,12 @@ internal fun EditorSubmitBar(
                     .fillMaxWidth()
                     // Single bottom inset = max(navBar, ime); union() takes the larger so the two never
                     // stack into a phantom gap. Keyboard closed → bar clears the gesture nav bar; keyboard
-                    // open → bar rides exactly on top of the IME. Requires windowSoftInputMode=adjustNothing
-                    // (AndroidManifest) so the OEM does NOT also resize the window — the resize+imePadding
-                    // double-shift was the Samsung One UI bug (#624).
+                    // open → bar rides exactly on top of the IME. Requires
+                    // windowSoftInputMode=adjustNothing on API 30+ (AndroidManifest) so the OEM does
+                    // not also resize the window — the resize+imePadding double-shift was the Samsung
+                    // One UI bug (#624). Below API 30, MainActivity requests adjustResize because
+                    // adjustNothing dispatches a zero IME inset there; enableEdgeToEdge keeps the
+                    // window unresized so the inset stays single (#1404).
                     .windowInsetsPadding(
                         WindowInsets.navigationBars
                             .union(WindowInsets.ime)
