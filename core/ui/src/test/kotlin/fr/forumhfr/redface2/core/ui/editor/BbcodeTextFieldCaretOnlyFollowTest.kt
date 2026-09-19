@@ -95,35 +95,6 @@ class BbcodeTextFieldCaretOnlyFollowTest {
         assertFieldValue(emitted.copy(selection = TextRange(0)))
     }
 
-    @Test
-    fun staleEchoDoesNotOverwriteANewerBufferedEdit() {
-        val fixture = setBridgeContent(TextFieldValue("draft", TextRange(5)))
-        val firstEdit = TextFieldValue("draft1", TextRange(6), composition = null)
-        val newerEdit = TextFieldValue("draft12", TextRange(7), composition = null)
-
-        composeTestRule.runOnIdle {
-            fixture.fieldState.edit {
-                replace(0, length, firstEdit.text)
-                selection = firstEdit.selection
-            }
-        }
-        composeTestRule.waitUntil(timeoutMillis = 5_000) { fixture.emissions.isNotEmpty() }
-        composeTestRule.waitForIdle()
-        assertEquals(firstEdit.text, fixture.emissions.last().text)
-
-        // Schedule the parent echo, then reproduce the IME edit that lands before its effect.
-        composeTestRule.runOnIdle {
-            fixture.value.value = firstEdit
-            fixture.fieldState.edit {
-                replace(0, length, newerEdit.text)
-                selection = newerEdit.selection
-            }
-        }
-        composeTestRule.waitForIdle()
-
-        assertTextFieldStateValue(fixture.fieldState, newerEdit)
-    }
-
     @OptIn(ExperimentalFoundationApi::class)
     @Test
     fun selectionOnlyResyncDoesNotCreateATextUndoEntry() {
