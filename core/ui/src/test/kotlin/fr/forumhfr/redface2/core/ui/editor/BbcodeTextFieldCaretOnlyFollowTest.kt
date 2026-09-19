@@ -1,8 +1,11 @@
 package fr.forumhfr.redface2.core.ui.editor
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.MutableState
@@ -19,6 +22,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -75,6 +79,70 @@ class BbcodeTextFieldCaretOnlyFollowTest {
     }
 
     @Test
+    fun parentSelectionNormalizationConvergesWithoutAnEmissionLoop() {
+        val fixture = setFieldContent(
+            initial = TextFieldValue("abcd", TextRange(2)),
+            normalize = { changed -> changed.copy(selection = TextRange(0)) },
+        )
+        focusField()
+
+        composeTestRule.onNode(hasSetTextAction()).performTextInput("X")
+        composeTestRule.waitUntil(timeoutMillis = 5_000) { fixture.emissions.isNotEmpty() }
+        composeTestRule.waitForIdle()
+
+        val emitted = TextFieldValue("abXcd", TextRange(3), composition = null)
+        assertEquals(listOf(emitted), fixture.emissions)
+        assertFieldValue(emitted.copy(selection = TextRange(0)))
+    }
+
+    @Test
+    fun staleEchoDoesNotOverwriteANewerBufferedEdit() {
+        val fixture = setBridgeContent(TextFieldValue("draft", TextRange(5)))
+        val firstEdit = TextFieldValue("draft1", TextRange(6), composition = null)
+        val newerEdit = TextFieldValue("draft12", TextRange(7), composition = null)
+
+        composeTestRule.runOnIdle {
+            fixture.fieldState.edit {
+                replace(0, length, firstEdit.text)
+                selection = firstEdit.selection
+            }
+        }
+        composeTestRule.waitUntil(timeoutMillis = 5_000) {
+            fixture.emissions == listOf(firstEdit)
+        }
+
+        // Schedule the parent echo, then reproduce the IME edit that lands before its effect.
+        composeTestRule.runOnIdle {
+            fixture.value.value = firstEdit
+            fixture.fieldState.edit {
+                replace(0, length, newerEdit.text)
+                selection = newerEdit.selection
+            }
+        }
+        composeTestRule.waitForIdle()
+
+        assertTextFieldStateValue(fixture.fieldState, newerEdit)
+    }
+
+    @OptIn(ExperimentalFoundationApi::class)
+    @Test
+    fun selectionOnlyResyncDoesNotCreateATextUndoEntry() {
+        val initial = TextFieldValue("draft", TextRange(5))
+        val fixture = setBridgeContent(initial)
+        val movedSelection = initial.copy(selection = TextRange(0))
+
+        composeTestRule.runOnIdle { fixture.value.value = movedSelection }
+        composeTestRule.waitForIdle()
+
+        assertTextFieldStateValue(fixture.fieldState, movedSelection)
+        assertFalse(
+            "selection-only parent sync must not replace text or create an undo entry",
+            fixture.fieldState.undoState.canUndo,
+        )
+        assertTrue("a parent selection resync must not echo", fixture.emissions.isEmpty())
+    }
+
+    @Test
     fun toolbarLikeInsertionLandsAtParentSelection() {
         val fixture = setFieldContent(TextFieldValue("hello world", TextRange(5)))
         val insertion = TextFieldValue(
@@ -89,7 +157,10 @@ class BbcodeTextFieldCaretOnlyFollowTest {
         assertTrue(fixture.emissions.isEmpty())
     }
 
-    private fun setFieldContent(initial: TextFieldValue): FieldFixture {
+    private fun setFieldContent(
+        initial: TextFieldValue,
+        normalize: (TextFieldValue) -> TextFieldValue = { it },
+    ): FieldFixture {
         lateinit var value: MutableState<TextFieldValue>
         val emissions = mutableListOf<TextFieldValue>()
         composeTestRule.setContent {
@@ -101,7 +172,7 @@ class BbcodeTextFieldCaretOnlyFollowTest {
                             value = value.value,
                             onValueChange = { changedValue ->
                                 emissions += changedValue
-                                value.value = changedValue
+                                value.value = normalize(changedValue)
                             },
                             label = "Message",
                             modifier = Modifier.fillMaxSize(),
@@ -112,6 +183,26 @@ class BbcodeTextFieldCaretOnlyFollowTest {
         }
         composeTestRule.waitForIdle()
         return FieldFixture(value = value, emissions = emissions)
+    }
+
+    private fun setBridgeContent(initial: TextFieldValue): BridgeFixture {
+        lateinit var value: MutableState<TextFieldValue>
+        lateinit var fieldState: TextFieldState
+        val emissions = mutableListOf<TextFieldValue>()
+        composeTestRule.setContent {
+            value = remember { mutableStateOf(initial) }
+            fieldState = rememberTextFieldState(
+                initialText = initial.text,
+                initialSelection = initial.selection,
+            )
+            BbcodeTextFieldValueBridge(
+                fieldState = fieldState,
+                value = value.value,
+                onValueChange = { emissions += it },
+            )
+        }
+        composeTestRule.waitForIdle()
+        return BridgeFixture(value = value, fieldState = fieldState, emissions = emissions)
     }
 
     private fun focusField() {
@@ -125,8 +216,19 @@ class BbcodeTextFieldCaretOnlyFollowTest {
         assertEquals(expected.selection, config[SemanticsProperties.TextSelectionRange])
     }
 
+    private fun assertTextFieldStateValue(state: TextFieldState, expected: TextFieldValue) {
+        assertEquals(expected.text, state.text.toString())
+        assertEquals(expected.selection, state.selection)
+    }
+
     private data class FieldFixture(
         val value: MutableState<TextFieldValue>,
+        val emissions: MutableList<TextFieldValue>,
+    )
+
+    private data class BridgeFixture(
+        val value: MutableState<TextFieldValue>,
+        val fieldState: TextFieldState,
         val emissions: MutableList<TextFieldValue>,
     )
 }

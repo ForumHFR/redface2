@@ -48,6 +48,7 @@ import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
+import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
 import fr.forumhfr.redface2.core.ui.editor.editorControlsMaxHeight
 
@@ -170,7 +171,7 @@ internal fun TopicFormContent(
             ) {
                 val controlsMaxHeight = editorControlsMaxHeight(
                     available = maxHeight,
-                    fieldMin = TOPIC_DRAFT_MIN_HEIGHT,
+                    fieldMin = EDITOR_DRAFT_MIN_HEIGHT,
                 )
                 Column(
                     modifier = Modifier.fillMaxSize(),
@@ -304,8 +305,6 @@ internal fun TopicFormContent(
         )
     }
 }
-
-private val TOPIC_DRAFT_MIN_HEIGHT = 160.dp
 
 /**
  * Dismissible error banners of the topic composer: the submit failure (typed [SubmitError]) and the

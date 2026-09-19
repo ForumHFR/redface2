@@ -10,6 +10,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldLineLimits
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
@@ -90,50 +91,11 @@ internal fun BbcodeTextField(
         initialText = value.text,
         initialSelection = value.selection,
     )
-    val received = BbcodeTextSnapshot(text = value.text, selection = value.selection)
-    var lastReceived by remember { mutableStateOf(received) }
-    var lastEmitted by remember { mutableStateOf<BbcodeTextSnapshot?>(null) }
-    val latestValue by rememberUpdatedState(value)
-    val latestOnValueChange by rememberUpdatedState(onValueChange)
-
-    // Parent-owned changes (toolbar, smileys, quotes, draft restore and ViewModel undo) must replace
-    // the BTF2 buffer and its selection. IME composition deliberately stays inside TextFieldState.
-    LaunchedEffect(received) {
-        lastReceived = received
-        lastEmitted = null
-        val current = BbcodeTextSnapshot(
-            text = fieldState.text.toString(),
-            selection = fieldState.selection,
-        )
-        if (current != received) {
-            fieldState.edit {
-                replace(0, length, received.text)
-                selection = received.selection
-            }
-        }
-    }
-
-    // snapshotFlow keeps autosave and preview fed by user edits. Comparing both the last parent
-    // value and the last callback value prevents the controlled bridge from echoing either side.
-    LaunchedEffect(fieldState) {
-        snapshotFlow {
-            BbcodeTextSnapshot(
-                text = fieldState.text.toString(),
-                selection = fieldState.selection,
-            )
-        }.collect { changed ->
-            if (changed != lastReceived && changed != lastEmitted) {
-                lastEmitted = changed
-                latestOnValueChange(
-                    latestValue.copy(
-                        text = changed.text,
-                        selection = changed.selection,
-                        composition = null,
-                    ),
-                )
-            }
-        }
-    }
+    BbcodeTextFieldValueBridge(
+        fieldState = fieldState,
+        value = value,
+        onValueChange = onValueChange,
+    )
 
     val fieldInteractions = remember { MutableInteractionSource() }
     val focusRequester = remember { FocusRequester() }
@@ -151,7 +113,7 @@ internal fun BbcodeTextField(
     }
     val lineLimits = TextFieldLineLimits.MultiLine(
         minHeightInLines = 5,
-        maxHeightInLines = 100,
+        maxHeightInLines = Int.MAX_VALUE,
     )
     Box(modifier = modifier.fillMaxWidth()) {
         BasicTextField(
@@ -185,6 +147,66 @@ internal fun BbcodeTextField(
             ),
             scrollState = scrollState,
         )
+    }
+}
+
+/** Controlled-value bridge kept separate so ordering-sensitive echo races can be tested directly. */
+@Composable
+internal fun BbcodeTextFieldValueBridge(
+    fieldState: TextFieldState,
+    value: TextFieldValue,
+    onValueChange: (TextFieldValue) -> Unit,
+) {
+    val received = BbcodeTextSnapshot(text = value.text, selection = value.selection)
+    var lastReceived by remember { mutableStateOf(received) }
+    var lastEmitted by remember { mutableStateOf<BbcodeTextSnapshot?>(null) }
+    val latestValue by rememberUpdatedState(value)
+    val latestOnValueChange by rememberUpdatedState(onValueChange)
+
+    // Parent-owned changes (toolbar, smileys, quotes, draft restore and normalization) must update
+    // the BTF2 buffer and its selection. IME composition deliberately stays inside TextFieldState.
+    LaunchedEffect(received) {
+        lastReceived = received
+        val previouslyEmitted = lastEmitted
+        lastEmitted = null
+        // The parent echo can arrive one frame after a newer IME edit. It acknowledges our last
+        // emission; applying it downward would overwrite the live buffer and lose that newer edit.
+        if (received == previouslyEmitted) return@LaunchedEffect
+
+        val current = BbcodeTextSnapshot(
+            text = fieldState.text.toString(),
+            selection = fieldState.selection,
+        )
+        if (current != received) {
+            val textChanged = current.text != received.text
+            fieldState.edit {
+                // A selection-only resync must preserve IME composition and the text undo stack.
+                if (textChanged) replace(0, length, received.text)
+                selection = received.selection
+            }
+        }
+    }
+
+    // snapshotFlow keeps autosave and preview fed by user edits. Comparing both the last parent
+    // value and the last callback value prevents the controlled bridge from echoing either side.
+    LaunchedEffect(fieldState) {
+        snapshotFlow {
+            BbcodeTextSnapshot(
+                text = fieldState.text.toString(),
+                selection = fieldState.selection,
+            )
+        }.collect { changed ->
+            if (changed != lastReceived && changed != lastEmitted) {
+                lastEmitted = changed
+                latestOnValueChange(
+                    latestValue.copy(
+                        text = changed.text,
+                        selection = changed.selection,
+                        composition = null,
+                    ),
+                )
+            }
+        }
     }
 }
 

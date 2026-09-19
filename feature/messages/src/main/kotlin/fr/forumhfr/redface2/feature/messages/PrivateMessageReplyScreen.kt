@@ -39,6 +39,7 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
+import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
@@ -250,7 +251,7 @@ private fun ReplyEditorBody(
     ) {
         val controlsMaxHeight = editorControlsMaxHeight(
             available = maxHeight,
-            fieldMin = 160.dp,
+            fieldMin = EDITOR_DRAFT_MIN_HEIGHT,
         )
         Column(
             modifier = Modifier.fillMaxSize(),

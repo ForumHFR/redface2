@@ -40,7 +40,7 @@ Liste **vivante** des limitations connues de Redface 2 et des compromis **assum�
 
 ## Rédaction
 
-- **Aucun suivi des sélections étendues dans le champ à défilement externe** (#447, #1263, suivi par #1406). Depuis la `0.59.2`, l'éditeur ne déplace volontairement plus le viewport pendant qu'une sélection est étendue, ni lors d'un relayout avec cette sélection : le suivi introduit en 0.59.1 désynchronisait les poignées du doigt sur la v335. Le **curseur réduit** reste suivi pendant la frappe et les insertions. Pour sélectionner au-delà de la zone visible, il faut donc relâcher la poignée puis faire défiler manuellement. Le défilement continu et un futur suivi de sélection exigent de rendre un défilement interne au champ : soit un scroller **entre la decoration box et l'inner text field**, que `TextLayoutResultProxy` peut compenser, soit la migration vers `BasicTextField(TextFieldState, …)` et son `ScrollState` ([#1406](https://github.com/ForumHFR/redface2/issues/1406)).
+- **Rédaction longue : défilement interne, hauteur contrainte en paysage** (#447, #1263, #1406, `0.59.8`). Le champ repose désormais sur `BasicTextField(TextFieldState, …)` et son `ScrollState` : le contenu défile dans le champ, le curseur reste visible pendant la frappe et les poignées suivent une sélection étendue. Limite restante : en paysage avec le clavier ouvert, la faible hauteur disponible ne permet pas de garder simultanément une grande zone de saisie et tous les contrôles ; ceux-ci restent accessibles dans leur zone défilante, et masquer le clavier rend davantage d'espace au brouillon.
 
 ## Réseau
 

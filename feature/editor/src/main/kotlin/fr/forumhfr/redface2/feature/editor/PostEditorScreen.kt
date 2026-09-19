@@ -61,6 +61,7 @@ import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitState
 import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
+import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsCallbacks
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsColumn
@@ -173,7 +174,7 @@ private fun PostEditorContent(
                 BoxWithConstraints(modifier = Modifier.weight(1f)) {
                     val topZoneMaxHeight = editorControlsMaxHeight(
                         available = maxHeight,
-                        fieldMin = 160.dp,
+                        fieldMin = EDITOR_DRAFT_MIN_HEIGHT,
                     )
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         EditorTopZone(

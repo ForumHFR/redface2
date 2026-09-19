@@ -11,6 +11,7 @@ import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -19,6 +20,7 @@ import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
@@ -30,6 +32,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import kotlin.math.abs
 
 /** #275/#410/#447 — BTF2 owns the bounded BBCode viewport and caret following. */
 @RunWith(RobolectricTestRunner::class)
@@ -41,22 +44,29 @@ class BbcodeTextFieldViewportTest {
     val composeTestRule = createComposeRule()
 
     private companion object {
-        const val FIELD_TAG = "bounded_bbcode_field"
         const val HOST_TAG = "bounded_bbcode_host"
         val LONG_TEXT = (1..200).joinToString("\n") { "line $it" }
     }
 
+    private lateinit var density: Density
     private lateinit var scrollState: ScrollState
     private var latestTextLayout: TextLayoutResult? = null
 
     @Test
-    fun fieldFillsItsBoundedHost() {
-        setFieldContent(text = "short", height = 240.dp)
+    fun longContentViewportMatchesHostMinusLabelHeadroom() {
+        setFieldContent(text = LONG_TEXT, height = 240.dp)
 
         val host = composeTestRule.onNodeWithTag(HOST_TAG).fetchSemanticsNode()
-        val field = composeTestRule.onNodeWithTag(FIELD_TAG).fetchSemanticsNode()
-        assertEquals(host.size.width, field.size.width)
-        assertEquals(host.size.height, field.size.height)
+        val layout = requireNotNull(latestTextLayout)
+        val viewportHeight = layout.size.height - scrollState.maxValue
+        val expectedHeight = host.size.height - with(density) { 8.dp.roundToPx() }
+        val tolerance = with(density) { 1.dp.roundToPx() }
+
+        assertTrue(
+            "BTF2 viewport must use the bounded host below the floating-label headroom " +
+                "(viewport=$viewportHeight expected=$expectedHeight)",
+            abs(viewportHeight - expectedHeight) <= tolerance,
+        )
     }
 
     @Test
@@ -116,6 +126,7 @@ class BbcodeTextFieldViewportTest {
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 Surface(color = MaterialTheme.colorScheme.surface) {
+                    density = LocalDensity.current
                     value = remember { mutableStateOf(TextFieldValue(text, selection)) }
                     fieldHeight = remember { mutableStateOf(height) }
                     scrollState = rememberScrollState()
@@ -128,9 +139,7 @@ class BbcodeTextFieldViewportTest {
                             value = value.value,
                             onValueChange = { value.value = it },
                             label = "Message",
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .testTag(FIELD_TAG),
+                            modifier = Modifier.fillMaxSize(),
                             scrollState = scrollState,
                             onTextLayout = { getResult -> latestTextLayout = getResult() },
                         )
