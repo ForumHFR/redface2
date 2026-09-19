@@ -188,20 +188,17 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                 if (savedStateHandle.get<String>(DRAFT_RESTORE_OFFER_FINGERPRINT_KEY) == fingerprint) {
                     return@launch
                 }
-                var offered = false
-                _state.update { current ->
-                    if (current.canOfferDraftRestore(draft)) {
-                        offered = true
+                val canOffer = _state.value.canOfferDraftRestore(draft)
+                if (canOffer) {
+                    _state.update { current ->
                         current.copy(
                             restorableDraft = draft.body,
                             restorableSubject = draft.subject,
                             restorableRecipients = draft.recipients,
                         )
-                    } else {
-                        current
                     }
+                    savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] = fingerprint
                 }
-                if (offered) savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] = fingerprint
             }
         }
     }
@@ -343,12 +340,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                     } else {
                         current.recipients
                     }
-                    val keepRestoreOffer = current.restorableDraft != null &&
-                        (
-                            current.restorableDraft != current.draft.text ||
-                                current.restorableSubject.orEmpty() != current.subject ||
-                                current.restorableRecipients.orEmpty() != nextRecipients
-                            )
+                    val keepRestoreOffer = current.restoreOfferDiffersFrom(nextRecipients)
                     current.copy(
                         isLoadingForm = false,
                         formAvailable = true,
@@ -356,13 +348,10 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                         // The composer's `dest` text input comes back through hiddenFields ; a
                         // server-side prefill (dest= in the GET) seeds the local field once.
                         recipients = nextRecipients,
-                        recipientsHydratedContent = if (
-                            hydrate && current.recipients.isBlank() && nextRecipients.isNotBlank()
-                        ) {
-                            nextRecipients
-                        } else {
-                            current.recipientsHydratedContent
-                        },
+                        recipientsHydratedContent = current.hydratedRecipientsContent(
+                            nextRecipients = nextRecipients,
+                            hydrate = hydrate,
+                        ),
                         restorableDraft = current.restorableDraft.takeIf { keepRestoreOffer },
                         restorableSubject = current.restorableSubject.takeIf { keepRestoreOffer },
                         restorableRecipients = current.restorableRecipients.takeIf { keepRestoreOffer },
@@ -394,6 +383,23 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                 _state.update { it.copy(isLoadingForm = false, formAvailable = false, formError = true) }
             }
         }
+    }
+
+    private fun PrivateMessageComposeUiState.restoreOfferDiffersFrom(nextRecipients: String): Boolean =
+        restorableDraft != null &&
+            (
+                restorableDraft != draft.text ||
+                    restorableSubject.orEmpty() != subject ||
+                    restorableRecipients.orEmpty() != nextRecipients
+                )
+
+    private fun PrivateMessageComposeUiState.hydratedRecipientsContent(
+        nextRecipients: String,
+        hydrate: Boolean,
+    ): String = if (hydrate && recipients.isBlank() && nextRecipients.isNotBlank()) {
+        nextRecipients
+    } else {
+        recipientsHydratedContent
     }
 
     fun onRecipientsChanged(value: String) {

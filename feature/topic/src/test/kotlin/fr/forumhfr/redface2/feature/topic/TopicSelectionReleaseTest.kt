@@ -6,15 +6,18 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
@@ -28,6 +31,7 @@ import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
 import fr.forumhfr.redface2.core.ui.post.releasePostSelectionOnTap
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -45,6 +49,8 @@ class TopicSelectionReleaseTest {
 
     @get:Rule
     val compose = createComposeRule()
+
+    private var doubleTapTimeoutMillis = 0L
 
     @Test
     fun `long press keeps selection epoch and tap outside selected post advances it`() {
@@ -76,6 +82,34 @@ class TopicSelectionReleaseTest {
     }
 
     @Test
+    fun `double tap arms selection and the following outside tap advances its epoch`() {
+        val epoch = mutableIntStateOf(0)
+        setTwoPosts(epoch)
+
+        compose.onNodeWithText(FIRST_POST_TEXT).performTouchInput { doubleClick() }
+        compose.runOnIdle { assertEquals("the selection gesture must not release itself", 0, epoch.intValue) }
+
+        compose.onNodeWithTag(SECOND_POST_BACKGROUND_TAG).performTouchInput { click() }
+        compose.runOnIdle { assertEquals(1, epoch.intValue) }
+    }
+
+    @Test
+    fun `two taps beyond the double tap timeout do not arm selection`() {
+        val epoch = mutableIntStateOf(0)
+        setTwoPosts(epoch)
+        compose.runOnIdle { assertTrue(doubleTapTimeoutMillis > 0) }
+
+        compose.onNodeWithText(FIRST_POST_TEXT).performTouchInput {
+            click()
+            advanceEventTime(doubleTapTimeoutMillis + 1)
+            click()
+        }
+        compose.onNodeWithTag(SECOND_POST_BACKGROUND_TAG).performTouchInput { click() }
+
+        compose.runOnIdle { assertEquals(0, epoch.intValue) }
+    }
+
+    @Test
     fun `selection observer does not consume a link tap in another post`() {
         val epoch = mutableIntStateOf(0)
         val uriHandler = RecordingUriHandler()
@@ -93,11 +127,13 @@ class TopicSelectionReleaseTest {
     private fun setTwoPosts(epoch: androidx.compose.runtime.MutableIntState, uriHandler: UriHandler? = null) {
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                val viewConfiguration = LocalViewConfiguration.current
+                SideEffect { doubleTapTimeoutMillis = viewConfiguration.doubleTapTimeoutMillis }
                 val selectionMaybeActive = remember { mutableStateOf(false) }
                 val content: @Composable () -> Unit = {
                     Column(
                         modifier = Modifier.releasePostSelectionOnTap(
-                            onLongPressObserved = { selectionMaybeActive.value = true },
+                            onSelectionPlausible = { selectionMaybeActive.value = true },
                             onTap = {
                                 if (selectionMaybeActive.value) {
                                     epoch.intValue += 1

@@ -190,16 +190,11 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                 if (savedStateHandle.get<String>(DRAFT_RESTORE_OFFER_FINGERPRINT_KEY) == fingerprint) {
                     return@launch
                 }
-                var offered = false
-                _state.update { current ->
-                    if (current.canOfferDraftRestore(body)) {
-                        offered = true
-                        current.copy(restorableDraft = body)
-                    } else {
-                        current
-                    }
+                val canOffer = _state.value.canOfferDraftRestore(body)
+                if (canOffer) {
+                    _state.update { current -> current.copy(restorableDraft = body) }
+                    savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] = fingerprint
                 }
-                if (offered) savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] = fingerprint
             }
         }
     }
@@ -637,11 +632,11 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     private fun PrivateMessageReplyUiState.withFormInitialContent(form: ReplyForm): PrivateMessageReplyUiState {
         if (draftHydratedFromForm) return this
         val initial = form.initialContent
-        return if (initial.isEmpty()) {
+        return if (initial.isBlank()) {
             copy(draftHydratedFromForm = true)
         } else {
             val existing = draft.text
-            val combined = if (existing.isEmpty()) {
+            val combined = if (existing.isBlank()) {
                 initial
             } else {
                 val separator = if (initial.endsWith('\n')) "\n" else "\n\n"
@@ -652,7 +647,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             )
             hydrated.copy(
                 draftHydratedFromForm = true,
-                draftHydratedContent = combined.takeIf { existing.isEmpty() },
+                draftHydratedContent = combined.takeIf { existing.isBlank() },
                 restorableDraft = restorableDraft.takeIf { it != combined },
             )
         }

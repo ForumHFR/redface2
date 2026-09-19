@@ -1729,7 +1729,7 @@ private fun ThreadMessages(
             .pinchZoom(scrollSession.zoomState, scrollSession.listState)
             .then(scrollSession.swipeModifier)
             .releasePostSelectionOnTap(
-                onLongPressObserved = markPostSelectionPossible,
+                onSelectionPlausible = markPostSelectionPossible,
                 onTap = releasePostSelection,
             )
             // One owner covers free card surfaces and interstices; child clickables consume their up.

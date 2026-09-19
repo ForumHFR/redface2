@@ -334,16 +334,11 @@ class PostEditorViewModel @AssistedInject constructor(
                 if (savedStateHandle.get<String>(DRAFT_RESTORE_OFFER_FINGERPRINT_KEY) == fingerprint) {
                     return@launch
                 }
-                var offered = false
-                _state.update { current ->
-                    if (current.canOfferDraftRestore(body)) {
-                        offered = true
-                        current.copy(restorableDraft = body)
-                    } else {
-                        current
-                    }
+                val canOffer = _state.value.canOfferDraftRestore(body)
+                if (canOffer) {
+                    _state.update { current -> current.copy(restorableDraft = body) }
+                    savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] = fingerprint
                 }
-                if (offered) savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] = fingerprint
             }
         }
     }

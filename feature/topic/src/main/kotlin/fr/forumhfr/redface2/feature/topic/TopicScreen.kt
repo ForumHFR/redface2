@@ -2429,7 +2429,7 @@ private fun TopicLoadedContent(
             // rule as topicPageSwipe).
             .topicMagnifier(zoomState, listState)
             .releasePostSelectionOnTap(
-                onLongPressObserved = markPostSelectionPossible,
+                onSelectionPlausible = markPostSelectionPossible,
                 onTap = releasePostSelection,
             )
             // #285 — system-bar insets (status + navigation) are now consumed by the Scaffold/TopAppBar

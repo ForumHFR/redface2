@@ -224,16 +224,13 @@ class TopicFormViewModel @AssistedInject constructor(
                 if (savedStateHandle.get<String>(DRAFT_RESTORE_OFFER_FINGERPRINT_KEY) == fingerprint) {
                     return@launch
                 }
-                var offered = false
-                _state.update { current ->
-                    if (current.canOfferDraftRestore(draft)) {
-                        offered = true
+                val canOffer = _state.value.canOfferDraftRestore(draft)
+                if (canOffer) {
+                    _state.update { current ->
                         current.copy(restorableDraft = draft.body, restorableSubject = draft.subject)
-                    } else {
-                        current
                     }
+                    savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] = fingerprint
                 }
-                if (offered) savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] = fingerprint
             }
         }
     }
