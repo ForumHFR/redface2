@@ -1,4 +1,6 @@
-Redface 2 v0.59.8 — dev.
-- The modern BBCode field natively tracks selection handles and the caret.
-- Private-message replies now match the other editors and reserve 160 dp for writing when space allows.
-- In the BBCode field, double-tap selects the word and triple-tap the line; automatic selection widening is off in this editor.
+Redface 2 v0.60.0 — beta.
+- Smooth text selection in the editor, even beyond the screen; double-tap selects the word, triple-tap the line.
+- The caret stays visible when the keyboard opens.
+- Tap outside text to clear selection in topics and private messages.
+- Android 10: the keyboard no longer hides the editor.
+- A banner helps when the image picker returns nothing.

@@ -1,4 +1,6 @@
-Redface 2 v0.59.8 — dev.
-- Le champ BBCode moderne suit nativement les poignées de sélection et le curseur.
-- La réponse MP s'aligne sur les autres éditeurs et réserve 160 dp à la saisie quand l'espace le permet.
-- Dans le champ BBCode, le double-tap sélectionne le mot et le triple-tap la ligne ; l'élargissement automatique de la sélection est désactivé dans cet éditeur.
+Redface 2 v0.60.0 — bêta.
+- Sélection de texte fluide dans l'éditeur, même au-delà de l'écran ; double-tap = le mot, triple-tap = la ligne.
+- Le curseur reste visible à l'ouverture du clavier.
+- Un tap hors du texte relâche la sélection dans les sujets et les MP.
+- Android 10 : le clavier ne masque plus la saisie.
+- Une bannière aide si le sélecteur d'images ne renvoie rien.
