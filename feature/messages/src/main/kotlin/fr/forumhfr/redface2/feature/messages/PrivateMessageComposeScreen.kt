@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.messages
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -42,6 +43,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
+import fr.forumhfr.redface2.core.ui.editor.editorControlsMaxHeight
 import fr.forumhfr.redface2.core.ui.post.PostMediaDiskCachePolicy
 
 /**
@@ -217,19 +219,124 @@ private fun ComposeEditorBody(
     modifier: Modifier = Modifier,
 ) {
     val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode, onImagePickerEvent)
-    // #275/#410 follow-up (dev v118 feedback, screen 520813) — compose is the ONE editor whose
-    // fixed header (recipients + subject + toolbar, ~300dp) could squeeze the weighted draft
-    // field to ~zero once the IME opened, with no outer scroll to bring it back into view: the
-    // reply editor's « no outer scroll, fillViewport field » design assumes the field owns most
-    // of the body. Header-heavy editors use the OTHER documented branch of the BbcodeTextField
-    // contract (cf. TopicFormScreen): the WHOLE body scrolls and the field keeps the default
-    // grow-with-content mode — cursor bring-into-view and IME re-anchoring route through this
-    // outer column (fillViewport here would nest two unbounded same-direction scrollables).
-    Column(
+    // #447/#1406 — the draft must be bounded so the legacy field owns selection scrolling. The
+    // header keeps an internal capped scroll: unlike the pre-#434 weighted layout, recipients,
+    // subject and toolbar cannot squeeze the draft to zero when the IME opens.
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
-            .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 12.dp),
+    ) {
+        val controlsMaxHeight = editorControlsMaxHeight(
+            available = maxHeight,
+            fieldMin = COMPOSE_DRAFT_MIN_HEIGHT,
+        )
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            // #447/#555/#1406 — metadata, preview controls and every banner share one bounded
+            // scrollable zone. None of that non-weighted chrome can consume the draft viewport.
+            Column(
+                modifier = Modifier
+                    .heightIn(max = controlsMaxHeight)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                ComposeEditorControls(
+                    state = state,
+                    onRecipientsChanged = onRecipientsChanged,
+                    onSubjectChanged = onSubjectChanged,
+                    onToolbarAction = onToolbarAction,
+                    onImageUploadRequested = launchImagePicker,
+                )
+
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                    TextButton(onClick = onTogglePreview) {
+                        Text(
+                            text = stringResource(
+                                if (state.isPreviewVisible) {
+                                    R.string.messages_reply_preview_hide
+                                } else {
+                                    R.string.messages_reply_preview_show
+                                },
+                            ),
+                        )
+                    }
+                }
+
+                if (state.isPreviewVisible) {
+                    HorizontalDivider()
+                    BbcodePreview(
+                        content = state.preview,
+                        modifier = Modifier.fillMaxWidth(),
+                        mediaDiskCachePolicy = PostMediaDiskCachePolicy.DISABLED,
+                    )
+                }
+
+                if (state.restorableDraft != null ||
+                    state.restorableSubject != null ||
+                    state.restorableRecipients != null
+                ) {
+                    MessageDraftRestoreBanner(onRestore = onDraftRestore, onDiscard = onDraftDiscard)
+                }
+
+                state.submitError?.let { error ->
+                    Text(
+                        // Unexpected gets composer wording (« vérifiez votre liste de messages ») —
+                        // the shared banner says « vérifiez la conversation », which has no meaning
+                        // before the conversation exists (Codex review of #404).
+                        text = stringResource(
+                            if (error == PrivateMessageReplyError.Unexpected) {
+                                R.string.messages_compose_error_unexpected
+                            } else {
+                                error.bannerResId
+                            },
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    TextButton(onClick = onErrorDismissed) {
+                        Text(text = stringResource(R.string.messages_reply_error_dismiss))
+                    }
+                }
+
+                // #459 — dismissible upload-error banner (shared :core:ui wording).
+                state.uploadError?.let { error ->
+                    Text(
+                        text = error.bannerText(),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    TextButton(onClick = onUploadErrorDismissed) {
+                        Text(text = stringResource(R.string.messages_reply_error_dismiss))
+                    }
+                }
+            }
+
+            BbcodeTextField(
+                value = state.draft,
+                onValueChange = onContentChanged,
+                label = stringResource(R.string.messages_reply_field_label),
+                placeholder = stringResource(R.string.messages_reply_field_placeholder),
+                modifier = Modifier.weight(1f),
+                // #459 — lock editing during a batch (caret must not move between two insertions).
+                readOnly = state.isUploading,
+            )
+        }
+    }
+}
+
+@Composable
+@Suppress("LongParameterList") // Hoisted editor controls: each callback maps to one field/action.
+private fun ComposeEditorControls(
+    state: PrivateMessageComposeUiState,
+    onRecipientsChanged: (String) -> Unit,
+    onSubjectChanged: (String) -> Unit,
+    onToolbarAction: (BbcodeAction) -> Unit,
+    onImageUploadRequested: () -> Unit,
+) {
+    Column(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         OutlinedTextField(
@@ -243,7 +350,6 @@ private fun ComposeEditorBody(
             supportingText = { Text(stringResource(R.string.messages_compose_recipients_help)) },
             modifier = Modifier.fillMaxWidth(),
         )
-
         OutlinedTextField(
             value = state.subject,
             onValueChange = onSubjectChanged,
@@ -261,96 +367,16 @@ private fun ComposeEditorBody(
             },
             modifier = Modifier.fillMaxWidth(),
         )
-
         BbcodeToolbar(
             onAction = onToolbarAction,
             // #459 — upload wiring, same affordance as the topic-side editors.
-            onImageUploadRequested = launchImagePicker,
+            onImageUploadRequested = onImageUploadRequested,
             uploading = state.isUploading,
         )
         // #459 — « n/N » batch counter while a multi-image upload is in flight.
         UploadProgressLabel(state.uploadProgress)
-
-        BbcodeTextField(
-            value = state.draft,
-            onValueChange = onContentChanged,
-            label = stringResource(R.string.messages_reply_field_label),
-            placeholder = stringResource(R.string.messages_reply_field_placeholder),
-            // Default grow-with-content mode inside the outer scroll (see the column comment):
-            // a min height keeps a real tap-target/typing area even with an empty draft.
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = COMPOSE_DRAFT_MIN_HEIGHT),
-            // #459 — lock editing during a batch (caret must not move between two insertions).
-            readOnly = state.isUploading,
-        )
-
-        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-            TextButton(onClick = onTogglePreview) {
-                Text(
-                    text = stringResource(
-                        if (state.isPreviewVisible) {
-                            R.string.messages_reply_preview_hide
-                        } else {
-                            R.string.messages_reply_preview_show
-                        },
-                    ),
-                )
-            }
-        }
-
-        if (state.isPreviewVisible) {
-            HorizontalDivider()
-            // Plain block inside the outer scroll (a nested same-direction verticalScroll is a
-            // Compose error) — same shape as TopicFormScreen's preview.
-            BbcodePreview(
-                content = state.preview,
-                modifier = Modifier.fillMaxWidth(),
-                mediaDiskCachePolicy = PostMediaDiskCachePolicy.DISABLED,
-            )
-        }
-
-        if (state.restorableDraft != null ||
-            state.restorableSubject != null ||
-            state.restorableRecipients != null
-        ) {
-            MessageDraftRestoreBanner(onRestore = onDraftRestore, onDiscard = onDraftDiscard)
-        }
-
-        state.submitError?.let { error ->
-            Text(
-                // Unexpected gets composer wording (« vérifiez votre liste de messages ») —
-                // the shared banner says « vérifiez la conversation », which has no meaning
-                // before the conversation exists (Codex review of #404).
-                text = stringResource(
-                    if (error == PrivateMessageReplyError.Unexpected) {
-                        R.string.messages_compose_error_unexpected
-                    } else {
-                        error.bannerResId
-                    },
-                ),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
-            TextButton(onClick = onErrorDismissed) {
-                Text(text = stringResource(R.string.messages_reply_error_dismiss))
-            }
-        }
-
-        // #459 — dismissible upload-error banner (shared :core:ui wording).
-        state.uploadError?.let { error ->
-            Text(
-                text = error.bannerText(),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
-            TextButton(onClick = onUploadErrorDismissed) {
-                Text(text = stringResource(R.string.messages_reply_error_dismiss))
-            }
-        }
     }
 }
 
-// #275/#410 follow-up — minimum draft area inside the scrollable compose body: with an empty
-// draft the outlined field still offers a real tap/typing target under the header fields.
+// #434/#447 — reserve a real draft viewport under the capped, scrollable compose controls.
 private val COMPOSE_DRAFT_MIN_HEIGHT = 160.dp
