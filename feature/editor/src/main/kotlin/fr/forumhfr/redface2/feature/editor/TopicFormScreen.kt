@@ -49,6 +49,7 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
+import fr.forumhfr.redface2.core.ui.editor.editorControlsMaxHeight
 
 /**
  * Topic-level form screen. Live for [TopicFormMode.EditFirstPost] (Phase 2D
@@ -164,18 +165,20 @@ internal fun TopicFormContent(
             BoxWithConstraints(
                 modifier = Modifier
                     .weight(1f)
-                    .fillMaxWidth(),
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 12.dp),
             ) {
-                val controlsMaxHeight = (maxHeight - TOPIC_DRAFT_MIN_HEIGHT - TOPIC_CHROME_RESERVE)
-                    .coerceIn(0.dp, TOPIC_CONTROLS_MAX_HEIGHT)
+                val controlsMaxHeight = editorControlsMaxHeight(
+                    available = maxHeight,
+                    fieldMin = TOPIC_DRAFT_MIN_HEIGHT,
+                )
                 Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    // #447/#1406 — keep the metadata reachable without making the BBCode field
-                    // unbounded. The reserved draft budget restores the field's internal scroller.
+                    // #447/#555/#1406 — every variable-height element competes inside one capped
+                    // scrollable zone. The weighted BBCode field below therefore keeps its real
+                    // viewport even when draft/error banners and the IME are all visible.
                     Column(
                         modifier = Modifier
                             .heightIn(max = controlsMaxHeight)
@@ -217,6 +220,34 @@ internal fun TopicFormContent(
                         )
                         // #459 — « n/N » batch counter while a multi-image upload is in flight.
                         UploadProgressLabel(state.uploadProgress)
+                        TextButton(onClick = { onIntent(TopicFormIntent.TogglePreview) }) {
+                            Text(
+                                text = if (state.isPreviewVisible) {
+                                    stringResource(R.string.editor_preview_hide)
+                                } else {
+                                    stringResource(R.string.editor_preview_show)
+                                },
+                            )
+                        }
+                        if (state.isPreviewVisible) {
+                            BbcodePreview(content = state.preview, modifier = Modifier.fillMaxWidth())
+                        }
+                        if (state.pollPresent && !state.pollEditable) {
+                            // Honest copy : the topic has a poll, but Phase 2D #148 does
+                            // not edit poll fields — they are preserved verbatim on POST.
+                            Text(
+                                text = stringResource(R.string.editor_topic_poll_readonly_note),
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        if (state.restorableDraft != null || state.restorableSubject != null) {
+                            DraftRestoreBanner(
+                                onRestore = { onIntent(TopicFormIntent.DraftRestoreRequested) },
+                                onDiscard = { onIntent(TopicFormIntent.DraftDiscardRequested) },
+                            )
+                        }
+                        TopicFormErrorBanners(state = state, onIntent = onIntent)
                     }
                     BbcodeTextField(
                         value = state.draft,
@@ -227,40 +258,6 @@ internal fun TopicFormContent(
                         // programmatic [img] insertions (keeps them in pick order).
                         readOnly = state.isUploading,
                     )
-                    TextButton(onClick = { onIntent(TopicFormIntent.TogglePreview) }) {
-                        Text(
-                            text = if (state.isPreviewVisible) {
-                                stringResource(R.string.editor_preview_hide)
-                            } else {
-                                stringResource(R.string.editor_preview_show)
-                            },
-                        )
-                    }
-                    if (state.isPreviewVisible) {
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .verticalScroll(rememberScrollState()),
-                        ) {
-                            BbcodePreview(content = state.preview, modifier = Modifier.fillMaxWidth())
-                        }
-                    }
-                    if (state.pollPresent && !state.pollEditable) {
-                        // Honest copy : the topic has a poll, but Phase 2D #148 does
-                        // not edit poll fields — they are preserved verbatim on POST.
-                        Text(
-                            text = stringResource(R.string.editor_topic_poll_readonly_note),
-                            style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    if (state.restorableDraft != null || state.restorableSubject != null) {
-                        DraftRestoreBanner(
-                            onRestore = { onIntent(TopicFormIntent.DraftRestoreRequested) },
-                            onDiscard = { onIntent(TopicFormIntent.DraftDiscardRequested) },
-                        )
-                    }
-                    TopicFormErrorBanners(state = state, onIntent = onIntent)
                 }
             }
             // Send-button accessibility — pin « Envoyer » to the bottom, above the IME, so the user
@@ -308,9 +305,7 @@ internal fun TopicFormContent(
     }
 }
 
-private val TOPIC_DRAFT_MIN_HEIGHT = 96.dp
-private val TOPIC_CHROME_RESERVE = 72.dp
-private val TOPIC_CONTROLS_MAX_HEIGHT = 360.dp
+private val TOPIC_DRAFT_MIN_HEIGHT = 160.dp
 
 /**
  * Dismissible error banners of the topic composer: the submit failure (typed [SubmitError]) and the

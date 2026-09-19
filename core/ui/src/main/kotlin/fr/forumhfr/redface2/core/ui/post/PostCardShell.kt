@@ -134,7 +134,7 @@ fun PostCardShell(
 /**
  * #884 — tag of the hairline that closes a `flat` [PostCardShell] (dividers have no text/semantics
  * to assert on; testTag is invisible to TalkBack). Public so feature-module tests can pin its
- * ABSENCE on their default card rendering — same precedent as `BBCODE_FIELD_PINNED_LABEL_TAG`.
+ * ABSENCE on their default card rendering.
  */
 const val POST_CARD_SHELL_DIVIDER_TAG = "PostCardShellDivider"
 

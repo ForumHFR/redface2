@@ -1,11 +1,8 @@
 package fr.forumhfr.redface2.core.ui.editor
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -20,13 +17,16 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.requestFocus
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import kotlin.math.abs
+import kotlin.math.ceil
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -39,11 +39,11 @@ import org.robolectric.annotation.GraphicsMode
 /**
  * #275/#410/#447 — layout contract of the bounded legacy [BbcodeTextField].
  *
- * Long text no longer grows inside an external `verticalScroll`: the field keeps the height given
- * by its host and `BasicTextField` owns the vertical range. That internal ownership is what lets
- * the legacy selection manager compensate scroll while a handle is dragged. Robolectric can pin
- * that structure and the size-change nudge's effect on the internal range; the real IME resize and
- * platform selection-handle popup remain device-only checks.
+ * Legacy `BasicTextField(TextFieldValue)` exposes no vertical scroll semantics. These tests prove
+ * internal ownership without inventing one: the text layout overflows a bounded field, a touch
+ * swipe changes which text offset is hit at the viewport centre, and caret moves/re-anchors leave
+ * the target line within one viewport of that centre. Real IME resize and handle popups remain
+ * device-only checks.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
@@ -56,7 +56,6 @@ class BbcodeTextFieldViewportTest {
     private companion object {
         const val FIELD_TAG = "bounded_bbcode_field"
         const val HOST_TAG = "bounded_bbcode_host"
-        const val OUTER_SCROLL_TAG = "outer_scroll"
         val LONG_TEXT = (1..200).joinToString("\n") { "line $it" }
     }
 
@@ -75,51 +74,57 @@ class BbcodeTextFieldViewportTest {
     }
 
     @Test
-    fun `long content - the field owns a vertical scroll range`() {
+    fun `long content - text layout overflows the bounded internal viewport`() {
         setFieldContent(text = LONG_TEXT)
 
-        assertTrue("the bounded text field owns the scroll", fieldScrollRange().maxValue() > 0f)
+        val viewportHeight = editableNodeHeight()
+        assertTrue(
+            "long text must overflow inside the bounded field",
+            textLayout().size.height > viewportHeight,
+        )
     }
 
     @Test
-    fun `short content - the internal scroll range is empty`() {
-        setFieldContent(text = "short")
+    fun `short content - text layout fits and a swipe cannot change its hit target`() {
+        setFieldContent(text = "short", selection = TextRange.Zero)
+        focusField()
+        val before = selectionAfterCenterTap()
 
-        assertEquals(0f, fieldScrollRange().maxValue(), 0f)
+        swipeFieldUp()
+        val after = selectionAfterCenterTap()
+
+        assertTrue(textLayout().size.height <= editableNodeHeight())
+        assertEquals(before, after)
     }
 
     @Test
-    fun `scrolling long text moves the internal range and not an outer container`() {
-        setFieldContent(text = LONG_TEXT, insideOuterScroll = true)
+    fun `touch scrolling long text advances the offset under the viewport centre`() {
+        setFieldContent(text = LONG_TEXT, selection = TextRange.Zero)
+        focusField()
+        val layout = textLayout()
+        val before = selectionAfterCenterTap()
 
-        val outerBefore = outerScrollValue()
-        composeTestRule.onNodeWithTag(FIELD_TAG)
-            .performSemanticsAction(SemanticsActions.ScrollBy) { scroll ->
-                scroll(0f, 100_000f)
-            }
-        composeTestRule.waitForIdle()
+        swipeFieldUp()
+        val after = selectionAfterCenterTap()
 
-        assertTrue("the internal field consumed the vertical scroll", fieldScrollValue() > 0f)
-        assertEquals("the ancestor must stay still", outerBefore, outerScrollValue(), 0f)
+        assertTrue(
+            "the internal field must consume the swipe (before=$before after=$after)",
+            layout.getLineForOffset(after) > layout.getLineForOffset(before),
+        )
     }
 
     @Test
     fun `moving a collapsed caret to the end reveals it in the internal viewport`() {
         val fixture = setFieldContent(text = LONG_TEXT, selection = TextRange.Zero)
         focusField()
-        val before = fieldScrollValue()
 
         composeTestRule.runOnIdle {
             fixture.value.value = fixture.value.value.copy(selection = TextRange(LONG_TEXT.length))
         }
         composeTestRule.waitForIdle()
 
-        val range = fieldScrollRange()
-        assertTrue(
-            "the internal viewport follows the final caret " +
-                "(before=$before after=${range.value()} max=${range.maxValue()})",
-            range.value() > before && range.value() >= range.maxValue() * 0.95f,
-        )
+        assertEquals(TextRange(LONG_TEXT.length), fixture.value.value.selection)
+        assertCaretLineIsInsideViewport(LONG_TEXT.length)
     }
 
     @Test
@@ -127,17 +132,12 @@ class BbcodeTextFieldViewportTest {
         val middle = LONG_TEXT.length / 2
         val fixture = setFieldContent(text = LONG_TEXT, selection = TextRange(middle))
         focusField()
-        val before = fieldScrollValue()
 
         composeTestRule.runOnIdle { fixture.height.value = 180.dp }
         composeTestRule.waitForIdle()
 
-        assertTrue(
-            "the size nudge must move the internal viewport after shrink " +
-                "(before=$before after=${fieldScrollValue()})",
-            fieldScrollValue() > before,
-        )
         assertEquals(TextRange(middle), fixture.value.value.selection)
+        assertCaretLineIsInsideViewport(middle)
     }
 
     @Test
@@ -149,26 +149,21 @@ class BbcodeTextFieldViewportTest {
             height = 240.dp,
         )
         focusField()
+
         composeTestRule.runOnIdle { fixture.height.value = 400.dp }
         composeTestRule.waitForIdle()
-        val expandedScroll = fieldScrollValue()
-
         composeTestRule.runOnIdle { fixture.height.value = 160.dp }
         composeTestRule.waitForIdle()
 
-        assertTrue(fieldScrollValue() > expandedScroll)
         assertEquals(TextRange(caret), fixture.value.value.selection)
+        assertCaretLineIsInsideViewport(caret)
     }
 
     @Test
-    fun `floating label stays inside the bounded field after internal scroll`() {
-        setFieldContent(text = LONG_TEXT, label = "BBCode content")
+    fun `floating label stays inside the bounded field after internal touch scroll`() {
+        setFieldContent(text = LONG_TEXT, selection = TextRange.Zero, label = "BBCode content")
         focusField()
-        composeTestRule.onNodeWithTag(FIELD_TAG)
-            .performSemanticsAction(SemanticsActions.ScrollBy) { scroll ->
-                scroll(0f, 100_000f)
-            }
-        composeTestRule.waitForIdle()
+        swipeFieldUp()
 
         val field = composeTestRule.onNodeWithTag(FIELD_TAG).fetchSemanticsNode()
         val label = composeTestRule
@@ -194,7 +189,6 @@ class BbcodeTextFieldViewportTest {
         selection: TextRange = TextRange(text.length),
         height: Dp = 400.dp,
         label: String = "Message",
-        insideOuterScroll: Boolean = false,
     ): FieldFixture {
         lateinit var value: MutableState<TextFieldValue>
         lateinit var fieldHeight: MutableState<Dp>
@@ -208,18 +202,7 @@ class BbcodeTextFieldViewportTest {
                             .size(320.dp, fieldHeight.value)
                             .testTag(HOST_TAG),
                     ) {
-                        if (insideOuterScroll) {
-                            Column(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .verticalScroll(rememberScrollState())
-                                    .testTag(OUTER_SCROLL_TAG),
-                            ) {
-                                Field(value = value, label = label)
-                            }
-                        } else {
-                            Field(value = value, label = label)
-                        }
+                        Field(value = value, label = label)
                     }
                 }
             }
@@ -244,18 +227,49 @@ class BbcodeTextFieldViewportTest {
         composeTestRule.waitForIdle()
     }
 
-    private fun fieldScrollValue(): Float = fieldScrollRange().value()
+    private fun swipeFieldUp() {
+        composeTestRule.onNodeWithTag(FIELD_TAG).performTouchInput { swipeUp() }
+        composeTestRule.waitForIdle()
+    }
 
-    private fun fieldScrollRange() = composeTestRule
-        .onNodeWithTag(FIELD_TAG)
-        .fetchSemanticsNode()
-        .config[SemanticsProperties.VerticalScrollAxisRange]
+    private fun selectionAfterCenterTap(): Int {
+        composeTestRule.onNodeWithTag(FIELD_TAG).performTouchInput { click(center) }
+        composeTestRule.waitForIdle()
+        return composeTestRule.onNode(hasSetTextAction())
+            .fetchSemanticsNode()
+            .config[SemanticsProperties.TextSelectionRange]
+            .end
+    }
 
-    private fun outerScrollValue(): Float = composeTestRule
-        .onNodeWithTag(OUTER_SCROLL_TAG)
+    private fun assertCaretLineIsInsideViewport(caret: Int) {
+        val layout = textLayout()
+        val centreOffset = selectionAfterCenterTap()
+        val caretLine = layout.getLineForOffset(caret)
+        val centreLine = layout.getLineForOffset(centreOffset)
+        val firstLineHeight = layout.getLineBottom(0) - layout.getLineTop(0)
+        val visibleLineCount = ceil(editableNodeHeight() / firstLineHeight).toInt() + 2
+        assertTrue(
+            "caret line must be in the internal viewport " +
+                "(caretLine=$caretLine centreLine=$centreLine visibleLines=$visibleLineCount)",
+            abs(caretLine - centreLine) <= visibleLineCount,
+        )
+    }
+
+    private fun textLayout(): TextLayoutResult {
+        val layouts = mutableListOf<TextLayoutResult>()
+        val readLayout = requireNotNull(
+            composeTestRule.onNode(hasSetTextAction())
+                .fetchSemanticsNode().config[SemanticsActions.GetTextLayoutResult].action,
+        )
+        assertTrue("the editable text layout must be readable", readLayout(layouts))
+        return layouts.single()
+    }
+
+    private fun editableNodeHeight(): Int = composeTestRule
+        .onNode(hasSetTextAction())
         .fetchSemanticsNode()
-        .config[SemanticsProperties.VerticalScrollAxisRange]
-        .value()
+        .size
+        .height
 
     private data class FieldFixture(
         val value: MutableState<TextFieldValue>,
