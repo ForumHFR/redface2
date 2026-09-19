@@ -1,2 +1,3 @@
-Redface 2 v0.59.4 — dev.
-- Urgent fix: the image picker no longer crashes the app on return; an invalid regex in diagnostic redaction no longer crashes the app.
+Redface 2 v0.59.5 — dev.
+- On Android 10, the keyboard no longer covers the writing area.
+- A banner now reports when the image picker returns no image.

@@ -20,6 +20,7 @@ import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
+import fr.forumhfr.redface2.core.ui.editor.UploadError
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -38,6 +39,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -131,7 +133,7 @@ class PrivateMessageComposeViewModelTest {
     }
 
     @Test
-    fun `empty picker result is logged without starting an upload`() = runTest {
+    fun `empty picker result shows a banner without starting an upload`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchComposeForm(any()) } returns composeForm()
         val diagnostics = DiagnosticsLog()
@@ -159,7 +161,11 @@ class PrivateMessageComposeViewModelTest {
             )
             advanceUntilIdle()
 
-            assertEquals(stateBefore, vm.state.value)
+            assertEquals(
+                stateBefore.copy(uploadError = UploadError.NoImageReceived),
+                vm.state.value,
+            )
+            assertFalse(vm.state.value.isUploading)
             assertTrue(reader.readUris.isEmpty())
             assertEquals(0, uploads.uploadCalls)
             assertEquals(
@@ -172,6 +178,34 @@ class PrivateMessageComposeViewModelTest {
             expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `single picker result keeps the upload path and no empty-result error`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val uploads = FakeUploadRepository()
+        val reader = FakeImageUploadReader()
+        val vm = viewModel(
+            repository = repository,
+            uploadRepository = uploads,
+            imageUploadReader = reader,
+        )
+        advanceUntilIdle()
+        val uri = "content://media/picker/photo/1"
+
+        vm.onImagePickerEvent(
+            ImagePickerEvent.Result(
+                contract = ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA,
+                uris = listOf(uri),
+            ),
+        )
+        advanceUntilIdle()
+
+        assertEquals(listOf(uri), reader.readUris)
+        assertEquals(1, uploads.uploadCalls)
+        assertNull(vm.state.value.uploadError)
+        assertFalse(vm.state.value.isUploading)
     }
 
     @Test

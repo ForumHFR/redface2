@@ -583,11 +583,16 @@ class PostEditorViewModel @AssistedInject constructor(
      */
     private fun onImagePicked(uri: String) = onImagesPicked(listOf(uri))
 
-    /** #988 — records the picker boundary, then preserves the existing upload filtering. */
+    /** #988/#1420 — records the picker boundary and surfaces a callback without images. */
     private fun onImagePickerEvent(event: ImagePickerEvent) {
         diagnostics.recordImagePickerEvent(event)
         if (event is ImagePickerEvent.Result) {
-            onImagesPicked(pickedImagesForUpload(event.contract, event.uris))
+            val pickedImages = pickedImagesForUpload(event.contract, event.uris)
+            val showEmptyPickerBanner = pickedImages.isEmpty() && uploadJob?.isActive != true
+            onImagesPicked(pickedImages)
+            if (showEmptyPickerBanner) {
+                _state.update { it.copy(uploadError = UploadError.NoImageReceived) }
+            }
         }
     }
 

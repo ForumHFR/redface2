@@ -23,6 +23,7 @@ import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
+import fr.forumhfr.redface2.core.ui.editor.UploadError
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -149,7 +150,7 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
-    fun `empty picker result is logged without starting an upload`() = runTest {
+    fun `empty picker result shows a banner without starting an upload`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } returns form()
         val diagnostics = DiagnosticsLog()
@@ -175,7 +176,11 @@ class PrivateMessageReplyViewModelTest {
             )
             advanceUntilIdle()
 
-            assertEquals(stateBefore, viewModel.state.value)
+            assertEquals(
+                stateBefore.copy(uploadError = UploadError.NoImageReceived),
+                viewModel.state.value,
+            )
+            assertFalse(viewModel.state.value.isUploading)
             assertTrue(reader.readUris.isEmpty())
             assertEquals(0, uploads.uploadCalls)
             assertEquals(
@@ -214,6 +219,8 @@ class PrivateMessageReplyViewModelTest {
 
         assertEquals(listOf(uri), reader.readUris)
         assertEquals(1, uploads.uploadCalls)
+        assertNull(viewModel.state.value.uploadError)
+        assertFalse(viewModel.state.value.isUploading)
         assertEquals(
             listOf(
                 "result contract=PickMultipleVisualMedia count=1 sources=[content://media]",

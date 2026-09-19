@@ -1015,7 +1015,7 @@ class PostEditorViewModelTest {
     // ----- #459 PR2 : image upload from the photo picker ---------------------
 
     @Test
-    fun `empty picker result is logged before being ignored`() = runTest {
+    fun `empty picker result shows a banner without starting an upload`() = runTest {
         val diagnostics = DiagnosticsLog()
         val viewModel = newReplyViewModel(
             diagnostics = diagnostics,
@@ -1041,7 +1041,11 @@ class PostEditorViewModelTest {
             )
             testScheduler.advanceUntilIdle()
 
-            assertEquals(stateBefore, viewModel.state.value)
+            assertEquals(
+                stateBefore.copy(uploadError = UploadError.NoImageReceived),
+                viewModel.state.value,
+            )
+            assertFalse(viewModel.state.value.isUploading)
             assertEquals(0, imageUploadReader.readCalls)
             assertEquals(0, uploadRepository.uploadCalls)
             assertEquals(
@@ -1054,6 +1058,30 @@ class PostEditorViewModelTest {
             expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `single picker result keeps the upload path and no empty-result error`() = runTest {
+        val viewModel = newReplyViewModel(
+            authRepository = FakeAuthRepository(AuthState.Authenticated("alice")),
+        )
+        testScheduler.advanceUntilIdle()
+        val uri = "content://media/picker/photo/1"
+
+        viewModel.submit(
+            PostEditorIntent.ImagePickerEventReceived(
+                ImagePickerEvent.Result(
+                    contract = ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA,
+                    uris = listOf(uri),
+                ),
+            ),
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf(uri), imageUploadReader.readUris)
+        assertEquals(1, uploadRepository.uploadCalls)
+        assertNull(viewModel.state.value.uploadError)
+        assertFalse(viewModel.state.value.isUploading)
     }
 
     @Test
