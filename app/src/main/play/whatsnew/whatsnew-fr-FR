@@ -1,3 +1,3 @@
-Redface 2 v0.59.6 — dev.
-- Un tap hors du texte relâche la sélection dans les sujets et les messages privés.
-- Les brouillons restent proposés sans doublon ni perte après recréation de l'éditeur.
+Redface 2 v0.59.7 — dev.
+- Dans les quatre éditeurs, les poignées de sélection restent pilotables au-delà de l'écran.
+- Le curseur reste visible quand le clavier, l'aperçu, une bannière ou des citations réduisent la zone de saisie.

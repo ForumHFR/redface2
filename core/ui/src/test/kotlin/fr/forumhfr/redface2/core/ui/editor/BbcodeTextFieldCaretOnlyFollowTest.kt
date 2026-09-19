@@ -1,25 +1,17 @@
 package fr.forumhfr.redface2.core.ui.editor
 
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.runtime.Composable
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.SemanticsActions
-import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
-import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
@@ -36,25 +28,11 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * #447 hotfix — the externally scrolled [BbcodeTextField] follows collapsed carets only.
+ * #275/#410 — state contract of the bounded field's caret nudge.
  *
- * The full-screen post editor and MP reply use [ScrollMode.FILL_VIEWPORT]; `TopicFormScreen` and
- * MP creation use the default field inside the caller's `verticalScroll` ([ScrollMode.OUTER]). Both
- * paths keep caret following from #449/#880, while this component's requester stays inert for every
- * extended selection so dragging a legacy `TextFieldValue` handle cannot scroll its coordinate
- * system away from the finger.
- *
- * Robolectric changes selections as state because the platform handles live in a separate `Popup`.
- * The tests read the real [SemanticsProperties.VerticalScrollAxisRange] of each external scroller.
- * They deliberately do not use a toolbar wrap to test text changes: legacy `CoreTextField` owns a
- * separate `BringIntoViewRequester` and reveals its focused selection end when focused text changes,
- * independently of this component's requester. [BbcodeFormatterTest] pins the atomic extended
- * selection returned by a wrap; the relayout cases below isolate this component's follow effect by
- * changing the text layout without changing the text.
- *
- * OUTER assertions use the stabilized scroll position as their baseline: at xxhdpi the initial
- * collapsed-caret reveal can consume the floating label's 8 dp headroom (24 px) while remaining at
- * the start of the text.
+ * `TextFieldScrollerPosition.update` only coerces its offset after the cursor rectangle changes.
+ * These tests pin the required probe/restoration sequence and its guards. Pixel visibility during
+ * a real IME animation and selection-handle dragging are platform behaviours covered on device.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
@@ -65,216 +43,161 @@ class BbcodeTextFieldCaretOnlyFollowTest {
     val composeTestRule = createComposeRule()
 
     private companion object {
-        const val OUTER_SCROLL_TAG = "outer_scroll"
-        val LONG_TEXT = (1..200).joinToString("\n") { "line $it" }
-        val INSERTED_TEXT = (1..80).joinToString("\n", postfix = "\n") { "inserted line $it" }
-        val SELECTION_NEAR_END = LONG_TEXT.length - 300
+        const val TEXT = "0123456789"
     }
 
     @Test
-    fun `fillViewport reveals a collapsed caret outside the viewport`() =
-        assertCollapsedCaretIsRevealed(ScrollMode.FILL_VIEWPORT)
+    fun `size change nudges an end caret backward then restores it`() {
+        assertNudge(TextFieldValue(TEXT, TextRange(TEXT.length)), probe = TEXT.length - 1)
+    }
 
     @Test
-    fun `outer scroll reveals a collapsed caret outside the viewport`() =
-        assertCollapsedCaretIsRevealed(ScrollMode.OUTER)
+    fun `size change nudges a middle caret backward then restores it`() {
+        assertNudge(TextFieldValue(TEXT, TextRange(5)), probe = 4)
+    }
 
     @Test
-    fun `fillViewport stays still when the top selection edge moves above the viewport`() =
-        assertMovingTopBoundaryDoesNotScroll(ScrollMode.FILL_VIEWPORT)
+    fun `size change nudges a start caret forward then restores it`() {
+        assertNudge(TextFieldValue(TEXT, TextRange.Zero), probe = 1)
+    }
 
     @Test
-    fun `outer scroll stays still when the top selection edge moves above the viewport`() =
-        assertMovingTopBoundaryDoesNotScroll(ScrollMode.OUTER)
+    fun `single-character text can probe forward from its start`() {
+        assertNudge(TextFieldValue("x", TextRange.Zero), probe = 1)
+    }
 
     @Test
-    fun `fillViewport stays still when the bottom selection edge moves below the viewport`() =
-        assertMovingBottomBoundaryDoesNotScroll(ScrollMode.FILL_VIEWPORT)
+    fun `focus gain nudges a collapsed caret without another size change`() {
+        val initial = TextFieldValue(TEXT, TextRange(6))
+        val fixture = setFieldContent(initial)
 
-    @Test
-    fun `outer scroll stays still when the bottom selection edge moves below the viewport`() =
-        assertMovingBottomBoundaryDoesNotScroll(ScrollMode.OUTER)
-
-    @Test
-    fun `fillViewport relayout does not follow an unchanged extended selection`() =
-        assertRelayoutDoesNotFollowExtendedSelection(ScrollMode.FILL_VIEWPORT)
-
-    @Test
-    fun `outer scroll relayout does not follow an unchanged extended selection`() =
-        assertRelayoutDoesNotFollowExtendedSelection(ScrollMode.OUTER)
-
-    @Test
-    fun `fillViewport select all from the final caret keeps the viewport still`() =
-        assertSelectAllFromFinalCaretDoesNotScroll(ScrollMode.FILL_VIEWPORT)
-
-    @Test
-    fun `outer scroll select all from the final caret keeps the viewport still`() =
-        assertSelectAllFromFinalCaretDoesNotScroll(ScrollMode.OUTER)
-
-    @Test
-    fun `fillViewport follows an insertion that moves a collapsed caret`() =
-        assertCollapsedCaretInsertionIsFollowed(ScrollMode.FILL_VIEWPORT)
-
-    @Test
-    fun `outer scroll follows an insertion that moves a collapsed caret`() =
-        assertCollapsedCaretInsertionIsFollowed(ScrollMode.OUTER)
-
-    private fun assertCollapsedCaretIsRevealed(mode: ScrollMode) {
-        val value = setContent(mode)
         focusField()
-        val before = scrollValue(mode.tag)
 
-        setSelection(value, TextRange(value.value.text.length))
-
-        val after = scrollValue(mode.tag)
-        val max = maxScrollValue(mode.tag)
-        assertTrue(
-            "the external viewport follows the final caret " +
-                "(mode=$mode before=$before after=$after max=$max)",
-            after > before && max > 0f && after >= max * 0.95f,
-        )
+        assertNudgeEmissions(fixture.emissions, initial, probe = 5)
     }
 
-    private fun assertMovingTopBoundaryDoesNotScroll(mode: ScrollMode) {
-        val value = setContent(mode)
+    @Test
+    fun `size change while unfocused does not nudge`() {
+        val fixture = setFieldContent(TextFieldValue(TEXT, TextRange(6)))
+
+        resize(fixture)
+
+        assertTrue(fixture.emissions.isEmpty())
+    }
+
+    @Test
+    fun `size change never touches a forward extended selection`() {
+        assertNoFocusedResizeNudge(TextFieldValue(TEXT, TextRange(2, 8)))
+    }
+
+    @Test
+    fun `size change never touches a reversed extended selection`() {
+        assertNoFocusedResizeNudge(TextFieldValue(TEXT, TextRange(8, 2)))
+    }
+
+    @Test
+    fun `size change does not nudge empty text`() {
+        assertNoFocusedResizeNudge(TextFieldValue("", TextRange.Zero))
+    }
+
+    @Test
+    fun `typing during the nudge window wins over caret restoration`() {
+        val initial = TextFieldValue(TEXT, TextRange(6))
+        val fixture = focusedFixture(initial)
+        startResizeNudge(fixture)
+        assertEquals(TextRange(5), fixture.emissions.single().selection)
+
+        composeTestRule.onNode(hasSetTextAction()).performTextInput("X")
+        val afterTyping = fixture.value.value
+        composeTestRule.mainClock.advanceTimeBy(CARET_NUDGE_MS + 1)
+        composeTestRule.waitForIdle()
+
+        assertEquals(afterTyping, fixture.value.value)
+        assertEquals(afterTyping, fixture.emissions.last())
+        assertEquals(2, fixture.emissions.size)
+    }
+
+    @Test
+    fun `a parent value change during the nudge window cancels restoration`() {
+        val initial = TextFieldValue(TEXT, TextRange(6))
+        val fixture = focusedFixture(initial)
+        startResizeNudge(fixture)
+        val replacement = TextFieldValue("replacement", TextRange(3))
+
+        composeTestRule.runOnIdle { fixture.value.value = replacement }
+        composeTestRule.mainClock.advanceTimeBy(CARET_NUDGE_MS + 1)
+        composeTestRule.waitForIdle()
+
+        assertEquals(replacement, fixture.value.value)
+        assertEquals(1, fixture.emissions.size)
+    }
+
+    @Test
+    fun `rapid size changes are debounced into one nudge`() {
+        val initial = TextFieldValue(TEXT, TextRange(6))
+        val fixture = focusedFixture(initial)
+        composeTestRule.mainClock.autoAdvance = false
+
+        composeTestRule.runOnIdle { fixture.height.value = 360.dp }
+        composeTestRule.mainClock.advanceTimeBy(FIELD_SIZE_SETTLE_MS / 2)
+        composeTestRule.runOnIdle { fixture.height.value = 320.dp }
+        composeTestRule.mainClock.advanceTimeBy(FIELD_SIZE_SETTLE_MS / 2)
+        composeTestRule.runOnIdle { fixture.height.value = 280.dp }
+        composeTestRule.mainClock.advanceTimeBy(FIELD_SIZE_SETTLE_MS + 1)
+        composeTestRule.mainClock.advanceTimeBy(CARET_NUDGE_MS + 1)
+        composeTestRule.waitForIdle()
+
+        assertNudgeEmissions(fixture.emissions, initial, probe = 5)
+    }
+
+    private fun assertNudge(initial: TextFieldValue, probe: Int) {
+        val fixture = focusedFixture(initial)
+
+        resize(fixture)
+
+        assertNudgeEmissions(fixture.emissions, initial, probe)
+    }
+
+    private fun assertNoFocusedResizeNudge(initial: TextFieldValue) {
+        val fixture = focusedFixture(initial)
+
+        resize(fixture)
+
+        assertTrue(fixture.emissions.isEmpty())
+        assertEquals(initial, fixture.value.value)
+    }
+
+    private fun focusedFixture(initial: TextFieldValue): FieldFixture {
+        val fixture = setFieldContent(initial)
         focusField()
-        setSelection(value, TextRange(LONG_TEXT.length))
-        setSelection(value, TextRange(SELECTION_NEAR_END, LONG_TEXT.length))
-        val before = scrollValue(mode.tag)
-        assertTrue("precondition: the viewport is away from the top", before > 0f)
-
-        setSelection(value, TextRange(5, LONG_TEXT.length))
-
-        assertViewportUnchanged(mode, before, "moving the top selection edge")
+        composeTestRule.runOnIdle { fixture.emissions.clear() }
+        return fixture
     }
 
-    private fun assertMovingBottomBoundaryDoesNotScroll(mode: ScrollMode) {
-        val value = setContent(mode)
-        focusField()
-        setSelection(value, TextRange(0, 5))
-        val before = scrollValue(mode.tag)
-        assertViewportNearStart(mode, before)
-
-        setSelection(value, TextRange(0, LONG_TEXT.length))
-
-        assertViewportUnchanged(mode, before, "moving the bottom selection edge")
-    }
-
-    private fun assertRelayoutDoesNotFollowExtendedSelection(mode: ScrollMode) {
-        val (value, width) = setResizableContent(mode)
-        focusField()
-        // Both selection edges stay near the start, then the viewport is parked at the opposite end.
-        // A relayout that followed either edge would therefore produce an observable jump upwards.
-        setSelection(value, TextRange(5, 20))
-        scrollToEnd(mode.tag)
-        val before = scrollValue(mode.tag)
-        val max = maxScrollValue(mode.tag)
-        assertTrue(
-            "precondition: the viewport was manually scrolled away from both selection edges",
-            max > 0f && before >= max * 0.9f,
-        )
-
-        relayout(width)
-
-        assertViewportUnchanged(mode, before, "relayout with an unchanged extended selection")
-    }
-
-    private fun assertSelectAllFromFinalCaretDoesNotScroll(mode: ScrollMode) {
-        val value = setContent(mode)
-        focusField()
-        setSelection(value, TextRange(LONG_TEXT.length))
-        val before = scrollValue(mode.tag)
-        assertTrue("precondition: the final caret moved the viewport", before > 0f)
-
-        setSelection(value, TextRange(0, LONG_TEXT.length))
-
-        assertViewportUnchanged(mode, before, "select all from the final caret")
-    }
-
-    private fun assertCollapsedCaretInsertionIsFollowed(mode: ScrollMode) {
-        val value = setContent(mode)
-        focusField()
-        val before = scrollValue(mode.tag)
-        assertViewportNearStart(mode, before)
-
-        insertAtCaret(value, INSERTED_TEXT)
-
-        val after = scrollValue(mode.tag)
-        assertTrue(
-            "the external viewport follows a collapsed caret after insertion " +
-                "(mode=$mode before=$before after=$after)",
-            after > before,
-        )
-    }
-
-    private fun setContent(mode: ScrollMode): MutableState<TextFieldValue> {
+    private fun setFieldContent(initial: TextFieldValue): FieldFixture {
         lateinit var value: MutableState<TextFieldValue>
+        lateinit var height: MutableState<Dp>
+        val emissions = mutableListOf<TextFieldValue>()
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 Surface(color = MaterialTheme.colorScheme.surface) {
-                    Box(Modifier.size(320.dp, 400.dp)) {
-                        value = remember { mutableStateOf(longTextValue()) }
-                        FieldHost(mode = mode, value = value)
+                    value = remember { mutableStateOf(initial) }
+                    height = remember { mutableStateOf(400.dp) }
+                    Box(Modifier.size(320.dp, height.value)) {
+                        BbcodeTextField(
+                            value = value.value,
+                            onValueChange = { changedValue ->
+                                emissions += changedValue
+                                value.value = changedValue
+                            },
+                            label = "Message",
+                            modifier = Modifier.fillMaxSize(),
+                        )
                     }
                 }
             }
         }
-        return value
-    }
-
-    private fun setResizableContent(
-        mode: ScrollMode,
-    ): Pair<MutableState<TextFieldValue>, MutableState<Dp>> {
-        lateinit var value: MutableState<TextFieldValue>
-        lateinit var width: MutableState<Dp>
-        composeTestRule.setContent {
-            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                Surface(color = MaterialTheme.colorScheme.surface) {
-                    value = remember { mutableStateOf(longTextValue()) }
-                    width = remember { mutableStateOf(320.dp) }
-                    Box(Modifier.size(width.value, 400.dp)) {
-                        FieldHost(mode = mode, value = value)
-                    }
-                }
-            }
-        }
-        return value to width
-    }
-
-    @Composable
-    private fun FieldHost(mode: ScrollMode, value: MutableState<TextFieldValue>) {
-        when (mode) {
-            ScrollMode.FILL_VIEWPORT -> BbcodeTextField(
-                value = value.value,
-                onValueChange = { value.value = it },
-                label = "Message",
-                modifier = Modifier.fillMaxSize(),
-                fillViewport = true,
-            )
-            ScrollMode.OUTER -> Column(
-                modifier = Modifier
-                    .verticalScroll(rememberScrollState())
-                    .testTag(OUTER_SCROLL_TAG),
-            ) {
-                BbcodeTextField(
-                    value = value.value,
-                    onValueChange = { value.value = it },
-                    label = "Message",
-                )
-            }
-        }
-    }
-
-    private fun scrollToEnd(tag: String) {
-        composeTestRule.onNodeWithTag(tag).performSemanticsAction(SemanticsActions.ScrollBy) {
-            it(0f, 100_000f)
-        }
-        composeTestRule.waitForIdle()
-    }
-
-    private fun relayout(width: MutableState<Dp>) {
-        composeTestRule.runOnIdle { width.value = 300.dp }
-        composeTestRule.waitForIdle()
+        return FieldFixture(value = value, height = height, emissions = emissions)
     }
 
     private fun focusField() {
@@ -282,53 +205,31 @@ class BbcodeTextFieldCaretOnlyFollowTest {
         composeTestRule.waitForIdle()
     }
 
-    private fun setSelection(value: MutableState<TextFieldValue>, selection: TextRange) {
-        composeTestRule.runOnIdle { value.value = value.value.copy(selection = selection) }
+    private fun resize(fixture: FieldFixture) {
+        composeTestRule.runOnIdle { fixture.height.value = 240.dp }
         composeTestRule.waitForIdle()
     }
 
-    private fun insertAtCaret(value: MutableState<TextFieldValue>, insertedText: String) {
-        composeTestRule.runOnIdle {
-            val caret = value.value.selection.end
-            val text = value.value.text
-            value.value = TextFieldValue(
-                text = text.substring(0, caret) + insertedText + text.substring(caret),
-                selection = TextRange(caret + insertedText.length),
-            )
-        }
+    private fun startResizeNudge(fixture: FieldFixture) {
+        composeTestRule.mainClock.autoAdvance = false
+        composeTestRule.runOnIdle { fixture.height.value = 240.dp }
+        composeTestRule.mainClock.advanceTimeBy(FIELD_SIZE_SETTLE_MS + 1)
         composeTestRule.waitForIdle()
     }
 
-    private fun assertViewportUnchanged(mode: ScrollMode, before: Float, action: String) {
-        assertEquals(
-            "$action must not move the external viewport in $mode",
-            before,
-            scrollValue(mode.tag),
-            0f,
-        )
+    private fun assertNudgeEmissions(
+        emissions: List<TextFieldValue>,
+        initial: TextFieldValue,
+        probe: Int,
+    ) {
+        assertEquals(2, emissions.size)
+        assertEquals(initial.copy(selection = TextRange(probe)), emissions[0])
+        assertEquals(initial, emissions[1])
     }
 
-    private fun assertViewportNearStart(mode: ScrollMode, value: Float) {
-        val max = maxScrollValue(mode.tag)
-        assertTrue(
-            "precondition: the initial viewport leaves room to scroll (mode=$mode value=$value max=$max)",
-            max > 0f && value <= max * 0.05f,
-        )
-    }
-
-    private fun longTextValue() = TextFieldValue(text = LONG_TEXT, selection = TextRange.Zero)
-
-    private fun scrollValue(tag: String): Float = scrollRange(tag).value()
-
-    private fun maxScrollValue(tag: String): Float = scrollRange(tag).maxValue()
-
-    private fun scrollRange(tag: String) = composeTestRule
-        .onNodeWithTag(tag)
-        .fetchSemanticsNode()
-        .config[SemanticsProperties.VerticalScrollAxisRange]
-
-    private enum class ScrollMode(val tag: String) {
-        FILL_VIEWPORT(BBCODE_FIELD_VIEWPORT_TAG),
-        OUTER(OUTER_SCROLL_TAG),
-    }
+    private data class FieldFixture(
+        val value: MutableState<TextFieldValue>,
+        val height: MutableState<Dp>,
+        val emissions: MutableList<TextFieldValue>,
+    )
 }

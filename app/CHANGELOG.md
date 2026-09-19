@@ -16,6 +16,10 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.59.7` — `internal` (dev) — 2026-09-19
+
+- **La sélection de texte reste pilotable au-delà de l'écran ([#447](https://github.com/ForumHFR/redface2/issues/447), [#1406](https://github.com/ForumHFR/redface2/issues/1406), [#275](https://github.com/ForumHFR/redface2/issues/275), [#410](https://github.com/ForumHFR/redface2/issues/410))** — les quatre éditeurs retrouvent un champ à hauteur bornée et son défilement interne : les poignées restent attachées au doigt quand la sélection dépasse l'écran. Un recalage bref du curseur après redimensionnement garde sa ligne visible à l'ouverture du clavier, au retour de l'aperçu et quand les bannières ou citations réduisent le champ.
+
 ## `0.59.6` — `internal` (dev) — 2026-09-19
 
 - **Un tap hors du texte relâche désormais la sélection dans les sujets et les messages privés ([#1391](https://github.com/ForumHFR/redface2/issues/1391))** — les conteneurs de sélection visibles ne sont recréés qu'après un appui long plausible, tandis que l'état interne des spoilers et médias est conservé.

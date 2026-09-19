@@ -133,11 +133,10 @@ private fun PostEditorContent(
             // No outer scroll : the draft field is weighted so it stretches to fill every
             // free pixel down to the bottom bar (dogfooding v108 — the column used to leave
             // a large blank under « Afficher l'aperçu »). Long content scrolls in the field's
-            // own fillViewport column (#275/#410) and inside the preview pane, which is also
-            // why weight() is usable at all — it needs the bounded height an outer
-            // verticalScroll would destroy. Keyboard handling : the bar's IME inset grows,
-            // this column shrinks by the same amount (weight absorbs), and the field's
-            // viewport re-anchors the cursor line.
+            // own internal scroller (#447/#1406) and inside the preview pane, which is also why
+            // weight() is usable at all — it gives the text field the bounded height required by
+            // the legacy selection manager. Keyboard handling : the bar's IME inset grows, this
+            // column shrinks by the same amount, and the field-size nudge re-anchors the caret.
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -185,10 +184,8 @@ private fun PostEditorContent(
                             label = stringResource(R.string.editor_field_label),
                             placeholder = stringResource(R.string.editor_field_placeholder),
                             modifier = Modifier.weight(1f),
-                            // #275/#410 — grow-with-content field in its own scrollable viewport so
-                            // the cursor stays visible under the IME (typing AND refocus after the
-                            // preview).
-                            fillViewport = true,
+                            // #275/#410/#447 — bounded legacy field: internal scrolling keeps
+                            // selection handles attached; the size nudge keeps the caret visible.
                             // Multi-image upload — lock editing during a batch so the user can't
                             // move the caret between two programmatic [img] insertions (keeps them
                             // in pick order).

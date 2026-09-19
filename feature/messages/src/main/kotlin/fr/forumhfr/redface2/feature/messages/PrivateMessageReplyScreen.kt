@@ -239,8 +239,8 @@ private fun ReplyEditorBody(
 ) {
     val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode, onImagePickerEvent)
     // No outer scroll : the draft field is weighted so it stretches down to the bar (same
-    // extensible-field design as the post editor) ; long content scrolls in the field's own
-    // fillViewport column (#275/#410) and inside the preview pane.
+    // extensible-field design as the post editor). Long content scrolls inside the bounded field
+    // (#447/#1406) and inside the preview pane.
     Column(
         modifier = modifier
             .fillMaxWidth()
@@ -274,9 +274,8 @@ private fun ReplyEditorBody(
             label = stringResource(R.string.messages_reply_field_label),
             placeholder = stringResource(R.string.messages_reply_field_placeholder),
             modifier = Modifier.weight(1f),
-            // #275/#410 — grow-with-content field in its own scrollable viewport so the
-            // cursor stays visible under the IME (typing AND refocus after the preview).
-            fillViewport = true,
+            // #275/#410/#447 — the field-size nudge preserves caret visibility while the internal
+            // legacy scroller keeps selection handles attached beyond the viewport.
             // #459 — lock editing during a batch (caret must not move between two insertions).
             readOnly = state.isUploading,
         )
