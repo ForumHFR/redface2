@@ -61,8 +61,12 @@ data class TopicFormState(
      * but never clobbers the field the user had touched.
      */
     val subjectHydratedFromServer: Boolean = false,
+    /** Exact untouched subject received from HFR; null until a non-blank hydration lands. */
+    val subjectHydratedContent: String? = null,
     /** Mirror of [subjectHydratedFromServer] for the BBCode draft. */
     val draftHydratedFromServer: Boolean = false,
+    /** Exact untouched body received from HFR; null until a non-blank hydration lands. */
+    val draftHydratedContent: String? = null,
     /** Mirror of [PostEditorState.optionsHydratedFromForm] for the same anti-clobber reason. */
     val optionsHydratedFromForm: Boolean = false,
     /**

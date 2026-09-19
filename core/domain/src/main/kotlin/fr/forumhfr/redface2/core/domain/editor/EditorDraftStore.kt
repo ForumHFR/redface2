@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.core.domain.editor
 
+import java.security.MessageDigest
+
 /**
  * Per-account local cache of in-progress editor content (#405).
  *
@@ -52,5 +54,28 @@ interface EditorDraftStore {
         val isPrivate: Boolean = false,
         /** Epoch millis of last write; set by the store, ignored on save input. */
         val updatedAt: Long = 0L,
-    )
+    ) {
+        /**
+         * Content-only marker for the restore-offer guard (#1415). The full draft must not be put
+         * in saved instance state, especially for private messages; hashing the length-delimited
+         * fields also ignores [updatedAt], which changes without changing what the user would be
+         * offered. Nullable fields use their editor representation (the empty string), so a Room
+         * null-to-empty round-trip cannot make an identical offer look new.
+         */
+        fun restoreOfferFingerprint(): String {
+            val canonical = buildString {
+                append(body.length).append(':').append(body)
+                val normalizedSubject = subject.orEmpty()
+                append(normalizedSubject.length).append(':').append(normalizedSubject)
+                val normalizedRecipients = recipients.orEmpty()
+                append(normalizedRecipients.length).append(':').append(normalizedRecipients)
+            }
+            return MessageDigest
+                .getInstance("SHA-256")
+                .digest(canonical.toByteArray(Charsets.UTF_8))
+                .joinToString(separator = "") { byte ->
+                    byte.toUByte().toString(radix = 16).padStart(length = 2, padChar = '0')
+                }
+        }
+    }
 }

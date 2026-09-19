@@ -50,6 +50,8 @@ data class PostEditorState(
      * `InvalidHashCheck`) does not overwrite the user's in-progress edit.
      */
     val draftHydratedFromForm: Boolean = false,
+    /** Exact untouched server prefill, used to distinguish hydration from a user edit (#1415). */
+    val draftHydratedContent: String? = null,
     /**
      * Per-post options the user can flip from the editor (Phase 2C, #146 round
      * 2 follow-up). Seeded from `ReplyForm.options` on the first form load and

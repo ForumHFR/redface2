@@ -956,7 +956,7 @@ class TopicFormViewModelTest {
     }
 
     @Test
-    fun `New recreation after the initial offer does not offer the draft again`() = runTest {
+    fun `New recreation with the same cached version does not reoffer and keeps autosave alive`() = runTest {
         val savedStateHandle = SavedStateHandle()
         draftStore.preload(
             EditorDraftKey.newTopic(SAMPLE_CAT),
@@ -977,6 +977,51 @@ class TopicFormViewModelTest {
 
         assertNull(recreated.state.value.restorableDraft)
         assertNull(recreated.state.value.restorableSubject)
+        recreated.submit(TopicFormIntent.SubjectChanged(TextFieldValue("new live title")))
+        recreated.submit(TopicFormIntent.ContentChanged(TextFieldValue("new live body")))
+        testScheduler.advanceTimeBy(800L)
+        testScheduler.runCurrent()
+        assertEquals("new live body", draftStore.saved[EditorDraftKey.newTopic(SAMPLE_CAT)]?.body)
+        assertEquals("tester", draftStore.lastSavedOwner)
+    }
+
+    @Test
+    fun `New process recreation offers a newer autosaved draft after live state was lost`() = runTest {
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        val savedStateHandle = SavedStateHandle()
+        draftStore.preload(key, EditorDraftStore.Draft(body = "first body", subject = "first title"))
+        val first = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            savedStateHandle = savedStateHandle,
+        )
+        testScheduler.advanceUntilIdle()
+        assertEquals("first body", first.state.value.restorableDraft)
+
+        draftStore.preload(key, EditorDraftStore.Draft(body = "new body", subject = "new title"))
+        val recreated = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            savedStateHandle = savedStateHandle,
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("new body", recreated.state.value.restorableDraft)
+        assertEquals("new title", recreated.state.value.restorableSubject)
+    }
+
+    @Test
+    fun `EditFirstPost server hydration does not hide a different cached draft`() = runTest {
+        draftStore.preload(
+            EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE),
+            EditorDraftStore.Draft(body = "unfinished body", subject = "unfinished title"),
+        )
+
+        val viewModel = newViewModel()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(topicFormRepository.formResult.initialContent, viewModel.state.value.draft.text)
+        assertEquals(topicFormRepository.formResult.subject, viewModel.state.value.subject.text)
+        assertEquals("unfinished body", viewModel.state.value.restorableDraft)
+        assertEquals("unfinished title", viewModel.state.value.restorableSubject)
     }
 
     @Test
@@ -1866,6 +1911,8 @@ class TopicFormViewModelTest {
         val deletedKeys: MutableList<String> = mutableListOf()
         var saveCount: Int = 0
             private set
+        var lastSavedOwner: String? = null
+            private set
 
         fun preload(key: String, draft: EditorDraftStore.Draft) {
             saved[key] = draft
@@ -1877,6 +1924,7 @@ class TopicFormViewModelTest {
 
         override suspend fun save(owner: String?, key: String, draft: EditorDraftStore.Draft) {
             saveCount += 1
+            lastSavedOwner = owner
             saved[key] = draft
         }
 

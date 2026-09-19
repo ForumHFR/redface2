@@ -1848,7 +1848,7 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `ViewModel recreation after the initial offer does not offer the draft again`() = runTest {
+    fun `ViewModel recreation with the same cached version does not reoffer and keeps autosave alive`() = runTest {
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
         val savedStateHandle = SavedStateHandle()
         draftStore.preload(key, EditorDraftStore.Draft(body = "rescued text"))
@@ -1861,6 +1861,42 @@ class PostEditorViewModelTest {
         testScheduler.advanceUntilIdle()
 
         assertNull(recreated.state.value.restorableDraft)
+        recreated.submit(PostEditorIntent.ContentChanged(TextFieldValue("new live text")))
+        testScheduler.advanceTimeBy(800L)
+        testScheduler.runCurrent()
+        assertEquals("new live text", draftStore.saved[key]?.body)
+        assertEquals("tester", draftStore.lastSavedOwner)
+    }
+
+    @Test
+    fun `process recreation offers a newer autosaved draft after live state was lost`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val savedStateHandle = SavedStateHandle()
+        draftStore.preload(key, EditorDraftStore.Draft(body = "first offered version"))
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val first = newReplyViewModel(savedStateHandle = savedStateHandle)
+        testScheduler.advanceUntilIdle()
+        assertEquals("first offered version", first.state.value.restorableDraft)
+
+        draftStore.preload(key, EditorDraftStore.Draft(body = "newer autosaved version"))
+        val recreated = newReplyViewModel(savedStateHandle = savedStateHandle)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("newer autosaved version", recreated.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `edit server hydration does not hide a different cached draft`() = runTest {
+        draftStore.preload(
+            EditorDraftKey.editPost(SAMPLE_CAT, SAMPLE_EDITED_NUMREPONSE),
+            EditorDraftStore.Draft(body = "unfinished rewrite"),
+        )
+
+        val viewModel = newEditViewModel()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("existing post body", viewModel.state.value.draft.text)
+        assertEquals("unfinished rewrite", viewModel.state.value.restorableDraft)
     }
 
     @Test
@@ -1953,6 +1989,31 @@ class PostEditorViewModelTest {
             assertNull("no banner on an escalation hand-over", settled.restorableDraft)
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `resumeSharedDraft is applied only once across ViewModel recreation`() = runTest {
+        val savedStateHandle = SavedStateHandle()
+        draftStore.preload(
+            EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID),
+            EditorDraftStore.Draft(body = "texte de la sheet"),
+        )
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val first = newReplyViewModel(
+            resumeSharedDraft = true,
+            savedStateHandle = savedStateHandle,
+        )
+        testScheduler.advanceUntilIdle()
+        assertEquals("texte de la sheet", first.state.value.draft.text)
+
+        val recreated = newReplyViewModel(
+            resumeSharedDraft = true,
+            savedStateHandle = savedStateHandle,
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("", recreated.state.value.draft.text)
+        assertNull(recreated.state.value.restorableDraft)
     }
 
     @Test
@@ -2775,6 +2836,8 @@ class PostEditorViewModelTest {
         val deletedKeys: MutableList<String> = mutableListOf()
         var saveCount: Int = 0
             private set
+        var lastSavedOwner: String? = null
+            private set
         var loadGate: CompletableDeferred<Unit>? = null
 
         /** Preload a draft so a VM created afterwards restores it on init. */
@@ -2791,6 +2854,7 @@ class PostEditorViewModelTest {
 
         override suspend fun save(owner: String?, key: String, draft: EditorDraftStore.Draft) {
             saveCount += 1
+            lastSavedOwner = owner
             saved[key] = draft
         }
 

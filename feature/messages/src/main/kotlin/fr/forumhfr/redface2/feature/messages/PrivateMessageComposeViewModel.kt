@@ -9,36 +9,36 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
-import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.recordImagePickerEvent
 import fr.forumhfr.redface2.core.domain.diagnostics.recordImagesPicked
-import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
-import fr.forumhfr.redface2.core.domain.upload.UploadException
-import fr.forumhfr.redface2.core.domain.upload.UploadFailureDiagnostics
-import fr.forumhfr.redface2.core.domain.upload.UploadRepository
-import fr.forumhfr.redface2.core.model.AuthState
-import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
-import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
-import fr.forumhfr.redface2.core.ui.editor.UploadError
-import fr.forumhfr.redface2.core.ui.editor.UploadProgress
-import fr.forumhfr.redface2.core.ui.editor.imageInsertBbcodeOrNull
-import fr.forumhfr.redface2.core.ui.editor.pickedImagesForUpload
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
+import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
+import fr.forumhfr.redface2.core.domain.upload.UploadException
+import fr.forumhfr.redface2.core.domain.upload.UploadFailureDiagnostics
+import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
+import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
-import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
+import fr.forumhfr.redface2.core.ui.editor.UploadError
+import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.imageInsertBbcodeOrNull
 import fr.forumhfr.redface2.core.ui.editor.insertBbcodeToken
+import fr.forumhfr.redface2.core.ui.editor.pickedImagesForUpload
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -83,8 +83,12 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
 
+    private val initialRecipients = initialRecipient.orEmpty().trim()
     private val _state = MutableStateFlow(
-        PrivateMessageComposeUiState(recipients = initialRecipient.orEmpty().trim()),
+        PrivateMessageComposeUiState(
+            recipients = initialRecipients,
+            recipientsHydratedContent = initialRecipients.takeIf { it.isNotBlank() },
+        ),
     )
     val state: StateFlow<PrivateMessageComposeUiState> = _state.asStateFlow()
 
@@ -168,12 +172,11 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     fun retryFormLoad() = loadForm()
 
     /**
-     * #405/#1415 — offer a cached body/subject/recipient set once, only while all live fields are
-     * empty. A server-side `dest` prefill or seeded recipient is therefore never covered by a stale
-     * restore offer. A cached draft has content when any of its three fields is non-blank.
+     * #405/#1415 — offer each cached body/subject/recipient version once. A routing or server-side
+     * `dest` prefill remains eligible while untouched; a real edit to any field suppresses the
+     * offer. The owner snapshot is captured even when the fingerprint guard filters the banner.
      */
     private fun restoreDraftIfAny() {
-        if (!markDraftRestoreOfferChecked()) return
         viewModelScope.launch {
             draftOwner = draftStore.currentOwner()
             val draft = draftStore.load(draftOwner, draftKey) ?: return@launch
@@ -181,8 +184,14 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                 !draft.subject.isNullOrBlank() ||
                 !draft.recipients.isNullOrBlank()
             if (hasContent) {
+                val fingerprint = draft.restoreOfferFingerprint()
+                if (savedStateHandle.get<String>(DRAFT_RESTORE_OFFER_FINGERPRINT_KEY) == fingerprint) {
+                    return@launch
+                }
+                var offered = false
                 _state.update { current ->
-                    if (current.isEmptyForDraftRestore() && !current.matches(draft)) {
+                    if (current.canOfferDraftRestore(draft)) {
+                        offered = true
                         current.copy(
                             restorableDraft = draft.body,
                             restorableSubject = draft.subject,
@@ -192,21 +201,18 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                         current
                     }
                 }
+                if (offered) savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] = fingerprint
             }
         }
     }
 
-    /** #1415 — one restore offer per navigation entry, including ViewModel recreation. */
-    private fun markDraftRestoreOfferChecked(): Boolean =
-        if (savedStateHandle.get<Boolean>(DRAFT_RESTORE_OFFER_CHECKED_KEY) == true) {
-            false
-        } else {
-            savedStateHandle[DRAFT_RESTORE_OFFER_CHECKED_KEY] = true
-            true
-        }
-
-    private fun PrivateMessageComposeUiState.isEmptyForDraftRestore(): Boolean =
-        draft.text.isBlank() && subject.isBlank() && recipients.isBlank()
+    private fun PrivateMessageComposeUiState.canOfferDraftRestore(
+        cached: EditorDraftStore.Draft,
+    ): Boolean =
+        !matches(cached) &&
+            draft.text.isBlank() &&
+            subject.isBlank() &&
+            (recipients.isBlank() || recipients == recipientsHydratedContent)
 
     private fun PrivateMessageComposeUiState.matches(cached: EditorDraftStore.Draft): Boolean =
         draft.text == cached.body &&
@@ -337,6 +343,12 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                     } else {
                         current.recipients
                     }
+                    val keepRestoreOffer = current.restorableDraft != null &&
+                        (
+                            current.restorableDraft != current.draft.text ||
+                                current.restorableSubject.orEmpty() != current.subject ||
+                                current.restorableRecipients.orEmpty() != nextRecipients
+                            )
                     current.copy(
                         isLoadingForm = false,
                         formAvailable = true,
@@ -344,9 +356,16 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                         // The composer's `dest` text input comes back through hiddenFields ; a
                         // server-side prefill (dest= in the GET) seeds the local field once.
                         recipients = nextRecipients,
-                        restorableDraft = current.restorableDraft.takeIf { nextRecipients.isBlank() },
-                        restorableSubject = current.restorableSubject.takeIf { nextRecipients.isBlank() },
-                        restorableRecipients = current.restorableRecipients.takeIf { nextRecipients.isBlank() },
+                        recipientsHydratedContent = if (
+                            hydrate && current.recipients.isBlank() && nextRecipients.isNotBlank()
+                        ) {
+                            nextRecipients
+                        } else {
+                            current.recipientsHydratedContent
+                        },
+                        restorableDraft = current.restorableDraft.takeIf { keepRestoreOffer },
+                        restorableSubject = current.restorableSubject.takeIf { keepRestoreOffer },
+                        restorableRecipients = current.restorableRecipients.takeIf { keepRestoreOffer },
                         signatureEnabled = if (hydrate) {
                             form.options.signatureEnabled || form.hiddenFields["signature"] == "1"
                         } else {
@@ -727,7 +746,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     }
 
     private companion object {
-        private const val DRAFT_RESTORE_OFFER_CHECKED_KEY = "draft_restore_offer_checked"
+        private const val DRAFT_RESTORE_OFFER_FINGERPRINT_KEY = "draft_restore_offer_fingerprint"
 
         // #405 — idle window after the last edit before the draft is persisted (cf. PostEditorViewModel).
         private const val AUTOSAVE_DEBOUNCE_MS = 750L
