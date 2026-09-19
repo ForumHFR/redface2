@@ -1,2 +1,3 @@
-Redface 2 v0.59.4 — dev.
-- Correctif urgent : le retour du sélecteur d'images ne plante plus ; une regex invalide dans le caviardage des diagnostics ne plante plus l'app.
+Redface 2 v0.59.5 — dev.
+- Android 10 : le clavier ne masque plus la zone de saisie.
+- Une bannière signale quand le sélecteur d'images ne renvoie aucune image.

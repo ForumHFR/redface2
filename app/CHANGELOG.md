@@ -16,6 +16,13 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.59.5` — `internal` (dev) — 2026-09-19
+
+- **Android 10 : le clavier ne masque plus la saisie ([#1404](https://github.com/ForumHFR/redface2/issues/1404))** — sous API 29, la fenêtre demande `adjustResize` afin que l'inset IME atteigne l'éditeur ; Android 11 et versions ultérieures conservent le comportement `adjustNothing` choisi pour éviter le double déplacement sur Samsung.
+- **Une bannière explique désormais les retours vides du sélecteur d'images ([#1420](https://github.com/ForumHFR/redface2/issues/1420))** — les quatre éditeurs indiquent qu'aucune image n'a été reçue et proposent l'explorateur de fichiers ou un redémarrage, sans prétendre distinguer une annulation d'un échec du sélecteur.
+
+---
+
 ## `0.59.4` — `internal` (dev) — 2026-09-16
 
 Hotfix #988/#1402 : correction d'une regex du caviardage des diagnostics refusée par le moteur ICU d'Android (accolade non échappée) qui faisait planter l'app à chaque retour du sélecteur d'images depuis la 0.59.3 ; une regex du rédacteur qui refuse de compiler ne fait plus planter l'app (repli fail-closed sur `<redacted>`) ; garde de syntaxe en test.

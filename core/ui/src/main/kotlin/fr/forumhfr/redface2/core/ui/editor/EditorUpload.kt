@@ -24,6 +24,9 @@ const val MAX_IMAGES_PER_UPLOAD = 10
  * gets here — the ViewModels ignore a pick without a userId.
  */
 sealed interface UploadError {
+    /** The picker returned no Uri; its callback cannot distinguish cancellation from failure (#1420). */
+    data object NoImageReceived : UploadError
+
     /** The picked image exceeds the host's accepted size. */
     data object TooLarge : UploadError
 
@@ -71,6 +74,7 @@ fun UploadProgressLabel(progress: UploadProgress?) {
  */
 @Composable
 fun UploadError.bannerText(): String = when (this) {
+    UploadError.NoImageReceived -> stringResource(R.string.editor_upload_error_no_image_received)
     UploadError.TooLarge -> stringResource(R.string.editor_upload_error_too_large)
     UploadError.UnsupportedType -> stringResource(R.string.editor_upload_error_unsupported_type)
     is UploadError.Server ->

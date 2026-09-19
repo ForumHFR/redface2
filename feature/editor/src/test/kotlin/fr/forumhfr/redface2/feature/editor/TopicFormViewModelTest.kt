@@ -1111,7 +1111,7 @@ class TopicFormViewModelTest {
     // ──────────────────────────────────────────────────────────────────────
 
     @Test
-    fun `empty picker result logs the ViewModel entry without uploading`() = runTest {
+    fun `empty picker result shows a banner without starting an upload`() = runTest {
         val diagnostics = DiagnosticsLog()
         val uploads = FakeUploadRepository()
         val reader = FakeImageUploadReader()
@@ -1141,7 +1141,11 @@ class TopicFormViewModelTest {
             )
             testScheduler.advanceUntilIdle()
 
-            assertEquals(stateBefore, viewModel.state.value)
+            assertEquals(
+                stateBefore.copy(uploadError = UploadError.NoImageReceived),
+                viewModel.state.value,
+            )
+            assertFalse(viewModel.state.value.isUploading)
             assertTrue(reader.readUris.isEmpty())
             assertEquals(0, uploads.uploadCalls)
             assertEquals(
@@ -1154,6 +1158,34 @@ class TopicFormViewModelTest {
             expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `single picker result keeps the upload path and no empty-result error`() = runTest {
+        val uploads = FakeUploadRepository()
+        val reader = FakeImageUploadReader()
+        val viewModel = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            uploadRepository = uploads,
+            imageUploadReader = reader,
+        )
+        testScheduler.advanceUntilIdle()
+        val uri = "content://media/picker/photo/1"
+
+        viewModel.submit(
+            TopicFormIntent.ImagePickerEventReceived(
+                ImagePickerEvent.Result(
+                    contract = ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA,
+                    uris = listOf(uri),
+                ),
+            ),
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf(uri), reader.readUris)
+        assertEquals(1, uploads.uploadCalls)
+        assertNull(viewModel.state.value.uploadError)
+        assertFalse(viewModel.state.value.isUploading)
     }
 
     @Test
