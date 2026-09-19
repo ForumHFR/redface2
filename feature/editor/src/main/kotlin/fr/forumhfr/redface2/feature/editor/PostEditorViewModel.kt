@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.assisted.Assisted
@@ -94,6 +95,7 @@ class PostEditorViewModel @AssistedInject constructor(
     private val imageUploadReader: ImageUploadReader,
     private val authRepository: AuthRepository,
     private val quoteMaterializer: TopicReplyQuoteMaterializer,
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
 
     private val _state: MutableStateFlow<PostEditorState> = MutableStateFlow(
@@ -279,7 +281,10 @@ class PostEditorViewModel @AssistedInject constructor(
                         val combined = if (existing.isBlank()) prefills + "\n" else prefills + "\n\n" + existing
                         current
                             .withFormHydration(form.copy(initialContent = ""), current.preview)
-                            .copy(draft = TextFieldValue(text = combined, selection = TextRange(combined.length)))
+                            .copy(
+                                draft = TextFieldValue(text = combined, selection = TextRange(combined.length)),
+                                restorableDraft = null,
+                            )
                     }
                     scheduleAutosave()
                 },
@@ -289,8 +294,9 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     /**
-     * #405 — surface a cached draft for [draftKey] on the banner (never auto-apply : a quote prefill
-     * or an edit body would otherwise be silently clobbered). Empty drafts are ignored.
+     * #405/#1415 — offer a cached draft for [draftKey] once, only while the live field is empty
+     * (never auto-apply: a quote prefill or edit body would otherwise be silently clobbered).
+     * Empty drafts and content already present when the asynchronous read returns are ignored.
      *
      * #790 exception — when the route carries `resumeSharedDraft` (escalation of a quick-reply
      * sheet, which JUST wrote the row), the body is APPENDED to the field instead of banner'd :
@@ -300,7 +306,8 @@ class PostEditorViewModel @AssistedInject constructor(
      * contract, restored.
      */
     private fun restoreDraftIfAny() {
-        val key = draftKey ?: return
+        val key = draftKey
+        if (key == null || (!request.resumeSharedDraft && !markDraftRestoreOfferChecked())) return
         viewModelScope.launch {
             draftOwner = draftStore.currentOwner()
             val body = draftStore.load(draftOwner, key)?.body
@@ -318,10 +325,25 @@ class PostEditorViewModel @AssistedInject constructor(
                 }
                 scheduleAutosave()
             } else {
-                _state.update { it.copy(restorableDraft = body) }
+                _state.update { current ->
+                    if (current.draft.text.isBlank() && current.draft.text != body) {
+                        current.copy(restorableDraft = body)
+                    } else {
+                        current
+                    }
+                }
             }
         }
     }
+
+    /** #1415 — one restore offer per navigation entry, including ViewModel recreation. */
+    private fun markDraftRestoreOfferChecked(): Boolean =
+        if (savedStateHandle.get<Boolean>(DRAFT_RESTORE_OFFER_CHECKED_KEY) == true) {
+            false
+        } else {
+            savedStateHandle[DRAFT_RESTORE_OFFER_CHECKED_KEY] = true
+            true
+        }
 
     /**
      * #405 — debounced autosave of the current body. Blank body → delete the row so an emptied
@@ -839,6 +861,7 @@ class PostEditorViewModel @AssistedInject constructor(
         return copy(
             isLoadingForm = false,
             draft = nextDraft,
+            restorableDraft = restorableDraft.takeIf { nextDraft.text.isBlank() },
             // Only adopt the caller's pre-computed preview when the same
             // hydration condition holds on the *latest* state. If the user
             // typed in between the snapshot and this update, `shouldHydrate`
@@ -1149,6 +1172,7 @@ class PostEditorViewModel @AssistedInject constructor(
         // Distinct from the repository's "ReplyRepository" tag so the diagnostics
         // panel makes it obvious which layer recorded an entry.
         private const val LOG_TAG_VM = "PostEditorVM"
+        private const val DRAFT_RESTORE_OFFER_CHECKED_KEY = "draft_restore_offer_checked"
 
         // #405 — idle window after the last edit before the draft is persisted. Long enough to
         // coalesce a burst of keystrokes into a single Room write, short enough that an accidental

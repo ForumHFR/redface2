@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.messages
 
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
@@ -101,6 +102,7 @@ class PrivateMessageComposeViewModelTest {
         uploadRepository: UploadRepository = FakeUploadRepository(),
         imageUploadReader: ImageUploadReader = FakeImageUploadReader(),
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
+        savedStateHandle: SavedStateHandle = SavedStateHandle(),
     ): PrivateMessageComposeViewModel = PrivateMessageComposeViewModel(
         initialRecipient = initialRecipient,
         repository = repository,
@@ -112,6 +114,7 @@ class PrivateMessageComposeViewModelTest {
         imageUploadReader = imageUploadReader,
         diagnostics = diagnostics,
         smileyRepository = smileyRepository,
+        savedStateHandle = savedStateHandle,
     )
 
     @Test
@@ -508,6 +511,25 @@ class PrivateMessageComposeViewModelTest {
         assertEquals("rescued subject", vm.state.value.subject)
         assertEquals("rescued dest", vm.state.value.recipients)
         assertEquals(null, vm.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `composer recreation after the initial offer does not offer the draft again`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val savedStateHandle = SavedStateHandle()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        draftStore.preload(
+            EditorDraftKey.mpCompose(),
+            EditorDraftStore.Draft(body = "rescued MP", isPrivate = true),
+        )
+        val first = viewModel(repository, savedStateHandle = savedStateHandle)
+        advanceUntilIdle()
+        assertEquals("rescued MP", first.state.value.restorableDraft)
+
+        val recreated = viewModel(repository, savedStateHandle = savedStateHandle)
+        advanceUntilIdle()
+
+        assertEquals(null, recreated.state.value.restorableDraft)
     }
 
     @Test

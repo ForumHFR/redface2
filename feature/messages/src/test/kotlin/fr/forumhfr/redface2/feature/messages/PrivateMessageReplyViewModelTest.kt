@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.messages
 
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
@@ -377,7 +378,7 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
-    fun `stored draft stays offered beside quote prefill and wins only on explicit restore`() = runTest {
+    fun `stored draft is not offered once the quote prefill occupies the editor`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         val prefill = "[quotemsg=1980000004,4,990001]Citation serveur[/quotemsg]\n"
         coEvery { repository.fetchReplyForm(any(), any()) } returns form(initialContent = prefill)
@@ -394,10 +395,6 @@ class PrivateMessageReplyViewModelTest {
         advanceUntilIdle()
 
         assertEquals(prefill, viewModel.state.value.draft.text)
-        assertEquals("Ancien brouillon", viewModel.state.value.restorableDraft)
-
-        viewModel.onDraftRestoreRequested()
-        assertEquals("Ancien brouillon", viewModel.state.value.draft.text)
         assertNull(viewModel.state.value.restorableDraft)
     }
 
@@ -824,6 +821,31 @@ class PrivateMessageReplyViewModelTest {
         viewModel.onDraftRestoreRequested()
         assertEquals("rescued MP", viewModel.state.value.draft.text)
         assertNull(viewModel.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `reply recreation after the initial offer does not offer the draft again`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val savedStateHandle = SavedStateHandle()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        draftStore.preload(
+            EditorDraftKey.mpReply(request.threadId),
+            EditorDraftStore.Draft(body = "rescued MP", isPrivate = true),
+        )
+        val first = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(), savedStateHandle,
+        )
+        assertEquals("rescued MP", first.state.value.restorableDraft)
+
+        val recreated = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(), savedStateHandle,
+        )
+
+        assertNull(recreated.state.value.restorableDraft)
     }
 
     @Test

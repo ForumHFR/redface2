@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
@@ -881,6 +882,7 @@ class PostEditorViewModelTest {
         userPreferencesRepository: UserPreferencesRepository =
             FakeUserPreferencesRepository(quoteCardsEnabled = true),
         authRepository: AuthRepository = FakeAuthRepository(),
+        savedStateHandle: SavedStateHandle = SavedStateHandle(),
     ): PostEditorViewModel =
         PostEditorViewModel(
             request = PostEditorRequest(
@@ -904,6 +906,7 @@ class PostEditorViewModelTest {
             imageUploadReader = imageUploadReader,
             authRepository = authRepository,
             quoteMaterializer = TopicReplyQuoteMaterializer(replyRepository),
+            savedStateHandle = savedStateHandle,
         )
 
     // ----- Phase 2F-B (#11) / #441 : smiley picker ----------------------------------
@@ -1795,6 +1798,69 @@ class PostEditorViewModelTest {
             assertEquals("the live draft stays empty until the user restores", "", settled.draft.text)
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `current content identical to the cached draft is never offered`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.preload(key, EditorDraftStore.Draft(body = "already visible"))
+        draftStore.loadGate = CompletableDeferred()
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel()
+        testScheduler.runCurrent()
+
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("already visible")))
+        draftStore.loadGate?.complete(Unit)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("already visible", viewModel.state.value.draft.text)
+        assertNull(viewModel.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `image insertion and autosave cannot turn the current draft into a restore offer`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.preload(key, EditorDraftStore.Draft(body = "older draft"))
+        draftStore.loadGate = CompletableDeferred()
+        replyRepository.formResult = Result.success(authenticatedForm())
+        uploadRepository.uploadResult = uploadedImage("https://h/Picture/Get/f/1415")
+        imageUploadReader.result =
+            ImageUpload(bytes = byteArrayOf(1), mimeType = "image/png", displayName = "picked.png")
+        val viewModel = newReplyViewModel(
+            authRepository = FakeAuthRepository(AuthState.Authenticated("alice")),
+        )
+        testScheduler.runCurrent()
+
+        viewModel.submit(
+            PostEditorIntent.ImagePickerEventReceived(
+                ImagePickerEvent.Result(
+                    contract = ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA,
+                    uris = listOf("content://picker/1415"),
+                ),
+            ),
+        )
+        testScheduler.advanceUntilIdle()
+        draftStore.loadGate?.complete(Unit)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(viewModel.state.value.draft.text, draftStore.saved[key]?.body)
+        assertNull(viewModel.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `ViewModel recreation after the initial offer does not offer the draft again`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val savedStateHandle = SavedStateHandle()
+        draftStore.preload(key, EditorDraftStore.Draft(body = "rescued text"))
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val first = newReplyViewModel(savedStateHandle = savedStateHandle)
+        testScheduler.advanceUntilIdle()
+        assertEquals("rescued text", first.state.value.restorableDraft)
+
+        val recreated = newReplyViewModel(savedStateHandle = savedStateHandle)
+        testScheduler.advanceUntilIdle()
+
+        assertNull(recreated.state.value.restorableDraft)
     }
 
     @Test
@@ -2709,6 +2775,7 @@ class PostEditorViewModelTest {
         val deletedKeys: MutableList<String> = mutableListOf()
         var saveCount: Int = 0
             private set
+        var loadGate: CompletableDeferred<Unit>? = null
 
         /** Preload a draft so a VM created afterwards restores it on init. */
         fun preload(key: String, draft: EditorDraftStore.Draft) {
@@ -2717,7 +2784,10 @@ class PostEditorViewModelTest {
 
         override suspend fun currentOwner(): String? = "tester"
 
-        override suspend fun load(owner: String?, key: String): EditorDraftStore.Draft? = saved[key]
+        override suspend fun load(owner: String?, key: String): EditorDraftStore.Draft? {
+            loadGate?.await()
+            return saved[key]
+        }
 
         override suspend fun save(owner: String?, key: String, draft: EditorDraftStore.Draft) {
             saveCount += 1

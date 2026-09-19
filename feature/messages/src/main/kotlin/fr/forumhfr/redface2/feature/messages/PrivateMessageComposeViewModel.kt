@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.messages
 
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.assisted.Assisted
@@ -79,6 +80,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     private val imageUploadReader: ImageUploadReader,
     private val diagnostics: DiagnosticsLog,
     smileyRepository: SmileyRepository,
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(
@@ -166,11 +168,12 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     fun retryFormLoad() = loadForm()
 
     /**
-     * #405 — surface a cached draft (body + subject + recipients) on the banner, never auto-applied
-     * (a server-side `dest` prefill or seeded recipient would otherwise be clobbered). A draft is
-     * considered restorable when any of the three fields is non-blank.
+     * #405/#1415 — offer a cached body/subject/recipient set once, only while all live fields are
+     * empty. A server-side `dest` prefill or seeded recipient is therefore never covered by a stale
+     * restore offer. A cached draft has content when any of its three fields is non-blank.
      */
     private fun restoreDraftIfAny() {
+        if (!markDraftRestoreOfferChecked()) return
         viewModelScope.launch {
             draftOwner = draftStore.currentOwner()
             val draft = draftStore.load(draftOwner, draftKey) ?: return@launch
@@ -178,16 +181,37 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                 !draft.subject.isNullOrBlank() ||
                 !draft.recipients.isNullOrBlank()
             if (hasContent) {
-                _state.update {
-                    it.copy(
-                        restorableDraft = draft.body,
-                        restorableSubject = draft.subject,
-                        restorableRecipients = draft.recipients,
-                    )
+                _state.update { current ->
+                    if (current.isEmptyForDraftRestore() && !current.matches(draft)) {
+                        current.copy(
+                            restorableDraft = draft.body,
+                            restorableSubject = draft.subject,
+                            restorableRecipients = draft.recipients,
+                        )
+                    } else {
+                        current
+                    }
                 }
             }
         }
     }
+
+    /** #1415 — one restore offer per navigation entry, including ViewModel recreation. */
+    private fun markDraftRestoreOfferChecked(): Boolean =
+        if (savedStateHandle.get<Boolean>(DRAFT_RESTORE_OFFER_CHECKED_KEY) == true) {
+            false
+        } else {
+            savedStateHandle[DRAFT_RESTORE_OFFER_CHECKED_KEY] = true
+            true
+        }
+
+    private fun PrivateMessageComposeUiState.isEmptyForDraftRestore(): Boolean =
+        draft.text.isBlank() && subject.isBlank() && recipients.isBlank()
+
+    private fun PrivateMessageComposeUiState.matches(cached: EditorDraftStore.Draft): Boolean =
+        draft.text == cached.body &&
+            subject == cached.subject.orEmpty() &&
+            recipients == cached.recipients.orEmpty()
 
     /**
      * #405 — debounced autosave of recipients + subject + body, flagged `isPrivate = true` so the
@@ -308,17 +332,21 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                     // expired hash_check must not clobber toggles (or a recipient edit) the user
                     // changed in between. Mirror of the reply editor's guard.
                     val hydrate = !current.optionsHydratedFromForm
+                    val nextRecipients = if (hydrate && current.recipients.isBlank()) {
+                        form.hiddenFields["dest"].orEmpty()
+                    } else {
+                        current.recipients
+                    }
                     current.copy(
                         isLoadingForm = false,
                         formAvailable = true,
                         formError = false,
                         // The composer's `dest` text input comes back through hiddenFields ; a
                         // server-side prefill (dest= in the GET) seeds the local field once.
-                        recipients = if (hydrate && current.recipients.isBlank()) {
-                            form.hiddenFields["dest"].orEmpty()
-                        } else {
-                            current.recipients
-                        },
+                        recipients = nextRecipients,
+                        restorableDraft = current.restorableDraft.takeIf { nextRecipients.isBlank() },
+                        restorableSubject = current.restorableSubject.takeIf { nextRecipients.isBlank() },
+                        restorableRecipients = current.restorableRecipients.takeIf { nextRecipients.isBlank() },
                         signatureEnabled = if (hydrate) {
                             form.options.signatureEnabled || form.hiddenFields["signature"] == "1"
                         } else {
@@ -350,14 +378,27 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     }
 
     fun onRecipientsChanged(value: String) {
-        _state.update { it.copy(recipients = value) }
+        _state.update {
+            it.copy(
+                recipients = value,
+                restorableDraft = it.restorableDraft.takeIf { value.isBlank() },
+                restorableSubject = it.restorableSubject.takeIf { value.isBlank() },
+                restorableRecipients = it.restorableRecipients.takeIf { value.isBlank() },
+            )
+        }
         scheduleAutosave()
     }
 
     fun onSubjectChanged(value: String) {
         _state.update {
             // HFR's maxlength=70 — truncate instead of erroring so pasted text just clips.
-            it.copy(subject = value.take(PrivateMessageComposeUiState.SUBJECT_MAX_LENGTH))
+            val subject = value.take(PrivateMessageComposeUiState.SUBJECT_MAX_LENGTH)
+            it.copy(
+                subject = subject,
+                restorableDraft = it.restorableDraft.takeIf { subject.isBlank() },
+                restorableSubject = it.restorableSubject.takeIf { subject.isBlank() },
+                restorableRecipients = it.restorableRecipients.takeIf { subject.isBlank() },
+            )
         }
         scheduleAutosave()
     }
@@ -538,6 +579,9 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     ): PrivateMessageComposeUiState = copy(
         draft = updated,
         preview = if (isPreviewVisible) previewParser.parsePreview(updated.text) else preview,
+        restorableDraft = restorableDraft.takeIf { updated.text.isBlank() },
+        restorableSubject = restorableSubject.takeIf { updated.text.isBlank() },
+        restorableRecipients = restorableRecipients.takeIf { updated.text.isBlank() },
         // #459 — a fresh text edit dismisses a stale upload banner (a successful upload INSERTS
         // text via this path, which also clears any prior error) — parity with PostEditorState.
         uploadError = if (updated.text != draft.text) null else uploadError,
@@ -683,6 +727,8 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     }
 
     private companion object {
+        private const val DRAFT_RESTORE_OFFER_CHECKED_KEY = "draft_restore_offer_checked"
+
         // #405 — idle window after the last edit before the draft is persisted (cf. PostEditorViewModel).
         private const val AUTOSAVE_DEBOUNCE_MS = 750L
 

@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.messages
 
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.assisted.Assisted
@@ -81,6 +82,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     private val imageUploadReader: ImageUploadReader,
     private val diagnostics: DiagnosticsLog,
     smileyRepository: SmileyRepository,
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
 
     private val _state = MutableStateFlow(PrivateMessageReplyUiState())
@@ -177,16 +179,32 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
 
     fun retryFormLoad() = loadForm()
 
-    /** #405 — surface a cached draft on the banner (never auto-applied). Empty drafts are ignored. */
+    /** #405/#1415 — offer a non-empty cached draft once, only while the live field is empty. */
     private fun restoreDraftIfAny() {
+        if (!markDraftRestoreOfferChecked()) return
         viewModelScope.launch {
             draftOwner = draftStore.currentOwner()
             val body = draftStore.load(draftOwner, draftKey)?.body
             if (!body.isNullOrBlank()) {
-                _state.update { it.copy(restorableDraft = body) }
+                _state.update { current ->
+                    if (current.draft.text.isBlank() && current.draft.text != body) {
+                        current.copy(restorableDraft = body)
+                    } else {
+                        current
+                    }
+                }
             }
         }
     }
+
+    /** #1415 — one restore offer per navigation entry, including ViewModel recreation. */
+    private fun markDraftRestoreOfferChecked(): Boolean =
+        if (savedStateHandle.get<Boolean>(DRAFT_RESTORE_OFFER_CHECKED_KEY) == true) {
+            false
+        } else {
+            savedStateHandle[DRAFT_RESTORE_OFFER_CHECKED_KEY] = true
+            true
+        }
 
     /**
      * #405 — debounced autosave of the body, flagged `isPrivate = true` so the logout purge wipes
@@ -605,6 +623,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         copy(
             draft = updated,
             preview = if (isPreviewVisible) previewParser.parsePreview(updated.text) else preview,
+            restorableDraft = restorableDraft.takeIf { updated.text.isBlank() },
             // #459 — a fresh text edit dismisses a stale upload banner — parity with PostEditorState.
             uploadError = if (updated.text != draft.text) null else uploadError,
         )
@@ -771,6 +790,8 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     }
 
     private companion object {
+        private const val DRAFT_RESTORE_OFFER_CHECKED_KEY = "draft_restore_offer_checked"
+
         // #405 — idle window after the last edit before the draft is persisted (cf. PostEditorViewModel).
         private const val AUTOSAVE_DEBOUNCE_MS = 750L
 

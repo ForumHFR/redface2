@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.ui.editor.UploadError
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
@@ -955,6 +956,30 @@ class TopicFormViewModelTest {
     }
 
     @Test
+    fun `New recreation after the initial offer does not offer the draft again`() = runTest {
+        val savedStateHandle = SavedStateHandle()
+        draftStore.preload(
+            EditorDraftKey.newTopic(SAMPLE_CAT),
+            EditorDraftStore.Draft(body = "rescued body", subject = "rescued title"),
+        )
+        val first = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            savedStateHandle = savedStateHandle,
+        )
+        testScheduler.advanceUntilIdle()
+        assertEquals("rescued body", first.state.value.restorableDraft)
+
+        val recreated = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            savedStateHandle = savedStateHandle,
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertNull(recreated.state.value.restorableDraft)
+        assertNull(recreated.state.value.restorableSubject)
+    }
+
+    @Test
     fun `New discard deletes the cached draft and clears the banner`() = runTest {
         val key = EditorDraftKey.newTopic(SAMPLE_CAT)
         draftStore.preload(key, EditorDraftStore.Draft(body = "rescued body"))
@@ -1319,6 +1344,7 @@ class TopicFormViewModelTest {
         authRepository: AuthRepository = FakeAuthRepository(),
         uploadRepository: UploadRepository = FakeUploadRepository(),
         imageUploadReader: ImageUploadReader = FakeImageUploadReader(),
+        savedStateHandle: SavedStateHandle = SavedStateHandle(),
     ): TopicFormViewModel = TopicFormViewModel(
         request = TopicFormRequest(
             mode = TopicFormMode.New,
@@ -1337,6 +1363,7 @@ class TopicFormViewModelTest {
         authRepository = authRepository,
         uploadRepository = uploadRepository,
         imageUploadReader = imageUploadReader,
+        savedStateHandle = savedStateHandle,
     )
 
     private suspend fun app.cash.turbine.ReceiveTurbine<TopicFormState>.awaitHydratedState(): TopicFormState {

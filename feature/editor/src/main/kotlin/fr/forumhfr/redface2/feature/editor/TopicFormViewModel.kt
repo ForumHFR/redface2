@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.assisted.Assisted
@@ -89,6 +90,7 @@ class TopicFormViewModel @AssistedInject constructor(
     private val authRepository: AuthRepository,
     private val uploadRepository: UploadRepository,
     private val imageUploadReader: ImageUploadReader,
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
 
     private val _state: MutableStateFlow<TopicFormState> = MutableStateFlow(
@@ -208,22 +210,43 @@ class TopicFormViewModel @AssistedInject constructor(
     }
 
     /**
-     * #405 — surface a cached draft (subject + body) on the banner, never auto-applied (a server
-     * EditFirstPost prefill would otherwise be clobbered). Empty drafts (blank body AND subject)
-     * are ignored.
+     * #405/#1415 — offer a cached subject/body once, only while both live fields are empty. A server
+     * EditFirstPost prefill is therefore never covered by a stale restore offer. Empty cached drafts
+     * (blank body AND subject) and content already present when the asynchronous read returns are
+     * ignored.
      */
     private fun restoreDraftIfAny() {
-        val key = draftKey ?: return
+        val key = draftKey
+        if (key == null || !markDraftRestoreOfferChecked()) return
         viewModelScope.launch {
             draftOwner = draftStore.currentOwner()
             val draft = draftStore.load(draftOwner, key) ?: return@launch
             if (draft.body.isNotBlank() || !draft.subject.isNullOrBlank()) {
-                _state.update {
-                    it.copy(restorableDraft = draft.body, restorableSubject = draft.subject)
+                _state.update { current ->
+                    if (current.isEmptyForDraftRestore() && !current.matches(draft)) {
+                        current.copy(restorableDraft = draft.body, restorableSubject = draft.subject)
+                    } else {
+                        current
+                    }
                 }
             }
         }
     }
+
+    /** #1415 — one restore offer per navigation entry, including ViewModel recreation. */
+    private fun markDraftRestoreOfferChecked(): Boolean =
+        if (savedStateHandle.get<Boolean>(DRAFT_RESTORE_OFFER_CHECKED_KEY) == true) {
+            false
+        } else {
+            savedStateHandle[DRAFT_RESTORE_OFFER_CHECKED_KEY] = true
+            true
+        }
+
+    private fun TopicFormState.isEmptyForDraftRestore(): Boolean =
+        draft.text.isBlank() && subject.text.isBlank()
+
+    private fun TopicFormState.matches(cached: EditorDraftStore.Draft): Boolean =
+        draft.text == cached.body && subject.text == cached.subject.orEmpty()
 
     /**
      * #405 — debounced autosave of subject + body. Blank body AND blank subject → delete the row.
@@ -571,6 +594,8 @@ class TopicFormViewModel @AssistedInject constructor(
         _state.update { current ->
             current.copy(
                 subject = value,
+                restorableDraft = current.restorableDraft.takeIf { value.text.isBlank() },
+                restorableSubject = current.restorableSubject.takeIf { value.text.isBlank() },
                 submitError = if (value.text != current.subject.text) null else current.submitError,
             )
         }
@@ -975,6 +1000,12 @@ class TopicFormViewModel @AssistedInject constructor(
             isLoadingForm = false,
             subject = nextSubject,
             draft = nextDraft,
+            restorableDraft = restorableDraft.takeIf {
+                nextSubject.text.isBlank() && nextDraft.text.isBlank()
+            },
+            restorableSubject = restorableSubject.takeIf {
+                nextSubject.text.isBlank() && nextDraft.text.isBlank()
+            },
             preview = if (hydrateDraft && isPreviewVisible) nextPreview else preview,
             subjectHydratedFromServer = subjectHydratedFromServer || hydrateSubject,
             draftHydratedFromServer = draftHydratedFromServer || hydrateDraft,
@@ -1033,6 +1064,7 @@ class TopicFormViewModel @AssistedInject constructor(
 
     private companion object {
         private const val LOG_TAG_VM = "TopicFormVM"
+        private const val DRAFT_RESTORE_OFFER_CHECKED_KEY = "draft_restore_offer_checked"
 
         // #405 — idle window after the last edit before the draft is persisted (cf. PostEditorViewModel).
         private const val AUTOSAVE_DEBOUNCE_MS = 750L
