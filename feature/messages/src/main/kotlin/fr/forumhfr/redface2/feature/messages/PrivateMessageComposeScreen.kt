@@ -219,7 +219,7 @@ private fun ComposeEditorBody(
     modifier: Modifier = Modifier,
 ) {
     val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode, onImagePickerEvent)
-    // #447/#1406 — the draft must be bounded so the legacy field owns selection scrolling. The
+    // #447/#1406 — the draft must be bounded so BTF2 owns selection scrolling. The
     // header keeps an internal capped scroll: unlike the pre-#434 weighted layout, recipients,
     // subject and toolbar cannot squeeze the draft to zero when the IME opens.
     BoxWithConstraints(

@@ -64,6 +64,7 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsCallbacks
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsColumn
+import fr.forumhfr.redface2.core.ui.editor.editorControlsMaxHeight
 
 
 /**
@@ -134,9 +135,9 @@ private fun PostEditorContent(
             // free pixel down to the bottom bar (dogfooding v108 — the column used to leave
             // a large blank under « Afficher l'aperçu »). Long content scrolls in the field's
             // own internal scroller (#447/#1406) and inside the preview pane, which is also why
-            // weight() is usable at all — it gives the text field the bounded height required by
-            // the legacy selection manager. Keyboard handling : the bar's IME inset grows, this
-            // column shrinks by the same amount, and the field-size nudge re-anchors the caret.
+            // weight() is usable at all — it gives BTF2 the bounded viewport required by its
+            // internal selection scroll. Keyboard handling : the bar's IME inset grows, this
+            // column shrinks by the same amount, and BTF2 keeps the caret anchored natively.
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -166,11 +167,14 @@ private fun PostEditorContent(
                 // the [quotemsg] blocks are materialised at submit.
                 // #555 — everything that competes with the field for vertical space (draft
                 // banner, error banners, cards) lives in ONE top zone that scrolls past its
-                // budget : the field keeps EDITOR_FIELD_MIN_HEIGHT no matter how short the
-                // IME leaves the window. Before this, the field was the only weighted child
+                // budget : the field keeps a 160 dp reserve while the available window permits it.
+                // Before this, the field was the only weighted child
                 // and fixed content could crush it to zero pixels on a short display (thibw).
                 BoxWithConstraints(modifier = Modifier.weight(1f)) {
-                    val topZoneMaxHeight = editorTopZoneMaxHeight(available = maxHeight)
+                    val topZoneMaxHeight = editorControlsMaxHeight(
+                        available = maxHeight,
+                        fieldMin = 160.dp,
+                    )
                     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                         EditorTopZone(
                             state = state,
@@ -184,15 +188,15 @@ private fun PostEditorContent(
                             label = stringResource(R.string.editor_field_label),
                             placeholder = stringResource(R.string.editor_field_placeholder),
                             modifier = Modifier.weight(1f),
-                            // #275/#410/#447 — bounded legacy field: internal scrolling keeps
-                            // selection handles attached; the size nudge keeps the caret visible.
+                            // #275/#410/#447 — BTF2 owns handle scrolling and caret following in
+                            // this bounded viewport.
                             // Multi-image upload — lock editing during a batch so the user can't
                             // move the caret between two programmatic [img] insertions (keeps them
                             // in pick order).
                             readOnly = state.isUploading,
                             // #555 — the editor opens ready to type: focus + IME on entry. Critical
                             // in edit mode (field hydrated with a long post: nothing set the focus,
-                            // keyboard closed, #447 caret-follow inert) ; for a reply it is the
+                            // keyboard closed) ; for a reply it is the
                             // expected behaviour anyway.
                             autoFocus = true,
                         )
@@ -341,7 +345,7 @@ internal fun DraftRestoreBanner(
 /**
  * #555 — the editor's TOP ZONE : everything that competes with the draft field for vertical
  * space (draft-restore banner, submit/upload error banners, quote cards) in one scrollable
- * column bounded by [maxHeight] (the [editorTopZoneMaxHeight] budget). Scrolling past the
+ * column bounded by [maxHeight] (the shared [editorControlsMaxHeight] budget). Scrolling past the
  * budget keeps every element reachable while the field keeps its guaranteed minimum below.
  */
 @Composable
@@ -437,25 +441,6 @@ private fun EditorQuoteCards(
         )
     }
 }
-
-/**
- * #555 — the top-zone budget of the editor : the draft banner, error banners and quote cards
- * share whatever the available height leaves ABOVE the field's guaranteed minimum, bounded by
- * [EDITOR_TOP_ZONE_MAX_HEIGHT] on a roomy display. Pure — pinned by unit test.
- */
-internal fun editorTopZoneMaxHeight(available: Dp): Dp =
-    (available - EDITOR_FIELD_MIN_HEIGHT - EDITOR_ZONE_SPACING)
-        .coerceIn(0.dp, EDITOR_TOP_ZONE_MAX_HEIGHT)
-
-// #555 — « Tout vider » + ~4 one-line cards (the historical 240dp cards budget) + room for a
-// draft/error banner. Past that the top zone scrolls.
-internal val EDITOR_TOP_ZONE_MAX_HEIGHT = 360.dp
-
-// #555 — the draft field never shrinks below this, whatever the IME + top zone demand.
-internal val EDITOR_FIELD_MIN_HEIGHT = 96.dp
-
-// Spacing between the top zone and the field inside their shared weighted box.
-private val EDITOR_ZONE_SPACING = 12.dp
 
 /**
  * Display state of [EditorSubmitBar]. [confirmArmed] is the « confirmation avant

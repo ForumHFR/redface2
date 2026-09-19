@@ -16,6 +16,10 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.59.8` — `internal` (dev) — 2026-09-19
+
+- **Le champ BBCode passe au `TextFieldState` moderne ([#447](https://github.com/ForumHFR/redface2/issues/447), [#872](https://github.com/ForumHFR/redface2/issues/872))** — les poignées de sélection et le curseur sont suivis nativement, sans recalage maison, tout en conservant le label flottant. L'écran de réponse MP rejoint la structure des autres éditeurs et la zone de saisie garde un minimum de 160 dp partout tant que la fenêtre le permet.
+
 ## `0.59.7` — `internal` (dev) — 2026-09-19
 
 - **La sélection de texte reste pilotable au-delà de l'écran ([#447](https://github.com/ForumHFR/redface2/issues/447), [#1406](https://github.com/ForumHFR/redface2/issues/1406), [#275](https://github.com/ForumHFR/redface2/issues/275), [#410](https://github.com/ForumHFR/redface2/issues/410))** — les quatre éditeurs retrouvent un champ à hauteur bornée et son défilement interne : les poignées restent attachées au doigt quand la sélection dépasse l'écran. Un recalage bref du curseur après redimensionnement garde sa ligne visible à l'ouverture du clavier, au retour de l'aperçu et quand les bannières ou citations réduisent le champ. Le label redevient flottant au-dessus de la décoration, hors du contenu qui défile ; il n'est plus épinglé sur une ligne dédiée.
