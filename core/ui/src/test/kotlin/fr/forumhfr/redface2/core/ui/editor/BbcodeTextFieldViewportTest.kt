@@ -59,7 +59,9 @@ class BbcodeTextFieldViewportTest {
         val host = composeTestRule.onNodeWithTag(HOST_TAG).fetchSemanticsNode()
         val layout = requireNotNull(latestTextLayout)
         val viewportHeight = layout.size.height - scrollState.maxValue
-        val expectedHeight = host.size.height - with(density) { 8.dp.roundToPx() }
+        // Host minus the #872 label headroom (8 dp) and the outlined decorator's vertical content
+        // padding (16 dp top + 16 dp bottom): what remains is the text viewport BTF2 scrolls in.
+        val expectedHeight = host.size.height - with(density) { (8.dp + 32.dp).roundToPx() }
         val tolerance = with(density) { 1.dp.roundToPx() }
 
         assertTrue(

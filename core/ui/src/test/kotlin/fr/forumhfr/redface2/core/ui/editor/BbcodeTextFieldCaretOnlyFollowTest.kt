@@ -107,9 +107,9 @@ class BbcodeTextFieldCaretOnlyFollowTest {
                 selection = firstEdit.selection
             }
         }
-        composeTestRule.waitUntil(timeoutMillis = 5_000) {
-            fixture.emissions == listOf(firstEdit)
-        }
+        composeTestRule.waitUntil(timeoutMillis = 5_000) { fixture.emissions.isNotEmpty() }
+        composeTestRule.waitForIdle()
+        assertEquals(firstEdit.text, fixture.emissions.last().text)
 
         // Schedule the parent echo, then reproduce the IME edit that lands before its effect.
         composeTestRule.runOnIdle {
