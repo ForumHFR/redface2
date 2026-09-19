@@ -2,10 +2,13 @@ package fr.forumhfr.redface2.feature.topic
 
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.UriHandler
@@ -23,6 +26,7 @@ import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.post.PostRenderer
+import fr.forumhfr.redface2.core.ui.post.releasePostSelectionOnTap
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -52,6 +56,23 @@ class TopicSelectionReleaseTest {
 
         compose.onNodeWithTag(SECOND_POST_BACKGROUND_TAG).performTouchInput { click() }
         compose.runOnIdle { assertEquals(1, epoch.intValue) }
+
+        compose.onNodeWithTag(SECOND_POST_BACKGROUND_TAG).performTouchInput { click() }
+        compose.runOnIdle { assertEquals("the release must disarm after one bump", 1, epoch.intValue) }
+
+        // Compose semantics expose neither Android's selection handles nor its floating toolbar.
+        // Their disappearance after the owner reset therefore remains a device-level check; this
+        // test pins the observable owner epoch and ResettableSelectionContainerTest pins recreation.
+    }
+
+    @Test
+    fun `plain tap without a preceding long press keeps selection owners stable`() {
+        val epoch = mutableIntStateOf(0)
+        setTwoPosts(epoch)
+
+        compose.onNodeWithTag(SECOND_POST_BACKGROUND_TAG).performTouchInput { click() }
+
+        compose.runOnIdle { assertEquals(0, epoch.intValue) }
     }
 
     @Test
@@ -60,6 +81,7 @@ class TopicSelectionReleaseTest {
         val uriHandler = RecordingUriHandler()
         setTwoPosts(epoch, uriHandler)
 
+        compose.onNodeWithText(FIRST_POST_TEXT).performTouchInput { longClick() }
         compose.onNodeWithText(LINK_TEXT).performTouchInput { click() }
 
         compose.runOnIdle {
@@ -71,9 +93,18 @@ class TopicSelectionReleaseTest {
     private fun setTwoPosts(epoch: androidx.compose.runtime.MutableIntState, uriHandler: UriHandler? = null) {
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                val selectionMaybeActive = remember { mutableStateOf(false) }
                 val content: @Composable () -> Unit = {
                     Column(
-                        modifier = Modifier.releasePostSelectionOnTap { epoch.intValue += 1 },
+                        modifier = Modifier.releasePostSelectionOnTap(
+                            onLongPressObserved = { selectionMaybeActive.value = true },
+                            onTap = {
+                                if (selectionMaybeActive.value) {
+                                    epoch.intValue += 1
+                                    selectionMaybeActive.value = false
+                                }
+                            },
+                        ),
                     ) {
                         PostRenderer(
                             content = paragraph(FIRST_POST_TEXT),
@@ -89,6 +120,7 @@ class TopicSelectionReleaseTest {
                             Spacer(
                                 Modifier
                                     .testTag(SECOND_POST_BACKGROUND_TAG)
+                                    .fillMaxWidth()
                                     .height(48.dp),
                             )
                         }

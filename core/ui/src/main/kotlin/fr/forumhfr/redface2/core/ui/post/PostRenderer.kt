@@ -37,7 +37,6 @@ import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -348,11 +347,10 @@ internal fun ResettableSelectionContainer(
     modifier: Modifier = Modifier,
     content: @Composable () -> Unit,
 ) {
-    val currentContent = rememberUpdatedState(content)
-    val movableContent = remember { movableContentOf { currentContent.value() } }
+    val movableContent = remember { movableContentOf<@Composable () -> Unit> { it() } }
     key(selectionEpoch) {
         SelectionContainer(modifier = modifier) {
-            movableContent()
+            movableContent(content)
         }
     }
 }

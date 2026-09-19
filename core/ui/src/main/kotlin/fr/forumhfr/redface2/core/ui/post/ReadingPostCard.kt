@@ -52,7 +52,7 @@ fun ReadingPostCard(
     identity: @Composable (moderationHeaderColors: ReadingPostHeaderColors?) -> Unit,
     modifier: Modifier = Modifier,
     presentation: ReadingPostCardPresentation = ReadingPostCardPresentation(),
-    /** #1391 — Topic-owned reset signal; other reading hosts keep the stable default. */
+    /** #1391 — reading-list-owned reset signal; direct hosts keep the stable default. */
     selectionEpoch: Int = 0,
     mediaDiskCachePolicy: PostMediaDiskCachePolicy = PostMediaDiskCachePolicy.ENABLED,
     onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,

@@ -43,6 +43,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -113,6 +114,7 @@ import fr.forumhfr.redface2.core.ui.post.ReadingPostCard
 import fr.forumhfr.redface2.core.ui.post.ReadingPostCardPresentation
 import fr.forumhfr.redface2.core.ui.post.postHeaderColors
 import fr.forumhfr.redface2.core.ui.post.readingContentColors
+import fr.forumhfr.redface2.core.ui.post.releasePostSelectionOnTap
 import fr.forumhfr.redface2.core.ui.post.sharePostImageUrl
 import fr.forumhfr.redface2.core.ui.post.viewerRequestFor
 import fr.forumhfr.redface2.core.ui.theme.LocalBlockedQuoteAuthors
@@ -1704,6 +1706,19 @@ private fun ThreadMessages(
     val zoomSuspendsScroll by remember(scrollSession.zoomState) {
         derivedStateOf { scrollSession.zoomState.zoomed }
     }
+    // #1391 — same bounded release owner as Topic: a long press only makes selection plausible;
+    // the next plain tap re-keys visible message SelectionContainers once, then disarms the flag.
+    var selectionEpoch by remember { mutableIntStateOf(0) }
+    var selectionMaybeActive by remember { mutableStateOf(false) }
+    val markPostSelectionPossible = remember { { selectionMaybeActive = true } }
+    val releasePostSelection = remember {
+        {
+            if (selectionMaybeActive) {
+                selectionEpoch += 1
+                selectionMaybeActive = false
+            }
+        }
+    }
     PostListScaffold(
         listState = scrollSession.listState,
         userScrollEnabled = !zoomSuspendsScroll,
@@ -1713,6 +1728,10 @@ private fun ThreadMessages(
         listModifier = Modifier
             .pinchZoom(scrollSession.zoomState, scrollSession.listState)
             .then(scrollSession.swipeModifier)
+            .releasePostSelectionOnTap(
+                onLongPressObserved = markPostSelectionPossible,
+                onTap = releasePostSelection,
+            )
             // One owner covers free card surfaces and interstices; child clickables consume their up.
             .privateMessageDoubleTapRefresh(
                 enabled = !zoomSuspendsScroll,
@@ -1760,6 +1779,7 @@ private fun ThreadMessages(
                 )
                 MessageCard(
                     message = message,
+                    selectionEpoch = selectionEpoch,
                     staffByPseudo = staffByPseudo,
                     multiQuoteSelected = multiQuoteSelections.any { selection ->
                         selection.numreponse == message.numreponse
@@ -1910,6 +1930,8 @@ internal fun MessageCard(
     presentation: ReadingPostCardPresentation = ReadingPostCardPresentation(),
     postHeaderEmphasis: PostHeaderEmphasis = PostHeaderEmphasis.SUBTLE,
     multiQuoteSelected: Boolean = false,
+    /** #1391 — MP list-owned reset signal; direct hosts keep the stable default. */
+    selectionEpoch: Int = 0,
     onOpenProfile: (() -> Unit)? = null,
     onOpenMenu: (() -> Unit)? = null,
     onImageLongPress: ((PostImageTarget) -> Unit)? = null,
@@ -1945,6 +1967,7 @@ internal fun MessageCard(
     ReadingPostCard(
         post = message,
         presentation = presentation.copy(selected = multiQuoteSelected),
+        selectionEpoch = selectionEpoch,
         // #1096 — the singleton Coil loader has no caller identity. Mark the whole MP
         // PostContent at this host boundary so painters and intrinsic probes cannot persist its
         // media URLs or bytes to Coil's shared disk cache.
