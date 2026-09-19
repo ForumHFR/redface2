@@ -2395,6 +2395,11 @@ private fun TopicLoadedContent(
     // the magnifier's controlled dispatchRawDelta (screen deltas divided by scale — 1:1 under the
     // finger). derivedStateOf: recomposes on the 1× ↔ zoomed transition only.
     val zoomSuspendsScroll by remember(zoomState) { derivedStateOf { zoomState.zoomed } }
+    // #1391 — each selectable post keeps its own SelectionContainer (LazyColumn-safe). A plain tap
+    // anywhere on the list advances this shared epoch; every visible container is then recreated
+    // while its movable body composition keeps spoiler/media state.
+    var selectionEpoch by remember { mutableIntStateOf(0) }
+    val releasePostSelection = remember { { selectionEpoch += 1 } }
     // #884 (vague 3) — list geometry switched by the « posts en pleine largeur » preference. The
     // historical values (#283 bottom clearance, #398 local side gutter, #287 8 dp rhythm) moved to
     // TopicListLayout.kt and stay byte-identical in card mode; full-width drops the side gutters
@@ -2413,6 +2418,7 @@ private fun TopicLoadedContent(
             // read in the untransformed local space that TopicZoomMath models (same coordinate
             // rule as topicPageSwipe).
             .topicMagnifier(zoomState, listState)
+            .releasePostSelectionOnTap(releasePostSelection)
             // #285 — system-bar insets (status + navigation) are now consumed by the Scaffold/TopAppBar
             // in TopicContent and applied via the content Surface's padding(innerPadding); the list no
             // longer adds statusBarsPadding()/navigationBarsPadding() here to avoid double-insetting.
@@ -2614,6 +2620,7 @@ private fun TopicLoadedContent(
                 } else {
                     TopicPostCard(
                         post = post,
+                        selectionEpoch = selectionEpoch,
                         staffByPseudo = staffByPseudo,
                         highlighted = highlight == post.numreponse,
                         // #863 — the SERVER count (« Message cité N fois », cross-page), parsed
@@ -3370,6 +3377,8 @@ private fun PollVoteUiError.pollVoteMessageRes(): Int = when (this) {
 // « + » affordance (gating, label flip, tap). Same visibility relaxation as other tested internals.
 internal fun TopicPostCard(
     post: Post,
+    /** #1391 — list-scoped signal used only to clear this post's text selection. */
+    selectionEpoch: Int = 0,
     /** #221 — global canonical staff directory; empty keeps direct tests/previews neutral. */
     staffByPseudo: Map<String, AuthorRole> = emptyMap(),
     /**
@@ -3489,6 +3498,7 @@ internal fun TopicPostCard(
         stringResource(R.string.topic_post_moderation_state_description)
     ReadingPostCard(
         post = post,
+        selectionEpoch = selectionEpoch,
         presentation = ReadingPostCardPresentation(
             showSignature = showSignature,
             flat = flat,
