@@ -7,12 +7,19 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getBoundsInRoot
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.unit.DpRect
+import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -48,7 +55,7 @@ class EditorScreenLayoutTest {
         }
 
         compose.onNode(hasSetTextAction()).assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT)
-        assertDraftActionsDisplayed()
+        assertDraftActionsFullyVisible()
     }
 
     @Test
@@ -67,7 +74,28 @@ class EditorScreenLayoutTest {
         // The subject is the first editable node; the weighted BBCode field is the second.
         compose.onAllNodes(hasSetTextAction())[1]
             .assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT)
-        assertDraftActionsDisplayed()
+        assertDraftActionsFullyVisible()
+    }
+
+    @Test
+    @Config(qualifiers = "fr-rFR-w360dp-h260dp-xxhdpi")
+    fun `post editor keeps both draft actions fully visible below the 220 dp budget threshold`() {
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                val scope = rememberCoroutineScope()
+                val picker = remember(scope) {
+                    SmileyPickerController(scope = scope, searchWiki = { _, _ -> emptyList() })
+                }
+                PostEditorContent(
+                    state = postState(restorableDraft = "Brouillon à restaurer"),
+                    onIntent = {},
+                    smileyPicker = picker,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+
+        assertDraftActionsFullyVisible()
     }
 
     @Test
@@ -93,9 +121,31 @@ class EditorScreenLayoutTest {
         compose.onNode(hasSetTextAction()).assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT)
     }
 
-    private fun assertDraftActionsDisplayed() {
-        compose.onNodeWithText("Restaurer").assertIsDisplayed()
-        compose.onNodeWithText("Ignorer").assertIsDisplayed()
+    private fun assertDraftActionsFullyVisible() {
+        val restoreBounds = assertFullyVisibleAction("Restaurer")
+        val discardBounds = assertFullyVisibleAction("Ignorer")
+        assertTrue(
+            "Draft actions must be separated by at least 8 dp",
+            discardBounds.left - restoreBounds.right >= 8.dp,
+        )
+    }
+
+    private fun assertFullyVisibleAction(label: String): DpRect {
+        val action = compose.onNodeWithText(label)
+            .assertHeightIsAtLeast(48.dp)
+        val clippedBounds = action.getBoundsInRoot()
+        val unclippedBounds = action.getUnclippedBoundsInRoot()
+        assertEquals("Action $label is clipped", unclippedBounds, clippedBounds)
+
+        val windowBounds = compose.onRoot().getUnclippedBoundsInRoot()
+        assertTrue(
+            "Action $label must stay entirely inside the window",
+            unclippedBounds.left >= windowBounds.left &&
+                unclippedBounds.top >= windowBounds.top &&
+                unclippedBounds.right <= windowBounds.right &&
+                unclippedBounds.bottom <= windowBounds.bottom,
+        )
+        return unclippedBounds
     }
 
     private fun postState(restorableDraft: String? = null) = PostEditorState(

@@ -260,7 +260,7 @@ private fun TopicFormControlsZone(
         state.restorableDraft != null || state.restorableSubject != null
     val hasAlert = hasRestorableDraft ||
         state.submitError != null || state.uploadError != null
-    LaunchedEffect(hasAlert) {
+    LaunchedEffect(hasRestorableDraft, state.submitError, state.uploadError) {
         if (hasAlert) controlsScroll.animateScrollTo(0)
     }
     Column(

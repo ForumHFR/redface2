@@ -237,7 +237,7 @@ internal fun ComposeEditorBody(
             state.restorableSubject != null || state.restorableRecipients != null
         val hasAlert = hasRestorableDraft ||
             state.submitError != null || state.uploadError != null
-        LaunchedEffect(hasAlert) {
+        LaunchedEffect(hasRestorableDraft, state.submitError, state.uploadError) {
             if (hasAlert) controlsScroll.animateScrollTo(0)
         }
         Column(

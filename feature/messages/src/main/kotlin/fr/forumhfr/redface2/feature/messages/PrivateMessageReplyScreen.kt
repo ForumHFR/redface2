@@ -256,7 +256,7 @@ internal fun ReplyEditorBody(
         val controlsScroll = rememberScrollState()
         val hasAlert = state.restorableDraft != null ||
             state.submitError != null || state.uploadError != null
-        LaunchedEffect(hasAlert) {
+        LaunchedEffect(state.restorableDraft != null, state.submitError, state.uploadError) {
             if (hasAlert) controlsScroll.animateScrollTo(0)
         }
         Column(

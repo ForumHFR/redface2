@@ -49,6 +49,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -145,6 +146,9 @@ internal fun PostEditorContent(
                 val controlsMaxHeight = editorControlsMaxHeight(
                     available = maxHeight,
                     fieldMin = EDITOR_DRAFT_MIN_HEIGHT,
+                    // An open preview may use every pixel left above the 160 dp draft instead of
+                    // staying capped at 360 dp on roomy windows.
+                    allowRoomyExpansion = state.isPreviewVisible,
                 )
                 Column(
                     modifier = Modifier.fillMaxSize(),
@@ -256,7 +260,8 @@ internal fun DraftRestoreBanner(
         tonalElevation = 2.dp,
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            modifier = Modifier.padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -264,17 +269,20 @@ internal fun DraftRestoreBanner(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f),
-                maxLines = 3,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
             TextButton(
                 onClick = onRestore,
-                contentPadding = PaddingValues(horizontal = 6.dp),
+                modifier = Modifier.heightIn(min = 48.dp),
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
             ) {
                 Text(text = stringResource(R.string.editor_draft_restore))
             }
             TextButton(
                 onClick = onDiscard,
-                contentPadding = PaddingValues(horizontal = 6.dp),
+                modifier = Modifier.heightIn(min = 48.dp),
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
             ) {
                 Text(text = stringResource(R.string.editor_draft_discard))
             }
@@ -300,8 +308,11 @@ private fun PostEditorControlsZone(
     val scroll = rememberScrollState()
     val hasAlert = state.restorableDraft != null ||
         state.submitError != null || state.uploadError != null
-    LaunchedEffect(hasAlert) {
+    LaunchedEffect(state.restorableDraft != null, state.submitError, state.uploadError) {
         if (hasAlert) scroll.animateScrollTo(0)
+    }
+    LaunchedEffect(state.isPreviewVisible) {
+        if (state.isPreviewVisible) scroll.animateScrollTo(scroll.maxValue)
     }
     Column(
         verticalArrangement = Arrangement.spacedBy(12.dp),

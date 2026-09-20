@@ -11,19 +11,29 @@ val EDITOR_DRAFT_MIN_HEIGHT = 160.dp
  *
  * On a regular window the zone receives only what remains after [fieldMin] and the inter-zone
  * spacing have been reserved. On a shorter window the controls receive one third of the available
- * height, up to the 48 dp needed to expose an action target; once that target fits, extra pixels go
- * back to the draft until [fieldMin] is restored. With 100 dp total, that leaves about 55 dp for the
- * draft after the 12 dp gap instead of the previous 48 dp from the 40/60 split. Roomy displays keep
- * the historical 360 dp cap.
+ * height, up to the 48 dp needed to expose an action target at the default font scale; once that
+ * target fits, extra pixels go back to the draft until [fieldMin] is restored. With 100 dp total,
+ * that leaves about 55 dp for the draft after the 12 dp gap instead of the previous 48 dp from the
+ * 40/60 split. Roomy displays keep the historical 360 dp cap unless [allowRoomyExpansion] is
+ * requested for content such as an open preview; the field reserve and short-window behavior
+ * remain unchanged.
  */
-fun editorControlsMaxHeight(available: Dp, fieldMin: Dp): Dp {
+fun editorControlsMaxHeight(
+    available: Dp,
+    fieldMin: Dp,
+    allowRoomyExpansion: Boolean = false,
+): Dp {
     val safeAvailable = available.coerceAtLeast(0.dp)
     val heightAfterFieldReserve =
         (safeAvailable - fieldMin - EDITOR_ZONE_SPACING).coerceAtLeast(0.dp)
     val shortWindowFloor = (safeAvailable * EDITOR_CONTROLS_SHORT_WINDOW_FRACTION)
         .coerceAtMost(EDITOR_CONTROLS_MIN_USABLE_HEIGHT)
-    return maxOf(heightAfterFieldReserve, shortWindowFloor)
-        .coerceAtMost(EDITOR_CONTROLS_MAX_HEIGHT)
+    val controlsHeight = maxOf(heightAfterFieldReserve, shortWindowFloor)
+    return if (allowRoomyExpansion) {
+        controlsHeight
+    } else {
+        controlsHeight.coerceAtMost(EDITOR_CONTROLS_MAX_HEIGHT)
+    }
 }
 
 private const val EDITOR_CONTROLS_SHORT_WINDOW_FRACTION = 1f / 3f

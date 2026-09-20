@@ -16,6 +16,18 @@ class EditorLayoutBudgetTest {
     }
 
     @Test
+    fun `roomy expansion uses space beyond the regular cap without shrinking the field`() {
+        assertEquals(
+            628.dp,
+            editorControlsMaxHeight(
+                available = 800.dp,
+                fieldMin = EDITOR_DRAFT_MIN_HEIGHT,
+                allowRoomyExpansion = true,
+            ),
+        )
+    }
+
+    @Test
     fun `regular window reserves the requested field minimum plus spacing`() {
         // 360 - 160 - 12 = 188; the controls use the remainder and leave exactly 160 dp.
         assertEquals(
