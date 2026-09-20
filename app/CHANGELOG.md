@@ -24,6 +24,10 @@ Premier lot des retours de la bêta `0.60.0` (milestone « Vue · Topic 2 »).
 
 - **« Aller à une page » raccourcit vers les extrémités** : dans le sélecteur de page du sujet et de la conversation privée, les boutons Précédent / Suivant — redondants avec les flèches ‹ › de la barre du bas — laissent place à « Première page » et « Dernière page », désactivés quand on y est déjà. Le saut direct par numéro est inchangé, et l'écran d'erreur garde son pas de récupération page par page (retour de CAMPEDEL sur le fil bêta, [#1299](https://github.com/ForumHFR/redface2/issues/1299)).
 
+### Lecture : position restaurée au retour de page ([#1300](https://github.com/ForumHFR/redface2/issues/1300))
+
+- **Le swipe vers la page précédente revient là où on l'avait laissée** : la position de lecture d'une page déjà ouverte est restaurée telle quelle, et une page jamais ouverte s'ouvre en bas — on revient en arrière pour lire la fin. Le garde-fou qui empêche d'enregistrer la position d'une page sous une autre restait fermé après un remontage de l'écran (rotation, retour depuis un autre écran) : plus aucune position n'était mémorisée et le retour ramenait une ancre périmée, souvent le point d'entrée dans le sujet. L'étape d'atterrissage est désormais un échange explicite entre le moteur de pagination et l'écran, ce qui permet à un écran remonté de retrouver son état sans rejouer de défilement (retour de garath_ sur le fil bêta, [#1300](https://github.com/ForumHFR/redface2/issues/1300)).
+
 ---
 
 ## `0.60.0` — `open` (bêta) — 2026-09-20
