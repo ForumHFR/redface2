@@ -135,6 +135,7 @@ import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.pager.PageFab
 import fr.forumhfr.redface2.core.ui.pager.PageFabDefaults
 import fr.forumhfr.redface2.core.ui.pager.PageNavigation
+import fr.forumhfr.redface2.core.ui.pager.PageNavigationActions
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
 import fr.forumhfr.redface2.core.ui.post.AuthorRolePill
 import fr.forumhfr.redface2.core.ui.post.CreatorPseudoText
@@ -1988,10 +1989,9 @@ internal fun TopicTopBar(
             TopicSearchBar(search = state.search, onIntent = onIntent)
         }
     }
-    // Vague 3 (#604) — page-picker sheet: the dissolved header card's PageNavigation
-    // (prev/next + jump field + compact range row), verbatim, in a bottom sheet anchored to the
-    // top-bar pill. The Error path keeps its own inline PageNavigation — recovery navigation
-    // must not hide behind a sheet (cadrage Codex vague 3).
+    // Vague 3 (#604) — page-picker sheet: the dissolved header card's PageNavigation in a bottom
+    // sheet anchored to the top-bar pill. #1299 replaces redundant adjacent shortcuts here with
+    // first/last; the Error path keeps adjacent recovery navigation inline and outside the sheet.
     if (pagePickerOpen && loaded != null) {
         ModalBottomSheet(onDismissRequest = { pagePickerOpen = false }) {
             Column(
@@ -2011,6 +2011,7 @@ internal fun TopicTopBar(
                     availablePages = state.availablePages,
                     canGoPrevious = state.canGoPrevious,
                     canGoNext = state.canGoNext,
+                    actions = PageNavigationActions.Extremes,
                     onOpenPage = { target ->
                         pagePickerOpen = false
                         onOpenPage(target)

@@ -98,6 +98,7 @@ import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.pager.PageFab
 import fr.forumhfr.redface2.core.ui.pager.PageFabDefaults
 import fr.forumhfr.redface2.core.ui.pager.PageNavigation
+import fr.forumhfr.redface2.core.ui.pager.PageNavigationActions
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
 import fr.forumhfr.redface2.core.ui.post.AuthorRolePill
 import fr.forumhfr.redface2.core.ui.post.CreatorPseudoText
@@ -875,6 +876,7 @@ private fun ThreadPagePickerHost(
                 },
                 canGoPrevious = thread.page > 1,
                 canGoNext = thread.page < thread.totalPages,
+                actions = PageNavigationActions.Extremes,
                 enabled = enabled,
                 onOpenPage = { target ->
                     if (pageInteraction.onSelectPage(target)) onDismiss()
