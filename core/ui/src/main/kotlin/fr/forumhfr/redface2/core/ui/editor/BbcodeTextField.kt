@@ -12,11 +12,13 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.foundation.text.selection.LocalTextClassifierCoroutineContext
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -37,6 +39,18 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+
+/**
+ * BTF2 asks Android's TextClassifier to expand every touch word/paragraph selection after Compose
+ * has computed it. On API 34 the classifier can turn a hyphenated word into a multi-line range
+ * (#447). Foundation exposes the worker context but no per-field opt-out, so an already-cancelled
+ * context keeps Compose's ICU word and paragraph boundaries while skipping only that asynchronous
+ * platform suggestion. It also deliberately removes TextClassifier-provided smart actions from
+ * this BBCode editor; the standard edit actions remain available.
+ */
+private val DisabledTextClassifierContext = Dispatchers.IO + Job().apply { cancel() }
 
 /**
  * Controlled Material 3 BBCode text field used by the four full-screen editors.
@@ -115,38 +129,42 @@ internal fun BbcodeTextField(
         minHeightInLines = 5,
         maxHeightInLines = Int.MAX_VALUE,
     )
-    Box(modifier = modifier.fillMaxWidth()) {
-        BasicTextField(
-            state = fieldState,
-            readOnly = readOnly,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(top = labelHeadroom)
-                .focusRequester(focusRequester),
-            textStyle = LocalTextStyle.current.merge(
-                TextStyle(color = MaterialTheme.colorScheme.onSurface),
-            ),
-            // #237 — sentence capitalization, matching RF1. A multiline editor keeps the default
-            // IME action so Enter inserts a newline.
-            keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.Sentences,
-                imeAction = ImeAction.Default,
-            ),
-            lineLimits = lineLimits,
-            onTextLayout = onTextLayout,
-            interactionSource = fieldInteractions,
-            cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-            decorator = OutlinedTextFieldDefaults.decorator(
+    CompositionLocalProvider(
+        LocalTextClassifierCoroutineContext provides DisabledTextClassifierContext,
+    ) {
+        Box(modifier = modifier.fillMaxWidth()) {
+            BasicTextField(
                 state = fieldState,
-                enabled = true,
+                readOnly = readOnly,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = labelHeadroom)
+                    .focusRequester(focusRequester),
+                textStyle = LocalTextStyle.current.merge(
+                    TextStyle(color = MaterialTheme.colorScheme.onSurface),
+                ),
+                // #237 — sentence capitalization, matching RF1. A multiline editor keeps the
+                // default IME action so Enter inserts a newline.
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.Sentences,
+                    imeAction = ImeAction.Default,
+                ),
                 lineLimits = lineLimits,
-                outputTransformation = null,
+                onTextLayout = onTextLayout,
                 interactionSource = fieldInteractions,
-                label = { Text(label) },
-                placeholder = placeholder?.let { hint -> { Text(hint) } },
-            ),
-            scrollState = scrollState,
-        )
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                decorator = OutlinedTextFieldDefaults.decorator(
+                    state = fieldState,
+                    enabled = true,
+                    lineLimits = lineLimits,
+                    outputTransformation = null,
+                    interactionSource = fieldInteractions,
+                    label = { Text(label) },
+                    placeholder = placeholder?.let { hint -> { Text(hint) } },
+                ),
+                scrollState = scrollState,
+            )
+        }
     }
 }
 
