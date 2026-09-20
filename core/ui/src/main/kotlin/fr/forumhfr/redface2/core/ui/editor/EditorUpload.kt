@@ -54,12 +54,12 @@ sealed interface UploadError {
 data class UploadProgress(val completed: Int, val total: Int)
 
 /**
- * Multi-image upload — « n/N » counter shown under the toolbar while a batch is in flight. Emits
- * nothing for a single image (null progress), which only flips the toolbar spinner.
+ * Multi-image upload — « n/N » counter shown under the toolbar while a batch is in flight.
+ * Callers omit this composable for a single image (`uploadProgress == null`), which only flips the
+ * toolbar spinner; this keeps empty children out of spaced editor columns.
  */
 @Composable
-fun UploadProgressLabel(progress: UploadProgress?) {
-    if (progress == null) return
+fun UploadProgressLabel(progress: UploadProgress) {
     Text(
         text = stringResource(R.string.editor_upload_progress, progress.completed, progress.total),
         style = MaterialTheme.typography.labelMedium,

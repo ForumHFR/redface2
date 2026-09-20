@@ -57,7 +57,7 @@ class PrivateMessageEditorLayoutTest {
             }
         }
 
-        compose.onNode(hasSetTextAction()).assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT)
+        compose.onNode(hasSetTextAction()).assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT - FIELD_LABEL_HEADROOM)
         assertDraftActionsFullyVisible()
     }
 
@@ -117,3 +117,6 @@ class PrivateMessageEditorLayoutTest {
         return unclippedBounds
     }
 }
+
+/** The editable node sits under the 8 dp floating-label headroom reserved inside the 160 dp slot. */
+private val FIELD_LABEL_HEADROOM = 8.dp

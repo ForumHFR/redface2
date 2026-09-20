@@ -11,6 +11,7 @@ import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.DpRect
@@ -54,8 +55,41 @@ class EditorScreenLayoutTest {
             }
         }
 
-        compose.onNode(hasSetTextAction()).assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT)
+        compose.onNode(hasSetTextAction()).assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT - FIELD_LABEL_HEADROOM)
         assertDraftActionsFullyVisible()
+    }
+
+    @Test
+    @Config(sdk = [29], qualifiers = "fr-rFR-w360dp-h330dp-xxhdpi")
+    fun `post editor leaves 12 dp between toolbar and preview without upload or quotes`() {
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                val scope = rememberCoroutineScope()
+                val picker = remember(scope) {
+                    SmileyPickerController(scope = scope, searchWiki = { _, _ -> emptyList() })
+                }
+                PostEditorContent(
+                    state = postState(),
+                    onIntent = {},
+                    smileyPicker = picker,
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+
+        val toolbarBottom = compose.onNodeWithTag(POST_EDITOR_TOOLBAR_TAG)
+            .getUnclippedBoundsInRoot()
+            .bottom
+        val previewTop = compose.onNodeWithTag(POST_EDITOR_PREVIEW_TOGGLE_TAG)
+            .getUnclippedBoundsInRoot()
+            .top
+
+        assertEquals(
+            "Only the arranged spacing may separate the toolbar and preview toggle",
+            12f,
+            (previewTop - toolbarBottom).value,
+            1f,
+        )
     }
 
     @Test
@@ -73,7 +107,7 @@ class EditorScreenLayoutTest {
 
         // The subject is the first editable node; the weighted BBCode field is the second.
         compose.onAllNodes(hasSetTextAction())[1]
-            .assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT)
+            .assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT - FIELD_LABEL_HEADROOM)
         assertDraftActionsFullyVisible()
     }
 
@@ -118,7 +152,7 @@ class EditorScreenLayoutTest {
 
         compose.onNodeWithText("Répondre au sujet").assertIsDisplayed()
         compose.onNodeWithText("Uploader").assertIsDisplayed()
-        compose.onNode(hasSetTextAction()).assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT)
+        compose.onNode(hasSetTextAction()).assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT - FIELD_LABEL_HEADROOM)
     }
 
     private fun assertDraftActionsFullyVisible() {
@@ -169,3 +203,6 @@ class EditorScreenLayoutTest {
         restorableDraft = restorableDraft,
     )
 }
+
+/** The editable node sits under the 8 dp floating-label headroom reserved inside the 160 dp slot. */
+private val FIELD_LABEL_HEADROOM = 8.dp

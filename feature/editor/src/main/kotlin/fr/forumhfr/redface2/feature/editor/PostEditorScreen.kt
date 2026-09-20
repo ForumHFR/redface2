@@ -46,6 +46,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -328,17 +329,27 @@ private fun PostEditorControlsZone(
         )
         BbcodeToolbar(
             onAction = { action -> onIntent(PostEditorIntent.ToolbarActionClicked(action)) },
+            modifier = Modifier.testTag(POST_EDITOR_TOOLBAR_TAG),
             onImageUrlRequested = onImageUrlRequested,
             onImageUploadRequested = onImageUploadRequested,
             uploading = state.isUploading,
         )
-        UploadProgressLabel(state.uploadProgress)
-        EditorQuoteCards(
-            quotes = state.quotes,
-            enabled = !state.isSubmitting,
-            onIntent = onIntent,
-        )
-        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+        state.uploadProgress?.let { progress ->
+            UploadProgressLabel(progress)
+        }
+        if (state.quotes.isNotEmpty()) {
+            EditorQuoteCards(
+                quotes = state.quotes,
+                enabled = !state.isSubmitting,
+                onIntent = onIntent,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(POST_EDITOR_PREVIEW_TOGGLE_TAG),
+            contentAlignment = Alignment.CenterStart,
+        ) {
             TextButton(onClick = { onIntent(PostEditorIntent.TogglePreview) }) {
                 Text(
                     text = stringResource(
@@ -399,7 +410,7 @@ private fun PostEditorAlertBanners(
 }
 
 /**
- * #604 lot 3 (mockup P3) — the quote cards block of the full-screen editor : the shared
+ * #604 lot 3 (mockup P3) — the non-empty quote cards block of the full-screen editor : the shared
  * [QuoteCard] rendering plus « Tout vider » (#436, shown from two cards up — for one card the
  * per-card ✕ is the same act). Deliberately UNBOUNDED here : the block lives inside the
  * editor's budgeted top zone (#555), whose single scroll keeps every card reachable.
@@ -410,8 +421,6 @@ private fun EditorQuoteCards(
     enabled: Boolean,
     onIntent: (PostEditorIntent) -> Unit,
 ) {
-    // No early-return on empty (#604 lot 4a) : the shared column hosts the live region that
-    // announces the LAST removal — hiding the whole block would silence it.
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (quotes.size > 1) {
             val clearAllLabel = stringResource(R.string.editor_quotes_clear_all_a11y)
@@ -639,3 +648,6 @@ private val SubmitError.bannerResId: Int
         SubmitError.SessionExpired -> R.string.editor_error_session_expired
         SubmitError.MissingSubcat -> R.string.editor_error_missing_subcat
     }
+
+internal const val POST_EDITOR_TOOLBAR_TAG = "post-editor-toolbar"
+internal const val POST_EDITOR_PREVIEW_TOGGLE_TAG = "post-editor-preview-toggle"

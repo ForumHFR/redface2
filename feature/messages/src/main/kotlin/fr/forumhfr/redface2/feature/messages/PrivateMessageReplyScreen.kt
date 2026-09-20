@@ -313,7 +313,9 @@ internal fun ReplyEditorBody(
                     uploading = state.isUploading,
                 )
                 // #459 — « n/N » batch counter while a multi-image upload is in flight.
-                UploadProgressLabel(state.uploadProgress)
+                state.uploadProgress?.let { progress ->
+                    UploadProgressLabel(progress)
+                }
 
                 Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
                     TextButton(onClick = onTogglePreview) {
