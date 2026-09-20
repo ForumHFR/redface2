@@ -480,6 +480,7 @@ fun TopicScreen(
     // suspending lambda but the surrounding scope is still a Composable). Capturing the message
     // upfront keeps the rule happy and avoids re-resolving on every effect.
     val refreshFailedMsg = stringResource(R.string.topic_post_submit_refresh_failed)
+    val postSubmittedMsg = stringResource(R.string.topic_post_submit_confirmed)
     val submittedElsewhereMsg = stringResource(R.string.topic_post_submitted_elsewhere)
     val submittedElsewhereAction = stringResource(R.string.topic_post_submitted_elsewhere_action)
     // #335 — manual pull-to-refresh failure message (resolved upfront, same rationale).
@@ -520,6 +521,20 @@ fun TopicScreen(
     // #1201 — close-poll confirmation gate. State-driven dialog (the ViewModel owns the
     // confirm → close flow) ; the outcomes ride the screen's single TopicEffect collector below.
     val closePollState by viewModel.closePollState.collectAsStateWithLifecycle()
+
+    // #1301 — HFR has accepted the message before this state begins. Keep that confirmation on
+    // screen while the retained topic refreshes; changing refreshKind cancels showSnackbar and
+    // removes only this in-flight confirmation. Redirects retain PostSubmit, so they never flash it.
+    LaunchedEffect(state.refreshKind, snackbarHostState) {
+        if (state.refreshKind == TopicRefreshKind.PostSubmit) {
+            // The submit acknowledgement is immediate, not queued behind stale transient feedback.
+            snackbarHostState.currentSnackbarData?.dismiss()
+            snackbarHostState.showSnackbar(
+                message = postSubmittedMsg,
+                duration = SnackbarDuration.Indefinite,
+            )
+        }
+    }
 
     // Bug fix (build 89) — report the loaded title up so `:app` caches it per topic. The next page
     // (recreated screen) reads it back through `request.titleHint`, keeping the top bar title stable
@@ -685,6 +700,8 @@ fun TopicScreen(
                 }
                 TopicEffect.PostSubmitRefreshFailed -> {
                     // Issue #200 — HFR accepted the post but the local force refresh failed.
+                    // #1301 — remove the in-flight success confirmation before its error replacement.
+                    snackbarHostState.currentSnackbarData?.dismiss()
                     // Surface a Toast so the user knows the submit went through and can
                     // re-trigger the refresh manually (pull-to-refresh / Retry) instead of
                     // assuming the post was silently lost.
@@ -1840,25 +1857,26 @@ internal fun topicBarPageIndicator(state: TopicUiState, loaded: TopicUiState.Mod
 // expanded; the small M3 top app bar keeps a fixed container height and would clip it otherwise.
 private val TopBarExpandedTitleExtraHeight = 24.dp
 
-// #895 — the discreet under-bar refresh hairline (visible only while the displayed page is
-// provisional). The 2 dp strip is permanently reserved so it never shifts the list.
+// #895/#1301 — the discreet under-bar refresh hairline. It covers provisional cache refreshes and
+// post-submit refreshes; the 2 dp strip is permanently reserved so it never shifts the list.
 private val TopBarRefreshHairlineHeight = 2.dp
 
 /**
- * #895 — the top-bar page pill. Shows the pagination OF THE DISPLAYED CONTENT (provisional cache
- * included — replacing known information with « Chargement… » was the reported flash) ; while the
- * page is provisional, screen readers get « page X sur Y, actualisation en cours » as the
- * equivalent of the visual hairline. No liveRegion : announcing cache-then-settled twice per
- * navigation would be pure noise (cadrage Sol).
+ * #895/#1301 — the top-bar page pill. Shows the pagination OF THE DISPLAYED CONTENT (provisional
+ * cache included — replacing known information with « Chargement… » was the reported flash).
+ * During a provisional or post-submit refresh, screen readers get « page X sur Y, actualisation en
+ * cours » as the equivalent of the visual hairline. No liveRegion for cache-then-network navigation
+ * updates; the post-submit Snackbar owns the immediate announcement.
  */
 @Composable
 private fun TopicBarPagePill(
     text: String,
     loaded: TopicUiState.Mode.Loaded?,
+    refreshing: Boolean,
     pagePickerLabel: String,
     onOpenPagePicker: () -> Unit,
 ) {
-    val refreshingLabel = loaded?.takeIf { it.provisional }?.let {
+    val refreshingLabel = loaded?.takeIf { refreshing }?.let {
         stringResource(
             R.string.topic_page_indicator_refreshing_a11y,
             it.topic.page,
@@ -1932,6 +1950,8 @@ internal fun TopicTopBar(
     )
     // #809 — long-press on the title opens the drapeau-removal flow (the tap toggle is unchanged).
     val titleLongPressLabel = stringResource(R.string.topic_remove_flag_long_press)
+    val showRefreshHairline = loaded?.provisional == true ||
+        state.refreshKind == TopicRefreshKind.PostSubmit
     Column {
         TopAppBar(
             title = {
@@ -1967,6 +1987,7 @@ internal fun TopicTopBar(
                     TopicBarPagePill(
                         text = barPageIndicator,
                         loaded = loaded,
+                        refreshing = showRefreshHairline,
                         pagePickerLabel = pagePickerLabel,
                         onOpenPagePicker = { pagePickerOpen = true },
                     )
@@ -2007,16 +2028,15 @@ internal fun TopicTopBar(
             },
             scrollBehavior = scrollBehavior,
         )
-        // #895 (quick win 3) — discreet refresh signal : a 2 dp hairline under the bar while the
-        // displayed page is provisional (cache on screen, authenticated refresh in flight). The
-        // strip is ALWAYS reserved (transparent when settled) so its appearance never shifts the
-        // list below — this PR exists to remove flashes, not to add one.
+        // #895/#1301 — discreet refresh signal while the displayed page is provisional OR a
+        // post-submit refresh is in flight. The strip is ALWAYS reserved (transparent when
+        // settled) so its appearance never shifts the list below.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(TopBarRefreshHairlineHeight),
         ) {
-            if (loaded?.provisional == true) {
+            if (showRefreshHairline) {
                 LinearProgressIndicator(
                     modifier = Modifier
                         .fillMaxWidth()

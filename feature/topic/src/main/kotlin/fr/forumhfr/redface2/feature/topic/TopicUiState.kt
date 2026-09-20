@@ -104,12 +104,12 @@ data class TopicUiState(
      */
     val writingSurfacePreset: WritingSurfacePreset = WritingSurfacePreset.FULL_EDITOR,
     /**
-     * #335 — `true` while a manual pull-to-refresh of the current page is in flight. Drives the
-     * Material3 `PullToRefreshBox` spinner. Set on the `Refresh` intent, cleared in the refresh
-     * coroutine's `finally` (so a cancellation — e.g. a delete starting mid-refresh — never leaves
-     * the indicator stuck).
+     * #1301 — refresh lifecycle and cause. [TopicRefreshKind.Manual] belongs to the pull gesture;
+     * [TopicRefreshKind.PostSubmit] survives page redirects and drives the separate submit
+     * acknowledgement/progress feedback. A single source of truth prevents the two indicators
+     * from disagreeing during ownership changes.
      */
-    val isRefreshing: Boolean = false,
+    val refreshKind: TopicRefreshKind = TopicRefreshKind.None,
     /**
      * Chantier C (#546) — intra-topic search (HFR `transsearch.php`), a MODE of this screen. Holds
      * the search bar visibility, the typed criteria and the search lifecycle. The matching topic
@@ -153,6 +153,9 @@ data class TopicUiState(
             is Mode.Loaded -> request.page < mode.topic.totalPages
             else -> request.page < (availablePages.lastOrNull() ?: 1)
         }
+
+    /** #335 — compatibility/readability projection used only by the pull-to-refresh spinner. */
+    val isRefreshing: Boolean get() = refreshKind == TopicRefreshKind.Manual
 
     /** #1300 — observable handshake for one page landing, scoped by a monotonic id and its page. */
     sealed interface Landing {

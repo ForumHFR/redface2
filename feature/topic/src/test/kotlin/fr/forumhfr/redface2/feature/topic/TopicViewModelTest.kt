@@ -3161,6 +3161,68 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `same-page submit exposes PostSubmit until fresh content settles (#1301)`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(2, 2, title = "stale")) }),
+            refreshTopicsToReturn = listOf(
+                fakeTopic(2, 2, title = "fresh", posts = listOf(fakePost(777))),
+            ),
+        ).apply { refreshHook = { _, _, _ -> gate.await() } }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.applySubmitResult(targetPage = 2, scrollTo = 777)
+
+        assertEquals(TopicRefreshKind.PostSubmit, viewModel.state.value.refreshKind)
+        assertFalse("post-submit must not drive the pull spinner", viewModel.state.value.isRefreshing)
+        assertEquals("stale", assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title)
+
+        gate.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(TopicRefreshKind.None, viewModel.state.value.refreshKind)
+        assertEquals("fresh", assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title)
+    }
+
+    @Test
+    fun `post-submit refresh stays active across the single overflow redirect (#1301 #226)`() = runTest {
+        val firstPageGate = CompletableDeferred<Unit>()
+        val redirectedPageGate = CompletableDeferred<Unit>()
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(2, 2)) }),
+            refreshTopicsToReturn = listOf(fakeTopic(2, 3), fakeTopic(3, 3)),
+        ).apply {
+            refreshHook = { _, _, page ->
+                if (page == 2) firstPageGate.await() else redirectedPageGate.await()
+            }
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.applySubmitResult(targetPage = 2, scrollTo = null)
+        assertEquals(TopicRefreshKind.PostSubmit, viewModel.state.value.refreshKind)
+
+        firstPageGate.complete(Unit)
+        runCurrent()
+
+        assertEquals(listOf(2, 3), repository.refreshCalls.map { it.third })
+        assertEquals(TopicRefreshKind.PostSubmit, viewModel.state.value.refreshKind)
+
+        redirectedPageGate.complete(Unit)
+        advanceUntilIdle()
+
+        assertEquals(TopicRefreshKind.None, viewModel.state.value.refreshKind)
+        assertEquals(3, viewModel.state.value.request.page)
+    }
+
+    @Test
     fun `plain submit on a provisional same-page refresh lands after the fresh emission (#1250)`() = runTest {
         val cached = fakeTopic(page = 2, totalPages = 2, title = "cached", posts = listOf(fakePost(100)))
         val fresh = fakeTopic(
@@ -3223,6 +3285,7 @@ class TopicViewModelTest {
 
     @Test
     fun `the submitted-elsewhere action opens the offered page at the bottom (#1243)`() = runTest {
+        val actionRefreshGate = CompletableDeferred<Unit>()
         val repository = FakeTopicRepository(
             flowsToReturn = listOf(
                 flow { emit(fakeTopic(page = 2, totalPages = 5, title = "loaded")) },
@@ -3242,8 +3305,15 @@ class TopicViewModelTest {
             viewModel.applySubmitResult(targetPage = 2, scrollTo = null)
             assertEquals(TopicEffect.PostSubmittedElsewhere(page = 5), awaitItem())
 
+            repository.refreshHook = { _, _, page ->
+                if (page == 5) actionRefreshGate.await()
+            }
             viewModel.openSubmittedPostPage(page = 5, departureAnchor = TopicScrollAnchor(index = 3, offset = 12))
+            assertEquals(TopicRefreshKind.PostSubmit, viewModel.state.value.refreshKind)
+
+            actionRefreshGate.complete(Unit)
             assertEquals(TopicEffect.ScrollToEndOfPage(5), awaitItem())
+            assertEquals(TopicRefreshKind.None, viewModel.state.value.refreshKind)
             cancelAndIgnoreRemainingEvents()
         }
 
@@ -5633,6 +5703,7 @@ class TopicViewModelTest {
         viewModel.effects.test {
             viewModel.send(TopicIntent.Refresh)
             assertTrue("the spinner shows while the refresh is in flight", viewModel.state.value.isRefreshing)
+            assertEquals(TopicRefreshKind.Manual, viewModel.state.value.refreshKind)
             gate.complete(Unit)
             // A successful manual refresh keeps the reading position: no ScrollToEndOfPage and no
             // NavigateToLastPage (those are post-submit concerns, #200/#226).
@@ -5641,6 +5712,7 @@ class TopicViewModelTest {
         }
 
         assertFalse(viewModel.state.value.isRefreshing)
+        assertEquals(TopicRefreshKind.None, viewModel.state.value.refreshKind)
         assertEquals("refreshed", (viewModel.state.value.mode as TopicUiState.Mode.Loaded).topic.title)
         assertEquals(1, repository.refreshCalls.size)
     }
@@ -6048,10 +6120,11 @@ class TopicViewModelTest {
             totalPages = 5,
             posts = listOf(fakePost(100)),
         )
+        val refreshGate = CompletableDeferred<Unit>()
         val repository = FakeTopicRepository(
             flowsToReturn = listOf(flow { emit(cachedTopic) }, flow { emit(cachedTopic) }),
             refreshErrorToThrow = IOException("force refresh transient failure"),
-        )
+        ).apply { refreshHook = { _, _, _ -> refreshGate.await() } }
 
         val viewModel = topicViewModel(
             request = topicRequest(page = 2),
@@ -6061,7 +6134,11 @@ class TopicViewModelTest {
 
         viewModel.effects.test {
             viewModel.applySubmitResult(targetPage = 2, scrollTo = null)
+            assertEquals(TopicRefreshKind.PostSubmit, viewModel.state.value.refreshKind)
+
+            refreshGate.complete(Unit)
             assertEquals(TopicEffect.PostSubmitRefreshFailed, awaitItem())
+            assertEquals(TopicRefreshKind.None, viewModel.state.value.refreshKind)
             // A bottom landing on the stale cache would surface here — nothing must.
             expectNoEvents()
             cancelAndIgnoreRemainingEvents()
