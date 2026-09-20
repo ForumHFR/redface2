@@ -46,6 +46,7 @@ import fr.forumhfr.redface2.core.ui.editor.pickedImagesForUpload
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -212,7 +213,8 @@ class TopicFormViewModel @AssistedInject constructor(
     /**
      * #405/#1415 — offer each cached subject/body version until the user handles it. Untouched
      * EditFirstPost hydration remains eligible, while a real user edit suppresses the initial
-     * offer. The fingerprint is recorded only after Restore/Ignore.
+     * offer. The fingerprint is recorded only after Ignore, so a restored row remains recoverable
+     * if process death loses the live editor state before autosave.
      */
     private fun restoreDraftIfAny() {
         viewModelScope.launch {
@@ -256,16 +258,16 @@ class TopicFormViewModel @AssistedInject constructor(
     }
 
     /**
-     * Immediate write of the current subject + body (both blank = delete the row, cf.
-     * [scheduleAutosave]). Reads [_state] AFTER the debounce delay — the previous shape captured
-     * a snapshot at scheduling time, which the #803 dirty-close flush would have re-persisted
-     * stale (state-hygiene audit 2026-07-05). Mirrors `PostEditorViewModel.persistDraftNow`.
+     * Immediate write of the current subject + body. A blank body with a pending offer is a no-op;
+     * otherwise both fields blank delete the row (cf. [scheduleAutosave]). Reads [_state] AFTER the
+     * debounce delay so the #803 dirty-close flush cannot re-persist a stale snapshot.
      */
     private suspend fun persistDraftNow() {
         val key = draftKey ?: return
         val snapshot = _state.value
-        val body = snapshot.draft.text.ifBlank { snapshot.restorableDraft.orEmpty() }
-        val subject = snapshot.subject.text.ifBlank { snapshot.restorableSubject.orEmpty() }
+        if (snapshot.draft.text.isBlank() && snapshot.restorableDraft != null) return
+        val body = snapshot.draft.text
+        val subject = snapshot.subject.text
         if (body.isBlank() && subject.isBlank()) {
             draftStore.delete(draftOwner, key)
         } else {
@@ -350,19 +352,20 @@ class TopicFormViewModel @AssistedInject constructor(
     }
 
     /**
-     * #405 — apply the cached subject + body (caret at the end, like form hydration) and clear the
-     * banner. Marks both fields hydrated so a late EditFirstPost form fetch cannot overwrite them.
+     * #405 — append the cached body after live text, fill only a blank subject, and clear the banner.
+     * Marks both fields hydrated so a late EditFirstPost form fetch cannot overwrite them.
      */
     private fun onDraftRestoreRequested() {
-        val offered = _state.value.restorableDraft ?: return
-        markDraftRestoreOfferHandled(
-            EditorDraftStore.Draft(body = offered, subject = _state.value.restorableSubject),
-        )
+        val offeredBody = _state.value.restorableDraft ?: return
         _state.update { current ->
-            val body = current.restorableDraft.orEmpty()
-            // Keep the live subject when the draft has none (it was autosaved before the server form
-            // populated the subject) : restoring must never blank a server-provided subject.
-            val subject = current.restorableSubject ?: current.subject.text
+            val body = if (current.draft.text.isBlank() || current.draft.text == offeredBody) {
+                offeredBody
+            } else {
+                current.draft.text.trimEnd() + "\n\n" + offeredBody
+            }
+            // A live subject always wins. Fill it from the offer only when it is still blank, so
+            // restoring never replaces a route/server value or a title the user just typed.
+            val subject = current.subject.text.ifBlank { current.restorableSubject.orEmpty() }
             current
                 .withDraft(TextFieldValue(text = body, selection = TextRange(body.length)))
                 .copy(
@@ -379,16 +382,20 @@ class TopicFormViewModel @AssistedInject constructor(
     /** #405 — discard the cached draft : delete the row and clear the banner. */
     private fun onDraftDiscardRequested() {
         val offered = _state.value.restorableDraft ?: return
-        markDraftRestoreOfferHandled(
+        markDraftRestoreOfferIgnored(
             EditorDraftStore.Draft(body = offered, subject = _state.value.restorableSubject),
         )
         _state.update { it.copy(restorableDraft = null, restorableSubject = null) }
-        autosaveJob?.cancel()
+        val pendingAutosave = autosaveJob
+        autosaveJob = null
         val key = draftKey ?: return
-        viewModelScope.launch { draftStore.delete(draftOwner, key) }
+        viewModelScope.launch {
+            pendingAutosave?.cancelAndJoin()
+            draftStore.delete(draftOwner, key)
+        }
     }
 
-    private fun markDraftRestoreOfferHandled(draft: EditorDraftStore.Draft) {
+    private fun markDraftRestoreOfferIgnored(draft: EditorDraftStore.Draft) {
         savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] = draft.restoreOfferFingerprint()
     }
 
@@ -998,6 +1005,11 @@ class TopicFormViewModel @AssistedInject constructor(
     private fun <T> T.hydratedValue(serverValue: T, hydrate: Boolean): T =
         if (hydrate) serverValue else this
 
+    private fun TopicFormState.restoreOfferDiffersFrom(
+        nextSubject: TextFieldValue,
+        nextDraft: TextFieldValue,
+    ): Boolean = restorableDraft != nextDraft.text || restorableSubject.orEmpty() != nextSubject.text
+
     private fun TopicFormState.withFormHydration(
         form: TopicForm,
         nextPreview: PostContent,
@@ -1010,10 +1022,13 @@ class TopicFormViewModel @AssistedInject constructor(
         val nextSubject = subject.hydratedWith(form.subject, hydrateSubject)
         val nextDraft = draft.hydratedWith(form.initialContent, hydrateDraft)
         val hydrateOptions = !optionsHydratedFromForm
+        val keepRestoreOffer = restoreOfferDiffersFrom(nextSubject, nextDraft)
         return copy(
             isLoadingForm = false,
             subject = nextSubject,
             draft = nextDraft,
+            restorableDraft = restorableDraft.takeIf { keepRestoreOffer },
+            restorableSubject = restorableSubject.takeIf { keepRestoreOffer },
             preview = if (hydrateDraft && isPreviewVisible) nextPreview else preview,
             subjectHydratedFromServer = subjectHydratedFromServer || hydrateSubject,
             subjectHydratedContent = subjectHydratedContent.hydratedValue(nextSubject.text, hydrateSubject),

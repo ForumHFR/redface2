@@ -956,10 +956,11 @@ class TopicFormViewModelTest {
     }
 
     @Test
-    fun `New recreation reoffers until restore then keeps the cached version handled`() = runTest {
+    fun `New recreation reoffers until decision and typing still autosaves`() = runTest {
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
         val savedStateHandle = SavedStateHandle()
         draftStore.preload(
-            EditorDraftKey.newTopic(SAMPLE_CAT),
+            key,
             EditorDraftStore.Draft(body = "rescued body", subject = "rescued title"),
         )
         val first = newTopicViewModel(
@@ -978,17 +979,26 @@ class TopicFormViewModelTest {
         assertEquals("rescued body", recreated.state.value.restorableDraft)
         assertEquals("rescued title", recreated.state.value.restorableSubject)
 
+        recreated.submit(TopicFormIntent.SubjectChanged(TextFieldValue("new live title")))
+        recreated.submit(TopicFormIntent.ContentChanged(TextFieldValue("new live body")))
+        testScheduler.advanceTimeBy(800L)
+        testScheduler.runCurrent()
+        assertEquals("new live body", draftStore.saved[key]?.body)
+        assertEquals("new live title", draftStore.saved[key]?.subject)
+        assertEquals("tester", draftStore.lastSavedOwner)
+
         recreated.submit(TopicFormIntent.DraftRestoreRequested)
         testScheduler.advanceUntilIdle()
-        assertTrue(savedStateHandle.get<String>("draft_restore_offer_fingerprint") != null)
+        assertNull(savedStateHandle.get<String>("draft_restore_offer_fingerprint"))
+        assertEquals("new live body\n\nrescued body", draftStore.saved[key]?.body)
 
-        val handled = newTopicViewModel(
+        val afterRestore = newTopicViewModel(
             entrySubcat = SAMPLE_SUBCAT,
             savedStateHandle = savedStateHandle,
         )
         testScheduler.advanceUntilIdle()
-        assertNull(handled.state.value.restorableDraft)
-        assertNull(handled.state.value.restorableSubject)
+        assertEquals("new live body\n\nrescued body", afterRestore.state.value.restorableDraft)
+        assertEquals("new live title", afterRestore.state.value.restorableSubject)
     }
 
     @Test
@@ -1031,6 +1041,23 @@ class TopicFormViewModelTest {
     }
 
     @Test
+    fun `EditFirstPost server hydration removes an identical cached draft offer`() = runTest {
+        draftStore.preload(
+            EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE),
+            EditorDraftStore.Draft(
+                body = topicFormRepository.formResult.initialContent,
+                subject = topicFormRepository.formResult.subject,
+            ),
+        )
+
+        val viewModel = newViewModel()
+        testScheduler.advanceUntilIdle()
+
+        assertNull(viewModel.state.value.restorableDraft)
+        assertNull(viewModel.state.value.restorableSubject)
+    }
+
+    @Test
     fun `moving selection in a hydrated first post keeps the restore offer`() = runTest {
         val key = EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE)
         draftStore.preload(
@@ -1052,7 +1079,7 @@ class TopicFormViewModelTest {
     }
 
     @Test
-    fun `typing a new topic subject preserves the offered body through autosave and restore`() = runTest {
+    fun `typing a new topic subject leaves the pending offer row untouched`() = runTest {
         val key = EditorDraftKey.newTopic(SAMPLE_CAT)
         draftStore.preload(
             key,
@@ -1065,13 +1092,32 @@ class TopicFormViewModelTest {
         testScheduler.advanceTimeBy(800L)
         testScheduler.runCurrent()
 
+        assertEquals("no hybrid row may be written while the visible body is blank", 0, draftStore.saveCount)
         assertEquals("rescued body", draftStore.saved[key]?.body)
-        assertEquals("new title", draftStore.saved[key]?.subject)
+        assertEquals("old title", draftStore.saved[key]?.subject)
         assertEquals("rescued body", viewModel.state.value.restorableDraft)
         viewModel.submit(TopicFormIntent.DraftRestoreRequested)
         testScheduler.advanceUntilIdle()
         assertEquals("rescued body", viewModel.state.value.draft.text)
         assertEquals("new title", viewModel.state.value.subject.text)
+    }
+
+    @Test
+    fun `restoring appends the offered topic body and keeps a live title`() = runTest {
+        draftStore.preload(
+            EditorDraftKey.newTopic(SAMPLE_CAT),
+            EditorDraftStore.Draft(body = "rescued body", subject = "rescued title"),
+        )
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("fresh title")))
+        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("fresh body")))
+        viewModel.submit(TopicFormIntent.DraftRestoreRequested)
+
+        assertEquals("fresh body\n\nrescued body", viewModel.state.value.draft.text)
+        assertEquals("fresh title", viewModel.state.value.subject.text)
+        assertNull(viewModel.state.value.restorableDraft)
     }
 
     @Test
@@ -1173,8 +1219,29 @@ class TopicFormViewModelTest {
 
         val effect = viewModel.effects.first()
         assertEquals(TopicFormEffect.CloseCommitted, effect)
+        assertEquals("closing must not rewrite a pending offer", 0, draftStore.saveCount)
+        assertFalse(draftStore.deletedKeys.contains(key))
         assertEquals("stale", draftStore.saved[key]?.body)
         assertEquals("stale", viewModel.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `CloseRequested with blank fields and no pending offer deletes the stale row`() = runTest {
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        testScheduler.advanceUntilIdle()
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+
+        viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("temporary title")))
+        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("temporary body")))
+        testScheduler.advanceTimeBy(800L)
+        testScheduler.runCurrent()
+        viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("")))
+        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("")))
+        viewModel.submit(TopicFormIntent.CloseRequested)
+
+        assertEquals(TopicFormEffect.CloseCommitted, viewModel.effects.first())
+        assertTrue("an emptied form must not leave a stale row", draftStore.deletedKeys.contains(key))
+        assertNull(draftStore.saved[key])
     }
 
     @Test

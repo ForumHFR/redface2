@@ -44,6 +44,7 @@ import fr.forumhfr.redface2.core.ui.editor.pickedImagesForUpload
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -215,14 +216,14 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     }
 
     /**
-     * Immediate write of the current body (blank = delete the row, cf. [scheduleAutosave]). Reads
-     * [_state] AFTER the debounce delay — the previous shape captured a snapshot at scheduling
-     * time, which the #803 dirty-close flush would have re-persisted stale (state-hygiene audit
-     * 2026-07-05). Mirrors `PostEditorViewModel.persistDraftNow`.
+     * Immediate write of the current body. A blank body with a pending offer is a no-op; otherwise
+     * blank deletes the row (cf. [scheduleAutosave]). Reads [_state] AFTER the debounce delay so the
+     * #803 dirty-close flush cannot re-persist a stale snapshot.
      */
     private suspend fun persistDraftNow() {
         val snapshot = _state.value
-        val body = snapshot.draft.text.ifBlank { snapshot.restorableDraft.orEmpty() }
+        if (snapshot.draft.text.isBlank() && snapshot.restorableDraft != null) return
+        val body = snapshot.draft.text
         if (body.isBlank()) {
             draftStore.delete(draftOwner, draftKey)
         } else {
@@ -268,12 +269,16 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         }
     }
 
-    /** #405 — apply the cached body to the draft and clear the banner. */
+    /** #405 — append the cached body after any live text and clear the banner. */
     fun onDraftRestoreRequested() {
-        val body = _state.value.restorableDraft ?: return
-        markDraftRestoreOfferHandled(body)
-        _state.update {
-            it.withDraftPreview(TextFieldValue(text = body, selection = TextRange(body.length)))
+        val offeredBody = _state.value.restorableDraft ?: return
+        _state.update { current ->
+            val body = if (current.draft.text.isBlank() || current.draft.text == offeredBody) {
+                offeredBody
+            } else {
+                current.draft.text.trimEnd() + "\n\n" + offeredBody
+            }
+            current.withDraftPreview(TextFieldValue(text = body, selection = TextRange(body.length)))
                 .copy(restorableDraft = null)
         }
         scheduleAutosave()
@@ -282,13 +287,17 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     /** #405 — discard the cached draft : delete the row and clear the banner. */
     fun onDraftDiscardRequested() {
         val body = _state.value.restorableDraft ?: return
-        markDraftRestoreOfferHandled(body)
+        markDraftRestoreOfferIgnored(body)
         _state.update { it.copy(restorableDraft = null) }
-        autosaveJob?.cancel()
-        viewModelScope.launch { draftStore.delete(draftOwner, draftKey) }
+        val pendingAutosave = autosaveJob
+        autosaveJob = null
+        viewModelScope.launch {
+            pendingAutosave?.cancelAndJoin()
+            draftStore.delete(draftOwner, draftKey)
+        }
     }
 
-    private fun markDraftRestoreOfferHandled(body: String) {
+    private fun markDraftRestoreOfferIgnored(body: String) {
         savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] =
             EditorDraftStore.Draft(body = body, isPrivate = true).restoreOfferFingerprint()
     }
@@ -636,7 +645,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
 
     /**
      * Applies a server prefill once without reconstructing it. A late form prefixes the untouched
-     * prefill to text already entered while loading; an explicit #405 restore may replace it later.
+     * prefill to text already entered while loading; an explicit #405 restore may append after it.
      */
     private fun PrivateMessageReplyUiState.withFormInitialContent(form: ReplyForm): PrivateMessageReplyUiState {
         if (draftHydratedFromForm) return this
@@ -657,6 +666,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             hydrated.copy(
                 draftHydratedFromForm = true,
                 draftHydratedContent = combined.takeIf { existing.isBlank() },
+                restorableDraft = restorableDraft.takeIf { it != combined },
             )
         }
     }
