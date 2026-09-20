@@ -5,6 +5,7 @@ import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
@@ -54,11 +55,20 @@ class FlagsSubmitAcknowledgementEffectTest {
             }
         }
 
-        compose.runOnIdle { request.intValue = 1 }
+        // The state lives outside the composition, so the global-snapshot write has to be
+        // published explicitly for the recomposer to see it in a test.
+        compose.runOnIdle {
+            request.intValue = 1
+            Snapshot.sendApplyNotifications()
+        }
+        compose.waitForIdle()
         compose.waitUntil(TIMEOUT_MS) { consumed == 1 }
         compose.onNodeWithText(MESSAGE).assertExists()
 
-        compose.runOnIdle { mount.intValue += 1 }
+        compose.runOnIdle {
+            mount.intValue += 1
+            Snapshot.sendApplyNotifications()
+        }
         compose.waitForIdle()
 
         assertEquals("the acknowledgement is owed exactly once", 1, consumed)
