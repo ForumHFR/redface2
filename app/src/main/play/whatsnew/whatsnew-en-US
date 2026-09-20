@@ -1,4 +1,4 @@
 Redface 2 v0.59.8 — dev.
 - The modern BBCode field natively tracks selection handles and the caret.
 - Private-message replies now match the other editors and reserve 160 dp for writing when space allows.
-- In the BBCode field, double-tap selects the word and triple-tap the line; Android smart selection is off in this editor.
+- In the BBCode field, double-tap selects the word and triple-tap the line; automatic selection widening is off in this editor.

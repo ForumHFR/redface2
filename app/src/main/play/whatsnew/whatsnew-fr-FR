@@ -1,4 +1,4 @@
 Redface 2 v0.59.8 — dev.
 - Le champ BBCode moderne suit nativement les poignées de sélection et le curseur.
 - La réponse MP s'aligne sur les autres éditeurs et réserve 160 dp à la saisie quand l'espace le permet.
-- Dans le champ BBCode, le double-tap sélectionne le mot et le triple-tap la ligne ; la sélection intelligente Android est désactivée dans cet éditeur.
+- Dans le champ BBCode, le double-tap sélectionne le mot et le triple-tap la ligne ; l'élargissement automatique de la sélection est désactivé dans cet éditeur.

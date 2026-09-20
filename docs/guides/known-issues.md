@@ -40,7 +40,7 @@ Liste **vivante** des limitations connues de Redface 2 et des compromis **assum�
 
 ## Rédaction
 
-- **Rédaction longue : défilement interne, hauteur contrainte en paysage** (#447, #1263, #1406, `0.59.8`). Le champ repose désormais sur `BasicTextField(TextFieldState, …)` et son `ScrollState` : le contenu défile dans le champ, le curseur reste visible pendant la frappe et les poignées suivent une sélection étendue. Limite restante : en paysage avec le clavier ouvert, la faible hauteur disponible ne permet pas de garder simultanément une grande zone de saisie et tous les contrôles ; ceux-ci restent accessibles dans leur zone défilante, et masquer le clavier rend davantage d'espace au brouillon.
+- **Rédaction longue : défilement interne, hauteur contrainte en paysage** (#447, #1263, #1406, `0.59.8`). Le champ repose désormais sur `BasicTextField(TextFieldState, …)` et son `ScrollState` : le contenu défile dans le champ, le curseur reste visible pendant la frappe et les poignées suivent une sélection étendue. Limite restante : en paysage avec le clavier ouvert sur un téléphone, l'éditeur de post ne laisse au brouillon qu'une bande de quelques lignes (≈ 28 dp mesurés sur un écran 360×780 émulé, le clavier masquant le reste) parce que son titre, sa barre d'outils et son aperçu restent hors de la zone bornée, contrairement aux trois autres éditeurs ; masquer le clavier rend l'espace au brouillon. Le rééquilibrage de cet écran relève de la refonte de l'éditeur (#1417).
 
 ## Réseau
 
