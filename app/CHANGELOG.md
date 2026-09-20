@@ -16,7 +16,7 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
-## `0.61.0` — `local` — 2026-09-20
+## `0.61.0` — `internal` (dev) — 2026-09-20
 
 Premier lot des retours de la bêta `0.60.0` (milestone « Vue · Topic 2 »).
 

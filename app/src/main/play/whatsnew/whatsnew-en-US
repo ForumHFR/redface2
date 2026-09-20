@@ -1,6 +1,4 @@
-Redface 2 v0.60.0 — beta.
-- Smooth text selection in the editor, even beyond the screen; double-tap selects the word, triple-tap the line.
-- The caret stays visible when the keyboard opens.
-- Tap outside text to clear selection in topics and private messages.
-- Android 10: the keyboard no longer hides the editor.
-- A banner helps when the image picker returns nothing.
+Redface 2 v0.61.0 — dev.
+- "Go to page": First page / Last page shortcuts, in topics and private messages alike.
+- Swiping back to the previous page returns where you left off reading; a page you never opened opens at the bottom.
+- After posting a message: immediate confirmation and a progress bar, instead of a page that looked frozen.

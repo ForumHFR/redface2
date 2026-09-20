@@ -1,6 +1,4 @@
-Redface 2 v0.60.0 — bêta.
-- Sélection de texte fluide dans l'éditeur, même au-delà de l'écran ; double-tap = le mot, triple-tap = la ligne.
-- Le curseur reste visible à l'ouverture du clavier.
-- Un tap hors du texte relâche la sélection dans les sujets et les MP.
-- Android 10 : le clavier ne masque plus la saisie.
-- Une bannière aide si le sélecteur d'images ne renvoie rien.
+Redface 2 v0.61.0 — dev.
+- « Aller à une page » : raccourcis Première page / Dernière page, dans les sujets comme dans les MP.
+- Le swipe vers la page précédente revient là où vous aviez laissé la lecture ; une page jamais ouverte s'ouvre en bas.
+- Après l'envoi d'un message : confirmation immédiate et bandeau de progression, au lieu d'une page qui semblait figée.
