@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.ui.editor
 
 import android.content.Context
+import android.content.ContextWrapper
 import android.content.res.Configuration
 import android.view.textclassifier.TextClassificationManager
 import android.view.textclassifier.TextClassifier
@@ -45,17 +46,30 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 
 /**
- * Creates a field-scoped service cache whose [TextClassificationManager] uses [TextClassifier.NO_OP].
- * This leaves the activity's classifier untouched and lets Foundation finish its selection-toolbar
- * pipeline, but removes smart selection and smart actions from this editor. The configuration
- * context is deliberately scoped to [BasicTextField]: it is not the activity's themed wrapper,
- * while the field's visual styling comes from Compose locals.
+ * Creates a field-scoped context whose [TextClassificationManager] uses [TextClassifier.NO_OP].
+ * This disables automatic selection expansion and classifier-provided actions in this editor. The
+ * standard Cut/Copy/Paste/Select all actions and other apps' `ACTION_PROCESS_TEXT` items remain.
+ *
+ * Only the classification service comes from a separate configuration context. Everything else,
+ * including activity launches, resources, configuration and theme, delegates to [context], so the
+ * visual context and `findActivity()` chain stay intact. The wrapper references the same context as
+ * `LocalContext` and is remembered only for that context's composition lifetime, so it does not
+ * extend the activity lifetime.
  */
-private fun createBbcodeTextFieldContext(context: Context): Context =
-    context.createConfigurationContext(Configuration(context.resources.configuration)).also {
-        it.getSystemService(TextClassificationManager::class.java)
-            ?.setTextClassifier(TextClassifier.NO_OP)
+internal fun createBbcodeTextFieldContext(context: Context): Context {
+    val noOpManager = context
+        .createConfigurationContext(Configuration(context.resources.configuration))
+        .getSystemService(TextClassificationManager::class.java)
+        ?.apply { setTextClassifier(TextClassifier.NO_OP) }
+    return object : ContextWrapper(context) {
+        override fun getSystemService(name: String): Any? =
+            if (name == Context.TEXT_CLASSIFICATION_SERVICE) {
+                noOpManager ?: super.getSystemService(name)
+            } else {
+                super.getSystemService(name)
+            }
     }
+}
 
 /**
  * Controlled Material 3 BBCode text field used by the four full-screen editors.
@@ -203,7 +217,7 @@ internal fun BbcodeTextFieldValueBridge(
         if (current != received) {
             val textChanged = current.text != received.text
             fieldState.edit {
-                // A selection-only resync must preserve IME composition and the text undo stack.
+                // A selection-only resync must not replace text or add a text undo entry.
                 if (textChanged) replace(0, length, received.text)
                 selection = received.selection
             }
