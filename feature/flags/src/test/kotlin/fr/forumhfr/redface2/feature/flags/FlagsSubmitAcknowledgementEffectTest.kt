@@ -1,11 +1,13 @@
 package fr.forumhfr.redface2.feature.flags
 
-import androidx.compose.material3.Scaffold
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.snapshots.Snapshot
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
@@ -38,7 +40,10 @@ class FlagsSubmitAcknowledgementEffectTest {
         var consumed = 0
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                Scaffold(snackbarHost = { SnackbarHost(host) }) { _ ->
+                // Real UI on screen on purpose: an empty composition schedules no frame under
+                // Robolectric, so the effects below would never reach the main looper.
+                Box(modifier = Modifier.fillMaxSize()) {
+                    SnackbarHost(host)
                     // `key` stands in for leaving the flags list and coming back to it.
                     key(mount.intValue) {
                         FlagsSubmitAcknowledgementEffect(
