@@ -1,4 +1,3 @@
-Redface 2 v0.61.0 — dev.
-- "Go to page": First page / Last page shortcuts, in topics and private messages alike.
-- Swiping back to the previous page returns where you left off reading; a page you never opened opens at the bottom.
-- After posting a message: immediate confirmation and a progress bar, instead of a page that looked frozen.
+Redface 2 v0.61.1 — dev.
+- Replying from the flags list now confirms the post: no more returning to the list unsure whether the message went through.
+- A post that lands on another page no longer shows two confirmations in a row: the "go to page N" offer replaces the first one.
