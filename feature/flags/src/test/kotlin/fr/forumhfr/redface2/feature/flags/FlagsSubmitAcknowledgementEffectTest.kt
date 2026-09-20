@@ -111,7 +111,16 @@ class FlagsSubmitAcknowledgementEffectTest {
             }
         }
 
-        compose.runOnIdle { publish() }
+        // #1301 — publishing the arming write is NOT optional here, exactly like in the test above.
+        // Recomposition alone would eventually observe it, but `emulateSavedInstanceStateRestore`
+        // saves the state from a snapshot of its own: left unpublished, the write is invisible to
+        // that save, the restored composition comes back with `request = 0` and the retry the test
+        // is about never happens. Isolated on 2026-09-20: this line alone turns the case green,
+        // and no amount of extra waiting does.
+        compose.runOnIdle {
+            publish()
+            Snapshot.sendApplyNotifications()
+        }
         compose.waitUntil(TIMEOUT_MS) { handlingStarted == 1 }
         assertEquals("the id must not be consumed before snackbar handling completes", emptyList<Long>(), consumed)
 
