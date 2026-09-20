@@ -16,7 +16,7 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
-## `0.61.1` — `local` — 2026-09-20
+## `0.61.1` — `internal` (dev) — 2026-09-20
 
 Retours de nicko sur le premier lot ([#1301](https://github.com/ForumHFR/redface2/issues/1301)).
 

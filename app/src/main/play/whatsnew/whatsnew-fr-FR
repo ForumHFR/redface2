@@ -1,4 +1,3 @@
-Redface 2 v0.61.0 — dev.
-- « Aller à une page » : raccourcis Première page / Dernière page, dans les sujets comme dans les MP.
-- Le swipe vers la page précédente revient là où vous aviez laissé la lecture ; une page jamais ouverte s'ouvre en bas.
-- Après l'envoi d'un message : confirmation immédiate et bandeau de progression, au lieu d'une page qui semblait figée.
+Redface 2 v0.61.1 — dev.
+- Répondre depuis la liste des drapeaux confirme enfin l'envoi : plus de retour à la liste sans savoir si le message est parti.
+- Un message publié sur une autre page n'affiche plus deux confirmations à la suite : l'offre « aller en page N » remplace la première.
