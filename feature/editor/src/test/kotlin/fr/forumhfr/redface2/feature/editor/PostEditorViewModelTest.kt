@@ -1766,7 +1766,7 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `emptying the draft deletes the cached row instead of saving a blank`() = runTest {
+    fun `emptying the draft without a pending offer deletes the cached row`() = runTest {
         replyRepository.formResult = Result.success(authenticatedForm())
         val viewModel = newReplyViewModel()
         testScheduler.advanceUntilIdle()
@@ -1848,7 +1848,7 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `ViewModel recreation with the same cached version does not reoffer and keeps autosave alive`() = runTest {
+    fun `ViewModel recreation reoffers until decision and typing still autosaves`() = runTest {
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
         val savedStateHandle = SavedStateHandle()
         draftStore.preload(key, EditorDraftStore.Draft(body = "rescued text"))
@@ -1856,16 +1856,26 @@ class PostEditorViewModelTest {
         val first = newReplyViewModel(savedStateHandle = savedStateHandle)
         testScheduler.advanceUntilIdle()
         assertEquals("rescued text", first.state.value.restorableDraft)
+        assertNull(savedStateHandle.get<String>("draft_restore_offer_fingerprint"))
 
         val recreated = newReplyViewModel(savedStateHandle = savedStateHandle)
         testScheduler.advanceUntilIdle()
+        assertEquals("rescued text", recreated.state.value.restorableDraft)
 
-        assertNull(recreated.state.value.restorableDraft)
         recreated.submit(PostEditorIntent.ContentChanged(TextFieldValue("new live text")))
         testScheduler.advanceTimeBy(800L)
         testScheduler.runCurrent()
         assertEquals("new live text", draftStore.saved[key]?.body)
         assertEquals("tester", draftStore.lastSavedOwner)
+
+        recreated.submit(PostEditorIntent.DraftRestoreRequested)
+        testScheduler.advanceUntilIdle()
+        assertNull(savedStateHandle.get<String>("draft_restore_offer_fingerprint"))
+        assertEquals("new live text\n\nrescued text", draftStore.saved[key]?.body)
+
+        val afterRestore = newReplyViewModel(savedStateHandle = savedStateHandle)
+        testScheduler.advanceUntilIdle()
+        assertEquals("new live text\n\nrescued text", afterRestore.state.value.restorableDraft)
     }
 
     @Test
@@ -1900,6 +1910,41 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `edit server hydration removes an identical cached draft offer`() = runTest {
+        draftStore.preload(
+            EditorDraftKey.editPost(SAMPLE_CAT, SAMPLE_EDITED_NUMREPONSE),
+            EditorDraftStore.Draft(body = "existing post body"),
+        )
+
+        val viewModel = newEditViewModel()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("existing post body", viewModel.state.value.draft.text)
+        assertNull(viewModel.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `moving selection in a hydrated post keeps the restore offer`() = runTest {
+        draftStore.preload(
+            EditorDraftKey.editPost(SAMPLE_CAT, SAMPLE_EDITED_NUMREPONSE),
+            EditorDraftStore.Draft(body = "unfinished rewrite"),
+        )
+        val viewModel = newEditViewModel()
+        testScheduler.advanceUntilIdle()
+        val hydrated = viewModel.state.value.draft
+
+        viewModel.submit(
+            PostEditorIntent.ContentChanged(hydrated.copy(selection = TextRange(3))),
+        )
+        testScheduler.advanceTimeBy(800L)
+        testScheduler.runCurrent()
+
+        assertEquals("unfinished rewrite", viewModel.state.value.restorableDraft)
+        val key = EditorDraftKey.editPost(SAMPLE_CAT, SAMPLE_EDITED_NUMREPONSE)
+        assertEquals("unfinished rewrite", draftStore.saved[key]?.body)
+    }
+
+    @Test
     fun `restoring fills the draft and clears the banner`() = runTest {
         draftStore.preload(
             EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID),
@@ -1922,11 +1967,29 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `discarding deletes the cached draft and clears the banner`() = runTest {
-        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
-        draftStore.preload(key, EditorDraftStore.Draft(body = "rescued text"))
+    fun `restoring appends the offered body after text typed since the offer`() = runTest {
+        draftStore.preload(
+            EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID),
+            EditorDraftStore.Draft(body = "rescued text"),
+        )
         replyRepository.formResult = Result.success(authenticatedForm())
         val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("fresh text")))
+        viewModel.submit(PostEditorIntent.DraftRestoreRequested)
+
+        assertEquals("fresh text\n\nrescued text", viewModel.state.value.draft.text)
+        assertNull(viewModel.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `discarding deletes the cached draft and clears the banner`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val savedStateHandle = SavedStateHandle()
+        draftStore.preload(key, EditorDraftStore.Draft(body = "rescued text"))
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel(savedStateHandle = savedStateHandle)
         testScheduler.advanceUntilIdle()
 
         viewModel.submit(PostEditorIntent.DraftDiscardRequested)
@@ -1934,6 +1997,28 @@ class PostEditorViewModelTest {
 
         assertTrue("discard deletes the row", draftStore.deletedKeys.contains(key))
         assertNull("the banner is cleared after discarding", viewModel.state.value.restorableDraft)
+        assertTrue(savedStateHandle.get<String>("draft_restore_offer_fingerprint") != null)
+
+        val recreated = newReplyViewModel(savedStateHandle = savedStateHandle)
+        testScheduler.advanceUntilIdle()
+        assertNull(recreated.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `discarding cancels a pending autosave before deleting the cached draft`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.preload(key, EditorDraftStore.Draft(body = "rescued text"))
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("fresh text")))
+        viewModel.submit(PostEditorIntent.DraftDiscardRequested)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("the cancelled debounce must not save after Ignore", 0, draftStore.saveCount)
+        assertTrue(draftStore.deletedKeys.contains(key))
+        assertNull(draftStore.saved[key])
     }
 
     @Test
@@ -2335,7 +2420,7 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `CloseRequested with a blank body deletes the row and still closes`() = runTest {
+    fun `CloseRequested with a blank live body preserves a pending restore offer`() = runTest {
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
         draftStore.preload(key, EditorDraftStore.Draft(body = "stale"))
         replyRepository.formResult = Result.success(authenticatedForm())
@@ -2346,7 +2431,10 @@ class PostEditorViewModelTest {
 
         val effect = viewModel.effects.first()
         assertEquals(PostEditorEffect.CloseCommitted, effect)
-        assertTrue("an emptied editor must not leave a stale row", draftStore.deletedKeys.contains(key))
+        assertEquals("closing must not rewrite a pending offer", 0, draftStore.saveCount)
+        assertFalse(draftStore.deletedKeys.contains(key))
+        assertEquals("stale", draftStore.saved[key]?.body)
+        assertEquals("stale", viewModel.state.value.restorableDraft)
     }
 
     @Test

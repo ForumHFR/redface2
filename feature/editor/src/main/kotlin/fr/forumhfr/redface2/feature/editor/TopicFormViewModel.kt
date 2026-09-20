@@ -46,6 +46,7 @@ import fr.forumhfr.redface2.core.ui.editor.pickedImagesForUpload
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -210,9 +211,10 @@ class TopicFormViewModel @AssistedInject constructor(
     }
 
     /**
-     * #405/#1415 — offer each cached subject/body version once. Untouched EditFirstPost hydration
-     * remains eligible, while a real user edit suppresses the offer. The fingerprint survives
-     * process recreation but changes when a newer autosave replaced the hidden row.
+     * #405/#1415 — offer each cached subject/body version until the user handles it. Untouched
+     * EditFirstPost hydration remains eligible, while a real user edit suppresses the initial
+     * offer. The fingerprint is recorded only after Ignore, so a restored row remains recoverable
+     * if process death loses the live editor state before autosave.
      */
     private fun restoreDraftIfAny() {
         viewModelScope.launch {
@@ -229,7 +231,6 @@ class TopicFormViewModel @AssistedInject constructor(
                     _state.update { current ->
                         current.copy(restorableDraft = draft.body, restorableSubject = draft.subject)
                     }
-                    savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] = fingerprint
                 }
             }
         }
@@ -257,14 +258,14 @@ class TopicFormViewModel @AssistedInject constructor(
     }
 
     /**
-     * Immediate write of the current subject + body (both blank = delete the row, cf.
-     * [scheduleAutosave]). Reads [_state] AFTER the debounce delay — the previous shape captured
-     * a snapshot at scheduling time, which the #803 dirty-close flush would have re-persisted
-     * stale (state-hygiene audit 2026-07-05). Mirrors `PostEditorViewModel.persistDraftNow`.
+     * Immediate write of the current subject + body. A blank body with a pending offer is a no-op;
+     * otherwise both fields blank delete the row (cf. [scheduleAutosave]). Reads [_state] AFTER the
+     * debounce delay so the #803 dirty-close flush cannot re-persist a stale snapshot.
      */
     private suspend fun persistDraftNow() {
         val key = draftKey ?: return
         val snapshot = _state.value
+        if (snapshot.draft.text.isBlank() && snapshot.restorableDraft != null) return
         val body = snapshot.draft.text
         val subject = snapshot.subject.text
         if (body.isBlank() && subject.isBlank()) {
@@ -351,15 +352,20 @@ class TopicFormViewModel @AssistedInject constructor(
     }
 
     /**
-     * #405 — apply the cached subject + body (caret at the end, like form hydration) and clear the
-     * banner. Marks both fields hydrated so a late EditFirstPost form fetch cannot overwrite them.
+     * #405 — append the cached body after live text, fill only a blank subject, and clear the banner.
+     * Marks both fields hydrated so a late EditFirstPost form fetch cannot overwrite them.
      */
     private fun onDraftRestoreRequested() {
+        val offeredBody = _state.value.restorableDraft ?: return
         _state.update { current ->
-            val body = current.restorableDraft.orEmpty()
-            // Keep the live subject when the draft has none (it was autosaved before the server form
-            // populated the subject) : restoring must never blank a server-provided subject.
-            val subject = current.restorableSubject ?: current.subject.text
+            val body = if (current.draft.text.isBlank() || current.draft.text == offeredBody) {
+                offeredBody
+            } else {
+                current.draft.text.trimEnd() + "\n\n" + offeredBody
+            }
+            // A live subject always wins. Fill it from the offer only when it is still blank, so
+            // restoring never replaces a route/server value or a title the user just typed.
+            val subject = current.subject.text.ifBlank { current.restorableSubject.orEmpty() }
             current
                 .withDraft(TextFieldValue(text = body, selection = TextRange(body.length)))
                 .copy(
@@ -375,9 +381,22 @@ class TopicFormViewModel @AssistedInject constructor(
 
     /** #405 — discard the cached draft : delete the row and clear the banner. */
     private fun onDraftDiscardRequested() {
+        val offered = _state.value.restorableDraft ?: return
+        markDraftRestoreOfferIgnored(
+            EditorDraftStore.Draft(body = offered, subject = _state.value.restorableSubject),
+        )
         _state.update { it.copy(restorableDraft = null, restorableSubject = null) }
+        val pendingAutosave = autosaveJob
+        autosaveJob = null
         val key = draftKey ?: return
-        viewModelScope.launch { draftStore.delete(draftOwner, key) }
+        viewModelScope.launch {
+            pendingAutosave?.cancelAndJoin()
+            draftStore.delete(draftOwner, key)
+        }
+    }
+
+    private fun markDraftRestoreOfferIgnored(draft: EditorDraftStore.Draft) {
+        savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] = draft.restoreOfferFingerprint()
     }
 
     /**
@@ -589,8 +608,11 @@ class TopicFormViewModel @AssistedInject constructor(
         _state.update { current ->
             current.copy(
                 subject = value,
-                restorableDraft = current.restorableDraft.takeIf { value.text.isBlank() },
-                restorableSubject = current.restorableSubject.takeIf { value.text.isBlank() },
+                restorableSubject = if (current.restorableDraft != null) {
+                    value.text.ifBlank { null }
+                } else {
+                    current.restorableSubject
+                },
                 submitError = if (value.text != current.subject.text) null else current.submitError,
             )
         }
@@ -598,6 +620,7 @@ class TopicFormViewModel @AssistedInject constructor(
     }
 
     private fun onContentChanged(value: TextFieldValue) {
+        val textChanged = value.text != _state.value.draft.text
         _state.update { current ->
             val refreshed = current.withDraft(value)
             if (refreshed.isPreviewVisible) {
@@ -606,7 +629,7 @@ class TopicFormViewModel @AssistedInject constructor(
                 refreshed
             }
         }
-        scheduleAutosave()
+        if (textChanged) scheduleAutosave()
     }
 
     private fun onToolbarActionClicked(action: BbcodeAction) {

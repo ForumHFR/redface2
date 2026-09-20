@@ -49,6 +49,7 @@ import fr.forumhfr.redface2.core.ui.editor.pickedImagesForUpload
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -295,11 +296,11 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     /**
-     * #405/#1415 — offer a cached draft for [draftKey] once per cached content version. An untouched
+     * #405/#1415 — offer a cached draft for [draftKey] until the user handles it. An untouched
      * server prefill remains eligible: the banner is a choice and never overwrites it automatically.
      * A genuine user edit (content distinct from [PostEditorState.draftHydratedContent]) suppresses
-     * the offer. The content fingerprint survives process recreation without hiding a newer
-     * autosaved row whose live StateFlow was lost.
+     * the initial offer. The content fingerprint is recorded only after Ignore, so a restored row
+     * can be offered again if process death loses the live editor state before autosave.
      *
      * #790 exception — when the route carries `resumeSharedDraft` (escalation of a quick-reply
      * sheet, which JUST wrote the row), the body is APPENDED to the field instead of banner'd :
@@ -337,7 +338,6 @@ class PostEditorViewModel @AssistedInject constructor(
                 val canOffer = _state.value.canOfferDraftRestore(body)
                 if (canOffer) {
                     _state.update { current -> current.copy(restorableDraft = body) }
-                    savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] = fingerprint
                 }
             }
         }
@@ -348,9 +348,9 @@ class PostEditorViewModel @AssistedInject constructor(
             (draft.text.isBlank() || draft.text == draftHydratedContent)
 
     /**
-     * #405 — debounced autosave of the current body. Blank body → delete the row so an emptied
-     * editor never leaves a stale draft behind. The store stamps `updatedAt` and is a no-op without
-     * an active session, so nothing is persisted for an anonymous client.
+     * #405 — debounced autosave of the current body. Without a pending offer, a blank body deletes
+     * the row so an emptied editor never leaves a stale draft behind. The store stamps `updatedAt`
+     * and is a no-op without an active session, so nothing is persisted for an anonymous client.
      */
     private fun scheduleAutosave() {
         if (draftKey == null) return
@@ -361,10 +361,12 @@ class PostEditorViewModel @AssistedInject constructor(
         }
     }
 
-    /** Immediate write of the current body (blank = delete the row, cf. [scheduleAutosave]). */
+    /** Immediate write of the current body. A blank field with a pending offer leaves the row untouched. */
     private suspend fun persistDraftNow() {
         val key = draftKey ?: return
-        val body = _state.value.draft.text
+        val snapshot = _state.value
+        if (snapshot.draft.text.isBlank() && snapshot.restorableDraft != null) return
+        val body = snapshot.draft.text
         if (body.isBlank()) {
             draftStore.delete(draftOwner, key)
         } else {
@@ -467,12 +469,17 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     /**
-     * #405 — apply the cached body to the draft (caret at the end, like form hydration) and clear
-     * the banner. Marks the draft hydrated so a late form fetch cannot overwrite the restored text.
+     * #405 — append the cached body after any live text (caret at the end) and clear the banner.
+     * Marks the draft hydrated so a late form fetch cannot overwrite the restored text.
      */
     private fun onDraftRestoreRequested() {
-        val body = _state.value.restorableDraft ?: return
+        val offeredBody = _state.value.restorableDraft ?: return
         _state.update { current ->
+            val body = if (current.draft.text.isBlank() || current.draft.text == offeredBody) {
+                offeredBody
+            } else {
+                current.draft.text.trimEnd() + "\n\n" + offeredBody
+            }
             current
                 .withDraft(TextFieldValue(text = body, selection = TextRange(body.length)))
                 .copy(restorableDraft = null, draftHydratedFromForm = true)
@@ -482,9 +489,21 @@ class PostEditorViewModel @AssistedInject constructor(
 
     /** #405 — discard the cached draft : delete the row and clear the banner. */
     private fun onDraftDiscardRequested() {
+        val body = _state.value.restorableDraft ?: return
+        markDraftRestoreOfferIgnored(body)
         _state.update { it.copy(restorableDraft = null) }
+        val pendingAutosave = autosaveJob
+        autosaveJob = null
         val key = draftKey ?: return
-        viewModelScope.launch { draftStore.delete(draftOwner, key) }
+        viewModelScope.launch {
+            pendingAutosave?.cancelAndJoin()
+            draftStore.delete(draftOwner, key)
+        }
+    }
+
+    private fun markDraftRestoreOfferIgnored(body: String) {
+        savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] =
+            EditorDraftStore.Draft(body = body).restoreOfferFingerprint()
     }
 
     /**
@@ -707,6 +726,7 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     private fun onContentChanged(value: TextFieldValue) {
+        val textChanged = value.text != _state.value.draft.text
         _state.update { current ->
             val refreshed = current.withDraft(value)
             if (refreshed.isPreviewVisible) {
@@ -715,7 +735,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 refreshed
             }
         }
-        scheduleAutosave()
+        if (textChanged) scheduleAutosave()
     }
 
     private fun onToolbarActionClicked(action: BbcodeAction) {

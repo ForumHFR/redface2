@@ -537,26 +537,65 @@ class PrivateMessageComposeViewModelTest {
     }
 
     @Test
-    fun `composer recreation with the same cached version does not reoffer and keeps autosave alive`() = runTest {
+    fun `recipient hydration removes an offer identical to every live field`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
+        val formGate = CompletableDeferred<ReplyForm>()
+        coEvery { repository.fetchComposeForm(any()) } coAnswers { formGate.await() }
+        draftStore.preload(
+            EditorDraftKey.mpCompose(),
+            EditorDraftStore.Draft(
+                body = "rescued body",
+                subject = "rescued subject",
+                recipients = "alice",
+                isPrivate = true,
+            ),
+        )
+        val viewModel = viewModel(repository)
+        assertEquals("rescued body", viewModel.state.value.restorableDraft)
+
+        viewModel.onContentChanged(TextFieldValue("rescued body"))
+        viewModel.onSubjectChanged("rescued subject")
+        formGate.complete(composeForm(dest = "alice"))
+        advanceUntilIdle()
+
+        assertEquals("alice", viewModel.state.value.recipients)
+        assertNull(viewModel.state.value.restorableDraft)
+        assertNull(viewModel.state.value.restorableSubject)
+        assertNull(viewModel.state.value.restorableRecipients)
+    }
+
+    @Test
+    fun `composer recreation reoffers until decision and typing still autosaves`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val key = EditorDraftKey.mpCompose()
         val savedStateHandle = SavedStateHandle()
         coEvery { repository.fetchComposeForm(any()) } returns composeForm()
         draftStore.preload(
-            EditorDraftKey.mpCompose(),
+            key,
             EditorDraftStore.Draft(body = "rescued MP", isPrivate = true),
         )
         val first = viewModel(repository, savedStateHandle = savedStateHandle)
         advanceUntilIdle()
         assertEquals("rescued MP", first.state.value.restorableDraft)
+        assertNull(savedStateHandle.get<String>("draft_restore_offer_fingerprint"))
 
         val recreated = viewModel(repository, savedStateHandle = savedStateHandle)
         advanceUntilIdle()
+        assertEquals("rescued MP", recreated.state.value.restorableDraft)
 
-        assertEquals(null, recreated.state.value.restorableDraft)
         recreated.onContentChanged(TextFieldValue("new live MP"))
         advanceTimeBy(800L)
-        assertEquals("new live MP", draftStore.saved[EditorDraftKey.mpCompose()]?.body)
+        assertEquals("new live MP", draftStore.saved[key]?.body)
         assertEquals("tester", draftStore.lastSavedOwner)
+
+        recreated.onDraftRestoreRequested()
+        advanceUntilIdle()
+        assertNull(savedStateHandle.get<String>("draft_restore_offer_fingerprint"))
+        assertEquals("new live MP\n\nrescued MP", draftStore.saved[key]?.body)
+
+        val afterRestore = viewModel(repository, savedStateHandle = savedStateHandle)
+        advanceUntilIdle()
+        assertEquals("new live MP\n\nrescued MP", afterRestore.state.value.restorableDraft)
     }
 
     @Test
@@ -575,6 +614,103 @@ class PrivateMessageComposeViewModelTest {
         advanceUntilIdle()
 
         assertEquals("new MP", recreated.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `typing recipients and subject leaves the pending MP row untouched`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val key = EditorDraftKey.mpCompose()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        draftStore.preload(
+            key,
+            EditorDraftStore.Draft(
+                body = "rescued body",
+                subject = "old subject",
+                recipients = "old recipient",
+                isPrivate = true,
+            ),
+        )
+        val viewModel = viewModel(repository)
+
+        viewModel.onRecipientsChanged("new recipient")
+        viewModel.onSubjectChanged("new subject")
+        advanceTimeBy(800L)
+
+        assertNull("no hybrid row may be written while the visible body is blank", draftStore.lastSavedOwner)
+        assertEquals("rescued body", draftStore.saved[key]?.body)
+        assertEquals("old subject", draftStore.saved[key]?.subject)
+        assertEquals("old recipient", draftStore.saved[key]?.recipients)
+        assertEquals("rescued body", viewModel.state.value.restorableDraft)
+
+        viewModel.onDraftRestoreRequested()
+        advanceUntilIdle()
+        assertEquals("rescued body", viewModel.state.value.draft.text)
+        assertEquals("new subject", viewModel.state.value.subject)
+        assertEquals("new recipient", viewModel.state.value.recipients)
+    }
+
+    @Test
+    fun `restoring appends the offered MP body and keeps live routing fields`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        draftStore.preload(
+            EditorDraftKey.mpCompose(),
+            EditorDraftStore.Draft(
+                body = "rescued body",
+                subject = "rescued subject",
+                recipients = "alice",
+                isPrivate = true,
+            ),
+        )
+        val viewModel = viewModel(repository)
+        advanceUntilIdle()
+
+        viewModel.onRecipientsChanged("bob")
+        viewModel.onSubjectChanged("fresh subject")
+        viewModel.onContentChanged(TextFieldValue("fresh body"))
+        viewModel.onDraftRestoreRequested()
+
+        assertEquals("fresh body\n\nrescued body", viewModel.state.value.draft.text)
+        assertEquals("fresh subject", viewModel.state.value.subject)
+        assertEquals("bob", viewModel.state.value.recipients)
+        assertNull(viewModel.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `moving selection keeps the compose restore offer`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        draftStore.preload(
+            EditorDraftKey.mpCompose(),
+            EditorDraftStore.Draft(body = "rescued body", isPrivate = true),
+        )
+        val viewModel = viewModel(repository)
+        viewModel.onContentChanged(TextFieldValue("live body", selection = TextRange(9)))
+        assertEquals("rescued body", viewModel.state.value.restorableDraft)
+
+        viewModel.onContentChanged(TextFieldValue("live body", selection = TextRange(2)))
+
+        assertEquals("rescued body", viewModel.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `discard records the decision and a recreation does not reoffer`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val savedStateHandle = SavedStateHandle()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        draftStore.preload(
+            EditorDraftKey.mpCompose(),
+            EditorDraftStore.Draft(body = "rescued MP", isPrivate = true),
+        )
+        val viewModel = viewModel(repository, savedStateHandle = savedStateHandle)
+
+        viewModel.onDraftDiscardRequested()
+        advanceUntilIdle()
+
+        assertTrue(savedStateHandle.get<String>("draft_restore_offer_fingerprint") != null)
+        val recreated = viewModel(repository, savedStateHandle = savedStateHandle)
+        advanceUntilIdle()
+        assertNull(recreated.state.value.restorableDraft)
     }
 
     @Test
@@ -619,7 +755,7 @@ class PrivateMessageComposeViewModelTest {
     }
 
     @Test
-    fun `onCloseRequested with every field blank deletes the row and still closes`() = runTest {
+    fun `onCloseRequested with blank live fields preserves a pending restore offer`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchComposeForm(any()) } returns composeForm()
         val key = EditorDraftKey.mpCompose()
@@ -630,7 +766,59 @@ class PrivateMessageComposeViewModelTest {
 
         val effect = vm.effects.first()
         assertEquals(PrivateMessageComposeEffect.CloseCommitted, effect)
+        assertNull("closing must not rewrite a pending offer", draftStore.lastSavedOwner)
+        assertFalse(draftStore.deletedKeys.contains(key))
+        assertEquals("stale", draftStore.saved[key]?.body)
+        assertEquals("stale", vm.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `route recipients with a pending offer do not create a hybrid row on close`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val key = EditorDraftKey.mpCompose()
+        coEvery { repository.fetchComposeForm("bob") } returns composeForm(dest = "bob")
+        draftStore.preload(
+            key,
+            EditorDraftStore.Draft(
+                body = "private text for alice",
+                subject = "alice subject",
+                recipients = "alice",
+                isPrivate = true,
+            ),
+        )
+        val viewModel = viewModel(repository, initialRecipient = "bob")
+        advanceUntilIdle()
+        assertEquals("bob", viewModel.state.value.recipients)
+        assertEquals("private text for alice", viewModel.state.value.restorableDraft)
+
+        viewModel.onCloseRequested()
+
+        assertEquals(PrivateMessageComposeEffect.CloseCommitted, viewModel.effects.first())
+        assertNull("close must not write offered text under route recipients", draftStore.lastSavedOwner)
+        assertEquals("private text for alice", draftStore.saved[key]?.body)
+        assertEquals("alice", draftStore.saved[key]?.recipients)
+    }
+
+    @Test
+    fun `onCloseRequested with blank fields and no pending offer deletes the stale row`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val viewModel = viewModel(repository)
+        advanceUntilIdle()
+        val key = EditorDraftKey.mpCompose()
+
+        viewModel.onRecipientsChanged("alice")
+        viewModel.onSubjectChanged("temporary subject")
+        viewModel.onContentChanged(TextFieldValue("temporary body"))
+        advanceTimeBy(800L)
+        viewModel.onRecipientsChanged("")
+        viewModel.onSubjectChanged("")
+        viewModel.onContentChanged(TextFieldValue(""))
+        viewModel.onCloseRequested()
+
+        assertEquals(PrivateMessageComposeEffect.CloseCommitted, viewModel.effects.first())
         assertTrue("an emptied composer must not leave a stale row", draftStore.deletedKeys.contains(key))
+        assertNull(draftStore.saved[key])
     }
 
     @Test

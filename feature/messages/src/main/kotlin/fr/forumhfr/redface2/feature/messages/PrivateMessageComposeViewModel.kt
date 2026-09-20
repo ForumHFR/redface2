@@ -42,6 +42,7 @@ import fr.forumhfr.redface2.core.ui.editor.pickedImagesForUpload
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -172,9 +173,10 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     fun retryFormLoad() = loadForm()
 
     /**
-     * #405/#1415 — offer each cached body/subject/recipient version once. A routing or server-side
-     * `dest` prefill remains eligible while untouched; a real edit to any field suppresses the
-     * offer. The owner snapshot is captured even when the fingerprint guard filters the banner.
+     * #405/#1415 — offer each cached body/subject/recipient version until the user handles it. A
+     * routing or server-side `dest` prefill remains eligible while untouched; a real edit suppresses
+     * the initial offer. The fingerprint is recorded only after Ignore, so a restored row remains
+     * recoverable if process death loses the live editor state before autosave.
      */
     private fun restoreDraftIfAny() {
         viewModelScope.launch {
@@ -197,7 +199,6 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                             restorableRecipients = draft.recipients,
                         )
                     }
-                    savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] = fingerprint
                 }
             }
         }
@@ -229,13 +230,13 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     }
 
     /**
-     * Immediate write of the current recipients + subject + body (all blank = delete the row, cf.
-     * [scheduleAutosave]). Reads [_state] AFTER the debounce delay — the previous shape captured a
-     * snapshot at scheduling time, which the #803 dirty-close flush would have re-persisted stale
-     * (state-hygiene audit 2026-07-05). Mirrors `PostEditorViewModel.persistDraftNow`.
+     * Immediate write of the current recipients + subject + body. A blank body with a pending offer
+     * is a no-op; otherwise all fields blank delete the row (cf. [scheduleAutosave]). Reads [_state]
+     * AFTER the debounce delay so the #803 dirty-close flush cannot re-persist a stale snapshot.
      */
     private suspend fun persistDraftNow() {
         val snapshot = _state.value
+        if (snapshot.draft.text.isBlank() && snapshot.restorableDraft != null) return
         val body = snapshot.draft.text
         val subject = snapshot.subject
         val recipients = snapshot.recipients
@@ -293,15 +294,19 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         }
     }
 
-    /** #405 — apply the cached recipients + subject + body and clear the banner. */
+    /** #405 — append the cached body, fill only blank routing fields, and clear the banner. */
     fun onDraftRestoreRequested() {
-        val snapshot = _state.value
-        val body = snapshot.restorableDraft.orEmpty()
-        _state.update {
-            it.withDraftPreview(TextFieldValue(text = body, selection = TextRange(body.length)))
+        val offeredBody = _state.value.restorableDraft ?: return
+        _state.update { current ->
+            val body = if (current.draft.text.isBlank() || current.draft.text == offeredBody) {
+                offeredBody
+            } else {
+                current.draft.text.trimEnd() + "\n\n" + offeredBody
+            }
+            current.withDraftPreview(TextFieldValue(text = body, selection = TextRange(body.length)))
                 .copy(
-                    subject = snapshot.restorableSubject.orEmpty(),
-                    recipients = snapshot.restorableRecipients.orEmpty(),
+                    subject = current.subject.ifBlank { current.restorableSubject.orEmpty() },
+                    recipients = current.recipients.ifBlank { current.restorableRecipients.orEmpty() },
                     restorableDraft = null,
                     restorableSubject = null,
                     restorableRecipients = null,
@@ -312,10 +317,29 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
 
     /** #405 — discard the cached draft : delete the row and clear the banner. */
     fun onDraftDiscardRequested() {
+        val snapshot = _state.value
+        val body = snapshot.restorableDraft ?: return
+        markDraftRestoreOfferIgnored(
+            EditorDraftStore.Draft(
+                body = body,
+                subject = snapshot.restorableSubject,
+                recipients = snapshot.restorableRecipients,
+                isPrivate = true,
+            ),
+        )
         _state.update {
             it.copy(restorableDraft = null, restorableSubject = null, restorableRecipients = null)
         }
-        viewModelScope.launch { draftStore.delete(draftOwner, draftKey) }
+        val pendingAutosave = autosaveJob
+        autosaveJob = null
+        viewModelScope.launch {
+            pendingAutosave?.cancelAndJoin()
+            draftStore.delete(draftOwner, draftKey)
+        }
+    }
+
+    private fun markDraftRestoreOfferIgnored(draft: EditorDraftStore.Draft) {
+        savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] = draft.restoreOfferFingerprint()
     }
 
     private fun loadForm() {
@@ -406,9 +430,11 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         _state.update {
             it.copy(
                 recipients = value,
-                restorableDraft = it.restorableDraft.takeIf { value.isBlank() },
-                restorableSubject = it.restorableSubject.takeIf { value.isBlank() },
-                restorableRecipients = it.restorableRecipients.takeIf { value.isBlank() },
+                restorableRecipients = if (it.restorableDraft != null) {
+                    value.ifBlank { null }
+                } else {
+                    it.restorableRecipients
+                },
             )
         }
         scheduleAutosave()
@@ -420,17 +446,20 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
             val subject = value.take(PrivateMessageComposeUiState.SUBJECT_MAX_LENGTH)
             it.copy(
                 subject = subject,
-                restorableDraft = it.restorableDraft.takeIf { subject.isBlank() },
-                restorableSubject = it.restorableSubject.takeIf { subject.isBlank() },
-                restorableRecipients = it.restorableRecipients.takeIf { subject.isBlank() },
+                restorableSubject = if (it.restorableDraft != null) {
+                    subject.ifBlank { null }
+                } else {
+                    it.restorableSubject
+                },
             )
         }
         scheduleAutosave()
     }
 
     fun onContentChanged(value: TextFieldValue) {
+        val textChanged = value.text != _state.value.draft.text
         _state.update { it.withDraftPreview(value) }
-        scheduleAutosave()
+        if (textChanged) scheduleAutosave()
     }
 
     fun onToolbarAction(action: BbcodeAction) {
@@ -604,9 +633,6 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     ): PrivateMessageComposeUiState = copy(
         draft = updated,
         preview = if (isPreviewVisible) previewParser.parsePreview(updated.text) else preview,
-        restorableDraft = restorableDraft.takeIf { updated.text.isBlank() },
-        restorableSubject = restorableSubject.takeIf { updated.text.isBlank() },
-        restorableRecipients = restorableRecipients.takeIf { updated.text.isBlank() },
         // #459 — a fresh text edit dismisses a stale upload banner (a successful upload INSERTS
         // text via this path, which also clears any prior error) — parity with PostEditorState.
         uploadError = if (updated.text != draft.text) null else uploadError,
