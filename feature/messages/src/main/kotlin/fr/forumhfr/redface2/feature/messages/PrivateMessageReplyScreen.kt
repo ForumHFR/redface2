@@ -228,7 +228,7 @@ private fun PrivateMessageReplyContent(
 
 @Composable
 @Suppress("LongParameterList") // Editor body mirrors the post editor surface; each callback is distinct.
-private fun ReplyEditorBody(
+internal fun ReplyEditorBody(
     state: PrivateMessageReplyUiState,
     onContentChanged: (TextFieldValue) -> Unit,
     onToolbarAction: (BbcodeAction) -> Unit,
@@ -253,6 +253,12 @@ private fun ReplyEditorBody(
             available = maxHeight,
             fieldMin = EDITOR_DRAFT_MIN_HEIGHT,
         )
+        val controlsScroll = rememberScrollState()
+        val hasAlert = state.restorableDraft != null ||
+            state.submitError != null || state.uploadError != null
+        LaunchedEffect(hasAlert) {
+            if (hasAlert) controlsScroll.animateScrollTo(0)
+        }
         Column(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -260,9 +266,36 @@ private fun ReplyEditorBody(
             Column(
                 modifier = Modifier
                     .heightIn(max = controlsMaxHeight)
-                    .verticalScroll(rememberScrollState()),
+                    .verticalScroll(controlsScroll),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                if (state.restorableDraft != null) {
+                    MessageDraftRestoreBanner(onRestore = onDraftRestore, onDiscard = onDraftDiscard)
+                }
+
+                state.submitError?.let { error ->
+                    Text(
+                        text = stringResource(error.bannerResId),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    TextButton(onClick = onErrorDismissed) {
+                        Text(text = stringResource(R.string.messages_reply_error_dismiss))
+                    }
+                }
+
+                // #459 — dismissible upload-error banner (shared :core:ui wording).
+                state.uploadError?.let { error ->
+                    Text(
+                        text = error.bannerText(),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    TextButton(onClick = onUploadErrorDismissed) {
+                        Text(text = stringResource(R.string.messages_reply_error_dismiss))
+                    }
+                }
+
                 // #618 (Bug 1) — owner-only compact summary; the dedicated sheet keeps large DTs
                 // from crowding the composer. Hidden for a participant or one-to-one MP.
                 if (state.canManageRecipients) {
@@ -305,32 +338,6 @@ private fun ReplyEditorBody(
                     )
                 }
 
-                if (state.restorableDraft != null) {
-                    MessageDraftRestoreBanner(onRestore = onDraftRestore, onDiscard = onDraftDiscard)
-                }
-
-                state.submitError?.let { error ->
-                    Text(
-                        text = stringResource(error.bannerResId),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                    TextButton(onClick = onErrorDismissed) {
-                        Text(text = stringResource(R.string.messages_reply_error_dismiss))
-                    }
-                }
-
-                // #459 — dismissible upload-error banner (shared :core:ui wording).
-                state.uploadError?.let { error ->
-                    Text(
-                        text = error.bannerText(),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                    TextButton(onClick = onUploadErrorDismissed) {
-                        Text(text = stringResource(R.string.messages_reply_error_dismiss))
-                    }
-                }
             }
 
             BbcodeTextField(

@@ -205,7 +205,7 @@ private fun PrivateMessageComposeContent(
 
 @Composable
 @Suppress("LongParameterList") // Editor body mirrors the reply surface ; each callback is distinct.
-private fun ComposeEditorBody(
+internal fun ComposeEditorBody(
     state: PrivateMessageComposeUiState,
     onRecipientsChanged: (String) -> Unit,
     onSubjectChanged: (String) -> Unit,
@@ -232,6 +232,14 @@ private fun ComposeEditorBody(
             available = maxHeight,
             fieldMin = EDITOR_DRAFT_MIN_HEIGHT,
         )
+        val controlsScroll = rememberScrollState()
+        val hasRestorableDraft = state.restorableDraft != null ||
+            state.restorableSubject != null || state.restorableRecipients != null
+        val hasAlert = hasRestorableDraft ||
+            state.submitError != null || state.uploadError != null
+        LaunchedEffect(hasAlert) {
+            if (hasAlert) controlsScroll.animateScrollTo(0)
+        }
         Column(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -241,44 +249,10 @@ private fun ComposeEditorBody(
             Column(
                 modifier = Modifier
                     .heightIn(max = controlsMaxHeight)
-                    .verticalScroll(rememberScrollState()),
+                    .verticalScroll(controlsScroll),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                ComposeEditorControls(
-                    state = state,
-                    onRecipientsChanged = onRecipientsChanged,
-                    onSubjectChanged = onSubjectChanged,
-                    onToolbarAction = onToolbarAction,
-                    onImageUploadRequested = launchImagePicker,
-                )
-
-                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-                    TextButton(onClick = onTogglePreview) {
-                        Text(
-                            text = stringResource(
-                                if (state.isPreviewVisible) {
-                                    R.string.messages_reply_preview_hide
-                                } else {
-                                    R.string.messages_reply_preview_show
-                                },
-                            ),
-                        )
-                    }
-                }
-
-                if (state.isPreviewVisible) {
-                    HorizontalDivider()
-                    BbcodePreview(
-                        content = state.preview,
-                        modifier = Modifier.fillMaxWidth(),
-                        mediaDiskCachePolicy = PostMediaDiskCachePolicy.DISABLED,
-                    )
-                }
-
-                if (state.restorableDraft != null ||
-                    state.restorableSubject != null ||
-                    state.restorableRecipients != null
-                ) {
+                if (hasRestorableDraft) {
                     MessageDraftRestoreBanner(onRestore = onDraftRestore, onDiscard = onDraftDiscard)
                 }
 
@@ -313,6 +287,38 @@ private fun ComposeEditorBody(
                         Text(text = stringResource(R.string.messages_reply_error_dismiss))
                     }
                 }
+
+                ComposeEditorControls(
+                    state = state,
+                    onRecipientsChanged = onRecipientsChanged,
+                    onSubjectChanged = onSubjectChanged,
+                    onToolbarAction = onToolbarAction,
+                    onImageUploadRequested = launchImagePicker,
+                )
+
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                    TextButton(onClick = onTogglePreview) {
+                        Text(
+                            text = stringResource(
+                                if (state.isPreviewVisible) {
+                                    R.string.messages_reply_preview_hide
+                                } else {
+                                    R.string.messages_reply_preview_show
+                                },
+                            ),
+                        )
+                    }
+                }
+
+                if (state.isPreviewVisible) {
+                    HorizontalDivider()
+                    BbcodePreview(
+                        content = state.preview,
+                        modifier = Modifier.fillMaxWidth(),
+                        mediaDiskCachePolicy = PostMediaDiskCachePolicy.DISABLED,
+                    )
+                }
+
             }
 
             BbcodeTextField(

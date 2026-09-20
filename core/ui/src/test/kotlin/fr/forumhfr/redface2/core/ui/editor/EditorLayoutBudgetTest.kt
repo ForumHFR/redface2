@@ -25,20 +25,41 @@ class EditorLayoutBudgetTest {
     }
 
     @Test
-    fun `short window gives controls forty percent instead of collapsing either zone`() {
-        // The 68 dp remainder would leave metadata nearly unusable, so the responsive share wins.
+    fun `regular short window still reserves the requested field minimum`() {
+        // 240 - 160 - 12 = 68 dp, enough to expose at least one 48 dp action target.
         assertEquals(
-            96.dp,
+            68.dp,
             editorControlsMaxHeight(available = 240.dp, fieldMin = EDITOR_DRAFT_MIN_HEIGHT),
         )
     }
 
     @Test
-    fun `tiny and invalid windows remain bounded`() {
+    fun `short window stops growing controls once one action target fits`() {
         assertEquals(
-            40.dp,
+            48.dp,
+            editorControlsMaxHeight(available = 200.dp, fieldMin = EDITOR_DRAFT_MIN_HEIGHT),
+        )
+    }
+
+    @Test
+    fun `tiny window gives controls one third and restores the old landscape field height`() {
+        assertEquals(
+            100.dp / 3f,
             editorControlsMaxHeight(available = 100.dp, fieldMin = EDITOR_DRAFT_MIN_HEIGHT),
         )
+        // 100 - 33.33 - 12 = 54.67 dp for the field, close to the 0.58.0 landscape measure.
+        val fieldHeight = 100.dp -
+            editorControlsMaxHeight(available = 100.dp, fieldMin = EDITOR_DRAFT_MIN_HEIGHT) -
+            12.dp
+        assertEquals(
+            54.67f,
+            fieldHeight.value,
+            0.01f,
+        )
+    }
+
+    @Test
+    fun `invalid window remains bounded`() {
         assertEquals(
             0.dp,
             editorControlsMaxHeight(available = (-1).dp, fieldMin = EDITOR_DRAFT_MIN_HEIGHT),

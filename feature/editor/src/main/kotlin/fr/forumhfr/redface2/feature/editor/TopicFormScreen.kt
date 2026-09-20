@@ -173,6 +173,14 @@ internal fun TopicFormContent(
                     available = maxHeight,
                     fieldMin = EDITOR_DRAFT_MIN_HEIGHT,
                 )
+                val controlsScroll = rememberScrollState()
+                val hasRestorableDraft =
+                    state.restorableDraft != null || state.restorableSubject != null
+                val hasAlert = hasRestorableDraft ||
+                    state.submitError != null || state.uploadError != null
+                LaunchedEffect(hasAlert) {
+                    if (hasAlert) controlsScroll.animateScrollTo(0)
+                }
                 Column(
                     modifier = Modifier.fillMaxSize(),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -183,9 +191,16 @@ internal fun TopicFormContent(
                     Column(
                         modifier = Modifier
                             .heightIn(max = controlsMaxHeight)
-                            .verticalScroll(rememberScrollState()),
+                            .verticalScroll(controlsScroll),
                         verticalArrangement = Arrangement.spacedBy(12.dp),
                     ) {
+                        if (hasRestorableDraft) {
+                            DraftRestoreBanner(
+                                onRestore = { onIntent(TopicFormIntent.DraftRestoreRequested) },
+                                onDiscard = { onIntent(TopicFormIntent.DraftDiscardRequested) },
+                            )
+                        }
+                        TopicFormErrorBanners(state = state, onIntent = onIntent)
                         Text(
                             text = stringResource(state.mode.titleResId),
                             style = MaterialTheme.typography.titleLarge,
@@ -242,13 +257,6 @@ internal fun TopicFormContent(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
-                        if (state.restorableDraft != null || state.restorableSubject != null) {
-                            DraftRestoreBanner(
-                                onRestore = { onIntent(TopicFormIntent.DraftRestoreRequested) },
-                                onDiscard = { onIntent(TopicFormIntent.DraftDiscardRequested) },
-                            )
-                        }
-                        TopicFormErrorBanners(state = state, onIntent = onIntent)
                     }
                     BbcodeTextField(
                         value = state.draft,

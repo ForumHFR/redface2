@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -106,19 +107,28 @@ internal fun MessageDraftRestoreBanner(
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         tonalElevation = 2.dp,
     ) {
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
                 text = stringResource(R.string.messages_draft_restore_message),
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+                maxLines = 3,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onRestore) {
-                    Text(text = stringResource(R.string.messages_draft_restore))
-                }
-                TextButton(onClick = onDiscard) {
-                    Text(text = stringResource(R.string.messages_draft_discard))
-                }
+            TextButton(
+                onClick = onRestore,
+                contentPadding = PaddingValues(horizontal = 6.dp),
+            ) {
+                Text(text = stringResource(R.string.messages_draft_restore))
+            }
+            TextButton(
+                onClick = onDiscard,
+                contentPadding = PaddingValues(horizontal = 6.dp),
+            ) {
+                Text(text = stringResource(R.string.messages_draft_discard))
             }
         }
     }

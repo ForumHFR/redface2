@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -113,7 +114,7 @@ fun PostEditorScreen(
 }
 
 @Composable
-private fun PostEditorContent(
+internal fun PostEditorContent(
     state: PostEditorState,
     onIntent: (PostEditorIntent) -> Unit,
     smileyPicker: SmileyPickerController,
@@ -132,113 +133,42 @@ private fun PostEditorContent(
         color = MaterialTheme.colorScheme.surface,
     ) {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
-            // No outer scroll : the draft field is weighted so it stretches to fill every
-            // free pixel down to the bottom bar (dogfooding v108 — the column used to leave
-            // a large blank under « Afficher l'aperçu »). Long content scrolls in the field's
-            // own internal scroller (#447/#1406) and inside the preview pane, which is also why
-            // weight() is usable at all — it gives BTF2 the bounded viewport required by its
-            // internal selection scroll. Keyboard handling : the bar's IME inset grows, this
-            // column shrinks by the same amount, and BTF2 keeps the caret anchored natively.
-            Column(
+            // #447 — the bounded budget covers ALL editor chrome, not just alerts/cards. The
+            // weighted BTF2 field therefore keeps its 160 dp reserve on a short IME viewport;
+            // title, toolbar and preview remain reachable in the controls zone above it.
+            BoxWithConstraints(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text(
-                    text = stringResource(state.mode.titleResId),
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
+                val controlsMaxHeight = editorControlsMaxHeight(
+                    available = maxHeight,
+                    fieldMin = EDITOR_DRAFT_MIN_HEIGHT,
                 )
-
-                BbcodeToolbar(
-                    onAction = { action -> onIntent(PostEditorIntent.ToolbarActionClicked(action)) },
-                    onImageUrlRequested = { imageUrlDialogOpen = true },
-                    onImageUploadRequested = launchImagePicker,
-                    uploading = state.isUploading,
-                )
-
-                // Multi-image upload — « n/N » progress under the toolbar while a batch (> 1 image)
-                // is in flight. A single upload keeps uploadProgress null (toolbar spinner only).
-                UploadProgressLabel(state.uploadProgress)
-
-                // #604 lot 3 (mockup P3) — the armed citations as cards ABOVE the field, the same
-                // rendering as the quick-reply sheet : the field only ever holds the user's text,
-                // the [quotemsg] blocks are materialised at submit.
-                // #555 — everything that competes with the field for vertical space (draft
-                // banner, error banners, cards) lives in ONE top zone that scrolls past its
-                // budget : the field keeps a 160 dp reserve while the available window permits it.
-                // Before this, the field was the only weighted child
-                // and fixed content could crush it to zero pixels on a short display (thibw).
-                BoxWithConstraints(modifier = Modifier.weight(1f)) {
-                    val topZoneMaxHeight = editorControlsMaxHeight(
-                        available = maxHeight,
-                        fieldMin = EDITOR_DRAFT_MIN_HEIGHT,
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    PostEditorControlsZone(
+                        state = state,
+                        onIntent = onIntent,
+                        maxHeight = controlsMaxHeight,
+                        onImageUrlRequested = { imageUrlDialogOpen = true },
+                        onImageUploadRequested = launchImagePicker,
+                        showSubmitBar = showSubmitBar,
                     )
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        EditorTopZone(
-                            state = state,
-                            onIntent = onIntent,
-                            maxHeight = topZoneMaxHeight,
-                        )
-
-                        BbcodeTextField(
-                            value = state.draft,
-                            onValueChange = { value -> onIntent(PostEditorIntent.ContentChanged(value)) },
-                            label = stringResource(R.string.editor_field_label),
-                            placeholder = stringResource(R.string.editor_field_placeholder),
-                            modifier = Modifier.weight(1f),
-                            // #275/#410/#447 — BTF2 owns handle scrolling and caret following in
-                            // this bounded viewport.
-                            // Multi-image upload — lock editing during a batch so the user can't
-                            // move the caret between two programmatic [img] insertions (keeps them
-                            // in pick order).
-                            readOnly = state.isUploading,
-                            // #555 — the editor opens ready to type: focus + IME on entry. Critical
-                            // in edit mode (field hydrated with a long post: nothing set the focus,
-                            // keyboard closed) ; for a reply it is the
-                            // expected behaviour anyway.
-                            autoFocus = true,
-                        )
-                    }
-                }
-
-                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-                    TextButton(onClick = { onIntent(PostEditorIntent.TogglePreview) }) {
-                        Text(
-                            text = stringResource(
-                                if (state.isPreviewVisible) {
-                                    R.string.editor_preview_hide
-                                } else {
-                                    R.string.editor_preview_show
-                                },
-                            ),
-                        )
-                    }
-                }
-
-                if (state.isPreviewVisible) {
-                    HorizontalDivider()
-                    // The preview shares the stretch with the field (50/50) and scrolls
-                    // internally — long rendered content must not push the bar off-screen.
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .verticalScroll(rememberScrollState()),
-                    ) {
-                        BbcodePreview(content = state.preview)
-                    }
-                }
-
-                if (!showSubmitBar) {
-                    // Defensive fallback for future post-level modes. Reply (#145),
-                    // Quote (#146) and Edit (#147) submit through the bottom bar ;
-                    // topic-level create/edit flows are handled by TopicFormScreen.
-                    Text(
-                        text = stringResource(R.string.editor_submit_disabled),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    BbcodeTextField(
+                        value = state.draft,
+                        onValueChange = { value -> onIntent(PostEditorIntent.ContentChanged(value)) },
+                        label = stringResource(R.string.editor_field_label),
+                        placeholder = stringResource(R.string.editor_field_placeholder),
+                        modifier = Modifier.weight(1f),
+                        // #275/#410/#447 — BTF2 owns handle scrolling and caret following in
+                        // this bounded viewport. Lock while a batch upload inserts its images.
+                        readOnly = state.isUploading,
+                        // #555 — the editor opens ready to type, including hydrated edit drafts.
+                        autoFocus = true,
                     )
                 }
             }
@@ -325,39 +255,48 @@ internal fun DraftRestoreBanner(
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         tonalElevation = 2.dp,
     ) {
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
                 text = stringResource(R.string.editor_draft_restore_message),
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+                maxLines = 3,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onRestore) {
-                    Text(text = stringResource(R.string.editor_draft_restore))
-                }
-                TextButton(onClick = onDiscard) {
-                    Text(text = stringResource(R.string.editor_draft_discard))
-                }
+            TextButton(
+                onClick = onRestore,
+                contentPadding = PaddingValues(horizontal = 6.dp),
+            ) {
+                Text(text = stringResource(R.string.editor_draft_restore))
+            }
+            TextButton(
+                onClick = onDiscard,
+                contentPadding = PaddingValues(horizontal = 6.dp),
+            ) {
+                Text(text = stringResource(R.string.editor_draft_discard))
             }
         }
     }
 }
 
 /**
- * #555 — the editor's TOP ZONE : everything that competes with the draft field for vertical
- * space (draft-restore banner, submit/upload error banners, quote cards) in one scrollable
- * column bounded by [maxHeight] (the shared [editorControlsMaxHeight] budget). Scrolling past the
- * budget keeps every element reachable while the field keeps its guaranteed minimum below.
+ * #447/#555 — every non-draft child lives in this one bounded scroller. Alerts are emitted first,
+ * then title/toolbar, quote cards and preview. The preview deliberately scrolls here instead of
+ * sharing field weight: showing it can no longer take pixels from the 160 dp draft reserve.
  */
 @Composable
-private fun EditorTopZone(
+@Suppress("LongParameterList") // One callback per toolbar action plus the shared editor state.
+private fun PostEditorControlsZone(
     state: PostEditorState,
     onIntent: (PostEditorIntent) -> Unit,
     maxHeight: Dp,
+    onImageUrlRequested: () -> Unit,
+    onImageUploadRequested: () -> Unit,
+    showSubmitBar: Boolean,
 ) {
-    // Gate Codex — an alert must not appear below the zone's internal fold : snap the zone
-    // back to the top whenever a banner (draft, submit, upload) shows up, so it is the first
-    // thing in the viewport.
     val scroll = rememberScrollState()
     val hasAlert = state.restorableDraft != null ||
         state.submitError != null || state.uploadError != null
@@ -370,37 +309,81 @@ private fun EditorTopZone(
             .heightIn(max = maxHeight)
             .verticalScroll(scroll),
     ) {
-        if (state.restorableDraft != null) {
-            DraftRestoreBanner(
-                onRestore = { onIntent(PostEditorIntent.DraftRestoreRequested) },
-                onDiscard = { onIntent(PostEditorIntent.DraftDiscardRequested) },
-            )
-        }
-        state.submitError?.let { error ->
-            Text(
-                text = stringResource(error.bannerResId),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
-            TextButton(onClick = { onIntent(PostEditorIntent.ErrorDismissed) }) {
-                Text(text = stringResource(R.string.editor_error_dismiss))
-            }
-        }
-        state.uploadError?.let { error ->
-            Text(
-                text = error.bannerText(),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
-            TextButton(onClick = { onIntent(PostEditorIntent.UploadErrorDismissed) }) {
-                Text(text = stringResource(R.string.editor_error_dismiss))
-            }
-        }
+        PostEditorAlertBanners(state = state, onIntent = onIntent)
+        Text(
+            text = stringResource(state.mode.titleResId),
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        BbcodeToolbar(
+            onAction = { action -> onIntent(PostEditorIntent.ToolbarActionClicked(action)) },
+            onImageUrlRequested = onImageUrlRequested,
+            onImageUploadRequested = onImageUploadRequested,
+            uploading = state.isUploading,
+        )
+        UploadProgressLabel(state.uploadProgress)
         EditorQuoteCards(
             quotes = state.quotes,
             enabled = !state.isSubmitting,
             onIntent = onIntent,
         )
+        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+            TextButton(onClick = { onIntent(PostEditorIntent.TogglePreview) }) {
+                Text(
+                    text = stringResource(
+                        if (state.isPreviewVisible) {
+                            R.string.editor_preview_hide
+                        } else {
+                            R.string.editor_preview_show
+                        },
+                    ),
+                )
+            }
+        }
+        if (state.isPreviewVisible) {
+            HorizontalDivider()
+            BbcodePreview(content = state.preview, modifier = Modifier.fillMaxWidth())
+        }
+        if (!showSubmitBar) {
+            Text(
+                text = stringResource(R.string.editor_submit_disabled),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PostEditorAlertBanners(
+    state: PostEditorState,
+    onIntent: (PostEditorIntent) -> Unit,
+) {
+    if (state.restorableDraft != null) {
+        DraftRestoreBanner(
+            onRestore = { onIntent(PostEditorIntent.DraftRestoreRequested) },
+            onDiscard = { onIntent(PostEditorIntent.DraftDiscardRequested) },
+        )
+    }
+    state.submitError?.let { error ->
+        Text(
+            text = stringResource(error.bannerResId),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error,
+        )
+        TextButton(onClick = { onIntent(PostEditorIntent.ErrorDismissed) }) {
+            Text(text = stringResource(R.string.editor_error_dismiss))
+        }
+    }
+    state.uploadError?.let { error ->
+        Text(
+            text = error.bannerText(),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error,
+        )
+        TextButton(onClick = { onIntent(PostEditorIntent.UploadErrorDismissed) }) {
+            Text(text = stringResource(R.string.editor_error_dismiss))
+        }
     }
 }
 
