@@ -19,6 +19,7 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 ## `0.59.8` — `internal` (dev) — 2026-09-19
 
 - **Le champ BBCode passe au `TextFieldState` moderne ([#447](https://github.com/ForumHFR/redface2/issues/447), [#872](https://github.com/ForumHFR/redface2/issues/872))** — les poignées de sélection et le curseur sont suivis nativement, sans recalage maison, tout en conservant le label flottant. L'écran de réponse MP rejoint la structure des autres éditeurs et la zone de saisie garde un minimum de 160 dp partout tant que la fenêtre le permet.
+- **Sélection tactile déterministe dans le champ BBCode ([#447](https://github.com/ForumHFR/redface2/issues/447))** — le double-tap sélectionne le mot (frontières ICU : plus de bloc multi-lignes sur les jetons à tirets ou les URL) et le triple-tap la ligne. La « sélection intelligente » Android et ses actions (Traduire, Lire à voix haute) sont désactivées dans cet éditeur uniquement ; Couper/Copier/Coller/Tout sélectionner restent.
 
 ## `0.59.7` — `internal` (dev) — 2026-09-19
 
