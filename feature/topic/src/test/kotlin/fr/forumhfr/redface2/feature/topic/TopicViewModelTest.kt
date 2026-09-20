@@ -95,8 +95,9 @@ import kotlinx.coroutines.test.setMain
 import kotlinx.coroutines.withContext
 import org.junit.After
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -691,7 +692,7 @@ class TopicViewModelTest {
     }
 
     @Test
-    fun `scrollTo does not emit an effect when the target post is missing from the page`() = runTest {
+    fun `scrollTo resolves without a scroll when the target is missing from the terminal page`() = runTest {
         val topic = fakeTopic(page = 1, totalPages = 1, posts = listOf(fakePost(numreponse = 555)))
         val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(topic) }))
 
@@ -702,6 +703,7 @@ class TopicViewModelTest {
         )
 
         viewModel.effects.test {
+            assertEquals(TopicEffect.LandingResolvedWithoutScroll(page = 1), awaitItem())
             expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
@@ -2941,6 +2943,89 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `a remounted flag landing persists the current anchor before a page round trip (#1300)`() = runTest {
+        val target = 220
+        val entryAnchor = TopicScrollAnchor(index = 2, offset = 8)
+        val currentAnchor = TopicScrollAnchor(index = 14, offset = 31)
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(2, 3, posts = listOf(fakePost(target)))) },
+                flow { emit(fakeTopic(3, 3)) },
+                flow { emit(fakeTopic(2, 3, posts = listOf(fakePost(target)))) },
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = target, forceRefresh = true),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+
+        viewModel.effects.test {
+            val entryLanding = awaitItem()
+            assertEquals(TopicEffect.ScrollToPost(target, lastRead = true), entryLanding)
+            val firstComposition = TopicListAlignment().apply { onLandingApplied(page = 2) }
+            viewModel.onLandingApplied(entryLanding)
+            if (firstComposition.shouldPersist(canonicalPage = 2, isLoaded = true)) {
+                viewModel.reportPageAnchor(entryAnchor)
+            }
+
+            // #1300 — the screen is mounted again with the SAME ViewModel and LazyListState.
+            // The one-shot ScrollToPost is gone, so only the acknowledged landing can reopen the
+            // real alignment gate and let the swipe capture the coordinates visible right now.
+            val remountedComposition = TopicListAlignment().apply {
+                synchronizeLanding(
+                    landing = viewModel.state.value.landing,
+                    canonicalPage = 2,
+                    isLoaded = true,
+                )
+            }
+            val departure = currentAnchor.takeIf {
+                remountedComposition.shouldPersist(canonicalPage = 2, isLoaded = true)
+            }
+            assertEquals(currentAnchor, departure)
+
+            viewModel.switchToPage(3, departureAnchor = departure)
+            val nextLanding = awaitItem()
+            assertEquals(TopicEffect.ScrollToTop(3), nextLanding)
+            viewModel.onLandingApplied(nextLanding)
+
+            viewModel.switchToPage(2)
+            assertEquals(TopicEffect.ScrollToAnchor(currentAnchor, 2), awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `an unacknowledged landing is redelivered to the next collector (#1300)`() = runTest {
+        val target = 220
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = target, forceRefresh = true),
+            topicRepository = FakeTopicRepository(
+                flowsToReturn = listOf(
+                    flow { emit(fakeTopic(2, 3, posts = listOf(fakePost(target)))) },
+                ),
+            ),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+        lateinit var interruptedLanding: TopicEffect
+
+        viewModel.effects.test {
+            interruptedLanding = awaitItem()
+            assertEquals(TopicEffect.ScrollToPost(target, lastRead = true), interruptedLanding)
+            assertTrue(viewModel.state.value.landing is TopicUiState.Landing.Pending)
+            cancelAndIgnoreRemainingEvents()
+        }
+
+        viewModel.effects.test {
+            val redeliveredLanding = awaitItem()
+            assertSame(interruptedLanding, redeliveredLanding)
+            viewModel.onLandingApplied(redeliveredLanding)
+            assertTrue(viewModel.state.value.landing is TopicUiState.Landing.Applied)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `the snapshot map is an LRU bounded to 5 terminal pages (#895)`() = runTest {
         val repository = FakeTopicRepository(
             flowsToReturn = buildList {
@@ -3361,6 +3446,7 @@ class TopicViewModelTest {
 
         viewModel.effects.test {
             viewModel.applySubmitResult(targetPage = 3, scrollTo = 640, quotedNumreponses = listOf(640))
+            assertEquals(TopicEffect.LandingResolvedWithoutScroll(page = 3), awaitItem())
             expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
@@ -4946,14 +5032,18 @@ class TopicViewModelTest {
             authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
             moderationRepository = repository,
         )
-        viewModel.effects.test { expectNoEvents() }
+        viewModel.effects.test {
+            val resolution = awaitItem()
+            assertEquals(TopicEffect.LandingResolvedWithoutScroll(page = 2), resolution)
+            viewModel.onLandingApplied(resolution)
+            expectNoEvents()
+        }
         assertNull(viewModel.state.value.moderationAlert)
 
-        // A later emission may satisfy the scroll, but cannot retry the consumed alert trigger.
+        // The first terminal representation consumed both the absent landing and the alert trigger.
         pages.emit(fakeTopic(2, 2, posts = listOf(fakePost(42))))
         runCurrent()
         viewModel.effects.test {
-            assertEquals(TopicEffect.ScrollToPost(42), awaitItem())
             expectNoEvents()
         }
         assertNull(viewModel.state.value.moderationAlert)
@@ -5431,6 +5521,7 @@ class TopicViewModelTest {
     private fun topicRequest(
         page: Int,
         scrollTo: Int? = null,
+        forceRefresh: Boolean = false,
         resolveScrollToPage: Boolean = false,
         moderationAlertFor: Int? = null,
     ): TopicRequest = TopicRequest(
@@ -5438,6 +5529,7 @@ class TopicViewModelTest {
         post = SAMPLE_POST,
         page = page,
         scrollTo = scrollTo,
+        forceRefresh = forceRefresh,
         resolveScrollToPage = resolveScrollToPage,
         moderationAlertFor = moderationAlertFor,
     )
@@ -5551,6 +5643,165 @@ class TopicViewModelTest {
         assertFalse(viewModel.state.value.isRefreshing)
         assertEquals("refreshed", (viewModel.state.value.mode as TopicUiState.Mode.Loaded).topic.title)
         assertEquals(1, repository.refreshCalls.size)
+    }
+
+    @Test
+    fun `a missing post stays pending provisionally then scrolls exactly once when terminal contains it (#1300)`() =
+        runTest {
+            val target = 777
+            val emissions = MutableSharedFlow<TopicPageEmission>(replay = 1).apply {
+                tryEmit(
+                    TopicPageEmission(
+                        fakeTopic(page = 2, totalPages = 2, posts = listOf(fakePost(100))),
+                        provisional = true,
+                    ),
+                )
+            }
+            val viewModel = topicViewModel(
+                request = topicRequest(page = 2, scrollTo = target),
+                topicRepository = FakeStreamingEmissionTopicRepository(emissions),
+                authRepository = FakeAuthRepository(AuthState.Anonymous),
+            )
+            advanceUntilIdle()
+
+            viewModel.effects.test {
+                expectNoEvents()
+                emissions.emit(
+                    TopicPageEmission(
+                        fakeTopic(page = 2, totalPages = 2, posts = listOf(fakePost(100), fakePost(target))),
+                        provisional = false,
+                    ),
+                )
+                assertEquals(TopicEffect.ScrollToPost(target), awaitItem())
+                emissions.emit(
+                    TopicPageEmission(
+                        fakeTopic(page = 2, totalPages = 2, posts = listOf(fakePost(target))),
+                        provisional = false,
+                    ),
+                )
+                expectNoEvents()
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+
+    @Test
+    fun `a terminal page without the pending post resolves once without scrolling (#1300)`() = runTest {
+        val target = 777
+        val emissions = MutableSharedFlow<TopicPageEmission>(replay = 1).apply {
+            tryEmit(
+                TopicPageEmission(
+                    fakeTopic(page = 2, totalPages = 2, posts = listOf(fakePost(100))),
+                    provisional = false,
+                ),
+            )
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = target),
+            topicRepository = FakeStreamingEmissionTopicRepository(emissions),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+        advanceUntilIdle()
+
+        viewModel.effects.test {
+            val resolution = awaitItem()
+            assertEquals(TopicEffect.LandingResolvedWithoutScroll(page = 2), resolution)
+            viewModel.onLandingApplied(resolution)
+            val applied = viewModel.state.value.landing as TopicUiState.Landing.Applied
+            assertEquals(2, applied.page)
+            emissions.emit(
+                TopicPageEmission(
+                    fakeTopic(page = 2, totalPages = 2, posts = listOf(fakePost(100))),
+                    provisional = false,
+                ),
+            )
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `an LRU snapshot missing the post is transient for the new landing owner (#1300)`() = runTest {
+        val target = 777
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow { emit(fakeTopic(page = 1, totalPages = 2)) },
+                flow { emit(fakeTopic(page = 2, totalPages = 2, posts = listOf(fakePost(200)))) },
+                flow { emit(fakeTopic(page = 1, totalPages = 2)) },
+                flow { emit(fakeTopic(page = 2, totalPages = 2, posts = listOf(fakePost(target)))) },
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+
+        viewModel.effects.test {
+            viewModel.switchToPage(2)
+            assertEquals(TopicEffect.ScrollToTop(2), awaitItem())
+            viewModel.switchToPage(1)
+            assertEquals(TopicEffect.ScrollToEndOfPage(1), awaitItem())
+
+            // Page 2 activates its settled historical snapshot first. Its missing target must not
+            // resolve the NEW owner: only the following terminal repository emission may decide.
+            viewModel.goToPost(targetPage = 2, numreponse = target)
+            assertEquals(TopicEffect.ScrollToPost(target), awaitItem())
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a failed refresh terminal cache emission resolves an absent landing (#1300)`() = runTest {
+        val target = 777
+        val cached = fakeTopic(page = 2, totalPages = 2, posts = listOf(fakePost(100)))
+        val emissions = MutableSharedFlow<TopicPageEmission>(replay = 1).apply {
+            tryEmit(TopicPageEmission(cached, provisional = true))
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = target),
+            topicRepository = FakeStreamingEmissionTopicRepository(emissions),
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+        advanceUntilIdle()
+
+        viewModel.effects.test {
+            expectNoEvents()
+            // The repository re-emits this cache row as terminal after the refresh failure.
+            emissions.emit(TopicPageEmission(cached, provisional = false))
+            assertEquals(TopicEffect.LandingResolvedWithoutScroll(page = 2), awaitItem())
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `navigation supersedes an absent landing before its terminal page arrives (#1300)`() = runTest {
+        val staleReply = CompletableDeferred<Unit>()
+        val target = 777
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(
+                flow {
+                    staleReply.await()
+                    emit(fakeTopic(page = 2, totalPages = 3, posts = listOf(fakePost(100))))
+                },
+                flow { emit(fakeTopic(page = 3, totalPages = 3, posts = listOf(fakePost(target)))) },
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2, scrollTo = target),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+
+        viewModel.effects.test {
+            viewModel.switchToPage(3)
+            assertEquals(TopicEffect.ScrollToTop(3), awaitItem())
+            staleReply.complete(Unit)
+            advanceUntilIdle()
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     @Test

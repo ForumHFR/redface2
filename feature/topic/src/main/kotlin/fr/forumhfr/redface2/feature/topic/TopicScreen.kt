@@ -66,6 +66,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -418,6 +419,12 @@ fun TopicScreen(
     // anchors) is gated on « the list is aligned with the canonical page », so a late fling
     // settle or a dispose can never record page N's coordinates under page N+1.
     val alignment = remember { TopicListAlignment() }
+    TopicLandingAlignmentEffect(
+        landing = state.landing,
+        canonicalPage = state.request.page,
+        isLoaded = state.mode is TopicUiState.Mode.Loaded,
+        alignment = alignment,
+    )
     // Gate r1 — tap-time departure anchor, but ONLY while aligned : right after a rapid second
     // page tap the list may still sit at the previous page's offset. A null departure just falls
     // back to the engine's stored anchor for the departed page.
@@ -584,6 +591,7 @@ fun TopicScreen(
                             // #197 re-anchor below only re-pins the same target, the position keeps
                             // describing this page.
                             alignment.onLandingApplied(page)
+                            viewModel.onLandingApplied(effect)
                             // #197 — block images above the target grow from 160dp to up to 480dp
                             // once Coil decodes them, shifting the offset *after* this one-shot
                             // scroll and leaving the target off-screen on a cold image cache. Keep
@@ -597,6 +605,7 @@ fun TopicScreen(
                             // Gate r2 — not-found : the no-scroll DECISION is the landing application
                             // (the content is this page, at a position the user now owns).
                             alignment.onLandingApplied(page)
+                            viewModel.onLandingApplied(effect)
                         }
                     }
                 }
@@ -628,6 +637,7 @@ fun TopicScreen(
                         // empty-page decision skipped it) : a suspension or disposal mid-landing
                         // must keep persists blocked.
                         alignment.onLandingApplied(effect.page)
+                        viewModel.onLandingApplied(effect)
                     }
                 }
                 is TopicEffect.ScrollToAnchor -> {
@@ -643,6 +653,7 @@ fun TopicScreen(
                         lazyListState.scrollToItem(effect.anchor.index, effect.anchor.offset)
                         // Gate r1/r2 — aligned only AFTER the scroll applied.
                         alignment.onLandingApplied(effect.page)
+                        viewModel.onLandingApplied(effect)
                     }
                 }
                 is TopicEffect.ScrollToTop -> {
@@ -657,6 +668,19 @@ fun TopicScreen(
                         lazyListState.scrollToItem(0)
                         // Gate r1/r2 — aligned only AFTER the scroll applied.
                         alignment.onLandingApplied(effect.page)
+                        viewModel.onLandingApplied(effect)
+                    }
+                }
+                is TopicEffect.LandingResolvedWithoutScroll -> {
+                    // #1300 — terminal page, absent target: make no movement. Waiting for the
+                    // page (or its abandonment) keeps this decision page-scoped like every other
+                    // landing, then acknowledges it so a remount can restore the local gate.
+                    val landed = viewModel.state.first {
+                        it.request.page != effect.page || it.mode is TopicUiState.Mode.Loaded
+                    }
+                    if (landed.request.page == effect.page && landed.mode is TopicUiState.Mode.Loaded) {
+                        alignment.onLandingApplied(effect.page)
+                        viewModel.onLandingApplied(effect)
                     }
                 }
                 TopicEffect.PostSubmitRefreshFailed -> {
@@ -1118,6 +1142,21 @@ private fun LazyListState.measuredSizeOf(target: Int): Int? =
     layoutInfo.visibleItemsInfo.firstOrNull { it.index == target }?.size
 
 /**
+ * #1300 — restore the composition-local alignment gate after the screen is mounted again with the
+ * same ViewModel. Only an acknowledged landing may reopen persistence; a pending landing keeps the
+ * gate closed until its one-shot effect (or terminal no-scroll resolution) is actually applied.
+ */
+@Composable
+internal fun TopicLandingAlignmentEffect(
+    landing: TopicUiState.Landing,
+    canonicalPage: Int,
+    isLoaded: Boolean,
+    alignment: TopicListAlignment,
+) {
+    SideEffect { alignment.synchronizeLanding(landing, canonicalPage, isLoaded) }
+}
+
+/**
  * #307 — one-shot restoration of the saved read position + the single central save point.
  *
  * RESTORE: waits for the ENTRY page's first `Loaded` emission OR its abandonment (the in-VM
@@ -1268,7 +1307,8 @@ private fun TopicEffect.isScrollEffect(): Boolean =
         this == TopicEffect.ScrollToTopOfResults ||
         this is TopicEffect.ScrollToEndOfPage ||
         this is TopicEffect.ScrollToAnchor ||
-        this is TopicEffect.ScrollToTop
+        this is TopicEffect.ScrollToTop ||
+        this is TopicEffect.LandingResolvedWithoutScroll
 
 /**
  * #1137 — pure alignment decision of a last-read landing ([LandingAlignment.LastReadMarker]),

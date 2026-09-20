@@ -13,6 +13,8 @@ package fr.forumhfr.redface2.feature.topic
  *  - [onLandingApplied] is called ONLY once a landing (entry restore, `ScrollToAnchor` /
  *    `ScrollToEndOfPage` / `ScrollToTop` / `ScrollToPost`) has been applied for a page — from
  *    that point the position genuinely describes that page ;
+ *  - [synchronizeLanding] closes the gate for an observable pending landing and restores an
+ *    acknowledged landing when this composition-local marker is recreated ;
  *  - [shouldPersist] gates every position persist (scroll-settle report, disposal save, tap-time
  *    departure anchors) : nothing is recorded while the list is not aligned with the CURRENT
  *    canonical page. A skipped persist just falls back to the engine's previous anchor for that
@@ -29,6 +31,27 @@ internal class TopicListAlignment {
     /** A landing for [page] was applied to the list — content and position now agree on it. */
     fun onLandingApplied(page: Int) {
         alignedPage = page
+    }
+
+    /**
+     * #1300 — synchronize this composition-local marker with the ViewModel handshake. A pending
+     * landing closes persistence (including a same-page re-landing); an applied one restores the
+     * marker after a remount without replaying its scroll.
+     */
+    fun synchronizeLanding(
+        landing: TopicUiState.Landing,
+        canonicalPage: Int,
+        isLoaded: Boolean,
+    ) {
+        when (landing) {
+            is TopicUiState.Landing.Pending -> {
+                if (landing.page == canonicalPage) alignedPage = null
+            }
+            is TopicUiState.Landing.Applied -> {
+                if (isLoaded && landing.page == canonicalPage) alignedPage = canonicalPage
+            }
+            TopicUiState.Landing.None -> Unit
+        }
     }
 
     /**

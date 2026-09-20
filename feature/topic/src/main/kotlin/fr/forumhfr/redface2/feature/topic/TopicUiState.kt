@@ -131,6 +131,15 @@ data class TopicUiState(
      * Kept in lock-step with every jump-stack mutation (push / pop / clear).
      */
     val canReturnFromJump: Boolean = false,
+    /**
+     * #1300 — lifecycle of the page landing currently owned by the ViewModel. [Landing.Pending]
+     * keeps position persistence closed while a one-shot effect still has to be applied; a
+     * delivered but unacknowledged effect is re-delivered if its collector disappears.
+     * [Landing.Applied] is written only after the screen acknowledges that application. A newly
+     * mounted screen can therefore restore its local alignment gate without replaying an applied
+     * scroll or losing an interrupted one.
+     */
+    val landing: Landing = Landing.None,
 ) {
     /**
      * Helper used by the screen / ViewModel : `true` when the user has navigated to a
@@ -144,6 +153,18 @@ data class TopicUiState(
             is Mode.Loaded -> request.page < mode.topic.totalPages
             else -> request.page < (availablePages.lastOrNull() ?: 1)
         }
+
+    /** #1300 — observable handshake for one page landing, scoped by a monotonic id and its page. */
+    sealed interface Landing {
+        /** No ViewModel-owned landing has to be restored by a remounted screen. */
+        data object None : Landing
+
+        /** Landing [id] for [page] was emitted or is waiting for a terminal page representation. */
+        data class Pending(val id: Long, val page: Int) : Landing
+
+        /** The screen applied landing [id] for [page], including an explicit no-scroll decision. */
+        data class Applied(val id: Long, val page: Int) : Landing
+    }
 
     sealed interface Mode {
         data object Loading : Mode
@@ -554,6 +575,13 @@ sealed interface TopicEffect {
      * stale-drop contract as [ScrollToEndOfPage].
      */
     data class ScrollToTop(val page: Int) : TopicEffect
+
+    /**
+     * #1300 — the first terminal representation of [page] did not contain the pending post.
+     * Applying this landing performs no scroll; it only lets the screen acknowledge that the
+     * current list position now belongs to the page and may be persisted.
+     */
+    data class LandingResolvedWithoutScroll(val page: Int) : TopicEffect
 
     /**
      * Issue #200 — emitted when the post-submit force refresh (`refreshTopicPage`) fails.
