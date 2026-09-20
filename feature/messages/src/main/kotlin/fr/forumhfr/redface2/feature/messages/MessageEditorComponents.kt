@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -50,6 +51,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitActions
 import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitButton
@@ -106,19 +108,32 @@ internal fun MessageDraftRestoreBanner(
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         tonalElevation = 2.dp,
     ) {
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
                 text = stringResource(R.string.messages_draft_restore_message),
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onRestore) {
-                    Text(text = stringResource(R.string.messages_draft_restore))
-                }
-                TextButton(onClick = onDiscard) {
-                    Text(text = stringResource(R.string.messages_draft_discard))
-                }
+            TextButton(
+                onClick = onRestore,
+                modifier = Modifier.heightIn(min = 48.dp),
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
+            ) {
+                Text(text = stringResource(R.string.messages_draft_restore))
+            }
+            TextButton(
+                onClick = onDiscard,
+                modifier = Modifier.heightIn(min = 48.dp),
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
+            ) {
+                Text(text = stringResource(R.string.messages_draft_discard))
             }
         }
     }

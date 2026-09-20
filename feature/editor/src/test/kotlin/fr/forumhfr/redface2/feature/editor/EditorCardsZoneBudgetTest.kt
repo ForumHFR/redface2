@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.editor
 
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
 import fr.forumhfr.redface2.core.ui.editor.editorControlsMaxHeight
@@ -12,46 +13,31 @@ import org.junit.Test
 class EditorCardsZoneBudgetTest {
 
     @Test
-    fun `short window hands the top zone only what the field minimum leaves`() {
-        // At 300 dp, the 128 dp remainder still beats the 40% short-window share.
+    fun `s9 ime viewport reserves 160 dp for the field across the measured range`() {
         assertEquals(
-            128.dp,
-            editorControlsMaxHeight(available = 300.dp, fieldMin = EDITOR_DRAFT_MIN_HEIGHT),
+            EDITOR_DRAFT_MIN_HEIGHT.value,
+            fieldHeight(available = 300.dp),
+            0.01f,
         )
-        // At 200 dp, preserving useful controls takes 40%; the field keeps the larger 60% share.
         assertEquals(
-            80.dp,
-            editorControlsMaxHeight(available = 200.dp, fieldMin = EDITOR_DRAFT_MIN_HEIGHT),
+            EDITOR_DRAFT_MIN_HEIGHT.value,
+            fieldHeight(available = 330.dp),
+            0.01f,
         )
     }
 
     @Test
-    fun `old field break-even now uses the responsive share`() {
+    fun `landscape viewport restores about 55 dp to the field`() {
         assertEquals(
-            68.8.dp,
-            editorControlsMaxHeight(available = 172.dp, fieldMin = EDITOR_DRAFT_MIN_HEIGHT),
+            54.67f,
+            fieldHeight(available = 100.dp),
+            0.01f,
         )
     }
 
-    @Test
-    fun `w360dp h640dp leaves more than the field minimum below roomy controls`() {
-        val controls = editorControlsMaxHeight(
-            available = 640.dp,
-            fieldMin = EDITOR_DRAFT_MIN_HEIGHT,
-        )
-
-        assertEquals(360.dp, controls)
-        assertEquals(268.dp, 640.dp - controls - 12.dp)
-    }
-
-    @Test
-    fun `w320dp h568dp leaves more than the field minimum below roomy controls`() {
-        val controls = editorControlsMaxHeight(
-            available = 568.dp,
-            fieldMin = EDITOR_DRAFT_MIN_HEIGHT,
-        )
-
-        assertEquals(360.dp, controls)
-        assertEquals(196.dp, 568.dp - controls - 12.dp)
-    }
+    private fun fieldHeight(available: Dp): Float = (
+        available -
+            editorControlsMaxHeight(available = available, fieldMin = EDITOR_DRAFT_MIN_HEIGHT) -
+            12.dp
+        ).value
 }

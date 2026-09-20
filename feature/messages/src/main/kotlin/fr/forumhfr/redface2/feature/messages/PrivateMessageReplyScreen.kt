@@ -228,7 +228,7 @@ private fun PrivateMessageReplyContent(
 
 @Composable
 @Suppress("LongParameterList") // Editor body mirrors the post editor surface; each callback is distinct.
-private fun ReplyEditorBody(
+internal fun ReplyEditorBody(
     state: PrivateMessageReplyUiState,
     onContentChanged: (TextFieldValue) -> Unit,
     onToolbarAction: (BbcodeAction) -> Unit,
@@ -253,6 +253,12 @@ private fun ReplyEditorBody(
             available = maxHeight,
             fieldMin = EDITOR_DRAFT_MIN_HEIGHT,
         )
+        val controlsScroll = rememberScrollState()
+        val hasAlert = state.restorableDraft != null ||
+            state.submitError != null || state.uploadError != null
+        LaunchedEffect(state.restorableDraft != null, state.submitError, state.uploadError) {
+            if (hasAlert) controlsScroll.animateScrollTo(0)
+        }
         Column(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -260,51 +266,9 @@ private fun ReplyEditorBody(
             Column(
                 modifier = Modifier
                     .heightIn(max = controlsMaxHeight)
-                    .verticalScroll(rememberScrollState()),
+                    .verticalScroll(controlsScroll),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                // #618 (Bug 1) — owner-only compact summary; the dedicated sheet keeps large DTs
-                // from crowding the composer. Hidden for a participant or one-to-one MP.
-                if (state.canManageRecipients) {
-                    MessageRecipientsSummary(
-                        count = state.recipients.size,
-                        onManage = onManageRecipients,
-                    )
-                    HorizontalDivider()
-                }
-
-                BbcodeToolbar(
-                    onAction = onToolbarAction,
-                    // #459 — upload wiring, same affordance as the topic-side editors.
-                    onImageUploadRequested = launchImagePicker,
-                    uploading = state.isUploading,
-                )
-                // #459 — « n/N » batch counter while a multi-image upload is in flight.
-                UploadProgressLabel(state.uploadProgress)
-
-                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-                    TextButton(onClick = onTogglePreview) {
-                        Text(
-                            text = stringResource(
-                                if (state.isPreviewVisible) {
-                                    R.string.messages_reply_preview_hide
-                                } else {
-                                    R.string.messages_reply_preview_show
-                                },
-                            ),
-                        )
-                    }
-                }
-
-                if (state.isPreviewVisible) {
-                    HorizontalDivider()
-                    BbcodePreview(
-                        content = state.preview,
-                        modifier = Modifier.fillMaxWidth(),
-                        mediaDiskCachePolicy = PostMediaDiskCachePolicy.DISABLED,
-                    )
-                }
-
                 if (state.restorableDraft != null) {
                     MessageDraftRestoreBanner(onRestore = onDraftRestore, onDiscard = onDraftDiscard)
                 }
@@ -331,6 +295,51 @@ private fun ReplyEditorBody(
                         Text(text = stringResource(R.string.messages_reply_error_dismiss))
                     }
                 }
+
+                // #618 (Bug 1) — owner-only compact summary; the dedicated sheet keeps large DTs
+                // from crowding the composer. Hidden for a participant or one-to-one MP.
+                if (state.canManageRecipients) {
+                    MessageRecipientsSummary(
+                        count = state.recipients.size,
+                        onManage = onManageRecipients,
+                    )
+                    HorizontalDivider()
+                }
+
+                BbcodeToolbar(
+                    onAction = onToolbarAction,
+                    // #459 — upload wiring, same affordance as the topic-side editors.
+                    onImageUploadRequested = launchImagePicker,
+                    uploading = state.isUploading,
+                )
+                // #459 — « n/N » batch counter while a multi-image upload is in flight.
+                state.uploadProgress?.let { progress ->
+                    UploadProgressLabel(progress)
+                }
+
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                    TextButton(onClick = onTogglePreview) {
+                        Text(
+                            text = stringResource(
+                                if (state.isPreviewVisible) {
+                                    R.string.messages_reply_preview_hide
+                                } else {
+                                    R.string.messages_reply_preview_show
+                                },
+                            ),
+                        )
+                    }
+                }
+
+                if (state.isPreviewVisible) {
+                    HorizontalDivider()
+                    BbcodePreview(
+                        content = state.preview,
+                        modifier = Modifier.fillMaxWidth(),
+                        mediaDiskCachePolicy = PostMediaDiskCachePolicy.DISABLED,
+                    )
+                }
+
             }
 
             BbcodeTextField(
