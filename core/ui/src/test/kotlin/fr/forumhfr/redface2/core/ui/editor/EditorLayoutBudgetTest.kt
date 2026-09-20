@@ -44,8 +44,9 @@ class EditorLayoutBudgetTest {
     @Test
     fun `tiny window gives controls one third and restores the old landscape field height`() {
         assertEquals(
-            100.dp / 3f,
-            editorControlsMaxHeight(available = 100.dp, fieldMin = EDITOR_DRAFT_MIN_HEIGHT),
+            (100.dp / 3f).value,
+            editorControlsMaxHeight(available = 100.dp, fieldMin = EDITOR_DRAFT_MIN_HEIGHT).value,
+            0.01f,
         )
         // 100 - 33.33 - 12 = 54.67 dp for the field, close to the 0.58.0 landscape measure.
         val fieldHeight = 100.dp -
