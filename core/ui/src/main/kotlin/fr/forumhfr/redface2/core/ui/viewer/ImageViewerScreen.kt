@@ -1,10 +1,5 @@
 package fr.forumhfr.redface2.core.ui.viewer
 
-import android.app.Activity
-import android.content.Context
-import android.content.ContextWrapper
-import android.view.View
-import android.view.Window
 import androidx.annotation.DrawableRes
 import androidx.annotation.StringRes
 import androidx.compose.animation.AnimatedVisibility
@@ -49,17 +44,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import coil3.compose.AsyncImage
 import coil3.memory.MemoryCache
 import coil3.request.CachePolicy
@@ -99,7 +89,7 @@ fun ImageViewerScreen(
     )
     val animationsEnabled = rememberAnimationsEnabled()
 
-    ImmersiveSystemBarsEffect()
+    PublishViewerBarsIntent(chromeVisible = actionsVisible)
 
     Box(
         modifier = modifier
@@ -135,6 +125,11 @@ fun ImageViewerScreen(
             modifier = Modifier.align(Alignment.Center),
         )
 
+        // M3 « Fade » is the documented pattern for chrome entering/leaving WITHIN the screen bounds,
+        // so the fade itself stays. `MaterialTheme.motionScheme.fastEffectsSpec()` would be the
+        // token-backed spec for it, but `motionScheme` is INTERNAL in material3 1.4.0 (build failure,
+        // #1388) — the local duration stands until the accessor becomes public. Android animates the
+        // real bars on its side, and ~150 ms reads as one movement with them.
         AnimatedVisibility(
             visible = actionsVisible,
             enter = if (animationsEnabled) fadeIn(tween(ACTIONS_FADE_DURATION_MS)) else EnterTransition.None,
@@ -354,57 +349,31 @@ private fun MemoryOnlyZoomableImage(
     )
 }
 
+/**
+ * #1388 — the viewer PUBLISHES what it wants of the window system bars and writes nothing itself:
+ * [SystemBarsOwnerEffect], hosted by the app shell, is the single writer (see [ViewerBarsIntent] for
+ * why). The intent stands for as long as this composable lives — an overlay or a modal route pushed
+ * ABOVE the viewer therefore keeps its fullscreen — and is withdrawn on the real dispose, at the end
+ * of the exit transition, which is what makes the shell the last writer.
+ *
+ * The registration is keyed by a per-instance [token] so two viewers overlapping during a transition
+ * never erase each other: leaving withdraws only this instance. A plain `remember` matches the
+ * holder's own lifetime — the holder is re-created with the theme on an activity re-creation, and so
+ * is this token, exactly like the `actionsVisible` it publishes.
+ */
 @Composable
-private fun ImmersiveSystemBarsEffect() {
-    val context = LocalContext.current
-    val view = LocalView.current
-    val window = context.findActivity()?.window
-    DisposableEffect(window, view) {
-        val snapshot = window?.let { hideSystemBars(it, view) }
-        onDispose {
-            if (window != null && snapshot != null) restoreSystemBars(window, view, snapshot)
-        }
+private fun PublishViewerBarsIntent(chromeVisible: Boolean) {
+    val intent = LocalViewerBarsIntent.current
+    val token = remember { Any() }
+    DisposableEffect(intent, token, chromeVisible) {
+        intent.publish(token, chromeVisible)
+        onDispose {}
     }
-}
-
-private data class SystemBarsSnapshot(
-    val statusBarsVisible: Boolean,
-    val navigationBarsVisible: Boolean,
-    val behavior: Int,
-)
-
-private fun hideSystemBars(window: Window, view: View): SystemBarsSnapshot {
-    val controller = WindowCompat.getInsetsController(window, view)
-    val insets = ViewCompat.getRootWindowInsets(view)
-    val snapshot = SystemBarsSnapshot(
-        statusBarsVisible = insets?.isVisible(WindowInsetsCompat.Type.statusBars()) ?: true,
-        navigationBarsVisible = insets?.isVisible(WindowInsetsCompat.Type.navigationBars()) ?: true,
-        behavior = controller.systemBarsBehavior,
-    )
-    controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-    controller.hide(WindowInsetsCompat.Type.systemBars())
-    return snapshot
-}
-
-private fun restoreSystemBars(window: Window, view: View, snapshot: SystemBarsSnapshot) {
-    val controller = WindowCompat.getInsetsController(window, view)
-    restoreBarVisibility(controller, WindowInsetsCompat.Type.statusBars(), snapshot.statusBarsVisible)
-    restoreBarVisibility(controller, WindowInsetsCompat.Type.navigationBars(), snapshot.navigationBarsVisible)
-    controller.systemBarsBehavior = snapshot.behavior
-}
-
-private fun restoreBarVisibility(
-    controller: WindowInsetsControllerCompat,
-    type: Int,
-    wasVisible: Boolean,
-) {
-    if (wasVisible) controller.show(type) else controller.hide(type)
-}
-
-private tailrec fun Context.findActivity(): Activity? = when (this) {
-    is Activity -> this
-    is ContextWrapper -> baseContext.findActivity()
-    else -> null
+    // Declared last and keyed on the holder + token alone so it runs ONCE, when this viewer really
+    // goes away — not on every chrome toggle.
+    DisposableEffect(intent, token) {
+        onDispose { intent.withdraw(token) }
+    }
 }
 
 internal enum class ImageViewerLoadState { Loading, Ready, Error }

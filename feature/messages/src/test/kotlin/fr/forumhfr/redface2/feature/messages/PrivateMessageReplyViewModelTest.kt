@@ -1,9 +1,13 @@
 package fr.forumhfr.redface2.feature.messages
 
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerContract
+import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
@@ -20,6 +24,7 @@ import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
+import fr.forumhfr.redface2.core.ui.editor.UploadError
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -143,6 +148,88 @@ class PrivateMessageReplyViewModelTest {
         assertEquals(2, uploads.uploadCalls)
         assertEquals(2, Regex("\\[img]").findAll(viewModel.state.value.draft.text).count())
         assertFalse(viewModel.state.value.isUploading)
+    }
+
+    @Test
+    fun `empty picker result shows a banner without starting an upload`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val diagnostics = DiagnosticsLog()
+        val uploads = FakeUploadRepository()
+        val reader = FakeImageUploadReader()
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), uploads, reader, diagnostics, smileyRepository(),
+        )
+        advanceUntilIdle()
+        viewModel.onContentChanged(
+            TextFieldValue(text = "draft", selection = TextRange(1, 4)),
+        )
+        advanceUntilIdle()
+        val stateBefore = viewModel.state.value
+
+        viewModel.effects.test {
+            viewModel.onImagePickerEvent(
+                ImagePickerEvent.Result(
+                    contract = ImagePickerContract.OPEN_MULTIPLE_DOCUMENTS,
+                    uris = emptyList(),
+                ),
+            )
+            advanceUntilIdle()
+
+            assertEquals(
+                stateBefore.copy(uploadError = UploadError.NoImageReceived),
+                viewModel.state.value,
+            )
+            assertFalse(viewModel.state.value.isUploading)
+            assertTrue(reader.readUris.isEmpty())
+            assertEquals(0, uploads.uploadCalls)
+            assertEquals(
+                listOf(
+                    "result contract=OpenMultipleDocuments count=0 sources=[]",
+                    "onImagesPicked count=0",
+                ),
+                diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
+            )
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `picker result logs a safe source then triggers the existing upload`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val diagnostics = DiagnosticsLog()
+        val uploads = FakeUploadRepository()
+        val reader = FakeImageUploadReader()
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), uploads, reader, diagnostics, smileyRepository(),
+        )
+        advanceUntilIdle()
+        val uri = "content://media/picker/private/photo-alice.jpg"
+
+        viewModel.onImagePickerEvent(
+            ImagePickerEvent.Result(
+                contract = ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA,
+                uris = listOf(uri),
+            ),
+        )
+        advanceUntilIdle()
+
+        assertEquals(listOf(uri), reader.readUris)
+        assertEquals(1, uploads.uploadCalls)
+        assertNull(viewModel.state.value.uploadError)
+        assertFalse(viewModel.state.value.isUploading)
+        assertEquals(
+            listOf(
+                "result contract=PickMultipleVisualMedia count=1 sources=[content://media]",
+                "onImagesPicked count=1",
+            ),
+            diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
+        )
+        assertFalse(diagnostics.entries.value.joinToString { it.message }.contains("photo-alice"))
     }
 
     @Test
@@ -291,7 +378,7 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
-    fun `stored draft stays offered beside quote prefill and wins only on explicit restore`() = runTest {
+    fun `stored draft is offered alongside an untouched quote prefill`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         val prefill = "[quotemsg=1980000004,4,990001]Citation serveur[/quotemsg]\n"
         coEvery { repository.fetchReplyForm(any(), any()) } returns form(initialContent = prefill)
@@ -309,10 +396,6 @@ class PrivateMessageReplyViewModelTest {
 
         assertEquals(prefill, viewModel.state.value.draft.text)
         assertEquals("Ancien brouillon", viewModel.state.value.restorableDraft)
-
-        viewModel.onDraftRestoreRequested()
-        assertEquals("Ancien brouillon", viewModel.state.value.draft.text)
-        assertNull(viewModel.state.value.restorableDraft)
     }
 
     @Test
@@ -741,15 +824,144 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
+    fun `reply recreation reoffers until decision and typing still autosaves`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val key = EditorDraftKey.mpReply(request.threadId)
+        val savedStateHandle = SavedStateHandle()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        draftStore.preload(
+            key,
+            EditorDraftStore.Draft(body = "rescued MP", isPrivate = true),
+        )
+        val first = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(), savedStateHandle,
+        )
+        assertEquals("rescued MP", first.state.value.restorableDraft)
+        assertNull(savedStateHandle.get<String>("draft_restore_offer_fingerprint"))
+
+        val recreated = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(), savedStateHandle,
+        )
+        assertEquals("rescued MP", recreated.state.value.restorableDraft)
+
+        recreated.onContentChanged(TextFieldValue("new live MP"))
+        advanceTimeBy(800L)
+        assertEquals("new live MP", draftStore.saved[key]?.body)
+        assertEquals("tester", draftStore.lastSavedOwner)
+
+        recreated.onDraftRestoreRequested()
+        advanceUntilIdle()
+        assertNull(savedStateHandle.get<String>("draft_restore_offer_fingerprint"))
+        assertEquals("new live MP\n\nrescued MP", draftStore.saved[key]?.body)
+
+        val afterRestore = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(), savedStateHandle,
+        )
+        assertEquals("new live MP\n\nrescued MP", afterRestore.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `reply process recreation offers a newer autosaved draft after live state was lost`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val savedStateHandle = SavedStateHandle()
+        val key = EditorDraftKey.mpReply(request.threadId)
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        draftStore.preload(key, EditorDraftStore.Draft(body = "first MP", isPrivate = true))
+        val first = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(), savedStateHandle,
+        )
+        assertEquals("first MP", first.state.value.restorableDraft)
+
+        draftStore.preload(key, EditorDraftStore.Draft(body = "new MP", isPrivate = true))
+        val recreated = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(), savedStateHandle,
+        )
+
+        assertEquals("new MP", recreated.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `private reply hydration removes an identical cached draft offer`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val body = "server body"
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form(initialContent = body)
+        draftStore.preload(
+            EditorDraftKey.mpReply(request.threadId),
+            EditorDraftStore.Draft(body = body, isPrivate = true),
+        )
+
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
+        )
+
+        assertEquals(body, viewModel.state.value.draft.text)
+        assertNull(viewModel.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `restoring appends the offered private reply after live text`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        draftStore.preload(
+            EditorDraftKey.mpReply(request.threadId),
+            EditorDraftStore.Draft(body = "rescued MP", isPrivate = true),
+        )
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
+        )
+
+        viewModel.onContentChanged(TextFieldValue("fresh MP"))
+        viewModel.onDraftRestoreRequested()
+
+        assertEquals("fresh MP\n\nrescued MP", viewModel.state.value.draft.text)
+        assertNull(viewModel.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `moving selection in a hydrated private reply keeps the restore offer`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val key = EditorDraftKey.mpReply(request.threadId)
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form(initialContent = "server body")
+        draftStore.preload(key, EditorDraftStore.Draft(body = "rescued MP", isPrivate = true))
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
+        )
+        val hydrated = viewModel.state.value.draft
+
+        viewModel.onContentChanged(hydrated.copy(selection = TextRange(3)))
+        advanceTimeBy(800L)
+
+        assertEquals("rescued MP", viewModel.state.value.restorableDraft)
+        assertEquals("rescued MP", draftStore.saved[key]?.body)
+    }
+
+    @Test
     fun `discarding deletes the cached MP draft`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
+        val savedStateHandle = SavedStateHandle()
         coEvery { repository.fetchReplyForm(any(), any()) } returns form()
         val key = EditorDraftKey.mpReply(request.threadId)
         draftStore.preload(key, EditorDraftStore.Draft(body = "rescued MP", isPrivate = true))
         val viewModel = PrivateMessageReplyViewModel(
             request, repository, previewParser, userPreferences(), draftStore,
             FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
-            smileyRepository(),
+            smileyRepository(), savedStateHandle,
         )
 
         viewModel.onDraftDiscardRequested()
@@ -757,6 +969,14 @@ class PrivateMessageReplyViewModelTest {
 
         assertTrue(draftStore.deletedKeys.contains(key))
         assertNull(viewModel.state.value.restorableDraft)
+        assertTrue(savedStateHandle.get<String>("draft_restore_offer_fingerprint") != null)
+
+        val recreated = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(), savedStateHandle,
+        )
+        assertNull(recreated.state.value.restorableDraft)
     }
 
     @Test
@@ -803,7 +1023,7 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
-    fun `onCloseRequested with a blank body deletes the row and still closes`() = runTest {
+    fun `onCloseRequested with a blank live body preserves a pending restore offer`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } returns form()
         val key = EditorDraftKey.mpReply(request.threadId)
@@ -818,7 +1038,31 @@ class PrivateMessageReplyViewModelTest {
 
         val effect = viewModel.effects.first()
         assertEquals(PrivateMessageReplyEffect.CloseCommitted, effect)
+        assertNull("closing must not rewrite a pending offer", draftStore.lastSavedOwner)
+        assertFalse(draftStore.deletedKeys.contains(key))
+        assertEquals("stale", draftStore.saved[key]?.body)
+        assertEquals("stale", viewModel.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `onCloseRequested with a blank body and no pending offer deletes the stale row`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
+        )
+        val key = EditorDraftKey.mpReply(request.threadId)
+
+        viewModel.onContentChanged(TextFieldValue("temporary body"))
+        advanceTimeBy(800L)
+        viewModel.onContentChanged(TextFieldValue(""))
+        viewModel.onCloseRequested()
+
+        assertEquals(PrivateMessageReplyEffect.CloseCommitted, viewModel.effects.first())
         assertTrue("an emptied editor must not leave a stale row", draftStore.deletedKeys.contains(key))
+        assertNull(draftStore.saved[key])
     }
 
     @Test
@@ -1119,6 +1363,8 @@ class PrivateMessageReplyViewModelTest {
     private class FakeEditorDraftStore : EditorDraftStore {
         val saved: MutableMap<String, EditorDraftStore.Draft> = mutableMapOf()
         val deletedKeys: MutableList<String> = mutableListOf()
+        var lastSavedOwner: String? = null
+            private set
 
         fun preload(key: String, draft: EditorDraftStore.Draft) {
             saved[key] = draft
@@ -1129,6 +1375,7 @@ class PrivateMessageReplyViewModelTest {
         override suspend fun load(owner: String?, key: String): EditorDraftStore.Draft? = saved[key]
 
         override suspend fun save(owner: String?, key: String, draft: EditorDraftStore.Draft) {
+            lastSavedOwner = owner
             saved[key] = draft
         }
 

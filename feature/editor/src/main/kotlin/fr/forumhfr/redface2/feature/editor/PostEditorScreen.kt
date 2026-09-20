@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -45,9 +46,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -61,9 +64,11 @@ import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitState
 import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
+import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsCallbacks
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsColumn
+import fr.forumhfr.redface2.core.ui.editor.editorControlsMaxHeight
 
 
 /**
@@ -111,7 +116,7 @@ fun PostEditorScreen(
 }
 
 @Composable
-private fun PostEditorContent(
+internal fun PostEditorContent(
     state: PostEditorState,
     onIntent: (PostEditorIntent) -> Unit,
     smileyPicker: SmileyPickerController,
@@ -119,8 +124,8 @@ private fun PostEditorContent(
 ) {
     var imageUrlDialogOpen by remember { mutableStateOf(false) }
     var optionsSheetOpen by remember { mutableStateOf(false) }
-    val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode) { uris ->
-        onIntent(PostEditorIntent.ImagesPicked(uris))
+    val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode) { event ->
+        onIntent(PostEditorIntent.ImagePickerEventReceived(event))
     }
     // Reply (#145), Quote (#146) and Edit (#147) submit through HFR's reply/edit form ; the other
     // (defensive) modes show a disabled note instead of a submit bar.
@@ -130,113 +135,45 @@ private fun PostEditorContent(
         color = MaterialTheme.colorScheme.surface,
     ) {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
-            // No outer scroll : the draft field is weighted so it stretches to fill every
-            // free pixel down to the bottom bar (dogfooding v108 — the column used to leave
-            // a large blank under « Afficher l'aperçu »). Long content scrolls in the field's
-            // own fillViewport column (#275/#410) and inside the preview pane, which is also
-            // why weight() is usable at all — it needs the bounded height an outer
-            // verticalScroll would destroy. Keyboard handling : the bar's IME inset grows,
-            // this column shrinks by the same amount (weight absorbs), and the field's
-            // viewport re-anchors the cursor line.
-            Column(
+            // #447 — the bounded budget covers ALL editor chrome, not just alerts/cards. The
+            // weighted BTF2 field therefore keeps its 160 dp reserve on a short IME viewport;
+            // title, toolbar and preview remain reachable in the controls zone above it.
+            BoxWithConstraints(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
                     .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text(
-                    text = stringResource(state.mode.titleResId),
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
+                val controlsMaxHeight = editorControlsMaxHeight(
+                    available = maxHeight,
+                    fieldMin = EDITOR_DRAFT_MIN_HEIGHT,
+                    // An open preview may use every pixel left above the 160 dp draft instead of
+                    // staying capped at 360 dp on roomy windows.
+                    allowRoomyExpansion = state.isPreviewVisible,
                 )
-
-                BbcodeToolbar(
-                    onAction = { action -> onIntent(PostEditorIntent.ToolbarActionClicked(action)) },
-                    onImageUrlRequested = { imageUrlDialogOpen = true },
-                    onImageUploadRequested = launchImagePicker,
-                    uploading = state.isUploading,
-                )
-
-                // Multi-image upload — « n/N » progress under the toolbar while a batch (> 1 image)
-                // is in flight. A single upload keeps uploadProgress null (toolbar spinner only).
-                UploadProgressLabel(state.uploadProgress)
-
-                // #604 lot 3 (mockup P3) — the armed citations as cards ABOVE the field, the same
-                // rendering as the quick-reply sheet : the field only ever holds the user's text,
-                // the [quotemsg] blocks are materialised at submit.
-                // #555 — everything that competes with the field for vertical space (draft
-                // banner, error banners, cards) lives in ONE top zone that scrolls past its
-                // budget : the field keeps EDITOR_FIELD_MIN_HEIGHT no matter how short the
-                // IME leaves the window. Before this, the field was the only weighted child
-                // and fixed content could crush it to zero pixels on a short display (thibw).
-                BoxWithConstraints(modifier = Modifier.weight(1f)) {
-                    val topZoneMaxHeight = editorTopZoneMaxHeight(available = maxHeight)
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        EditorTopZone(
-                            state = state,
-                            onIntent = onIntent,
-                            maxHeight = topZoneMaxHeight,
-                        )
-
-                        BbcodeTextField(
-                            value = state.draft,
-                            onValueChange = { value -> onIntent(PostEditorIntent.ContentChanged(value)) },
-                            label = stringResource(R.string.editor_field_label),
-                            placeholder = stringResource(R.string.editor_field_placeholder),
-                            modifier = Modifier.weight(1f),
-                            // #275/#410 — grow-with-content field in its own scrollable viewport so
-                            // the cursor stays visible under the IME (typing AND refocus after the
-                            // preview).
-                            fillViewport = true,
-                            // Multi-image upload — lock editing during a batch so the user can't
-                            // move the caret between two programmatic [img] insertions (keeps them
-                            // in pick order).
-                            readOnly = state.isUploading,
-                            // #555 — the editor opens ready to type: focus + IME on entry. Critical
-                            // in edit mode (field hydrated with a long post: nothing set the focus,
-                            // keyboard closed, #447 caret-follow inert) ; for a reply it is the
-                            // expected behaviour anyway.
-                            autoFocus = true,
-                        )
-                    }
-                }
-
-                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-                    TextButton(onClick = { onIntent(PostEditorIntent.TogglePreview) }) {
-                        Text(
-                            text = stringResource(
-                                if (state.isPreviewVisible) {
-                                    R.string.editor_preview_hide
-                                } else {
-                                    R.string.editor_preview_show
-                                },
-                            ),
-                        )
-                    }
-                }
-
-                if (state.isPreviewVisible) {
-                    HorizontalDivider()
-                    // The preview shares the stretch with the field (50/50) and scrolls
-                    // internally — long rendered content must not push the bar off-screen.
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .verticalScroll(rememberScrollState()),
-                    ) {
-                        BbcodePreview(content = state.preview)
-                    }
-                }
-
-                if (!showSubmitBar) {
-                    // Defensive fallback for future post-level modes. Reply (#145),
-                    // Quote (#146) and Edit (#147) submit through the bottom bar ;
-                    // topic-level create/edit flows are handled by TopicFormScreen.
-                    Text(
-                        text = stringResource(R.string.editor_submit_disabled),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    PostEditorControlsZone(
+                        state = state,
+                        onIntent = onIntent,
+                        maxHeight = controlsMaxHeight,
+                        onImageUrlRequested = { imageUrlDialogOpen = true },
+                        onImageUploadRequested = launchImagePicker,
+                        showSubmitBar = showSubmitBar,
+                    )
+                    BbcodeTextField(
+                        value = state.draft,
+                        onValueChange = { value -> onIntent(PostEditorIntent.ContentChanged(value)) },
+                        label = stringResource(R.string.editor_field_label),
+                        placeholder = stringResource(R.string.editor_field_placeholder),
+                        modifier = Modifier.weight(1f),
+                        // #275/#410/#447 — BTF2 owns handle scrolling and caret following in
+                        // this bounded viewport. Lock while a batch upload inserts its images.
+                        readOnly = state.isUploading,
+                        // #555 — the editor opens ready to type, including hydrated edit drafts.
+                        autoFocus = true,
                     )
                 }
             }
@@ -323,44 +260,60 @@ internal fun DraftRestoreBanner(
         color = MaterialTheme.colorScheme.surfaceContainerHighest,
         tonalElevation = 2.dp,
     ) {
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             Text(
                 text = stringResource(R.string.editor_draft_restore_message),
-                style = MaterialTheme.typography.bodyMedium,
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.weight(1f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onRestore) {
-                    Text(text = stringResource(R.string.editor_draft_restore))
-                }
-                TextButton(onClick = onDiscard) {
-                    Text(text = stringResource(R.string.editor_draft_discard))
-                }
+            TextButton(
+                onClick = onRestore,
+                modifier = Modifier.heightIn(min = 48.dp),
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
+            ) {
+                Text(text = stringResource(R.string.editor_draft_restore))
+            }
+            TextButton(
+                onClick = onDiscard,
+                modifier = Modifier.heightIn(min = 48.dp),
+                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
+            ) {
+                Text(text = stringResource(R.string.editor_draft_discard))
             }
         }
     }
 }
 
 /**
- * #555 — the editor's TOP ZONE : everything that competes with the draft field for vertical
- * space (draft-restore banner, submit/upload error banners, quote cards) in one scrollable
- * column bounded by [maxHeight] (the [editorTopZoneMaxHeight] budget). Scrolling past the
- * budget keeps every element reachable while the field keeps its guaranteed minimum below.
+ * #447/#555 — every non-draft child lives in this one bounded scroller. Alerts are emitted first,
+ * then title/toolbar, quote cards and preview. The preview deliberately scrolls here instead of
+ * sharing field weight: showing it can no longer take pixels from the 160 dp draft reserve.
  */
 @Composable
-private fun EditorTopZone(
+@Suppress("LongParameterList") // One callback per toolbar action plus the shared editor state.
+private fun PostEditorControlsZone(
     state: PostEditorState,
     onIntent: (PostEditorIntent) -> Unit,
     maxHeight: Dp,
+    onImageUrlRequested: () -> Unit,
+    onImageUploadRequested: () -> Unit,
+    showSubmitBar: Boolean,
 ) {
-    // Gate Codex — an alert must not appear below the zone's internal fold : snap the zone
-    // back to the top whenever a banner (draft, submit, upload) shows up, so it is the first
-    // thing in the viewport.
     val scroll = rememberScrollState()
     val hasAlert = state.restorableDraft != null ||
         state.submitError != null || state.uploadError != null
-    LaunchedEffect(hasAlert) {
+    LaunchedEffect(state.restorableDraft != null, state.submitError, state.uploadError) {
         if (hasAlert) scroll.animateScrollTo(0)
+    }
+    LaunchedEffect(state.isPreviewVisible) {
+        if (state.isPreviewVisible) scroll.animateScrollTo(scroll.maxValue)
     }
     Column(
         verticalArrangement = Arrangement.spacedBy(12.dp),
@@ -368,42 +321,96 @@ private fun EditorTopZone(
             .heightIn(max = maxHeight)
             .verticalScroll(scroll),
     ) {
-        if (state.restorableDraft != null) {
-            DraftRestoreBanner(
-                onRestore = { onIntent(PostEditorIntent.DraftRestoreRequested) },
-                onDiscard = { onIntent(PostEditorIntent.DraftDiscardRequested) },
-            )
-        }
-        state.submitError?.let { error ->
-            Text(
-                text = stringResource(error.bannerResId),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
-            TextButton(onClick = { onIntent(PostEditorIntent.ErrorDismissed) }) {
-                Text(text = stringResource(R.string.editor_error_dismiss))
-            }
-        }
-        state.uploadError?.let { error ->
-            Text(
-                text = error.bannerText(),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
-            TextButton(onClick = { onIntent(PostEditorIntent.UploadErrorDismissed) }) {
-                Text(text = stringResource(R.string.editor_error_dismiss))
-            }
-        }
-        EditorQuoteCards(
-            quotes = state.quotes,
-            enabled = !state.isSubmitting,
-            onIntent = onIntent,
+        PostEditorAlertBanners(state = state, onIntent = onIntent)
+        Text(
+            text = stringResource(state.mode.titleResId),
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onSurface,
         )
+        BbcodeToolbar(
+            onAction = { action -> onIntent(PostEditorIntent.ToolbarActionClicked(action)) },
+            modifier = Modifier.testTag(POST_EDITOR_TOOLBAR_TAG),
+            onImageUrlRequested = onImageUrlRequested,
+            onImageUploadRequested = onImageUploadRequested,
+            uploading = state.isUploading,
+        )
+        state.uploadProgress?.let { progress ->
+            UploadProgressLabel(progress)
+        }
+        if (state.quotes.isNotEmpty()) {
+            EditorQuoteCards(
+                quotes = state.quotes,
+                enabled = !state.isSubmitting,
+                onIntent = onIntent,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag(POST_EDITOR_PREVIEW_TOGGLE_TAG),
+            contentAlignment = Alignment.CenterStart,
+        ) {
+            TextButton(onClick = { onIntent(PostEditorIntent.TogglePreview) }) {
+                Text(
+                    text = stringResource(
+                        if (state.isPreviewVisible) {
+                            R.string.editor_preview_hide
+                        } else {
+                            R.string.editor_preview_show
+                        },
+                    ),
+                )
+            }
+        }
+        if (state.isPreviewVisible) {
+            HorizontalDivider()
+            BbcodePreview(content = state.preview, modifier = Modifier.fillMaxWidth())
+        }
+        if (!showSubmitBar) {
+            Text(
+                text = stringResource(R.string.editor_submit_disabled),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PostEditorAlertBanners(
+    state: PostEditorState,
+    onIntent: (PostEditorIntent) -> Unit,
+) {
+    if (state.restorableDraft != null) {
+        DraftRestoreBanner(
+            onRestore = { onIntent(PostEditorIntent.DraftRestoreRequested) },
+            onDiscard = { onIntent(PostEditorIntent.DraftDiscardRequested) },
+        )
+    }
+    state.submitError?.let { error ->
+        Text(
+            text = stringResource(error.bannerResId),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error,
+        )
+        TextButton(onClick = { onIntent(PostEditorIntent.ErrorDismissed) }) {
+            Text(text = stringResource(R.string.editor_error_dismiss))
+        }
+    }
+    state.uploadError?.let { error ->
+        Text(
+            text = error.bannerText(),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error,
+        )
+        TextButton(onClick = { onIntent(PostEditorIntent.UploadErrorDismissed) }) {
+            Text(text = stringResource(R.string.editor_error_dismiss))
+        }
     }
 }
 
 /**
- * #604 lot 3 (mockup P3) — the quote cards block of the full-screen editor : the shared
+ * #604 lot 3 (mockup P3) — the non-empty quote cards block of the full-screen editor : the shared
  * [QuoteCard] rendering plus « Tout vider » (#436, shown from two cards up — for one card the
  * per-card ✕ is the same act). Deliberately UNBOUNDED here : the block lives inside the
  * editor's budgeted top zone (#555), whose single scroll keeps every card reachable.
@@ -414,8 +421,6 @@ private fun EditorQuoteCards(
     enabled: Boolean,
     onIntent: (PostEditorIntent) -> Unit,
 ) {
-    // No early-return on empty (#604 lot 4a) : the shared column hosts the live region that
-    // announces the LAST removal — hiding the whole block would silence it.
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (quotes.size > 1) {
             val clearAllLabel = stringResource(R.string.editor_quotes_clear_all_a11y)
@@ -440,25 +445,6 @@ private fun EditorQuoteCards(
         )
     }
 }
-
-/**
- * #555 — the top-zone budget of the editor : the draft banner, error banners and quote cards
- * share whatever the available height leaves ABOVE the field's guaranteed minimum, bounded by
- * [EDITOR_TOP_ZONE_MAX_HEIGHT] on a roomy display. Pure — pinned by unit test.
- */
-internal fun editorTopZoneMaxHeight(available: Dp): Dp =
-    (available - EDITOR_FIELD_MIN_HEIGHT - EDITOR_ZONE_SPACING)
-        .coerceIn(0.dp, EDITOR_TOP_ZONE_MAX_HEIGHT)
-
-// #555 — « Tout vider » + ~4 one-line cards (the historical 240dp cards budget) + room for a
-// draft/error banner. Past that the top zone scrolls.
-internal val EDITOR_TOP_ZONE_MAX_HEIGHT = 360.dp
-
-// #555 — the draft field never shrinks below this, whatever the IME + top zone demand.
-internal val EDITOR_FIELD_MIN_HEIGHT = 96.dp
-
-// Spacing between the top zone and the field inside their shared weighted box.
-private val EDITOR_ZONE_SPACING = 12.dp
 
 /**
  * Display state of [EditorSubmitBar]. [confirmArmed] is the « confirmation avant
@@ -512,9 +498,12 @@ internal fun EditorSubmitBar(
                     .fillMaxWidth()
                     // Single bottom inset = max(navBar, ime); union() takes the larger so the two never
                     // stack into a phantom gap. Keyboard closed → bar clears the gesture nav bar; keyboard
-                    // open → bar rides exactly on top of the IME. Requires windowSoftInputMode=adjustNothing
-                    // (AndroidManifest) so the OEM does NOT also resize the window — the resize+imePadding
-                    // double-shift was the Samsung One UI bug (#624).
+                    // open → bar rides exactly on top of the IME. Requires
+                    // windowSoftInputMode=adjustNothing on API 30+ (AndroidManifest) so the OEM does
+                    // not also resize the window — the resize+imePadding double-shift was the Samsung
+                    // One UI bug (#624). Below API 30, MainActivity requests adjustResize because
+                    // adjustNothing dispatches a zero IME inset there; enableEdgeToEdge keeps the
+                    // window unresized so the inset stays single (#1404).
                     .windowInsetsPadding(
                         WindowInsets.navigationBars
                             .union(WindowInsets.ime)
@@ -659,3 +648,6 @@ private val SubmitError.bannerResId: Int
         SubmitError.SessionExpired -> R.string.editor_error_session_expired
         SubmitError.MissingSubcat -> R.string.editor_error_missing_subcat
     }
+
+internal const val POST_EDITOR_TOOLBAR_TAG = "post-editor-toolbar"
+internal const val POST_EDITOR_PREVIEW_TOGGLE_TAG = "post-editor-preview-toggle"

@@ -33,6 +33,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.movableContentOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
@@ -304,6 +305,9 @@ fun PostRenderer(
     // `selectable = true` through ReadingPostCard, which keeps the capability structurally
     // constant over the card's lifetime (#946).
     selectable: Boolean = false,
+    // #1391 — Topic increments this epoch after a plain list tap. Re-keying only the selection
+    // host drops its private selection while movable content below keeps spoiler/media state.
+    selectionEpoch: Int = 0,
     // #699 — invoked with the cited post's `(page, numreponse)` when the reader taps a sourced
     // quote's header. Null (default) keeps the header inert — only the topic reading surface wires
     // it (the editor preview, MP threads and signatures have nowhere meaningful to navigate).
@@ -319,7 +323,7 @@ fun PostRenderer(
         // SelectionContainer silently breaks selection. Links (LinkAnnotation.Url) stay tappable
         // inside a SelectionContainer; inline media carry a U+FFFC placeholder that can pollute a
         // copied selection spanning them (known, acceptable limitation).
-        SelectionContainer(modifier = modifier) {
+        ResettableSelectionContainer(selectionEpoch = selectionEpoch, modifier = modifier) {
             PostBlocksRenderer(blocks = content.blocks, quoteDepth = 0, onGoToCitedPost = onGoToCitedPost)
         }
     } else {
@@ -329,6 +333,25 @@ fun PostRenderer(
             quoteDepth = 0,
             onGoToCitedPost = onGoToCitedPost,
         )
+    }
+}
+
+/**
+ * Recreates the selection owner when [selectionEpoch] changes without recreating its content.
+ * [movableContentOf] gives the post body its own composition identity, so nested remember state
+ * (notably opened spoilers and image attempts) survives the selection reset.
+ */
+@Composable
+internal fun ResettableSelectionContainer(
+    selectionEpoch: Int,
+    modifier: Modifier = Modifier,
+    content: @Composable () -> Unit,
+) {
+    val movableContent = remember { movableContentOf<@Composable () -> Unit> { it() } }
+    key(selectionEpoch) {
+        SelectionContainer(modifier = modifier) {
+            movableContent(content)
+        }
     }
 }
 

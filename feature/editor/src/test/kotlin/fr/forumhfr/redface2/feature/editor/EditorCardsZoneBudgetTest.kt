@@ -1,39 +1,43 @@
 package fr.forumhfr.redface2.feature.editor
 
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
+import fr.forumhfr.redface2.core.ui.editor.editorControlsMaxHeight
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * #555 — the pure budget behind the editor's {top zone + field} weighted box : the top zone
- * (draft banner, error banners, quote cards) gets whatever the available height leaves ABOVE
- * the field's guaranteed minimum, bounded by the roomy-display cap. Pinning it here is what
- * keeps « the field can never be crushed to zero by the IME + cards » true (thibw, dev 0.26.1).
+ * #555/#447 — screen-specific checks for the post editor's shared controls budget.
  */
 class EditorCardsZoneBudgetTest {
 
     @Test
-    fun `roomy display keeps the historical cap`() {
-        // 700 − 96 − 12 = 592 → capped at 360 (banner + « Tout vider » + ~4 cards).
-        assertEquals(360.dp, editorTopZoneMaxHeight(available = 700.dp))
+    fun `s9 ime viewport reserves 160 dp for the field across the measured range`() {
+        assertEquals(
+            EDITOR_DRAFT_MIN_HEIGHT.value,
+            fieldHeight(available = 300.dp),
+            0.01f,
+        )
+        assertEquals(
+            EDITOR_DRAFT_MIN_HEIGHT.value,
+            fieldHeight(available = 330.dp),
+            0.01f,
+        )
     }
 
     @Test
-    fun `short window hands the top zone only what the field minimum leaves`() {
-        // 300 − 96 − 12 = 192 → below the cap, the top zone shrinks.
-        assertEquals(192.dp, editorTopZoneMaxHeight(available = 300.dp))
-        // 200 − 96 − 12 = 92.
-        assertEquals(92.dp, editorTopZoneMaxHeight(available = 200.dp))
+    fun `landscape viewport restores about 55 dp to the field`() {
+        assertEquals(
+            54.67f,
+            fieldHeight(available = 100.dp),
+            0.01f,
+        )
     }
 
-    @Test
-    fun `tiny window gives everything to the field`() {
-        // 100 − 96 − 12 < 0 → clamped to zero, the field takes the whole zone.
-        assertEquals(0.dp, editorTopZoneMaxHeight(available = 100.dp))
-    }
-
-    @Test
-    fun `field minimum plus spacing is the exact break-even point`() {
-        assertEquals(0.dp, editorTopZoneMaxHeight(available = EDITOR_FIELD_MIN_HEIGHT + 12.dp))
-    }
+    private fun fieldHeight(available: Dp): Float = (
+        available -
+            editorControlsMaxHeight(available = available, fieldMin = EDITOR_DRAFT_MIN_HEIGHT) -
+            12.dp
+        ).value
 }

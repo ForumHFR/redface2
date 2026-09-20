@@ -28,6 +28,8 @@ data class PrivateMessageReplyUiState(
      * a retry or InvalidHashCheck refetch from duplicating the server-provided quote around edits.
      */
     val draftHydratedFromForm: Boolean = false,
+    /** Exact untouched server quote prefill, distinct from later user edits (#1415). */
+    val draftHydratedContent: String? = null,
     val isPreviewVisible: Boolean = false,
     val preview: PostContent = PostContent(blocks = emptyList()),
     val signatureEnabled: Boolean = false,

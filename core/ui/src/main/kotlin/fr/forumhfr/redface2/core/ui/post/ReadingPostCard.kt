@@ -52,6 +52,8 @@ fun ReadingPostCard(
     identity: @Composable (moderationHeaderColors: ReadingPostHeaderColors?) -> Unit,
     modifier: Modifier = Modifier,
     presentation: ReadingPostCardPresentation = ReadingPostCardPresentation(),
+    /** #1391 — reading-list-owned reset signal; direct hosts keep the stable default. */
+    selectionEpoch: Int = 0,
     mediaDiskCachePolicy: PostMediaDiskCachePolicy = PostMediaDiskCachePolicy.ENABLED,
     onGoToCitedPost: ((page: Int, numreponse: Int) -> Unit)? = null,
     onImageLongPress: ((PostImageTarget) -> Unit)? = null,
@@ -131,6 +133,7 @@ fun ReadingPostCard(
                                 content = post.content,
                                 // #946 — constant by construction: never swap SelectionContainer at runtime.
                                 selectable = true,
+                                selectionEpoch = selectionEpoch,
                                 onGoToCitedPost = onGoToCitedPost,
                             )
                         }

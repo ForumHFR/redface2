@@ -24,6 +24,9 @@ const val MAX_IMAGES_PER_UPLOAD = 10
  * gets here — the ViewModels ignore a pick without a userId.
  */
 sealed interface UploadError {
+    /** The picker returned no Uri; its callback cannot distinguish cancellation from failure (#1420). */
+    data object NoImageReceived : UploadError
+
     /** The picked image exceeds the host's accepted size. */
     data object TooLarge : UploadError
 
@@ -51,12 +54,12 @@ sealed interface UploadError {
 data class UploadProgress(val completed: Int, val total: Int)
 
 /**
- * Multi-image upload — « n/N » counter shown under the toolbar while a batch is in flight. Emits
- * nothing for a single image (null progress), which only flips the toolbar spinner.
+ * Multi-image upload — « n/N » counter shown under the toolbar while a batch is in flight.
+ * Callers omit this composable for a single image (`uploadProgress == null`), which only flips the
+ * toolbar spinner; this keeps empty children out of spaced editor columns.
  */
 @Composable
-fun UploadProgressLabel(progress: UploadProgress?) {
-    if (progress == null) return
+fun UploadProgressLabel(progress: UploadProgress) {
     Text(
         text = stringResource(R.string.editor_upload_progress, progress.completed, progress.total),
         style = MaterialTheme.typography.labelMedium,
@@ -71,6 +74,7 @@ fun UploadProgressLabel(progress: UploadProgress?) {
  */
 @Composable
 fun UploadError.bannerText(): String = when (this) {
+    UploadError.NoImageReceived -> stringResource(R.string.editor_upload_error_no_image_received)
     UploadError.TooLarge -> stringResource(R.string.editor_upload_error_too_large)
     UploadError.UnsupportedType -> stringResource(R.string.editor_upload_error_unsupported_type)
     is UploadError.Server ->

@@ -6,8 +6,6 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.net.Uri
-import android.view.View
-import android.view.Window
 import android.widget.Toast
 import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.EnterTransition
@@ -30,7 +28,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,7 +39,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
-import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.UriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
@@ -80,9 +76,6 @@ import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffo
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteScaffoldLayout
 import androidx.compose.material3.adaptive.navigationsuite.NavigationSuiteType
 import androidx.core.net.toUri
-import androidx.core.view.WindowCompat
-import androidx.core.view.WindowInsetsCompat
-import androidx.core.view.WindowInsetsControllerCompat
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.Icon
@@ -120,6 +113,7 @@ import fr.forumhfr.redface2.core.ui.post.sharePostImageUrl
 import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
 import fr.forumhfr.redface2.core.ui.viewer.ImageViewerRequest
 import fr.forumhfr.redface2.core.ui.viewer.ImageViewerScreen
+import fr.forumhfr.redface2.core.ui.viewer.SystemBarsOwnerEffect
 import fr.forumhfr.redface2.feature.auth.LoginScreen
 import fr.forumhfr.redface2.feature.editor.PostEditorMode
 import fr.forumhfr.redface2.feature.editor.PostEditorRequest
@@ -983,47 +977,26 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
     // null only on the @Preview path (no host Activity), where the FAB also never renders.
     val backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
     // #518 follow-up — scroll-driven reveal of the hidden system nav bar. The MODE is the user preference;
-    // the raw scroll FACTS are reported up by the active topic screen. RedfaceApp stays the single owner
-    // of the window bar (no dual ownership): it combines mode + facts via the pure shouldRevealNavBar and
-    // drives the window below. topicNavBarScroll resets when the active route is no longer a topic.
+    // the raw scroll FACTS are reported up by the active topic screen. RedfaceApp is the SINGLE writer of
+    // the window system bars (#1388): every other surface — the fullscreen image viewer included — only
+    // publishes an intent, and [SystemBarsOwnerEffect] below folds mode + facts + intent through the pure
+    // appSystemBars. topicNavBarScroll resets when the active route is no longer a topic.
     val immersiveNavBarReveal by themeViewModel.immersiveNavBarReveal.collectAsStateWithLifecycle()
     var topicNavBarScroll by remember { mutableStateOf(NavBarScrollFacts()) }
-    // Effective hide + scroll-report gate are pure helpers so RedfaceApp stays under detekt's complexity.
-    val hideNavBarNow = immersiveNavBarHidden(hideSystemNavBar, immersiveNavBarReveal, topicNavBarScroll)
+    // Reveal decision + scroll-report gate are pure helpers so RedfaceApp stays under detekt's complexity.
+    val navBarRevealed = navBarRevealedByScroll(immersiveNavBarReveal, topicNavBarScroll)
     val darkTheme = when (themeMode) {
         ThemeMode.LIGHT -> false
         ThemeMode.DARK -> true
         ThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
-    // #286 — keep the system bar ICON contrast in sync with the EFFECTIVE app theme, not the OS night
-    // mode. MainActivity calls enableEdgeToEdge() once, whose default SystemBarStyle derives bar icon
-    // contrast from the OS uiMode; once the user forces LIGHT/DARK against the OS, the status /
-    // navigation bar icons would otherwise keep the OS contrast (e.g. light icons on a forced-light
-    // background = invisible). SideEffect re-asserts it after each themed recomposition.
-    val view = LocalView.current
-    // Resolve the host Activity defensively (Context.findActivity) instead of casting view.context
-    // directly: RedfaceApp is mounted under MainActivity today, but a future ContextWrapper in the
-    // chain would make a hard `as Activity` cast crash. isInEditMode guards the @Preview path.
-    val window = view.context.findActivity()?.window
-    if (!view.isInEditMode && window != null) {
-        SideEffect {
-            val controller = WindowCompat.getInsetsController(window, view)
-            controller.isAppearanceLightStatusBars = !darkTheme
-            controller.isAppearanceLightNavigationBars = !darkTheme
-        }
-        // #518 — apply immersive mode whenever the EFFECTIVE hide state changes (the master toggle, or a
-        // scroll-driven reveal request flipping, #518 follow-up), and re-assert it on ON_RESUME (returning
-        // from another app / the recents screen restores the bar without a recomposition). The
-        // transient-bars-by-swipe behaviour handles user swipes; hiding sets the bottom inset to 0 so
-        // navigationBarsPadding() collapses cleanly, while a transient swipe-reveal does NOT change insets
-        // (no layout jump). Status bar and the in-app tab bar are untouched.
-        LaunchedEffect(hideNavBarNow) {
-            applyImmersiveNavBar(window, view, hideNavBarNow)
-        }
-        LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-            applyImmersiveNavBar(window, view, hideNavBarNow)
-        }
-    }
+    // #286 — the system bar ICON contrast follows the EFFECTIVE app theme, not the OS night mode
+    // (MainActivity's enableEdgeToEdge() derives it from the OS uiMode, so a forced LIGHT/DARK would
+    // otherwise keep the OS contrast: light icons on a forced-light background = invisible). It used
+    // to be asserted here from a SideEffect; #1388 folded it into `appSystemBars`, because the image
+    // viewer needs light icons over its black backdrop whatever the theme — and because two writers
+    // of the same window is exactly the bug class this lot removed. `darkTheme` is now an INPUT of
+    // [SystemBarsOwnerEffect] below, the single writer.
     RedfaceTheme(
         darkTheme = darkTheme,
         themeColorPreferences = themeColorPreferences,
@@ -1306,6 +1279,16 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
         // nav bar revealed off-topic. Returning to a topic re-emits its current facts on first frame. The
         // branch lives in the helper composable to keep RedfaceApp under detekt's complexity threshold.
         ResetNavBarScrollOffTopic(topRoute) { topicNavBarScroll = NavBarScrollFacts() }
+        // #518 / #1388 — THE single writer of the window system bars. It reads the viewer's published
+        // intent from the composition, so an overlay above the viewer, a predictive back or an activity
+        // re-creation never hands the window to a second writer. `viewerRouteActive` only seeds the very
+        // first frame (before the viewer has published), hence the top route here.
+        SystemBarsOwnerEffect(
+            immersive = hideSystemNavBar,
+            navBarRevealed = navBarRevealed,
+            viewerRouteActive = topRoute is ImageViewerRoute,
+            darkTheme = darkTheme,
+        )
         val adaptiveType = NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfo())
         val navLayoutType = resolveNavLayoutType(topRoute.hidesNavigationSuite(), adaptiveType)
         // #529 — consume the bottom nav-bar inset for the content only under a bottom-bar layout
@@ -2084,15 +2067,15 @@ private data class ImmersiveNavBarNavState(
 )
 
 /**
- * #518 follow-up — effective « hide the system nav bar now » state: immersive on AND no active
- * scroll-driven reveal ([shouldRevealNavBar]). Extracted so the `&&` stays out of RedfaceApp's
+ * #518 follow-up — whether the scroll position currently asks for the hidden system nav bar to come
+ * back ([shouldRevealNavBar]). Fed to the pure `appSystemBars` policy, which combines it with the
+ * immersive setting and the viewer intent. Extracted so the unpacking stays out of RedfaceApp's
  * cyclomatic-complexity budget.
  */
-private fun immersiveNavBarHidden(
-    hideSystemNavBar: Boolean,
+private fun navBarRevealedByScroll(
     mode: ImmersiveNavBarReveal,
     scroll: NavBarScrollFacts,
-): Boolean = hideSystemNavBar && !shouldRevealNavBar(mode, scroll.atBottom, scroll.scrollingUp)
+): Boolean = shouldRevealNavBar(mode, scroll.atBottom, scroll.scrollingUp)
 
 /**
  * #518 follow-up — whether the topic screen should report its scroll facts: immersive on AND a
@@ -3389,7 +3372,7 @@ private fun applyInAppBackStackUpdate(backStack: NavBackStack<NavKey>, updated: 
 }
 
 /**
- * #286 — walk the Context chain to the host [Activity] (or null), so the system-bar SideEffect never
+ * #286 — walk the Context chain to the host [Activity] (or null), so an Activity lookup never
  * crashes on a non-Activity / ContextWrapper context. Tail-recursive over [ContextWrapper.baseContext].
  */
 internal tailrec fun Context.findActivity(): Activity? = when (this) {
@@ -3398,25 +3381,10 @@ internal tailrec fun Context.findActivity(): Activity? = when (this) {
     else -> null
 }
 
-/**
- * #518 — hide or show ONLY the bottom Android system navigation bar on [window]. Never touches
- * `Type.statusBars()` (the top bar stays) nor the in-app tab bar. When hiding, the behaviour is set to
- * [WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE] so a swipe from the bottom edge
- * re-reveals the bar transiently (documented Android behaviour) without changing layout insets.
- */
-private fun applyImmersiveNavBar(window: Window, view: View, hide: Boolean) {
-    val controller = WindowCompat.getInsetsController(window, view)
-    if (hide) {
-        controller.systemBarsBehavior =
-            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        controller.hide(WindowInsetsCompat.Type.navigationBars())
-    } else {
-        controller.show(WindowInsetsCompat.Type.navigationBars())
-    }
-}
-
-// #494 — paramètres de transition (Claude + Codex). MotionScheme M3 absent en stable 1.4.x (1.5.0-alpha)
-// → easings « emphasized » locaux. Slide LÉGER (1/4 de largeur) pour ne pas singer le swipe topic.
+// #494 — paramètres de transition (Claude + Codex). L'interface `MotionScheme` EXISTE en material3 1.4.0,
+// mais l'accesseur `MaterialTheme.motionScheme` y est `internal` (échec de compilation constaté, #1388) :
+// inutilisable, d'où les easings « emphasized » locaux — à reprendre quand il deviendra public.
+// Slide LÉGER (1/4 de largeur) pour ne pas singer le swipe topic.
 private val EmphasizedDecelerate = CubicBezierEasing(0.05f, 0.7f, 0.1f, 1f)
 private val EmphasizedAccelerate = CubicBezierEasing(0.3f, 0f, 0.8f, 0.15f)
 private const val DRILL_MS = 320

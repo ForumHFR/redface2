@@ -10,6 +10,19 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ---
 
+## v0.13.1 — 2026-09-20
+
+**Parité de sélection et promotion bêta 0.60.0** : cette version consigne le relâchement de sélection partagé entre Topic et MP, puis aligne les pages publiques sur la nouvelle bêta.
+
+### Changed
+- `docs/specs/reading-parity.md` : la parité de sélection couvre désormais [#1391](https://github.com/ForumHFR/redface2/issues/1391) ; après un geste plausible, le tap extérieur re-keye le `SelectionContainer`, tandis que `movableContentOf` conserve l'état interne des spoilers, citations repliées et médias.
+- Pages d'entrée (`README.md`, `AGENTS.md`, `docs/index.md`, `docs/guides/contributing.md`) : état du projet = bêta publique **0.60.0**, canal dev aligné sur la bêta au 20/09/2026.
+- `docs/specs/roadmap.md` : plage de livraison de la refonte UI étendue jusqu'à la bêta **0.60.0**.
+- `docs/guides/known-issues.md` : compromis de l'éditeur long explicité (sélection qui suit le doigt, hauteur contrainte en paysage avec clavier) et note ICU alignée sur le hotfix `0.59.4` ([#1414](https://github.com/ForumHFR/redface2/issues/1414)).
+- `docs/_config.yml` : footer v0.13.1.
+
+---
+
 ## v0.13.0 — 2026-09-13
 
 **Contrat images v1.6 et promotion bêta 0.58.0** : cette version consigne l'entrée du contrat de rendu des images dans le dépôt (audit [#876](https://github.com/ForumHFR/redface2/issues/876), chapeau [#1334](https://github.com/ForumHFR/redface2/issues/1334), 12-13/09/2026) et la passe de fraîcheur des pages d'entrée à la promotion bêta 0.58.0, plus l'hygiène du 08/09 restée en « Unreleased ».

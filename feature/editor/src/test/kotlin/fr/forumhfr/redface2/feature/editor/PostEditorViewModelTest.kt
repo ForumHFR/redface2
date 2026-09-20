@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
@@ -36,6 +37,8 @@ import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadException
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerContract
+import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
@@ -879,6 +882,7 @@ class PostEditorViewModelTest {
         userPreferencesRepository: UserPreferencesRepository =
             FakeUserPreferencesRepository(quoteCardsEnabled = true),
         authRepository: AuthRepository = FakeAuthRepository(),
+        savedStateHandle: SavedStateHandle = SavedStateHandle(),
     ): PostEditorViewModel =
         PostEditorViewModel(
             request = PostEditorRequest(
@@ -902,6 +906,7 @@ class PostEditorViewModelTest {
             imageUploadReader = imageUploadReader,
             authRepository = authRepository,
             quoteMaterializer = TopicReplyQuoteMaterializer(replyRepository),
+            savedStateHandle = savedStateHandle,
         )
 
     // ----- Phase 2F-B (#11) / #441 : smiley picker ----------------------------------
@@ -1011,6 +1016,113 @@ class PostEditorViewModelTest {
     }
 
     // ----- #459 PR2 : image upload from the photo picker ---------------------
+
+    @Test
+    fun `empty picker result shows a banner without starting an upload`() = runTest {
+        val diagnostics = DiagnosticsLog()
+        val viewModel = newReplyViewModel(
+            diagnostics = diagnostics,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("alice")),
+        )
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(
+            PostEditorIntent.ContentChanged(
+                TextFieldValue(text = "draft", selection = TextRange(1, 4)),
+            ),
+        )
+        testScheduler.advanceUntilIdle()
+        val stateBefore = viewModel.state.value
+
+        viewModel.effects.test {
+            viewModel.submit(
+                PostEditorIntent.ImagePickerEventReceived(
+                    ImagePickerEvent.Result(
+                        contract = ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA,
+                        uris = emptyList(),
+                    ),
+                ),
+            )
+            testScheduler.advanceUntilIdle()
+
+            assertEquals(
+                stateBefore.copy(uploadError = UploadError.NoImageReceived),
+                viewModel.state.value,
+            )
+            assertFalse(viewModel.state.value.isUploading)
+            assertEquals(0, imageUploadReader.readCalls)
+            assertEquals(0, uploadRepository.uploadCalls)
+            assertEquals(
+                listOf(
+                    "result contract=PickMultipleVisualMedia count=0 sources=[]",
+                    "onImagesPicked count=0",
+                ),
+                diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
+            )
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `single picker result keeps the upload path and no empty-result error`() = runTest {
+        val viewModel = newReplyViewModel(
+            authRepository = FakeAuthRepository(AuthState.Authenticated("alice")),
+        )
+        testScheduler.advanceUntilIdle()
+        val uri = "content://media/picker/photo/1"
+
+        viewModel.submit(
+            PostEditorIntent.ImagePickerEventReceived(
+                ImagePickerEvent.Result(
+                    contract = ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA,
+                    uris = listOf(uri),
+                ),
+            ),
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf(uri), imageUploadReader.readUris)
+        assertEquals(1, uploadRepository.uploadCalls)
+        assertNull(viewModel.state.value.uploadError)
+        assertFalse(viewModel.state.value.isUploading)
+    }
+
+    @Test
+    fun `photo picker result logs safe sources and uploads all eleven callback uris`() = runTest {
+        val diagnostics = DiagnosticsLog()
+        val viewModel = newReplyViewModel(
+            diagnostics = diagnostics,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("alice")),
+        )
+        testScheduler.advanceUntilIdle()
+        val uris = (1..11).map {
+            "content://com.android.providers.media.documents/document/image%3A$it"
+        }
+
+        viewModel.submit(
+            PostEditorIntent.ImagePickerEventReceived(
+                ImagePickerEvent.Result(
+                    contract = ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA,
+                    uris = uris,
+                ),
+            ),
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(uris, imageUploadReader.readUris)
+        assertEquals(11, uploadRepository.uploadCalls)
+        val messages = diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message }
+        assertEquals(
+            listOf(
+                "result contract=PickMultipleVisualMedia count=11 " +
+                    "sources=[content://com.android.providers.media.documents]",
+                "onImagesPicked count=11",
+            ),
+            messages,
+        )
+        assertFalse(messages.joinToString().contains("image%3A"))
+        assertFalse(messages.joinToString().contains("document/"))
+    }
 
     @Test
     fun `ImagePicked reads the uri uploads with the lowercased userId and inserts img at caret`() = runTest {
@@ -1654,7 +1766,7 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `emptying the draft deletes the cached row instead of saving a blank`() = runTest {
+    fun `emptying the draft without a pending offer deletes the cached row`() = runTest {
         replyRepository.formResult = Result.success(authenticatedForm())
         val viewModel = newReplyViewModel()
         testScheduler.advanceUntilIdle()
@@ -1689,6 +1801,150 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `current content identical to the cached draft is never offered`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.preload(key, EditorDraftStore.Draft(body = "already visible"))
+        draftStore.loadGate = CompletableDeferred()
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel()
+        testScheduler.runCurrent()
+
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("already visible")))
+        draftStore.loadGate?.complete(Unit)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("already visible", viewModel.state.value.draft.text)
+        assertNull(viewModel.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `image insertion and autosave cannot turn the current draft into a restore offer`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.preload(key, EditorDraftStore.Draft(body = "older draft"))
+        draftStore.loadGate = CompletableDeferred()
+        replyRepository.formResult = Result.success(authenticatedForm())
+        uploadRepository.uploadResult = uploadedImage("https://h/Picture/Get/f/1415")
+        imageUploadReader.result =
+            ImageUpload(bytes = byteArrayOf(1), mimeType = "image/png", displayName = "picked.png")
+        val viewModel = newReplyViewModel(
+            authRepository = FakeAuthRepository(AuthState.Authenticated("alice")),
+        )
+        testScheduler.runCurrent()
+
+        viewModel.submit(
+            PostEditorIntent.ImagePickerEventReceived(
+                ImagePickerEvent.Result(
+                    contract = ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA,
+                    uris = listOf("content://picker/1415"),
+                ),
+            ),
+        )
+        testScheduler.advanceUntilIdle()
+        draftStore.loadGate?.complete(Unit)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(viewModel.state.value.draft.text, draftStore.saved[key]?.body)
+        assertNull(viewModel.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `ViewModel recreation reoffers until decision and typing still autosaves`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val savedStateHandle = SavedStateHandle()
+        draftStore.preload(key, EditorDraftStore.Draft(body = "rescued text"))
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val first = newReplyViewModel(savedStateHandle = savedStateHandle)
+        testScheduler.advanceUntilIdle()
+        assertEquals("rescued text", first.state.value.restorableDraft)
+        assertNull(savedStateHandle.get<String>("draft_restore_offer_fingerprint"))
+
+        val recreated = newReplyViewModel(savedStateHandle = savedStateHandle)
+        testScheduler.advanceUntilIdle()
+        assertEquals("rescued text", recreated.state.value.restorableDraft)
+
+        recreated.submit(PostEditorIntent.ContentChanged(TextFieldValue("new live text")))
+        testScheduler.advanceTimeBy(800L)
+        testScheduler.runCurrent()
+        assertEquals("new live text", draftStore.saved[key]?.body)
+        assertEquals("tester", draftStore.lastSavedOwner)
+
+        recreated.submit(PostEditorIntent.DraftRestoreRequested)
+        testScheduler.advanceUntilIdle()
+        assertNull(savedStateHandle.get<String>("draft_restore_offer_fingerprint"))
+        assertEquals("new live text\n\nrescued text", draftStore.saved[key]?.body)
+
+        val afterRestore = newReplyViewModel(savedStateHandle = savedStateHandle)
+        testScheduler.advanceUntilIdle()
+        assertEquals("new live text\n\nrescued text", afterRestore.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `process recreation offers a newer autosaved draft after live state was lost`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val savedStateHandle = SavedStateHandle()
+        draftStore.preload(key, EditorDraftStore.Draft(body = "first offered version"))
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val first = newReplyViewModel(savedStateHandle = savedStateHandle)
+        testScheduler.advanceUntilIdle()
+        assertEquals("first offered version", first.state.value.restorableDraft)
+
+        draftStore.preload(key, EditorDraftStore.Draft(body = "newer autosaved version"))
+        val recreated = newReplyViewModel(savedStateHandle = savedStateHandle)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("newer autosaved version", recreated.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `edit server hydration does not hide a different cached draft`() = runTest {
+        draftStore.preload(
+            EditorDraftKey.editPost(SAMPLE_CAT, SAMPLE_EDITED_NUMREPONSE),
+            EditorDraftStore.Draft(body = "unfinished rewrite"),
+        )
+
+        val viewModel = newEditViewModel()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("existing post body", viewModel.state.value.draft.text)
+        assertEquals("unfinished rewrite", viewModel.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `edit server hydration removes an identical cached draft offer`() = runTest {
+        draftStore.preload(
+            EditorDraftKey.editPost(SAMPLE_CAT, SAMPLE_EDITED_NUMREPONSE),
+            EditorDraftStore.Draft(body = "existing post body"),
+        )
+
+        val viewModel = newEditViewModel()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("existing post body", viewModel.state.value.draft.text)
+        assertNull(viewModel.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `moving selection in a hydrated post keeps the restore offer`() = runTest {
+        draftStore.preload(
+            EditorDraftKey.editPost(SAMPLE_CAT, SAMPLE_EDITED_NUMREPONSE),
+            EditorDraftStore.Draft(body = "unfinished rewrite"),
+        )
+        val viewModel = newEditViewModel()
+        testScheduler.advanceUntilIdle()
+        val hydrated = viewModel.state.value.draft
+
+        viewModel.submit(
+            PostEditorIntent.ContentChanged(hydrated.copy(selection = TextRange(3))),
+        )
+        testScheduler.advanceTimeBy(800L)
+        testScheduler.runCurrent()
+
+        assertEquals("unfinished rewrite", viewModel.state.value.restorableDraft)
+        val key = EditorDraftKey.editPost(SAMPLE_CAT, SAMPLE_EDITED_NUMREPONSE)
+        assertEquals("unfinished rewrite", draftStore.saved[key]?.body)
+    }
+
+    @Test
     fun `restoring fills the draft and clears the banner`() = runTest {
         draftStore.preload(
             EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID),
@@ -1711,11 +1967,29 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `discarding deletes the cached draft and clears the banner`() = runTest {
-        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
-        draftStore.preload(key, EditorDraftStore.Draft(body = "rescued text"))
+    fun `restoring appends the offered body after text typed since the offer`() = runTest {
+        draftStore.preload(
+            EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID),
+            EditorDraftStore.Draft(body = "rescued text"),
+        )
         replyRepository.formResult = Result.success(authenticatedForm())
         val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("fresh text")))
+        viewModel.submit(PostEditorIntent.DraftRestoreRequested)
+
+        assertEquals("fresh text\n\nrescued text", viewModel.state.value.draft.text)
+        assertNull(viewModel.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `discarding deletes the cached draft and clears the banner`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val savedStateHandle = SavedStateHandle()
+        draftStore.preload(key, EditorDraftStore.Draft(body = "rescued text"))
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel(savedStateHandle = savedStateHandle)
         testScheduler.advanceUntilIdle()
 
         viewModel.submit(PostEditorIntent.DraftDiscardRequested)
@@ -1723,6 +1997,28 @@ class PostEditorViewModelTest {
 
         assertTrue("discard deletes the row", draftStore.deletedKeys.contains(key))
         assertNull("the banner is cleared after discarding", viewModel.state.value.restorableDraft)
+        assertTrue(savedStateHandle.get<String>("draft_restore_offer_fingerprint") != null)
+
+        val recreated = newReplyViewModel(savedStateHandle = savedStateHandle)
+        testScheduler.advanceUntilIdle()
+        assertNull(recreated.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `discarding cancels a pending autosave before deleting the cached draft`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.preload(key, EditorDraftStore.Draft(body = "rescued text"))
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("fresh text")))
+        viewModel.submit(PostEditorIntent.DraftDiscardRequested)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("the cancelled debounce must not save after Ignore", 0, draftStore.saveCount)
+        assertTrue(draftStore.deletedKeys.contains(key))
+        assertNull(draftStore.saved[key])
     }
 
     @Test
@@ -1778,6 +2074,31 @@ class PostEditorViewModelTest {
             assertNull("no banner on an escalation hand-over", settled.restorableDraft)
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `resumeSharedDraft is applied only once across ViewModel recreation`() = runTest {
+        val savedStateHandle = SavedStateHandle()
+        draftStore.preload(
+            EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID),
+            EditorDraftStore.Draft(body = "texte de la sheet"),
+        )
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val first = newReplyViewModel(
+            resumeSharedDraft = true,
+            savedStateHandle = savedStateHandle,
+        )
+        testScheduler.advanceUntilIdle()
+        assertEquals("texte de la sheet", first.state.value.draft.text)
+
+        val recreated = newReplyViewModel(
+            resumeSharedDraft = true,
+            savedStateHandle = savedStateHandle,
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("", recreated.state.value.draft.text)
+        assertNull(recreated.state.value.restorableDraft)
     }
 
     @Test
@@ -2099,7 +2420,7 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `CloseRequested with a blank body deletes the row and still closes`() = runTest {
+    fun `CloseRequested with a blank live body preserves a pending restore offer`() = runTest {
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
         draftStore.preload(key, EditorDraftStore.Draft(body = "stale"))
         replyRepository.formResult = Result.success(authenticatedForm())
@@ -2110,7 +2431,10 @@ class PostEditorViewModelTest {
 
         val effect = viewModel.effects.first()
         assertEquals(PostEditorEffect.CloseCommitted, effect)
-        assertTrue("an emptied editor must not leave a stale row", draftStore.deletedKeys.contains(key))
+        assertEquals("closing must not rewrite a pending offer", 0, draftStore.saveCount)
+        assertFalse(draftStore.deletedKeys.contains(key))
+        assertEquals("stale", draftStore.saved[key]?.body)
+        assertEquals("stale", viewModel.state.value.restorableDraft)
     }
 
     @Test
@@ -2600,6 +2924,9 @@ class PostEditorViewModelTest {
         val deletedKeys: MutableList<String> = mutableListOf()
         var saveCount: Int = 0
             private set
+        var lastSavedOwner: String? = null
+            private set
+        var loadGate: CompletableDeferred<Unit>? = null
 
         /** Preload a draft so a VM created afterwards restores it on init. */
         fun preload(key: String, draft: EditorDraftStore.Draft) {
@@ -2608,10 +2935,14 @@ class PostEditorViewModelTest {
 
         override suspend fun currentOwner(): String? = "tester"
 
-        override suspend fun load(owner: String?, key: String): EditorDraftStore.Draft? = saved[key]
+        override suspend fun load(owner: String?, key: String): EditorDraftStore.Draft? {
+            loadGate?.await()
+            return saved[key]
+        }
 
         override suspend fun save(owner: String?, key: String, draft: EditorDraftStore.Draft) {
             saveCount += 1
+            lastSavedOwner = owner
             saved[key] = draft
         }
 

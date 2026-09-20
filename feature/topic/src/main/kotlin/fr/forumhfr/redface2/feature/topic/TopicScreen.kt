@@ -152,6 +152,7 @@ import fr.forumhfr.redface2.core.ui.post.ReadingPostCardPresentation
 import fr.forumhfr.redface2.core.ui.post.collectPostMediaUrls
 import fr.forumhfr.redface2.core.ui.post.postHeaderColors
 import fr.forumhfr.redface2.core.ui.post.readingContentColors
+import fr.forumhfr.redface2.core.ui.post.releasePostSelectionOnTap
 import fr.forumhfr.redface2.core.ui.post.retryFailedPostMedia
 import fr.forumhfr.redface2.core.ui.post.sharePostImageUrl
 import fr.forumhfr.redface2.core.ui.post.viewerRequestFor
@@ -2395,6 +2396,20 @@ private fun TopicLoadedContent(
     // the magnifier's controlled dispatchRawDelta (screen deltas divided by scale — 1:1 under the
     // finger). derivedStateOf: recomposes on the 1× ↔ zoomed transition only.
     val zoomSuspendsScroll by remember(zoomState) { derivedStateOf { zoomState.zoomed } }
+    // #1391 — each selectable post keeps its own SelectionContainer (LazyColumn-safe). A long press
+    // makes selection plausible; only the next plain tap then advances this shared epoch. This
+    // avoids re-keying every visible post for ordinary links/images/actions and double-tap refresh.
+    var selectionEpoch by remember { mutableIntStateOf(0) }
+    var selectionMaybeActive by remember { mutableStateOf(false) }
+    val markPostSelectionPossible = remember { { selectionMaybeActive = true } }
+    val releasePostSelection = remember {
+        {
+            if (selectionMaybeActive) {
+                selectionEpoch += 1
+                selectionMaybeActive = false
+            }
+        }
+    }
     // #884 (vague 3) — list geometry switched by the « posts en pleine largeur » preference. The
     // historical values (#283 bottom clearance, #398 local side gutter, #287 8 dp rhythm) moved to
     // TopicListLayout.kt and stay byte-identical in card mode; full-width drops the side gutters
@@ -2413,6 +2428,10 @@ private fun TopicLoadedContent(
             // read in the untransformed local space that TopicZoomMath models (same coordinate
             // rule as topicPageSwipe).
             .topicMagnifier(zoomState, listState)
+            .releasePostSelectionOnTap(
+                onSelectionPlausible = markPostSelectionPossible,
+                onTap = releasePostSelection,
+            )
             // #285 — system-bar insets (status + navigation) are now consumed by the Scaffold/TopAppBar
             // in TopicContent and applied via the content Surface's padding(innerPadding); the list no
             // longer adds statusBarsPadding()/navigationBarsPadding() here to avoid double-insetting.
@@ -2614,6 +2633,7 @@ private fun TopicLoadedContent(
                 } else {
                     TopicPostCard(
                         post = post,
+                        selectionEpoch = selectionEpoch,
                         staffByPseudo = staffByPseudo,
                         highlighted = highlight == post.numreponse,
                         // #863 — the SERVER count (« Message cité N fois », cross-page), parsed
@@ -3370,6 +3390,8 @@ private fun PollVoteUiError.pollVoteMessageRes(): Int = when (this) {
 // « + » affordance (gating, label flip, tap). Same visibility relaxation as other tested internals.
 internal fun TopicPostCard(
     post: Post,
+    /** #1391 — list-scoped signal used only to clear this post's text selection. */
+    selectionEpoch: Int = 0,
     /** #221 — global canonical staff directory; empty keeps direct tests/previews neutral. */
     staffByPseudo: Map<String, AuthorRole> = emptyMap(),
     /**
@@ -3489,6 +3511,7 @@ internal fun TopicPostCard(
         stringResource(R.string.topic_post_moderation_state_description)
     ReadingPostCard(
         post = post,
+        selectionEpoch = selectionEpoch,
         presentation = ReadingPostCardPresentation(
             showSignature = showSignature,
             flat = flat,

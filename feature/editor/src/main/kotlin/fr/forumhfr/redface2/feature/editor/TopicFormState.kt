@@ -3,6 +3,7 @@ import fr.forumhfr.redface2.core.ui.editor.UploadError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
 import androidx.compose.ui.text.input.TextFieldValue
+import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.editor.validateBbcodeDraft
 import fr.forumhfr.redface2.core.model.PostContent
@@ -60,8 +61,12 @@ data class TopicFormState(
      * but never clobbers the field the user had touched.
      */
     val subjectHydratedFromServer: Boolean = false,
+    /** Exact untouched subject received from HFR; null until a non-blank hydration lands. */
+    val subjectHydratedContent: String? = null,
     /** Mirror of [subjectHydratedFromServer] for the BBCode draft. */
     val draftHydratedFromServer: Boolean = false,
+    /** Exact untouched body received from HFR; null until a non-blank hydration lands. */
+    val draftHydratedContent: String? = null,
     /** Mirror of [PostEditorState.optionsHydratedFromForm] for the same anti-clobber reason. */
     val optionsHydratedFromForm: Boolean = false,
     /**
@@ -208,6 +213,9 @@ sealed interface TopicFormIntent {
      * sequentially, one `[img]` inserted per success. Mirrors [PostEditorIntent.ImagesPicked].
      */
     data class ImagesPicked(val uris: List<String>) : TopicFormIntent
+
+    /** #988 — launch/result boundary emitted by the shared picker before upload filtering. */
+    data class ImagePickerEventReceived(val event: ImagePickerEvent) : TopicFormIntent
 
     /** #459 — dismiss the upload-error banner. Mirrors [PostEditorIntent.UploadErrorDismissed]. */
     data object UploadErrorDismissed : TopicFormIntent

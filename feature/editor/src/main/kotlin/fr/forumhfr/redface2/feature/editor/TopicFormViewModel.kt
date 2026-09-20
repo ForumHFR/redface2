@@ -1,10 +1,8 @@
 package fr.forumhfr.redface2.feature.editor
-import fr.forumhfr.redface2.core.ui.editor.UploadError
-import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
-import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.assisted.Assisted
@@ -14,6 +12,8 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.diagnostics.recordImagePickerEvent
+import fr.forumhfr.redface2.core.domain.diagnostics.recordImagesPicked
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
@@ -27,6 +27,7 @@ import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.write.EditFirstPostContext
 import fr.forumhfr.redface2.core.model.write.NewTopicContext
 import fr.forumhfr.redface2.core.model.write.NewTopicSubmitResult
@@ -35,12 +36,17 @@ import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.model.write.TopicForm
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
+import fr.forumhfr.redface2.core.ui.editor.UploadError
+import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.imageInsertBbcodeOrNull
 import fr.forumhfr.redface2.core.ui.editor.insertBbcodeToken
+import fr.forumhfr.redface2.core.ui.editor.pickedImagesForUpload
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -85,6 +91,7 @@ class TopicFormViewModel @AssistedInject constructor(
     private val authRepository: AuthRepository,
     private val uploadRepository: UploadRepository,
     private val imageUploadReader: ImageUploadReader,
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
 
     private val _state: MutableStateFlow<TopicFormState> = MutableStateFlow(
@@ -204,22 +211,38 @@ class TopicFormViewModel @AssistedInject constructor(
     }
 
     /**
-     * #405 — surface a cached draft (subject + body) on the banner, never auto-applied (a server
-     * EditFirstPost prefill would otherwise be clobbered). Empty drafts (blank body AND subject)
-     * are ignored.
+     * #405/#1415 — offer each cached subject/body version until the user handles it. Untouched
+     * EditFirstPost hydration remains eligible, while a real user edit suppresses the initial
+     * offer. The fingerprint is recorded only after Ignore, so a restored row remains recoverable
+     * if process death loses the live editor state before autosave.
      */
     private fun restoreDraftIfAny() {
-        val key = draftKey ?: return
         viewModelScope.launch {
             draftOwner = draftStore.currentOwner()
+            val key = draftKey ?: return@launch
             val draft = draftStore.load(draftOwner, key) ?: return@launch
             if (draft.body.isNotBlank() || !draft.subject.isNullOrBlank()) {
-                _state.update {
-                    it.copy(restorableDraft = draft.body, restorableSubject = draft.subject)
+                val fingerprint = draft.restoreOfferFingerprint()
+                if (savedStateHandle.get<String>(DRAFT_RESTORE_OFFER_FINGERPRINT_KEY) == fingerprint) {
+                    return@launch
+                }
+                val canOffer = _state.value.canOfferDraftRestore(draft)
+                if (canOffer) {
+                    _state.update { current ->
+                        current.copy(restorableDraft = draft.body, restorableSubject = draft.subject)
+                    }
                 }
             }
         }
     }
+
+    private fun TopicFormState.canOfferDraftRestore(cached: EditorDraftStore.Draft): Boolean =
+        !matches(cached) &&
+            (draft.text.isBlank() || draft.text == draftHydratedContent) &&
+            (subject.text.isBlank() || subject.text == subjectHydratedContent)
+
+    private fun TopicFormState.matches(cached: EditorDraftStore.Draft): Boolean =
+        draft.text == cached.body && subject.text == cached.subject.orEmpty()
 
     /**
      * #405 — debounced autosave of subject + body. Blank body AND blank subject → delete the row.
@@ -235,14 +258,14 @@ class TopicFormViewModel @AssistedInject constructor(
     }
 
     /**
-     * Immediate write of the current subject + body (both blank = delete the row, cf.
-     * [scheduleAutosave]). Reads [_state] AFTER the debounce delay — the previous shape captured
-     * a snapshot at scheduling time, which the #803 dirty-close flush would have re-persisted
-     * stale (state-hygiene audit 2026-07-05). Mirrors `PostEditorViewModel.persistDraftNow`.
+     * Immediate write of the current subject + body. A blank body with a pending offer is a no-op;
+     * otherwise both fields blank delete the row (cf. [scheduleAutosave]). Reads [_state] AFTER the
+     * debounce delay so the #803 dirty-close flush cannot re-persist a stale snapshot.
      */
     private suspend fun persistDraftNow() {
         val key = draftKey ?: return
         val snapshot = _state.value
+        if (snapshot.draft.text.isBlank() && snapshot.restorableDraft != null) return
         val body = snapshot.draft.text
         val subject = snapshot.subject.text
         if (body.isBlank() && subject.isBlank()) {
@@ -320,6 +343,7 @@ class TopicFormViewModel @AssistedInject constructor(
             is TopicFormIntent.SmileySelected -> onSmileySelected(intent.token)
             is TopicFormIntent.ImageUrlInserted -> onImageUrlInserted(intent.url)
             is TopicFormIntent.ImagesPicked -> onImagesPicked(intent.uris)
+            is TopicFormIntent.ImagePickerEventReceived -> onImagePickerEvent(intent.event)
             TopicFormIntent.UploadErrorDismissed -> _state.update { it.copy(uploadError = null) }
             TopicFormIntent.DraftRestoreRequested -> onDraftRestoreRequested()
             TopicFormIntent.DraftDiscardRequested -> onDraftDiscardRequested()
@@ -328,15 +352,20 @@ class TopicFormViewModel @AssistedInject constructor(
     }
 
     /**
-     * #405 — apply the cached subject + body (caret at the end, like form hydration) and clear the
-     * banner. Marks both fields hydrated so a late EditFirstPost form fetch cannot overwrite them.
+     * #405 — append the cached body after live text, fill only a blank subject, and clear the banner.
+     * Marks both fields hydrated so a late EditFirstPost form fetch cannot overwrite them.
      */
     private fun onDraftRestoreRequested() {
+        val offeredBody = _state.value.restorableDraft ?: return
         _state.update { current ->
-            val body = current.restorableDraft.orEmpty()
-            // Keep the live subject when the draft has none (it was autosaved before the server form
-            // populated the subject) : restoring must never blank a server-provided subject.
-            val subject = current.restorableSubject ?: current.subject.text
+            val body = if (current.draft.text.isBlank() || current.draft.text == offeredBody) {
+                offeredBody
+            } else {
+                current.draft.text.trimEnd() + "\n\n" + offeredBody
+            }
+            // A live subject always wins. Fill it from the offer only when it is still blank, so
+            // restoring never replaces a route/server value or a title the user just typed.
+            val subject = current.subject.text.ifBlank { current.restorableSubject.orEmpty() }
             current
                 .withDraft(TextFieldValue(text = body, selection = TextRange(body.length)))
                 .copy(
@@ -352,9 +381,22 @@ class TopicFormViewModel @AssistedInject constructor(
 
     /** #405 — discard the cached draft : delete the row and clear the banner. */
     private fun onDraftDiscardRequested() {
+        val offered = _state.value.restorableDraft ?: return
+        markDraftRestoreOfferIgnored(
+            EditorDraftStore.Draft(body = offered, subject = _state.value.restorableSubject),
+        )
         _state.update { it.copy(restorableDraft = null, restorableSubject = null) }
+        val pendingAutosave = autosaveJob
+        autosaveJob = null
         val key = draftKey ?: return
-        viewModelScope.launch { draftStore.delete(draftOwner, key) }
+        viewModelScope.launch {
+            pendingAutosave?.cancelAndJoin()
+            draftStore.delete(draftOwner, key)
+        }
+    }
+
+    private fun markDraftRestoreOfferIgnored(draft: EditorDraftStore.Draft) {
+        savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] = draft.restoreOfferFingerprint()
     }
 
     /**
@@ -469,6 +511,19 @@ class TopicFormViewModel @AssistedInject constructor(
         }
     }
 
+    /** #988/#1420 — records the picker boundary and surfaces a callback without images. */
+    private fun onImagePickerEvent(event: ImagePickerEvent) {
+        diagnostics.recordImagePickerEvent(event)
+        if (event is ImagePickerEvent.Result) {
+            val pickedImages = pickedImagesForUpload(event.contract, event.uris)
+            val showEmptyPickerBanner = pickedImages.isEmpty() && uploadJob?.isActive != true
+            onImagesPicked(pickedImages)
+            if (showEmptyPickerBanner) {
+                _state.update { it.copy(uploadError = UploadError.NoImageReceived) }
+            }
+        }
+    }
+
     /**
      * #459 — pick→read→upload→insert for the topic composer, copied from the proven
      * `PostEditorViewModel.onImagesPicked` contract (multi-image #490): the picked [uris] are read
@@ -480,6 +535,7 @@ class TopicFormViewModel @AssistedInject constructor(
      * than one image.
      */
     private fun onImagesPicked(uris: List<String>) {
+        diagnostics.recordImagesPicked(uris.size)
         val userId = activeUserId
         val targets = uris.filter { it.isNotBlank() }
         // One guard (ReturnCount): nothing in flight already, an authenticated owner, a non-empty pick.
@@ -552,6 +608,11 @@ class TopicFormViewModel @AssistedInject constructor(
         _state.update { current ->
             current.copy(
                 subject = value,
+                restorableSubject = if (current.restorableDraft != null) {
+                    value.text.ifBlank { null }
+                } else {
+                    current.restorableSubject
+                },
                 submitError = if (value.text != current.subject.text) null else current.submitError,
             )
         }
@@ -559,6 +620,7 @@ class TopicFormViewModel @AssistedInject constructor(
     }
 
     private fun onContentChanged(value: TextFieldValue) {
+        val textChanged = value.text != _state.value.draft.text
         _state.update { current ->
             val refreshed = current.withDraft(value)
             if (refreshed.isPreviewVisible) {
@@ -567,7 +629,7 @@ class TopicFormViewModel @AssistedInject constructor(
                 refreshed
             }
         }
-        scheduleAutosave()
+        if (textChanged) scheduleAutosave()
     }
 
     private fun onToolbarActionClicked(action: BbcodeAction) {
@@ -940,6 +1002,14 @@ class TopicFormViewModel @AssistedInject constructor(
             this
         }
 
+    private fun <T> T.hydratedValue(serverValue: T, hydrate: Boolean): T =
+        if (hydrate) serverValue else this
+
+    private fun TopicFormState.restoreOfferDiffersFrom(
+        nextSubject: TextFieldValue,
+        nextDraft: TextFieldValue,
+    ): Boolean = restorableDraft != nextDraft.text || restorableSubject.orEmpty() != nextSubject.text
+
     private fun TopicFormState.withFormHydration(
         form: TopicForm,
         nextPreview: PostContent,
@@ -952,19 +1022,24 @@ class TopicFormViewModel @AssistedInject constructor(
         val nextSubject = subject.hydratedWith(form.subject, hydrateSubject)
         val nextDraft = draft.hydratedWith(form.initialContent, hydrateDraft)
         val hydrateOptions = !optionsHydratedFromForm
+        val keepRestoreOffer = restoreOfferDiffersFrom(nextSubject, nextDraft)
         return copy(
             isLoadingForm = false,
             subject = nextSubject,
             draft = nextDraft,
+            restorableDraft = restorableDraft.takeIf { keepRestoreOffer },
+            restorableSubject = restorableSubject.takeIf { keepRestoreOffer },
             preview = if (hydrateDraft && isPreviewVisible) nextPreview else preview,
             subjectHydratedFromServer = subjectHydratedFromServer || hydrateSubject,
+            subjectHydratedContent = subjectHydratedContent.hydratedValue(nextSubject.text, hydrateSubject),
             draftHydratedFromServer = draftHydratedFromServer || hydrateDraft,
+            draftHydratedContent = draftHydratedContent.hydratedValue(nextDraft.text, hydrateDraft),
             // The form's `selectedSubcat` is `Int?` post-#149 :
             //  - Edit FP : non-null by `parseEditFirstPost` contract, kept as-is.
             //  - New : HFR serves no pre-selection, so `form.selectedSubcat` is
             //    null. We fall back to `subcat` (the entry chip from the
             //    request), letting the user override via the dropdown later.
-            selectedSubcat = if (hydrateOptions) form.selectedSubcat ?: subcat else selectedSubcat,
+            selectedSubcat = selectedSubcat.hydratedValue(form.selectedSubcat ?: subcat, hydrateOptions),
             subcategoryChoices = form.subcategoryChoices,
             // #213 — propagate whether HFR served a <select name=subcat>. A cat
             // without sub-category (false) is submittable with subcat=0 ; a cat
@@ -972,14 +1047,13 @@ class TopicFormViewModel @AssistedInject constructor(
             hasSubcategorySelect = form.hasSubcategorySelect,
             pollPresent = form.poll.present,
             pollEditable = form.poll.editableInThisVersion,
-            signatureEnabled = if (hydrateOptions) form.options.signatureEnabled else signatureEnabled,
-            smileyDisabled = if (hydrateOptions) form.options.smileyDisabled else smileyDisabled,
-            emailNotificationEnabled = if (hydrateOptions) {
-                form.options.emailNotificationEnabled
-            } else {
-                emailNotificationEnabled
-            },
-            msgIcon = if (hydrateOptions) form.msgIcon.toEditorMsgIcon() else msgIcon,
+            signatureEnabled = signatureEnabled.hydratedValue(form.options.signatureEnabled, hydrateOptions),
+            smileyDisabled = smileyDisabled.hydratedValue(form.options.smileyDisabled, hydrateOptions),
+            emailNotificationEnabled = emailNotificationEnabled.hydratedValue(
+                form.options.emailNotificationEnabled,
+                hydrateOptions,
+            ),
+            msgIcon = msgIcon.hydratedValue(form.msgIcon.toEditorMsgIcon(), hydrateOptions),
             optionsHydratedFromForm = true,
             // Propagate the parsed anonymous flag so `canSubmit` can refuse
             // the POST locally (the wire would refuse too, but we don't want
@@ -1014,6 +1088,7 @@ class TopicFormViewModel @AssistedInject constructor(
 
     private companion object {
         private const val LOG_TAG_VM = "TopicFormVM"
+        private const val DRAFT_RESTORE_OFFER_FINGERPRINT_KEY = "draft_restore_offer_fingerprint"
 
         // #405 — idle window after the last edit before the draft is persisted (cf. PostEditorViewModel).
         private const val AUTOSAVE_DEBOUNCE_MS = 750L

@@ -25,6 +25,8 @@ data class PrivateMessageComposeUiState(
     val formAvailable: Boolean = false,
     val formError: Boolean = false,
     val recipients: String = "",
+    /** Exact untouched recipient prefill supplied by routing/HFR, distinct from a user edit. */
+    val recipientsHydratedContent: String? = null,
     val subject: String = "",
     val draft: TextFieldValue = TextFieldValue(),
     val isPreviewVisible: Boolean = false,

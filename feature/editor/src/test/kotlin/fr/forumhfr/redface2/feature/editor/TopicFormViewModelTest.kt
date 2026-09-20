@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.ui.editor.UploadError
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.lifecycle.SavedStateHandle
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
@@ -39,6 +40,8 @@ import fr.forumhfr.redface2.core.domain.upload.UploadedImage
 import fr.forumhfr.redface2.core.domain.upload.UploadedImageRecord
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerContract
+import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
@@ -953,10 +956,179 @@ class TopicFormViewModelTest {
     }
 
     @Test
+    fun `New recreation reoffers until decision and typing still autosaves`() = runTest {
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        val savedStateHandle = SavedStateHandle()
+        draftStore.preload(
+            key,
+            EditorDraftStore.Draft(body = "rescued body", subject = "rescued title"),
+        )
+        val first = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            savedStateHandle = savedStateHandle,
+        )
+        testScheduler.advanceUntilIdle()
+        assertEquals("rescued body", first.state.value.restorableDraft)
+        assertNull(savedStateHandle.get<String>("draft_restore_offer_fingerprint"))
+
+        val recreated = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            savedStateHandle = savedStateHandle,
+        )
+        testScheduler.advanceUntilIdle()
+        assertEquals("rescued body", recreated.state.value.restorableDraft)
+        assertEquals("rescued title", recreated.state.value.restorableSubject)
+
+        recreated.submit(TopicFormIntent.SubjectChanged(TextFieldValue("new live title")))
+        recreated.submit(TopicFormIntent.ContentChanged(TextFieldValue("new live body")))
+        testScheduler.advanceTimeBy(800L)
+        testScheduler.runCurrent()
+        assertEquals("new live body", draftStore.saved[key]?.body)
+        assertEquals("new live title", draftStore.saved[key]?.subject)
+        assertEquals("tester", draftStore.lastSavedOwner)
+
+        recreated.submit(TopicFormIntent.DraftRestoreRequested)
+        testScheduler.advanceUntilIdle()
+        assertNull(savedStateHandle.get<String>("draft_restore_offer_fingerprint"))
+        assertEquals("new live body\n\nrescued body", draftStore.saved[key]?.body)
+
+        val afterRestore = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            savedStateHandle = savedStateHandle,
+        )
+        testScheduler.advanceUntilIdle()
+        assertEquals("new live body\n\nrescued body", afterRestore.state.value.restorableDraft)
+        assertEquals("new live title", afterRestore.state.value.restorableSubject)
+    }
+
+    @Test
+    fun `New process recreation offers a newer autosaved draft after live state was lost`() = runTest {
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        val savedStateHandle = SavedStateHandle()
+        draftStore.preload(key, EditorDraftStore.Draft(body = "first body", subject = "first title"))
+        val first = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            savedStateHandle = savedStateHandle,
+        )
+        testScheduler.advanceUntilIdle()
+        assertEquals("first body", first.state.value.restorableDraft)
+
+        draftStore.preload(key, EditorDraftStore.Draft(body = "new body", subject = "new title"))
+        val recreated = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            savedStateHandle = savedStateHandle,
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("new body", recreated.state.value.restorableDraft)
+        assertEquals("new title", recreated.state.value.restorableSubject)
+    }
+
+    @Test
+    fun `EditFirstPost server hydration does not hide a different cached draft`() = runTest {
+        draftStore.preload(
+            EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE),
+            EditorDraftStore.Draft(body = "unfinished body", subject = "unfinished title"),
+        )
+
+        val viewModel = newViewModel()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(topicFormRepository.formResult.initialContent, viewModel.state.value.draft.text)
+        assertEquals(topicFormRepository.formResult.subject, viewModel.state.value.subject.text)
+        assertEquals("unfinished body", viewModel.state.value.restorableDraft)
+        assertEquals("unfinished title", viewModel.state.value.restorableSubject)
+    }
+
+    @Test
+    fun `EditFirstPost server hydration removes an identical cached draft offer`() = runTest {
+        draftStore.preload(
+            EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE),
+            EditorDraftStore.Draft(
+                body = topicFormRepository.formResult.initialContent,
+                subject = topicFormRepository.formResult.subject,
+            ),
+        )
+
+        val viewModel = newViewModel()
+        testScheduler.advanceUntilIdle()
+
+        assertNull(viewModel.state.value.restorableDraft)
+        assertNull(viewModel.state.value.restorableSubject)
+    }
+
+    @Test
+    fun `moving selection in a hydrated first post keeps the restore offer`() = runTest {
+        val key = EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE)
+        draftStore.preload(
+            key,
+            EditorDraftStore.Draft(body = "unfinished body", subject = "unfinished title"),
+        )
+        val viewModel = newViewModel()
+        testScheduler.advanceUntilIdle()
+        val hydrated = viewModel.state.value.draft
+
+        viewModel.submit(
+            TopicFormIntent.ContentChanged(hydrated.copy(selection = TextRange(4))),
+        )
+        testScheduler.advanceTimeBy(800L)
+        testScheduler.runCurrent()
+
+        assertEquals("unfinished body", viewModel.state.value.restorableDraft)
+        assertEquals("unfinished body", draftStore.saved[key]?.body)
+    }
+
+    @Test
+    fun `typing a new topic subject leaves the pending offer row untouched`() = runTest {
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        draftStore.preload(
+            key,
+            EditorDraftStore.Draft(body = "rescued body", subject = "old title"),
+        )
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("new title")))
+        testScheduler.advanceTimeBy(800L)
+        testScheduler.runCurrent()
+
+        assertEquals("no hybrid row may be written while the visible body is blank", 0, draftStore.saveCount)
+        assertEquals("rescued body", draftStore.saved[key]?.body)
+        assertEquals("old title", draftStore.saved[key]?.subject)
+        assertEquals("rescued body", viewModel.state.value.restorableDraft)
+        viewModel.submit(TopicFormIntent.DraftRestoreRequested)
+        testScheduler.advanceUntilIdle()
+        assertEquals("rescued body", viewModel.state.value.draft.text)
+        assertEquals("new title", viewModel.state.value.subject.text)
+    }
+
+    @Test
+    fun `restoring appends the offered topic body and keeps a live title`() = runTest {
+        draftStore.preload(
+            EditorDraftKey.newTopic(SAMPLE_CAT),
+            EditorDraftStore.Draft(body = "rescued body", subject = "rescued title"),
+        )
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("fresh title")))
+        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("fresh body")))
+        viewModel.submit(TopicFormIntent.DraftRestoreRequested)
+
+        assertEquals("fresh body\n\nrescued body", viewModel.state.value.draft.text)
+        assertEquals("fresh title", viewModel.state.value.subject.text)
+        assertNull(viewModel.state.value.restorableDraft)
+    }
+
+    @Test
     fun `New discard deletes the cached draft and clears the banner`() = runTest {
         val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        val savedStateHandle = SavedStateHandle()
         draftStore.preload(key, EditorDraftStore.Draft(body = "rescued body"))
-        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        val viewModel = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            savedStateHandle = savedStateHandle,
+        )
         testScheduler.advanceUntilIdle()
 
         viewModel.submit(TopicFormIntent.DraftDiscardRequested)
@@ -964,6 +1136,14 @@ class TopicFormViewModelTest {
 
         assertTrue(draftStore.deletedKeys.contains(key))
         assertNull(viewModel.state.value.restorableDraft)
+        assertTrue(savedStateHandle.get<String>("draft_restore_offer_fingerprint") != null)
+
+        val recreated = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            savedStateHandle = savedStateHandle,
+        )
+        testScheduler.advanceUntilIdle()
+        assertNull(recreated.state.value.restorableDraft)
     }
 
     @Test
@@ -1029,7 +1209,7 @@ class TopicFormViewModelTest {
     }
 
     @Test
-    fun `CloseRequested with blank subject and body deletes the row and still closes`() = runTest {
+    fun `CloseRequested with blank live fields preserves a pending restore offer`() = runTest {
         val key = EditorDraftKey.newTopic(SAMPLE_CAT)
         draftStore.preload(key, EditorDraftStore.Draft(body = "stale", subject = "stale title"))
         val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
@@ -1039,7 +1219,29 @@ class TopicFormViewModelTest {
 
         val effect = viewModel.effects.first()
         assertEquals(TopicFormEffect.CloseCommitted, effect)
+        assertEquals("closing must not rewrite a pending offer", 0, draftStore.saveCount)
+        assertFalse(draftStore.deletedKeys.contains(key))
+        assertEquals("stale", draftStore.saved[key]?.body)
+        assertEquals("stale", viewModel.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `CloseRequested with blank fields and no pending offer deletes the stale row`() = runTest {
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        testScheduler.advanceUntilIdle()
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+
+        viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("temporary title")))
+        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("temporary body")))
+        testScheduler.advanceTimeBy(800L)
+        testScheduler.runCurrent()
+        viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("")))
+        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("")))
+        viewModel.submit(TopicFormIntent.CloseRequested)
+
+        assertEquals(TopicFormEffect.CloseCommitted, viewModel.effects.first())
         assertTrue("an emptied form must not leave a stale row", draftStore.deletedKeys.contains(key))
+        assertNull(draftStore.saved[key])
     }
 
     @Test
@@ -1107,6 +1309,122 @@ class TopicFormViewModelTest {
     // the batch semantics themselves are pinned by PostEditorViewModelTest — here we prove the
     // topic-form copy is actually wired: authenticated pick uploads + inserts, anonymous is inert).
     // ──────────────────────────────────────────────────────────────────────
+
+    @Test
+    fun `empty picker result shows a banner without starting an upload`() = runTest {
+        val diagnostics = DiagnosticsLog()
+        val uploads = FakeUploadRepository()
+        val reader = FakeImageUploadReader()
+        val viewModel = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            diagnostics = diagnostics,
+            uploadRepository = uploads,
+            imageUploadReader = reader,
+        )
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(
+            TopicFormIntent.ContentChanged(
+                TextFieldValue(text = "draft", selection = TextRange(1, 4)),
+            ),
+        )
+        testScheduler.advanceUntilIdle()
+        val stateBefore = viewModel.state.value
+
+        viewModel.effects.test {
+            viewModel.submit(
+                TopicFormIntent.ImagePickerEventReceived(
+                    ImagePickerEvent.Result(
+                        contract = ImagePickerContract.GET_MULTIPLE_CONTENTS,
+                        uris = emptyList(),
+                    ),
+                ),
+            )
+            testScheduler.advanceUntilIdle()
+
+            assertEquals(
+                stateBefore.copy(uploadError = UploadError.NoImageReceived),
+                viewModel.state.value,
+            )
+            assertFalse(viewModel.state.value.isUploading)
+            assertTrue(reader.readUris.isEmpty())
+            assertEquals(0, uploads.uploadCalls)
+            assertEquals(
+                listOf(
+                    "result contract=GetMultipleContents count=0 sources=[]",
+                    "onImagesPicked count=0",
+                ),
+                diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
+            )
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `single picker result keeps the upload path and no empty-result error`() = runTest {
+        val uploads = FakeUploadRepository()
+        val reader = FakeImageUploadReader()
+        val viewModel = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            uploadRepository = uploads,
+            imageUploadReader = reader,
+        )
+        testScheduler.advanceUntilIdle()
+        val uri = "content://media/picker/photo/1"
+
+        viewModel.submit(
+            TopicFormIntent.ImagePickerEventReceived(
+                ImagePickerEvent.Result(
+                    contract = ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA,
+                    uris = listOf(uri),
+                ),
+            ),
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(listOf(uri), reader.readUris)
+        assertEquals(1, uploads.uploadCalls)
+        assertNull(viewModel.state.value.uploadError)
+        assertFalse(viewModel.state.value.isUploading)
+    }
+
+    @Test
+    fun `document picker logs eleven raw uris then uploads the first ten`() = runTest {
+        val diagnostics = DiagnosticsLog()
+        val uploads = FakeUploadRepository()
+        val reader = FakeImageUploadReader()
+        val viewModel = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            diagnostics = diagnostics,
+            uploadRepository = uploads,
+            imageUploadReader = reader,
+        )
+        testScheduler.advanceUntilIdle()
+        val uris = (1..11).map {
+            "content://com.android.providers.media.documents/document/image%3A$it"
+        }
+
+        viewModel.submit(
+            TopicFormIntent.ImagePickerEventReceived(
+                ImagePickerEvent.Result(
+                    contract = ImagePickerContract.OPEN_MULTIPLE_DOCUMENTS,
+                    uris = uris,
+                ),
+            ),
+        )
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(uris.take(10), reader.readUris)
+        assertEquals(10, uploads.uploadCalls)
+        assertEquals(
+            listOf(
+                "result contract=OpenMultipleDocuments count=11 " +
+                    "sources=[content://com.android.providers.media.documents]",
+                "onImagesPicked count=10",
+            ),
+            diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
+        )
+    }
 
     @Test
     fun `picked images upload and insert one img per success, in pick order (#459)`() = runTest {
@@ -1201,6 +1519,7 @@ class TopicFormViewModelTest {
         authRepository: AuthRepository = FakeAuthRepository(),
         uploadRepository: UploadRepository = FakeUploadRepository(),
         imageUploadReader: ImageUploadReader = FakeImageUploadReader(),
+        savedStateHandle: SavedStateHandle = SavedStateHandle(),
     ): TopicFormViewModel = TopicFormViewModel(
         request = TopicFormRequest(
             mode = TopicFormMode.New,
@@ -1219,6 +1538,7 @@ class TopicFormViewModelTest {
         authRepository = authRepository,
         uploadRepository = uploadRepository,
         imageUploadReader = imageUploadReader,
+        savedStateHandle = savedStateHandle,
     )
 
     private suspend fun app.cash.turbine.ReceiveTurbine<TopicFormState>.awaitHydratedState(): TopicFormState {
@@ -1721,6 +2041,8 @@ class TopicFormViewModelTest {
         val deletedKeys: MutableList<String> = mutableListOf()
         var saveCount: Int = 0
             private set
+        var lastSavedOwner: String? = null
+            private set
 
         fun preload(key: String, draft: EditorDraftStore.Draft) {
             saved[key] = draft
@@ -1732,6 +2054,7 @@ class TopicFormViewModelTest {
 
         override suspend fun save(owner: String?, key: String, draft: EditorDraftStore.Draft) {
             saveCount += 1
+            lastSavedOwner = owner
             saved[key] = draft
         }
 

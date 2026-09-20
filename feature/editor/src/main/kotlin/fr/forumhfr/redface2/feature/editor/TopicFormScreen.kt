@@ -8,10 +8,12 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
@@ -39,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -46,7 +49,9 @@ import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
+import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
+import fr.forumhfr.redface2.core.ui.editor.editorControlsMaxHeight
 
 /**
  * Topic-level form screen. Live for [TopicFormMode.EditFirstPost] (Phase 2D
@@ -151,96 +156,45 @@ internal fun TopicFormContent(
 ) {
     var imageUrlDialogOpen by remember { mutableStateOf(false) }
     var optionsSheetOpen by remember { mutableStateOf(false) }
-    val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode) { uris ->
-        onIntent(TopicFormIntent.ImagesPicked(uris))
+    val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode) { event ->
+        onIntent(TopicFormIntent.ImagePickerEventReceived(event))
     }
     Surface(
         modifier = modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.surface,
     ) {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
-            Column(
+            BoxWithConstraints(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 16.dp, vertical = 12.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Text(
-                    text = stringResource(state.mode.titleResId),
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
+                val controlsMaxHeight = editorControlsMaxHeight(
+                    available = maxHeight,
+                    fieldMin = EDITOR_DRAFT_MIN_HEIGHT,
                 )
-                OutlinedTextField(
-                    value = state.subject,
-                    onValueChange = { onIntent(TopicFormIntent.SubjectChanged(it)) },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = !state.isSubmitting,
-                    label = { Text(stringResource(R.string.editor_topic_subject_label)) },
-                    // #237 — sentence capitalization (parité RF1) like the body field.
-                    keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
-                )
-                // #213 — a category WITHOUT a sub-category (e.g. IA, cat=32) renders no
-                // `<select name=subcat>` on HFR's form (`hasSubcategorySelect = false`), so
-                // posting there uses subcat=0. Hide the picker entirely in that case rather
-                // than showing an empty « choisir une sous-catégorie » dropdown the user
-                // cannot act on (dogfood feedback @XaaT). Categories WITH sub-categories keep it.
-                if (state.hasSubcategorySelect) {
-                    SubcategoryDropdown(
-                        choices = state.subcategoryChoices,
-                        selectedSubcat = state.selectedSubcat,
-                        enabled = !state.isSubmitting && !state.isLoadingForm,
-                        onSelect = { id -> onIntent(TopicFormIntent.SubcatSelected(id)) },
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    TopicFormControlsZone(
+                        state = state,
+                        onIntent = onIntent,
+                        maxHeight = controlsMaxHeight,
+                        onImageUrlRequested = { imageUrlDialogOpen = true },
+                        onImageUploadRequested = launchImagePicker,
+                    )
+                    BbcodeTextField(
+                        value = state.draft,
+                        onValueChange = { onIntent(TopicFormIntent.ContentChanged(it)) },
+                        label = stringResource(R.string.editor_field_label),
+                        modifier = Modifier.weight(1f),
+                        // #459 — lock editing during a batch so the caret cannot move between two
+                        // programmatic [img] insertions (keeps them in pick order).
+                        readOnly = state.isUploading,
                     )
                 }
-                BbcodeToolbar(
-                    onAction = { onIntent(TopicFormIntent.ToolbarActionClicked(it)) },
-                    onImageUrlRequested = { imageUrlDialogOpen = true },
-                    // #459 — upload wiring, same affordance as the reply editor.
-                    onImageUploadRequested = launchImagePicker,
-                    uploading = state.isUploading,
-                )
-                // #459 — « n/N » batch counter while a multi-image upload is in flight.
-                UploadProgressLabel(state.uploadProgress)
-                BbcodeTextField(
-                    value = state.draft,
-                    onValueChange = { onIntent(TopicFormIntent.ContentChanged(it)) },
-                    label = stringResource(R.string.editor_field_label),
-                    modifier = Modifier.fillMaxWidth(),
-                    // #459 — lock editing during a batch so the caret cannot move between two
-                    // programmatic [img] insertions (keeps them in pick order).
-                    readOnly = state.isUploading,
-                )
-                TextButton(onClick = { onIntent(TopicFormIntent.TogglePreview) }) {
-                    Text(
-                        text = if (state.isPreviewVisible) {
-                            stringResource(R.string.editor_preview_hide)
-                        } else {
-                            stringResource(R.string.editor_preview_show)
-                        },
-                    )
-                }
-                if (state.isPreviewVisible) {
-                    BbcodePreview(content = state.preview, modifier = Modifier.fillMaxWidth())
-                }
-                if (state.pollPresent && !state.pollEditable) {
-                    // Honest copy : the topic has a poll, but Phase 2D #148 does
-                    // not edit poll fields — they are preserved verbatim on POST.
-                    Text(
-                        text = stringResource(R.string.editor_topic_poll_readonly_note),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                if (state.restorableDraft != null || state.restorableSubject != null) {
-                    DraftRestoreBanner(
-                        onRestore = { onIntent(TopicFormIntent.DraftRestoreRequested) },
-                        onDiscard = { onIntent(TopicFormIntent.DraftDiscardRequested) },
-                    )
-                }
-                TopicFormErrorBanners(state = state, onIntent = onIntent)
             }
             // Send-button accessibility — pin « Envoyer » to the bottom, above the IME, so the user
             // never has to dismiss the keyboard to submit a new topic / first-post edit (shared
@@ -284,6 +238,102 @@ internal fun TopicFormContent(
             onDismiss = { imageUrlDialogOpen = false },
             onInsert = { url -> onIntent(TopicFormIntent.ImageUrlInserted(url)) },
         )
+    }
+}
+
+/**
+ * #447/#555/#1406 — every variable-height element competes inside one capped scroller. Alerts are
+ * emitted first, followed by the title, subject controls, toolbar, upload state, preview and poll.
+ * The weighted BBCode field in [TopicFormContent] therefore keeps its real viewport when banners
+ * and the IME are all visible.
+ */
+@Composable
+private fun TopicFormControlsZone(
+    state: TopicFormState,
+    onIntent: (TopicFormIntent) -> Unit,
+    maxHeight: Dp,
+    onImageUrlRequested: () -> Unit,
+    onImageUploadRequested: () -> Unit,
+) {
+    val controlsScroll = rememberScrollState()
+    val hasRestorableDraft =
+        state.restorableDraft != null || state.restorableSubject != null
+    val hasAlert = hasRestorableDraft ||
+        state.submitError != null || state.uploadError != null
+    LaunchedEffect(hasRestorableDraft, state.submitError, state.uploadError) {
+        if (hasAlert) controlsScroll.animateScrollTo(0)
+    }
+    Column(
+        modifier = Modifier
+            .heightIn(max = maxHeight)
+            .verticalScroll(controlsScroll),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        if (hasRestorableDraft) {
+            DraftRestoreBanner(
+                onRestore = { onIntent(TopicFormIntent.DraftRestoreRequested) },
+                onDiscard = { onIntent(TopicFormIntent.DraftDiscardRequested) },
+            )
+        }
+        TopicFormErrorBanners(state = state, onIntent = onIntent)
+        Text(
+            text = stringResource(state.mode.titleResId),
+            style = MaterialTheme.typography.titleLarge,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        OutlinedTextField(
+            value = state.subject,
+            onValueChange = { onIntent(TopicFormIntent.SubjectChanged(it)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth(),
+            enabled = !state.isSubmitting,
+            label = { Text(stringResource(R.string.editor_topic_subject_label)) },
+            // #237 — sentence capitalization (parité RF1) like the body field.
+            keyboardOptions = KeyboardOptions(
+                capitalization = KeyboardCapitalization.Sentences,
+            ),
+        )
+        // #213 — categories without a sub-category have no HFR select.
+        if (state.hasSubcategorySelect) {
+            SubcategoryDropdown(
+                choices = state.subcategoryChoices,
+                selectedSubcat = state.selectedSubcat,
+                enabled = !state.isSubmitting && !state.isLoadingForm,
+                onSelect = { id -> onIntent(TopicFormIntent.SubcatSelected(id)) },
+            )
+        }
+        BbcodeToolbar(
+            onAction = { onIntent(TopicFormIntent.ToolbarActionClicked(it)) },
+            onImageUrlRequested = onImageUrlRequested,
+            // #459 — upload wiring, same affordance as the reply editor.
+            onImageUploadRequested = onImageUploadRequested,
+            uploading = state.isUploading,
+        )
+        // #459 — « n/N » batch counter while a multi-image upload is in flight.
+        state.uploadProgress?.let { progress ->
+            UploadProgressLabel(progress)
+        }
+        TextButton(onClick = { onIntent(TopicFormIntent.TogglePreview) }) {
+            Text(
+                text = if (state.isPreviewVisible) {
+                    stringResource(R.string.editor_preview_hide)
+                } else {
+                    stringResource(R.string.editor_preview_show)
+                },
+            )
+        }
+        if (state.isPreviewVisible) {
+            BbcodePreview(content = state.preview, modifier = Modifier.fillMaxWidth())
+        }
+        if (state.pollPresent && !state.pollEditable) {
+            // Honest copy : the topic has a poll, but Phase 2D #148 does
+            // not edit poll fields — they are preserved verbatim on POST.
+            Text(
+                text = stringResource(R.string.editor_topic_poll_readonly_note),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 
