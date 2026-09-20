@@ -5,9 +5,9 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
+import kotlinx.coroutines.launch
 
 /**
  * #1301 — turns the host's acknowledgement counter into exactly ONE bounded snackbar on the flags
@@ -17,17 +17,11 @@ import androidx.compose.runtime.setValue
  * pop reveals the list and not a topic entry. The #895 étape 4 post-submit outcome stays guarded on
  * that topic entry — armed from here it would sit in its slot and fire on a LATER, unrelated open
  * of the topic — so the reader used to come back with no sign at all that the message went through.
- * This is that sign : an acknowledgement, with no refresh and no navigation behind it.
+ * This is that sign: an acknowledgement, with no refresh and no navigation behind it.
  *
- * [SnackbarDuration.Short] is deliberate : nothing on this screen refreshes after the submit, so an
- * Indefinite acknowledgement would have no terminal condition. It preempts whatever the host is
- * showing (the #99 flag-removal feedback shares it) because it answers the reader's LAST action and
- * must not wait in line behind an older one.
- *
- * The counter is mirrored locally BEFORE [onConsumed] resets it upstream : showing a snackbar
- * suspends for as long as it stays on screen, and an effect keyed on the host value would be
- * cancelled — dismissing the snackbar — the moment the slot was cleared. Resetting it right away is
- * what keeps a later re-mount of the list (coming back from a topic) from replaying it.
+ * Same one-shot handshake as `QuickConfigRequestEffect` (#603): the counter is consumed on the
+ * first composition that sees it, which resets it upstream, so a re-mount of the list (coming back
+ * from a topic later in the session) can never replay an acknowledgement already given.
  *
  * @param request the host's monotonic counter ; `0` means nothing is owed.
  */
@@ -38,18 +32,27 @@ internal fun FlagsSubmitAcknowledgementEffect(
     message: String,
     onConsumed: () -> Unit,
 ) {
-    var armed by remember { mutableIntStateOf(0) }
+    val screenScope = rememberCoroutineScope()
+    val currentMessage by rememberUpdatedState(message)
     LaunchedEffect(request) {
         if (request > 0) {
-            armed = request
             onConsumed()
+            // Shown from the SCREEN's scope, not this effect's: [onConsumed] resets the counter,
+            // which restarts this very effect and would cancel — hence dismiss — a snackbar shown
+            // from here the instant it appeared.
+            screenScope.launch { snackbarHostState.showSubmitAcknowledgement(currentMessage) }
         }
     }
-    LaunchedEffect(armed) {
-        if (armed > 0) {
-            snackbarHostState.currentSnackbarData?.dismiss()
-            snackbarHostState.showSnackbar(message = message, duration = SnackbarDuration.Short)
-            armed = 0
-        }
-    }
+}
+
+/**
+ * #1301 — the acknowledgement itself. [SnackbarDuration.Short] is deliberate: nothing on this
+ * screen refreshes after the submit, so an Indefinite acknowledgement would have no terminal
+ * condition. It preempts whatever the host is showing (the #99 flag-removal feedback shares it)
+ * because it answers the reader's LAST action and must not wait in line behind an older one —
+ * Material serialises `showSnackbar` calls behind a single mutex.
+ */
+internal suspend fun SnackbarHostState.showSubmitAcknowledgement(message: String) {
+    currentSnackbarData?.dismiss()
+    showSnackbar(message = message, duration = SnackbarDuration.Short)
 }
