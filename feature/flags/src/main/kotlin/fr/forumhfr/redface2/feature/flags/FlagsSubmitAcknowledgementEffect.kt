@@ -5,12 +5,10 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
-import kotlinx.coroutines.launch
 
 /**
- * #1301 — turns the host's acknowledgement counter into exactly ONE bounded snackbar on the flags
+ * #1301 — turns the host's pending acknowledgement id into one bounded snackbar on the flags
  * list.
  *
  * « Poster un message » on the long-press sheet (#15) opens the editor ON TOP OF this list, so the
@@ -19,28 +17,24 @@ import kotlinx.coroutines.launch
  * of the topic — so the reader used to come back with no sign at all that the message went through.
  * This is that sign: an acknowledgement, with no refresh and no navigation behind it.
  *
- * Same one-shot handshake as `QuickConfigRequestEffect` (#603): the counter is consumed on the
- * first composition that sees it, which resets it upstream, so a re-mount of the list (coming back
- * from a topic later in the session) can never replay an acknowledgement already given.
+ * Unlike a disposable tap request, the id stays pending while [showAcknowledgement] is suspended.
+ * A recreation cancels that attempt without consuming the id, and the restored composition retries
+ * it. Completion clears the exact id handled, so an older snackbar cannot erase a newer handoff.
  *
- * @param request the host's monotonic counter ; `0` means nothing is owed.
+ * @param request the host's pending acknowledgement id; `0` means nothing is owed.
  */
 @Composable
 internal fun FlagsSubmitAcknowledgementEffect(
-    request: Int,
-    snackbarHostState: SnackbarHostState,
-    message: String,
-    onConsumed: () -> Unit,
+    request: Long,
+    onConsumed: (Long) -> Unit,
+    showAcknowledgement: suspend () -> Unit,
 ) {
-    val screenScope = rememberCoroutineScope()
-    val currentMessage by rememberUpdatedState(message)
+    val currentOnConsumed by rememberUpdatedState(onConsumed)
+    val currentShowAcknowledgement by rememberUpdatedState(showAcknowledgement)
     LaunchedEffect(request) {
-        if (request > 0) {
-            onConsumed()
-            // Shown from the SCREEN's scope, not this effect's: [onConsumed] resets the counter,
-            // which restarts this very effect and would cancel — hence dismiss — a snackbar shown
-            // from here the instant it appeared.
-            screenScope.launch { snackbarHostState.showSubmitAcknowledgement(currentMessage) }
+        if (request > 0L) {
+            currentShowAcknowledgement()
+            currentOnConsumed(request)
         }
     }
 }

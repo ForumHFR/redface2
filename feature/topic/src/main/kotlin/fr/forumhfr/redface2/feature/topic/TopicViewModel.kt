@@ -1897,14 +1897,14 @@ class TopicViewModel @AssistedInject constructor(
         pageSnapshots.remove(target)
         jumpStack.clear()
         syncJumpAvailability()
-        performSubmitRefresh(plan)
+        performSubmitRefresh(plan, TopicRefreshKind.PostSubmit)
     }
 
     /**
      * #1243 — explicit Snackbar action after the refreshed submit page reports a later published
      * page. This is now a user gesture, so opening the post page may advance HFR's read flag.
      */
-    fun openSubmittedPostPage(page: Int, scrollTo: Int? = null, departureAnchor: TopicScrollAnchor? = null) {
+    fun openSubmittedPostPage(page: Int, departureAnchor: TopicScrollAnchor? = null) {
         if (page < 1) return
         departureAnchor?.let { pageAnchors[request.page] = it }
         postSubmitRedirectBudget = 0
@@ -1912,12 +1912,13 @@ class TopicViewModel @AssistedInject constructor(
         jumpStack.clear()
         syncJumpAvailability()
         performSubmitRefresh(
-            SubmitRefreshPlan(
+            plan = SubmitRefreshPlan(
                 initialTarget = page,
-                landing = scrollTo?.let { PendingLanding.Post(it) } ?: PendingLanding.Bottom,
+                landing = PendingLanding.Bottom,
                 overflowRedirectAllowed = false,
                 submittedElsewhereNotificationAllowed = false,
             ),
+            submitRefreshKind = TopicRefreshKind.PostSubmitJump,
         )
     }
 
@@ -2033,10 +2034,10 @@ class TopicViewModel @AssistedInject constructor(
      * submit result ; ownership taken via [becomePageOwner] (which cancels the anonymous warmup),
      * never an anonymous prefetch escalating to authenticated.
      */
-    private fun performSubmitRefresh(plan: SubmitRefreshPlan) {
+    private fun performSubmitRefresh(plan: SubmitRefreshPlan, submitRefreshKind: TopicRefreshKind) {
         becomePageOwner()
-        // #1301 — acknowledge synchronously, before any same-page no-op adoption or network wait.
-        _state.update { it.copy(refreshKind = TopicRefreshKind.PostSubmit) }
+        // #1301 — expose the durable cause synchronously, before any adoption or network wait.
+        _state.update { it.copy(refreshKind = submitRefreshKind) }
         savedStateHandle[KEY_FORCE_REFRESH_DONE] = true
         adoptSubmitTarget(plan.initialTarget, plan.landing)
         val generation = ownerGeneration
@@ -2059,7 +2060,7 @@ class TopicViewModel @AssistedInject constructor(
                             search = it.search.capturingAnchor(topic),
                             // #1301 — the first #226 response is not terminal when it redirects.
                             refreshKind = if (shouldRedirect) {
-                                TopicRefreshKind.PostSubmit
+                                submitRefreshKind
                             } else {
                                 TopicRefreshKind.None
                             },

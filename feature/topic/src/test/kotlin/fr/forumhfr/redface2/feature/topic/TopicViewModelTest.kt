@@ -3309,7 +3309,8 @@ class TopicViewModelTest {
                 if (page == 5) actionRefreshGate.await()
             }
             viewModel.openSubmittedPostPage(page = 5, departureAnchor = TopicScrollAnchor(index = 3, offset = 12))
-            assertEquals(TopicRefreshKind.PostSubmit, viewModel.state.value.refreshKind)
+            assertEquals(TopicRefreshKind.PostSubmitJump, viewModel.state.value.refreshKind)
+            assertFalse("a submitted-post jump must not drive pull-to-refresh", viewModel.state.value.isRefreshing)
 
             actionRefreshGate.complete(Unit)
             assertEquals(TopicEffect.ScrollToEndOfPage(5), awaitItem())

@@ -1,6 +1,10 @@
 package fr.forumhfr.redface2.feature.topic
 
 import androidx.compose.material3.SnackbarResult
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
@@ -15,10 +19,10 @@ import kotlinx.coroutines.launch
  * confirmations one after the other (beta feedback from nicko on 0.61.0). Routing both through this
  * coordinator makes the offer REPLACE the confirmation instead.
  *
- * It also separates « a post-submit refresh is running » — [TopicRefreshKind.PostSubmit], the
- * durable state of the network work — from « an acknowledgement is still owed » : taking the offer
- * calls `TopicViewModel.openSubmittedPostPage`, which starts another post-submit refresh. That
- * refresh is a jump, not a new submit, and must not reopen the generic confirmation.
+ * The ViewModel separates a submit refresh ([TopicRefreshKind.PostSubmit]) from the explicit jump
+ * started by the offer ([TopicRefreshKind.PostSubmitJump]). The coordinator therefore owns only
+ * snackbar replacement; it has no transient flag that a recreation or a conflated StateFlow
+ * transition could lose.
  *
  * Plain class remembered by the screen : a one-shot snackbar is an Effect and must never be replayed
  * at recomposition (`docs/specs/mvi.md`), so none of this belongs in [TopicUiState].
@@ -34,18 +38,8 @@ internal class TopicSubmitFeedback(private val dismissCurrentSnackbar: () -> Uni
     /** True while [showing] is the « page N » offer, which the end of a refresh must not remove. */
     private var showingOffer = false
 
-    /** Armed by the offer's action : the refresh it starts is a jump, not a new submit. */
-    private var skipNextConfirmation = false
-
-    /**
-     * #1301 — a post-submit refresh just started : confirm that HFR accepted the message, unless
-     * this refresh is the one the reader asked for by taking the « page N » offer.
-     */
+    /** #1301 — a post-submit refresh just started: confirm that HFR accepted the message. */
     fun confirmSubmit(scope: CoroutineScope, show: suspend () -> Unit) {
-        if (skipNextConfirmation) {
-            skipNextConfirmation = false
-            return
-        }
         replace(scope, offer = false) { show() }
     }
 
@@ -61,7 +55,6 @@ internal class TopicSubmitFeedback(private val dismissCurrentSnackbar: () -> Uni
     ) {
         replace(scope, offer = true) {
             if (show() == SnackbarResult.ActionPerformed) {
-                skipNextConfirmation = true
                 openPage()
             }
         }
@@ -87,5 +80,27 @@ internal class TopicSubmitFeedback(private val dismissCurrentSnackbar: () -> Uni
         dismissCurrentSnackbar()
         showingOffer = offer
         showing = scope.launch { block() }
+    }
+}
+
+/**
+ * #1301 — bridges the ViewModel's durable refresh cause to the one-shot snackbar coordinator.
+ * Only a real submit owns a confirmation; a jump still owns progress but dismisses no offer because
+ * [TopicSubmitFeedback.dismissConfirmation] preserves the offer currently on screen.
+ */
+@Composable
+internal fun TopicSubmitFeedbackEffect(
+    refreshKind: TopicRefreshKind,
+    submitFeedback: TopicSubmitFeedback,
+    scope: CoroutineScope,
+    showConfirmation: suspend () -> Unit,
+) {
+    val currentShowConfirmation by rememberUpdatedState(showConfirmation)
+    LaunchedEffect(refreshKind, submitFeedback) {
+        if (refreshKind == TopicRefreshKind.PostSubmit) {
+            submitFeedback.confirmSubmit(scope) { currentShowConfirmation() }
+        } else {
+            submitFeedback.dismissConfirmation()
+        }
     }
 }

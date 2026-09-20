@@ -105,9 +105,10 @@ data class TopicUiState(
     val writingSurfacePreset: WritingSurfacePreset = WritingSurfacePreset.FULL_EDITOR,
     /**
      * #1301 — refresh lifecycle and cause. [TopicRefreshKind.Manual] belongs to the pull gesture;
-     * [TopicRefreshKind.PostSubmit] survives page redirects and drives the separate submit
-     * acknowledgement/progress feedback. A single source of truth prevents the two indicators
-     * from disagreeing during ownership changes.
+     * [TopicRefreshKind.PostSubmit] and [TopicRefreshKind.PostSubmitJump] survive page redirects
+     * and drive the separate submit progress feedback. Only [TopicRefreshKind.PostSubmit] also
+     * acknowledges publication. A single source of truth prevents the indicators from disagreeing
+     * during ownership changes.
      */
     val refreshKind: TopicRefreshKind = TopicRefreshKind.None,
     /**
@@ -603,7 +604,7 @@ sealed interface TopicEffect {
      * in place. The read flag cannot be advanced by an automatic authenticated load of the tail, so
      * the screen surfaces a Snackbar with an explicit action to open [page].
      */
-    data class PostSubmittedElsewhere(val page: Int, val scrollTo: Int? = null) : TopicEffect
+    data class PostSubmittedElsewhere(val page: Int) : TopicEffect
 
     /**
      * #335 — emitted when a manual pull-to-refresh (`Refresh` intent) failed to reach HFR. The

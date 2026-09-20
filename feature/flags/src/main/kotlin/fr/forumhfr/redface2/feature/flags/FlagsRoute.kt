@@ -196,10 +196,9 @@ fun FlagsRoute(
     // #1301 — bumped by the host when an editor opened FROM this list (« Poster un message », #15)
     // submitted successfully. The list has no topic entry to apply the #895 post-submit outcome to,
     // so without this the reader came back with nothing telling them the message went through.
-    submitAcknowledgement: Int = 0,
-    // #1301 — reset the host counter as soon as the acknowledgement is taken over, so a re-mount
-    // (coming back from a topic later in the session) can never replay it.
-    onSubmitAcknowledged: () -> Unit = {},
+    submitAcknowledgement: Long = 0L,
+    // #1301 — clear only the id whose snackbar completed, preserving a newer pending handoff.
+    onSubmitAcknowledged: (Long) -> Unit = { _ -> },
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
     val viewModel: FlagsViewModel = hiltViewModel()
@@ -374,13 +373,13 @@ fun FlagsRoute(
         }
     }
 
-    // #1301 — bounded acknowledgement for a message sent from the editor opened on this list.
+    // #1301 — bounded acknowledgement for a message sent from the editor opened on this list. The
+    // id remains pending through recreation until the snackbar has actually completed its display.
+    val submitAcknowledgementMessage = stringResource(R.string.flags_post_submit_confirmed)
     FlagsSubmitAcknowledgementEffect(
         request = submitAcknowledgement,
-        snackbarHostState = snackbarHostState,
-        message = stringResource(R.string.flags_post_submit_confirmed),
         onConsumed = onSubmitAcknowledged,
-    )
+    ) { snackbarHostState.showSubmitAcknowledgement(submitAcknowledgementMessage) }
 
     // #603 PR2 — client-side search over the loaded flags + the app-bar tab picker. The query is
     // hoisted here (the app bar edits it, the body filters with it) and reset on a tab change so a

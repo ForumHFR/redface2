@@ -2,15 +2,19 @@ package fr.forumhfr.redface2.feature.flags
 
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.material3.SnackbarHost
-import androidx.compose.material3.SnackbarHostState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
-import androidx.compose.ui.test.onNodeWithText
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import kotlinx.coroutines.CompletableDeferred
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -20,9 +24,8 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * #1301 — the one-shot handshake behind the flags list's submit acknowledgement: taken over exactly
- * once, and never replayed when the list is re-mounted later in the session (coming back from a
- * topic). What the acknowledgement itself looks like is covered by [FlagsSubmitAcknowledgementTest].
+ * #1301 — the saveable handshake behind the flags list's submit acknowledgement. What the
+ * acknowledgement itself looks like is covered by [FlagsSubmitAcknowledgementTest].
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
@@ -33,42 +36,43 @@ class FlagsSubmitAcknowledgementEffectTest {
     val compose = createComposeRule()
 
     @Test
-    fun `an armed counter is taken over once and a re-mount never replays it`() {
-        val host = SnackbarHostState()
-        val request = mutableIntStateOf(0)
+    fun `an armed id is consumed after handling and a later re-mount never replays it`() {
+        val request = mutableLongStateOf(0L)
         val mount = mutableIntStateOf(0)
-        var consumed = 0
+        val handled = CompletableDeferred<Unit>()
+        val consumed = mutableListOf<Long>()
+        var handlingStarted = 0
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                // Real UI on screen on purpose: an empty composition schedules no frame under
-                // Robolectric, so the effects below would never reach the main looper.
                 Box(modifier = Modifier.fillMaxSize()) {
-                    SnackbarHost(host)
-                    // `key` stands in for leaving the flags list and coming back to it.
+                    // #1301 — `key` stands in for leaving the flags list and coming back to it.
                     key(mount.intValue) {
                         FlagsSubmitAcknowledgementEffect(
-                            request = request.intValue,
-                            snackbarHostState = host,
-                            message = MESSAGE,
-                            onConsumed = {
-                                consumed += 1
-                                request.intValue = 0
+                            request = request.longValue,
+                            onConsumed = { requestId ->
+                                consumed += requestId
+                                if (request.longValue == requestId) request.longValue = 0L
                             },
-                        )
+                        ) {
+                            handlingStarted += 1
+                            handled.await()
+                        }
                     }
                 }
             }
         }
 
-        // The state lives outside the composition, so the global-snapshot write has to be
-        // published explicitly for the recomposer to see it in a test.
+        // #1301 — the state lives outside the composition, so publish its global-snapshot write
+        // explicitly for the recomposer to see it in this test.
         compose.runOnIdle {
-            request.intValue = 1
+            request.longValue = 1L
             Snapshot.sendApplyNotifications()
         }
-        compose.waitForIdle()
-        compose.waitUntil(TIMEOUT_MS) { consumed == 1 }
-        compose.onNodeWithText(MESSAGE).assertExists()
+        compose.waitUntil(TIMEOUT_MS) { handlingStarted == 1 }
+        assertEquals("the pending id must survive while the snackbar is handled", emptyList<Long>(), consumed)
+
+        compose.runOnIdle { handled.complete(Unit) }
+        compose.waitUntil(TIMEOUT_MS) { consumed == listOf(1L) }
 
         compose.runOnIdle {
             mount.intValue += 1
@@ -76,12 +80,54 @@ class FlagsSubmitAcknowledgementEffectTest {
         }
         compose.waitForIdle()
 
-        assertEquals("the acknowledgement is owed exactly once", 1, consumed)
-        assertEquals("the host counter must be free again", 0, request.intValue)
+        assertEquals("a handled acknowledgement must not replay", 1, handlingStarted)
+        assertEquals("the pending id must be free again", 0L, request.longValue)
+    }
+
+    @Test
+    fun `activity recreation before handling preserves and retries the pending id`() {
+        val restorationTester = StateRestorationTester(compose)
+        val handlingGate = CompletableDeferred<Unit>()
+        val consumed = mutableListOf<Long>()
+        var handlingStarted = 0
+        lateinit var publish: () -> Unit
+
+        restorationTester.setContent {
+            var request by rememberSaveable { mutableStateOf(0L) }
+            publish = { request += 1L }
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    FlagsSubmitAcknowledgementEffect(
+                        request = request,
+                        onConsumed = { requestId ->
+                            consumed += requestId
+                            if (request == requestId) request = 0L
+                        },
+                    ) {
+                        handlingStarted += 1
+                        handlingGate.await()
+                    }
+                }
+            }
+        }
+
+        compose.runOnIdle { publish() }
+        compose.waitUntil(TIMEOUT_MS) { handlingStarted == 1 }
+        assertEquals("the id must not be consumed before snackbar handling completes", emptyList<Long>(), consumed)
+
+        // #1301 — emulateSavedInstanceStateRestore destroys the Activity composition while the
+        // snackbar is suspended, then restores the production rememberSaveable contract.
+        restorationTester.emulateSavedInstanceStateRestore()
+        compose.waitUntil(TIMEOUT_MS) { handlingStarted == 2 }
+        assertEquals("recreation must leave the acknowledgement pending", emptyList<Long>(), consumed)
+
+        compose.runOnIdle { handlingGate.complete(Unit) }
+        compose.waitUntil(TIMEOUT_MS) { consumed == listOf(1L) }
+
+        assertEquals("only the restored attempt may settle the pending id", listOf(1L), consumed)
     }
 
     private companion object {
-        const val MESSAGE = "Message publié"
         const val TIMEOUT_MS = 2_000L
     }
 }

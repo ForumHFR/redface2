@@ -507,22 +507,17 @@ fun TopicScreen(
     // confirm → close flow) ; the outcomes ride the screen's single TopicEffect collector below.
     val closePollState by viewModel.closePollState.collectAsStateWithLifecycle()
 
-    // #1301 — HFR has accepted the message before this state begins. Keep that confirmation on
-    // screen while the retained topic refreshes; leaving PostSubmit removes it — unless the
-    // « page N » offer already replaced it. Redirects retain PostSubmit, so it never flashes off.
-    // The coordinator owns the snackbar coroutine (not this effect) so that the offer, which
-    // arrives on the effect channel, can cancel it whatever order the two reach the screen.
-    LaunchedEffect(state.refreshKind, submitFeedback) {
-        if (state.refreshKind == TopicRefreshKind.PostSubmit) {
-            submitFeedback.confirmSubmit(snackbarScope) {
-                snackbarHostState.showSnackbar(
-                    message = postSubmittedMsg,
-                    duration = SnackbarDuration.Indefinite,
-                )
-            }
-        } else {
-            submitFeedback.dismissConfirmation()
-        }
+    // #1301 — only a real submit confirms publication; the durable PostSubmitJump kind survives a
+    // recreation during « Y aller » without replaying it. Both kinds keep the progress hairline.
+    TopicSubmitFeedbackEffect(
+        refreshKind = state.refreshKind,
+        submitFeedback = submitFeedback,
+        scope = snackbarScope,
+    ) {
+        snackbarHostState.showSnackbar(
+            message = postSubmittedMsg,
+            duration = SnackbarDuration.Indefinite,
+        )
     }
 
     // Bug fix (build 89) — report the loaded title up so `:app` caches it per topic. The next page
@@ -715,9 +710,8 @@ fun TopicScreen(
                         },
                         openPage = {
                             viewModel.openSubmittedPostPage(
-                                effect.page,
-                                effect.scrollTo,
-                                alignedDepartureAnchor(),
+                                page = effect.page,
+                                departureAnchor = alignedDepartureAnchor(),
                             )
                         },
                     )
@@ -1945,8 +1939,7 @@ internal fun TopicTopBar(
     )
     // #809 — long-press on the title opens the drapeau-removal flow (the tap toggle is unchanged).
     val titleLongPressLabel = stringResource(R.string.topic_remove_flag_long_press)
-    val showRefreshHairline = loaded?.provisional == true ||
-        state.refreshKind == TopicRefreshKind.PostSubmit
+    val showRefreshHairline = loaded?.provisional == true || state.refreshKind.isPostSubmitRefresh()
     Column {
         TopAppBar(
             title = {

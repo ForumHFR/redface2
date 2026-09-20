@@ -94,40 +94,6 @@ class TopicSubmitFeedbackTest {
     }
 
     @Test
-    fun `taking the offer silences the refresh it starts`() = runTest {
-        val feedback = TopicSubmitFeedback(dismissCurrentSnackbar = {})
-        var confirmations = 0
-
-        feedback.offerSubmittedElsewhere(
-            scope = this,
-            show = { SnackbarResult.ActionPerformed },
-            // openSubmittedPostPage re-arms TopicRefreshKind.PostSubmit, which reaches the screen as
-            // a fresh confirmSubmit — that progress is a jump, not a new submit.
-            openPage = { feedback.confirmSubmit(this) { confirmations += 1 } },
-        )
-        advanceUntilIdle()
-
-        assertEquals("« Y aller » must not bring « Message publié » back", 0, confirmations)
-    }
-
-    @Test
-    fun `a genuinely new submit after an offer confirms again`() = runTest {
-        val feedback = TopicSubmitFeedback(dismissCurrentSnackbar = {})
-        var confirmations = 0
-
-        feedback.offerSubmittedElsewhere(
-            scope = this,
-            show = { SnackbarResult.ActionPerformed },
-            openPage = { feedback.confirmSubmit(this) { confirmations += 1 } },
-        )
-        advanceUntilIdle()
-        feedback.confirmSubmit(this) { confirmations += 1 }
-        advanceUntilIdle()
-
-        assertEquals(1, confirmations)
-    }
-
-    @Test
     fun `the end of the refresh removes the confirmation`() = runTest {
         var dismissedCurrent = 0
         val feedback = TopicSubmitFeedback(dismissCurrentSnackbar = { dismissedCurrent += 1 })

@@ -1066,12 +1066,10 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
         // event semantics — a tap mid-rotation is a negligible loss.
         var flagsQuickConfigRequest by remember { mutableStateOf(0) }
 
-        // #1301 — an editor opened ON TOP OF the flags list (#15 « Poster un message ») pops back to
-        // the LIST, so the #895 étape 4 post-submit outcome — guarded on the topic entry below —
-        // never fires and the reader got no sign at all. This counter carries the bounded
-        // acknowledgement instead. Same plain `remember` event semantics as the counter above: a
-        // saved value would re-announce a message published before a config change.
-        var flagsSubmitAckRequest by remember { mutableStateOf(0) }
+        // #1301 — a successful POST from the flags list is owed one bounded acknowledgement. The
+        // pending id is saveable so a recreation between the editor handoff and the snackbar cannot
+        // erase that acknowledgement; the effect clears only the exact id it actually handled.
+        var flagsSubmitAckRequest by rememberSaveable { mutableStateOf(0L) }
 
         // Phase 2 finish (#208) — profile bottom sheet state, hoisted to `:app` so that
         // `:feature:topic` never depends on `:feature:profile`. The sheet is opened from
@@ -1403,8 +1401,12 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                             onFlagsQuickConfigConsumed = { flagsQuickConfigRequest = 0 },
                             flagsSubmitAckNavState = FlagsSubmitAckNavState(
                                 request = flagsSubmitAckRequest,
-                                onPublish = { flagsSubmitAckRequest += 1 },
-                                onConsumed = { flagsSubmitAckRequest = 0 },
+                                onPublish = { flagsSubmitAckRequest += 1L },
+                                onConsumed = { consumedId ->
+                                    if (flagsSubmitAckRequest == consumedId) {
+                                        flagsSubmitAckRequest = 0L
+                                    }
+                                },
                             ),
                             onReportContent = {
                                 startReportEmail(context, reportEmailSubject, reportNoEmailClient)
@@ -1971,18 +1973,17 @@ private data class TopicSubmitNavState(
 /**
  * #1301 — the bounded « message published » acknowledgement owed to the FLAGS list, twin of
  * [TopicSubmitNavState] for the one screen that can host an editor without being the target topic
- * (cf. [SubmitHandoff]). Deliberately carries no payload : the list refreshes nothing and navigates
- * nowhere, so a monotonic counter is all the identity the one-shot needs.
+ * (cf. [SubmitHandoff]). Deliberately carries no domain payload: the list refreshes nothing and
+ * navigates nowhere, so a pending acknowledgement id is all the identity the handshake needs.
  *
- * @property request raised by the editor entry BEFORE its pop ; `0` means nothing is owed.
+ * @property request raised by the editor entry BEFORE its pop; `0` means nothing is owed.
  * @property onPublish arms the acknowledgement.
- * @property onConsumed resets the counter the moment `FlagsRoute` took it over, so a re-mount of
- *   the list (coming back from a topic later in the session) can never replay it.
+ * @property onConsumed clears this exact id after the snackbar was actually handled.
  */
 private data class FlagsSubmitAckNavState(
-    val request: Int,
+    val request: Long,
     val onPublish: () -> Unit,
-    val onConsumed: () -> Unit,
+    val onConsumed: (Long) -> Unit,
 )
 
 /**
