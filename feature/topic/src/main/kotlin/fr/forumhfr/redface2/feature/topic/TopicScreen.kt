@@ -49,7 +49,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -165,34 +164,12 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-
-@Suppress("LongParameterList")
-internal fun CoroutineScope.launchPostSubmittedElsewhereSnackbar(
-    effect: TopicEffect.PostSubmittedElsewhere,
-    message: String,
-    actionLabel: String,
-    showSnackbar: suspend (
-        message: String,
-        actionLabel: String,
-        duration: SnackbarDuration
-    ) -> SnackbarResult,
-    departureAnchor: () -> TopicScrollAnchor?,
-    openSubmittedPostPage: (page: Int, scrollTo: Int?, departureAnchor: TopicScrollAnchor?) -> Unit,
-) {
-    launch {
-        val result = showSnackbar(message, actionLabel, SnackbarDuration.Long)
-        if (result == SnackbarResult.ActionPerformed) {
-            openSubmittedPostPage(effect.page, effect.scrollTo, departureAnchor())
-        }
-    }
-}
 
 @Composable
 // LongParameterList : state-hoisted Composable : each callback has a distinct call-site
@@ -392,6 +369,14 @@ fun TopicScreen(
     val lazyListState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
     val snackbarScope = rememberCoroutineScope()
+    // #1301 — ONE owner for the whole post-submit feedback (« Message publié », then « Message
+    // publié en page N » once the refreshed page reports a later one). Material serialises
+    // showSnackbar behind a single mutex, so two independent launches showed the reader BOTH
+    // confirmations in a row (beta feedback from nicko) ; through the coordinator the second
+    // replaces the first.
+    val submitFeedback = remember(snackbarHostState) {
+        TopicSubmitFeedback { snackbarHostState.currentSnackbarData?.dismiss() }
+    }
     // #1137 — measured height (px) of the « Dernier message lu » separator, written from where the
     // marker is composed (onSizeChanged, inside the last-read post's item — cf. TopicLoadedContent)
     // and read by the flag landing below to put the marker's top edge on the landing line (the post
@@ -522,18 +507,17 @@ fun TopicScreen(
     // confirm → close flow) ; the outcomes ride the screen's single TopicEffect collector below.
     val closePollState by viewModel.closePollState.collectAsStateWithLifecycle()
 
-    // #1301 — HFR has accepted the message before this state begins. Keep that confirmation on
-    // screen while the retained topic refreshes; changing refreshKind cancels showSnackbar and
-    // removes only this in-flight confirmation. Redirects retain PostSubmit, so they never flash it.
-    LaunchedEffect(state.refreshKind, snackbarHostState) {
-        if (state.refreshKind == TopicRefreshKind.PostSubmit) {
-            // The submit acknowledgement is immediate, not queued behind stale transient feedback.
-            snackbarHostState.currentSnackbarData?.dismiss()
-            snackbarHostState.showSnackbar(
-                message = postSubmittedMsg,
-                duration = SnackbarDuration.Indefinite,
-            )
-        }
+    // #1301 — only a real submit confirms publication; the durable PostSubmitJump kind survives a
+    // recreation during « Y aller » without replaying it. Both kinds keep the progress hairline.
+    TopicSubmitFeedbackEffect(
+        refreshKind = state.refreshKind,
+        submitFeedback = submitFeedback,
+        scope = snackbarScope,
+    ) {
+        snackbarHostState.showSnackbar(
+            message = postSubmittedMsg,
+            duration = SnackbarDuration.Indefinite,
+        )
     }
 
     // Bug fix (build 89) — report the loaded title up so `:app` caches it per topic. The next page
@@ -701,7 +685,7 @@ fun TopicScreen(
                 TopicEffect.PostSubmitRefreshFailed -> {
                     // Issue #200 — HFR accepted the post but the local force refresh failed.
                     // #1301 — remove the in-flight success confirmation before its error replacement.
-                    snackbarHostState.currentSnackbarData?.dismiss()
+                    submitFeedback.dismissConfirmation()
                     // Surface a Toast so the user knows the submit went through and can
                     // re-trigger the refresh manually (pull-to-refresh / Retry) instead of
                     // assuming the post was silently lost.
@@ -712,19 +696,24 @@ fun TopicScreen(
                     ).show()
                 }
                 is TopicEffect.PostSubmittedElsewhere -> {
-                    snackbarScope.launchPostSubmittedElsewhereSnackbar(
-                        effect = effect,
-                        message = String.format(Locale.getDefault(), submittedElsewhereMsg, effect.page),
-                        actionLabel = submittedElsewhereAction,
-                        showSnackbar = { message, actionLabel, duration ->
+                    // #1301 — REPLACES the « Message publié » confirmation through the single
+                    // coordinator instead of queueing a second snackbar behind it. The launch keeps
+                    // the effect collector free while the snackbar stays on screen.
+                    submitFeedback.offerSubmittedElsewhere(
+                        scope = snackbarScope,
+                        show = {
                             snackbarHostState.showSnackbar(
-                                message = message,
-                                actionLabel = actionLabel,
-                                duration = duration,
+                                message = String.format(Locale.getDefault(), submittedElsewhereMsg, effect.page),
+                                actionLabel = submittedElsewhereAction,
+                                duration = SnackbarDuration.Long,
                             )
                         },
-                        departureAnchor = alignedDepartureAnchor,
-                        openSubmittedPostPage = viewModel::openSubmittedPostPage,
+                        openPage = {
+                            viewModel.openSubmittedPostPage(
+                                page = effect.page,
+                                departureAnchor = alignedDepartureAnchor(),
+                            )
+                        },
                     )
                 }
                 TopicEffect.RefreshFailed -> {
@@ -1950,8 +1939,7 @@ internal fun TopicTopBar(
     )
     // #809 — long-press on the title opens the drapeau-removal flow (the tap toggle is unchanged).
     val titleLongPressLabel = stringResource(R.string.topic_remove_flag_long_press)
-    val showRefreshHairline = loaded?.provisional == true ||
-        state.refreshKind == TopicRefreshKind.PostSubmit
+    val showRefreshHairline = loaded?.provisional == true || state.refreshKind.isPostSubmitRefresh()
     Column {
         TopAppBar(
             title = {

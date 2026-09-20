@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import org.junit.Assert.assertFalse
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -70,6 +71,20 @@ class TopicTopBarProvisionalPillTest {
         composeTestRule
             .onNodeWithContentDescription("Page 3 sur 10, actualisation en cours")
             .assertExists()
+    }
+
+    @Test
+    fun `the submitted-post jump keeps the hairline without becoming a pull refresh (#1301)`() {
+        val state = sampleState(mode = loadedMode(provisional = false)).copy(
+            refreshKind = TopicRefreshKind.PostSubmitJump,
+        )
+        setBar(state)
+
+        composeTestRule.onNodeWithTag(TOPIC_REFRESH_HAIRLINE_TAG, useUnmergedTree = true).assertExists()
+        composeTestRule
+            .onNodeWithContentDescription("Page 3 sur 10, actualisation en cours")
+            .assertExists()
+        assertFalse(state.isRefreshing)
     }
 
     @Test

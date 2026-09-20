@@ -227,4 +227,9 @@
     <!-- %1$s = titre du topic. -->
     <string name="flags_remove_success">Drapeau retiré : %1$s</string>
     <string name="flags_remove_failure">Impossible de retirer le drapeau : %1$s</string>
+
+    <!-- #1301 — Accusé borné affiché sur la liste des drapeaux après l'envoi d'un message depuis
+         l'éditeur ouvert par « Poster un message » (#15) : la liste n'a aucune page de sujet à
+         rafraîchir, c'est le seul retour que le lecteur obtient. -->
+    <string name="flags_post_submit_confirmed">Message publié</string>
 </resources>

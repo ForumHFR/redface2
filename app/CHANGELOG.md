@@ -16,6 +16,17 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.61.1` — `local` — 2026-09-20
+
+Retours de nicko sur le premier lot ([#1301](https://github.com/ForumHFR/redface2/issues/1301)).
+
+### Écriture : confirmation d'envoi manquante ou dédoublée ([#1301](https://github.com/ForumHFR/redface2/issues/1301))
+
+- **Répondre depuis la liste des drapeaux confirme enfin l'envoi** : « Poster un message » ouvre l'éditeur au-dessus de la liste, qui n'a aucune page de sujet à rafraîchir — on revenait donc à la liste sans le moindre signe que le message était parti. Un accusé « Message publié » s'affiche désormais sur la liste, sans rafraîchissement ni navigation, et passe devant un retour de retrait de drapeau encore à l'écran (retour de nicko sur le fil DEV, [#1301](https://github.com/ForumHFR/redface2/issues/1301)).
+- **Plus de double confirmation quand le message atterrit sur une autre page** : « Message publié » puis « Message publié en page N » s'affichaient l'un après l'autre. Les deux passent maintenant par un seul coordinateur : l'offre « page N » remplace la confirmation au lieu de faire la queue derrière elle, et le saut « Y aller » ne ramène plus une confirmation générique (retour de nicko sur le fil DEV, [#1301](https://github.com/ForumHFR/redface2/issues/1301)).
+
+---
+
 ## `0.61.0` — `internal` (dev) — 2026-09-20
 
 Premier lot des retours de la bêta `0.60.0` (milestone « Vue · Topic 2 »).
