@@ -281,8 +281,5 @@ internal fun TopicFormState.withDraft(updated: TextFieldValue): TopicFormState =
     copy(
         draft = updated,
         validation = validateBbcodeDraft(updated.text),
-        // #1415 — editing the live body makes the cached row ineligible for a restore offer.
-        restorableDraft = restorableDraft.takeIf { updated.text.isBlank() },
-        restorableSubject = restorableSubject.takeIf { updated.text.isBlank() },
         submitError = if (updated.text != draft.text) null else submitError,
     )

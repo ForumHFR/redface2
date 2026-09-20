@@ -28,6 +28,7 @@ Promotion bêta du lot développé en dev de `0.59.0` à `0.59.8`, depuis la pr�
 - **Android 10 : le clavier ne masque plus la saisie** : sous API 29, la fenêtre utilise `adjustResize` pour transmettre correctement l'inset IME à l'éditeur, sans modifier le comportement retenu à partir d'Android 11 ([#1404](https://github.com/ForumHFR/redface2/issues/1404)).
 - **Un retour vide du sélecteur d'images est expliqué** : une bannière propose l'explorateur de fichiers ou un redémarrage, sans confondre annulation et échec du sélecteur ([#1420](https://github.com/ForumHFR/redface2/issues/1420)).
 - **La restauration de brouillon n'est proposée qu'une fois** : les préremplissages serveur ne masquent plus la proposition, une recréation ne la duplique pas et une sauvegarde plus récente peut être proposée ensuite ([#1415](https://github.com/ForumHFR/redface2/issues/1415)).
+- **Le brouillon en cache survit à la saisie du titre ou des destinataires** : l'offre de restauration ne disparaît que sur Restaurer/Ignorer et l'enregistrement automatique n'écrase plus un corps mémorisé par un corps vide ([#1415](https://github.com/ForumHFR/redface2/issues/1415)).
 
 ### Vue Topic / MP : relâchement de sélection ([#1391](https://github.com/ForumHFR/redface2/issues/1391))
 

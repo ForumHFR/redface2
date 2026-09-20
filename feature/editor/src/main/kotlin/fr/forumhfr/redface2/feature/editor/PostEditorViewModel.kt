@@ -284,7 +284,6 @@ class PostEditorViewModel @AssistedInject constructor(
                             .copy(
                                 draft = TextFieldValue(text = combined, selection = TextRange(combined.length)),
                                 draftHydratedContent = combined.takeIf { existing.isBlank() },
-                                restorableDraft = current.restorableDraft.takeIf { it != combined },
                             )
                     }
                     scheduleAutosave()
@@ -295,11 +294,11 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     /**
-     * #405/#1415 — offer a cached draft for [draftKey] once per cached content version. An untouched
+     * #405/#1415 — offer a cached draft for [draftKey] until the user handles it. An untouched
      * server prefill remains eligible: the banner is a choice and never overwrites it automatically.
      * A genuine user edit (content distinct from [PostEditorState.draftHydratedContent]) suppresses
-     * the offer. The content fingerprint survives process recreation without hiding a newer
-     * autosaved row whose live StateFlow was lost.
+     * the initial offer. The content fingerprint is recorded only after Restore/Ignore, so process
+     * recreation cannot hide an offer that the user never handled.
      *
      * #790 exception — when the route carries `resumeSharedDraft` (escalation of a quick-reply
      * sheet, which JUST wrote the row), the body is APPENDED to the field instead of banner'd :
@@ -337,7 +336,6 @@ class PostEditorViewModel @AssistedInject constructor(
                 val canOffer = _state.value.canOfferDraftRestore(body)
                 if (canOffer) {
                     _state.update { current -> current.copy(restorableDraft = body) }
-                    savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] = fingerprint
                 }
             }
         }
@@ -361,10 +359,11 @@ class PostEditorViewModel @AssistedInject constructor(
         }
     }
 
-    /** Immediate write of the current body (blank = delete the row, cf. [scheduleAutosave]). */
+    /** Immediate write of the current body, preserving a pending non-empty restore offer. */
     private suspend fun persistDraftNow() {
         val key = draftKey ?: return
-        val body = _state.value.draft.text
+        val snapshot = _state.value
+        val body = snapshot.draft.text.ifBlank { snapshot.restorableDraft.orEmpty() }
         if (body.isBlank()) {
             draftStore.delete(draftOwner, key)
         } else {
@@ -472,6 +471,7 @@ class PostEditorViewModel @AssistedInject constructor(
      */
     private fun onDraftRestoreRequested() {
         val body = _state.value.restorableDraft ?: return
+        markDraftRestoreOfferHandled(body)
         _state.update { current ->
             current
                 .withDraft(TextFieldValue(text = body, selection = TextRange(body.length)))
@@ -482,9 +482,17 @@ class PostEditorViewModel @AssistedInject constructor(
 
     /** #405 — discard the cached draft : delete the row and clear the banner. */
     private fun onDraftDiscardRequested() {
+        val body = _state.value.restorableDraft ?: return
+        markDraftRestoreOfferHandled(body)
         _state.update { it.copy(restorableDraft = null) }
+        autosaveJob?.cancel()
         val key = draftKey ?: return
         viewModelScope.launch { draftStore.delete(draftOwner, key) }
+    }
+
+    private fun markDraftRestoreOfferHandled(body: String) {
+        savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] =
+            EditorDraftStore.Draft(body = body).restoreOfferFingerprint()
     }
 
     /**
@@ -707,6 +715,7 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     private fun onContentChanged(value: TextFieldValue) {
+        val textChanged = value.text != _state.value.draft.text
         _state.update { current ->
             val refreshed = current.withDraft(value)
             if (refreshed.isPreviewVisible) {
@@ -715,7 +724,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 refreshed
             }
         }
-        scheduleAutosave()
+        if (textChanged) scheduleAutosave()
     }
 
     private fun onToolbarActionClicked(action: BbcodeAction) {
@@ -863,7 +872,6 @@ class PostEditorViewModel @AssistedInject constructor(
         return copy(
             isLoadingForm = false,
             draft = nextDraft,
-            restorableDraft = restorableDraft.takeIf { it != nextDraft.text },
             // Only adopt the caller's pre-computed preview when the same
             // hydration condition holds on the *latest* state. If the user
             // typed in between the snapshot and this update, `shouldHydrate`

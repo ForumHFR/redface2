@@ -824,7 +824,7 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
-    fun `reply recreation with the same cached version does not reoffer and keeps autosave alive`() = runTest {
+    fun `reply recreation reoffers until restore then keeps the cached version handled`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         val savedStateHandle = SavedStateHandle()
         coEvery { repository.fetchReplyForm(any(), any()) } returns form()
@@ -838,18 +838,25 @@ class PrivateMessageReplyViewModelTest {
             smileyRepository(), savedStateHandle,
         )
         assertEquals("rescued MP", first.state.value.restorableDraft)
+        assertNull(savedStateHandle.get<String>("draft_restore_offer_fingerprint"))
 
         val recreated = PrivateMessageReplyViewModel(
             request, repository, previewParser, userPreferences(), draftStore,
             FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
             smileyRepository(), savedStateHandle,
         )
+        assertEquals("rescued MP", recreated.state.value.restorableDraft)
 
-        assertNull(recreated.state.value.restorableDraft)
-        recreated.onContentChanged(TextFieldValue("new live MP"))
-        advanceTimeBy(800L)
-        assertEquals("new live MP", draftStore.saved[EditorDraftKey.mpReply(request.threadId)]?.body)
-        assertEquals("tester", draftStore.lastSavedOwner)
+        recreated.onDraftRestoreRequested()
+        advanceUntilIdle()
+        assertTrue(savedStateHandle.get<String>("draft_restore_offer_fingerprint") != null)
+
+        val handled = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(), savedStateHandle,
+        )
+        assertNull(handled.state.value.restorableDraft)
     }
 
     @Test
@@ -877,15 +884,36 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
+    fun `moving selection in a hydrated private reply keeps the restore offer`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val key = EditorDraftKey.mpReply(request.threadId)
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form(initialContent = "server body")
+        draftStore.preload(key, EditorDraftStore.Draft(body = "rescued MP", isPrivate = true))
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
+        )
+        val hydrated = viewModel.state.value.draft
+
+        viewModel.onContentChanged(hydrated.copy(selection = TextRange(3)))
+        advanceTimeBy(800L)
+
+        assertEquals("rescued MP", viewModel.state.value.restorableDraft)
+        assertEquals("rescued MP", draftStore.saved[key]?.body)
+    }
+
+    @Test
     fun `discarding deletes the cached MP draft`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
+        val savedStateHandle = SavedStateHandle()
         coEvery { repository.fetchReplyForm(any(), any()) } returns form()
         val key = EditorDraftKey.mpReply(request.threadId)
         draftStore.preload(key, EditorDraftStore.Draft(body = "rescued MP", isPrivate = true))
         val viewModel = PrivateMessageReplyViewModel(
             request, repository, previewParser, userPreferences(), draftStore,
             FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
-            smileyRepository(),
+            smileyRepository(), savedStateHandle,
         )
 
         viewModel.onDraftDiscardRequested()
@@ -893,6 +921,14 @@ class PrivateMessageReplyViewModelTest {
 
         assertTrue(draftStore.deletedKeys.contains(key))
         assertNull(viewModel.state.value.restorableDraft)
+        assertTrue(savedStateHandle.get<String>("draft_restore_offer_fingerprint") != null)
+
+        val recreated = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(), savedStateHandle,
+        )
+        assertNull(recreated.state.value.restorableDraft)
     }
 
     @Test
@@ -939,7 +975,7 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
-    fun `onCloseRequested with a blank body deletes the row and still closes`() = runTest {
+    fun `onCloseRequested with a blank live body preserves a pending restore offer`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } returns form()
         val key = EditorDraftKey.mpReply(request.threadId)
@@ -954,7 +990,8 @@ class PrivateMessageReplyViewModelTest {
 
         val effect = viewModel.effects.first()
         assertEquals(PrivateMessageReplyEffect.CloseCommitted, effect)
-        assertTrue("an emptied editor must not leave a stale row", draftStore.deletedKeys.contains(key))
+        assertEquals("stale", draftStore.saved[key]?.body)
+        assertEquals("stale", viewModel.state.value.restorableDraft)
     }
 
     @Test

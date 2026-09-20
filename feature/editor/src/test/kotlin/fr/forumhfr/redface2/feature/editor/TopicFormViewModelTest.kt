@@ -956,7 +956,7 @@ class TopicFormViewModelTest {
     }
 
     @Test
-    fun `New recreation with the same cached version does not reoffer and keeps autosave alive`() = runTest {
+    fun `New recreation reoffers until restore then keeps the cached version handled`() = runTest {
         val savedStateHandle = SavedStateHandle()
         draftStore.preload(
             EditorDraftKey.newTopic(SAMPLE_CAT),
@@ -968,21 +968,27 @@ class TopicFormViewModelTest {
         )
         testScheduler.advanceUntilIdle()
         assertEquals("rescued body", first.state.value.restorableDraft)
+        assertNull(savedStateHandle.get<String>("draft_restore_offer_fingerprint"))
 
         val recreated = newTopicViewModel(
             entrySubcat = SAMPLE_SUBCAT,
             savedStateHandle = savedStateHandle,
         )
         testScheduler.advanceUntilIdle()
+        assertEquals("rescued body", recreated.state.value.restorableDraft)
+        assertEquals("rescued title", recreated.state.value.restorableSubject)
 
-        assertNull(recreated.state.value.restorableDraft)
-        assertNull(recreated.state.value.restorableSubject)
-        recreated.submit(TopicFormIntent.SubjectChanged(TextFieldValue("new live title")))
-        recreated.submit(TopicFormIntent.ContentChanged(TextFieldValue("new live body")))
-        testScheduler.advanceTimeBy(800L)
-        testScheduler.runCurrent()
-        assertEquals("new live body", draftStore.saved[EditorDraftKey.newTopic(SAMPLE_CAT)]?.body)
-        assertEquals("tester", draftStore.lastSavedOwner)
+        recreated.submit(TopicFormIntent.DraftRestoreRequested)
+        testScheduler.advanceUntilIdle()
+        assertTrue(savedStateHandle.get<String>("draft_restore_offer_fingerprint") != null)
+
+        val handled = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            savedStateHandle = savedStateHandle,
+        )
+        testScheduler.advanceUntilIdle()
+        assertNull(handled.state.value.restorableDraft)
+        assertNull(handled.state.value.restorableSubject)
     }
 
     @Test
@@ -1025,10 +1031,58 @@ class TopicFormViewModelTest {
     }
 
     @Test
+    fun `moving selection in a hydrated first post keeps the restore offer`() = runTest {
+        val key = EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE)
+        draftStore.preload(
+            key,
+            EditorDraftStore.Draft(body = "unfinished body", subject = "unfinished title"),
+        )
+        val viewModel = newViewModel()
+        testScheduler.advanceUntilIdle()
+        val hydrated = viewModel.state.value.draft
+
+        viewModel.submit(
+            TopicFormIntent.ContentChanged(hydrated.copy(selection = TextRange(4))),
+        )
+        testScheduler.advanceTimeBy(800L)
+        testScheduler.runCurrent()
+
+        assertEquals("unfinished body", viewModel.state.value.restorableDraft)
+        assertEquals("unfinished body", draftStore.saved[key]?.body)
+    }
+
+    @Test
+    fun `typing a new topic subject preserves the offered body through autosave and restore`() = runTest {
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        draftStore.preload(
+            key,
+            EditorDraftStore.Draft(body = "rescued body", subject = "old title"),
+        )
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("new title")))
+        testScheduler.advanceTimeBy(800L)
+        testScheduler.runCurrent()
+
+        assertEquals("rescued body", draftStore.saved[key]?.body)
+        assertEquals("new title", draftStore.saved[key]?.subject)
+        assertEquals("rescued body", viewModel.state.value.restorableDraft)
+        viewModel.submit(TopicFormIntent.DraftRestoreRequested)
+        testScheduler.advanceUntilIdle()
+        assertEquals("rescued body", viewModel.state.value.draft.text)
+        assertEquals("new title", viewModel.state.value.subject.text)
+    }
+
+    @Test
     fun `New discard deletes the cached draft and clears the banner`() = runTest {
         val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        val savedStateHandle = SavedStateHandle()
         draftStore.preload(key, EditorDraftStore.Draft(body = "rescued body"))
-        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        val viewModel = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            savedStateHandle = savedStateHandle,
+        )
         testScheduler.advanceUntilIdle()
 
         viewModel.submit(TopicFormIntent.DraftDiscardRequested)
@@ -1036,6 +1090,14 @@ class TopicFormViewModelTest {
 
         assertTrue(draftStore.deletedKeys.contains(key))
         assertNull(viewModel.state.value.restorableDraft)
+        assertTrue(savedStateHandle.get<String>("draft_restore_offer_fingerprint") != null)
+
+        val recreated = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            savedStateHandle = savedStateHandle,
+        )
+        testScheduler.advanceUntilIdle()
+        assertNull(recreated.state.value.restorableDraft)
     }
 
     @Test
@@ -1101,7 +1163,7 @@ class TopicFormViewModelTest {
     }
 
     @Test
-    fun `CloseRequested with blank subject and body deletes the row and still closes`() = runTest {
+    fun `CloseRequested with blank live fields preserves a pending restore offer`() = runTest {
         val key = EditorDraftKey.newTopic(SAMPLE_CAT)
         draftStore.preload(key, EditorDraftStore.Draft(body = "stale", subject = "stale title"))
         val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
@@ -1111,7 +1173,8 @@ class TopicFormViewModelTest {
 
         val effect = viewModel.effects.first()
         assertEquals(TopicFormEffect.CloseCommitted, effect)
-        assertTrue("an emptied form must not leave a stale row", draftStore.deletedKeys.contains(key))
+        assertEquals("stale", draftStore.saved[key]?.body)
+        assertEquals("stale", viewModel.state.value.restorableDraft)
     }
 
     @Test

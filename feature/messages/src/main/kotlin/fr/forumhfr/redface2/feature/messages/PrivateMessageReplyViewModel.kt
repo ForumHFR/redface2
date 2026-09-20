@@ -179,7 +179,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
 
     fun retryFormLoad() = loadForm()
 
-    /** #405/#1415 — offer each cached version once unless the user has already edited the field. */
+    /** #405/#1415 — offer each cached version until Restore/Ignore handles it. */
     private fun restoreDraftIfAny() {
         viewModelScope.launch {
             draftOwner = draftStore.currentOwner()
@@ -193,7 +193,6 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                 val canOffer = _state.value.canOfferDraftRestore(body)
                 if (canOffer) {
                     _state.update { current -> current.copy(restorableDraft = body) }
-                    savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] = fingerprint
                 }
             }
         }
@@ -222,7 +221,8 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
      * 2026-07-05). Mirrors `PostEditorViewModel.persistDraftNow`.
      */
     private suspend fun persistDraftNow() {
-        val body = _state.value.draft.text
+        val snapshot = _state.value
+        val body = snapshot.draft.text.ifBlank { snapshot.restorableDraft.orEmpty() }
         if (body.isBlank()) {
             draftStore.delete(draftOwner, draftKey)
         } else {
@@ -271,6 +271,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     /** #405 — apply the cached body to the draft and clear the banner. */
     fun onDraftRestoreRequested() {
         val body = _state.value.restorableDraft ?: return
+        markDraftRestoreOfferHandled(body)
         _state.update {
             it.withDraftPreview(TextFieldValue(text = body, selection = TextRange(body.length)))
                 .copy(restorableDraft = null)
@@ -280,8 +281,16 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
 
     /** #405 — discard the cached draft : delete the row and clear the banner. */
     fun onDraftDiscardRequested() {
+        val body = _state.value.restorableDraft ?: return
+        markDraftRestoreOfferHandled(body)
         _state.update { it.copy(restorableDraft = null) }
+        autosaveJob?.cancel()
         viewModelScope.launch { draftStore.delete(draftOwner, draftKey) }
+    }
+
+    private fun markDraftRestoreOfferHandled(body: String) {
+        savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] =
+            EditorDraftStore.Draft(body = body, isPrivate = true).restoreOfferFingerprint()
     }
 
     private fun loadForm() {
@@ -377,8 +386,9 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     }
 
     fun onContentChanged(value: TextFieldValue) {
+        val textChanged = value.text != _state.value.draft.text
         _state.update { it.withDraftPreview(value) }
-        scheduleAutosave()
+        if (textChanged) scheduleAutosave()
     }
 
     fun onToolbarAction(action: BbcodeAction) {
@@ -620,7 +630,6 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         copy(
             draft = updated,
             preview = if (isPreviewVisible) previewParser.parsePreview(updated.text) else preview,
-            restorableDraft = restorableDraft.takeIf { updated.text.isBlank() },
             // #459 — a fresh text edit dismisses a stale upload banner — parity with PostEditorState.
             uploadError = if (updated.text != draft.text) null else uploadError,
         )
@@ -648,7 +657,6 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             hydrated.copy(
                 draftHydratedFromForm = true,
                 draftHydratedContent = combined.takeIf { existing.isBlank() },
-                restorableDraft = restorableDraft.takeIf { it != combined },
             )
         }
     }

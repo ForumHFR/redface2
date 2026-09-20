@@ -210,9 +210,9 @@ class TopicFormViewModel @AssistedInject constructor(
     }
 
     /**
-     * #405/#1415 — offer each cached subject/body version once. Untouched EditFirstPost hydration
-     * remains eligible, while a real user edit suppresses the offer. The fingerprint survives
-     * process recreation but changes when a newer autosave replaced the hidden row.
+     * #405/#1415 — offer each cached subject/body version until the user handles it. Untouched
+     * EditFirstPost hydration remains eligible, while a real user edit suppresses the initial
+     * offer. The fingerprint is recorded only after Restore/Ignore.
      */
     private fun restoreDraftIfAny() {
         viewModelScope.launch {
@@ -229,7 +229,6 @@ class TopicFormViewModel @AssistedInject constructor(
                     _state.update { current ->
                         current.copy(restorableDraft = draft.body, restorableSubject = draft.subject)
                     }
-                    savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] = fingerprint
                 }
             }
         }
@@ -265,8 +264,8 @@ class TopicFormViewModel @AssistedInject constructor(
     private suspend fun persistDraftNow() {
         val key = draftKey ?: return
         val snapshot = _state.value
-        val body = snapshot.draft.text
-        val subject = snapshot.subject.text
+        val body = snapshot.draft.text.ifBlank { snapshot.restorableDraft.orEmpty() }
+        val subject = snapshot.subject.text.ifBlank { snapshot.restorableSubject.orEmpty() }
         if (body.isBlank() && subject.isBlank()) {
             draftStore.delete(draftOwner, key)
         } else {
@@ -355,6 +354,10 @@ class TopicFormViewModel @AssistedInject constructor(
      * banner. Marks both fields hydrated so a late EditFirstPost form fetch cannot overwrite them.
      */
     private fun onDraftRestoreRequested() {
+        val offered = _state.value.restorableDraft ?: return
+        markDraftRestoreOfferHandled(
+            EditorDraftStore.Draft(body = offered, subject = _state.value.restorableSubject),
+        )
         _state.update { current ->
             val body = current.restorableDraft.orEmpty()
             // Keep the live subject when the draft has none (it was autosaved before the server form
@@ -375,9 +378,18 @@ class TopicFormViewModel @AssistedInject constructor(
 
     /** #405 — discard the cached draft : delete the row and clear the banner. */
     private fun onDraftDiscardRequested() {
+        val offered = _state.value.restorableDraft ?: return
+        markDraftRestoreOfferHandled(
+            EditorDraftStore.Draft(body = offered, subject = _state.value.restorableSubject),
+        )
         _state.update { it.copy(restorableDraft = null, restorableSubject = null) }
+        autosaveJob?.cancel()
         val key = draftKey ?: return
         viewModelScope.launch { draftStore.delete(draftOwner, key) }
+    }
+
+    private fun markDraftRestoreOfferHandled(draft: EditorDraftStore.Draft) {
+        savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] = draft.restoreOfferFingerprint()
     }
 
     /**
@@ -589,8 +601,11 @@ class TopicFormViewModel @AssistedInject constructor(
         _state.update { current ->
             current.copy(
                 subject = value,
-                restorableDraft = current.restorableDraft.takeIf { value.text.isBlank() },
-                restorableSubject = current.restorableSubject.takeIf { value.text.isBlank() },
+                restorableSubject = if (current.restorableDraft != null) {
+                    value.text.ifBlank { null }
+                } else {
+                    current.restorableSubject
+                },
                 submitError = if (value.text != current.subject.text) null else current.submitError,
             )
         }
@@ -598,6 +613,7 @@ class TopicFormViewModel @AssistedInject constructor(
     }
 
     private fun onContentChanged(value: TextFieldValue) {
+        val textChanged = value.text != _state.value.draft.text
         _state.update { current ->
             val refreshed = current.withDraft(value)
             if (refreshed.isPreviewVisible) {
@@ -606,7 +622,7 @@ class TopicFormViewModel @AssistedInject constructor(
                 refreshed
             }
         }
-        scheduleAutosave()
+        if (textChanged) scheduleAutosave()
     }
 
     private fun onToolbarActionClicked(action: BbcodeAction) {
@@ -982,11 +998,6 @@ class TopicFormViewModel @AssistedInject constructor(
     private fun <T> T.hydratedValue(serverValue: T, hydrate: Boolean): T =
         if (hydrate) serverValue else this
 
-    private fun TopicFormState.restoreOfferDiffersFrom(
-        nextSubject: TextFieldValue,
-        nextDraft: TextFieldValue,
-    ): Boolean = restorableDraft != nextDraft.text || restorableSubject.orEmpty() != nextSubject.text
-
     private fun TopicFormState.withFormHydration(
         form: TopicForm,
         nextPreview: PostContent,
@@ -999,13 +1010,10 @@ class TopicFormViewModel @AssistedInject constructor(
         val nextSubject = subject.hydratedWith(form.subject, hydrateSubject)
         val nextDraft = draft.hydratedWith(form.initialContent, hydrateDraft)
         val hydrateOptions = !optionsHydratedFromForm
-        val keepRestoreOffer = restoreOfferDiffersFrom(nextSubject, nextDraft)
         return copy(
             isLoadingForm = false,
             subject = nextSubject,
             draft = nextDraft,
-            restorableDraft = restorableDraft.takeIf { keepRestoreOffer },
-            restorableSubject = restorableSubject.takeIf { keepRestoreOffer },
             preview = if (hydrateDraft && isPreviewVisible) nextPreview else preview,
             subjectHydratedFromServer = subjectHydratedFromServer || hydrateSubject,
             subjectHydratedContent = subjectHydratedContent.hydratedValue(nextSubject.text, hydrateSubject),
