@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.61.0` — `local` — 2026-09-20
+
+Premier lot des retours de la bêta `0.60.0` (milestone « Vue · Topic 2 »).
+
+### Lecture : sélecteur de page ([#1299](https://github.com/ForumHFR/redface2/issues/1299))
+
+- **« Aller à une page » raccourcit vers les extrémités** : dans le sélecteur de page du sujet et de la conversation privée, les boutons Précédent / Suivant — redondants avec les flèches ‹ › de la barre du bas — laissent place à « Première page » et « Dernière page », désactivés quand on y est déjà. Le saut direct par numéro est inchangé, et l'écran d'erreur garde son pas de récupération page par page (retour de CAMPEDEL sur le fil bêta, [#1299](https://github.com/ForumHFR/redface2/issues/1299)).
+
+---
+
 ## `0.60.0` — `open` (bêta) — 2026-09-20
 
 Promotion bêta du lot développé en dev de `0.59.0` à `0.59.8`, depuis la précédente bêta `0.58.0`. Le détail par version dev figure dans les entrées ci-dessous. Review de promotion : Claude Opus sur la PR [#1427](https://github.com/ForumHFR/redface2/pull/1427) (`1427-review-opus.md`, findings bloquants traités avant merge : contexte Activity conservé sous le champ, docs alignées ; points mineurs suivis dans [#1417](https://github.com/ForumHFR/redface2/issues/1417)), puis review de la PR de promotion en commentaire. Limites connues : la migration complète des ViewModels vers `TextFieldState` est reportée à [#1417](https://github.com/ForumHFR/redface2/issues/1417) ; en paysage avec le clavier ouvert, les contrôles restent accessibles dans leur zone défilante mais la hauteur du champ de saisie demeure contrainte.
