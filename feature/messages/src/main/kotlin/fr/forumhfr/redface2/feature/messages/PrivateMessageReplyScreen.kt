@@ -3,9 +3,11 @@ package fr.forumhfr.redface2.feature.messages
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
@@ -37,10 +39,12 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
+import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
+import fr.forumhfr.redface2.core.ui.editor.editorControlsMaxHeight
 import fr.forumhfr.redface2.core.ui.post.PostMediaDiskCachePolicy
 
 /**
@@ -238,102 +242,106 @@ private fun ReplyEditorBody(
     modifier: Modifier = Modifier,
 ) {
     val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode, onImagePickerEvent)
-    // No outer scroll : the draft field is weighted so it stretches down to the bar (same
-    // extensible-field design as the post editor). Long content scrolls inside the bounded field
-    // (#447/#1406) and inside the preview pane.
-    Column(
+    // #447/#1406 — all variable-height chrome shares one bounded scroller above the BTF2 field.
+    // The field is the final weighted child and therefore keeps a real internal viewport.
+    BoxWithConstraints(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // #618 (Bug 1) — owner-only COMPACT summary, replacing the inline member editor that used to
-        // stack above the body and crowd the composer (unscrollable for a 29+-member DT). A tap opens
-        // the dedicated RecipientManagerSheet; the body + send bar stay reachable. Hidden for a simple
-        // participant / one-to-one MP (canManageRecipients is false).
-        if (state.canManageRecipients) {
-            MessageRecipientsSummary(
-                count = state.recipients.size,
-                onManage = onManageRecipients,
-            )
-            HorizontalDivider()
-        }
-
-        BbcodeToolbar(
-            onAction = onToolbarAction,
-            // #459 — upload wiring, same affordance as the topic-side editors.
-            onImageUploadRequested = launchImagePicker,
-            uploading = state.isUploading,
+        val controlsMaxHeight = editorControlsMaxHeight(
+            available = maxHeight,
+            fieldMin = EDITOR_DRAFT_MIN_HEIGHT,
         )
-        // #459 — « n/N » batch counter while a multi-image upload is in flight.
-        UploadProgressLabel(state.uploadProgress)
-
-        BbcodeTextField(
-            value = state.draft,
-            onValueChange = onContentChanged,
-            label = stringResource(R.string.messages_reply_field_label),
-            placeholder = stringResource(R.string.messages_reply_field_placeholder),
-            modifier = Modifier.weight(1f),
-            // #275/#410/#447 — the field-size nudge preserves caret visibility while the internal
-            // legacy scroller keeps selection handles attached beyond the viewport.
-            // #459 — lock editing during a batch (caret must not move between two insertions).
-            readOnly = state.isUploading,
-        )
-
-        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
-            TextButton(onClick = onTogglePreview) {
-                Text(
-                    text = stringResource(
-                        if (state.isPreviewVisible) {
-                            R.string.messages_reply_preview_hide
-                        } else {
-                            R.string.messages_reply_preview_show
-                        },
-                    ),
-                )
-            }
-        }
-
-        if (state.isPreviewVisible) {
-            HorizontalDivider()
-            // Shares the stretch with the field (50/50) and scrolls internally.
+        Column(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
             Column(
                 modifier = Modifier
-                    .weight(1f)
+                    .heightIn(max = controlsMaxHeight)
                     .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                BbcodePreview(
-                    content = state.preview,
-                    mediaDiskCachePolicy = PostMediaDiskCachePolicy.DISABLED,
+                // #618 (Bug 1) — owner-only compact summary; the dedicated sheet keeps large DTs
+                // from crowding the composer. Hidden for a participant or one-to-one MP.
+                if (state.canManageRecipients) {
+                    MessageRecipientsSummary(
+                        count = state.recipients.size,
+                        onManage = onManageRecipients,
+                    )
+                    HorizontalDivider()
+                }
+
+                BbcodeToolbar(
+                    onAction = onToolbarAction,
+                    // #459 — upload wiring, same affordance as the topic-side editors.
+                    onImageUploadRequested = launchImagePicker,
+                    uploading = state.isUploading,
                 )
+                // #459 — « n/N » batch counter while a multi-image upload is in flight.
+                UploadProgressLabel(state.uploadProgress)
+
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.CenterStart) {
+                    TextButton(onClick = onTogglePreview) {
+                        Text(
+                            text = stringResource(
+                                if (state.isPreviewVisible) {
+                                    R.string.messages_reply_preview_hide
+                                } else {
+                                    R.string.messages_reply_preview_show
+                                },
+                            ),
+                        )
+                    }
+                }
+
+                if (state.isPreviewVisible) {
+                    HorizontalDivider()
+                    BbcodePreview(
+                        content = state.preview,
+                        modifier = Modifier.fillMaxWidth(),
+                        mediaDiskCachePolicy = PostMediaDiskCachePolicy.DISABLED,
+                    )
+                }
+
+                if (state.restorableDraft != null) {
+                    MessageDraftRestoreBanner(onRestore = onDraftRestore, onDiscard = onDraftDiscard)
+                }
+
+                state.submitError?.let { error ->
+                    Text(
+                        text = stringResource(error.bannerResId),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    TextButton(onClick = onErrorDismissed) {
+                        Text(text = stringResource(R.string.messages_reply_error_dismiss))
+                    }
+                }
+
+                // #459 — dismissible upload-error banner (shared :core:ui wording).
+                state.uploadError?.let { error ->
+                    Text(
+                        text = error.bannerText(),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                    TextButton(onClick = onUploadErrorDismissed) {
+                        Text(text = stringResource(R.string.messages_reply_error_dismiss))
+                    }
+                }
             }
-        }
 
-        if (state.restorableDraft != null) {
-            MessageDraftRestoreBanner(onRestore = onDraftRestore, onDiscard = onDraftDiscard)
-        }
-
-        state.submitError?.let { error ->
-            Text(
-                text = stringResource(error.bannerResId),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
+            BbcodeTextField(
+                value = state.draft,
+                onValueChange = onContentChanged,
+                label = stringResource(R.string.messages_reply_field_label),
+                placeholder = stringResource(R.string.messages_reply_field_placeholder),
+                modifier = Modifier.weight(1f),
+                // #459 — lock editing during a batch (caret must not move between two insertions).
+                readOnly = state.isUploading,
             )
-            TextButton(onClick = onErrorDismissed) {
-                Text(text = stringResource(R.string.messages_reply_error_dismiss))
-            }
-        }
-
-        // #459 — dismissible upload-error banner (shared :core:ui wording).
-        state.uploadError?.let { error ->
-            Text(
-                text = error.bannerText(),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
-            TextButton(onClick = onUploadErrorDismissed) {
-                Text(text = stringResource(R.string.messages_reply_error_dismiss))
-            }
         }
     }
 }

@@ -3,6 +3,9 @@ package fr.forumhfr.redface2.core.ui.editor
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
+/** Minimum draft viewport reserved by every full-screen editor. */
+val EDITOR_DRAFT_MIN_HEIGHT = 160.dp
+
 /**
  * Maximum height of the scrollable controls/chrome zone above a weighted editor field.
  *

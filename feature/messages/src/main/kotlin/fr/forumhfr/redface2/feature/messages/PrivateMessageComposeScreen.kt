@@ -39,6 +39,7 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
+import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
@@ -219,7 +220,7 @@ private fun ComposeEditorBody(
     modifier: Modifier = Modifier,
 ) {
     val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode, onImagePickerEvent)
-    // #447/#1406 — the draft must be bounded so the legacy field owns selection scrolling. The
+    // #447/#1406 — the draft must be bounded so BTF2 owns selection scrolling. The
     // header keeps an internal capped scroll: unlike the pre-#434 weighted layout, recipients,
     // subject and toolbar cannot squeeze the draft to zero when the IME opens.
     BoxWithConstraints(
@@ -229,7 +230,7 @@ private fun ComposeEditorBody(
     ) {
         val controlsMaxHeight = editorControlsMaxHeight(
             available = maxHeight,
-            fieldMin = COMPOSE_DRAFT_MIN_HEIGHT,
+            fieldMin = EDITOR_DRAFT_MIN_HEIGHT,
         )
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -377,6 +378,3 @@ private fun ComposeEditorControls(
         UploadProgressLabel(state.uploadProgress)
     }
 }
-
-// #434/#447 — reserve a real draft viewport under the capped, scrollable compose controls.
-private val COMPOSE_DRAFT_MIN_HEIGHT = 160.dp

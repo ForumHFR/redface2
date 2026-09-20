@@ -1,3 +1,4 @@
-Redface 2 v0.59.7 — dev.
-- Dans les quatre éditeurs, les poignées de sélection restent pilotables au-delà de l'écran.
-- Le curseur reste visible quand le clavier, l'aperçu, une bannière ou des citations réduisent la zone de saisie.
+Redface 2 v0.59.8 — dev.
+- Le champ BBCode moderne suit nativement les poignées de sélection et le curseur.
+- La réponse MP s'aligne sur les autres éditeurs et réserve 160 dp à la saisie quand l'espace le permet.
+- Dans le champ BBCode, le double-tap sélectionne le mot et le triple-tap la ligne ; l'élargissement automatique de la sélection est désactivé dans cet éditeur.
