@@ -1148,9 +1148,10 @@ class TopicViewModel @AssistedInject constructor(
      * #335 — manual pull-to-refresh of the current page. Re-fetches over the network and replaces the
      * loaded page in place, WITHOUT the post-submit overflow redirect (#226) or any scroll effect, so
      * the user keeps their reading position. NO-OP unless a page is already loaded and no refresh is
-     * in flight (guards a double pull). `isRefreshing` is cleared in `finally` so a cancellation —
-     * e.g. a delete's `refreshAfterDelete` re-assigning `loadJob` mid-refresh — never leaves the
-     * spinner stuck.
+     * in flight (guards a double pull). The [TopicRefreshKind.Manual] state is cleared in `finally`
+     * so a cancellation — e.g. a delete's `refreshAfterDelete` re-assigning `loadJob` mid-refresh —
+     * never leaves the spinner stuck. A post-submit refresh also blocks a competing pull, but uses
+     * its dedicated under-bar indicator instead of the pull spinner (#1301).
      *
      * konsist:bypass-prefetch-guard — cancels the in-flight prefetch and force-fetches the page; this
      * is an explicit user-initiated authenticated refresh, not an anonymous warmup escalating to
@@ -1166,7 +1167,7 @@ class TopicViewModel @AssistedInject constructor(
         // expansion. Keep the single-flight guard below: neither cancel the vote nor issue GET 2.
         clearPollVisit()
         if (
-            _state.value.isRefreshing ||
+            _state.value.refreshKind != TopicRefreshKind.None ||
             displayed.pollVote?.phase?.let { it != PollVotePhase.Idle } == true
         ) {
             return
@@ -1175,7 +1176,7 @@ class TopicViewModel @AssistedInject constructor(
         // single-flight keep this effectively free while the directory is fresh/in flight.
         loadStaff()
         becomePageOwner()
-        _state.update { it.copy(isRefreshing = true) }
+        _state.update { it.copy(refreshKind = TopicRefreshKind.Manual) }
         // Gate Sol PR1 r2 (bloquant 1) — same ownership guard as every other async producer :
         // a reply landing after a page switch must never write over the new owner's page.
         val generation = ownerGeneration
@@ -1209,7 +1210,7 @@ class TopicViewModel @AssistedInject constructor(
                 // a superseded refresh must not cut a NEWER refresh's indicator (the takeover
                 // itself already reset the stale one in becomePageOwner).
                 if (generation == ownerGeneration) {
-                    _state.update { it.copy(isRefreshing = false) }
+                    _state.update { it.copy(refreshKind = TopicRefreshKind.None) }
                 }
             }
         }
@@ -1317,7 +1318,7 @@ class TopicViewModel @AssistedInject constructor(
         // navigation so its resolved goToPost cannot rip the user off the page they just chose.
         citingPostNavigationJob?.cancel()
         prefetchedPage = null
-        reclaimRefreshIndicator()
+        reclaimRefreshState()
         // Gate Sol PR1 — a SAME-PAGE re-own (Retry, refresh, search takeover) keeps the
         // not-yet-dispatched landing alive by re-tagging it to the new generation (historical
         // scrollTo retry across Retry) ; a page change drops it — the switch paths re-arm
@@ -1328,15 +1329,14 @@ class TopicViewModel @AssistedInject constructor(
     }
 
     /**
-     * Gate Sol PR1 r3/r4 — the pull-to-refresh spinner belongs to the OUTGOING owner : EVERY
-     * takeover (page switch, normal load, AND a search claiming the page through [launchSearch])
-     * resets it immediately ; the superseded refresh's finally (generation-guarded) then rightly
-     * refuses to touch a newer owner's indicator. Without the search path a spinner could stay
-     * stuck forever — `refresh()` guards on `isRefreshing`, blocking every future pull (gate r4).
+     * Gate Sol PR1 r3/r4 / #1301 — refresh feedback belongs to the OUTGOING owner: EVERY takeover
+     * (page switch, normal load, search, or another submit) resets it immediately. The new owner
+     * then arms its own [TopicRefreshKind]. Without the search path a manual spinner could stay
+     * stuck forever; without the generic reset a cancelled post-submit hairline could do the same.
      */
-    private fun reclaimRefreshIndicator() {
-        if (_state.value.isRefreshing) {
-            _state.update { it.copy(isRefreshing = false) }
+    private fun reclaimRefreshState() {
+        if (_state.value.refreshKind != TopicRefreshKind.None) {
+            _state.update { it.copy(refreshKind = TopicRefreshKind.None) }
         }
     }
 
@@ -2035,6 +2035,8 @@ class TopicViewModel @AssistedInject constructor(
      */
     private fun performSubmitRefresh(plan: SubmitRefreshPlan) {
         becomePageOwner()
+        // #1301 — acknowledge synchronously, before any same-page no-op adoption or network wait.
+        _state.update { it.copy(refreshKind = TopicRefreshKind.PostSubmit) }
         savedStateHandle[KEY_FORCE_REFRESH_DONE] = true
         adoptSubmitTarget(plan.initialTarget, plan.landing)
         val generation = ownerGeneration
@@ -2047,22 +2049,27 @@ class TopicViewModel @AssistedInject constructor(
                 try {
                     val topic = topicRepository.refreshTopicPage(request.cat, request.post, target)
                     if (generation != ownerGeneration) return@launch
+                    val shouldRedirect = plan.overflowRedirectAllowed &&
+                        topic.totalPages > target &&
+                        postSubmitRedirectBudget > 0
                     _state.update {
                         it.copy(
                             mode = loadedMode(topic),
                             availablePages = (1..topic.totalPages).toList(),
                             search = it.search.capturingAnchor(topic),
+                            // #1301 — the first #226 response is not terminal when it redirects.
+                            refreshKind = if (shouldRedirect) {
+                                TopicRefreshKind.PostSubmit
+                            } else {
+                                TopicRefreshKind.None
+                            },
                         )
                     }
                     // #226 — plain-reply overflow : the reply created a page past the target.
                     // Consume the single redirect budget and land on the real last page ; that
                     // landing can never redirect again (anti-chase), whatever a concurrent
                     // poster does.
-                    if (
-                        plan.overflowRedirectAllowed &&
-                        topic.totalPages > target &&
-                        postSubmitRedirectBudget > 0
-                    ) {
+                    if (shouldRedirect) {
                         postSubmitRedirectBudget = 0
                         redirected = true
                         pageSnapshots.remove(target)
@@ -2088,6 +2095,8 @@ class TopicViewModel @AssistedInject constructor(
                     // back to the cache-aside path with a Retry affordance.
                     android.util.Log.w(LOG_TAG, "Submit-result refresh failed", refreshError)
                     if (generation != ownerGeneration) return@launch
+                    // #1301 — dismiss the success confirmation before the existing error effect.
+                    _state.update { it.copy(refreshKind = TopicRefreshKind.None) }
                     _effects.trySend(TopicEffect.PostSubmitRefreshFailed)
                     resolvePendingLandingWithoutScroll()
                     startPageLoad(showLoading = _state.value.mode !is TopicUiState.Mode.Loaded)
@@ -2971,7 +2980,7 @@ class TopicViewModel @AssistedInject constructor(
         loadJob?.cancel()
         prefetchJob?.cancel()
         // Gate r4 (bloquant 1) — a search takeover supersedes an in-flight pull-to-refresh too.
-        reclaimRefreshIndicator()
+        reclaimRefreshState()
         val generation = ++ownerGeneration
         _state.update { it.copy(search = it.search.copy(status = TopicSearchStatus.Loading)) }
         searchJob = viewModelScope.launch {
