@@ -1,5 +1,9 @@
 package fr.forumhfr.redface2.core.ui.editor
 
+import android.content.Context
+import android.content.res.Configuration
+import android.view.textclassifier.TextClassificationManager
+import android.view.textclassifier.TextClassifier
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -12,7 +16,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
-import androidx.compose.foundation.text.selection.LocalTextClassifierCoroutineContext
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -30,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
@@ -39,18 +43,19 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 
 /**
- * BTF2 asks Android's TextClassifier to expand every touch word/paragraph selection after Compose
- * has computed it. On API 34 the classifier can turn a hyphenated word into a multi-line range
- * (#447). Foundation exposes the worker context but no per-field opt-out, so an already-cancelled
- * context keeps Compose's ICU word and paragraph boundaries while skipping only that asynchronous
- * platform suggestion. It also deliberately removes TextClassifier-provided smart actions from
- * this BBCode editor; the standard edit actions remain available.
+ * Creates a field-scoped service cache whose [TextClassificationManager] uses [TextClassifier.NO_OP].
+ * This leaves the activity's classifier untouched and lets Foundation finish its selection-toolbar
+ * pipeline, but removes smart selection and smart actions from this editor. The configuration
+ * context is deliberately scoped to [BasicTextField]: it is not the activity's themed wrapper,
+ * while the field's visual styling comes from Compose locals.
  */
-private val DisabledTextClassifierContext = Dispatchers.IO + Job().apply { cancel() }
+private fun createBbcodeTextFieldContext(context: Context): Context =
+    context.createConfigurationContext(Configuration(context.resources.configuration)).also {
+        it.getSystemService(TextClassificationManager::class.java)
+            ?.setTextClassifier(TextClassifier.NO_OP)
+    }
 
 /**
  * Controlled Material 3 BBCode text field used by the four full-screen editors.
@@ -129,10 +134,10 @@ internal fun BbcodeTextField(
         minHeightInLines = 5,
         maxHeightInLines = Int.MAX_VALUE,
     )
-    CompositionLocalProvider(
-        LocalTextClassifierCoroutineContext provides DisabledTextClassifierContext,
-    ) {
-        Box(modifier = modifier.fillMaxWidth()) {
+    val context = LocalContext.current
+    val fieldContext = remember(context) { createBbcodeTextFieldContext(context) }
+    Box(modifier = modifier.fillMaxWidth()) {
+        CompositionLocalProvider(LocalContext provides fieldContext) {
             BasicTextField(
                 state = fieldState,
                 readOnly = readOnly,

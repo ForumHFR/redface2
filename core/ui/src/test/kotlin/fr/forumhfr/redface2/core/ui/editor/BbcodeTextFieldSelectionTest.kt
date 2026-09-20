@@ -5,13 +5,21 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.contextmenu.provider.LocalTextContextMenuToolbarProvider
+import androidx.compose.foundation.text.contextmenu.provider.TextContextMenuDataProvider
+import androidx.compose.foundation.text.contextmenu.provider.TextContextMenuProvider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalTextToolbar
+import androidx.compose.ui.platform.TextToolbar
+import androidx.compose.ui.platform.TextToolbarStatus
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.hasSetTextAction
@@ -23,6 +31,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import kotlinx.coroutines.awaitCancellation
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -89,29 +98,61 @@ class BbcodeTextFieldSelectionTest {
         assertSelection(TextRange(38, 56))
     }
 
-    private fun setFieldContent(text: String) {
+    @Test
+    fun doubleTapRequestsSelectionToolbar() {
+        val toolbar = RecordingTextToolbar()
+
+        setFieldContent(
+            text = ORDINARY_TEXT,
+            textToolbar = toolbar,
+            textContextMenuProvider = ForwardingTextContextMenuProvider(toolbar),
+        )
+        doubleTap(offset = 68)
+
+        assertTrue("a touch selection must request the standard toolbar", toolbar.showMenuCalls > 0)
+    }
+
+    private fun setFieldContent(
+        text: String,
+        textToolbar: TextToolbar? = null,
+        textContextMenuProvider: TextContextMenuProvider? = null,
+    ) {
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                Surface(color = MaterialTheme.colorScheme.surface) {
-                    density = LocalDensity.current
-                    val value = remember { mutableStateOf(TextFieldValue(text, TextRange.Zero)) }
-                    val scrollState = rememberScrollState()
-                    Box(Modifier.size(320.dp, 240.dp)) {
-                        BbcodeTextField(
-                            value = value.value,
-                            onValueChange = { value.value = it },
-                            label = "Message",
-                            modifier = Modifier.fillMaxSize(),
-                            scrollState = scrollState,
-                            onTextLayout = { getResult ->
-                                getResult()?.let { textLayout = it }
-                            },
-                        )
-                    }
+                val resolvedTextToolbar = textToolbar ?: LocalTextToolbar.current
+                val resolvedTextContextMenuProvider =
+                    textContextMenuProvider ?: LocalTextContextMenuToolbarProvider.current
+                CompositionLocalProvider(
+                    LocalTextToolbar provides resolvedTextToolbar,
+                    LocalTextContextMenuToolbarProvider provides resolvedTextContextMenuProvider,
+                ) {
+                    FieldContent(text)
                 }
             }
         }
         composeTestRule.waitForIdle()
+    }
+
+    @Suppress("ComposableNaming") // Test fixture, not a reusable UI component.
+    @androidx.compose.runtime.Composable
+    private fun FieldContent(text: String) {
+        Surface(color = MaterialTheme.colorScheme.surface) {
+            density = LocalDensity.current
+            val value = remember { mutableStateOf(TextFieldValue(text, TextRange.Zero)) }
+            val scrollState = rememberScrollState()
+            Box(Modifier.size(320.dp, 240.dp)) {
+                BbcodeTextField(
+                    value = value.value,
+                    onValueChange = { value.value = it },
+                    label = "Message",
+                    modifier = Modifier.fillMaxSize(),
+                    scrollState = scrollState,
+                    onTextLayout = { getResult ->
+                        getResult()?.let { textLayout = it }
+                    },
+                )
+            }
+        }
     }
 
     private fun doubleTap(offset: Int) {
@@ -150,6 +191,40 @@ class BbcodeTextFieldSelectionTest {
         val NO_SPACE_TEXT = (1..40).joinToString("\n") { line ->
             "L${line.toString().padStart(2, '0')}-aaaa-bbbb-cccc"
         }
+    }
+}
+
+/** Bridges Foundation's 1.11.2 context-menu provider to the requested legacy toolbar fake. */
+private class ForwardingTextContextMenuProvider(
+    private val toolbar: TextToolbar,
+) : TextContextMenuProvider {
+
+    override suspend fun showTextContextMenu(dataProvider: TextContextMenuDataProvider) {
+        toolbar.showMenu(Rect.Zero, null, null, null, null)
+        awaitCancellation()
+    }
+}
+
+private class RecordingTextToolbar : TextToolbar {
+    var showMenuCalls: Int = 0
+        private set
+
+    override var status: TextToolbarStatus = TextToolbarStatus.Hidden
+        private set
+
+    override fun showMenu(
+        rect: Rect,
+        onCopyRequested: (() -> Unit)?,
+        onPasteRequested: (() -> Unit)?,
+        onCutRequested: (() -> Unit)?,
+        onSelectAllRequested: (() -> Unit)?,
+    ) {
+        showMenuCalls++
+        status = TextToolbarStatus.Shown
+    }
+
+    override fun hide() {
+        status = TextToolbarStatus.Hidden
     }
 }
 
