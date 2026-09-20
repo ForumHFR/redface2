@@ -16,6 +16,31 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.60.0` — `open` (bêta) — 2026-09-20
+
+Promotion bêta du lot développé en dev de `0.59.0` à `0.59.8`, depuis la précédente bêta `0.58.0`. Le détail par version dev figure dans les entrées ci-dessous. Review de promotion : Claude Opus sur la PR [#1427](https://github.com/ForumHFR/redface2/pull/1427) (`1427-review-opus.md`, findings bloquants traités avant merge : contexte Activity conservé sous le champ, docs alignées ; points mineurs suivis dans [#1417](https://github.com/ForumHFR/redface2/issues/1417)), puis review de la PR de promotion en commentaire. Limites connues : la migration complète des ViewModels vers `TextFieldState` est reportée à [#1417](https://github.com/ForumHFR/redface2/issues/1417) ; en paysage avec le clavier ouvert, les contrôles restent accessibles dans leur zone défilante mais la hauteur du champ de saisie demeure contrainte.
+
+### Éditeur : sélection et champ BTF2 ([#447](https://github.com/ForumHFR/redface2/issues/447), [#1404](https://github.com/ForumHFR/redface2/issues/1404), [#1420](https://github.com/ForumHFR/redface2/issues/1420), [#1415](https://github.com/ForumHFR/redface2/issues/1415), [#872](https://github.com/ForumHFR/redface2/issues/872))
+
+- **La sélection reste pilotable au-delà de l'écran** : le champ BBCode à hauteur bornée défile désormais en interne, les poignées restent attachées au doigt et le label flotte au-dessus du contenu ([#447](https://github.com/ForumHFR/redface2/issues/447), [#1406](https://github.com/ForumHFR/redface2/issues/1406), [#872](https://github.com/ForumHFR/redface2/issues/872)).
+- **Le curseur reste visible quand l'espace change** : ouverture du clavier, retour de l'aperçu, bannière ou citations gardent la ligne active à l'écran ; la réponse MP rejoint les autres éditeurs et réserve au moins 160 dp à la saisie quand la fenêtre le permet ([#447](https://github.com/ForumHFR/redface2/issues/447), [#872](https://github.com/ForumHFR/redface2/issues/872)).
+- **La sélection tactile est déterministe** : dans le champ BBCode, le double-tap sélectionne le mot (frontières ICU, plus de bloc multi-lignes sur les jetons à tirets) et le triple-tap la ligne ; l'élargissement automatique de la « sélection intelligente » Android est désactivé dans cet éditeur uniquement, la barre garde Couper/Copier/Coller/Tout sélectionner et les actions des autres applications ([#447](https://github.com/ForumHFR/redface2/issues/447)).
+- **Android 10 : le clavier ne masque plus la saisie** : sous API 29, la fenêtre utilise `adjustResize` pour transmettre correctement l'inset IME à l'éditeur, sans modifier le comportement retenu à partir d'Android 11 ([#1404](https://github.com/ForumHFR/redface2/issues/1404)).
+- **Un retour vide du sélecteur d'images est expliqué** : une bannière propose l'explorateur de fichiers ou un redémarrage, sans confondre annulation et échec du sélecteur ([#1420](https://github.com/ForumHFR/redface2/issues/1420)).
+- **La restauration de brouillon n'est proposée qu'une fois** : les préremplissages serveur ne masquent plus la proposition, une recréation ne la duplique pas et une sauvegarde plus récente peut être proposée ensuite ([#1415](https://github.com/ForumHFR/redface2/issues/1415)).
+
+### Vue Topic / MP : relâchement de sélection ([#1391](https://github.com/ForumHFR/redface2/issues/1391))
+
+- **Un tap hors du texte relâche la sélection dans les sujets et les messages privés** : les conteneurs visibles ne sont recréés qu'après un geste de sélection plausible, sans perdre l'état des spoilers, citations repliées ou médias.
+
+### Fiabilité : hotfix ICU [#1414](https://github.com/ForumHFR/redface2/issues/1414) (`0.59.4`), visionneuse [#1388](https://github.com/ForumHFR/redface2/issues/1388), journal upload [#1410](https://github.com/ForumHFR/redface2/issues/1410)
+
+- **Le retour du sélecteur d'images ne plante plus sur Android** : la regex refusée par le moteur ICU est corrigée et un motif de caviardage invalide se replie désormais vers `<redacted>` au lieu de faire tomber l'application ([#1414](https://github.com/ForumHFR/redface2/issues/1414)).
+- **La visionneuse respecte le mode immersif et ses propres contrôles** : à l'ouverture, barres d'actions et système sont visibles sans chevauchement ; un tap les masque ou les ramène ensemble, avec des icônes lisibles et une restauration fiable à la fermeture ([#1388](https://github.com/ForumHFR/redface2/issues/1388)).
+- **Le journal Diagnostic couvre le chemin avant l'upload** : il consigne le contrat lancé, le retour brut du sélecteur et l'entrée dans l'envoi pour les quatre éditeurs, y compris un résultat vide, sans conserver chemin, URI complète ni identifiant ([#1410](https://github.com/ForumHFR/redface2/issues/1410)).
+
+---
+
 ## `0.59.8` — `internal` (dev) — 2026-09-19
 
 - **Le champ BBCode passe au `TextFieldState` moderne ([#447](https://github.com/ForumHFR/redface2/issues/447), [#872](https://github.com/ForumHFR/redface2/issues/872))** — les poignées de sélection et le curseur sont suivis nativement, sans recalage maison, tout en conservant le label flottant. L'écran de réponse MP rejoint la structure des autres éditeurs et la zone de saisie garde un minimum de 160 dp partout tant que la fenêtre le permet.
