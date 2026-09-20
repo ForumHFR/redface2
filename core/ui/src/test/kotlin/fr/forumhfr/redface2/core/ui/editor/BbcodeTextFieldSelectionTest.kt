@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.ui.editor
 
+import android.widget.Magnifier
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.size
@@ -29,10 +30,16 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.annotation.Implementation
+import org.robolectric.annotation.Implements
 
 /** #447 — touch word and paragraph selection in the state-based BBCode field. */
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
+@Config(
+    sdk = [34],
+    qualifiers = "w360dp-h780dp-xxhdpi",
+    shadows = [NoopBbcodeTextFieldShadowMagnifier::class],
+)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class BbcodeTextFieldSelectionTest {
 
@@ -129,4 +136,28 @@ class BbcodeTextFieldSelectionTest {
             "L${line.toString().padStart(2, '0')}-aaaa-bbbb-cccc"
         }
     }
+}
+
+/** Robolectric's [Magnifier] has no Surface; the platform magnifier is proven on device. */
+@Implements(Magnifier::class)
+class NoopBbcodeTextFieldShadowMagnifier {
+
+    @Implementation
+    @Suppress("UnusedParameter") // Robolectric matches the platform signature.
+    fun show(sourceCenterX: Float, sourceCenterY: Float) = Unit
+
+    @Implementation
+    @Suppress("UnusedParameter") // Robolectric matches the platform signature.
+    fun show(
+        sourceCenterX: Float,
+        sourceCenterY: Float,
+        magnifierCenterX: Float,
+        magnifierCenterY: Float,
+    ) = Unit
+
+    @Implementation
+    fun update() = Unit
+
+    @Implementation
+    fun dismiss() = Unit
 }
