@@ -1,4 +1,4 @@
 Redface 2 v0.62.0 — beta.
 - Page picker: First page / Last page shortcuts, in topics and private messages alike.
-- Going back to the previous page restores your exact reading position, or opens at the bottom if you never opened it.
-- After posting: an immediate confirmation and a progress bar, including from the flags list.
+- In a topic, going back to the previous page restores your exact reading position if you had opened it before.
+- Posting a message now confirms it: right away in the topic, and from the flags list too.

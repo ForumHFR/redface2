@@ -1,4 +1,4 @@
 Redface 2 v0.62.0 — bêta.
 - « Aller à une page » : raccourcis Première page / Dernière page, dans les sujets comme dans les MP.
-- Le retour à la page précédente restaure la position exacte si vous l'aviez déjà ouverte, sinon il ouvre en bas.
-- Après l'envoi d'un message : confirmation immédiate et bandeau de progression, y compris depuis la liste des drapeaux.
+- Dans un sujet, revenir à la page précédente restaure la position exacte si vous l'aviez déjà ouverte.
+- Envoyer un message confirme enfin l'envoi : tout de suite dans le sujet, et aussi depuis la liste des drapeaux.
