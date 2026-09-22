@@ -53,6 +53,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.receiveAsFlow
@@ -130,7 +131,30 @@ class TopicViewModel @AssistedInject constructor(
     private var staffByPseudo: Map<String, AuthorRole> = emptyMap()
 
     private val _effects: Channel<TopicEffect> = Channel(capacity = Channel.BUFFERED)
-    val effects: Flow<TopicEffect> = _effects.receiveAsFlow()
+
+    /**
+     * #1300 — landing effects remain owned by the ViewModel until the screen acknowledges them.
+     * If a collector is cancelled after receiving one but before applying it, the exact same
+     * effect instance is offered to the next collector. Other one-shot effects retain the
+     * channel's consume-once semantics.
+     */
+    val effects: Flow<TopicEffect> = flow {
+        var receivedLandingId: Long? = null
+        try {
+            claimLandingRedelivery()?.let { delivered ->
+                receivedLandingId = delivered.armed.id
+                emit(delivered.effect)
+            }
+            _effects.receiveAsFlow().collect { effect ->
+                deliveredLanding
+                    ?.takeIf { it.effect === effect }
+                    ?.let { receivedLandingId = it.armed.id }
+                emit(effect)
+            }
+        } finally {
+            receivedLandingId?.let(::retainLandingForRedelivery)
+        }
+    }
 
     private var loadJob: Job? = null
     private var prefetchJob: Job? = null
@@ -232,23 +256,32 @@ class TopicViewModel @AssistedInject constructor(
     /**
      * F3/F4 — the landing owed to the page on screen, dispatched on the first matching Loaded
      * then cleared (one landing per switch/entry). A [PendingLanding.Post] whose target is not on
-     * the page stays pending for the next emission (historical scrollTo retry) ; any newer switch
-     * REPLACES it through [armLanding]. Gate Sol PR1 : the armed landing CARRIES its owner
-     * `(generation, page)` — [dispatchPendingLanding] refuses a stale pair, and the
-     * post-suspension clear is a COMPARE-and-clear, so a landing armed by a newer owner while
-     * `_effects.send` was suspended is never blindly erased. A same-page re-own (Retry / refresh /
-     * search takeover) re-tags the landing instead of dropping it ([becomePageOwner]).
+     * an explicitly provisional representation stays pending for the terminal emission ; any newer
+     * switch REPLACES it through [armLanding]. Gate Sol PR1 : the armed landing CARRIES its owner
+     * `(generation, page)` — [dispatchPendingLanding] refuses a stale pair and delivers through a
+     * non-suspending `trySend`, so a newer owner can never be blindly erased. A same-page re-own
+     * (Retry / refresh / search takeover) re-tags the landing instead of dropping it
+     * ([becomePageOwner]).
      * [ArmedLanding.initialScrollTo] marks the INITIAL route `scrollTo` : its dispatch or its
      * supersession persists [KEY_SCROLL_TO_CONSUMED] (Sol point 5 : `route.scrollTo` is
      * exclusively an ENTRY intention, never replayed after process death).
      */
     private var pendingLanding: ArmedLanding? = null
+    private var nextLandingId: Long = 0
+    private var deliveredLanding: DeliveredLanding? = null
+    private var redeliverableLandingId: Long? = null
 
     private data class ArmedLanding(
+        val id: Long,
         val landing: PendingLanding,
         val generation: Int,
         val page: Int,
         val initialScrollTo: Boolean = false,
+    )
+
+    private data class DeliveredLanding(
+        val effect: TopicEffect,
+        val armed: ArmedLanding,
     )
 
     /**
@@ -274,8 +307,8 @@ class TopicViewModel @AssistedInject constructor(
     /**
      * #895 étape 4 — the landing model of the switch engine (F3 priority made explicit). One value
      * per switch/entry, dispatched by [dispatchPendingLanding] on the first matching Loaded :
-     * - [Post] → [TopicEffect.ScrollToPost] once the numreponse is on the page (stays pending
-     *   through emissions of the same generation otherwise — historical scrollTo behaviour) ;
+     * - [Post] → [TopicEffect.ScrollToPost] once the numreponse is on the page (stays pending only
+     *   through provisional emissions of the same generation, then resolves without scrolling) ;
      * - [PostOrBottom] → [TopicEffect.ScrollToPost] when the numreponse is on the page, else no
      *   scroll — terminal on the first Loaded either way (#974/#1243 : a submit that carried quotes
      *   resumes on the cited post when visible and otherwise preserves the reader's position) ;
@@ -994,7 +1027,7 @@ class TopicViewModel @AssistedInject constructor(
                         search = current.search.capturingAnchor(topic),
                     )
                 }
-                dispatchPendingLanding(topic)
+                dispatchPendingLanding(topic, terminal = true)
                 pollVoteMutationGeneration = null
                 recordSnapshot(topic)
             } catch (cancellation: CancellationException) {
@@ -1115,9 +1148,10 @@ class TopicViewModel @AssistedInject constructor(
      * #335 — manual pull-to-refresh of the current page. Re-fetches over the network and replaces the
      * loaded page in place, WITHOUT the post-submit overflow redirect (#226) or any scroll effect, so
      * the user keeps their reading position. NO-OP unless a page is already loaded and no refresh is
-     * in flight (guards a double pull). `isRefreshing` is cleared in `finally` so a cancellation —
-     * e.g. a delete's `refreshAfterDelete` re-assigning `loadJob` mid-refresh — never leaves the
-     * spinner stuck.
+     * in flight (guards a double pull). The [TopicRefreshKind.Manual] state is cleared in `finally`
+     * so a cancellation — e.g. a delete's `refreshAfterDelete` re-assigning `loadJob` mid-refresh —
+     * never leaves the spinner stuck. A post-submit refresh also blocks a competing pull, but uses
+     * its dedicated under-bar indicator instead of the pull spinner (#1301).
      *
      * konsist:bypass-prefetch-guard — cancels the in-flight prefetch and force-fetches the page; this
      * is an explicit user-initiated authenticated refresh, not an anonymous warmup escalating to
@@ -1133,7 +1167,7 @@ class TopicViewModel @AssistedInject constructor(
         // expansion. Keep the single-flight guard below: neither cancel the vote nor issue GET 2.
         clearPollVisit()
         if (
-            _state.value.isRefreshing ||
+            _state.value.refreshKind != TopicRefreshKind.None ||
             displayed.pollVote?.phase?.let { it != PollVotePhase.Idle } == true
         ) {
             return
@@ -1142,7 +1176,7 @@ class TopicViewModel @AssistedInject constructor(
         // single-flight keep this effectively free while the directory is fresh/in flight.
         loadStaff()
         becomePageOwner()
-        _state.update { it.copy(isRefreshing = true) }
+        _state.update { it.copy(refreshKind = TopicRefreshKind.Manual) }
         // Gate Sol PR1 r2 (bloquant 1) — same ownership guard as every other async producer :
         // a reply landing after a page switch must never write over the new owner's page.
         val generation = ownerGeneration
@@ -1157,7 +1191,7 @@ class TopicViewModel @AssistedInject constructor(
                         search = it.search.capturingAnchor(topic),
                     )
                 }
-                dispatchPendingLanding(topic)
+                dispatchPendingLanding(topic, terminal = true)
                 recordSnapshot(topic)
                 // Re-arm the page+1 warmup, like `loadCurrentPage` (l. ~219). Unlike the post-submit
                 // `performSubmitRefresh` (which deliberately skips it), a manual mid-page pull is
@@ -1176,7 +1210,7 @@ class TopicViewModel @AssistedInject constructor(
                 // a superseded refresh must not cut a NEWER refresh's indicator (the takeover
                 // itself already reset the stale one in becomePageOwner).
                 if (generation == ownerGeneration) {
-                    _state.update { it.copy(isRefreshing = false) }
+                    _state.update { it.copy(refreshKind = TopicRefreshKind.None) }
                 }
             }
         }
@@ -1284,7 +1318,7 @@ class TopicViewModel @AssistedInject constructor(
         // navigation so its resolved goToPost cannot rip the user off the page they just chose.
         citingPostNavigationJob?.cancel()
         prefetchedPage = null
-        reclaimRefreshIndicator()
+        reclaimRefreshState()
         // Gate Sol PR1 — a SAME-PAGE re-own (Retry, refresh, search takeover) keeps the
         // not-yet-dispatched landing alive by re-tagging it to the new generation (historical
         // scrollTo retry across Retry) ; a page change drops it — the switch paths re-arm
@@ -1295,15 +1329,14 @@ class TopicViewModel @AssistedInject constructor(
     }
 
     /**
-     * Gate Sol PR1 r3/r4 — the pull-to-refresh spinner belongs to the OUTGOING owner : EVERY
-     * takeover (page switch, normal load, AND a search claiming the page through [launchSearch])
-     * resets it immediately ; the superseded refresh's finally (generation-guarded) then rightly
-     * refuses to touch a newer owner's indicator. Without the search path a spinner could stay
-     * stuck forever — `refresh()` guards on `isRefreshing`, blocking every future pull (gate r4).
+     * Gate Sol PR1 r3/r4 / #1301 — refresh feedback belongs to the OUTGOING owner: EVERY takeover
+     * (page switch, normal load, search, or another submit) resets it immediately. The new owner
+     * then arms its own [TopicRefreshKind]. Without the search path a manual spinner could stay
+     * stuck forever; without the generic reset a cancelled post-submit hairline could do the same.
      */
-    private fun reclaimRefreshIndicator() {
-        if (_state.value.isRefreshing) {
-            _state.update { it.copy(isRefreshing = false) }
+    private fun reclaimRefreshState() {
+        if (_state.value.refreshKind != TopicRefreshKind.None) {
+            _state.update { it.copy(refreshKind = TopicRefreshKind.None) }
         }
     }
 
@@ -1320,8 +1353,30 @@ class TopicViewModel @AssistedInject constructor(
         if (previous?.initialScrollTo == true) {
             savedStateHandle[KEY_SCROLL_TO_CONSUMED] = true
         }
+        val hadOutstandingLanding = previous != null || deliveredLanding != null
+        deliveredLanding = null
+        redeliverableLandingId = null
         pendingLanding = landing?.let {
-            ArmedLanding(it, ownerGeneration, request.page, initialScrollTo)
+            ArmedLanding(
+                id = ++nextLandingId,
+                landing = it,
+                generation = ownerGeneration,
+                page = request.page,
+                initialScrollTo = initialScrollTo,
+            )
+        }
+        val armed = pendingLanding
+        _state.update { current ->
+            val applied = current.landing as? TopicUiState.Landing.Applied
+            when {
+                armed != null -> current.copy(
+                    landing = TopicUiState.Landing.Pending(armed.id, armed.page),
+                )
+                hadOutstandingLanding -> current.copy(landing = TopicUiState.Landing.None)
+                applied != null && applied.page != request.page ->
+                    current.copy(landing = TopicUiState.Landing.None)
+                else -> current
+            }
         }
     }
 
@@ -1407,7 +1462,7 @@ class TopicViewModel @AssistedInject constructor(
                             savedStateHandle[KEY_FORCE_REFRESH_DONE] = true
                         }
                     }
-                    dispatchPendingLanding(topic)
+                    dispatchPendingLanding(topic, terminal = !emission.provisional)
                     maybeSchedulePrefetch(totalPages = topic.totalPages)
                 }
             // #910 gate r1 — a NORMAL completion with NO emission would otherwise leave either
@@ -1587,13 +1642,13 @@ class TopicViewModel @AssistedInject constructor(
     }
 
     /**
-     * #895 étape 4 — dispatch the landing owed to the page on screen, once, on the first Loaded
-     * of the owning generation. A [PendingLanding.Post] whose numreponse is not on [topic] stays
-     * pending (the next emission of the SAME generation may contain it — the historical scrollTo
-     * retry) ; [PendingLanding.PostOrBottom] is terminal even when silent, while every other landing
-     * dispatches unconditionally. A landing armed by a superseded owner is dropped without effect.
+     * #895/#1300 — dispatch the landing owed to the page on screen, once, for the owning
+     * generation. [terminal] comes from the CURRENT `TopicPageEmission`, never from a retained
+     * `Mode.Loaded`: an LRU snapshot is settled historically but remains provisional for this
+     * landing owner. A missing [PendingLanding.Post] therefore survives only an explicitly
+     * transient representation; the first terminal one resolves it without scrolling.
      */
-    private fun dispatchPendingLanding(topic: Topic) {
+    private fun dispatchPendingLanding(topic: Topic, terminal: Boolean) {
         // Gate Sol PR1 (bloquant 2) — refuse a stale pair : a dispatch reached from an untagged
         // path (same-page jump, snapshot activation) may run after a newer navigation replaced
         // the owner ; the armed landing knows who it belongs to.
@@ -1602,41 +1657,81 @@ class TopicViewModel @AssistedInject constructor(
             ?: return
         dispatchPendingModerationAlert(topic, armed)
         val effect = when (val landing = armed.landing) {
-            // A Post target absent from the page stays pending : the next emission of the same
-            // owner may contain it (historical scrollTo retry) — hence the nullable effect.
-            is PendingLanding.Post ->
-                TopicEffect.ScrollToPost(landing.numreponse, lastRead = landing.lastRead)
-                    .takeIf { topic.posts.any { post -> post.numreponse == landing.numreponse } }
-            // #974/#1243 — a cited post absent from the landing page is terminal but silent :
-            // do not jump to the bottom of a different page and rip the reader away from context.
+            is PendingLanding.Post -> when {
+                topic.posts.any { post -> post.numreponse == landing.numreponse } ->
+                    TopicEffect.ScrollToPost(landing.numreponse, lastRead = landing.lastRead)
+                terminal -> TopicEffect.LandingResolvedWithoutScroll(armed.page)
+                else -> null
+            }
+            // #974/#1243 — a cited post absent from the landing page is terminal without a scroll:
+            // do not jump to the bottom of a different page and rip the reader away from context,
+            // but do explicitly reopen the persistence gate.
             is PendingLanding.PostOrBottom ->
                 if (topic.posts.any { post -> post.numreponse == landing.numreponse }) {
                     TopicEffect.ScrollToPost(landing.numreponse)
                 } else {
-                    clearLanding()
-                    null
+                    TopicEffect.LandingResolvedWithoutScroll(armed.page)
                 }
             is PendingLanding.Anchor -> TopicEffect.ScrollToAnchor(landing.anchor, armed.page)
             PendingLanding.Bottom -> TopicEffect.ScrollToEndOfPage(armed.page)
             PendingLanding.Top -> TopicEffect.ScrollToTop(armed.page)
         } ?: return
-        // Gate Sol PR1 r2 (bloquant 2) — the validity check and the delivery must be ATOMIC : a
-        // suspending `send` opens a window where a newer owner supersedes the landing while the
-        // stale effect is still delivered on the new page. `trySend` never suspends (the channel
-        // is BUFFERED), so on the Main-confined ViewModel nothing can interleave between the
-        // `(generation, page)` check above and the delivery. A full buffer (never observed : the
-        // screen collects eagerly) keeps the landing pending for the next emission.
-        if (_effects.trySend(effect).isSuccess) {
-            clearLanding()
-        }
+        deliverLanding(effect, armed)
+    }
+
+    /** Resolve the current owner's landing without moving the list (terminal miss/fallback). */
+    private fun resolvePendingLandingWithoutScroll() {
+        val armed = pendingLanding
+            ?.takeIf { it.generation == ownerGeneration && it.page == request.page }
+            ?: return
+        deliverLanding(TopicEffect.LandingResolvedWithoutScroll(armed.page), armed)
     }
 
     /**
-     * Clear the pending landing ; when it was the INITIAL route `scrollTo`, persist the
-     * consumption so a process death never replays the deep-link scroll (Sol point 5).
+     * Gate Sol PR1 r2 — atomically deliver [effect] for [armed]. `trySend` never suspends, so a
+     * newer owner cannot interleave between the owner check and consumption. A full buffer leaves
+     * the landing pending for the next terminal representation.
      */
-    private fun clearLanding() {
-        val armed = pendingLanding ?: return
+    private fun deliverLanding(effect: TopicEffect, armed: ArmedLanding) {
+        val delivery = DeliveredLanding(effect, armed)
+        deliveredLanding = delivery
+        redeliverableLandingId = null
+        if (_effects.trySend(effect).isSuccess) {
+            consumeLanding(armed)
+        } else if (deliveredLanding === delivery) {
+            deliveredLanding = null
+        }
+    }
+
+    /** #1300 — retain an interrupted delivery for the next collector, if it is still current. */
+    private fun retainLandingForRedelivery(id: Long) {
+        if (unacknowledgedDelivery(id) != null) redeliverableLandingId = id
+    }
+
+    /** Claim the retained delivery once; cancellation retains it again through the flow's guard. */
+    private fun claimLandingRedelivery(): DeliveredLanding? {
+        val id = redeliverableLandingId
+        redeliverableLandingId = null
+        return id?.let(::unacknowledgedDelivery)
+    }
+
+    /** Resolve a retained id only while its exact pending phase and canonical page still match. */
+    private fun unacknowledgedDelivery(id: Long): DeliveredLanding? {
+        val current = _state.value
+        return deliveredLanding
+            ?.takeIf { it.armed.id == id }
+            ?.takeIf {
+                current.landing == TopicUiState.Landing.Pending(it.armed.id, it.armed.page)
+            }
+            ?.takeIf { request.page == it.armed.page }
+    }
+
+    /**
+     * Consume [armed] after its effect was delivered; the UI handshake remains
+     * [TopicUiState.Landing.Pending] until [onLandingApplied] acknowledges that exact effect.
+     */
+    private fun consumeLanding(armed: ArmedLanding) {
+        if (pendingLanding?.id != armed.id) return
         pendingLanding = null
         if (armed.initialScrollTo) {
             savedStateHandle[KEY_SCROLL_TO_CONSUMED] = true
@@ -1677,6 +1772,42 @@ class TopicViewModel @AssistedInject constructor(
         pageAnchors[request.page] = anchor
         savedStateHandle[KEY_ANCHOR_INDEX] = anchor.index
         savedStateHandle[KEY_ANCHOR_OFFSET] = anchor.offset
+    }
+
+    /**
+     * #1300 — acknowledge that the screen applied this exact landing effect. The referential
+     * identity check prevents a late completion from acknowledging a newer same-page landing;
+     * [TopicUiState.Landing.Applied] then lets a remounted composition restore its local alignment
+     * gate without replaying the one-shot scroll.
+     */
+    fun onLandingApplied(effect: TopicEffect) {
+        val armed = validatedAppliedLanding(effect) ?: return
+        deliveredLanding = null
+        redeliverableLandingId = null
+        _state.update { current ->
+            if (
+                current.landing == TopicUiState.Landing.Pending(armed.id, armed.page) &&
+                current.request.page == armed.page &&
+                current.mode is TopicUiState.Mode.Loaded
+            ) {
+                current.copy(landing = TopicUiState.Landing.Applied(armed.id, armed.page))
+            } else {
+                current
+            }
+        }
+    }
+
+    /** Validate every owner and phase guard before acknowledging a delivered landing. */
+    private fun validatedAppliedLanding(effect: TopicEffect): ArmedLanding? {
+        val current = _state.value
+        return deliveredLanding
+            ?.takeIf { it.effect === effect }
+            ?.armed
+            ?.takeIf {
+                current.landing == TopicUiState.Landing.Pending(it.id, it.page)
+            }
+            ?.takeIf { request.page == it.page }
+            ?.takeIf { current.mode is TopicUiState.Mode.Loaded }
     }
 
     /**
@@ -1766,14 +1897,14 @@ class TopicViewModel @AssistedInject constructor(
         pageSnapshots.remove(target)
         jumpStack.clear()
         syncJumpAvailability()
-        performSubmitRefresh(plan)
+        performSubmitRefresh(plan, TopicRefreshKind.PostSubmit)
     }
 
     /**
      * #1243 — explicit Snackbar action after the refreshed submit page reports a later published
      * page. This is now a user gesture, so opening the post page may advance HFR's read flag.
      */
-    fun openSubmittedPostPage(page: Int, scrollTo: Int? = null, departureAnchor: TopicScrollAnchor? = null) {
+    fun openSubmittedPostPage(page: Int, departureAnchor: TopicScrollAnchor? = null) {
         if (page < 1) return
         departureAnchor?.let { pageAnchors[request.page] = it }
         postSubmitRedirectBudget = 0
@@ -1781,12 +1912,13 @@ class TopicViewModel @AssistedInject constructor(
         jumpStack.clear()
         syncJumpAvailability()
         performSubmitRefresh(
-            SubmitRefreshPlan(
+            plan = SubmitRefreshPlan(
                 initialTarget = page,
-                landing = scrollTo?.let { PendingLanding.Post(it) } ?: PendingLanding.Bottom,
+                landing = PendingLanding.Bottom,
                 overflowRedirectAllowed = false,
                 submittedElsewhereNotificationAllowed = false,
             ),
+            submitRefreshKind = TopicRefreshKind.PostSubmitJump,
         )
     }
 
@@ -1888,7 +2020,7 @@ class TopicViewModel @AssistedInject constructor(
      */
     private fun dispatchLandingAgainstScreen() {
         val loaded = _state.value.mode as? TopicUiState.Mode.Loaded ?: return
-        dispatchPendingLanding(loaded.topic)
+        dispatchPendingLanding(loaded.topic, terminal = false)
     }
 
     /**
@@ -1902,8 +2034,10 @@ class TopicViewModel @AssistedInject constructor(
      * submit result ; ownership taken via [becomePageOwner] (which cancels the anonymous warmup),
      * never an anonymous prefetch escalating to authenticated.
      */
-    private fun performSubmitRefresh(plan: SubmitRefreshPlan) {
+    private fun performSubmitRefresh(plan: SubmitRefreshPlan, submitRefreshKind: TopicRefreshKind) {
         becomePageOwner()
+        // #1301 — expose the durable cause synchronously, before any adoption or network wait.
+        _state.update { it.copy(refreshKind = submitRefreshKind) }
         savedStateHandle[KEY_FORCE_REFRESH_DONE] = true
         adoptSubmitTarget(plan.initialTarget, plan.landing)
         val generation = ownerGeneration
@@ -1916,22 +2050,27 @@ class TopicViewModel @AssistedInject constructor(
                 try {
                     val topic = topicRepository.refreshTopicPage(request.cat, request.post, target)
                     if (generation != ownerGeneration) return@launch
+                    val shouldRedirect = plan.overflowRedirectAllowed &&
+                        topic.totalPages > target &&
+                        postSubmitRedirectBudget > 0
                     _state.update {
                         it.copy(
                             mode = loadedMode(topic),
                             availablePages = (1..topic.totalPages).toList(),
                             search = it.search.capturingAnchor(topic),
+                            // #1301 — the first #226 response is not terminal when it redirects.
+                            refreshKind = if (shouldRedirect) {
+                                submitRefreshKind
+                            } else {
+                                TopicRefreshKind.None
+                            },
                         )
                     }
                     // #226 — plain-reply overflow : the reply created a page past the target.
                     // Consume the single redirect budget and land on the real last page ; that
                     // landing can never redirect again (anti-chase), whatever a concurrent
                     // poster does.
-                    if (
-                        plan.overflowRedirectAllowed &&
-                        topic.totalPages > target &&
-                        postSubmitRedirectBudget > 0
-                    ) {
+                    if (shouldRedirect) {
                         postSubmitRedirectBudget = 0
                         redirected = true
                         pageSnapshots.remove(target)
@@ -1941,7 +2080,7 @@ class TopicViewModel @AssistedInject constructor(
                         continue
                     }
                     recordSnapshot(topic)
-                    dispatchPendingLanding(topic)
+                    dispatchPendingLanding(topic, terminal = true)
                     if (
                         plan.submittedElsewhereNotificationAllowed &&
                         !redirected &&
@@ -1953,12 +2092,14 @@ class TopicViewModel @AssistedInject constructor(
                     throw cancellation
                 } catch (@Suppress("TooGenericExceptionCaught") refreshError: Exception) {
                     // Same contract as the historical post-submit failure : HFR accepted the POST,
-                    // tell the user, drop the landing (no scroll on a stale page) and fall back to
-                    // the cache-aside path with a Retry affordance.
+                    // tell the user, resolve the landing without scrolling a stale page, then fall
+                    // back to the cache-aside path with a Retry affordance.
                     android.util.Log.w(LOG_TAG, "Submit-result refresh failed", refreshError)
                     if (generation != ownerGeneration) return@launch
+                    // #1301 — dismiss the success confirmation before the existing error effect.
+                    _state.update { it.copy(refreshKind = TopicRefreshKind.None) }
                     _effects.trySend(TopicEffect.PostSubmitRefreshFailed)
-                    clearLanding()
+                    resolvePendingLandingWithoutScroll()
                     startPageLoad(showLoading = _state.value.mode !is TopicUiState.Mode.Loaded)
                 }
                 return@launch
@@ -2128,7 +2269,7 @@ class TopicViewModel @AssistedInject constructor(
                         availablePages = (1..topic.totalPages).toList(),
                     )
                 }
-                dispatchPendingLanding(topic)
+                dispatchPendingLanding(topic, terminal = true)
                 recordSnapshot(topic)
             } catch (cancellation: CancellationException) {
                 throw cancellation
@@ -2372,7 +2513,7 @@ class TopicViewModel @AssistedInject constructor(
                         search = it.search.capturingAnchor(topic),
                     )
                 }
-                dispatchPendingLanding(topic)
+                dispatchPendingLanding(topic, terminal = true)
                 recordSnapshot(topic)
             } catch (cancellation: CancellationException) {
                 throw cancellation
@@ -2840,7 +2981,7 @@ class TopicViewModel @AssistedInject constructor(
         loadJob?.cancel()
         prefetchJob?.cancel()
         // Gate r4 (bloquant 1) — a search takeover supersedes an in-flight pull-to-refresh too.
-        reclaimRefreshIndicator()
+        reclaimRefreshState()
         val generation = ++ownerGeneration
         _state.update { it.copy(search = it.search.copy(status = TopicSearchStatus.Loading)) }
         searchJob = viewModelScope.launch {

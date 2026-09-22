@@ -49,7 +49,6 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.SmallFloatingActionButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -66,6 +65,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -135,6 +135,7 @@ import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.pager.PageFab
 import fr.forumhfr.redface2.core.ui.pager.PageFabDefaults
 import fr.forumhfr.redface2.core.ui.pager.PageNavigation
+import fr.forumhfr.redface2.core.ui.pager.PageNavigationActions
 import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
 import fr.forumhfr.redface2.core.ui.post.AuthorRolePill
 import fr.forumhfr.redface2.core.ui.post.CreatorPseudoText
@@ -163,34 +164,12 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
 import java.util.Locale
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
-
-@Suppress("LongParameterList")
-internal fun CoroutineScope.launchPostSubmittedElsewhereSnackbar(
-    effect: TopicEffect.PostSubmittedElsewhere,
-    message: String,
-    actionLabel: String,
-    showSnackbar: suspend (
-        message: String,
-        actionLabel: String,
-        duration: SnackbarDuration
-    ) -> SnackbarResult,
-    departureAnchor: () -> TopicScrollAnchor?,
-    openSubmittedPostPage: (page: Int, scrollTo: Int?, departureAnchor: TopicScrollAnchor?) -> Unit,
-) {
-    launch {
-        val result = showSnackbar(message, actionLabel, SnackbarDuration.Long)
-        if (result == SnackbarResult.ActionPerformed) {
-            openSubmittedPostPage(effect.page, effect.scrollTo, departureAnchor())
-        }
-    }
-}
 
 @Composable
 // LongParameterList : state-hoisted Composable : each callback has a distinct call-site
@@ -390,6 +369,14 @@ fun TopicScreen(
     val lazyListState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
     val snackbarScope = rememberCoroutineScope()
+    // #1301 — ONE owner for the whole post-submit feedback (« Message publié », then « Message
+    // publié en page N » once the refreshed page reports a later one). Material serialises
+    // showSnackbar behind a single mutex, so two independent launches showed the reader BOTH
+    // confirmations in a row (beta feedback from nicko) ; through the coordinator the second
+    // replaces the first.
+    val submitFeedback = remember(snackbarHostState) {
+        TopicSubmitFeedback { snackbarHostState.currentSnackbarData?.dismiss() }
+    }
     // #1137 — measured height (px) of the « Dernier message lu » separator, written from where the
     // marker is composed (onSizeChanged, inside the last-read post's item — cf. TopicLoadedContent)
     // and read by the flag landing below to put the marker's top edge on the landing line (the post
@@ -417,6 +404,12 @@ fun TopicScreen(
     // anchors) is gated on « the list is aligned with the canonical page », so a late fling
     // settle or a dispose can never record page N's coordinates under page N+1.
     val alignment = remember { TopicListAlignment() }
+    TopicLandingAlignmentEffect(
+        landing = state.landing,
+        canonicalPage = state.request.page,
+        isLoaded = state.mode is TopicUiState.Mode.Loaded,
+        alignment = alignment,
+    )
     // Gate r1 — tap-time departure anchor, but ONLY while aligned : right after a rapid second
     // page tap the list may still sit at the previous page's offset. A null departure just falls
     // back to the engine's stored anchor for the departed page.
@@ -472,6 +465,7 @@ fun TopicScreen(
     // suspending lambda but the surrounding scope is still a Composable). Capturing the message
     // upfront keeps the rule happy and avoids re-resolving on every effect.
     val refreshFailedMsg = stringResource(R.string.topic_post_submit_refresh_failed)
+    val postSubmittedMsg = stringResource(R.string.topic_post_submit_confirmed)
     val submittedElsewhereMsg = stringResource(R.string.topic_post_submitted_elsewhere)
     val submittedElsewhereAction = stringResource(R.string.topic_post_submitted_elsewhere_action)
     // #335 — manual pull-to-refresh failure message (resolved upfront, same rationale).
@@ -512,6 +506,19 @@ fun TopicScreen(
     // #1201 — close-poll confirmation gate. State-driven dialog (the ViewModel owns the
     // confirm → close flow) ; the outcomes ride the screen's single TopicEffect collector below.
     val closePollState by viewModel.closePollState.collectAsStateWithLifecycle()
+
+    // #1301 — only a real submit confirms publication; the durable PostSubmitJump kind survives a
+    // recreation during « Y aller » without replaying it. Both kinds keep the progress hairline.
+    TopicSubmitFeedbackEffect(
+        refreshKind = state.refreshKind,
+        submitFeedback = submitFeedback,
+        scope = snackbarScope,
+    ) {
+        snackbarHostState.showSnackbar(
+            message = postSubmittedMsg,
+            duration = SnackbarDuration.Indefinite,
+        )
+    }
 
     // Bug fix (build 89) — report the loaded title up so `:app` caches it per topic. The next page
     // (recreated screen) reads it back through `request.titleHint`, keeping the top bar title stable
@@ -583,6 +590,7 @@ fun TopicScreen(
                             // #197 re-anchor below only re-pins the same target, the position keeps
                             // describing this page.
                             alignment.onLandingApplied(page)
+                            viewModel.onLandingApplied(effect)
                             // #197 — block images above the target grow from 160dp to up to 480dp
                             // once Coil decodes them, shifting the offset *after* this one-shot
                             // scroll and leaving the target off-screen on a cold image cache. Keep
@@ -596,6 +604,7 @@ fun TopicScreen(
                             // Gate r2 — not-found : the no-scroll DECISION is the landing application
                             // (the content is this page, at a position the user now owns).
                             alignment.onLandingApplied(page)
+                            viewModel.onLandingApplied(effect)
                         }
                     }
                 }
@@ -627,6 +636,7 @@ fun TopicScreen(
                         // empty-page decision skipped it) : a suspension or disposal mid-landing
                         // must keep persists blocked.
                         alignment.onLandingApplied(effect.page)
+                        viewModel.onLandingApplied(effect)
                     }
                 }
                 is TopicEffect.ScrollToAnchor -> {
@@ -642,6 +652,7 @@ fun TopicScreen(
                         lazyListState.scrollToItem(effect.anchor.index, effect.anchor.offset)
                         // Gate r1/r2 — aligned only AFTER the scroll applied.
                         alignment.onLandingApplied(effect.page)
+                        viewModel.onLandingApplied(effect)
                     }
                 }
                 is TopicEffect.ScrollToTop -> {
@@ -656,10 +667,25 @@ fun TopicScreen(
                         lazyListState.scrollToItem(0)
                         // Gate r1/r2 — aligned only AFTER the scroll applied.
                         alignment.onLandingApplied(effect.page)
+                        viewModel.onLandingApplied(effect)
+                    }
+                }
+                is TopicEffect.LandingResolvedWithoutScroll -> {
+                    // #1300 — terminal page, absent target: make no movement. Waiting for the
+                    // page (or its abandonment) keeps this decision page-scoped like every other
+                    // landing, then acknowledges it so a remount can restore the local gate.
+                    val landed = viewModel.state.first {
+                        it.request.page != effect.page || it.mode is TopicUiState.Mode.Loaded
+                    }
+                    if (landed.request.page == effect.page && landed.mode is TopicUiState.Mode.Loaded) {
+                        alignment.onLandingApplied(effect.page)
+                        viewModel.onLandingApplied(effect)
                     }
                 }
                 TopicEffect.PostSubmitRefreshFailed -> {
                     // Issue #200 — HFR accepted the post but the local force refresh failed.
+                    // #1301 — remove the in-flight success confirmation before its error replacement.
+                    submitFeedback.dismissConfirmation()
                     // Surface a Toast so the user knows the submit went through and can
                     // re-trigger the refresh manually (pull-to-refresh / Retry) instead of
                     // assuming the post was silently lost.
@@ -670,19 +696,24 @@ fun TopicScreen(
                     ).show()
                 }
                 is TopicEffect.PostSubmittedElsewhere -> {
-                    snackbarScope.launchPostSubmittedElsewhereSnackbar(
-                        effect = effect,
-                        message = String.format(Locale.getDefault(), submittedElsewhereMsg, effect.page),
-                        actionLabel = submittedElsewhereAction,
-                        showSnackbar = { message, actionLabel, duration ->
+                    // #1301 — REPLACES the « Message publié » confirmation through the single
+                    // coordinator instead of queueing a second snackbar behind it. The launch keeps
+                    // the effect collector free while the snackbar stays on screen.
+                    submitFeedback.offerSubmittedElsewhere(
+                        scope = snackbarScope,
+                        show = {
                             snackbarHostState.showSnackbar(
-                                message = message,
-                                actionLabel = actionLabel,
-                                duration = duration,
+                                message = String.format(Locale.getDefault(), submittedElsewhereMsg, effect.page),
+                                actionLabel = submittedElsewhereAction,
+                                duration = SnackbarDuration.Long,
                             )
                         },
-                        departureAnchor = alignedDepartureAnchor,
-                        openSubmittedPostPage = viewModel::openSubmittedPostPage,
+                        openPage = {
+                            viewModel.openSubmittedPostPage(
+                                page = effect.page,
+                                departureAnchor = alignedDepartureAnchor(),
+                            )
+                        },
                     )
                 }
                 TopicEffect.RefreshFailed -> {
@@ -1117,6 +1148,21 @@ private fun LazyListState.measuredSizeOf(target: Int): Int? =
     layoutInfo.visibleItemsInfo.firstOrNull { it.index == target }?.size
 
 /**
+ * #1300 — restore the composition-local alignment gate after the screen is mounted again with the
+ * same ViewModel. Only an acknowledged landing may reopen persistence; a pending landing keeps the
+ * gate closed until its one-shot effect (or terminal no-scroll resolution) is actually applied.
+ */
+@Composable
+internal fun TopicLandingAlignmentEffect(
+    landing: TopicUiState.Landing,
+    canonicalPage: Int,
+    isLoaded: Boolean,
+    alignment: TopicListAlignment,
+) {
+    SideEffect { alignment.synchronizeLanding(landing, canonicalPage, isLoaded) }
+}
+
+/**
  * #307 — one-shot restoration of the saved read position + the single central save point.
  *
  * RESTORE: waits for the ENTRY page's first `Loaded` emission OR its abandonment (the in-VM
@@ -1267,7 +1313,8 @@ private fun TopicEffect.isScrollEffect(): Boolean =
         this == TopicEffect.ScrollToTopOfResults ||
         this is TopicEffect.ScrollToEndOfPage ||
         this is TopicEffect.ScrollToAnchor ||
-        this is TopicEffect.ScrollToTop
+        this is TopicEffect.ScrollToTop ||
+        this is TopicEffect.LandingResolvedWithoutScroll
 
 /**
  * #1137 — pure alignment decision of a last-read landing ([LandingAlignment.LastReadMarker]),
@@ -1799,25 +1846,26 @@ internal fun topicBarPageIndicator(state: TopicUiState, loaded: TopicUiState.Mod
 // expanded; the small M3 top app bar keeps a fixed container height and would clip it otherwise.
 private val TopBarExpandedTitleExtraHeight = 24.dp
 
-// #895 — the discreet under-bar refresh hairline (visible only while the displayed page is
-// provisional). The 2 dp strip is permanently reserved so it never shifts the list.
+// #895/#1301 — the discreet under-bar refresh hairline. It covers provisional cache refreshes and
+// post-submit refreshes; the 2 dp strip is permanently reserved so it never shifts the list.
 private val TopBarRefreshHairlineHeight = 2.dp
 
 /**
- * #895 — the top-bar page pill. Shows the pagination OF THE DISPLAYED CONTENT (provisional cache
- * included — replacing known information with « Chargement… » was the reported flash) ; while the
- * page is provisional, screen readers get « page X sur Y, actualisation en cours » as the
- * equivalent of the visual hairline. No liveRegion : announcing cache-then-settled twice per
- * navigation would be pure noise (cadrage Sol).
+ * #895/#1301 — the top-bar page pill. Shows the pagination OF THE DISPLAYED CONTENT (provisional
+ * cache included — replacing known information with « Chargement… » was the reported flash).
+ * During a provisional or post-submit refresh, screen readers get « page X sur Y, actualisation en
+ * cours » as the equivalent of the visual hairline. No liveRegion for cache-then-network navigation
+ * updates; the post-submit Snackbar owns the immediate announcement.
  */
 @Composable
 private fun TopicBarPagePill(
     text: String,
     loaded: TopicUiState.Mode.Loaded?,
+    refreshing: Boolean,
     pagePickerLabel: String,
     onOpenPagePicker: () -> Unit,
 ) {
-    val refreshingLabel = loaded?.takeIf { it.provisional }?.let {
+    val refreshingLabel = loaded?.takeIf { refreshing }?.let {
         stringResource(
             R.string.topic_page_indicator_refreshing_a11y,
             it.topic.page,
@@ -1891,6 +1939,7 @@ internal fun TopicTopBar(
     )
     // #809 — long-press on the title opens the drapeau-removal flow (the tap toggle is unchanged).
     val titleLongPressLabel = stringResource(R.string.topic_remove_flag_long_press)
+    val showRefreshHairline = loaded?.provisional == true || state.refreshKind.isPostSubmitRefresh()
     Column {
         TopAppBar(
             title = {
@@ -1926,6 +1975,7 @@ internal fun TopicTopBar(
                     TopicBarPagePill(
                         text = barPageIndicator,
                         loaded = loaded,
+                        refreshing = showRefreshHairline,
                         pagePickerLabel = pagePickerLabel,
                         onOpenPagePicker = { pagePickerOpen = true },
                     )
@@ -1966,16 +2016,15 @@ internal fun TopicTopBar(
             },
             scrollBehavior = scrollBehavior,
         )
-        // #895 (quick win 3) — discreet refresh signal : a 2 dp hairline under the bar while the
-        // displayed page is provisional (cache on screen, authenticated refresh in flight). The
-        // strip is ALWAYS reserved (transparent when settled) so its appearance never shifts the
-        // list below — this PR exists to remove flashes, not to add one.
+        // #895/#1301 — discreet refresh signal while the displayed page is provisional OR a
+        // post-submit refresh is in flight. The strip is ALWAYS reserved (transparent when
+        // settled) so its appearance never shifts the list below.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(TopBarRefreshHairlineHeight),
         ) {
-            if (loaded?.provisional == true) {
+            if (showRefreshHairline) {
                 LinearProgressIndicator(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -1988,10 +2037,9 @@ internal fun TopicTopBar(
             TopicSearchBar(search = state.search, onIntent = onIntent)
         }
     }
-    // Vague 3 (#604) — page-picker sheet: the dissolved header card's PageNavigation
-    // (prev/next + jump field + compact range row), verbatim, in a bottom sheet anchored to the
-    // top-bar pill. The Error path keeps its own inline PageNavigation — recovery navigation
-    // must not hide behind a sheet (cadrage Codex vague 3).
+    // Vague 3 (#604) — page-picker sheet: the dissolved header card's PageNavigation in a bottom
+    // sheet anchored to the top-bar pill. #1299 replaces redundant adjacent shortcuts here with
+    // first/last; the Error path keeps adjacent recovery navigation inline and outside the sheet.
     if (pagePickerOpen && loaded != null) {
         ModalBottomSheet(onDismissRequest = { pagePickerOpen = false }) {
             Column(
@@ -2011,6 +2059,7 @@ internal fun TopicTopBar(
                     availablePages = state.availablePages,
                     canGoPrevious = state.canGoPrevious,
                     canGoNext = state.canGoNext,
+                    actions = PageNavigationActions.Extremes,
                     onOpenPage = { target ->
                         pagePickerOpen = false
                         onOpenPage(target)

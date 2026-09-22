@@ -59,4 +59,21 @@ class TopicListAlignmentTest {
             alignment.shouldPersist(canonicalPage = 1, isLoaded = true),
         )
     }
+
+    @Test
+    fun `only an acknowledged landing restores alignment after a remount (#1300)`() {
+        val pending = TopicUiState.Landing.Pending(id = 4, page = 2)
+        val applied = TopicUiState.Landing.Applied(id = 4, page = 2)
+        val alignment = TopicListAlignment()
+
+        alignment.synchronizeLanding(pending, canonicalPage = 2, isLoaded = true)
+        assertFalse(alignment.shouldPersist(canonicalPage = 2, isLoaded = true))
+
+        alignment.synchronizeLanding(applied, canonicalPage = 2, isLoaded = true)
+        assertTrue(alignment.shouldPersist(canonicalPage = 2, isLoaded = true))
+
+        val otherPage = TopicListAlignment()
+        otherPage.synchronizeLanding(applied, canonicalPage = 3, isLoaded = true)
+        assertFalse(otherPage.shouldPersist(canonicalPage = 3, isLoaded = true))
+    }
 }

@@ -104,12 +104,13 @@ data class TopicUiState(
      */
     val writingSurfacePreset: WritingSurfacePreset = WritingSurfacePreset.FULL_EDITOR,
     /**
-     * #335 — `true` while a manual pull-to-refresh of the current page is in flight. Drives the
-     * Material3 `PullToRefreshBox` spinner. Set on the `Refresh` intent, cleared in the refresh
-     * coroutine's `finally` (so a cancellation — e.g. a delete starting mid-refresh — never leaves
-     * the indicator stuck).
+     * #1301 — refresh lifecycle and cause. [TopicRefreshKind.Manual] belongs to the pull gesture;
+     * [TopicRefreshKind.PostSubmit] and [TopicRefreshKind.PostSubmitJump] survive page redirects
+     * and drive the separate submit progress feedback. Only [TopicRefreshKind.PostSubmit] also
+     * acknowledges publication. A single source of truth prevents the indicators from disagreeing
+     * during ownership changes.
      */
-    val isRefreshing: Boolean = false,
+    val refreshKind: TopicRefreshKind = TopicRefreshKind.None,
     /**
      * Chantier C (#546) — intra-topic search (HFR `transsearch.php`), a MODE of this screen. Holds
      * the search bar visibility, the typed criteria and the search lifecycle. The matching topic
@@ -131,6 +132,15 @@ data class TopicUiState(
      * Kept in lock-step with every jump-stack mutation (push / pop / clear).
      */
     val canReturnFromJump: Boolean = false,
+    /**
+     * #1300 — lifecycle of the page landing currently owned by the ViewModel. [Landing.Pending]
+     * keeps position persistence closed while a one-shot effect still has to be applied; a
+     * delivered but unacknowledged effect is re-delivered if its collector disappears.
+     * [Landing.Applied] is written only after the screen acknowledges that application. A newly
+     * mounted screen can therefore restore its local alignment gate without replaying an applied
+     * scroll or losing an interrupted one.
+     */
+    val landing: Landing = Landing.None,
 ) {
     /**
      * Helper used by the screen / ViewModel : `true` when the user has navigated to a
@@ -144,6 +154,21 @@ data class TopicUiState(
             is Mode.Loaded -> request.page < mode.topic.totalPages
             else -> request.page < (availablePages.lastOrNull() ?: 1)
         }
+
+    /** #335 — compatibility/readability projection used only by the pull-to-refresh spinner. */
+    val isRefreshing: Boolean get() = refreshKind == TopicRefreshKind.Manual
+
+    /** #1300 — observable handshake for one page landing, scoped by a monotonic id and its page. */
+    sealed interface Landing {
+        /** No ViewModel-owned landing has to be restored by a remounted screen. */
+        data object None : Landing
+
+        /** Landing [id] for [page] was emitted or is waiting for a terminal page representation. */
+        data class Pending(val id: Long, val page: Int) : Landing
+
+        /** The screen applied landing [id] for [page], including an explicit no-scroll decision. */
+        data class Applied(val id: Long, val page: Int) : Landing
+    }
 
     sealed interface Mode {
         data object Loading : Mode
@@ -556,6 +581,13 @@ sealed interface TopicEffect {
     data class ScrollToTop(val page: Int) : TopicEffect
 
     /**
+     * #1300 — the first terminal representation of [page] did not contain the pending post.
+     * Applying this landing performs no scroll; it only lets the screen acknowledge that the
+     * current list position now belongs to the page and may be persisted.
+     */
+    data class LandingResolvedWithoutScroll(val page: Int) : TopicEffect
+
+    /**
      * Issue #200 — emitted when the post-submit force refresh (`refreshTopicPage`) fails.
      * HFR has already accepted the post (the editor only emits its `SubmitSucceeded`
      * effect on a `ReplySubmitResult.Success`), but the local refetch could not land,
@@ -572,7 +604,7 @@ sealed interface TopicEffect {
      * in place. The read flag cannot be advanced by an automatic authenticated load of the tail, so
      * the screen surfaces a Snackbar with an explicit action to open [page].
      */
-    data class PostSubmittedElsewhere(val page: Int, val scrollTo: Int? = null) : TopicEffect
+    data class PostSubmittedElsewhere(val page: Int) : TopicEffect
 
     /**
      * #335 — emitted when a manual pull-to-refresh (`Refresh` intent) failed to reach HFR. The

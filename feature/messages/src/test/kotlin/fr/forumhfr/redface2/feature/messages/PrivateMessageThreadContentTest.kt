@@ -298,8 +298,8 @@ class PrivateMessageThreadContentTest {
         compose.runOnIdle { state.value = state.value.copy(isRefreshing = true) }
         compose.waitForIdle()
 
-        compose.onNodeWithText("Précédent").assertIsNotEnabled()
-        compose.onNodeWithText("Suivant").assertIsNotEnabled()
+        compose.onNodeWithContentDescription("Aller à la première page").assertIsNotEnabled()
+        compose.onNodeWithContentDescription("Aller à la dernière page").assertIsNotEnabled()
         compose.onNodeWithText("Y aller").assertIsNotEnabled()
         compose.onNodeWithContentDescription("Page 2 sur 4, actualisation en cours")
             .assertIsNotEnabled()

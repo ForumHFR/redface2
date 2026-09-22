@@ -16,6 +16,43 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.62.0` — `open` (bêta) — 2026-09-22
+
+Promotion bêta du lot développé en dev de `0.61.0` à `0.61.1`, depuis la précédente bêta `0.60.0`. Le détail par version dev figure dans les entrées ci-dessous. Contenu : le premier lot des retours de la bêta `0.60.0` (milestone « Vue · Topic 2 ») — raccourcis de page, position de lecture restaurée au retour de page, retour explicite après l'envoi d'un message — puis la correction des trois défauts que ce dernier point a révélés aux testeurs.
+
+Review de promotion : double relecture indépendante du diff `main...dev` — Sol (`gpt-5.6-sol`, xhigh) et Claude Fable 5.1. Findings traités avant merge : notes Play rectifiées (le parcours depuis la liste des drapeaux affiche un accusé court, pas le bandeau de progression) et pages publiques alignées sur la bêta. Findings fichés : [#1446](https://github.com/ForumHFR/redface2/issues/1446), [#1447](https://github.com/ForumHFR/redface2/issues/1447), [#1448](https://github.com/ForumHFR/redface2/issues/1448).
+
+Limites connues : la position de lecture restaurée au retour de page ([#1300](https://github.com/ForumHFR/redface2/issues/1300)) ne concerne que les **sujets** — en message privé, une page précédente jamais ouverte atterrit toujours en haut ; les confirmations d'action sur un message (« publié », « publié page N », « supprimé ») ne sont pas encore uniformisées ([#1437](https://github.com/ForumHFR/redface2/issues/1437)) ; l'envoi d'un message privé n'affiche toujours aucun accusé ([#1438](https://github.com/ForumHFR/redface2/issues/1438)).
+
+## `0.61.1` — `internal` (dev) — 2026-09-20
+
+Retours de nicko sur le premier lot ([#1301](https://github.com/ForumHFR/redface2/issues/1301)).
+
+### Écriture : confirmation d'envoi manquante ou dédoublée ([#1301](https://github.com/ForumHFR/redface2/issues/1301))
+
+- **Répondre depuis la liste des drapeaux confirme enfin l'envoi** : « Poster un message » ouvre l'éditeur au-dessus de la liste, qui n'a aucune page de sujet à rafraîchir — on revenait donc à la liste sans le moindre signe que le message était parti. Un accusé « Message publié » s'affiche désormais sur la liste, sans rafraîchissement ni navigation, et passe devant un retour de retrait de drapeau encore à l'écran (retour de nicko sur le fil DEV, [#1301](https://github.com/ForumHFR/redface2/issues/1301)).
+- **Plus de double confirmation quand le message atterrit sur une autre page** : « Message publié » puis « Message publié en page N » s'affichaient l'un après l'autre. Les deux passent maintenant par un seul coordinateur : l'offre « page N » remplace la confirmation au lieu de faire la queue derrière elle, et le saut « Y aller » ne ramène plus une confirmation générique (retour de nicko sur le fil DEV, [#1301](https://github.com/ForumHFR/redface2/issues/1301)).
+
+---
+
+## `0.61.0` — `internal` (dev) — 2026-09-20
+
+Premier lot des retours de la bêta `0.60.0` (milestone « Vue · Topic 2 »).
+
+### Lecture : sélecteur de page ([#1299](https://github.com/ForumHFR/redface2/issues/1299))
+
+- **« Aller à une page » raccourcit vers les extrémités** : dans le sélecteur de page du sujet et de la conversation privée, les boutons Précédent / Suivant — redondants avec les flèches ‹ › de la barre du bas — laissent place à « Première page » et « Dernière page », désactivés quand on y est déjà. Le saut direct par numéro est inchangé, et l'écran d'erreur garde son pas de récupération page par page (retour de CAMPEDEL sur le fil bêta, [#1299](https://github.com/ForumHFR/redface2/issues/1299)).
+
+### Écriture : retour explicite après l'envoi d'un message ([#1301](https://github.com/ForumHFR/redface2/issues/1301))
+
+- **Envoyer un message ne ressemble plus à un bug** : la page du sujet rouvrait sur son contenu d'avant, sans le message et sans le moindre indicateur, puis se mettait à jour plusieurs secondes plus tard — le temps de l'aller-retour avec HFR. Une confirmation « Message publié » s'affiche désormais dès que HFR a accepté le message, accompagnée du bandeau de progression sous la barre du haut, jusqu'à l'arrivée du contenu à jour ; en cas d'échec du rafraîchissement, la confirmation laisse la place au message d'erreur. Le retour couvre aussi l'envoi qui déborde sur une page nouvellement créée (retour de tryptique sur le fil bêta, [#1301](https://github.com/ForumHFR/redface2/issues/1301)).
+
+### Lecture : position restaurée au retour de page ([#1300](https://github.com/ForumHFR/redface2/issues/1300))
+
+- **Le swipe vers la page précédente revient là où on l'avait laissée** : la position de lecture d'une page déjà ouverte est restaurée telle quelle, et une page jamais ouverte s'ouvre en bas — on revient en arrière pour lire la fin. Le garde-fou qui empêche d'enregistrer la position d'une page sous une autre restait fermé après un remontage de l'écran (rotation, retour depuis un autre écran) : plus aucune position n'était mémorisée et le retour ramenait une ancre périmée, souvent le point d'entrée dans le sujet. L'étape d'atterrissage est désormais un échange explicite entre le moteur de pagination et l'écran, ce qui permet à un écran remonté de retrouver son état sans rejouer de défilement (retour de garath_ sur le fil bêta, [#1300](https://github.com/ForumHFR/redface2/issues/1300)).
+
+---
+
 ## `0.60.0` — `open` (bêta) — 2026-09-20
 
 Promotion bêta du lot développé en dev de `0.59.0` à `0.59.8`, depuis la précédente bêta `0.58.0`. Le détail par version dev figure dans les entrées ci-dessous. Review de promotion : Claude Opus sur la PR [#1427](https://github.com/ForumHFR/redface2/pull/1427) (`1427-review-opus.md`, findings bloquants traités avant merge : contexte Activity conservé sous le champ, docs alignées ; points mineurs suivis dans [#1417](https://github.com/ForumHFR/redface2/issues/1417)), puis review de la PR de promotion en commentaire. Limites connues : la migration complète des ViewModels vers `TextFieldState` est reportée à [#1417](https://github.com/ForumHFR/redface2/issues/1417) ; en paysage avec le clavier ouvert, les contrôles restent accessibles dans leur zone défilante mais la hauteur du champ de saisie demeure contrainte.

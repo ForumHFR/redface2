@@ -1066,6 +1066,11 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
         // event semantics — a tap mid-rotation is a negligible loss.
         var flagsQuickConfigRequest by remember { mutableStateOf(0) }
 
+        // #1301 — a successful POST from the flags list is owed one bounded acknowledgement. The
+        // pending id is saveable so a recreation between the editor handoff and the snackbar cannot
+        // erase that acknowledgement; the effect clears only the exact id it actually handled.
+        var flagsSubmitAckRequest by rememberSaveable { mutableStateOf(0L) }
+
         // Phase 2 finish (#208) — profile bottom sheet state, hoisted to `:app` so that
         // `:feature:topic` never depends on `:feature:profile`. The sheet is opened from
         // any TopicScreen tap on an avatar/author with a non-null profileId.
@@ -1394,6 +1399,15 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                             // #603 bug fix — reset the counter once FlagsRoute handled it, so a re-mount
                             // (return from a category/topic) does not replay the sheet open (Codex review).
                             onFlagsQuickConfigConsumed = { flagsQuickConfigRequest = 0 },
+                            flagsSubmitAckNavState = FlagsSubmitAckNavState(
+                                request = flagsSubmitAckRequest,
+                                onPublish = { flagsSubmitAckRequest += 1L },
+                                onConsumed = { consumedId ->
+                                    if (flagsSubmitAckRequest == consumedId) {
+                                        flagsSubmitAckRequest = 0L
+                                    }
+                                },
+                            ),
                             onReportContent = {
                                 startReportEmail(context, reportEmailSubject, reportNoEmailClient)
                             },
@@ -1934,7 +1948,7 @@ private data class TopicPendingSubmit(
  * LATER unrelated open of the same topic would consume — e.g. an editor opened straight from the
  * Flags list (`onReplyFlag`) pops back to the LIST, not to a topic entry.
  */
-private fun isTopicEntryFor(below: Any?, cat: Int, topicId: Int): Boolean {
+internal fun isTopicEntryFor(below: Any?, cat: Int, topicId: Int): Boolean {
     val topic = below as? TopicRoute ?: return false
     return topic.cat == cat && topic.post == topicId
 }
@@ -1954,6 +1968,22 @@ private data class TopicSubmitNavState(
     val pending: TopicPendingSubmit?,
     val onPublish: (cat: Int, post: Int, targetPage: Int?, scrollTo: Int?, quotedNumreponses: List<Int>) -> Unit,
     val onConsumed: () -> Unit,
+)
+
+/**
+ * #1301 — the bounded « message published » acknowledgement owed to the FLAGS list, twin of
+ * [TopicSubmitNavState] for the one screen that can host an editor without being the target topic
+ * (cf. [SubmitHandoff]). Deliberately carries no domain payload: the list refreshes nothing and
+ * navigates nowhere, so a pending acknowledgement id is all the identity the handshake needs.
+ *
+ * @property request raised by the editor entry BEFORE its pop; `0` means nothing is owed.
+ * @property onPublish arms the acknowledgement.
+ * @property onConsumed clears this exact id after the snackbar was actually handled.
+ */
+private data class FlagsSubmitAckNavState(
+    val request: Long,
+    val onPublish: () -> Unit,
+    val onConsumed: (Long) -> Unit,
 )
 
 /**
@@ -2226,6 +2256,8 @@ private fun RedfaceNavHost(
     // #603 bug fix — FlagsRoute calls this once it has handled a request, resetting the counter to 0 so a
     // re-mount under the back stack does not re-open the sheet with a stale value (Codex review).
     onFlagsQuickConfigConsumed: () -> Unit,
+    // #1301 — bounded acknowledgement owed to the flags list when an editor opened there submits.
+    flagsSubmitAckNavState: FlagsSubmitAckNavState,
     // #494 — the « Signaler un contenu » row of the settings Account/About sub-page reuses the same
     // report-email flow as the account menu (which owns `context` + the report strings).
     onReportContent: () -> Unit,
@@ -2387,6 +2419,10 @@ private fun RedfaceNavHost(
                     },
                     quickConfigRequest = flagsQuickConfigRequest,
                     onQuickConfigConsumed = onFlagsQuickConfigConsumed,
+                    // #1301 — « Poster un message » sends from here; the list is what the editor pop
+                    // reveals, so it is the screen that owes the reader the confirmation.
+                    submitAcknowledgement = flagsSubmitAckNavState.request,
+                    onSubmitAcknowledged = flagsSubmitAckNavState.onConsumed,
                     topBarActions = accountMenu,
                 )
             }
@@ -3138,16 +3174,25 @@ private fun RedfaceNavHost(
                         // being THIS topic — an editor opened from the Flags list (onReplyFlag) pops
                         // back to the list, and a pending outcome armed there would fire on a LATER
                         // unrelated open of the topic.
+                        // #1301 — that guarded case is no longer silent : the flags list gets its
+                        // own bounded acknowledgement instead (cf. [SubmitHandoff]). The two stay
+                        // mutually exclusive, so no outcome is ever armed without an owner.
                         val topicId = route.topicId
                         val below = backStack.getOrNull(backStack.lastIndex - 1)
-                        if (topicId != null && isTopicEntryFor(below, route.cat, topicId)) {
-                            topicSubmitNavState.onPublish(
-                                route.cat,
-                                topicId,
-                                targetPage,
-                                scrollTo,
-                                quotedNumreponses,
-                            )
+                        when (submitHandoffFor(below, route.cat, topicId)) {
+                            // topicId is non-null by construction of a TopicOutcome ; the `let` is
+                            // only what lets the compiler smart-cast it.
+                            SubmitHandoff.TopicOutcome -> topicId?.let {
+                                topicSubmitNavState.onPublish(
+                                    route.cat,
+                                    it,
+                                    targetPage,
+                                    scrollTo,
+                                    quotedNumreponses,
+                                )
+                            }
+                            SubmitHandoff.FlagsAcknowledgement -> flagsSubmitAckNavState.onPublish()
+                            SubmitHandoff.None -> Unit
                         }
                         // #868/#869 — the selection's intent is consumed by the SUCCESSFUL submit
                         // of a basket-consuming session (« Citer N » / its escalation), and only

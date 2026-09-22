@@ -8,6 +8,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import fr.forumhfr.redface2.core.model.Topic
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import org.junit.Assert.assertFalse
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -20,8 +21,9 @@ import org.robolectric.annotation.GraphicsMode
  * included : « page X / Y » with the discreet refresh hairline + the « actualisation en cours »
  * a11y description while the refresh is in flight, the same pagination without them once
  * settled, and « Chargement… » ONLY in pure Loading (no content on screen — the #877 guarantee).
- * The pill string goes through the REAL [topicBarPageIndicator] derivation, not a hand-fed
- * stand-in.
+ * #1301 adds the same visual/accessibility feedback for a post-submit refresh over an otherwise
+ * settled page. The pill string goes through the REAL [topicBarPageIndicator] derivation, not a
+ * hand-fed stand-in.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
@@ -54,6 +56,35 @@ class TopicTopBarProvisionalPillTest {
         composeTestRule
             .onNodeWithContentDescription("Page 3 sur 10, actualisation en cours")
             .assertDoesNotExist()
+    }
+
+    @Test
+    fun `a same-page post-submit refresh shows progress over settled content (#1301)`() {
+        setBar(
+            sampleState(mode = loadedMode(provisional = false)).copy(
+                refreshKind = TopicRefreshKind.PostSubmit,
+            ),
+        )
+
+        composeTestRule.onNodeWithText("page 3 / 10").assertExists()
+        composeTestRule.onNodeWithTag(TOPIC_REFRESH_HAIRLINE_TAG, useUnmergedTree = true).assertExists()
+        composeTestRule
+            .onNodeWithContentDescription("Page 3 sur 10, actualisation en cours")
+            .assertExists()
+    }
+
+    @Test
+    fun `the submitted-post jump keeps the hairline without becoming a pull refresh (#1301)`() {
+        val state = sampleState(mode = loadedMode(provisional = false)).copy(
+            refreshKind = TopicRefreshKind.PostSubmitJump,
+        )
+        setBar(state)
+
+        composeTestRule.onNodeWithTag(TOPIC_REFRESH_HAIRLINE_TAG, useUnmergedTree = true).assertExists()
+        composeTestRule
+            .onNodeWithContentDescription("Page 3 sur 10, actualisation en cours")
+            .assertExists()
+        assertFalse(state.isRefreshing)
     }
 
     @Test

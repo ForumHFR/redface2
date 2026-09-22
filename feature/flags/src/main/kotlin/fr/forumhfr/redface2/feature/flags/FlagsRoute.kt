@@ -172,7 +172,9 @@ private val LocalFlagsContentTopPadding = compositionLocalOf { 0.dp }
 // justified inline at the content lambda usage.
 @SuppressLint("UnusedMaterial3ScaffoldPaddingParameter")
 @Composable
-@Suppress("LongParameterList") // Screen route: 4 host nav callbacks + the quick-config trigger + the account slot.
+// Screen route: 4 host nav callbacks + the quick-config trigger + the #1301 submit acknowledgement
+// + the account slot.
+@Suppress("LongParameterList")
 fun FlagsRoute(
     onOpenFlag: (flag: Flag, page: Int) -> Unit,
     // #15 — open the reply editor for a topic (long-press sheet « Poster un message »). Defaulted so
@@ -191,6 +193,12 @@ fun FlagsRoute(
     // #603 — reset the host's quick-config counter once handled, so a re-mount (return from a category/
     // topic) does not re-open the sheet with a stale request (bug fix, Codex review).
     onQuickConfigConsumed: () -> Unit = {},
+    // #1301 — bumped by the host when an editor opened FROM this list (« Poster un message », #15)
+    // submitted successfully. The list has no topic entry to apply the #895 post-submit outcome to,
+    // so without this the reader came back with nothing telling them the message went through.
+    submitAcknowledgement: Long = 0L,
+    // #1301 — clear only the id whose snackbar completed, preserving a newer pending handoff.
+    onSubmitAcknowledged: (Long) -> Unit = { _ -> },
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
     val viewModel: FlagsViewModel = hiltViewModel()
@@ -364,6 +372,14 @@ fun FlagsRoute(
             }
         }
     }
+
+    // #1301 — bounded acknowledgement for a message sent from the editor opened on this list. The
+    // id remains pending through recreation until the snackbar has actually completed its display.
+    val submitAcknowledgementMessage = stringResource(R.string.flags_post_submit_confirmed)
+    FlagsSubmitAcknowledgementEffect(
+        request = submitAcknowledgement,
+        onConsumed = onSubmitAcknowledged,
+    ) { snackbarHostState.showSubmitAcknowledgement(submitAcknowledgementMessage) }
 
     // #603 PR2 — client-side search over the loaded flags + the app-bar tab picker. The query is
     // hoisted here (the app bar edits it, the body filters with it) and reset on a tab change so a

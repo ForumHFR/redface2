@@ -32,7 +32,7 @@ Pour la liste des capabilities et des non-goals, voir le [scope fonctionnel]({{ 
 | **1 — Core** | Lecture du forum (drapeaux, topics, forum, deep links) | XL | Phase 0 | ✅ Livrée (AAB `0.1.0-phase1.7` / `app-v38` / specs v0.8.4) |
 | **2 — Écriture** | Post / edit / quote / create topic / recherche / proxy alpha | L | Phase 1 | ✅ Livrée |
 | **3 — Messages** | MPs classiques + MultiMPs (lecture + écriture + DT + sync de position) | M | Phase 2 | ✅ Livrée (clôture #598 ; sync MPStorage bidirectionnelle complète + cache Room reportés → #6, Phase 4) |
-| **4 — Extensions + refonte UI pré-1.0** | Bookmarks, Qualitay, Redflag + refonte Drapeaux (#603) / Topic (#604) + hygiène repo (#605) ; Blacklist déjà livrée | L | Phase 3 + **hfr-redflag Worker** | ◐ Refonte UI livrée (bêtas 0.18.0 → 0.60.0) ; extensions communautaires non commencées hors Blacklist. Milestones de phase fermés en 06/2026 : le suivi se fait par **milestones de vue** |
+| **4 — Extensions + refonte UI pré-1.0** | Bookmarks, Qualitay, Redflag + refonte Drapeaux (#603) / Topic (#604) + hygiène repo (#605) ; Blacklist déjà livrée | L | Phase 3 + **hfr-redflag Worker** | ◐ Refonte UI livrée (bêtas 0.18.0 → 0.62.0) ; extensions communautaires non commencées hors Blacklist. Milestones de phase fermés en 06/2026 : le suivi se fait par **milestones de vue** |
 | **Polish & UX** | Animations, offline, thème dynamique, Play Store, raffinements UX | — | continu | ♾️ Backlog continu (pas une étape finale) |
 
 **Taille** : S = petit sous-chantier, M = quelques composants, L = plusieurs features indépendantes, XL = écran majeur + parseurs + cache (ex. `PostRenderer` natif).
