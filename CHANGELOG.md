@@ -10,6 +10,17 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ---
 
+## [0.13.2] - 2026-09-22
+
+**Promotion bêta 0.62.0** : alignement des pages publiques sur la nouvelle bêta.
+
+### Changed
+
+- Pages d'entrée (`README.md`, `AGENTS.md`, `docs/index.md`, `docs/guides/contributing.md`) : état du projet = bêta publique **0.62.0**, canal dev aligné sur la bêta au 22/09/2026.
+- `docs/specs/roadmap.md` : plage de livraison de la refonte UI étendue jusqu'à la bêta **0.62.0**.
+
+---
+
 ## v0.13.1 — 2026-09-20
 
 **Parité de sélection et promotion bêta 0.60.0** : cette version consigne le relâchement de sélection partagé entre Topic et MP, puis aligne les pages publiques sur la nouvelle bêta.

@@ -16,6 +16,14 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.62.0` — `open` (bêta) — 2026-09-22
+
+Promotion bêta du lot développé en dev de `0.61.0` à `0.61.1`, depuis la précédente bêta `0.60.0`. Le détail par version dev figure dans les entrées ci-dessous. Contenu : le premier lot des retours de la bêta `0.60.0` (milestone « Vue · Topic 2 ») — raccourcis de page, position de lecture restaurée au retour de page, retour explicite après l'envoi d'un message — puis la correction des trois défauts que ce dernier point a révélés aux testeurs.
+
+Review de promotion : double relecture indépendante du diff `main...dev` — Sol (`gpt-5.6-sol`, xhigh) et Claude Fable 5.1. Findings traités avant merge : notes Play rectifiées (le parcours depuis la liste des drapeaux affiche un accusé court, pas le bandeau de progression) et pages publiques alignées sur la bêta. Findings fichés : [#1446](https://github.com/ForumHFR/redface2/issues/1446), [#1447](https://github.com/ForumHFR/redface2/issues/1447), [#1448](https://github.com/ForumHFR/redface2/issues/1448).
+
+Limites connues : la position de lecture restaurée au retour de page ([#1300](https://github.com/ForumHFR/redface2/issues/1300)) ne concerne que les **sujets** — en message privé, une page précédente jamais ouverte atterrit toujours en haut ; les confirmations d'action sur un message (« publié », « publié page N », « supprimé ») ne sont pas encore uniformisées ([#1437](https://github.com/ForumHFR/redface2/issues/1437)) ; l'envoi d'un message privé n'affiche toujours aucun accusé ([#1438](https://github.com/ForumHFR/redface2/issues/1438)).
+
 ## `0.61.1` — `internal` (dev) — 2026-09-20
 
 Retours de nicko sur le premier lot ([#1301](https://github.com/ForumHFR/redface2/issues/1301)).
