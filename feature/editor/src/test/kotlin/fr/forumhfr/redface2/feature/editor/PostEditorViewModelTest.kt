@@ -965,16 +965,20 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `SmileySelected inserts the token at the caret and closes the picker`() = runTest {
+    fun `SmileySelected sends a perso token through the visible preview and closes the picker`() = runTest {
         val viewModel = newReplyViewModel()
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("hello", TextRange(5))))
+        viewModel.submit(PostEditorIntent.TogglePreview)
         viewModel.smileyPicker.open()
-        viewModel.submit(PostEditorIntent.SmileySelected(":jap:"))
+        viewModel.submit(PostEditorIntent.SmileySelected("[:jap_yvele]"))
         viewModel.state.test {
             val state = expectMostRecentItem()
             // Surrounding spaces convention from `putSmiley` is honoured.
-            assertEquals("hello :jap: ", state.draft.text)
-            assertEquals(12, state.draft.selection.start)
+            val expected = "hello [:jap_yvele] "
+            assertEquals(expected, state.draft.text)
+            assertEquals(expected.length, state.draft.selection.start)
+            // #873 — all editor surfaces keep passing the picker token through the shared parser.
+            assertEquals(previewParser.contentFor(expected), state.preview)
             cancelAndIgnoreRemainingEvents()
         }
         // Picker auto-closes (through the controller) so the user can keep typing ;

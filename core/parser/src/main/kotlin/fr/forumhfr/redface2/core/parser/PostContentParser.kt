@@ -6,6 +6,7 @@ import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyKind
 import fr.forumhfr.redface2.core.model.isCcImageUrl
 import fr.forumhfr.redface2.core.parser.common.HfrSelectors
+import fr.forumhfr.redface2.core.parser.smiley.PersonalSmileyNameExtractor
 import org.jsoup.nodes.Element
 import org.jsoup.nodes.Node
 import org.jsoup.nodes.TextNode
@@ -554,20 +555,21 @@ class PostContentParser {
 
     private fun parseSmiley(element: Element): PostInline.Smiley? {
         if (element.tagName() != "img") return null
+        val personalName = PersonalSmileyNameExtractor.extract(
+            alt = element.attr("alt"),
+            title = element.attr("title"),
+        )
         // HFR keeps `title` canonical-cased (e.g. ":D") while `alt` can drift to lowercase
         // (`:d`) on legacy posts. Pick title first so :D and :d don't end up as two distinct
-        // builtin tokens for the same emoticon.
+        // builtin tokens for the same emoticon. #873 deliberately gives perso tokens their
+        // separate alt-first path above because the picker inserts `this.alt`.
         val title = element.attr("title").trim()
         val alt = element.attr("alt").trim()
         val token = title.ifBlank { alt }
         val imageUrl = sanitizeImageHref(element.attr("src"))
         return when {
             token.isEmpty() -> null
-            PERSO_SMILEY_REGEX.matches(token) -> {
-                // token = "[:name]" → strip "[:" prefix and trailing "]"
-                val name = token.substring(2, token.length - 1)
-                PostInline.Smiley(SmileyKind.Perso(name), imageUrl)
-            }
+            personalName != null -> PostInline.Smiley(SmileyKind.Perso(personalName), imageUrl)
 
             BUILTIN_SMILEY_REGEX.matches(token) -> {
                 // The BBCode token is the canonical identity (`:)`, `;)`, `:jap:`, `:??:` …);
@@ -709,9 +711,6 @@ class PostContentParser {
         //   - named codes wrapped in colons (`:jap:`, `:lol:`, `:spamafote:`, `:??:`)
         // The character set covers the punctuation actually observed in the fixtures.
         val BUILTIN_SMILEY_REGEX = Regex("""^[:;][\w)(/?;\-']{1,15}:?$""")
-
-        // HFR custom smileys are wrapped as alt="[:name]" — name may contain spaces and punctuation.
-        val PERSO_SMILEY_REGEX = Regex("""^\[:[^]]+]$""")
 
         // Static citation permalink: .../sujet_<topicPost>_<page>.htm#t<numreponse>
         val CITATION_HREF_REGEX = Regex("""sujet_\d+_(\d+)\.htm#t(\d+)""")

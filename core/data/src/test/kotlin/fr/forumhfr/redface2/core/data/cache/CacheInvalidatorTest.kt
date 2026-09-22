@@ -1,7 +1,8 @@
 package fr.forumhfr.redface2.core.data.cache
 
-import fr.forumhfr.redface2.core.data.messages.PrivateMessageThreadSessionCache
 import fr.forumhfr.redface2.core.data.messages.PrivateMessageContentCacheMaintenance
+import fr.forumhfr.redface2.core.data.messages.PrivateMessageThreadSessionCache
+import fr.forumhfr.redface2.core.data.smiley.PersonalSmileyRegistry
 import fr.forumhfr.redface2.core.database.dao.EditorDraftDao
 import fr.forumhfr.redface2.core.database.dao.FlagDao
 import fr.forumhfr.redface2.core.database.dao.MpReadPositionDao
@@ -22,6 +23,8 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -32,6 +35,7 @@ class CacheInvalidatorTest {
     fun `first login from Anonymous does not purge anyone`() = runTest {
         val state = MutableStateFlow<AuthState>(AuthState.Anonymous)
         val fixture = invalidator(state)
+        fixture.personalSmileyRegistry.registerCurrent("session", "https://example.com/session.gif")
         fixture.invalidator.start()
 
         state.value = AuthState.Authenticated("alice")
@@ -48,6 +52,10 @@ class CacheInvalidatorTest {
         }
         verify(exactly = 0) { fixture.threadSessionCache.clearAndAdvanceGeneration() }
         verify(exactly = 0) { fixture.flagRepository.clearSessionCache() }
+        assertEquals(
+            "https://example.com/session.gif",
+            fixture.personalSmileyRegistry.resolve("session"),
+        )
     }
 
     @Test
@@ -55,6 +63,7 @@ class CacheInvalidatorTest {
         runTest {
             val state = MutableStateFlow<AuthState>(AuthState.Authenticated("alice"))
             val fixture = invalidator(state)
+            fixture.personalSmileyRegistry.registerCurrent("session", "https://example.com/session.gif")
             fixture.invalidator.start()
 
             state.value = AuthState.Anonymous
@@ -70,6 +79,7 @@ class CacheInvalidatorTest {
             }
             verify { fixture.threadSessionCache.clearAndAdvanceGeneration() }
             verify { fixture.flagRepository.clearSessionCache() }
+            assertNull(fixture.personalSmileyRegistry.resolve("session"))
         }
 
     @Test
@@ -78,11 +88,15 @@ class CacheInvalidatorTest {
         val fixture = invalidator(state)
         var generationAdvanced = false
         var generationWasAdvancedBeforeImagePurge = false
+        var smileyRegistryWasClearedBeforeImagePurge = false
+        fixture.personalSmileyRegistry.registerCurrent("session", "https://example.com/session.gif")
         every { fixture.threadSessionCache.clearAndAdvanceGeneration() } answers {
             generationAdvanced = true
         }
         coEvery { fixture.imageCacheMaintenance.clearImageCache() } answers {
             generationWasAdvancedBeforeImagePurge = generationAdvanced
+            smileyRegistryWasClearedBeforeImagePurge =
+                fixture.personalSmileyRegistry.resolve("session") == null
         }
         fixture.invalidator.start()
 
@@ -93,6 +107,10 @@ class CacheInvalidatorTest {
         assertTrue(
             "the RAM generation must advance before any suspending purge",
             generationWasAdvancedBeforeImagePurge,
+        )
+        assertTrue(
+            "the perso-smiley RAM registry must clear before any suspending purge",
+            smileyRegistryWasClearedBeforeImagePurge,
         )
     }
 
@@ -119,6 +137,7 @@ class CacheInvalidatorTest {
     fun `account switch purges the outgoing pseudo not the incoming one`() = runTest {
         val state = MutableStateFlow<AuthState>(AuthState.Authenticated("Alice"))
         val fixture = invalidator(state)
+        fixture.personalSmileyRegistry.registerCurrent("session", "https://example.com/session.gif")
         fixture.invalidator.start()
 
         state.value = AuthState.Authenticated("Bob")
@@ -140,6 +159,7 @@ class CacheInvalidatorTest {
         coVerify(exactly = 0) { fixture.privateMessageContentCacheMaintenance.purgeForUser("bob") }
         verify { fixture.threadSessionCache.clearAndAdvanceGeneration() }
         verify { fixture.flagRepository.clearSessionCache() }
+        assertNull(fixture.personalSmileyRegistry.resolve("session"))
     }
 
     @Test
@@ -173,6 +193,7 @@ class CacheInvalidatorTest {
         val threadSessionCache: PrivateMessageThreadSessionCache,
         val imageCacheMaintenance: ImageCacheMaintenance,
         val privateMessageContentCacheMaintenance: PrivateMessageContentCacheMaintenance,
+        val personalSmileyRegistry: PersonalSmileyRegistry,
         val flagRepository: FlagRepository,
     )
 
@@ -189,6 +210,7 @@ class CacheInvalidatorTest {
         val imageCacheMaintenance = mockk<ImageCacheMaintenance>(relaxed = true)
         val privateMessageContentCacheMaintenance =
             mockk<PrivateMessageContentCacheMaintenance>(relaxed = true)
+        val personalSmileyRegistry = PersonalSmileyRegistry()
         val flagRepository = mockk<FlagRepository>(relaxed = true)
         val invalidator = CacheInvalidator(
             authRepository = authRepository,
@@ -200,6 +222,7 @@ class CacheInvalidatorTest {
             flagRepository = flagRepository,
             privateMessageThreadSessionCache = threadSessionCache,
             privateMessageContentCacheMaintenance = privateMessageContentCacheMaintenance,
+            personalSmileyRegistry = personalSmileyRegistry,
             imageCacheMaintenance = imageCacheMaintenance,
             ioDispatcher = UnconfinedTestDispatcher(),
         )
@@ -213,7 +236,12 @@ class CacheInvalidatorTest {
             threadSessionCache,
             imageCacheMaintenance,
             privateMessageContentCacheMaintenance,
+            personalSmileyRegistry,
             flagRepository,
         )
+    }
+
+    private fun PersonalSmileyRegistry.registerCurrent(name: String, imageUrl: String) {
+        register(capture(), name, imageUrl)
     }
 }

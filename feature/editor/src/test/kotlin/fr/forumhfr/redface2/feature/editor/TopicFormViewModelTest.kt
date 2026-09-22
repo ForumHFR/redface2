@@ -610,16 +610,17 @@ class TopicFormViewModelTest {
         )
         viewModel.submit(TopicFormIntent.TogglePreview)
         viewModel.smileyPicker.open()
-        viewModel.submit(TopicFormIntent.SmileySelected(":jap:"))
+        viewModel.submit(TopicFormIntent.SmileySelected("[:jap_yvele]"))
         viewModel.state.test {
             val state = expectMostRecentItem()
             // Surrounding-spaces convention from `insertBbcodeToken` is honoured.
-            assertEquals("hello :jap: ", state.draft.text)
-            assertEquals(12, state.draft.selection.start)
+            val expected = "hello [:jap_yvele] "
+            assertEquals(expected, state.draft.text)
+            assertEquals(expected.length, state.draft.selection.start)
             // Preview was visible : the new draft text must be re-parsed.
             val firstBlock = state.preview.blocks.first() as PostBlock.Paragraph
             val firstInline = firstBlock.inlines.first() as PostInline.Text
-            assertEquals("hello :jap: ", firstInline.value)
+            assertEquals(expected, firstInline.value)
             cancelAndIgnoreRemainingEvents()
         }
         // Picker auto-closes (through the controller) ; #824 restores the search on reopen.

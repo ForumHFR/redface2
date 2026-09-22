@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.network.HfrClient
+import fr.forumhfr.redface2.core.parser.smiley.PersonalSmileyNameExtractor
 import fr.forumhfr.redface2.core.parser.smiley.SmileySearchParser
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -21,14 +22,16 @@ import kotlinx.coroutines.withContext
  * we only log its length.
  */
 @Singleton
-class DefaultSmileyRepository @Inject constructor(
+class DefaultSmileyRepository @Inject internal constructor(
     private val hfrClient: HfrClient,
     private val parser: SmileySearchParser,
+    private val personalSmileyRegistry: PersonalSmileyRegistry,
     private val diagnostics: DiagnosticsLog,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : SmileyRepository {
 
     override suspend fun searchWiki(userId: Int, query: String): List<EditorSmiley> {
+        val registryStamp = personalSmileyRegistry.capture()
         diagnostics.record(
             DiagnosticsLog.Level.INFO,
             LOG_TAG,
@@ -41,6 +44,13 @@ class DefaultSmileyRepository @Inject constructor(
         return withContext(ioDispatcher) {
             val fragment = hfrClient.getSmileySearch(userId = userId, query = toImplicitAndQuery(query))
             val results = parser.parse(fragment)
+            // #873 — retain every valid row from the successful response, not only the item the
+            // user eventually clicks. Editor callbacks can therefore keep their token-only API.
+            results.forEach { smiley ->
+                PersonalSmileyNameExtractor.extract(smiley.token)?.let { name ->
+                    personalSmileyRegistry.register(registryStamp, name, smiley.imageUrl)
+                }
+            }
             diagnostics.record(
                 DiagnosticsLog.Level.DEBUG,
                 LOG_TAG,

@@ -17,7 +17,9 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
+import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
@@ -58,7 +60,7 @@ class PrivateMessageComposeViewModelTest {
         Dispatchers.resetMain()
     }
 
-    private val previewParser = BbcodePreviewParser { PostContent(blocks = emptyList()) }
+    private val previewParser = RecordingPreviewParser()
 
     private fun userPreferences(confirmBeforePosting: Boolean = false): UserPreferencesRepository =
         mockk {
@@ -262,6 +264,23 @@ class PrivateMessageComposeViewModelTest {
         advanceUntilIdle()
 
         coVerify(exactly = 1) { smileys.searchWiki(54596, "jap") }
+    }
+
+    @Test
+    fun `picker perso token refreshes the visible compose preview through the shared parser`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val viewModel = viewModel(repository)
+        advanceUntilIdle()
+        viewModel.onContentChanged(TextFieldValue("hello", TextRange(5)))
+        viewModel.onTogglePreview()
+        viewModel.smileyPicker.open()
+
+        viewModel.onSmileySelected("[:jap_yvele]")
+
+        val expected = "hello [:jap_yvele] "
+        assertEquals(expected, viewModel.state.value.draft.text)
+        assertEquals(previewParser.contentFor(expected), viewModel.state.value.preview)
     }
 
     @Test
@@ -894,5 +913,13 @@ class PrivateMessageComposeViewModelTest {
             deletedKeys += key
             saved.remove(key)
         }
+    }
+
+    private class RecordingPreviewParser : BbcodePreviewParser {
+        override fun parsePreview(bbcode: String): PostContent = contentFor(bbcode)
+
+        fun contentFor(bbcode: String): PostContent = PostContent(
+            blocks = listOf(PostBlock.Paragraph(listOf(PostInline.Text(bbcode)))),
+        )
     }
 }

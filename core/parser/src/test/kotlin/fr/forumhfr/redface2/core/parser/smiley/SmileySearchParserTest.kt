@@ -1,6 +1,10 @@
 package fr.forumhfr.redface2.core.parser.smiley
 
 import fr.forumhfr.redface2.core.model.EditorSmileySource
+import fr.forumhfr.redface2.core.model.PostBlock
+import fr.forumhfr.redface2.core.model.PostInline
+import fr.forumhfr.redface2.core.model.SmileyKind
+import fr.forumhfr.redface2.core.parser.TopicPageParser
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -119,6 +123,27 @@ class SmileySearchParserTest {
         """.trimIndent()
         val results = parser.parse(fragment)
         assertEquals(listOf("[:fromtitle]"), results.map { it.token })
+    }
+
+    @Test
+    fun `wiki and rendered-post fixtures produce the same naked registry key`() {
+        // #873 — both are real HFR captures. A parser-priority or trimming drift between these
+        // paths would make a populated registry miss the exact token rendered by the preview.
+        val wikiKey = parser.parse(readFixture("smiley_search_jap.html"))
+            .first { it.token == "[:jap_yvele]" }
+            .let { PersonalSmileyNameExtractor.extract(it.token) }
+        val postKey = TopicPageParser().parse(readFixture("topic_khakha_page_146.html"))
+            .posts
+            .flatMap { it.content.blocks }
+            .filterIsInstance<PostBlock.Paragraph>()
+            .flatMap { it.inlines }
+            .filterIsInstance<PostInline.Smiley>()
+            .mapNotNull { it.kind as? SmileyKind.Perso }
+            .first { it.name == "jap_yvele" }
+            .name
+
+        assertEquals("jap_yvele", wikiKey)
+        assertEquals(wikiKey, postKey)
     }
 
     @Test

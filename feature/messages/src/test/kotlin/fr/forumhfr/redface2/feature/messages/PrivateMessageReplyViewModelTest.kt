@@ -15,7 +15,9 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
+import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.write.PrivateMessageQuote
 import fr.forumhfr.redface2.core.model.write.PrivateMessageReplyContext
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
@@ -70,7 +72,7 @@ class PrivateMessageReplyViewModelTest {
         quote = quote,
     )
 
-    private val previewParser = BbcodePreviewParser { PostContent(blocks = emptyList()) }
+    private val previewParser = RecordingPreviewParser()
 
     /**
      * #312 — preferences mock. `observeConfirmBeforePosting` is the only member the reply
@@ -439,6 +441,26 @@ class PrivateMessageReplyViewModelTest {
         advanceUntilIdle()
 
         coVerify(exactly = 1) { smileys.searchWiki(54596, "jap") }
+    }
+
+    @Test
+    fun `picker perso token refreshes the visible reply preview through the shared parser`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
+        )
+        viewModel.onContentChanged(TextFieldValue("hello", TextRange(5)))
+        viewModel.onTogglePreview()
+        viewModel.smileyPicker.open()
+
+        viewModel.onSmileySelected("[:jap_yvele]")
+
+        val expected = "hello [:jap_yvele] "
+        assertEquals(expected, viewModel.state.value.draft.text)
+        assertEquals(previewParser.contentFor(expected), viewModel.state.value.preview)
     }
 
     @Test
@@ -1383,5 +1405,13 @@ class PrivateMessageReplyViewModelTest {
             deletedKeys += key
             saved.remove(key)
         }
+    }
+
+    private class RecordingPreviewParser : BbcodePreviewParser {
+        override fun parsePreview(bbcode: String): PostContent = contentFor(bbcode)
+
+        fun contentFor(bbcode: String): PostContent = PostContent(
+            blocks = listOf(PostBlock.Paragraph(listOf(PostInline.Text(bbcode)))),
+        )
     }
 }

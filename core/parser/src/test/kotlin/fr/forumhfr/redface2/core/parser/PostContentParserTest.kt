@@ -390,6 +390,27 @@ class PostContentParserTest {
     }
 
     @Test
+    fun `perso smiley uses alt when title carries a different perso name`() {
+        // #873 — HFR's picker inserts `this.alt`; using title here would populate and query two
+        // different registry keys even though both attributes belong to the same rendered image.
+        val element = jsoupBody(
+            """
+            <div id="para123">
+                <p><img src="https://forum-images.hardware.fr/images/perso/right.gif"
+                    alt="[:Alt Exact]" title="[:different title]" /></p>
+            </div>
+            """.trimIndent(),
+        )
+
+        val smiley = PostContentParser().parse(element).ast
+            .allInlines()
+            .filterIsInstance<PostInline.Smiley>()
+            .single()
+
+        assertEquals(SmileyKind.Perso("Alt Exact"), smiley.kind)
+    }
+
+    @Test
     fun `builtin smiley alt syntax is recognised as Builtin kind`() {
         val topic = pageParser.parse(fixture("topic_khakha_page_2.html"))
 

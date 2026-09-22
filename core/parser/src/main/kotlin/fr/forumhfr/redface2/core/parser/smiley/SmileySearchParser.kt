@@ -15,7 +15,8 @@ import org.jsoup.Jsoup
  *
  * Behaviour pinned by [SmileySearchParserTest] against the real fixture
  * `smiley_search_jap.html` captured 2026-05-22 :
- *  - the token comes from `alt` (falls back to `title`), kept verbatim ;
+ *  - the perso name comes from `alt` (falls back to `title`) via
+ *    [PersonalSmileyNameExtractor], then is wrapped back into its `[:name]` picker token ;
  *  - the image URL comes from `src` ;
  *  - entries missing either field are dropped ;
  *  - duplicates by `(token, url)` are deduplicated in declaration order, the first occurrence
@@ -31,12 +32,15 @@ class SmileySearchParser {
         val seen = HashSet<Pair<String, String>>()
         return document.select("img")
             .mapNotNull { img ->
-                // Prefer `alt` ; some legacy variants only carry `title`. We never invent a
-                // token from the URL : if neither attribute carries a token we drop the row.
-                val token = img.attr("alt").takeIf { it.isNotBlank() }
-                    ?: img.attr("title").takeIf { it.isNotBlank() }
+                // #873 — share the exact naked-name extraction with rendered posts. We never
+                // invent a token from the URL: if neither attribute carries a perso token, drop it.
+                val name = PersonalSmileyNameExtractor.extract(
+                    alt = img.attr("alt"),
+                    title = img.attr("title"),
+                )
                     ?: return@mapNotNull null
                 val src = img.attr("src").takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val token = "[:$name]"
                 EditorSmiley(token = token, imageUrl = src, source = EditorSmileySource.WIKI)
             }
             .filter { entry -> seen.add(entry.token to entry.imageUrl) }

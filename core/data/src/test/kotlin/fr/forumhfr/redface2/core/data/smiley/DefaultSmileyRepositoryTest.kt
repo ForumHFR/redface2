@@ -1,6 +1,8 @@
 package fr.forumhfr.redface2.core.data.smiley
 
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.model.EditorSmiley
+import fr.forumhfr.redface2.core.model.EditorSmileySource
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.smiley.SmileySearchParser
 import io.mockk.coEvery
@@ -11,6 +13,7 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
@@ -29,10 +32,12 @@ class DefaultSmileyRepositoryTest {
         every { parse(any()) } returns emptyList()
     }
     private val diagnostics = mockk<DiagnosticsLog>(relaxed = true)
+    private val personalSmileyRegistry = PersonalSmileyRegistry()
 
     private fun repository() = DefaultSmileyRepository(
         hfrClient = hfrClient,
         parser = parser,
+        personalSmileyRegistry = personalSmileyRegistry,
         diagnostics = diagnostics,
         ioDispatcher = UnconfinedTestDispatcher(),
     )
@@ -70,5 +75,46 @@ class DefaultSmileyRepositoryTest {
     fun `already fully operated input is idempotent`() {
         assertEquals("+chat -noir", toImplicitAndQuery("+chat -noir"))
         assertEquals("+chat -noir", toImplicitAndQuery(toImplicitAndQuery("chat -noir")))
+    }
+
+    @Test
+    fun `a successful wiki response registers every parsed perso smiley`() = runTest {
+        val results = listOf(
+            EditorSmiley(
+                token = "[:CaSsE Exacte]",
+                imageUrl = "https://example.com/case.gif",
+                source = EditorSmileySource.WIKI,
+            ),
+            EditorSmiley(
+                token = "[:été:3]",
+                imageUrl = "https://example.com/variant.gif",
+                source = EditorSmileySource.WIKI,
+            ),
+        )
+        coEvery { hfrClient.getSmileySearch(any(), any()) } returns "wiki response"
+        every { parser.parse("wiki response") } returns results
+
+        assertEquals(results, repository().searchWiki(userId = 54596, query = "anything"))
+
+        assertEquals("https://example.com/case.gif", personalSmileyRegistry.resolve("CaSsE Exacte"))
+        assertEquals("https://example.com/variant.gif", personalSmileyRegistry.resolve("été:3"))
+    }
+
+    @Test
+    fun `an in-flight wiki response cannot refill the registry after session purge`() = runTest {
+        val result = EditorSmiley(
+            token = "[:stale]",
+            imageUrl = "https://example.com/stale.gif",
+            source = EditorSmileySource.WIKI,
+        )
+        coEvery { hfrClient.getSmileySearch(any(), any()) } coAnswers {
+            personalSmileyRegistry.clearAndAdvanceGeneration()
+            "late wiki response"
+        }
+        every { parser.parse("late wiki response") } returns listOf(result)
+
+        repository().searchWiki(userId = 54596, query = "stale")
+
+        assertNull(personalSmileyRegistry.resolve("stale"))
     }
 }

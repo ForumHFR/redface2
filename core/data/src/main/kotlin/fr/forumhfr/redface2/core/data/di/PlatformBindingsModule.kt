@@ -4,6 +4,7 @@ import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import fr.forumhfr.redface2.core.data.smiley.PersonalSmileyPreviewResolver
 import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
 import fr.forumhfr.redface2.core.domain.coroutines.DefaultDispatcher
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
@@ -67,6 +68,11 @@ object PlatformBindingsModule {
 
     @Provides
     @Singleton
-    fun provideBbcodePreviewParser(parser: HfrParser): BbcodePreviewParser =
-        BbcodePreviewParser { bbcode -> parser.parsePostContentFromBbcode(bbcode) }
+    fun provideBbcodePreviewParser(
+        parser: HfrParser,
+        personalSmileyPreviewResolver: PersonalSmileyPreviewResolver,
+    ): BbcodePreviewParser = BbcodePreviewParser { bbcode ->
+        // #873 — deterministic parse first, mutable process-RAM lookup second.
+        personalSmileyPreviewResolver.resolve(parser.parsePostContentFromBbcode(bbcode))
+    }
 }

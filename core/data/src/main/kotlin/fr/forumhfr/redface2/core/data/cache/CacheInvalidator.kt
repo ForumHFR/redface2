@@ -1,8 +1,9 @@
 package fr.forumhfr.redface2.core.data.cache
 
 import android.util.Log
-import fr.forumhfr.redface2.core.data.messages.PrivateMessageThreadSessionCache
 import fr.forumhfr.redface2.core.data.messages.PrivateMessageContentCacheMaintenance
+import fr.forumhfr.redface2.core.data.messages.PrivateMessageThreadSessionCache
+import fr.forumhfr.redface2.core.data.smiley.PersonalSmileyRegistry
 import fr.forumhfr.redface2.core.database.dao.EditorDraftDao
 import fr.forumhfr.redface2.core.database.dao.FlagDao
 import fr.forumhfr.redface2.core.database.dao.MpReadPositionDao
@@ -69,6 +70,10 @@ import kotlinx.coroutines.plus
  * impossible. The safe transition therefore clears both memory and disk globally; public-topic
  * images disappear as collateral and are downloaded again on demand.
  *
+ * The process-RAM perso-smiley registry is session content too (#873): wiki results can reveal the
+ * outgoing account's searches and custom tokens, so it is synchronously cleared on the same
+ * transition before any suspending purge starts.
+ *
  * On a `Authenticated(A) → Authenticated(B)` switch (login, then logout, then
  * login as someone else), we wipe rows owned by A explicitly. The session
  * cache held in [FlagRepository.clearSessionCache] is also flushed so that the
@@ -94,6 +99,7 @@ class CacheInvalidator @Inject internal constructor(
     private val flagRepository: FlagRepository,
     private val privateMessageThreadSessionCache: PrivateMessageThreadSessionCache,
     private val privateMessageContentCacheMaintenance: PrivateMessageContentCacheMaintenance,
+    private val personalSmileyRegistry: PersonalSmileyRegistry,
     private val imageCacheMaintenance: ImageCacheMaintenance,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
@@ -125,6 +131,7 @@ class CacheInvalidator @Inject internal constructor(
                     // lands while they run must already carry an obsolete generation and be unable
                     // to refill the RAM cache or reach the UI under the next account (#1080).
                     privateMessageThreadSessionCache.clearAndAdvanceGeneration()
+                    personalSmileyRegistry.clearAndAdvanceGeneration()
                     runCatching { imageCacheMaintenance.clearImageCache() }
                         .onFailure { Log.w(LOG_TAG, "Failed to purge global image cache", it) }
                     runCatching { flagDao.deleteAllForUser(previousPseudo) }
