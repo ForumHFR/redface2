@@ -1,3 +1,4 @@
-Redface 2 v0.61.1 — dev.
-- Replying from the flags list now confirms the post: no more returning to the list unsure whether the message went through.
-- A post that lands on another page no longer shows two confirmations in a row: the "go to page N" offer replaces the first one.
+Redface 2 v0.62.0 — beta.
+- Page picker: First page / Last page shortcuts, in topics and private messages alike.
+- Going back to the previous page restores your exact reading position, or opens at the bottom if you never opened it.
+- After posting: an immediate confirmation and a progress bar, including from the flags list.

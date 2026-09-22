@@ -1,3 +1,4 @@
-Redface 2 v0.61.1 — dev.
-- Répondre depuis la liste des drapeaux confirme enfin l'envoi : plus de retour à la liste sans savoir si le message est parti.
-- Un message publié sur une autre page n'affiche plus deux confirmations à la suite : l'offre « aller en page N » remplace la première.
+Redface 2 v0.62.0 — bêta.
+- « Aller à une page » : raccourcis Première page / Dernière page, dans les sujets comme dans les MP.
+- Le retour à la page précédente restaure la position exacte si vous l'aviez déjà ouverte, sinon il ouvre en bas.
+- Après l'envoi d'un message : confirmation immédiate et bandeau de progression, y compris depuis la liste des drapeaux.
