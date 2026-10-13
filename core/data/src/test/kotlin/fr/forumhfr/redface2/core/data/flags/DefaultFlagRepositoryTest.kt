@@ -7,6 +7,13 @@ import fr.forumhfr.redface2.core.database.entities.FlagTopicEntity
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshDiagnostics
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagFetchTrace
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshPhase
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallOutcome
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallSummary
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrClientRole
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrEndpoint
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
@@ -28,10 +35,12 @@ import java.io.IOException
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
@@ -74,6 +83,59 @@ class DefaultFlagRepositoryTest {
     private val capturedParticipatedFixture: String = fixture("rest_cat23_participated.json")
 
     @Test
+    fun `fast refresh records two entries with exact page and transport counters - 984`() = runTest {
+        val diagnostics = DiagnosticsLog()
+        val apiClient = diagnosticApi()
+        val dao = stubFlagDao()
+        val repo = buildRepository(apiClient, stubForumRepository(sampleCategories),
+            flagDao = dao, diagnostics = diagnostics)
+        repo.refresh(FlagType.CYAN)
+        assertTrue(diagnostics.entries.value.size <= 3)
+        assertEquals(2, diagnostics.entries.value.size)
+        val summary = diagnostics.entries.value.last().message
+        listOf("outcome=success ", "categories=2", "bucketPages=2", "stickyPages=2", "calls=4",
+            "callFailures=0", "reused=4", "bucketsFailures=0", "stickiesFailures=0", "joined=0").forEach {
+            assertTrue(summary, summary.contains(it))
+        }
+        assertTrue(repo.observe(FlagType.CYAN).first() is FlagsResult.Success)
+        coVerify(exactly = 1) { dao.replaceForType(any(), FlagType.CYAN, any()) }
+    }
+
+    @Test
+    fun `failed sticky supplement remains a business success and is diagnosed incomplete - 984`() = runTest {
+        val diagnostics = DiagnosticsLog()
+        val apiClient = diagnosticApi(failSticky = true)
+        val repo = buildRepository(apiClient, stubForumRepository(sampleCategories), diagnostics = diagnostics)
+        repo.refresh(FlagType.CYAN)
+        val summary = diagnostics.entries.value.last().message
+        assertTrue(summary, summary.contains("outcome=success-incomplete"))
+        assertTrue(summary, summary.contains("reasons=sticky_request"))
+        assertTrue(summary, summary.contains("stickiesFailures=1"))
+        assertTrue(summary, summary.contains("callFailures=1"))
+        assertTrue(summary, summary.contains("calls=4"))
+        assertTrue(repo.observe(FlagType.CYAN).first() is FlagsResult.Success)
+    }
+
+    @Test
+    fun `folded bucket failure is diagnosed as failure despite refresh returning Unit - 984`() = runTest {
+        val diagnostics = DiagnosticsLog()
+        val (apiClient, forumRepository) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+        }
+        coEvery {
+            apiClient.getCategoryFlagTopics(cat = 23, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        } throws IOException("Cookie=SecretCookie hash_check=SecretHash")
+        val repo = buildRepository(apiClient, forumRepository, diagnostics = diagnostics)
+        repo.refresh(FlagType.CYAN)
+        val summary = diagnostics.entries.value.last().message
+        assertTrue(summary, summary.contains("outcome=failure exception=IOException"))
+        assertTrue(summary, summary.contains("bucketsFailures=1"))
+        assertTrue(summary, !summary.contains("SecretCookie"))
+    }
+
+    @Test
     fun `observe emits Loading then Success on a happy fetch`() = runTest {
         val (apiClient, forumRepository) = wireDeps {
             stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
@@ -104,6 +166,7 @@ class DefaultFlagRepositoryTest {
 
     @Test
     fun `observe and refresh fired together share a single REST fan-out - 501`() = runTest {
+        val diagnostics = DiagnosticsLog()
         // #501 (Codex review) — observe()'s initial fetch and a concurrent refresh() for the SAME tab
         // must collapse into ONE per-category fan-out, not two. The gate keeps the first fetch in
         // flight while the second caller arrives, so a missing in-flight dedup would call cat 23 twice.
@@ -130,7 +193,7 @@ class DefaultFlagRepositoryTest {
             gate.await()
             capturedParticipatedFixture
         }
-        val repo = buildRepository(apiClient, stubForumRepository(sampleCategories))
+        val repo = buildRepository(apiClient, stubForumRepository(sampleCategories), diagnostics = diagnostics)
 
         // Sequence the two callers so they genuinely overlap: observe() first reaches the gated fetch
         // (registering the in-flight Deferred), THEN refresh() runs and must find + await that same
@@ -142,6 +205,10 @@ class DefaultFlagRepositoryTest {
         gate.complete(Unit)
         observeJob.join()
         refreshJob.join()
+        val joined = diagnostics.entries.value.single { it.message.contains("joined=1") }.message
+        assertTrue(joined, joined.contains("fetchRefreshIds=[1]"))
+        assertTrue(joined, joined.contains("bucketPages=2"))
+        assertTrue(joined, joined.contains("stickyGenerationRefused=1"))
 
         // A single fan-out: the gated category was hit exactly once despite the two concurrent callers.
         coVerify(exactly = 1) {
@@ -2059,6 +2126,43 @@ class DefaultFlagRepositoryTest {
         }
     }
 
+    /** Mocked clients feed the same safe transport boundary as the EventListener, without real IO. */
+    private fun diagnosticApi(failSticky: Boolean = false): HfrApiClient {
+        val api = mockk<HfrApiClient>()
+        val sequence = AtomicLong()
+        coEvery {
+            api.getCategoryFlagTopics(cat = any(), bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        } coAnswers {
+            val cat = firstArg<Int>()
+            recordDiagnosticCall(sequence.incrementAndGet(), cat, sticky = false, failed = false)
+            if (cat == 23) capturedParticipatedFixture else EMPTY_PAGE
+        }
+        coEvery {
+            api.getTopicList(cat = any(), subcat = null, page = 1, resultsPerPage = any(), useAuth = true)
+        } coAnswers {
+            val cat = firstArg<Int>()
+            val failed = failSticky && cat == 13
+            recordDiagnosticCall(sequence.incrementAndGet(), cat, sticky = true, failed = failed)
+            if (failed) throw IOException("secret cookie")
+            EMPTY_PAGE
+        }
+        return api
+    }
+
+    private suspend fun recordDiagnosticCall(id: Long, cat: Int, sticky: Boolean, failed: Boolean) {
+        val trace = requireNotNull(currentCoroutineContext()[FlagFetchTrace])
+        trace.call(HfrCallSummary(
+            id = id, endpoint = HfrEndpoint(if (sticky) HfrEndpoint.Family.LAST else HfrEndpoint.Family.PARTICIPATED, cat, 1),
+            role = HfrClientRole.AUTH, refreshId = trace.refreshId,
+            phase = if (sticky) FlagRefreshPhase.STICKIES else FlagRefreshPhase.BUCKETS,
+            waitMs = 0, dnsMs = 0, connectMs = 0, tlsMs = 0, headersSentToReceivedMs = 10, bodyMs = 0, totalMs = 10,
+            status = if (failed) 503 else 200, protocol = "h2", reusedConnection = true, inFlightAtStart = 1,
+            outcome = if (failed) HfrCallOutcome.FAILURE else HfrCallOutcome.OK,
+            exceptionClass = if (failed) "IOException" else null,
+        ))
+    }
+
     private fun sampleFlag(type: FlagType = FlagType.CYAN, topicId: Int = 35395): Flag = Flag(
         cat = 23,
         subcat = 550,
@@ -2129,6 +2233,7 @@ class DefaultFlagRepositoryTest {
         ioDispatcher = UnconfinedTestDispatcher(),
         clock = clock,
         diagnostics = diagnostics,
+        refreshDiagnostics = FlagRefreshDiagnostics(diagnostics),
     )
 
     private fun stubAuthRepository(pseudo: String = "XaT"): AuthRepository {

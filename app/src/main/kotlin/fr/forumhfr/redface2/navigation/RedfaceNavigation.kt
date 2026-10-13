@@ -2428,6 +2428,9 @@ private fun RedfaceNavHost(
             }
             entry<DiagnosticsRoute> {
                 fr.forumhfr.redface2.feature.flags.DiagnosticsScreen(
+                    versionName = BuildConfig.VERSION_NAME,
+                    versionCode = BuildConfig.VERSION_CODE,
+                    channel = BuildConfig.FLAVOR,
                     onClose = {
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)

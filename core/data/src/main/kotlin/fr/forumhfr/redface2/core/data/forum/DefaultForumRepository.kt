@@ -3,6 +3,9 @@ package fr.forumhfr.redface2.core.data.forum
 import android.util.Log
 import fr.forumhfr.redface2.core.data.cache.CachePolicy
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagFetchTrace
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshGap
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshPhase
 import fr.forumhfr.redface2.core.domain.forum.FlagFilterBucket
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
@@ -16,6 +19,7 @@ import java.time.Instant
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -110,7 +114,15 @@ class DefaultForumRepository @Inject constructor(
                 // screen when only the categories endpoint is momentarily down (parity with the old
                 // observeCategories().first behaviour, which served last-known-good). A cold cache has
                 // nothing to fall back to, so its Failure still surfaces.
-                is ForumResult.Failure -> if (cached != null) ForumResult.Success(cached.value) else fetched
+                is ForumResult.Failure -> if (cached != null) {
+                    currentCoroutineContext()[FlagFetchTrace]?.let { trace ->
+                        trace.gap(FlagRefreshGap.CATALOGUE_FALLBACK)
+                        trace.failed(FlagRefreshPhase.CATALOGUE, fetched.cause, fatal = false)
+                    }
+                    ForumResult.Success(cached.value)
+                } else {
+                    fetched
+                }
                 else -> fetched
             }
         }

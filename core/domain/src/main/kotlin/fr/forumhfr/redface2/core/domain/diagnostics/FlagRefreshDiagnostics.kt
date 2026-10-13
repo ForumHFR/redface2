@@ -1,0 +1,188 @@
+package fr.forumhfr.redface2.core.domain.diagnostics
+
+import fr.forumhfr.redface2.core.model.FlagType
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+import javax.inject.Inject
+import javax.inject.Singleton
+import kotlin.coroutines.AbstractCoroutineContextElement
+import kotlin.coroutines.CoroutineContext
+
+enum class FlagRefreshTrigger(val label: String) {
+    LAUNCH("launch"), RETURN_FROM_TOPIC("return-from-topic"), RESUME("resume"),
+    TAB("tab"), PULL("pull"), INITIAL_OBSERVE("initial-observe"),
+}
+
+enum class FlagRefreshGap {
+    CATALOGUE_FALLBACK, EMPTY_BUCKET_PAGE, PAGE_CAP, STICKY_GENERATION, STICKY_CANCELLED, STICKY_REQUEST,
+    STICKY_DECODE, ROOM_WRITE, CACHE_GENERATION,
+}
+
+/** Injected process-local identity owner; no UUID, account or global mutable singleton. */
+@Singleton
+class FlagRefreshDiagnostics @Inject constructor(private val log: DiagnosticsLog) {
+    private val sequence = AtomicLong()
+
+    fun fetch(type: FlagType, refreshId: Long?): FlagFetchTrace =
+        FlagFetchTrace(refreshId ?: sequence.incrementAndGet(), type)
+
+    fun begin(
+        trigger: FlagRefreshTrigger,
+        types: List<FlagType>,
+        startedNanos: Long = System.nanoTime(),
+    ): FlagRefreshTrace {
+        val trace = FlagRefreshTrace(sequence.incrementAndGet(), types, log, startedNanos)
+        log.record(DiagnosticsLog.Level.INFO, TAG,
+            "refresh=${trace.id} trigger=${trigger.label} types=${types.joinToString { it.name }} begin")
+        return trace
+    }
+
+    fun ignored(
+        trigger: FlagRefreshTrigger,
+        types: List<FlagType>,
+        throttled: Boolean,
+        deferredTypes: List<FlagType> = emptyList(),
+    ) {
+        log.record(DiagnosticsLog.Level.INFO, TAG,
+            "trigger=${trigger.label} types=${types.joinToString { it.name }} " +
+                "ignored=${if (throttled) "throttle" else "reentrance"} " +
+                "deferredTypes=${deferredTypes.joinToString { it.name }}")
+    }
+
+    companion object { const val TAG = "FlagsRefresh" }
+}
+
+/** A refresh owns its lifetime; detached fetches retain their own measurements for late joiners. */
+class FlagRefreshTrace internal constructor(
+    val id: Long,
+    private val types: List<FlagType>,
+    private val log: DiagnosticsLog,
+    private val started: Long,
+) : AbstractCoroutineContextElement(Key) {
+    private val triggerToBeginMs = elapsedDiagnosticMs(started)
+    private val fetches = linkedSetOf<FlagFetchTrace>()
+    private var joined = 0
+    private var publicationMs: Long? = null
+    private var failureClass: String? = null
+
+    @Synchronized
+    fun attach(fetch: FlagFetchTrace, wasJoined: Boolean) {
+        if (fetches.add(fetch) && wasJoined) joined++
+    }
+
+    @Synchronized
+    fun published() {
+        if (publicationMs == null) publicationMs = elapsedDiagnosticMs(started)
+    }
+
+    @Synchronized
+    fun failure(error: Throwable) { failureClass = error.diagnosticClassName() }
+
+    @Synchronized
+    fun finish() {
+        val calls = fetches.flatMap { it.callSnapshot() }.distinctBy { it.id }
+        val gaps = fetches.flatMap { it.gapSnapshot() }.distinct()
+        // Outcome follows the result actually published, even if a superseded attempt failed.
+        val failed = failureClass
+        val outcome = when {
+            failed != null -> "failure"
+            gaps.isNotEmpty() -> "success-incomplete"
+            else -> "success"
+        }
+        val durations = calls.map { it.totalMs }.sorted()
+        val phases = FlagRefreshPhase.entries.joinToString { phase ->
+            val wall = fetches.sumOf { it.phaseMs(phase) }
+            val transport = calls.filter { it.phase == phase }
+            "${phase.name.lowercase()}Ms=$wall " +
+                "${phase.name.lowercase()}CallMs=${transport.sumOf { it.totalMs }} " +
+                "${phase.name.lowercase()}Failures=${fetches.sumOf { it.failures(phase) }}"
+        }
+        val slowest = calls.sortedByDescending { it.totalMs }.take(3).joinToString(";") {
+            "${it.endpoint.label()} totalMs=${it.totalMs}"
+        }
+        val transport = "waitMs=${calls.sumOf { it.waitMs ?: 0L }} " +
+            "waitMeasuredCalls=${calls.count { it.waitMs != null }} dnsMs=${calls.sumOf { it.dnsMs }} " +
+            "connectMs=${calls.sumOf { it.connectMs }} tlsMs=${calls.sumOf { it.tlsMs }} " +
+            "headersSentToReceivedMs=${calls.sumOf { it.headersSentToReceivedMs ?: 0L }} " +
+            "bodyMs=${calls.sumOf { it.bodyMs }} totalCallMs=${calls.sumOf { it.totalMs }} " +
+            "peakInFlight=${calls.maxOfOrNull { it.inFlightAtStart } ?: 0}"
+        log.record(DiagnosticsLog.Level.INFO, FlagRefreshDiagnostics.TAG,
+            "refresh=$id types=${types.joinToString { it.name }} outcome=$outcome " +
+                "exception=${failed ?: "-"} reasons=${gaps.joinToString { it.name.lowercase() }} " +
+                "fetches=${fetches.size} newFetches=${fetches.size - joined} joined=$joined " +
+                "pendingFetches=${fetches.count { !it.isFinished() }} " +
+                "fetchRefreshIds=${fetches.map { it.refreshId }.distinct()} " +
+                "callRefreshIds=${calls.mapNotNull { it.refreshId }.distinct()} " +
+                "fetchFailureClasses=${fetches.mapNotNull { it.failureClass }.distinct()} " +
+                "categories=${fetches.sumOf { it.categoryCount }} bucketPages=${fetches.sumOf { it.bucketPages }} " +
+                "stickyPages=${fetches.sumOf { it.stickyPages }} calls=${calls.size} " +
+                "callFailures=${calls.count { it.outcome != HfrCallOutcome.OK }} " +
+                "reused=${calls.count { it.reusedConnection }} maxMs=${durations.lastOrNull() ?: 0} " +
+                "medianMs=${durations.getOrNull(durations.size / 2) ?: 0} $transport $phases " +
+                "stickyGenerationRefused=${fetches.sumOf { it.stickyGenerationRefused }} " +
+                "stickySweepsJoined=${fetches.sumOf { it.stickySweepsJoined }} " +
+                "triggerToBeginMs=$triggerToBeginMs firstFreshPublicationMs=${publicationMs ?: "-"} " +
+                "totalMs=${elapsedDiagnosticMs(started)} " +
+                "slowest=[$slowest]")
+    }
+
+    companion object Key : CoroutineContext.Key<FlagRefreshTrace>
+}
+
+/** Only safe transport summaries and numeric counters are retained, for the fetch's lifetime. */
+class FlagFetchTrace(val refreshId: Long, val type: FlagType) : AbstractCoroutineContextElement(Key) {
+    private val calls = mutableListOf<HfrCallSummary>()
+    private val gaps = mutableSetOf<FlagRefreshGap>()
+    private val phases = mutableMapOf<FlagRefreshPhase, Long>()
+    private val phaseFailures = mutableMapOf<FlagRefreshPhase, Int>()
+    private var finished = false
+    var categoryCount: Int = 0
+    var bucketPages: Int = 0
+        private set
+    var stickyPages: Int = 0
+        private set
+    var stickyGenerationRefused: Int = 0
+        private set
+    var stickySweepsJoined: Int = 0
+        private set
+    var failureClass: String? = null
+        private set
+
+    @Synchronized fun call(summary: HfrCallSummary) { calls += summary }
+    @Synchronized fun markFinished() { finished = true }
+    @Synchronized fun isFinished(): Boolean = finished
+    @Synchronized fun joinedStickySweep() { stickySweepsJoined++ }
+    @Synchronized fun absorbSticky(sweep: FlagFetchTrace) {
+        calls += sweep.callSnapshot()
+        stickyPages += sweep.stickyPages
+        gaps += sweep.gapSnapshot()
+        phaseFailures[FlagRefreshPhase.STICKIES] = failures(FlagRefreshPhase.STICKIES) +
+            sweep.failures(FlagRefreshPhase.STICKIES)
+    }
+    @Synchronized fun callSnapshot(): List<HfrCallSummary> = calls.toList()
+    @Synchronized fun gapSnapshot(): Set<FlagRefreshGap> = gaps.toSet()
+    @Synchronized fun gap(gap: FlagRefreshGap) {
+        gaps += gap
+        if (gap == FlagRefreshGap.STICKY_GENERATION) stickyGenerationRefused++
+    }
+    @Synchronized fun page(sticky: Boolean) { if (sticky) stickyPages++ else bucketPages++ }
+    @Synchronized fun phase(phase: FlagRefreshPhase, nanos: Long) {
+        phases[phase] = (phases[phase] ?: 0L) + elapsedDiagnosticMs(nanos)
+    }
+    @Synchronized fun phaseMs(phase: FlagRefreshPhase): Long = phases[phase] ?: 0L
+    @Synchronized fun failures(phase: FlagRefreshPhase): Int = phaseFailures[phase] ?: 0
+    @Synchronized fun fatal(error: Throwable) { failureClass = error.diagnosticClassName() }
+    @Synchronized fun failed(phase: FlagRefreshPhase, error: Throwable, fatal: Boolean) {
+        phaseFailures[phase] = (phaseFailures[phase] ?: 0) + 1
+        if (fatal) failureClass = error.diagnosticClassName()
+    }
+
+    companion object Key : CoroutineContext.Key<FlagFetchTrace>
+}
+
+/** Created BEFORE dispatching each request-producing child, to measure its queue wait explicitly. */
+class HfrRequestQueued(val nanos: Long = System.nanoTime()) : AbstractCoroutineContextElement(Key) {
+    private val consumed = AtomicBoolean()
+    fun consume(): Long = if (consumed.compareAndSet(false, true)) nanos else System.nanoTime()
+    companion object Key : CoroutineContext.Key<HfrRequestQueued>
+}

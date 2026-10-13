@@ -352,7 +352,7 @@ fun FlagsRoute(
     // in-flight guard make a resume that lands right after another trigger a no-op (no double
     // fan-out — the post-suspension recheck in maybeAutoRefresh is concurrency-safe).
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        viewModel.maybeAutoRefresh()
+        viewModel.maybeAutoRefresh(fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrigger.RESUME)
     }
 
     // One-shot snackbar for the delflag outcome (#99). Keyed on the event instance so a
