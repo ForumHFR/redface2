@@ -95,8 +95,10 @@ class HfrEventListenerFactoryTest {
         httpListener.callEnd(httpFailure)
 
         assertEquals(4, log.entries.value.size)
-        assertEquals(listOf(HfrCallOutcome.OK, HfrCallOutcome.FAILURE, HfrCallOutcome.CANCELLED, HfrCallOutcome.FAILURE),
-            fetch.callSnapshot().map { it.outcome })
+        assertEquals(
+            listOf(HfrCallOutcome.OK, HfrCallOutcome.FAILURE, HfrCallOutcome.CANCELLED, HfrCallOutcome.FAILURE),
+            fetch.callSnapshot().map { it.outcome },
+        )
         assertEquals("IOException", fetch.callSnapshot()[1].exceptionClass)
         log.entries.value.forEach { entry ->
             listOf("Secret", "Cookie", "35395", "hash_check", "proxy", "https", "?").forEach {

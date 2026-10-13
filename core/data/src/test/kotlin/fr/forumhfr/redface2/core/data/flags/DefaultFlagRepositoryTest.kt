@@ -927,7 +927,7 @@ class DefaultFlagRepositoryTest {
                     "title": "old in cat 13",
                     "links": {
                       "category": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/"},
-                      "posts": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/topics/100/posts/?page=1&results_per_page=40", "count": 1}
+                      "posts": {"href": "$CATEGORIES_URL/13/topics/100/posts/?page=1&results_per_page=40", "count": 1}
                     },
                     "is_read": false,
                     "flag_owntopic": 1,
@@ -938,7 +938,7 @@ class DefaultFlagRepositoryTest {
                     "title": "newest in cat 13",
                     "links": {
                       "category": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/"},
-                      "posts": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/topics/200/posts/?page=1&results_per_page=40", "count": 1}
+                      "posts": {"href": "$CATEGORIES_URL/13/topics/200/posts/?page=1&results_per_page=40", "count": 1}
                     },
                     "is_read": false,
                     "flag_owntopic": 1,
@@ -960,7 +960,7 @@ class DefaultFlagRepositoryTest {
                     "title": "middle in cat 23",
                     "links": {
                       "category": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"},
-                      "posts": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/topics/300/posts/?page=1&results_per_page=40", "count": 1}
+                      "posts": {"href": "$CATEGORIES_URL/23/topics/300/posts/?page=1&results_per_page=40", "count": 1}
                     },
                     "is_read": false,
                     "flag_owntopic": 1,
@@ -1006,7 +1006,7 @@ class DefaultFlagRepositoryTest {
                     "title": "Topic A — partial page",
                     "links": {
                       "category": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/"},
-                      "posts": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/topics/300/posts/?page=1&results_per_page=40", "count": 1}
+                      "posts": {"href": "$CATEGORIES_URL/13/topics/300/posts/?page=1&results_per_page=40", "count": 1}
                     },
                     "is_read": false,
                     "flag_owntopic": 1
@@ -1027,7 +1027,7 @@ class DefaultFlagRepositoryTest {
                     "title": "Topic B — second page",
                     "links": {
                       "category": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/"},
-                      "posts": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/topics/400/posts/?page=1&results_per_page=40", "count": 1}
+                      "posts": {"href": "$CATEGORIES_URL/13/topics/400/posts/?page=1&results_per_page=40", "count": 1}
                     },
                     "is_read": false,
                     "flag_owntopic": 1
@@ -1091,7 +1091,7 @@ class DefaultFlagRepositoryTest {
                     "title": "Topic A",
                     "links": {
                       "category": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/"},
-                      "posts": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/topics/100/posts/?page=1&results_per_page=40", "count": 1}
+                      "posts": {"href": "$CATEGORIES_URL/13/topics/100/posts/?page=1&results_per_page=40", "count": 1}
                     },
                     "is_read": false,
                     "flag_owntopic": 1
@@ -1112,7 +1112,7 @@ class DefaultFlagRepositoryTest {
                     "title": "Topic B",
                     "links": {
                       "category": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/"},
-                      "posts": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/topics/200/posts/?page=2&results_per_page=40", "count": 50}
+                      "posts": {"href": "$CATEGORIES_URL/13/topics/200/posts/?page=2&results_per_page=40", "count": 50}
                     },
                     "is_read": false,
                     "flag_owntopic": 1
@@ -2153,7 +2153,8 @@ class DefaultFlagRepositoryTest {
     private suspend fun recordDiagnosticCall(id: Long, cat: Int, sticky: Boolean, failed: Boolean) {
         val trace = requireNotNull(currentCoroutineContext()[FlagFetchTrace])
         trace.call(HfrCallSummary(
-            id = id, endpoint = HfrEndpoint(if (sticky) HfrEndpoint.Family.LAST else HfrEndpoint.Family.PARTICIPATED, cat, 1),
+            id = id,
+            endpoint = HfrEndpoint(if (sticky) HfrEndpoint.Family.LAST else HfrEndpoint.Family.PARTICIPATED, cat, 1),
             role = HfrClientRole.AUTH, refreshId = trace.refreshId,
             phase = if (sticky) FlagRefreshPhase.STICKIES else FlagRefreshPhase.BUCKETS,
             waitMs = 0, dnsMs = 0, connectMs = 0, tlsMs = 0, headersSentToReceivedMs = 10, bodyMs = 0, totalMs = 10,
@@ -2290,6 +2291,8 @@ class DefaultFlagRepositoryTest {
     }
 
     private companion object {
+        const val CATEGORIES_URL = "https://forum.hardware.fr/api/forums/hardwarefr/categories"
+
         const val EMPTY_PAGE = """
             {
               "resource": {

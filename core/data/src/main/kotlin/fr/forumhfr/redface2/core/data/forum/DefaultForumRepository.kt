@@ -108,23 +108,7 @@ class DefaultForumRepository @Inject constructor(
             // concurrent observeCategories() cold fetch is not duplicated. This is the #251 fix:
             // the flags fan-out asks with forceRefreshIfStale = true so a category added after the
             // 24h cache was warmed is enumerated and its drapeaux fetched.
-            else -> when (val fetched = fetchCategoriesSingleFlight(now)) {
-                // DEGRADE on a network failure when a stale cache exists: the flags fan-out (#251)
-                // prefers enumerating a slightly-stale catalogue to hard-failing the whole Drapeaux
-                // screen when only the categories endpoint is momentarily down (parity with the old
-                // observeCategories().first behaviour, which served last-known-good). A cold cache has
-                // nothing to fall back to, so its Failure still surfaces.
-                is ForumResult.Failure -> if (cached != null) {
-                    currentCoroutineContext()[FlagFetchTrace]?.let { trace ->
-                        trace.gap(FlagRefreshGap.CATALOGUE_FALLBACK)
-                        trace.failed(FlagRefreshPhase.CATALOGUE, fetched.cause, fatal = false)
-                    }
-                    ForumResult.Success(cached.value)
-                } else {
-                    fetched
-                }
-                else -> fetched
-            }
+            else -> fetchCategoriesWithFallback(now, cached)
         }
     }
 
@@ -267,6 +251,27 @@ class DefaultForumRepository @Inject constructor(
                 fetchCategories()
             }
         }
+
+    private suspend fun fetchCategoriesWithFallback(
+        now: Instant,
+        cached: CachedEntry<List<Category>>?,
+    ): ForumResult<List<Category>> = when (val fetched = fetchCategoriesSingleFlight(now)) {
+        // DEGRADE on a network failure when a stale cache exists: the flags fan-out (#251)
+        // prefers enumerating a slightly-stale catalogue to hard-failing the whole Drapeaux
+        // screen when only the categories endpoint is momentarily down (parity with the old
+        // observeCategories().first behaviour, which served last-known-good). A cold cache has
+        // nothing to fall back to, so its Failure still surfaces.
+        is ForumResult.Failure -> if (cached != null) {
+            currentCoroutineContext()[FlagFetchTrace]?.let { trace ->
+                trace.gap(FlagRefreshGap.CATALOGUE_FALLBACK)
+                trace.failed(FlagRefreshPhase.CATALOGUE, fetched.cause, fatal = false)
+            }
+            ForumResult.Success(cached.value)
+        } else {
+            fetched
+        }
+        else -> fetched
+    }
 
     private suspend fun fetchCategories(): ForumResult<List<Category>> = withContext(ioDispatcher) {
         runCatching {

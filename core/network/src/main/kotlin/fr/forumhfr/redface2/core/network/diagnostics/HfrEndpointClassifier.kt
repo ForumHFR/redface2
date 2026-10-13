@@ -17,7 +17,8 @@ fun classifyHfrEndpoint(url: HttpUrl): HfrEndpoint? {
 
 private fun isImagePath(url: HttpUrl): Boolean = url.encodedPath.startsWith("/images/") ||
     url.encodedPath.startsWith("/mesimages/") ||
-    url.encodedPath.substringAfterLast('.').lowercase() in setOf("gif", "jpg", "jpeg", "png", "webp", "svg", "avif", "ico")
+    url.encodedPath.substringAfterLast('.').lowercase() in
+        setOf("gif", "jpg", "jpeg", "png", "webp", "svg", "avif", "ico")
 
 private fun publicCategory(url: HttpUrl): Int? =
     url.queryParameter("cat")?.toIntOrNull()?.takeIf { it > 0 }

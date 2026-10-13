@@ -54,7 +54,9 @@ class FlagRefreshDiagnosticsTest {
         failed.failure(IOException("https://secret.proxy/?hash_check=SecretCookie"))
         failed.finish()
         assertTrue(log.entries.value.last().message.contains("outcome=failure exception=IOException"))
-        assertFalse(log.entries.value.any { it.message.contains("SecretCookie") || it.message.contains("secret.proxy") })
+        assertFalse(log.entries.value.any {
+            it.message.contains("SecretCookie") || it.message.contains("secret.proxy")
+        })
     }
 
     private fun summary(id: Long, duration: Long): HfrCallSummary = HfrCallSummary(

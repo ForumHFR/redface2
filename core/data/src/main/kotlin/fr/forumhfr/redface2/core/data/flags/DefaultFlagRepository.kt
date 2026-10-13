@@ -1046,7 +1046,11 @@ class DefaultFlagRepository @Inject constructor(
         val all = when (val result = forumRepository.getCategories(forceRefreshIfStale = true)) {
             is ForumResult.Success -> result.value
             is ForumResult.Failure -> {
-                currentCoroutineContext()[FlagFetchTrace]?.failed(FlagRefreshPhase.CATALOGUE, result.cause, fatal = true)
+                currentCoroutineContext()[FlagFetchTrace]?.failed(
+                    FlagRefreshPhase.CATALOGUE,
+                    result.cause,
+                    fatal = true,
+                )
                 throw result.cause
             }
             ForumResult.Loading -> error("getCategories never emits Loading")
