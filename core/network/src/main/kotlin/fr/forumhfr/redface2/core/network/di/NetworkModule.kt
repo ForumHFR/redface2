@@ -5,7 +5,10 @@ import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrClientRole
 import fr.forumhfr.redface2.core.network.HfrConstants
+import fr.forumhfr.redface2.core.network.diagnostics.HfrEventListenerFactory
+import fr.forumhfr.redface2.core.network.diagnostics.HfrNetworkDiagnostics
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
 import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
@@ -15,6 +18,7 @@ import fr.forumhfr.redface2.core.network.qualifiers.UploadClient
 import java.time.Duration
 import javax.inject.Singleton
 import okhttp3.CookieJar
+import okhttp3.EventListener
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -29,8 +33,12 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideBaseClient(userPreferencesRepository: UserPreferencesRepository): OkHttpClient =
+    fun provideBaseClient(
+        userPreferencesRepository: UserPreferencesRepository,
+        diagnostics: HfrNetworkDiagnostics,
+    ): OkHttpClient =
         OkHttpClient.Builder()
+        .eventListenerFactory(HfrEventListenerFactory(diagnostics))
         .connectTimeout(HfrConstants.ConnectTimeout)
         .readTimeout(HfrConstants.ReadTimeout)
         .writeTimeout(HfrConstants.WriteTimeout)
@@ -46,6 +54,7 @@ object NetworkModule {
         baseClient: OkHttpClient,
         cookieJar: CookieJar,
     ): OkHttpClient = baseClient.newBuilder()
+        .diagnosticsRole(baseClient, HfrClientRole.AUTH)
         .cookieJar(cookieJar)
         .followSslRedirects(false)
         .build()
@@ -57,6 +66,7 @@ object NetworkModule {
         baseClient: OkHttpClient,
         cookieJar: CookieJar,
     ): OkHttpClient = baseClient.newBuilder()
+        .diagnosticsRole(baseClient, HfrClientRole.MUTATION)
         .cookieJar(cookieJar)
         .followSslRedirects(false)
         .retryOnConnectionFailure(false)
@@ -66,6 +76,7 @@ object NetworkModule {
     @Singleton
     @AnonymousClient
     fun provideAnonymousClient(baseClient: OkHttpClient): OkHttpClient = baseClient.newBuilder()
+        .diagnosticsRole(baseClient, HfrClientRole.ANON)
         .cookieJar(CookieJar.NO_COOKIES)
         .followRedirects(true)
         .followSslRedirects(false)
@@ -79,6 +90,7 @@ object NetworkModule {
     @Singleton
     @ImageClient
     fun provideImageClient(baseClient: OkHttpClient): OkHttpClient = baseClient.newBuilder()
+        .eventListener(EventListener.NONE)
         .cookieJar(CookieJar.NO_COOKIES)
         .followRedirects(true)
         .followSslRedirects(true)
@@ -97,12 +109,22 @@ object NetworkModule {
     @Singleton
     @UploadClient
     fun provideUploadClient(baseClient: OkHttpClient): OkHttpClient = baseClient.newBuilder()
+        .diagnosticsRole(baseClient, HfrClientRole.UPLOAD)
         .cookieJar(CookieJar.NO_COOKIES)
         .followSslRedirects(false)
         .retryOnConnectionFailure(false)
         .writeTimeout(Duration.ofSeconds(UPLOAD_WRITE_TIMEOUT_SECONDS))
         .callTimeout(Duration.ofSeconds(UPLOAD_CALL_TIMEOUT_SECONDS))
         .build()
+
+    private fun OkHttpClient.Builder.diagnosticsRole(
+        baseClient: OkHttpClient,
+        role: HfrClientRole,
+    ): OkHttpClient.Builder = apply {
+        (baseClient.eventListenerFactory as? HfrEventListenerFactory)?.let {
+            eventListenerFactory(it.withRole(role))
+        }
+    }
 
     private const val UPLOAD_WRITE_TIMEOUT_SECONDS = 60L
     private const val UPLOAD_CALL_TIMEOUT_SECONDS = 90L

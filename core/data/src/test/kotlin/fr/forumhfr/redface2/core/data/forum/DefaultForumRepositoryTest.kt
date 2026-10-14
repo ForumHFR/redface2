@@ -1,8 +1,19 @@
 package fr.forumhfr.redface2.core.data.forum
 
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagFetchTrace
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshDiagnostics
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshPhase
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrigger
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallOutcome
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallSummary
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrCatalogueTrace
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrClientRole
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrEndpoint
 import fr.forumhfr.redface2.core.domain.forum.FlagFilterBucket
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
+import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.network.HfrApiClient
 import fr.forumhfr.redface2.core.network.HfrRestFlagBucket
 import io.mockk.coEvery
@@ -14,12 +25,16 @@ import java.time.ZoneOffset
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -129,6 +144,63 @@ class DefaultForumRepositoryTest {
         assertEquals(19, firstResult.value.size)
         assertEquals(19, secondResult.value.size)
         coVerify(exactly = 1) { apiClient.getCategories(any()) }
+    }
+
+    @Test
+    fun `refreshes joining an observer catalogue load retain its shared transport summary - 984`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val apiClient = mockk<HfrApiClient> {
+            coEvery { getCategories(any()) } coAnswers {
+                val catalogue = currentCoroutineContext()[HfrCatalogueTrace]
+                assertNotNull(catalogue)
+                // The observer starts without a FlagFetchTrace, just like the grouping collector.
+                assertNull(currentCoroutineContext()[FlagFetchTrace])
+                gate.await()
+                catalogue!!.call(HfrCallSummary(
+                    id = 1, endpoint = HfrEndpoint(HfrEndpoint.Family.CATEGORIES), role = HfrClientRole.ANON,
+                    refreshId = null, phase = FlagRefreshPhase.CATALOGUE, waitMs = 0, dnsMs = 100,
+                    connectMs = 200, tlsMs = 150, headersSentToReceivedMs = 1_900, bodyMs = 100,
+                    totalMs = 2_300, status = 200, protocol = "h2", reusedConnection = false,
+                    inFlightAtStart = 1, outcome = HfrCallOutcome.OK,
+                ))
+                fixture("rest_categories.json")
+            }
+        }
+        val repo = repository(apiClient)
+        val observer = async { repo.observeCategories().first { it is ForumResult.Success } }
+        runCurrent()
+        val log = DiagnosticsLog()
+        val trace = FlagRefreshDiagnostics(log).begin(FlagRefreshTrigger.PULL, listOf(FlagType.CYAN, FlagType.RED))
+        val fetches = listOf(FlagType.CYAN, FlagType.RED).map { FlagFetchTrace(trace.id, it) }
+        val waiters = fetches.map { fetch ->
+            async { withContext(trace + fetch) { repo.getCategories(forceRefreshIfStale = true) } }
+        }
+        runCurrent()
+        waiters.forEach { assertFalse(it.isCompleted) }
+        gate.complete(Unit)
+        assertTrue(observer.await() is ForumResult.Success)
+        waiters.forEach { assertTrue(it.await() is ForumResult.Success) }
+        fetches.forEach { fetch ->
+            assertTrue(fetch.joinedCatalogue())
+            val call = fetch.callSnapshot().single()
+            assertEquals(trace.id, call.refreshId)
+            assertEquals(fetch.type, call.flagType)
+            trace.attach(fetch, false)
+            trace.result(fetch.type, fetch)
+            fetch.markFinished()
+        }
+        trace.published()
+        trace.finish()
+
+        val summary = log.entries.value.last().message
+        listOf("catalogue=joined", "calls=1 ", "catalogueCallMs=2300", "dnsMs=100", "connectMs=200").forEach {
+            assertTrue(summary, summary.contains(it))
+        }
+        coVerify(exactly = 1) { apiClient.getCategories(any()) }
+        // An ordinary later cache hit must not be attributed the previous load's HTTP time.
+        val cachedFetch = FlagFetchTrace(99, FlagType.FAVORITE)
+        withContext(cachedFetch) { repo.getCategories(forceRefreshIfStale = true) }
+        assertTrue(cachedFetch.callSnapshot().isEmpty())
     }
 
     @Test

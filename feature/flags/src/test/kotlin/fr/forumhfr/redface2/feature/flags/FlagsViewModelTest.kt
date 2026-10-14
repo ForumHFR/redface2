@@ -7,6 +7,8 @@ import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.LoginError
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshDiagnostics
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
@@ -279,16 +281,19 @@ class FlagsViewModelTest {
 
     @Test
     fun `refresh ignores a second pull while the same tab is already refreshing`() = runTest {
+        val diagnostics = DiagnosticsLog()
         val flags = FakeFlagRepository()
         val firstGate = CompletableDeferred<Unit>()
         flags.refreshGate = firstGate
         val forum = FakeForumRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("xaat"), flagRepository = flags)
-        val vm = viewModel(auth, flags, forum)
+        val vm = viewModel(auth, flags, forum, diagnostics = diagnostics)
 
         vm.refresh()
         assertTrue(vm.isRefreshing.value)
         vm.refresh()
+        assertEquals(1, diagnostics.entries.value.count { it.message.contains("trigger=pull") &&
+            it.message.contains("ignored=reentrance") })
 
         assertEquals(listOf(FlagType.CYAN), flags.refreshCalls)
         firstGate.complete(Unit)
@@ -1680,14 +1685,16 @@ class FlagsViewModelTest {
 
     @Test
     fun `maybeAutoRefresh throttles rapid landings then allows after the window`() = runTest {
+        val diagnostics = DiagnosticsLog()
         val flags = FakeFlagRepository()
         val auth = FakeAuthRepository(AuthState.Authenticated("XaT"), flagRepository = flags)
         val clock = SteppingClock(Instant.parse("2026-06-11T12:00:00Z"))
-        val vm = viewModelWithClock(auth, flags, clock)
+        val vm = viewModelWithClock(auth, flags, clock, diagnostics)
 
         vm.maybeAutoRefresh()
         vm.maybeAutoRefresh() // immediate re-landing (back-and-forth) — throttled
         assertEquals(1, flags.refreshCalls.size)
+        assertEquals(1, diagnostics.entries.value.count { it.message.contains("ignored=throttle") })
 
         clock.now = clock.now.plusSeconds(16) // past the 15 s window
         vm.maybeAutoRefresh()
@@ -2818,6 +2825,7 @@ class FlagsViewModelTest {
         // #1144 — stands in for the @ApplicationScope singleton; never cancelled by the tests, like
         // the process-lifetime scope it mirrors.
         externalScope: CoroutineScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher()),
+        diagnostics: DiagnosticsLog = DiagnosticsLog(),
     ): FlagsViewModel =
         FlagsViewModel(
             authRepository = auth,
@@ -2830,6 +2838,7 @@ class FlagsViewModelTest {
             mpStorageRepository = mpStorage,
             clock = fixedClock,
             externalScope = externalScope,
+            refreshDiagnostics = FlagRefreshDiagnostics(diagnostics),
         )
 
     /** Builds a ViewModel with a custom [clock] for the #378 throttle tests; everything else is a
@@ -2838,6 +2847,7 @@ class FlagsViewModelTest {
         auth: FakeAuthRepository,
         flags: FakeFlagRepository,
         clock: Clock,
+        diagnostics: DiagnosticsLog = DiagnosticsLog(),
     ): FlagsViewModel {
         val forum = FakeForumRepository()
         val prefs = FakeUserPreferencesRepository()
@@ -2852,6 +2862,7 @@ class FlagsViewModelTest {
             mpStorageRepository = FakeMpStorageRepository(),
             clock = clock,
             externalScope = CoroutineScope(SupervisorJob() + UnconfinedTestDispatcher()),
+            refreshDiagnostics = FlagRefreshDiagnostics(diagnostics),
         )
     }
 

@@ -2,15 +2,19 @@ package fr.forumhfr.redface2.core.network
 
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
+import fr.forumhfr.redface2.core.network.diagnostics.HfrCallTag
+import fr.forumhfr.redface2.core.network.diagnostics.withHfrDiagnostics
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
 import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.currentCoroutineContext
 import okhttp3.Call
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 
 /**
  * REST client for the JSON HFR API exposed at `/webservices/rest_api.php`. Phase 1C-A
@@ -194,12 +198,12 @@ class HfrApiClient @Inject constructor(
             .setEncodedQueryParameter(PARAM_URI, uri)
         extraParams.forEach { (name, value) -> builder.addQueryParameter(name, value) }
         val url = builder.build()
-        val request = Request.Builder().url(url).get().build()
+        val request = Request.Builder().url(url).get().build().withHfrDiagnostics(currentCoroutineContext())
         val client = if (useAuth) authenticated else anonymous
         return if (useAuth) {
             client.newCall(request).executeAuthenticatedJson()
         } else {
-            client.newCall(request).execute().use { response ->
+            client.newCall(request).executeDiagnosed().use { response ->
                 if (!response.isSuccessful) {
                     // #324 — typed (status code) while keeping the richer REST diagnostic line.
                     throw HfrServerException(
@@ -213,7 +217,12 @@ class HfrApiClient @Inject constructor(
         }
     }
 
-    private fun Call.executeAuthenticatedJson(): String = execute().use { response ->
+    private fun Call.executeDiagnosed(): Response {
+        request().tag(HfrCallTag::class.java)?.executing()
+        return execute()
+    }
+
+    private fun Call.executeAuthenticatedJson(): String = executeDiagnosed().use { response ->
         val body = response.body.string()
         if (!response.isSuccessful) {
             // #324 — typed (status code) while keeping the richer REST diagnostic line.

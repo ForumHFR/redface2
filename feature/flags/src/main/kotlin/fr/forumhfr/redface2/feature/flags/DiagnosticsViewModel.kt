@@ -31,6 +31,7 @@ import android.widget.Toast
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -57,7 +58,12 @@ class DiagnosticsViewModel @Inject constructor(
  * resets the trail by design).
  */
 @Composable
-fun DiagnosticsScreen(onClose: () -> Unit) {
+fun DiagnosticsScreen(
+    onClose: () -> Unit,
+    versionName: String,
+    versionCode: Int,
+    channel: String,
+) {
     val viewModel: DiagnosticsViewModel = hiltViewModel()
     val entries by viewModel.entries.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
@@ -97,11 +103,25 @@ fun DiagnosticsScreen(onClose: () -> Unit) {
                 Spacer(Modifier.weight(1f))
                 TextButton(
                     enabled = entries.isNotEmpty(),
-                    onClick = { copyDiagnosticsToClipboard(context, entries, timeFormat) },
+                    onClick = {
+                        copyDiagnosticsToClipboard(
+                            context, entries, timeFormat,
+                            DiagnosticsEnvironment(
+                                versionName, versionCode, channel,
+                                Build.VERSION.SDK_INT, Build.MANUFACTURER, Build.MODEL,
+                            ),
+                        )
+                    },
                 ) { Text("Copier") }
                 TextButton(onClick = { viewModel.clear() }) { Text("Vider") }
                 TextButton(onClick = onClose) { Text("Fermer") }
             }
+            Text(
+                text = stringResource(R.string.diagnostics_copy_scope),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
             if (entries.isEmpty()) {
@@ -129,7 +149,7 @@ fun DiagnosticsScreen(onClose: () -> Unit) {
 }
 
 /**
- * Copy the full diagnostic trail to the system clipboard as plain text. Format:
+ * Copy only the allowed network measurements to the clipboard as plain text. Format:
  * `HH:mm:ss.SSS  L  TAG  message` per line — same shape rendered by [DiagnosticsRow]
  * but flat, so the alpha tester can paste it into a bug report or a HFR post without
  * losing context.
@@ -141,20 +161,13 @@ private fun copyDiagnosticsToClipboard(
     context: Context,
     entries: List<DiagnosticsLog.Entry>,
     timeFormat: SimpleDateFormat,
+    environment: DiagnosticsEnvironment,
 ) {
-    val payload = entries.joinToString(separator = "\n") { entry ->
-        val level = when (entry.level) {
-            DiagnosticsLog.Level.INFO -> "I"
-            DiagnosticsLog.Level.DEBUG -> "D"
-            DiagnosticsLog.Level.WARN -> "W"
-            DiagnosticsLog.Level.ERROR -> "E"
-        }
-        "${timeFormat.format(Date(entry.timestampMillis))}  $level  ${entry.tag}  ${entry.message}"
-    }
+    val payload = formatDiagnosticsExport(entries, timeFormat, environment)
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     clipboard.setPrimaryClip(ClipData.newPlainText("redface2 diagnostics", payload))
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-        Toast.makeText(context, "Diagnostics copiés (${entries.size} lignes)", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, context.getString(R.string.diagnostics_network_copied), Toast.LENGTH_SHORT).show()
     }
 }
 
