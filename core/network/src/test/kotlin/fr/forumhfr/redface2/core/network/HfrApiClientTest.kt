@@ -8,8 +8,12 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withTimeout
 import okhttp3.Call
 import okhttp3.EventListener
 import okhttp3.HttpUrl
@@ -74,6 +78,58 @@ class HfrApiClientTest {
             val error = runCatching { failingClient.getCategories(useAuth) }.exceptionOrNull()
             assertTrue("IOException must propagate, got $error", error is IOException)
             assertEquals(failure.message, error?.message)
+        }
+    }
+
+    @Test
+    fun `OkHttp read timeout remains a network failure with an active coroutine - 984`() = runTest {
+        val listener = CallLifecycleListener()
+        val okHttp = OkHttpClient.Builder()
+            .eventListener(listener)
+            .readTimeout(500, TimeUnit.MILLISECONDS)
+            .build()
+        val timedClient = HfrApiClient(okHttp, okHttp, server.url("/"), Dispatchers.IO)
+        server.enqueue(MockResponse().setBody("ab").throttleBody(1, 30, TimeUnit.SECONDS))
+
+        try {
+            val error = runCatching { timedClient.getCategories(useAuth = true) }.exceptionOrNull()
+            assertTrue("OkHttp timeout must remain an IOException, got $error", error is IOException)
+            assertTrue("network failure must not cancel the coroutine", currentCoroutineContext().isActive)
+            assertEquals("the timeout must occur while reading the body", 0L, listener.responseBodyStarted.count)
+            assertTrue("timed-out Call must terminate",
+                listener.terminalFailure.await(CALL_EVENT_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+            assertTrue(requireNotNull(listener.activeCall).isExecuted())
+        } finally {
+            listener.activeCall?.cancel()
+        }
+    }
+
+    @Test
+    fun `withTimeout propagates cancellation and cancels the blocked REST Call - 984`() = runTest {
+        val listener = CallLifecycleListener()
+        val okHttp = OkHttpClient.Builder().eventListener(listener).build()
+        val timedClient = HfrApiClient(okHttp, okHttp, server.url("/"), Dispatchers.IO)
+        server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+        // IO supplies a real-time timeout; runTest's virtual clock must not race the Call barrier.
+        val inFlight = async(Dispatchers.IO) {
+            withTimeout(1_000) { timedClient.getCategories(useAuth = false) }
+        }
+
+        try {
+            assertTrue("REST call did not reach the headers barrier",
+                listener.requestHeadersSent.await(CALL_EVENT_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+            assertEquals(1L, listener.responseHeadersReceived.count)
+            val error = runCatching { inFlight.await() }.exceptionOrNull()
+            assertTrue("withTimeout must propagate its exception, got $error", error is TimeoutCancellationException)
+            assertTrue("timeout must invoke Call.cancel()",
+                listener.canceled.await(CALL_EVENT_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+            assertTrue(requireNotNull(listener.activeCall).isCanceled())
+            assertTrue("cancelled Call must terminate",
+                listener.terminalFailure.await(CALL_EVENT_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+            assertTrue(inFlight.isCompleted)
+        } finally {
+            listener.activeCall?.cancel()
+            inFlight.cancel()
         }
     }
 
