@@ -286,7 +286,9 @@ class DefaultFlagRepository @Inject constructor(
         refreshJob.join()
     }
 
-    override suspend fun refresh(type: FlagType): FlagsResult = diagnoseRefresh(type, FlagRefreshTrigger.PULL) { trace ->
+    override suspend fun refresh(type: FlagType): FlagsResult = diagnoseRefresh(
+        type, FlagRefreshTrigger.PULL,
+    ) { trace ->
         val userId = currentUserId()
         val active = beginRefresh(type, userId)
         try {
@@ -1137,7 +1139,9 @@ class DefaultFlagRepository @Inject constructor(
     private suspend fun persistFlags(userId: String, type: FlagType, result: FlagsResult.Success) {
         val trace = currentCoroutineContext()[FlagFetchTrace]
         runCatching {
-            flagCacheStore.replace(userId = userId, type = type, flags = result.flags, isComplete = result.issue == null)
+            flagCacheStore.replace(
+                userId = userId, type = type, flags = result.flags, isComplete = result.issue == null,
+            )
         }.onFailure { throwable ->
             if (throwable is CancellationException) throw throwable
             trace?.gap(FlagRefreshGap.ROOM_WRITE)

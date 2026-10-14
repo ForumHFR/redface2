@@ -9,6 +9,7 @@ import fr.forumhfr.redface2.core.domain.auth.LoginError
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshDiagnostics
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrigger
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
@@ -117,7 +118,7 @@ class FlagsViewModelTest {
     fun `incomplete observation warns once while fresh content and filters keep working - 984`() = runTest {
         val flags = FakeFlagRepository()
         val result = incompleteSuccess()
-        flags.emit(FlagType.CYAN, result)
+        flags.observationResults = mapOf(FlagType.CYAN to result)
         val vm = viewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), flags, FakeForumRepository())
         advanceUntilIdle()
         assertEquals(1, flatTopics(vm.flagsState.value as FlagsListUiState.Success).single().topicId)
@@ -136,20 +137,31 @@ class FlagsViewModelTest {
     }
 
     @Test
-    fun `explicit incomplete refresh emits one warning and retry refreshes its original tab - 984`() = runTest {
+    fun `explicit incomplete refresh emits one warning and retry refreshes its displayed tab - 984`() = runTest {
         val flags = FakeFlagRepository().apply { refreshResults = mapOf(FlagType.CYAN to incompleteSuccess()) }
         val vm = viewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), flags, FakeForumRepository())
         vm.refresh()
         advanceUntilIdle()
         assertFalse(vm.isRefreshing.value)
         val warning = requireNotNull(vm.refreshWarning.value)
+        assertEquals(FlagTab.Cyan, warning.tab)
         assertEquals(listOf(FlagType.CYAN), warning.retryTypes)
         vm.selectTab(FlagTab.Red)
-        flags.refreshResults = emptyMap()
+        advanceUntilIdle()
+        assertNull("Cyan's warning must wait for Cyan", vm.refreshWarning.value)
+        flags.refreshResults = mapOf(FlagType.CYAN to FlagsResult.Success(emptyList()))
+        vm.retryRefreshWarning(warning)
+        advanceUntilIdle()
+        assertEquals("a stale action must not refresh a hidden tab", listOf(FlagType.CYAN), flags.refreshCalls)
+        vm.selectTab(FlagTab.Cyan)
+        advanceUntilIdle()
+        assertTrue(vm.refreshWarning.value === warning)
+        vm.consumeRefreshWarning(warning)
         vm.retryRefreshWarning(warning)
         advanceUntilIdle()
         assertEquals(listOf(FlagType.CYAN, FlagType.CYAN), flags.refreshCalls)
         assertNull(vm.refreshWarning.value)
+        vm.selectTab(FlagTab.Red)
         vm.selectTab(FlagTab.Cyan)
         advanceUntilIdle()
         assertNull("an observer replay must not repeat the handled warning", vm.refreshWarning.value)
@@ -188,7 +200,7 @@ class FlagsViewModelTest {
             refreshGate = CompletableDeferred()
         }
         val superFavorite = FakeSuperFavoriteRepository(initial = (1..3).mapTo(linkedSetOf()) {
-            SuperFavoriteTopic(cat = 1, topicId = it, title = "Old $it")
+            SuperFavoriteTopic(cat = 1, topicId = it, title = "Old $it", subcat = null)
         })
         val vm = viewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), flags, FakeForumRepository(),
             superFavorite = superFavorite)
@@ -242,17 +254,217 @@ class FlagsViewModelTest {
     }
 
     @Test
-    fun `incomplete auto refresh leaves the next automatic attempt unthrottled - 984`() = runTest {
+    fun `incomplete auto refresh keeps the fifteen second throttle for landings and resume - 984`() = runTest {
         val flags = FakeFlagRepository().apply { refreshResults = mapOf(FlagType.CYAN to incompleteSuccess()) }
-        val vm = viewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), flags, FakeForumRepository())
+        val clock = SteppingClock(fixedClock.instant())
+        val vm = viewModelWithClock(FakeAuthRepository(AuthState.Authenticated("xaat")), flags, clock)
         vm.maybeAutoRefresh()
         advanceUntilIdle()
-        flags.refreshResults = emptyMap()
         vm.maybeAutoRefresh()
+        vm.maybeAutoRefresh(FlagRefreshTrigger.RESUME)
+        advanceUntilIdle()
+        assertEquals(listOf(FlagType.CYAN), flags.refreshCalls)
+        clock.now = clock.now.plusSeconds(14)
+        vm.maybeAutoRefresh()
+        advanceUntilIdle()
+        assertEquals(listOf(FlagType.CYAN), flags.refreshCalls)
+        clock.now = clock.now.plusSeconds(1)
+        vm.maybeAutoRefresh(FlagRefreshTrigger.RESUME)
         advanceUntilIdle()
         vm.maybeAutoRefresh()
         advanceUntilIdle()
         assertEquals(listOf(FlagType.CYAN, FlagType.CYAN), flags.refreshCalls)
+    }
+
+    @Test
+    fun `pull retry and return from a topic bypass the throttle after an incomplete attempt - 984`() = runTest {
+        val flags = FakeFlagRepository().apply { refreshResults = mapOf(FlagType.CYAN to incompleteSuccess()) }
+        val vm = viewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), flags, FakeForumRepository())
+        vm.maybeAutoRefresh()
+        advanceUntilIdle()
+        val warning = requireNotNull(vm.refreshWarning.value)
+        vm.consumeRefreshWarning(warning)
+        vm.retryRefreshWarning(warning)
+        advanceUntilIdle()
+        vm.refresh()
+        advanceUntilIdle()
+        vm.onFlagOpened()
+        vm.maybeAutoRefresh()
+        advanceUntilIdle()
+        assertEquals(List(4) { FlagType.CYAN }, flags.refreshCalls)
+        vm.maybeAutoRefresh(FlagRefreshTrigger.RESUME)
+        advanceUntilIdle()
+        assertEquals("automatic attempts are throttled again after the read", 4, flags.refreshCalls.size)
+    }
+
+    @Test
+    fun `a late Cyan warning waits off Red and DT without losing another tab warning - 984`() = runTest {
+        val flags = FakeFlagRepository().apply {
+            refreshResults = mapOf(FlagType.CYAN to incompleteSuccess())
+            refreshGate = CompletableDeferred()
+        }
+        val vm = viewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), flags, FakeForumRepository())
+        vm.refresh()
+        vm.selectTab(FlagTab.Red)
+        flags.refreshGate?.complete(Unit)
+        advanceUntilIdle()
+        assertNull(vm.refreshWarning.value)
+        flags.emit(FlagType.RED, FlagsResult.Success(emptyList(), FlagRefreshIssue(paginationTruncated = true)))
+        advanceUntilIdle()
+        val redWarning = requireNotNull(vm.refreshWarning.value)
+        assertEquals(FlagTab.Red, redWarning.tab)
+        vm.selectTab(FlagTab.Dt)
+        advanceUntilIdle()
+        assertNull(vm.refreshWarning.value)
+        vm.selectTab(FlagTab.Cyan)
+        advanceUntilIdle()
+        val cyanWarning = requireNotNull(vm.refreshWarning.value)
+        assertEquals(FlagTab.Cyan, cyanWarning.tab)
+        assertEquals(listOf(FlagType.CYAN), cyanWarning.retryTypes)
+        vm.selectTab(FlagTab.Red)
+        advanceUntilIdle()
+        assertTrue("Cyan must not replace Red's pending warning", vm.refreshWarning.value === redWarning)
+    }
+
+    @Test
+    fun `a late Super warning waits for Super and retries its original batch - 984`() = runTest {
+        val flags = FakeFlagRepository().apply {
+            refreshResults = mapOf(FlagType.CYAN to incompleteSuccess())
+            refreshGate = CompletableDeferred()
+        }
+        val vm = viewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), flags, FakeForumRepository())
+        vm.selectTab(FlagTab.Super)
+        vm.refresh()
+        vm.selectTab(FlagTab.Dt)
+        flags.refreshGate?.complete(Unit)
+        advanceUntilIdle()
+        assertNull(vm.refreshWarning.value)
+        vm.selectTab(FlagTab.Super)
+        advanceUntilIdle()
+        val warning = requireNotNull(vm.refreshWarning.value)
+        val order = listOf(FlagType.CYAN, FlagType.RED, FlagType.FAVORITE)
+        assertEquals(FlagTab.Super, warning.tab)
+        assertEquals(order, warning.retryTypes)
+        flags.refreshResults = order.associateWith { FlagsResult.Success(emptyList()) }
+        vm.consumeRefreshWarning(warning)
+        vm.retryRefreshWarning(warning)
+        advanceUntilIdle()
+        assertEquals(order + order, flags.refreshCalls)
+        assertNull(vm.refreshWarning.value)
+    }
+
+    @Test
+    fun `a complete refresh clears an unconsumed incomplete warning - 984`() = runTest {
+        val flags = FakeFlagRepository().apply { refreshResults = mapOf(FlagType.CYAN to incompleteSuccess()) }
+        val vm = viewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), flags, FakeForumRepository())
+        vm.refresh()
+        advanceUntilIdle()
+        assertTrue(vm.refreshWarning.value != null)
+        flags.refreshResults = mapOf(FlagType.CYAN to FlagsResult.Success(emptyList()))
+        vm.refresh()
+        advanceUntilIdle()
+        assertNull(vm.refreshWarning.value)
+    }
+
+    @Test
+    fun `a complete observation clears an unconsumed warning without waiting for its snackbar - 984`() = runTest {
+        val flags = FakeFlagRepository()
+        val vm = viewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), flags, FakeForumRepository())
+        flags.emit(FlagType.CYAN, incompleteSuccess())
+        advanceUntilIdle()
+        assertTrue(vm.refreshWarning.value != null)
+        flags.emit(FlagType.CYAN, FlagsResult.Success(emptyList()))
+        advanceUntilIdle()
+        assertNull(vm.refreshWarning.value)
+    }
+
+    @Test
+    fun `a complete type removes only its own causes from a pending Super warning - 984`() = runTest {
+        val flags = FakeFlagRepository().apply {
+            refreshResults = mapOf(
+                FlagType.CYAN to incompleteSuccess(),
+                FlagType.RED to FlagsResult.Success(emptyList(), FlagRefreshIssue(paginationTruncated = true)),
+            )
+        }
+        val vm = viewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), flags, FakeForumRepository())
+        vm.selectTab(FlagTab.Super)
+        vm.refresh()
+        advanceUntilIdle()
+        assertTrue(requireNotNull(vm.refreshWarning.value).issue.stickyCategories.isNotEmpty())
+        vm.selectTab(FlagTab.Cyan)
+        flags.refreshResults = mapOf(FlagType.CYAN to FlagsResult.Success(emptyList()))
+        vm.refresh()
+        advanceUntilIdle()
+        vm.selectTab(FlagTab.Super)
+        advanceUntilIdle()
+        val remaining = requireNotNull(vm.refreshWarning.value)
+        assertTrue(remaining.issue.stickyCategories.isEmpty())
+        assertTrue(remaining.issue.paginationTruncated)
+        assertEquals(listOf(FlagType.CYAN, FlagType.RED, FlagType.FAVORITE), remaining.retryTypes)
+        vm.selectTab(FlagTab.Red)
+        advanceUntilIdle()
+        flags.emit(FlagType.RED, FlagsResult.Success(emptyList()))
+        advanceUntilIdle()
+        vm.selectTab(FlagTab.Super)
+        advanceUntilIdle()
+        assertNull(vm.refreshWarning.value)
+    }
+
+    @Test
+    fun `queued manual refreshes keep each warning attached to its requesting view - 984`() = runTest {
+        val flags = FakeFlagRepository().apply {
+            refreshResults = FlagType.entries.associateWith {
+                FlagsResult.Success(emptyList(), FlagRefreshIssue(paginationTruncated = true))
+            }
+            refreshGate = CompletableDeferred()
+        }
+        val vm = viewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), flags, FakeForumRepository())
+        vm.refresh()
+        vm.selectTab(FlagTab.Red)
+        vm.refresh()
+        vm.selectTab(FlagTab.Favorite)
+        vm.refresh()
+        vm.selectTab(FlagTab.Super)
+        vm.refresh() // Red and Favorite are already queued: keep both their views and Super.
+        flags.refreshGate?.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(listOf(FlagType.CYAN, FlagType.RED, FlagType.FAVORITE), flags.refreshCalls)
+        val superWarning = requireNotNull(vm.refreshWarning.value)
+        assertEquals(FlagTab.Super, superWarning.tab)
+        assertEquals(listOf(FlagType.RED, FlagType.FAVORITE), superWarning.retryTypes)
+        vm.selectTab(FlagTab.Favorite)
+        advanceUntilIdle()
+        val favoriteWarning = requireNotNull(vm.refreshWarning.value)
+        assertEquals(FlagTab.Favorite, favoriteWarning.tab)
+        assertEquals(listOf(FlagType.FAVORITE), favoriteWarning.retryTypes)
+        vm.selectTab(FlagTab.Red)
+        advanceUntilIdle()
+        val redWarning = requireNotNull(vm.refreshWarning.value)
+        assertEquals(FlagTab.Red, redWarning.tab)
+        assertEquals(listOf(FlagType.RED), redWarning.retryTypes)
+        vm.selectTab(FlagTab.Cyan)
+        advanceUntilIdle()
+        assertEquals(listOf(FlagType.CYAN), requireNotNull(vm.refreshWarning.value).retryTypes)
+    }
+
+    @Test
+    fun `the first cache purge drops private snapshots and keeps configured server responses - 984`() = runTest {
+        val flags = FakeFlagRepository()
+        val old = stubFlag(1, FlagType.CYAN)
+        val fresh = stubFlag(2, FlagType.CYAN)
+        flags.emit(FlagType.CYAN, FlagsResult.Success(listOf(old)))
+        flags.cachedFlags = listOf(old)
+        flags.refreshResults = mapOf(FlagType.CYAN to FlagsResult.Success(listOf(fresh)))
+        flags.clearSessionCache()
+        assertEquals(1, flags.clearSessionCacheCallCount)
+        assertTrue(flags.cachedFlags.isEmpty())
+        flags.observe(FlagType.CYAN).test {
+            expectNoEvents()
+            flags.refresh(FlagType.CYAN)
+            assertEquals(FlagsResult.Success(listOf(fresh)), awaitItem())
+            assertEquals(listOf(fresh), flags.cachedFlags)
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     private fun incompleteSuccess(): FlagsResult.Success = FlagsResult.Success(
@@ -2761,7 +2973,6 @@ class FlagsViewModelTest {
         val flags = FakeFlagRepository()
         val liveExact = stubFlag(2, FlagType.CYAN).copy(cat = 23, title = "Live exact")
         val cachedLegacy = stubFlag(3, FlagType.RED).copy(cat = 10, title = "Cached legacy")
-        flags.cachedFlags = listOf(liveExact, cachedLegacy)
         val favorites = setOf(
             SuperFavoriteTopic(cat = null, topicId = 99, title = null, subcat = null),
             SuperFavoriteTopic(cat = 23, topicId = 4, title = "Snapshot only", subcat = 550),
@@ -2778,6 +2989,7 @@ class FlagsViewModelTest {
             prefs = FakeUserPreferencesRepository(groupByCategory = false),
             superFavorite = FakeSuperFavoriteRepository(favorites),
         )
+        flags.cachedFlags = listOf(liveExact, cachedLegacy)
 
         vm.selectTab(FlagTab.Super)
         advanceUntilIdle()
@@ -3149,8 +3361,15 @@ class FlagsViewModelTest {
         var removeFlagResult: kotlinx.coroutines.CompletableDeferred<Result<Unit>> =
             kotlinx.coroutines.CompletableDeferred(Result.success(Unit))
 
-        override fun observe(type: FlagType): Flow<FlagsResult> =
-            perType.getValue(type).asSharedFlow()
+        // Configured server responses survive cache purges; private cached snapshots never do.
+        var observationResults: Map<FlagType, FlagsResult> = emptyMap()
+
+        override fun observe(type: FlagType): Flow<FlagsResult> = flow {
+            if (perType.getValue(type).replayCache.isEmpty()) {
+                observationResults[type]?.let { this@FakeFlagRepository.emit(type, it) }
+            }
+            emitAll(perType.getValue(type).asSharedFlow())
+        }
 
         override fun observeCacheUpdates(types: Set<FlagType>): Flow<FlagType> =
             cacheUpdates.asSharedFlow().filter { it in types }
@@ -3183,11 +3402,8 @@ class FlagsViewModelTest {
         override fun clearSessionCache() {
             clearSessionCacheCallCount += 1
             sessionGeneration++
-            // Keep seeded first-observation fixtures, but drop private replays on a later switch.
-            if (clearSessionCacheCallCount > 1) {
-                perType.values.forEach { it.resetReplayCache() }
-                cachedFlags = emptyList()
-            }
+            perType.values.forEach { it.resetReplayCache() }
+            cachedFlags = emptyList()
         }
 
         override suspend fun addFlag(context: FlagAddContext): Result<Unit> {

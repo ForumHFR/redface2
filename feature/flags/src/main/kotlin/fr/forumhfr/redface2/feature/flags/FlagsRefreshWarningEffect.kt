@@ -4,18 +4,26 @@ import android.content.res.Resources
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SnackbarVisuals
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.platform.LocalContext
 import fr.forumhfr.redface2.core.domain.flags.FlagRefreshIssue
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
-/** The pending warning is cleared on account change, cancelling its snackbar and its retry action. */
+/** Session/view changes cancel both the display and its locally retained Retry action. */
 @Composable
 internal fun FlagsRefreshWarningEffect(
     warning: FlagsRefreshWarning?,
     authSessionKey: String?,
+    selectedTab: FlagTab,
     host: SnackbarHostState,
     onConsumed: (FlagsRefreshWarning) -> Unit,
     onRetry: (FlagsRefreshWarning) -> Unit,
@@ -23,11 +31,18 @@ internal fun FlagsRefreshWarningEffect(
     val resources = LocalContext.current.resources
     val currentOnConsumed by rememberUpdatedState(onConsumed)
     val currentOnRetry by rememberUpdatedState(onRetry)
-    LaunchedEffect(warning, authSessionKey) {
-        if (warning != null && warning.pseudo == authSessionKey) {
+    LaunchedEffect(warning, authSessionKey, selectedTab) {
+        if (warning != null && warning.pseudo == authSessionKey && warning.tab == selectedTab) {
+            // A previous composition already presented this event. Its suspended display was
+            // cancelled, so finish the handoff without showing it again after recreation.
+            if (warning.wasPresented) {
+                currentOnConsumed(warning)
+                return@LaunchedEffect
+            }
             val result = host.showRefreshWarning(
                 message = refreshWarningMessage(resources, warning.issue),
                 retryLabel = resources.getString(R.string.flags_retry),
+                onPresented = { warning.wasPresented = true },
             )
             currentOnConsumed(warning)
             if (result == SnackbarResult.ActionPerformed) currentOnRetry(warning)
@@ -35,8 +50,40 @@ internal fun FlagsRefreshWarningEffect(
     }
 }
 
-internal suspend fun SnackbarHostState.showRefreshWarning(message: String, retryLabel: String): SnackbarResult =
-    showSnackbar(message = message, actionLabel = retryLabel, withDismissAction = true, duration = SnackbarDuration.Long)
+internal suspend fun SnackbarHostState.showRefreshWarning(
+    message: String,
+    retryLabel: String,
+    onPresented: () -> Unit = {},
+): SnackbarResult = coroutineScope {
+    val visuals = RefreshWarningVisuals(message, retryLabel)
+    val result = async(start = CoroutineStart.UNDISPATCHED) { showSnackbar(visuals) }
+    // showSnackbar queues behind the host mutex. Only claim presentation once THIS warning is
+    // visible: a queued event must remain withdrawable by a complete snapshot, and retryable after
+    // recreation if it never got its turn. Identity avoids matching an identical older message.
+    var presented = false
+    val presentation = launch(start = CoroutineStart.UNDISPATCHED) {
+        snapshotFlow { currentSnackbarData?.visuals }.first { it === visuals }
+        presented = true
+        onPresented()
+    }
+    try {
+        val outcome = result.await()
+        // A quick action/dismissal can finish before snapshotFlow observes the queued snackbar.
+        // Completion proves presentation too; the observer must never hold the action suspended.
+        if (!presented) onPresented()
+        outcome
+    } finally {
+        presentation.cancel()
+    }
+}
+
+private class RefreshWarningVisuals(
+    override val message: String,
+    override val actionLabel: String,
+) : SnackbarVisuals {
+    override val withDismissAction = true
+    override val duration = SnackbarDuration.Long
+}
 
 internal fun FlagRefreshIssue.stickyCategoryLabels(fallback: (Int) -> String): String {
     val labels = stickyCategories.take(MAX_CATEGORY_NAMES).joinToString(", ") { category ->

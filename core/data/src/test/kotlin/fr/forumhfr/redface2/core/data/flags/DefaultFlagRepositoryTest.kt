@@ -201,7 +201,10 @@ class DefaultFlagRepositoryTest {
         assertEquals(setOf(100_217, 35395), complete.flags.map { it.topicId }.toSet())
         coEvery { api.getTopicList(13, null, 1, any(), true) } throws IOException("sticky unavailable")
         coEvery {
-            api.getCategoryFlagTopics(23, HfrRestFlagBucket.FAVORITES, any(), any(), true)
+            api.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.FAVORITES,
+                page = any(), resultsPerPage = any(), useAuth = true,
+            )
         } returns capturedParticipatedFixture.replace("35395", "35396")
 
         val partial = repo.refresh(FlagType.FAVORITE) as FlagsResult.Success
@@ -253,7 +256,10 @@ class DefaultFlagRepositoryTest {
         val api = diagnosticApi()
         val page = capturedParticipatedFixture.replace("\"results_count\": 1", "\"results_count\": 101")
         coEvery {
-            api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED, any(), any(), true)
+            api.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true,
+            )
         } returns page
         val diagnostics = DiagnosticsLog()
         val dao = stubFlagDao()
@@ -265,10 +271,16 @@ class DefaultFlagRepositoryTest {
         assertEquals(emptyList<FlagRefreshCategory>(), result.issue?.stickyCategories)
         assertTrue(diagnostics.entries.value.last().message.contains("reasons=page_cap"))
         coVerify(exactly = 100) {
-            api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED, any(), any(), true)
+            api.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true,
+            )
         }
         coVerify(exactly = 0) {
-            api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED, 101, any(), true)
+            api.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = 101, resultsPerPage = any(), useAuth = true,
+            )
         }
         coVerify(exactly = 1) { dao.replaceForType("xat", FlagType.CYAN, any()) }
     }
@@ -277,7 +289,10 @@ class DefaultFlagRepositoryTest {
     fun `an early empty page only diagnoses a divergent count without a UI warning - 984`() = runTest {
         val api = diagnosticApi()
         coEvery {
-            api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED, any(), any(), true)
+            api.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true,
+            )
         } returns EMPTY_PAGE.replace("\"results_count\": 0", "\"results_count\": 2")
         val diagnostics = DiagnosticsLog()
         val repo = buildRepository(api, stubForumRepository(sampleCategories), diagnostics = diagnostics)
@@ -286,7 +301,10 @@ class DefaultFlagRepositoryTest {
         assertNull(result.issue)
         assertTrue(diagnostics.entries.value.last().message.contains("reasons=empty_bucket_page"))
         coVerify(exactly = 1) {
-            api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED, 1, any(), true)
+            api.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = 1, resultsPerPage = any(), useAuth = true,
+            )
         }
     }
 

@@ -262,6 +262,7 @@ fun FlagsRoute(
     FlagsRefreshWarningEffect(
         warning = refreshWarning,
         authSessionKey = authSessionKey,
+        selectedTab = flagsTabState.tab,
         host = snackbarHostState,
         onConsumed = viewModel::consumeRefreshWarning,
         onRetry = viewModel::retryRefreshWarning,

@@ -18,13 +18,36 @@ class FlagsRefreshWarningTest {
     @Test
     fun `warning offers retry and reports the action once`() = runTest {
         val host = SnackbarHostState()
-        val shown = async { host.showRefreshWarning("Liste incomplète", "Réessayer") }
+        var presented = 0
+        val shown = async { host.showRefreshWarning("Liste incomplète", "Réessayer") { presented++ } }
         runCurrent()
+        assertEquals("presentation is claimed before the action completes", 1, presented)
         assertEquals("Liste incomplète", host.currentSnackbarData?.visuals?.message)
         assertEquals("Réessayer", host.currentSnackbarData?.visuals?.actionLabel)
         assertEquals(SnackbarDuration.Long, host.currentSnackbarData?.visuals?.duration)
         host.currentSnackbarData?.performAction()
         assertEquals(SnackbarResult.ActionPerformed, shown.await())
+        assertEquals(1, presented)
+        assertNull(host.currentSnackbarData)
+    }
+
+    @Test
+    fun `a queued warning action completes even before the presentation observer runs`() = runTest {
+        val host = SnackbarHostState()
+        val other = async { host.showSnackbar("Other message") }
+        runCurrent()
+        var presented = 0
+        val shown = async { host.showRefreshWarning("Liste incomplète", "Réessayer") { presented++ } }
+        runCurrent()
+        assertEquals(0, presented)
+        host.currentSnackbarData?.dismiss()
+        other.await()
+        runCurrent()
+        assertEquals("Liste incomplète", host.currentSnackbarData?.visuals?.message)
+        // Do not send snapshot apply notifications: completion must not depend on their delivery.
+        host.currentSnackbarData?.performAction()
+        assertEquals(SnackbarResult.ActionPerformed, shown.await())
+        assertEquals(1, presented)
         assertNull(host.currentSnackbarData)
     }
 
