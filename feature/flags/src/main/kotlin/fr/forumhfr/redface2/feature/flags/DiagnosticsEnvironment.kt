@@ -15,6 +15,9 @@ internal data class DiagnosticsEnvironment(
     val model: String,
 )
 
+// Closed export boundary: legacy producers remain visible only in the local viewer.
+private val networkExportTags = setOf("FlagsRefresh", "HfrCall", "AppForeground")
+
 internal fun formatDiagnosticsExport(
     entries: List<DiagnosticsLog.Entry>,
     timeFormat: SimpleDateFormat,
@@ -24,7 +27,8 @@ internal fun formatDiagnosticsExport(
         "channel=${environment.channel.singleLine()}")
     appendLine("Android API=${environment.apiLevel} manufacturer=${environment.manufacturer.singleLine()} " +
         "model=${environment.model.singleLine()}")
-    entries.forEach { entry ->
+    val exported = entries.filter { it.tag in networkExportTags }
+    exported.forEach { entry ->
         val level = when (entry.level) {
             DiagnosticsLog.Level.INFO -> "I"
             DiagnosticsLog.Level.DEBUG -> "D"
@@ -33,6 +37,7 @@ internal fun formatDiagnosticsExport(
         }
         appendLine("${timeFormat.format(Date(entry.timestampMillis))}  $level  ${entry.tag}  ${entry.message}")
     }
+    appendLine("${entries.size - exported.size} entrées locales non exportées")
 }.trimEnd()
 
 private fun String.singleLine(): String = replace('\n', ' ').replace('\r', ' ')

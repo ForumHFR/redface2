@@ -4,11 +4,17 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagFetchTrace
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallOutcome
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrClientRole
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshDiagnostics
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrigger
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshPhase
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrCatalogueTrace
 import fr.forumhfr.redface2.core.model.FlagType
 import java.io.IOException
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.Socket
+import java.util.concurrent.Executors
+import okhttp3.Address
 import okhttp3.Call
 import okhttp3.Connection
 import okhttp3.EventListener
@@ -80,7 +86,7 @@ class HfrEventListenerFactoryTest {
         slowListener.callStart(slow)
         at(1_000) { slowListener.responseHeadersEnd(slow, response(slow, 200)); slowListener.callEnd(slow) }
         slowListener.callEnd(slow)
-        assertEquals(1, log.entries.value.size)
+        assertTrue(log.entries.value.isEmpty())
 
         val (failed, failedListener) = newCall()
         failedListener.callStart(failed)
@@ -94,7 +100,8 @@ class HfrEventListenerFactoryTest {
         httpListener.responseHeadersEnd(httpFailure, response(httpFailure, 503))
         httpListener.callEnd(httpFailure)
 
-        assertEquals(4, log.entries.value.size)
+        flushRefresh()
+        assertEquals(4, log.entries.value.count { it.tag == "HfrCall" })
         assertEquals(
             listOf(HfrCallOutcome.OK, HfrCallOutcome.FAILURE, HfrCallOutcome.CANCELLED, HfrCallOutcome.FAILURE),
             fetch.callSnapshot().map { it.outcome },
@@ -115,7 +122,8 @@ class HfrEventListenerFactoryTest {
         val summary = fetch.callSnapshot().single()
         assertEquals(1_500L, summary.waitMs)
         assertEquals(1_501L, summary.totalMs)
-        assertEquals(1, log.entries.value.size)
+        flushRefresh()
+        assertEquals(1, log.entries.value.count { it.tag == "HfrCall" })
     }
 
     @Test
@@ -131,8 +139,234 @@ class HfrEventListenerFactoryTest {
         assertSame(EventListener.NONE, factory.create(image))
     }
 
-    private fun newCall(): Pair<Call, EventListener> {
-        val tag = HfrCallTag(now, fetch)
+    @Test
+    fun `overlapping connections retain B timings when A fails during B TLS`() {
+        overlappingConnections(winnerIsA = false)
+    }
+
+    @Test
+    fun `overlapping connections retain A timings when B fails during A TLS`() {
+        overlappingConnections(winnerIsA = true)
+    }
+
+    private fun overlappingConnections(winnerIsA: Boolean) {
+        val (call, listener) = newCall()
+        val secondAddress = InetSocketAddress.createUnresolved("second-unused", 443)
+        val workerA = Executors.newSingleThreadExecutor()
+        val workerB = Executors.newSingleThreadExecutor()
+        try {
+            listener.callStart(call)
+            at(10) { workerA.submit { listener.connectStart(call, address, Proxy.NO_PROXY) }.get() }
+            at(20) { workerA.submit { listener.secureConnectStart(call) }.get() }
+            at(30) { workerB.submit { listener.connectStart(call, secondAddress, Proxy.NO_PROXY) }.get() }
+            at(40) { workerB.submit { listener.secureConnectStart(call) }.get() }
+            val winner = if (winnerIsA) workerA else workerB
+            val loser = if (winnerIsA) workerB else workerA
+            val winningAddress = if (winnerIsA) address else secondAddress
+            val losingAddress = if (winnerIsA) secondAddress else address
+            at(50) {
+                loser.submit {
+                    listener.connectFailed(call, losingAddress, Proxy.NO_PROXY, null, IOException("Secret"))
+                }.get()
+            }
+            at(70) { winner.submit { listener.secureConnectEnd(call, null) }.get() }
+            at(90) {
+                winner.submit { listener.connectEnd(call, winningAddress, Proxy.NO_PROXY, Protocol.HTTP_2) }.get()
+            }
+            listener.connectionAcquired(call, connection(winningAddress))
+            at(100) { listener.responseHeadersEnd(call, response(call, 200)); listener.callEnd(call) }
+
+            val summary = fetch.callSnapshot().single()
+            assertEquals(if (winnerIsA) 80L else 60L, summary.connectMs)
+            assertEquals(if (winnerIsA) 50L else 30L, summary.tlsMs)
+            assertEquals(2, summary.connectAttempts)
+            assertEquals(1, summary.connectFailures)
+            assertFalse(summary.reusedConnection)
+            assertEquals(HfrCallOutcome.OK, summary.outcome)
+        } finally {
+            workerA.shutdownNow()
+            workerB.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `responseFailed followed by callFailed accounts for the body and call only once`() {
+        val (call, listener) = newCall()
+        listener.callStart(call)
+        at(10) { listener.requestHeadersEnd(call, call.request()) }
+        at(20) { listener.responseHeadersEnd(call, response(call, 200)) }
+        at(30) { listener.responseBodyStart(call) }
+        at(80) { listener.responseFailed(call, IOException("SecretBody")) }
+        at(100) { listener.callFailed(call, IOException("SecretMessage")) }
+        listener.callFailed(call, IOException("SecretDuplicate"))
+
+        val summary = fetch.callSnapshot().single()
+        assertEquals(50L, summary.bodyMs)
+        assertEquals(10L, summary.headersSentToReceivedMs)
+        assertEquals(100L, summary.totalMs)
+        assertEquals(HfrCallOutcome.FAILURE, summary.outcome)
+        assertEquals("IOException", summary.exceptionClass)
+        val (next, nextListener) = newCall()
+        nextListener.callStart(next)
+        nextListener.callEnd(next)
+        assertEquals(1, fetch.callSnapshot().last().inFlightAtStart)
+        flushRefresh()
+        assertEquals(1, log.entries.value.count { it.tag == "HfrCall" })
+        assertFalse(log.entries.value.any { it.message.contains("Secret") })
+    }
+
+    @Test
+    fun `redirect with two successive connections to the same address preserves both successful timings`() {
+        val (call, listener) = newCall()
+        listener.callStart(call)
+        at(10) { listener.connectStart(call, address, Proxy.NO_PROXY) }
+        at(20) { listener.secureConnectStart(call) }
+        at(40) { listener.secureConnectEnd(call, null) }
+        at(50) { listener.connectEnd(call, address, Proxy.NO_PROXY, Protocol.HTTP_2) }
+        listener.connectionAcquired(call, connection())
+        at(60) { listener.requestHeadersEnd(call, call.request()) }
+        at(70) { listener.responseHeadersEnd(call, response(call, 302)) }
+        at(100) { listener.connectStart(call, address, Proxy.NO_PROXY) }
+        at(110) { listener.secureConnectStart(call) }
+        at(130) { listener.secureConnectEnd(call, null) }
+        at(150) { listener.connectEnd(call, address, Proxy.NO_PROXY, Protocol.HTTP_2) }
+        listener.connectionAcquired(call, connection())
+        at(160) { listener.requestHeadersEnd(call, call.request()) }
+        at(180) { listener.responseHeadersEnd(call, response(call, 200)) }
+        at(200) { listener.callEnd(call) }
+
+        val summary = fetch.callSnapshot().single()
+        assertEquals(90L, summary.connectMs)
+        assertEquals(40L, summary.tlsMs)
+        assertEquals(30L, summary.headersSentToReceivedMs)
+        assertEquals(2, summary.connectAttempts)
+        assertEquals(0, summary.connectFailures)
+        assertEquals(200, summary.status)
+        assertEquals(HfrCallOutcome.OK, summary.outcome)
+        assertFalse(summary.reusedConnection)
+    }
+
+    @Test
+    fun `retry to the same address excludes the failed attempt from winning connection timings`() {
+        val (call, listener) = newCall()
+        listener.callStart(call)
+        at(10) { listener.connectStart(call, address, Proxy.NO_PROXY) }
+        at(20) { listener.secureConnectStart(call) }
+        at(40) { listener.connectFailed(call, address, Proxy.NO_PROXY, null, IOException("SecretTLS")) }
+        at(50) { listener.connectStart(call, address, Proxy.NO_PROXY) }
+        at(60) { listener.secureConnectStart(call) }
+        at(80) { listener.secureConnectEnd(call, null) }
+        at(100) { listener.connectEnd(call, address, Proxy.NO_PROXY, Protocol.HTTP_2) }
+        listener.connectionAcquired(call, connection())
+        at(120) { listener.responseHeadersEnd(call, response(call, 200)); listener.callEnd(call) }
+
+        val summary = fetch.callSnapshot().single()
+        assertEquals(50L, summary.connectMs)
+        assertEquals(20L, summary.tlsMs)
+        assertEquals(2, summary.connectAttempts)
+        assertEquals(1, summary.connectFailures)
+        assertEquals(HfrCallOutcome.OK, summary.outcome)
+    }
+
+    @Test
+    fun `two successful connection attempts contribute only the acquired route timings`() {
+        val (call, listener) = newCall()
+        val secondAddress = InetSocketAddress.createUnresolved("second-unused", 443)
+        listener.callStart(call)
+        at(10) { listener.connectStart(call, address, Proxy.NO_PROXY) }
+        at(20) { listener.secureConnectStart(call) }
+        at(30) { listener.secureConnectEnd(call, null) }
+        at(40) { listener.connectStart(call, secondAddress, Proxy.NO_PROXY) }
+        at(50) { listener.secureConnectStart(call) }
+        at(60) { listener.secureConnectEnd(call, null) }
+        at(70) { listener.connectEnd(call, address, Proxy.NO_PROXY, Protocol.HTTP_2) }
+        at(90) { listener.connectEnd(call, secondAddress, Proxy.NO_PROXY, Protocol.HTTP_2) }
+        listener.connectionAcquired(call, connection(secondAddress))
+        at(100) { listener.callEnd(call) }
+
+        val summary = fetch.callSnapshot().single()
+        assertEquals(50L, summary.connectMs)
+        assertEquals(10L, summary.tlsMs)
+        assertEquals(2, summary.connectAttempts)
+        assertEquals(0, summary.connectFailures)
+    }
+
+    @Test
+    fun `114 slow correlated calls defer details until the twelve line refresh quota is applied`() {
+        val trace = FlagRefreshDiagnostics(log).begin(FlagRefreshTrigger.PULL, listOf(FlagType.CYAN))
+        trace.attach(fetch, false)
+        repeat(114) {
+            val (call, listener) = newCall()
+            listener.callStart(call)
+            at(now / 1_000_000 + 1_500) {
+                listener.responseHeadersEnd(call, response(call, 200))
+                listener.callEnd(call)
+            }
+        }
+        assertEquals(1, log.entries.value.size)
+        fetch.markFinished()
+        trace.result(FlagType.CYAN, fetch)
+        trace.published()
+        trace.finish()
+
+        assertEquals(14, log.entries.value.size)
+        assertEquals(12, log.entries.value.count { it.tag == "HfrCall" })
+        assertTrue(log.entries.value.first().message.contains("trigger=pull"))
+        assertTrue(log.entries.value.last().message.contains("calls=114 "))
+        assertTrue(log.entries.value.last().message.contains("details-omitted=102 "))
+    }
+
+    @Test
+    fun `uncorrelated slow calls share a bounded global detail window`() {
+        repeat(114) {
+            val (call, listener) = newCall(correlated = false)
+            listener.callStart(call)
+            at(now / 1_000_000 + 1_500) { listener.callEnd(call) }
+        }
+        assertEquals(HfrNetworkDiagnostics.MAX_WINDOW_DETAILS, log.entries.value.size)
+        assertTrue(log.entries.value.all { it.tag == "HfrCall" })
+        assertTrue(fetch.callSnapshot().isEmpty())
+    }
+
+    @Test
+    fun `catalogue started without a refresh retains transport timings for a later joiner`() {
+        val catalogue = HfrCatalogueTrace()
+        val request = Request.Builder()
+            .url("https://forum.hardware.fr/webservices/rest_api.php?uri=forums/hardwarefr/categories/")
+            .tag(HfrCallTag::class.java, HfrCallTag(now, null, catalogue))
+            .build()
+        val call = OkHttpClient().newCall(request)
+        val listener = factory.create(call)
+        listener.callStart(call)
+        val trace = FlagRefreshDiagnostics(log).begin(FlagRefreshTrigger.PULL, listOf(FlagType.CYAN))
+        fetch.catalogue(catalogue, wasJoined = true)
+        trace.attach(fetch, false)
+        at(100) { listener.dnsStart(call, "unused") }
+        at(200) { listener.dnsEnd(call, "unused", emptyList()) }
+        at(300) { listener.requestHeadersEnd(call, request) }
+        at(2_000) { listener.responseHeadersEnd(call, response(call, 200)); listener.callEnd(call) }
+        assertEquals(1, log.entries.value.size)
+        val summary = fetch.callSnapshot().single()
+        assertEquals(FlagRefreshPhase.CATALOGUE, summary.phase)
+        assertEquals(100L, summary.dnsMs)
+        assertEquals(1_700L, summary.headersSentToReceivedMs)
+        assertEquals(2_000L, summary.totalMs)
+        assertEquals(fetch.refreshId, summary.refreshId)
+        trace.result(fetch.type, fetch)
+        trace.finish()
+        assertTrue(log.entries.value.last().message.contains("catalogue=joined"))
+        assertTrue(log.entries.value.last().message.contains("catalogueCallMs=2000"))
+    }
+
+    private fun flushRefresh() {
+        val trace = FlagRefreshDiagnostics(log).begin(FlagRefreshTrigger.PULL, listOf(FlagType.CYAN))
+        trace.attach(fetch, false)
+        trace.result(FlagType.CYAN, fetch)
+        trace.finish()
+    }
+
+    private fun newCall(correlated: Boolean = true): Pair<Call, EventListener> {
+        val tag = HfrCallTag(now, if (correlated) fetch else null)
         val request = Request.Builder()
             .url("https://forum.hardware.fr/webservices/rest_api.php?" +
                 "uri=forums/hardwarefr/categories/23/topics/participated/&post=35395&hash_check=SecretHash")
@@ -147,8 +381,18 @@ class HfrEventListenerFactoryTest {
         .request(call.request()).protocol(Protocol.HTTP_2).code(code).message("SecretResponse")
         .header("Set-Cookie", "SecretResponseCookie").body("SecretBody".toResponseBody()).build()
 
-    private fun connection(): Connection = object : Connection {
-        override fun route(): Route = error("Not used by diagnostics")
+    private fun connection(socketAddress: InetSocketAddress = address): Connection = object : Connection {
+        override fun route(): Route {
+            val client = OkHttpClient()
+            val address = Address(
+                uriHost = "unused", uriPort = 443, dns = client.dns, socketFactory = client.socketFactory,
+                sslSocketFactory = client.sslSocketFactory, hostnameVerifier = client.hostnameVerifier,
+                certificatePinner = client.certificatePinner, proxyAuthenticator = client.proxyAuthenticator,
+                proxy = null, protocols = client.protocols, connectionSpecs = client.connectionSpecs,
+                proxySelector = client.proxySelector,
+            )
+            return Route(address, Proxy.NO_PROXY, socketAddress)
+        }
         override fun socket(): Socket = error("Not used by diagnostics")
         override fun handshake(): Handshake? = null
         override fun protocol(): Protocol = Protocol.HTTP_2

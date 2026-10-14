@@ -31,6 +31,7 @@ import android.widget.Toast
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -115,6 +116,12 @@ fun DiagnosticsScreen(
                 TextButton(onClick = { viewModel.clear() }) { Text("Vider") }
                 TextButton(onClick = onClose) { Text("Fermer") }
             }
+            Text(
+                text = stringResource(R.string.diagnostics_copy_scope),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp),
+            )
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
             if (entries.isEmpty()) {
@@ -142,7 +149,7 @@ fun DiagnosticsScreen(
 }
 
 /**
- * Copy the full diagnostic trail to the system clipboard as plain text. Format:
+ * Copy only the allowed network measurements to the clipboard as plain text. Format:
  * `HH:mm:ss.SSS  L  TAG  message` per line — same shape rendered by [DiagnosticsRow]
  * but flat, so the alpha tester can paste it into a bug report or a HFR post without
  * losing context.
@@ -160,7 +167,7 @@ private fun copyDiagnosticsToClipboard(
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     clipboard.setPrimaryClip(ClipData.newPlainText("redface2 diagnostics", payload))
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-        Toast.makeText(context, "Diagnostics copiés (${entries.size} lignes)", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, context.getString(R.string.diagnostics_network_copied), Toast.LENGTH_SHORT).show()
     }
 }
 

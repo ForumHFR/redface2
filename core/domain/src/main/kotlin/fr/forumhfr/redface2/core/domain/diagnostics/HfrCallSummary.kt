@@ -50,15 +50,27 @@ data class HfrCallSummary(
     val outcome: HfrCallOutcome,
     val exceptionClass: String? = null,
     val flagType: FlagType? = null,
+    val connectAttempts: Int = 0,
+    val connectFailures: Int = 0,
 ) {
     fun line(): String =
         "refresh=${refreshId ?: "-"} ${endpoint.label()} role=${role.name.lowercase()} " +
             "type=${flagType?.name ?: "-"} phase=${phase?.name?.lowercase() ?: "-"} " +
             "waitMs=${waitMs ?: "-"} dnsMs=$dnsMs " +
-            "connectMs=$connectMs tlsMs=$tlsMs headersSentToReceivedMs=${headersSentToReceivedMs ?: "-"} " +
+            "connectMs=$connectMs tlsMs=$tlsMs connectAttempts=$connectAttempts connectFailures=$connectFailures " +
+            "headersSentToReceivedMs=${headersSentToReceivedMs ?: "-"} " +
             "bodyMs=$bodyMs totalMs=$totalMs status=${status ?: "-"} protocol=${protocol ?: "-"} " +
             "reused=$reusedConnection inFlight=$inFlightAtStart outcome=${outcome.name.lowercase()} " +
             "exception=${exceptionClass ?: "-"}"
+}
+
+/** One quota across all types, attempts and joined fetches of a refresh. */
+object HfrCallDetailPolicy {
+    const val SLOW_CALL_MS = 1_000L
+    const val MAX_REFRESH_DETAILS = 12
+
+    fun includes(summary: HfrCallSummary): Boolean =
+        summary.totalMs >= SLOW_CALL_MS || summary.outcome != HfrCallOutcome.OK
 }
 
 /** Never use Throwable.message, toString, stack traces or request data at this boundary. */

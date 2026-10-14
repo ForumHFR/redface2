@@ -1515,6 +1515,7 @@ class DefaultFlagRepositoryTest {
 
     @Test
     fun `addFlag prevents an older favorite fetch from restoring or exposing stale data - 986`() = runTest {
+        val diagnostics = DiagnosticsLog()
         val gate = CompletableDeferred<Unit>()
         var favoriteCalls = 0
         val apiClient = mockk<HfrApiClient>()
@@ -1547,6 +1548,7 @@ class DefaultFlagRepositoryTest {
             ),
             flagDao = flagDao,
             hfrClient = hfrClient,
+            diagnostics = diagnostics,
         )
 
         var observed: FlagsResult.Success? = null
@@ -1560,6 +1562,12 @@ class DefaultFlagRepositoryTest {
 
         assertEquals(listOf(35395), observed?.flags?.map { it.topicId })
         assertEquals("the invalidated generation must run a second REST fetch", 2, favoriteCalls)
+        val summary = diagnostics.entries.value.single {
+            it.tag == FlagRefreshDiagnostics.TAG && it.message.contains("outcome=")
+        }.message
+        assertTrue(summary, summary.contains("outcome=success "))
+        assertTrue(summary, summary.contains("fetches=2 newFetches=2"))
+        assertTrue(summary, !summary.contains("cache_generation"))
         coVerify(exactly = 1) {
             flagDao.replaceForType(
                 userId = "xat",

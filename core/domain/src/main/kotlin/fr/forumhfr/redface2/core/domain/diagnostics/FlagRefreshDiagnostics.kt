@@ -61,6 +61,7 @@ class FlagRefreshTrace internal constructor(
 ) : AbstractCoroutineContextElement(Key) {
     private val triggerToBeginMs = elapsedDiagnosticMs(started)
     private val fetches = linkedSetOf<FlagFetchTrace>()
+    private val resultFetches = mutableMapOf<FlagType, FlagFetchTrace?>()
     private var joined = 0
     private var publicationMs: Long? = null
     private var failureClass: String? = null
@@ -68,6 +69,13 @@ class FlagRefreshTrace internal constructor(
     @Synchronized
     fun attach(fetch: FlagFetchTrace, wasJoined: Boolean) {
         if (fetches.add(fetch) && wasJoined) joined++
+    }
+
+    /** Select the source of the returned result; abandoned attempts remain in the transport totals. */
+    @Synchronized
+    fun result(type: FlagType, fetch: FlagFetchTrace?) {
+        if (fetch != null && fetch !in fetches) attach(fetch, wasJoined = true)
+        resultFetches[type] = fetch
     }
 
     @Synchronized
@@ -81,7 +89,7 @@ class FlagRefreshTrace internal constructor(
     @Synchronized
     fun finish() {
         val calls = fetches.flatMap { it.callSnapshot() }.distinctBy { it.id }
-        val gaps = fetches.flatMap { it.gapSnapshot() }.distinct()
+        val gaps = resultFetches.values.filterNotNull().flatMap { it.gapSnapshot() }.distinct()
         // Outcome follows the result actually published, even if a superseded attempt failed.
         val failed = failureClass
         val outcome = when {
@@ -106,6 +114,11 @@ class FlagRefreshTrace internal constructor(
             "headersSentToReceivedMs=${calls.sumOf { it.headersSentToReceivedMs ?: 0L }} " +
             "bodyMs=${calls.sumOf { it.bodyMs }} totalCallMs=${calls.sumOf { it.totalMs }} " +
             "peakInFlight=${calls.maxOfOrNull { it.inFlightAtStart } ?: 0}"
+        val details = calls.filter(HfrCallDetailPolicy::includes)
+        details.take(HfrCallDetailPolicy.MAX_REFRESH_DETAILS).forEach {
+            log.record(DiagnosticsLog.Level.INFO, "HfrCall", it.line())
+        }
+        // Write the summary last; details of this refresh cannot evict its trigger or summary.
         log.record(DiagnosticsLog.Level.INFO, FlagRefreshDiagnostics.TAG,
             "refresh=$id types=${types.joinToString { it.name }} outcome=$outcome " +
                 "exception=${failed ?: "-"} reasons=${gaps.joinToString { it.name.lowercase() }} " +
@@ -116,6 +129,10 @@ class FlagRefreshTrace internal constructor(
                 "fetchFailureClasses=${fetches.mapNotNull { it.failureClass }.distinct()} " +
                 "categories=${fetches.sumOf { it.categoryCount }} bucketPages=${fetches.sumOf { it.bucketPages }} " +
                 "stickyPages=${fetches.sumOf { it.stickyPages }} calls=${calls.size} " +
+                "catalogue=${if (fetches.any { it.joinedCatalogue() }) "joined" else "local"} " +
+                "details-omitted=${(details.size - HfrCallDetailPolicy.MAX_REFRESH_DETAILS).coerceAtLeast(0)} " +
+                "connectAttempts=${calls.sumOf { it.connectAttempts }} " +
+                "connectFailures=${calls.sumOf { it.connectFailures }} " +
                 "callFailures=${calls.count { it.outcome != HfrCallOutcome.OK }} " +
                 "reused=${calls.count { it.reusedConnection }} maxMs=${durations.lastOrNull() ?: 0} " +
                 "medianMs=${durations.getOrNull(durations.size / 2) ?: 0} $transport $phases " +
@@ -132,6 +149,8 @@ class FlagRefreshTrace internal constructor(
 /** Only safe transport summaries and numeric counters are retained, for the fetch's lifetime. */
 class FlagFetchTrace(val refreshId: Long, val type: FlagType) : AbstractCoroutineContextElement(Key) {
     private val calls = mutableListOf<HfrCallSummary>()
+    private val catalogues = linkedSetOf<HfrCatalogueTrace>()
+    private var catalogueJoined = false
     private val gaps = mutableSetOf<FlagRefreshGap>()
     private val phases = mutableMapOf<FlagRefreshPhase, Long>()
     private val phaseFailures = mutableMapOf<FlagRefreshPhase, Int>()
@@ -159,7 +178,16 @@ class FlagFetchTrace(val refreshId: Long, val type: FlagType) : AbstractCoroutin
         phaseFailures[FlagRefreshPhase.STICKIES] = failures(FlagRefreshPhase.STICKIES) +
             sweep.failures(FlagRefreshPhase.STICKIES)
     }
-    @Synchronized fun callSnapshot(): List<HfrCallSummary> = calls.toList()
+    @Synchronized fun catalogue(trace: HfrCatalogueTrace, wasJoined: Boolean) {
+        catalogues += trace
+        catalogueJoined = catalogueJoined || wasJoined
+        trace.correlate()
+    }
+    @Synchronized fun joinedCatalogue(): Boolean = catalogueJoined
+    @Synchronized fun callSnapshot(): List<HfrCallSummary> =
+        (calls + catalogues.flatMap { it.callSnapshot() }.map {
+            it.copy(refreshId = refreshId, flagType = type, phase = FlagRefreshPhase.CATALOGUE)
+        }).distinctBy { it.id }
     @Synchronized fun gapSnapshot(): Set<FlagRefreshGap> = gaps.toSet()
     @Synchronized fun gap(gap: FlagRefreshGap) {
         gaps += gap

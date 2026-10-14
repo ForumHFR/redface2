@@ -26,6 +26,8 @@ class FlagRefreshDiagnosticsTest {
         second.markFinished()
         trace.attach(first, wasJoined = false)
         trace.attach(second, wasJoined = true)
+        trace.result(FlagType.CYAN, first)
+        trace.result(FlagType.RED, second)
         trace.published()
         trace.finish()
         assertEquals(2, log.entries.value.size)
@@ -47,6 +49,7 @@ class FlagRefreshDiagnosticsTest {
         fetch.gap(FlagRefreshGap.STICKY_REQUEST)
         fetch.failed(FlagRefreshPhase.STICKIES, IOException("secret cookie"), fatal = false)
         incomplete.attach(fetch, false)
+        incomplete.result(FlagType.CYAN, fetch)
         incomplete.finish()
         assertTrue(log.entries.value.last().message.contains("outcome=success-incomplete"))
         assertTrue(log.entries.value.last().message.contains("stickiesFailures=1"))
@@ -57,6 +60,78 @@ class FlagRefreshDiagnosticsTest {
         assertFalse(log.entries.value.any {
             it.message.contains("SecretCookie") || it.message.contains("secret.proxy")
         })
+    }
+
+    @Test
+    fun `a replaced generation keeps attempt counters but only the returned result determines completeness`() {
+        val log = DiagnosticsLog()
+        val trace = FlagRefreshDiagnostics(log).begin(FlagRefreshTrigger.PULL, listOf(FlagType.CYAN))
+        val superseded = FlagFetchTrace(trace.id, FlagType.CYAN)
+        superseded.gap(FlagRefreshGap.CACHE_GENERATION)
+        superseded.gap(FlagRefreshGap.STICKY_REQUEST)
+        superseded.markFinished()
+        val replacement = FlagFetchTrace(trace.id, FlagType.CYAN)
+        replacement.markFinished()
+        trace.attach(superseded, false)
+        trace.attach(replacement, false)
+        trace.result(FlagType.CYAN, replacement)
+        trace.published()
+        trace.finish()
+
+        val line = log.entries.value.last().message
+        assertTrue(line, line.contains("outcome=success "))
+        assertTrue(line, line.contains("fetches=2 newFetches=2"))
+        assertFalse(line, line.contains("cache_generation") || line.contains("sticky_request"))
+    }
+
+    @Test
+    fun `returned cached replacement retains its own gaps instead of abandoned attempt gaps`() {
+        val log = DiagnosticsLog()
+        val trace = FlagRefreshDiagnostics(log).begin(FlagRefreshTrigger.PULL, listOf(FlagType.CYAN))
+        val abandoned = FlagFetchTrace(trace.id, FlagType.CYAN)
+        abandoned.gap(FlagRefreshGap.CACHE_GENERATION)
+        trace.attach(abandoned, false)
+        val cached = FlagFetchTrace(99, FlagType.CYAN)
+        cached.gap(FlagRefreshGap.ROOM_WRITE)
+        trace.result(FlagType.CYAN, cached)
+        trace.finish()
+
+        val line = log.entries.value.last().message
+        assertTrue(line, line.contains("outcome=success-incomplete"))
+        assertTrue(line, line.contains("reasons=room_write"))
+        assertTrue(line, line.contains("fetches=2 newFetches=1 joined=1"))
+        assertFalse(line, line.contains("cache_generation"))
+    }
+
+    @Test
+    fun `two saturated Super pulls share one twelve detail quota each and retain both triggers and summaries`() {
+        val log = DiagnosticsLog()
+        val diagnostics = FlagRefreshDiagnostics(log)
+        repeat(2) { refresh ->
+            val trace = diagnostics.begin(FlagRefreshTrigger.PULL, FlagType.entries)
+            val fetches = FlagType.entries.map { FlagFetchTrace(trace.id, it) }
+            repeat(114) { index ->
+                val fetch = fetches[index % fetches.size]
+                fetch.call(summary((refresh * 114 + index).toLong(), 1_500).copy(refreshId = trace.id))
+            }
+            // A shared call does not consume quota twice, even across types.
+            fetches.last().call(fetches.first().callSnapshot().first())
+            fetches.forEach { trace.attach(it, false); trace.result(it.type, it); it.markFinished() }
+            trace.published()
+            trace.finish()
+        }
+
+        val entries = log.entries.value
+        assertEquals(28, entries.size)
+        assertEquals(24, entries.count { it.tag == "HfrCall" })
+        assertEquals(2, entries.count { it.message.contains("trigger=pull") })
+        val summaries = entries.filter { it.tag == "FlagsRefresh" && it.message.contains("outcome=") }
+        assertEquals(2, summaries.size)
+        summaries.forEach {
+            assertTrue(it.message, it.message.contains("calls=114 "))
+            assertTrue(it.message, it.message.contains("details-omitted=102 "))
+        }
+        assertEquals(summaries.last(), entries.last())
     }
 
     private fun summary(id: Long, duration: Long): HfrCallSummary = HfrCallSummary(

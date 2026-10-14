@@ -114,6 +114,8 @@ class DefaultFlagRepository @Inject constructor(
 ) : FlagRepository {
 
     private val cachedSuccesses: MutableMap<FlagType, FlagsResult.Success> = EnumMap(FlagType::class.java)
+    // Same lifetime and lock as the cache; only the source trace of the returned result determines gaps.
+    private val cachedFetchTraces: MutableMap<FlagType, FlagFetchTrace> = EnumMap(FlagType::class.java)
 
     /**
      * Per-bucket generation + write lock. A successful mutation can invalidate one bucket while an
@@ -231,7 +233,10 @@ class DefaultFlagRepository @Inject constructor(
                     val ownsSnapshot = sameUser && synchronized(cachedSuccesses) {
                         val ownsSnapshot = sessionGeneration == diskSessionGeneration &&
                             cacheGenerations.getValue(type) == diskCacheGeneration
-                        if (ownsSnapshot && loaded != null) cachedSuccesses[type] = loaded.result
+                        if (ownsSnapshot && loaded != null) {
+                            cachedSuccesses[type] = loaded.result
+                            cachedFetchTraces.remove(type)
+                        }
                         ownsSnapshot
                     }
                     loaded to ownsSnapshot
@@ -297,6 +302,7 @@ class DefaultFlagRepository @Inject constructor(
         // point will see a changed generation and skip its cache write (#501 Codex P1).
         synchronized(cachedSuccesses) {
             cachedSuccesses.clear()
+            cachedFetchTraces.clear()
             sessionGeneration++
             FlagType.entries.forEach { type -> bumpCacheGeneration(type) }
             synchronized(favoriteResolutionMemos) { favoriteResolutionMemos.clear() }
@@ -753,6 +759,7 @@ class DefaultFlagRepository @Inject constructor(
             synchronized(cachedSuccesses) {
                 bumpCacheGeneration(FlagType.FAVORITE)
                 cachedSuccesses.remove(FlagType.FAVORITE)
+                cachedFetchTraces.remove(FlagType.FAVORITE)
                 synchronized(favoriteResolutionMemos) { favoriteResolutionMemos.clear() }
             }
             // A mutation opens a new sticky-sweep generation too: a post-mutation fetch must not
@@ -866,19 +873,28 @@ class DefaultFlagRepository @Inject constructor(
             }
             caller?.attach(observed.trace, joined)
             val result = observed.deferred.await()
+            var resultTrace: FlagFetchTrace? = observed.trace
             val ownedResult = if (currentUserId() != userId) {
                 FlagsResult.Failure(
                     IllegalStateException("HFR account changed while fetching flags"),
                 )
             } else {
                 synchronized(cachedSuccesses) {
-                    if (cacheGenerations.getValue(type) == cacheGeneration) result else cachedSuccesses[type]
+                    if (cacheGenerations.getValue(type) == cacheGeneration) {
+                        result
+                    } else {
+                        resultTrace = cachedFetchTraces[type]
+                        cachedSuccesses[type]
+                    }
                 }
             }
             // A mutation invalidated this bucket while the request was running. Do not expose its
             // pre-mutation snapshot even transiently. Reuse a replacement that a concurrent
             // post-mutation refresh already committed; otherwise retry under the new generation.
-            if (ownedResult != null) return ownedResult
+            if (ownedResult != null) {
+                caller?.result(type, resultTrace)
+                return ownedResult
+            }
         }
     }
 
@@ -997,6 +1013,7 @@ class DefaultFlagRepository @Inject constructor(
                     cacheGenerations.getValue(type) == startCacheGeneration
                 ) {
                     cachedSuccesses[type] = result
+                    if (trace != null) cachedFetchTraces[type] = trace else cachedFetchTraces.remove(type)
                     committed = true
                 }
             }
