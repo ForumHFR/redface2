@@ -1,4 +1,3 @@
-Redface 2 v0.62.0 — beta.
-- Page picker: First page / Last page shortcuts, in topics and private messages alike.
-- In a topic, going back to the previous page restores your exact reading position if you had opened it before.
-- Posting a message now confirms it: right away in the topic, and from the flags list too.
+Redface 2 v0.63.0 — dev.
+- Flags: the app now measures every refresh (each forum request, phases, failures) to find out why it is sometimes slow or stuck.
+- After a slow refresh: account menu → Diagnostics → Copy, then paste the text on the DEV topic. The copy only holds these measurements, no username or topic.

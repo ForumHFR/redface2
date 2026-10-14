@@ -16,6 +16,19 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.63.0` — `internal` (dev) — 2026-10-14
+
+Premier lot du chantier « refresh des drapeaux lent ou bloqué » ([#984](https://github.com/ForumHFR/redface2/issues/984)) : mesurer avant de corriger.
+
+### Diagnostics : mesures du refresh des drapeaux ([#984](https://github.com/ForumHFR/redface2/issues/984), [#1469](https://github.com/ForumHFR/redface2/pull/1469))
+
+- **Chaque refresh des drapeaux est chronométré** : déclencheur (lancement, retour d'un sujet, reprise, onglet, pull), refresh ignoré (délai minimal, refresh déjà en cours), durée de chaque phase (catalogue, drapeaux par catégorie, épinglés, écriture locale, affichage), compteurs et issue (complet, incomplet, échec). Retours de styx42, minux et Colonel MythO sur le fil TU.
+- **Chaque appel au forum est mesuré** : attente, DNS, connexion, TLS, connexion réutilisée, réponse, total, statut, échec ou annulation. Seuls les appels lents (≥ 1 s), en échec ou annulés sont détaillés, au plus 12 par refresh.
+- **Diagnostics → Copier n'exporte plus que ces mesures**, précédées de la version, du canal, de l'API Android et du modèle d'appareil : ni pseudo, ni sujet, ni URL, ni message d'erreur brut. Les autres entrées restent visibles à l'écran.
+- Aucun changement de comportement : mêmes requêtes, même ordre, mêmes délais.
+
+---
+
 ## `0.62.0` — `open` (bêta) — 2026-09-22
 
 Promotion bêta du lot développé en dev de `0.61.0` à `0.61.1`, depuis la précédente bêta `0.60.0`. Le détail par version dev figure dans les entrées ci-dessous. Contenu : le premier lot des retours de la bêta `0.60.0` (milestone « Vue · Topic 2 ») — raccourcis de page, position de lecture restaurée au retour de page, retour explicite après l'envoi d'un message — puis la correction des trois défauts que ce dernier point a révélés aux testeurs.
