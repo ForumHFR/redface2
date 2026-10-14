@@ -5,9 +5,12 @@ import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallOutcome
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallSummary
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrClientRole
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrEndpoint
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrIpFamily
 import fr.forumhfr.redface2.core.domain.diagnostics.diagnosticClassName
 import fr.forumhfr.redface2.core.domain.diagnostics.elapsedDiagnosticMs
 import java.io.IOException
+import java.net.Inet4Address
+import java.net.Inet6Address
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.util.concurrent.atomic.AtomicBoolean
@@ -69,6 +72,7 @@ private class HfrTimingListener(
     private var reused = false
     private var status: Int? = null
     private var protocol: String? = null
+    private var ipFamily = HfrIpFamily.UNKNOWN
 
     @Synchronized
     override fun callStart(call: Call) {
@@ -180,6 +184,13 @@ private class HfrTimingListener(
     override fun connectionAcquired(call: Call, connection: Connection) {
         if (ended.get()) return
         val route = connection.route()
+        // Attempts may race or fail. Only the acquired route describes the connection used,
+        // including a pooled connection for which this call saw no connectStart/connectEnd.
+        ipFamily = when (route.socketAddress.address) {
+            is Inet4Address -> HfrIpFamily.V4
+            is Inet6Address -> HfrIpFamily.V6
+            else -> HfrIpFamily.UNKNOWN
+        }
         val winner = successfulConnections.firstOrNull {
             it.address == route.socketAddress && it.proxy == route.proxy
         }
@@ -253,6 +264,7 @@ private class HfrTimingListener(
             connectAttempts = connectAttempts, connectFailures = connectFailures,
             connectAbandoned = connectAbandoned, failedConnectMs = failedConnectMs,
             maxFailedConnectMs = maxFailedConnectMs, failedTlsMs = failedTlsMs, maxFailedTlsMs = maxFailedTlsMs,
+            ipFamily = ipFamily,
         ), tag?.fetch, tag?.catalogue)
         connections.clear()
         successfulConnections.clear()

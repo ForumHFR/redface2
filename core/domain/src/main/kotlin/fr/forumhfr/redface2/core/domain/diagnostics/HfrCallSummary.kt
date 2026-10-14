@@ -27,6 +27,7 @@ data class HfrEndpoint(
 
 enum class HfrClientRole { AUTH, ANON, MUTATION, UPLOAD }
 enum class HfrCallOutcome { OK, FAILURE, CANCELLED }
+enum class HfrIpFamily(val label: String) { V4("v4"), V6("v6"), UNKNOWN("-") }
 enum class FlagRefreshPhase { CATALOGUE, BUCKETS, STICKIES, SORT, MUTEX, ROOM }
 
 // Each duration is a separate transport landmark, not a bag of arbitrary log fields.
@@ -59,6 +60,7 @@ data class HfrCallSummary(
     val maxFailedConnectMs: Long = 0,
     val failedTlsMs: Long = 0,
     val maxFailedTlsMs: Long = 0,
+    val ipFamily: HfrIpFamily = HfrIpFamily.UNKNOWN,
     // Copies retain this call-local claim, including catalogue ownership and late attachment.
     private val detailPublished: AtomicBoolean = AtomicBoolean(),
 ) {
@@ -76,7 +78,7 @@ data class HfrCallSummary(
             "headersSentToReceivedMs=${headersSentToReceivedMs ?: "-"} " +
             "bodyMs=$bodyMs totalMs=$totalMs status=${status ?: "-"} protocol=${protocol ?: "-"} " +
             "reused=$reusedConnection inFlight=$inFlightAtStart outcome=${outcome.name.lowercase()} " +
-            "exception=${exceptionClass ?: "-"}"
+            "exception=${exceptionClass ?: "-"} ip=${ipFamily.label}"
 }
 
 /** One quota across all types, attempts and joined fetches of a refresh. */

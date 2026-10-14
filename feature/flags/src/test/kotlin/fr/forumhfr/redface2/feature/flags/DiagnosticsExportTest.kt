@@ -1,6 +1,14 @@
 package fr.forumhfr.redface2.feature.flags
 
+import fr.forumhfr.redface2.core.domain.diagnostics.AppForegroundDiagnostics
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshDiagnostics
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrigger
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkDiagnosticsContext
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkDiagnosticsContextProvider
+import fr.forumhfr.redface2.core.domain.diagnostics.NetworkTransport
+import fr.forumhfr.redface2.core.model.FlagType
 import java.text.SimpleDateFormat
 import java.util.Locale
 import java.util.TimeZone
@@ -10,6 +18,52 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DiagnosticsExportTest {
+    @Test
+    fun `export retains closed network snapshots and capture times even when copied after resume`() {
+        val contexts = listOf(
+            NetworkDiagnosticsContext(setOf(NetworkTransport.WIFI), false, true, true) to
+                "transport=wifi metered=0 validated=1 privateDns=1",
+            NetworkDiagnosticsContext(setOf(NetworkTransport.CELLULAR), true, false, false) to
+                "transport=cellular metered=1 validated=0 privateDns=0",
+            NetworkDiagnosticsContext(setOf(NetworkTransport.VPN)) to
+                "transport=vpn metered=? validated=? privateDns=?",
+            NetworkDiagnosticsContext(setOf(NetworkTransport.WIFI, NetworkTransport.VPN), false, true) to
+                "transport=vpn+wifi metered=0 validated=1 privateDns=?",
+            NetworkDiagnosticsContext(emptySet()) to "transport=none metered=? validated=? privateDns=?",
+        )
+        contexts.forEach { (context, expected) ->
+            assertCapturedExport(NetworkDiagnosticsContextProvider { context }, expected)
+        }
+        assertCapturedExport(
+            NetworkDiagnosticsContextProvider { error("SecretSsid SecretDns SecretOperator 192.0.2.1") },
+            "transport=unknown metered=? validated=? privateDns=?",
+        )
+    }
+
+    private fun assertCapturedExport(provider: NetworkDiagnosticsContextProvider, expected: String) {
+        val log = DiagnosticsLog()
+        var now = 10_000_000_000L
+        val foreground = AppForegroundDiagnostics(log, DiagnosticsClock { now })
+        foreground.foregrounded()
+        now = 16_900_000_000L
+        val trace = FlagRefreshDiagnostics(log, provider, foreground)
+            .begin(FlagRefreshTrigger.PULL, listOf(FlagType.CYAN))
+        now = 60_000_000_000L
+        trace.finish()
+        foreground.backgrounded()
+        now = 100_000_000_000L
+        foreground.foregrounded()
+        val format = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+        val environment = DiagnosticsEnvironment("0.63.1", 72, "dev", 36, "Xiaomi", "Test")
+        val exported = formatDiagnosticsExport(log.entries.value, format, environment)
+        val refreshLines = exported.lines().filter { it.contains("  FlagsRefresh  ") }
+        assertEquals(2, refreshLines.size)
+        refreshLines.forEach { assertTrue(it, it.endsWith("$expected uptimeS=16 foregroundS=6")) }
+        listOf("Secret", "192.0.2.1").forEach { assertFalse(exported, exported.contains(it)) }
+        assertEquals("Redface 2 version=0.63.1 build=72 channel=dev", exported.lines().first())
+        assertEquals("0 entrées locales non exportées", exported.lines().last())
+    }
+
     @Test
     fun `copy export starts with app build channel and allowed device fields followed by readable entries`() {
         val entry = DiagnosticsLog.Entry(1, DiagnosticsLog.Level.INFO, "FlagsRefresh", "refresh=1 outcome=success", 0)
@@ -34,7 +88,7 @@ class DiagnosticsExportTest {
             "ReplyRepository" to "IOException: SecretMessage Cookie=SecretCookie",
             "FlagsRefreshExtra" to "SecretUnknownProducer",
             "FlagsRefresh" to "refresh=1 outcome=success",
-            "HfrCall" to "refresh=1 rest:categories totalMs=1200",
+            "HfrCall" to "refresh=1 rest:categories totalMs=1200 ip=v6",
             "AppForeground" to "backgroundMs=4000",
         )
         val entries = messages.mapIndexed { index, (tag, message) ->
