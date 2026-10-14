@@ -191,9 +191,8 @@ class AppAccountViewModelTest {
         override fun observe(type: FlagType): Flow<FlagsResult> =
             perType.getValue(type).asSharedFlow()
 
-        override suspend fun refresh(type: FlagType) {
-            // Not exercised in these tests — included to satisfy the interface.
-        }
+        override suspend fun refresh(type: FlagType): FlagsResult =
+            error("AppAccountViewModel must not refresh flags")
 
         override fun clearSessionCache() {
             clearSessionCacheCallCount += 1

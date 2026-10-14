@@ -147,6 +147,11 @@
     <string name="flags_error">Impossible de récupérer les drapeaux. Vérifie ta connexion ou réessaie.</string>
     <string name="flags_session_expired">Session HFR expirée. Reconnecte-toi pour recharger tes drapeaux.</string>
     <string name="flags_retry">Réessayer</string>
+    <!-- #984 — best-effort list warning; %1$s contains the missing parts of this refresh. -->
+    <string name="flags_incomplete">Liste incomplète : %1$s</string>
+    <!-- At most two catalogue names, then +N. -->
+    <string name="flags_incomplete_stickies">épinglés de %1$s non chargés</string>
+    <string name="flags_incomplete_pages">toutes les pages n\'ont pas été chargées</string>
 
     <!-- #662 — état vide visuel d'un onglet entièrement vide : un visuel (icône fine en défaut, ou un
          smiley perso HFR si « états vides humoristiques » est activé) + un titre + un sous-texte propres

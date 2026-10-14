@@ -258,6 +258,15 @@ fun FlagsRoute(
     )
 
     val snackbarHostState = remember { SnackbarHostState() }
+    val refreshWarning by viewModel.refreshWarning.collectAsStateWithLifecycle()
+    FlagsRefreshWarningEffect(
+        warning = refreshWarning,
+        authSessionKey = authSessionKey,
+        selectedTab = flagsTabState.tab,
+        host = snackbarHostState,
+        onConsumed = viewModel::consumeRefreshWarning,
+        onRetry = viewModel::retryRefreshWarning,
+    )
 
     // #385 — hoisted list state + scroll-to-top when the unread filter flips (cf.
     // FilterFlipScrollResetEffect).
