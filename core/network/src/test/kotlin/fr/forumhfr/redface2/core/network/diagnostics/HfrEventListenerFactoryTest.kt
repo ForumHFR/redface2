@@ -11,6 +11,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrace
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrCatalogueTrace
 import fr.forumhfr.redface2.core.model.FlagType
 import java.io.IOException
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Proxy
 import java.net.Socket
@@ -40,6 +41,86 @@ class HfrEventListenerFactoryTest {
     private val factory = HfrEventListenerFactory(collector, HfrClientRole.AUTH) { now }
     private val address = InetSocketAddress.createUnresolved("unused", 443)
     private var activeRefresh: FlagRefreshTrace? = null
+
+    @Test
+    fun `acquired IPv4 and IPv6 family is exported for both new and reused connections`() {
+        listOf(false, true).forEach { ipv6 ->
+            listOf(false, true).forEach { reused ->
+                val (call, listener) = newCall()
+                val routeAddress = ipAddress(ipv6)
+                at(0) { listener.callStart(call) }
+                if (!reused) {
+                    at(10) { listener.connectStart(call, routeAddress, Proxy.NO_PROXY) }
+                    at(20) { listener.connectEnd(call, routeAddress, Proxy.NO_PROXY, Protocol.HTTP_2) }
+                }
+                listener.connectionAcquired(call, connection(routeAddress))
+                at(1_500) { listener.callEnd(call) }
+                val summary = fetch.callSnapshot().last()
+                assertEquals(reused, summary.reusedConnection)
+                assertTrue(summary.line(), summary.line().endsWith("ip=${if (ipv6) "v6" else "v4"}"))
+                assertFalse(summary.line().contains(routeAddress.address.hostAddress.orEmpty()))
+            }
+        }
+        flushRefresh()
+        assertEquals(listOf("v4", "v4", "v6", "v6"), log.entries.value.filter { it.tag == "HfrCall" }
+            .map { it.message.substringAfterLast("ip=") })
+    }
+
+    @Test
+    fun `failed IPv6 racer and acquired IPv4 connection export only the acquired family`() {
+        val (call, listener) = newCall()
+        val v6 = ipAddress(ipv6 = true)
+        val v4 = ipAddress(ipv6 = false)
+        at(0) { listener.callStart(call) }
+        at(10) { listener.connectStart(call, v6, Proxy.NO_PROXY) }
+        at(20) { listener.connectStart(call, v4, Proxy.NO_PROXY) }
+        at(30) { listener.connectFailed(call, v6, Proxy.NO_PROXY, null, IOException("SecretIpv6")) }
+        at(40) { listener.connectEnd(call, v4, Proxy.NO_PROXY, Protocol.HTTP_2) }
+        at(50) { listener.connectionAcquired(call, connection(v4)) }
+        at(1_500) { listener.callEnd(call) }
+        flushRefresh()
+        val line = log.entries.value.single { it.tag == "HfrCall" }.message
+        assertTrue(line, line.endsWith("ip=v4"))
+        assertTrue(line, line.contains("connectAttempts=2 connectFailures=1"))
+        assertFalse(line.contains("SecretIpv6"))
+    }
+
+    @Test
+    fun `unused IPv6 racer completing after IPv4 acquisition cannot replace its family`() {
+        val (call, listener) = newCall()
+        val v6 = ipAddress(ipv6 = true)
+        val v4 = ipAddress(ipv6 = false)
+        at(0) { listener.callStart(call) }
+        at(10) { listener.connectStart(call, v6, Proxy.NO_PROXY) }
+        at(20) { listener.connectStart(call, v4, Proxy.NO_PROXY) }
+        at(30) { listener.connectEnd(call, v4, Proxy.NO_PROXY, Protocol.HTTP_2) }
+        at(40) { listener.connectionAcquired(call, connection(v4)) }
+        at(50) { listener.connectEnd(call, v6, Proxy.NO_PROXY, Protocol.HTTP_2) }
+        at(1_500) { listener.callEnd(call) }
+        flushRefresh()
+        assertTrue(log.entries.value.single { it.tag == "HfrCall" }.message.endsWith("ip=v4"))
+    }
+
+    @Test
+    fun `successful IPv6 attempt without acquisition has no acquired address family`() {
+        val (call, listener) = newCall()
+        val v6 = ipAddress(ipv6 = true)
+        listener.callStart(call)
+        listener.connectStart(call, v6, Proxy.NO_PROXY)
+        listener.connectEnd(call, v6, Proxy.NO_PROXY, Protocol.HTTP_2)
+        listener.callFailed(call, IOException("SecretBeforeAcquisition"))
+        flushRefresh()
+        assertTrue(log.entries.value.single { it.tag == "HfrCall" }.message.endsWith("ip=-"))
+    }
+
+    @Test
+    fun `failure without connection acquisition has no address family`() {
+        val (call, listener) = newCall()
+        listener.callStart(call)
+        listener.callFailed(call, IOException("SecretDns"))
+        flushRefresh()
+        assertTrue(log.entries.value.single { it.tag == "HfrCall" }.message.endsWith("ip=-"))
+    }
 
     @Test
     fun `new and reused connections retain all timings without consuming buffer entries`() {
@@ -111,9 +192,12 @@ class HfrEventListenerFactoryTest {
         )
         assertEquals("IOException", fetch.callSnapshot()[1].exceptionClass)
         log.entries.value.forEach { entry ->
-            listOf("Secret", "Cookie", "35395", "hash_check", "proxy", "https", "?").forEach {
+            listOf("Secret", "Cookie", "35395", "hash_check", "proxy", "https").forEach {
                 assertFalse(entry.message, entry.message.contains(it))
             }
+            // Unknown context bits are allowed; arbitrary query delimiters remain forbidden.
+            val unknownBits = Regex("""\b(?:metered|validated|privateDns|foregroundS)=\?(?= |$)""")
+            assertFalse(entry.message, entry.message.replace(unknownBits, "").contains("?"))
         }
     }
 
@@ -656,4 +740,13 @@ class HfrEventListenerFactoryTest {
     }
 
     private fun at(ms: Long, block: () -> Unit) { now = ms * 1_000_000; block() }
+
+    private fun ipAddress(ipv6: Boolean): InetSocketAddress {
+        val bytes = if (ipv6) {
+            ByteArray(16).apply { this[0] = 0x20; this[1] = 0x01; this[15] = 1 }
+        } else {
+            byteArrayOf(192.toByte(), 0, 2, 1)
+        }
+        return InetSocketAddress(InetAddress.getByAddress(bytes), 443)
+    }
 }

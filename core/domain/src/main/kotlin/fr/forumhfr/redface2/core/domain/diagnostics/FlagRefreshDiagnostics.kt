@@ -23,7 +23,12 @@ enum class FlagRefreshGap {
 
 /** Injected process-local identity owner; no UUID, account or global mutable singleton. */
 @Singleton
-class FlagRefreshDiagnostics @Inject constructor(private val log: DiagnosticsLog) {
+class FlagRefreshDiagnostics @Inject constructor(
+    private val log: DiagnosticsLog,
+    private val networkContext: NetworkDiagnosticsContextProvider =
+        NetworkDiagnosticsContextProvider { NetworkDiagnosticsContext() },
+    private val foreground: AppForegroundDiagnostics = AppForegroundDiagnostics(log),
+) {
     private val sequence = AtomicLong()
 
     /** An unowned fetch gets a source identity from the same sequence, without beginning a refresh. */
@@ -35,9 +40,12 @@ class FlagRefreshDiagnostics @Inject constructor(private val log: DiagnosticsLog
         types: List<FlagType>,
         startedNanos: Long = System.nanoTime(),
     ): FlagRefreshTrace {
-        val trace = FlagRefreshTrace(sequence.incrementAndGet(), types, log, startedNanos)
+        val timing = foreground.snapshot()
+        val network = runCatching { networkContext.snapshot() }.getOrElse { NetworkDiagnosticsContext() }
+        val contextLine = "${network.line()} ${timing.line()}"
+        val trace = FlagRefreshTrace(sequence.incrementAndGet(), types, log, startedNanos, contextLine)
         log.record(DiagnosticsLog.Level.INFO, TAG,
-            "refresh=${trace.id} trigger=${trigger.label} types=${types.joinToString { it.name }} begin")
+            "refresh=${trace.id} trigger=${trigger.label} types=${types.joinToString { it.name }} begin $contextLine")
         return trace
     }
 
@@ -62,6 +70,7 @@ class FlagRefreshTrace internal constructor(
     private val types: List<FlagType>,
     private val log: DiagnosticsLog,
     private val started: Long,
+    private val contextLine: String,
 ) : AbstractCoroutineContextElement(Key) {
     private val triggerToBeginMs = elapsedDiagnosticMs(started)
     private val fetches = linkedSetOf<FlagFetchTrace>()
@@ -111,7 +120,7 @@ class FlagRefreshTrace internal constructor(
             "refresh=$id types=${types.joinToString { it.name }} ${resultLine(gaps)} " +
                 "${fetchLine()} ${callLine(calls, omitted)} ${transportLine(calls)} ${phaseLine(calls)} " +
                 "triggerToBeginMs=$triggerToBeginMs firstFreshPublicationMs=${publicationMs ?: "-"} " +
-                "totalMs=${elapsedDiagnosticMs(started)} slowest=[${slowestLine(calls)}]")
+                "totalMs=${elapsedDiagnosticMs(started)} slowest=[${slowestLine(calls)}] $contextLine")
     }
 
     private fun publishDetails(calls: List<HfrCallSummary>): Int {

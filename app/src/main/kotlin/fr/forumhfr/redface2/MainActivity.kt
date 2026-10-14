@@ -52,6 +52,9 @@ class MainActivity : ComponentActivity() {
         nextIntentDeliveryId = deliveryId + 1
         latestIntentDelivery = IntentDelivery(intent, deliveryId)
 
+        // Seed the cold-start timestamp before composition can trigger the initial refresh.
+        // Recreated activities keep the existing timestamp until an actual background/resume.
+        foregroundDiagnostics.foregrounded()
         setContent {
             RedfaceApp(intentDelivery = latestIntentDelivery)
         }

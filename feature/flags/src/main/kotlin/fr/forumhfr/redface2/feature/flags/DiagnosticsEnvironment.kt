@@ -15,7 +15,9 @@ internal data class DiagnosticsEnvironment(
     val model: String,
 )
 
-// Closed export boundary: legacy producers remain visible only in the local viewer.
+// Entire messages of these tags are exported. New fields must use closed values/numbers only,
+// including refresh network context and the acquired connection's IP family (never its address).
+// Legacy producers remain visible only in the local viewer.
 private val networkExportTags = setOf("FlagsRefresh", "HfrCall", "AppForeground")
 
 internal fun formatDiagnosticsExport(

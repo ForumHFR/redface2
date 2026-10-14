@@ -12,6 +12,54 @@ import org.junit.Test
 
 class FlagRefreshDiagnosticsTest {
     @Test
+    fun `begin captures immutable network and device context once for both refresh lines`() {
+        var now = 100_900_000_000L
+        val log = DiagnosticsLog()
+        val foreground = AppForegroundDiagnostics(log, DiagnosticsClock { now })
+        foreground.foregrounded()
+        now = 106_200_000_000L
+        val transports = mutableSetOf(NetworkTransport.VPN, NetworkTransport.WIFI)
+        var context = NetworkDiagnosticsContext(transports, metered = false, validated = true, privateDns = true)
+        var captures = 0
+        val provider = NetworkDiagnosticsContextProvider { captures++; context }
+        val diagnostics = FlagRefreshDiagnostics(log, provider, foreground)
+        val trace = diagnostics.begin(FlagRefreshTrigger.PULL, listOf(FlagType.CYAN))
+        // Neither a mutable source, a network switch, nor a later resume can rewrite this refresh.
+        transports.clear()
+        context = NetworkDiagnosticsContext(emptySet())
+        now = 150_000_000_000L
+        foreground.backgrounded()
+        foreground.foregrounded()
+        trace.finish()
+        val suffix = "transport=vpn+wifi metered=0 validated=1 privateDns=1 uptimeS=106 foregroundS=5"
+        log.entries.value.filter { it.tag == "FlagsRefresh" }.forEach {
+            assertTrue(it.message, it.message.endsWith(suffix))
+        }
+        assertEquals(1, captures)
+        diagnostics.begin(FlagRefreshTrigger.RESUME, listOf(FlagType.RED))
+        assertTrue(log.entries.value.last().message.endsWith(
+            "transport=none metered=? validated=? privateDns=? uptimeS=150 foregroundS=0",
+        ))
+    }
+
+    @Test
+    fun `context provider failures are unknown and never copy exception messages`() {
+        val log = DiagnosticsLog()
+        val provider = NetworkDiagnosticsContextProvider { error("SecretSsid 192.0.2.1 SecretDns") }
+        val foreground = AppForegroundDiagnostics(log, DiagnosticsClock { 15_000_000_000L })
+        val trace = FlagRefreshDiagnostics(log, provider, foreground)
+            .begin(FlagRefreshTrigger.LAUNCH, listOf(FlagType.CYAN))
+        trace.finish()
+        log.entries.value.forEach {
+            assertTrue(it.message.endsWith(
+                "transport=unknown metered=? validated=? privateDns=? uptimeS=15 foregroundS=?",
+            ))
+            assertFalse(it.message.contains("Secret"))
+            assertFalse(it.message.contains("192.0.2.1"))
+        }
+    }
+
+    @Test
     fun `list issue uses the shared sweep gaps and excludes uncertain count or storage gaps - 984`() {
         val categories = listOf(Category(13, "Programmation", forceSubcat = false, subcategoryCount = 0))
         val fetch = FlagFetchTrace(1, FlagType.CYAN)
