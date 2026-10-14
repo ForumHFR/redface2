@@ -900,15 +900,7 @@ class DefaultFlagRepository @Inject constructor(
                 key to observed
             }
             try {
-                val result = try {
-                    observed.deferred.await()
-                } catch (superseded: SupersededFetchException) {
-                    // This repository cancelled obsolete work, not the caller's refresh. Its
-                    // transport remains cancelled, but only the replacement sets the outcome.
-                    currentCoroutineContext().ensureActive()
-                    if (currentUserId() != userId) throw superseded
-                    null
-                }
+                val result = awaitFetchResult(observed, userId)
                 val ownedResult = cacheWriteMutexes.getValue(type).withLock {
                     acceptFetchedResult(key, result, observed.trace, caller, publish)
                 }
@@ -917,6 +909,16 @@ class DefaultFlagRepository @Inject constructor(
                 releaseFetch(key, observed)
             }
         }
+    }
+
+    private suspend fun awaitFetchResult(observed: ObservedFetch, userId: String): FlagsResult? = try {
+        observed.deferred.await()
+    } catch (superseded: SupersededFetchException) {
+        // This repository cancelled obsolete work, not the caller's refresh. Its
+        // transport remains cancelled, but only the replacement sets the outcome.
+        currentCoroutineContext().ensureActive()
+        if (currentUserId() != userId) throw superseded
+        null
     }
 
     /** Called under generationMutex: a barrier cannot change between key capture and joining. */

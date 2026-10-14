@@ -312,14 +312,28 @@ class DefaultFlagRepositoryTest {
         coVerify(exactly = 1) {
             dao.replaceForType("xat", FlagType.FAVORITE, match { it.single().topicId == 100_217 })
         }
-        val pullSummary = diagnostics.entries.value.first {
-            it.message.contains("outcome=") && it.message.contains("newFetches=1 joined=0")
+        val refreshEntries = diagnostics.entries.value.filter { it.tag == FlagRefreshDiagnostics.TAG }
+        val pullRefresh = refreshEntries.single {
+            it.message.contains("trigger=pull ")
+        }.message.substringBefore(' ')
+        val pullSummary = refreshEntries.single {
+            it.message.startsWith("$pullRefresh ") && it.message.contains("outcome=")
         }.message
+        // beginRefresh cancels the old fetch before the pull joins the current generation.
+        // Either the observer's retry or the pull can create that same replacement first.
+        // Only its creator/joiner counters vary; cancellation and publication stay exact above.
+        assertTrue(pullSummary, pullSummary.contains("outcome=success exception=-"))
+        assertTrue(pullSummary, pullSummary.contains("fetches=1 "))
+        assertTrue(pullSummary, pullSummary.contains("newFetches=1 joined=0") ||
+            pullSummary.contains("newFetches=0 joined=1"))
+        assertTrue(pullSummary, pullSummary.contains("pendingFetches=0"))
         assertTrue(pullSummary, pullSummary.contains("stickyGenerationRefused=0"))
-        val initialSummary = diagnostics.entries.value.single {
+        val initialSummary = refreshEntries.single {
             it.message.startsWith("refresh=1 ") && it.message.contains("outcome=")
         }.message
         assertTrue(initialSummary, initialSummary.contains("outcome=success exception=-"))
+        assertTrue(initialSummary, initialSummary.contains("fetches=2 "))
+        assertTrue(initialSummary, initialSummary.contains("pendingFetches=0"))
         assertTrue(initialSummary, initialSummary.contains("callFailures=2"))
         assertTrue("cancelled transport must remain visible despite the successful replacement",
             diagnostics.entries.value.any { it.tag == "HfrCall" && it.message.contains("outcome=cancelled") })
