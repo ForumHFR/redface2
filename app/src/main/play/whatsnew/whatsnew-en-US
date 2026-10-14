@@ -1,4 +1,4 @@
-Redface 2 v0.63.1 — dev.
-- Flags: more reliable refresh. Leaving the screen really cancels pending requests, a removed flag no longer comes back, pinned topics no longer vanish after two quick refreshes.
-- If part of the list fails to load: a « Liste incomplète » warning with a retry action.
-- After a slow refresh: Diagnostics → Copy, then paste on the DEV topic.
+Redface 2 v0.63.2 — dev.
+- Flag diagnostics: the export now also shows the network type (wifi, mobile, VPN), private DNS, time since the phone booted and IPv4/IPv6, with no IP or network name.
+- New "view network connections" permission to read the network type.
+- Paste your exports on the DEV topic after slow refreshes, and after fast ones too.

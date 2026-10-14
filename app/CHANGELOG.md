@@ -16,6 +16,19 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.63.2` — `internal` (dev) — 2026-10-15
+
+Troisième lot du chantier « refresh des drapeaux lent ou bloqué » ([#984](https://github.com/ForumHFR/redface2/issues/984)) : donner du contexte aux mesures des testeurs.
+
+### Diagnostics : contexte réseau et appareil ([#984](https://github.com/ForumHFR/redface2/issues/984), [#1478](https://github.com/ForumHFR/redface2/pull/1478))
+
+- **Chaque refresh des drapeaux exporte le contexte réseau** pris à son début : type de réseau (wifi, mobile, ethernet, VPN distinct), réseau limité ou non, connexion validée, DNS privé actif, secondes depuis le démarrage du téléphone et depuis le retour dans l'app (démarrage froid compris).
+- **Chaque appel détaillé indique la famille de la connexion** utilisée (IPv4 ou IPv6).
+- Toujours en champs fermés : ni pseudo, ni sujet, ni URL, ni adresse IP, ni nom de réseau ou de serveur DNS, ni opérateur.
+- **Nouvelle permission** `ACCESS_NETWORK_STATE` (« voir les connexions réseau », permission normale accordée d'office) pour lire le type de réseau.
+
+---
+
 ## `0.63.1` — `internal` (dev) — 2026-10-14
 
 Deuxième lot du chantier « refresh des drapeaux lent ou bloqué » ([#984](https://github.com/ForumHFR/redface2/issues/984)) : défauts établis par lecture du code, indépendants des mesures de 0.63.0.
