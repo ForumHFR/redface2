@@ -9,6 +9,7 @@ import fr.forumhfr.redface2.core.domain.coroutines.awaitDetached
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshDiagnostics
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrigger
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
+import fr.forumhfr.redface2.core.domain.flags.FlagRefreshIssue
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
@@ -91,6 +92,12 @@ class FlagsViewModel @Inject constructor(
 ) : ViewModel() {
 
     private var observedPseudo: String? = null
+    private var flagsSessionGeneration = 0L
+    // The SAME issue object is replayed with its snapshot (including filter/mutation copies).
+    // Reference equality avoids repeating it without suppressing a later, identical failed fetch.
+    private val reportedRefreshIssues = mutableMapOf<FlagType, FlagRefreshIssue>()
+    private val _refreshWarning = MutableStateFlow<FlagsRefreshWarning?>(null)
+    val refreshWarning: StateFlow<FlagsRefreshWarning?> = _refreshWarning.asStateFlow()
 
     /**
      * #378 — instant of the last refresh triggered through [maybeAutoRefresh], PER [FlagType], for
@@ -141,6 +148,7 @@ class FlagsViewModel @Inject constructor(
     private val pendingManualDiagnosticStarts = mutableMapOf<FlagType, Long>()
     private var refreshGeneration = 0L
     private var activeRefreshGeneration: Long? = null
+    private var refreshingSessionGeneration: Long? = null
     private var deferredLandingType: FlagType? = null
     private var diagnosticLandingTab: FlagTab? = null
     private val subcategoryRefreshRequestedCats: MutableSet<Int> = mutableSetOf()
@@ -526,11 +534,23 @@ class FlagsViewModel @Inject constructor(
      * resolved view settings so an unrelated layout change doesn't re-run the topic filter.
      */
     private fun authenticatedFlagsListState(type: FlagType): Flow<FlagsListUiState?> {
+        val session = flagsSessionGeneration
+        val pseudo = observedPseudo
         val unreadOnlyFlow = userPreferencesRepository.observeFlagsViewSettings(type)
             .map { it.unreadOnly }
             .distinctUntilChanged()
         val filteredFlags = combine(
-            flagRepository.observe(type),
+            flagRepository.observe(type).onEach { result ->
+                // Explicit refreshes are reported by their returned outcome, once per serialized
+                // batch (Super included). Initial and stale-disk observations have no such owner.
+                if (isCurrentFlagsSession(session, pseudo) &&
+                    !(refreshingSessionGeneration == session && type in refreshingCoveredTypes)
+                ) {
+                    takeRefreshIssue(type, result)?.let { issue ->
+                        _refreshWarning.value = FlagsRefreshWarning(issue, listOf(type), session, requireNotNull(pseudo))
+                    }
+                }
+            },
             unreadOnlyFlow,
         ) { result, unreadOnly ->
             FilteredFlags(
@@ -897,6 +917,31 @@ class FlagsViewModel @Inject constructor(
         requestManualRefresh(listOf(type))
     }
 
+    fun consumeRefreshWarning(warning: FlagsRefreshWarning) {
+        if (_refreshWarning.value === warning) _refreshWarning.value = null
+    }
+
+    /** Retry the warned tab/batch, even if the user selected another tab while it was showing. */
+    fun retryRefreshWarning(warning: FlagsRefreshWarning) {
+        if (!isCurrentFlagsSession(warning.sessionGeneration, warning.pseudo)) return
+        consumeRefreshWarning(warning)
+        requestManualRefresh(warning.retryTypes)
+    }
+
+    private fun isCurrentFlagsSession(session: Long, pseudo: String?): Boolean =
+        pseudo != null && flagsSessionGeneration == session &&
+            (authState.value as? AuthState.Authenticated)?.pseudo == pseudo
+
+    private fun takeRefreshIssue(type: FlagType, result: FlagsResult): FlagRefreshIssue? {
+        val issue = (result as? FlagsResult.Success)?.issue ?: return null
+        // Keep the existing throttle for complete results; an incomplete automatic attempt must
+        // leave the next landing/resume free to retry, without starting a retry loop here.
+        lastAutoRefreshAt.remove(type)
+        if (reportedRefreshIssues[type] === issue) return null
+        reportedRefreshIssues[type] = issue
+        return issue
+    }
+
     private fun requestManualRefresh(types: List<FlagType>) {
         // A manual refresh captures the post-reading state too, so the generations visible at this
         // call would only duplicate the fan-out on the next landing — consume them (#378 follow-up).
@@ -1048,6 +1093,7 @@ class FlagsViewModel @Inject constructor(
     private fun beginRefresh(type: FlagType, coveredTypes: Set<FlagType> = setOf(type)): Long {
         val generation = ++refreshGeneration
         activeRefreshGeneration = generation
+        refreshingSessionGeneration = flagsSessionGeneration
         refreshingType = type
         refreshingCoveredTypes = coveredTypes
         _isRefreshing.value = true
@@ -1095,13 +1141,26 @@ class FlagsViewModel @Inject constructor(
 
     /** Fetches one serialized batch of types, keeping [refreshingType] in sync for the top bar. */
     private suspend fun fetchRefreshBatch(types: List<FlagType>, trigger: FlagRefreshTrigger, startedNanos: Long) {
+        val session = flagsSessionGeneration
+        val pseudo = (authState.value as? AuthState.Authenticated)?.pseudo
+        val issues = mutableListOf<FlagRefreshIssue>()
         val trace = refreshDiagnostics.begin(trigger, types, startedNanos)
         try {
             withContext(trace) {
                 types.forEach { type ->
                     refreshingType = type
-                    flagRepository.refresh(type)
+                    val result = flagRepository.refresh(type)
+                    if (isCurrentFlagsSession(session, pseudo)) {
+                        takeRefreshIssue(type, result)?.let(issues::add)
+                    }
                 }
+            }
+            if (issues.isNotEmpty() && isCurrentFlagsSession(session, pseudo)) {
+                val aggregate = FlagRefreshIssue(
+                    stickyCategories = issues.flatMap { it.stickyCategories }.distinctBy { it.id },
+                    paginationTruncated = issues.any { it.paginationTruncated },
+                )
+                _refreshWarning.value = FlagsRefreshWarning(aggregate, types, session, requireNotNull(pseudo))
             }
         } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
             trace.failure(error)
@@ -1118,6 +1177,7 @@ class FlagsViewModel @Inject constructor(
     private fun endRefresh(generation: Long) {
         if (activeRefreshGeneration != generation) return
         activeRefreshGeneration = null
+        refreshingSessionGeneration = null
         refreshingType = null
         refreshingCoveredTypes = emptySet()
         _isRefreshing.value = false
@@ -1367,6 +1427,7 @@ class FlagsViewModel @Inject constructor(
             null -> Unit
             AuthState.Anonymous -> {
                 observedPseudo = null
+                resetRefreshWarnings()
                 resetDtState()
                 flagRepository.clearSessionCache()
             }
@@ -1375,12 +1436,19 @@ class FlagsViewModel @Inject constructor(
                 // singleton and may outlive this ViewModel, so a recreated Flags screen
                 // must not trust whatever per-user cache was left in memory.
                 if (observedPseudo != state.pseudo) {
+                    resetRefreshWarnings()
                     resetDtState()
                     flagRepository.clearSessionCache()
                 }
                 observedPseudo = state.pseudo
             }
         }
+    }
+
+    private fun resetRefreshWarnings() {
+        flagsSessionGeneration++
+        _refreshWarning.value = null
+        reportedRefreshIssues.clear()
     }
 
     /** Drop the DT list (and its one-shot guard) so a logout / account switch never shows the
@@ -1399,6 +1467,14 @@ class FlagsViewModel @Inject constructor(
         _dtIsRefreshing.value = false
     }
 }
+
+/** One consumable warning, fenced to its auth session; retry keeps the original batch order. */
+class FlagsRefreshWarning(
+    val issue: FlagRefreshIssue,
+    val retryTypes: List<FlagType>,
+    internal val sessionGeneration: Long,
+    internal val pseudo: String,
+)
 
 /**
  * UI-level tab model for the Drapeaux screen. The three real tabs map to a [FlagType] the

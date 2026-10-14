@@ -1,13 +1,36 @@
 package fr.forumhfr.redface2.core.domain.diagnostics
 
 import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.core.model.Category
+import fr.forumhfr.redface2.core.domain.flags.FlagRefreshCategory
 import java.io.IOException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FlagRefreshDiagnosticsTest {
+    @Test
+    fun `list issue uses the shared sweep gaps and excludes uncertain count or storage gaps - 984`() {
+        val categories = listOf(Category(13, "Programmation", forceSubcat = false, subcategoryCount = 0))
+        val fetch = FlagFetchTrace(1, FlagType.CYAN)
+        assertNull(fetch.listIssue(categories))
+        fetch.gap(FlagRefreshGap.EMPTY_BUCKET_PAGE)
+        fetch.gap(FlagRefreshGap.ROOM_WRITE)
+        assertNull(fetch.listIssue(categories))
+
+        val sweep = FlagFetchTrace(1, FlagType.CYAN)
+        sweep.gap(FlagRefreshGap.STICKY_REQUEST, stickyCategory = 13)
+        fetch.absorbSticky(sweep)
+        assertEquals(listOf(FlagRefreshCategory(13, "Programmation")), fetch.listIssue(categories)?.stickyCategories)
+        fetch.gap(FlagRefreshGap.STICKY_DECODE, stickyCategory = 13)
+        fetch.gap(FlagRefreshGap.PAGE_CAP)
+        assertEquals(1, fetch.listIssue(categories)?.stickyCategories?.size)
+        assertEquals(true, fetch.listIssue(categories)?.paginationTruncated)
+        assertTrue(fetch.gapSnapshot().containsAll(sweep.gapSnapshot()))
+    }
+
     @Test
     fun `a multi-type fast refresh uses two entries and deduplicates shared transport`() {
         val log = DiagnosticsLog()

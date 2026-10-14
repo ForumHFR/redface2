@@ -39,8 +39,10 @@ interface FlagRepository {
     /**
      * Force a fresh network fetch, update the session cache, and broadcast it to current
      * observers. Active observers receive [FlagsResult.Loading] before the fresh result.
+     * Returns the published outcome for cache-only consumers (Super). A success may carry a
+     * transient [FlagRefreshIssue]; its fresh rows are still published and persisted.
      */
-    suspend fun refresh(type: FlagType)
+    suspend fun refresh(type: FlagType): FlagsResult
 
     /**
      * Passive cache invalidation signal for cache-only consumers. Unlike [observe], subscribing here
@@ -140,6 +142,15 @@ interface FlagRepository {
  */
 sealed class FlagsResult {
     data object Loading : FlagsResult()
-    data class Success(val flags: List<Flag>) : FlagsResult()
+    data class Success(val flags: List<Flag>, val issue: FlagRefreshIssue? = null) : FlagsResult()
     data class Failure(val cause: Throwable) : FlagsResult()
 }
+
+/** Missing parts of a best-effort list, kept only for the lifetime of this fetched snapshot. */
+data class FlagRefreshIssue(
+    val stickyCategories: List<FlagRefreshCategory> = emptyList(),
+    val paginationTruncated: Boolean = false,
+)
+
+/** The catalogue already supplies the name; no extra request is made for warning labels. */
+data class FlagRefreshCategory(val id: Int, val name: String?)

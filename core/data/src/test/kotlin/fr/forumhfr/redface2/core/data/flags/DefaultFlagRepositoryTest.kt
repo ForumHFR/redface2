@@ -15,6 +15,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallSummary
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrClientRole
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrEndpoint
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
+import fr.forumhfr.redface2.core.domain.flags.FlagRefreshCategory
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.model.AuthState
@@ -53,6 +54,7 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -93,7 +95,8 @@ class DefaultFlagRepositoryTest {
         val dao = stubFlagDao()
         val repo = buildRepository(apiClient, stubForumRepository(sampleCategories),
             flagDao = dao, diagnostics = diagnostics)
-        repo.refresh(FlagType.CYAN)
+        val result = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        assertNull(result.issue)
         assertTrue(diagnostics.entries.value.size <= 3)
         assertEquals(2, diagnostics.entries.value.size)
         val summary = diagnostics.entries.value.last().message
@@ -107,11 +110,33 @@ class DefaultFlagRepositoryTest {
     }
 
     @Test
-    fun `failed sticky supplement remains a business success and is diagnosed incomplete - 984`() = runTest {
+    fun `failed sticky supplement publishes fresh rows and its category without freshening Room - 984`() = runTest {
         val diagnostics = DiagnosticsLog()
         val apiClient = diagnosticApi(failSticky = true)
-        val repo = buildRepository(apiClient, stubForumRepository(sampleCategories), diagnostics = diagnostics)
-        repo.refresh(FlagType.CYAN)
+        val dao = stubFlagDao()
+        var persistedRows = emptyList<FlagTopicEntity>()
+        coEvery { dao.replaceForType("xat", FlagType.CYAN, any()) } coAnswers {
+            persistedRows = thirdArg()
+        }
+        val repo = buildRepository(apiClient, stubForumRepository(sampleCategories),
+            flagDao = dao, diagnostics = diagnostics)
+        val result = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        assertEquals(35395, result.flags.single().topicId)
+        assertEquals(listOf(FlagRefreshCategory(13, "Discussions")), result.issue?.stickyCategories)
+        assertEquals(false, result.issue?.paginationTruncated)
+        coVerify(exactly = 1) {
+            dao.replaceForType("xat", FlagType.CYAN, match { rows ->
+                rows.single().topicId == 35395 &&
+                    rows.single().fetchedAt < Instant.parse("2026-05-03T11:59:30Z")
+            })
+        }
+        coEvery { dao.getFlags("xat", FlagType.CYAN) } returns persistedRows
+        coEvery { dao.getLastFetchedAt("xat", FlagType.CYAN) } returns persistedRows.single().fetchedAt
+        val disk = requireNotNull(FlagCacheStore(dao,
+            Clock.fixed(Instant.parse("2026-05-03T12:00:00Z"), ZoneOffset.UTC),
+            UnconfinedTestDispatcher()).load(FlagType.CYAN, "xat"))
+        assertFalse("partial rows cannot delay a later disk retry", disk.isFresh)
+        assertNull("the warning is not persisted", disk.result.issue)
         val summary = diagnostics.entries.value.last().message
         assertTrue(summary, summary.contains("outcome=success-incomplete"))
         assertTrue(summary, summary.contains("reasons=sticky_request"))
@@ -122,7 +147,7 @@ class DefaultFlagRepositoryTest {
     }
 
     @Test
-    fun `folded bucket failure is diagnosed as failure despite refresh returning Unit - 984`() = runTest {
+    fun `folded bucket failure is returned and diagnosed as failure - 984`() = runTest {
         val diagnostics = DiagnosticsLog()
         val (apiClient, forumRepository) = wireDeps {
             stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
@@ -133,11 +158,136 @@ class DefaultFlagRepositoryTest {
                 page = any(), resultsPerPage = any(), useAuth = true)
         } throws IOException("Cookie=SecretCookie hash_check=SecretHash")
         val repo = buildRepository(apiClient, forumRepository, diagnostics = diagnostics)
-        repo.refresh(FlagType.CYAN)
+        assertTrue(repo.refresh(FlagType.CYAN) is FlagsResult.Failure)
         val summary = diagnostics.entries.value.last().message
         assertTrue(summary, summary.contains("outcome=failure exception=IOException"))
         assertTrue(summary, summary.contains("bucketsFailures=1"))
         assertTrue(summary, !summary.contains("SecretCookie"))
+    }
+
+    @Test
+    fun `stale disk refresh publishes an incomplete success after the old rows - 984`() = runTest {
+        val dao = stubFlagDao()
+        val stale = Instant.parse("2026-05-03T11:00:00Z")
+        coEvery { dao.getFlags("xat", FlagType.CYAN) } returns listOf(
+            flagEntity(FlagType.CYAN, 999, "Old row", stale),
+        )
+        coEvery { dao.getLastFetchedAt("xat", FlagType.CYAN) } returns stale
+        val repo = buildRepository(diagnosticApi(failSticky = true), stubForumRepository(sampleCategories),
+            flagDao = dao)
+        repo.observe(FlagType.CYAN).test {
+            assertEquals(999, (awaitItem() as FlagsResult.Success).flags.single().topicId)
+            val fresh = awaitItem() as FlagsResult.Success
+            assertEquals(35395, fresh.flags.single().topicId)
+            assertEquals(listOf(FlagRefreshCategory(13, "Discussions")), fresh.issue?.stickyCategories)
+            cancelAndIgnoreRemainingEvents()
+        }
+        coVerify(exactly = 1) { dao.replaceForType("xat", FlagType.CYAN, any()) }
+    }
+
+    @Test
+    fun `partial refresh replaces old rows rather than retaining the failed category - 984`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.FAVORITES, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.FAVORITES, capturedParticipatedFixture)
+        }
+        coEvery {
+            api.getTopicList(13, null, 1, any(), true)
+        } returns fixture("rest_cat13_topics_last_sticky_favorite.json")
+        val dao = stubFlagDao()
+        val repo = buildRepository(api, forum, flagDao = dao)
+        val complete = repo.refresh(FlagType.FAVORITE) as FlagsResult.Success
+        assertNull(complete.issue)
+        assertEquals(setOf(100_217, 35395), complete.flags.map { it.topicId }.toSet())
+        coEvery { api.getTopicList(13, null, 1, any(), true) } throws IOException("sticky unavailable")
+        coEvery {
+            api.getCategoryFlagTopics(23, HfrRestFlagBucket.FAVORITES, any(), any(), true)
+        } returns capturedParticipatedFixture.replace("35395", "35396")
+
+        val partial = repo.refresh(FlagType.FAVORITE) as FlagsResult.Success
+        assertEquals(35396, partial.flags.single().topicId)
+        assertEquals(listOf(FlagRefreshCategory(13, "Discussions")), partial.issue?.stickyCategories)
+        assertEquals(partial, repo.observe(FlagType.FAVORITE).first())
+        coVerify(exactly = 1) {
+            dao.replaceForType("xat", FlagType.FAVORITE, match { it.singleOrNull()?.topicId == 35396 })
+        }
+        coVerify(exactly = 2) { dao.replaceForType("xat", FlagType.FAVORITE, any()) }
+    }
+
+    @Test
+    fun `sticky decode failure carries its category without failing the fresh bucket - 984`() = runTest {
+        val api = diagnosticApi()
+        coEvery { api.getTopicList(13, null, 1, any(), true) } returns "invalid JSON"
+        val diagnostics = DiagnosticsLog()
+        val repo = buildRepository(api, stubForumRepository(sampleCategories), diagnostics = diagnostics)
+        val result = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        assertEquals(35395, result.flags.single().topicId)
+        assertEquals(listOf(FlagRefreshCategory(13, "Discussions")), result.issue?.stickyCategories)
+        val summary = diagnostics.entries.value.last().message
+        assertTrue(summary, summary.contains("outcome=success-incomplete"))
+        assertTrue(summary, summary.contains("reasons=sticky_decode"))
+        assertTrue(summary, summary.contains("stickiesFailures=1"))
+    }
+
+    @Test
+    fun `a favorite mutation preserves the partial snapshot issue and stale freshness - 984`() = runTest {
+        val api = diagnosticApi(failSticky = true)
+        val dao = stubFlagDao()
+        val hfr = mockk<HfrClient>()
+        coEvery { hfr.addFlag(any()) } returns ADD_SUCCESS_HTML
+        val repo = buildRepository(api, stubForumRepository(sampleCategories), flagDao = dao, hfrClient = hfr)
+        val partial = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        assertTrue(repo.addFlag(sampleFlagAddContext()).isSuccess)
+        val updated = repo.observe(FlagType.CYAN).first() as FlagsResult.Success
+        assertTrue(updated.flags.single().isFavorite)
+        assertTrue("a mutation reuses the warning identity", updated.issue === partial.issue)
+        coVerify(exactly = 2) {
+            dao.replaceForType("xat", FlagType.CYAN, match { rows ->
+                rows.single().fetchedAt < Instant.parse("2026-05-03T11:59:30Z")
+            })
+        }
+    }
+
+    @Test
+    fun `page cap publishes a partial list with a pagination issue - 984`() = runTest {
+        val api = diagnosticApi()
+        val page = capturedParticipatedFixture.replace("\"results_count\": 1", "\"results_count\": 101")
+        coEvery {
+            api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED, any(), any(), true)
+        } returns page
+        val diagnostics = DiagnosticsLog()
+        val dao = stubFlagDao()
+        val repo = buildRepository(api, stubForumRepository(sampleCategories),
+            flagDao = dao, diagnostics = diagnostics)
+        val result = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        assertEquals(100, result.flags.size)
+        assertEquals(true, result.issue?.paginationTruncated)
+        assertEquals(emptyList<FlagRefreshCategory>(), result.issue?.stickyCategories)
+        assertTrue(diagnostics.entries.value.last().message.contains("reasons=page_cap"))
+        coVerify(exactly = 100) {
+            api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED, any(), any(), true)
+        }
+        coVerify(exactly = 0) {
+            api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED, 101, any(), true)
+        }
+        coVerify(exactly = 1) { dao.replaceForType("xat", FlagType.CYAN, any()) }
+    }
+
+    @Test
+    fun `an early empty page only diagnoses a divergent count without a UI warning - 984`() = runTest {
+        val api = diagnosticApi()
+        coEvery {
+            api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED, any(), any(), true)
+        } returns EMPTY_PAGE.replace("\"results_count\": 0", "\"results_count\": 2")
+        val diagnostics = DiagnosticsLog()
+        val repo = buildRepository(api, stubForumRepository(sampleCategories), diagnostics = diagnostics)
+        val result = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        assertTrue(result.flags.isEmpty())
+        assertNull(result.issue)
+        assertTrue(diagnostics.entries.value.last().message.contains("reasons=empty_bucket_page"))
+        coVerify(exactly = 1) {
+            api.getCategoryFlagTopics(23, HfrRestFlagBucket.PARTICIPATED, 1, any(), true)
+        }
     }
 
     @Test
@@ -1059,6 +1209,9 @@ class DefaultFlagRepositoryTest {
         coEvery {
             apiClient.getTopicList(cat = 32, subcat = null, page = any(), resultsPerPage = any(), useAuth = true)
         } throws RuntimeException("topics/last boom")
+        coEvery {
+            apiClient.getTopicList(cat = 23, subcat = null, page = any(), resultsPerPage = any(), useAuth = true)
+        } returns EMPTY_PAGE
         val repo = buildRepository(apiClient, stubForumRepository(catalogue))
 
         repo.observe(FlagType.CYAN).test {
@@ -1068,6 +1221,9 @@ class DefaultFlagRepositoryTest {
                 "the bucket flag from cat 23 survives the supplement failure",
                 success.flags.any { it.cat == 23 },
             )
+            // #984 option (b): keep the best-effort list, but stop treating the missing cat as silent.
+            assertEquals(listOf(FlagRefreshCategory(32, "Intelligence Artificielle")),
+                success.issue?.stickyCategories)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -2786,6 +2942,11 @@ class DefaultFlagRepositoryTest {
         configure: ApiStubScope.() -> Unit,
     ): Pair<HfrApiClient, ForumRepository> {
         val apiClient = mockk<HfrApiClient>()
+        // A happy bucket fixture also needs a successful (possibly empty) sticky supplement.
+        // Otherwise an unstubbed call now correctly adds an incomplete-list issue (#984).
+        coEvery {
+            apiClient.getTopicList(cat = any(), subcat = null, page = 1, resultsPerPage = any(), useAuth = true)
+        } returns EMPTY_PAGE
         ApiStubScope(apiClient).configure()
         return apiClient to stubForumRepository(sampleCategories)
     }

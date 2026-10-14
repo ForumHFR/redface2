@@ -32,8 +32,10 @@ class FlagCacheStore @Inject constructor(
         )
     }
 
-    suspend fun replace(userId: String, type: FlagType, flags: List<Flag>) {
-        val fetchedAt = clock.instant()
+    suspend fun replace(userId: String, type: FlagType, flags: List<Flag>, isComplete: Boolean = true) {
+        // Persist the best-effort rows without granting them a fresh-cache window. No durable
+        // completeness status: a later disk observation retries through the existing stale path.
+        val fetchedAt = if (isComplete) clock.instant() else clock.instant().minus(CachePolicy.flags).minusNanos(1)
         withContext(ioDispatcher) {
             flagDao.replaceForType(
                 userId = userId,

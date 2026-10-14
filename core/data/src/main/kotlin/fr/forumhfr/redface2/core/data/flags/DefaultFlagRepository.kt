@@ -286,7 +286,7 @@ class DefaultFlagRepository @Inject constructor(
         refreshJob.join()
     }
 
-    override suspend fun refresh(type: FlagType) = diagnoseRefresh(type, FlagRefreshTrigger.PULL) { trace ->
+    override suspend fun refresh(type: FlagType): FlagsResult = diagnoseRefresh(type, FlagRefreshTrigger.PULL) { trace ->
         val userId = currentUserId()
         val active = beginRefresh(type, userId)
         try {
@@ -296,6 +296,7 @@ class DefaultFlagRepository @Inject constructor(
                 val failure = notAuthenticatedFailure()
                 trace.failure(failure.cause)
                 flow.emit(failure)
+                failure
             } else {
                 fetchDeduplicated(type, userId) { result ->
                     if (result is FlagsResult.Failure) trace.failure(result.cause)
@@ -748,7 +749,7 @@ class DefaultFlagRepository @Inject constructor(
             synchronized(favoriteResolutionMemos) { favoriteResolutionMemos.clear() }
         }
         val current = cachedSuccesses[flag.type] ?: return null
-        return FlagsResult.Success(current.flags.filterNot {
+        return current.copy(flags = current.flags.filterNot {
             it.cat == flag.cat && it.topicId == flag.topicId
         }).also { cachedSuccesses[flag.type] = it }
     }
@@ -778,11 +779,12 @@ class DefaultFlagRepository @Inject constructor(
                             flag
                         }
                     }
-                    if (changed) FlagsResult.Success(flags).also { cachedSuccesses[type] = it } else null
+                    if (changed) current.copy(flags = flags).also { cachedSuccesses[type] = it } else null
                 }
                 if (success != null) {
                     runCatching {
-                        flagCacheStore.replace(userId = userId, type = type, flags = success.flags)
+                        flagCacheStore.replace(userId = userId, type = type, flags = success.flags,
+                            isComplete = success.issue == null)
                     }.onFailure { throwable ->
                         if (throwable is CancellationException) throw throwable
                         Log.w(LOG_TAG, "Could not persist added favourite marker for $type", throwable)
@@ -839,18 +841,18 @@ class DefaultFlagRepository @Inject constructor(
         cacheUpdates.tryEmit(type)
     }
 
-    private suspend fun diagnoseRefresh(
+    private suspend fun <T> diagnoseRefresh(
         type: FlagType,
         trigger: FlagRefreshTrigger,
-        block: suspend (FlagRefreshTrace) -> Unit,
-    ) {
+        block: suspend (FlagRefreshTrace) -> T,
+    ): T {
         val inherited = currentCoroutineContext()[FlagRefreshTrace]
         if (inherited != null) {
-            block(inherited)
+            return block(inherited)
         } else {
             val trace = refreshDiagnostics.begin(trigger, listOf(type))
             try {
-                withContext(trace) { block(trace) }
+                return withContext(trace) { block(trace) }
             } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
                 trace.failure(error)
                 throw error
@@ -1027,8 +1029,10 @@ class DefaultFlagRepository @Inject constructor(
 
     private suspend fun fetch(key: FetchKey): FlagsResult = withContext(ioDispatcher) {
         val type = key.type
+        var categories: List<Category> = emptyList()
         val result = runCatching {
             val cats = measured(FlagRefreshPhase.CATALOGUE) { loadCategories() }
+            categories = cats
             currentCoroutineContext()[FlagFetchTrace]?.categoryCount = cats.size
             val bucket = type.toBucket()
             // `coroutineScope` (fail-all) is intentional over `supervisorScope` (best-effort).
@@ -1073,7 +1077,9 @@ class DefaultFlagRepository @Inject constructor(
                 }
             }
         }.fold(
-            onSuccess = { flags -> FlagsResult.Success(flags) },
+            onSuccess = { flags ->
+                FlagsResult.Success(flags, currentCoroutineContext()[FlagFetchTrace]?.listIssue(categories))
+            },
             onFailure = { throwable ->
                 if (throwable is CancellationException) throw throwable
                 Log.w(LOG_TAG, "Flags REST fetch failed for $type", throwable)
@@ -1108,7 +1114,7 @@ class DefaultFlagRepository @Inject constructor(
                     fetchKey(type, key.userId) == key
                 }
                 if (ownsWrite) {
-                    measured(FlagRefreshPhase.ROOM) { persistFlags(key.userId, type, result.flags) }
+                    measured(FlagRefreshPhase.ROOM) { persistFlags(key.userId, type, result) }
                     val committed = synchronized(cachedSuccesses) {
                         if (fetchKey(type, key.userId) == key) {
                             cachedSuccesses[type] = result
@@ -1128,10 +1134,10 @@ class DefaultFlagRepository @Inject constructor(
         }
     }
 
-    private suspend fun persistFlags(userId: String, type: FlagType, flags: List<Flag>) {
+    private suspend fun persistFlags(userId: String, type: FlagType, result: FlagsResult.Success) {
         val trace = currentCoroutineContext()[FlagFetchTrace]
         runCatching {
-            flagCacheStore.replace(userId = userId, type = type, flags = flags)
+            flagCacheStore.replace(userId = userId, type = type, flags = result.flags, isComplete = result.issue == null)
         }.onFailure { throwable ->
             if (throwable is CancellationException) throw throwable
             trace?.gap(FlagRefreshGap.ROOM_WRITE)
@@ -1239,10 +1245,9 @@ class DefaultFlagRepository @Inject constructor(
             }
             page += 1
         }
-        // Loop exited via the MAX_PAGES cap. Surface the silent truncation in adb logs
-        // so it can be diagnosed before the user complains — defensive cap, but if it
-        // ever fires the listing is incomplete and the symptom would otherwise be
-        // invisible.
+        // Loop exited via the MAX_PAGES cap: record certain truncation for diagnostics and the
+        // transient UI warning, while still publishing the accumulated rows. Unlike a divergent
+        // counter on an empty page, a non-empty walk stopped by our cap has unvisited pages.
         if (accumulated.size < lastResultsCount) {
             trace?.gap(FlagRefreshGap.PAGE_CAP)
             Log.w(
@@ -1272,8 +1277,9 @@ class DefaultFlagRepository @Inject constructor(
      *
      * Best-effort (#251 Codex gate): although it runs in the SAME `coroutineScope` as the bucket
      * fan-out, each cat's `topics/last` call is wrapped in its own `runCatching`, so a network/JSON
-     * failure logs and yields nothing rather than failing the whole refresh — recovering a marginal
-     * sticky is not worth turning the screen into a "Réessayer" error. (A `CancellationException` is
+     * failure logs and yields nothing rather than failing the whole refresh. #984 also records the
+     * category in the existing diagnostic gap so the fresh list carries a retryable warning.
+     * (A `CancellationException` is
      * rethrown, not swallowed, to keep structured concurrency intact.) Page 1 only:
      * stickies always head the listing, so deeper pages would be pure network noise for this fix.
      * #862 widened the scope from no-subcategory cats to ALL cats (~19 parallel GETs per refresh,
@@ -1318,7 +1324,7 @@ class DefaultFlagRepository @Inject constructor(
                 RestFlagMappers.toStickyFlags(envelope = envelope, type = type, fallbackCat = category.id)
             }.getOrElse { throwable ->
                 if (throwable is CancellationException) throw throwable
-                trace?.gap(FlagRefreshGap.STICKY_DECODE)
+                trace?.gap(FlagRefreshGap.STICKY_DECODE, stickyCategory = category.id)
                 trace?.failed(FlagRefreshPhase.STICKIES, throwable, fatal = false)
                 Log.w(LOG_TAG, "Sticky sweep decode failed for cat=${category.id} (best-effort)", throwable)
                 emptyList()
@@ -1384,7 +1390,7 @@ class DefaultFlagRepository @Inject constructor(
                                 // "miss" — rethrow it so structured concurrency stays intact
                                 // (#251 Codex review). Only network failures degrade to null.
                                 if (throwable is CancellationException) throw throwable
-                                trace?.gap(FlagRefreshGap.STICKY_REQUEST)
+                                trace?.gap(FlagRefreshGap.STICKY_REQUEST, stickyCategory = category.id)
                                 trace?.failed(FlagRefreshPhase.STICKIES, throwable, fatal = false)
                                 Log.w(
                                     LOG_TAG,

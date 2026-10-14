@@ -1,5 +1,8 @@
 package fr.forumhfr.redface2.core.domain.diagnostics
 
+import fr.forumhfr.redface2.core.domain.flags.FlagRefreshCategory
+import fr.forumhfr.redface2.core.domain.flags.FlagRefreshIssue
+import fr.forumhfr.redface2.core.model.Category
 import fr.forumhfr.redface2.core.model.FlagType
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -194,6 +197,7 @@ class FlagFetchTrace(val refreshId: Long, val type: FlagType) : AbstractCoroutin
     private val publications = linkedSetOf<HfrCallPublication>()
     private var catalogueJoined = false
     private val gaps = mutableSetOf<FlagRefreshGap>()
+    private val missingStickyCategories = linkedSetOf<Int>()
     private val phases = mutableMapOf<FlagRefreshPhase, Long>()
     private val phaseFailures = mutableMapOf<FlagRefreshPhase, Int>()
     private var finished = false
@@ -234,6 +238,7 @@ class FlagFetchTrace(val refreshId: Long, val type: FlagType) : AbstractCoroutin
         calls += sweep.callSnapshot()
         stickyPages += sweep.stickyPages
         gaps += sweep.gapSnapshot()
+        missingStickyCategories += sweep.missingStickyCategorySnapshot()
         phaseFailures[FlagRefreshPhase.STICKIES] = failures(FlagRefreshPhase.STICKIES) +
             sweep.failures(FlagRefreshPhase.STICKIES)
     }
@@ -248,9 +253,21 @@ class FlagFetchTrace(val refreshId: Long, val type: FlagType) : AbstractCoroutin
             it.copy(refreshId = refreshId, flagType = type, phase = FlagRefreshPhase.CATALOGUE)
         }).distinctBy { it.id }
     @Synchronized fun gapSnapshot(): Set<FlagRefreshGap> = gaps.toSet()
-    @Synchronized fun gap(gap: FlagRefreshGap) {
+    @Synchronized fun gap(gap: FlagRefreshGap, stickyCategory: Int? = null) {
         gaps += gap
+        if (stickyCategory != null) missingStickyCategories += stickyCategory
         if (gap == FlagRefreshGap.STICKY_GENERATION) stickyGenerationRefused++
+    }
+    @Synchronized private fun missingStickyCategorySnapshot(): Set<Int> = missingStickyCategories.toSet()
+
+    /** Reuse the diagnostic gaps, but warn only about certain missing list data. An empty page
+     * can reflect a divergent server count; Room failures and catalogue fallback are diagnostics
+     * too, without proving that this published list is missing flags. */
+    @Synchronized fun listIssue(categories: List<Category>): FlagRefreshIssue? {
+        val missing = categories.filter { it.id in missingStickyCategories }
+            .map { FlagRefreshCategory(it.id, it.name) }
+        val truncated = FlagRefreshGap.PAGE_CAP in gaps
+        return if (missing.isEmpty() && !truncated) null else FlagRefreshIssue(missing, truncated)
     }
     @Synchronized fun page(sticky: Boolean) { if (sticky) stickyPages++ else bucketPages++ }
     @Synchronized fun phase(phase: FlagRefreshPhase, nanos: Long) {
