@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.domain.diagnostics
 
 import fr.forumhfr.redface2.core.model.FlagType
+import java.util.concurrent.atomic.AtomicBoolean
 
 /** Only public endpoint metadata crosses the network/diagnostics boundary. */
 data class HfrEndpoint(
@@ -58,7 +59,13 @@ data class HfrCallSummary(
     val maxFailedConnectMs: Long = 0,
     val failedTlsMs: Long = 0,
     val maxFailedTlsMs: Long = 0,
+    // Copies retain this call-local claim, including catalogue ownership and late attachment.
+    private val detailPublished: AtomicBoolean = AtomicBoolean(),
 ) {
+    fun claimDetail(): Boolean = detailPublished.compareAndSet(false, true)
+
+    fun isDetailPublished(): Boolean = detailPublished.get()
+
     fun line(): String =
         "refresh=${refreshId ?: "-"} ${endpoint.label()} role=${role.name.lowercase()} " +
             "type=${flagType?.name ?: "-"} phase=${phase?.name?.lowercase() ?: "-"} " +

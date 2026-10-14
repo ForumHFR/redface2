@@ -44,7 +44,7 @@ class HfrNetworkDiagnostics internal constructor(
             detailWindowStarted = now
             windowDetails = 0
         }
-        if (windowDetails < MAX_WINDOW_DETAILS) {
+        if (windowDetails < MAX_WINDOW_DETAILS && summary.claimDetail()) {
             windowDetails++
             log.record(DiagnosticsLog.Level.INFO, "HfrCall", summary.line())
         }

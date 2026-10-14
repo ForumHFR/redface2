@@ -429,6 +429,56 @@ class HfrEventListenerFactoryTest {
     }
 
     @Test
+    fun `failed TLS stops at thirty ms while another route waits until one thousand ms`() {
+        failedTlsWithPendingRoute(routeKnownAtTlsStart = false)
+    }
+
+    @Test
+    fun `a known TLS route stops on failure even after another route starts and callbacks change threads`() {
+        failedTlsWithPendingRoute(routeKnownAtTlsStart = true)
+    }
+
+    private fun failedTlsWithPendingRoute(routeKnownAtTlsStart: Boolean) {
+        val (call, listener) = newCall()
+        val secondAddress = InetSocketAddress.createUnresolved("SecretOtherHost", 443)
+        val tcpWorker = Executors.newSingleThreadExecutor()
+        val tlsWorker = Executors.newSingleThreadExecutor()
+        try {
+            listener.callStart(call)
+            at(10) { tcpWorker.submit { listener.connectStart(call, address, Proxy.NO_PROXY) }.get() }
+            if (!routeKnownAtTlsStart) {
+                at(15) { tcpWorker.submit { listener.connectStart(call, secondAddress, Proxy.NO_PROXY) }.get() }
+            }
+            at(20) { tlsWorker.submit { listener.secureConnectStart(call) }.get() }
+            if (routeKnownAtTlsStart) {
+                at(25) { tcpWorker.submit { listener.connectStart(call, secondAddress, Proxy.NO_PROXY) }.get() }
+            }
+            val failTls = { listener.connectFailed(call, address, Proxy.NO_PROXY, null, IOException("SecretTLS")) }
+            at(30) {
+                if (routeKnownAtTlsStart) failTls() else tlsWorker.submit { failTls() }.get()
+            }
+            at(1_000) { tlsWorker.submit { listener.secureConnectStart(call) }.get() }
+            at(1_010) { listener.secureConnectEnd(call, null) }
+            at(1_020) { listener.connectEnd(call, secondAddress, Proxy.NO_PROXY, Protocol.HTTP_2) }
+            listener.connectionAcquired(call, connection(secondAddress))
+            at(1_030) { listener.responseHeadersEnd(call, response(call, 200)); listener.callEnd(call) }
+
+            val summary = fetch.callSnapshot().single()
+            assertEquals(10L, summary.failedTlsMs)
+            assertEquals(10L, summary.maxFailedTlsMs)
+            assertEquals(20L, summary.failedConnectMs)
+            assertEquals(10L, summary.tlsMs)
+            assertEquals(if (routeKnownAtTlsStart) 995L else 1_005L, summary.connectMs)
+            assertEquals(2, summary.connectAttempts)
+            assertEquals(1, summary.connectFailures)
+            assertEquals(HfrCallOutcome.OK, summary.outcome)
+        } finally {
+            tcpWorker.shutdownNow()
+            tlsWorker.shutdownNow()
+        }
+    }
+
+    @Test
     fun `connections to the same address through different proxies keep separate attempt timings`() {
         val (call, listener) = newCall()
         val proxy = Proxy(Proxy.Type.HTTP, InetSocketAddress.createUnresolved("SecretProxyHost", 8080))

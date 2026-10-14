@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagFetchTrace
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshDiagnostics
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshPhase
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrace
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrigger
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallOutcome
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallSummary
@@ -12,6 +13,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.HfrClientRole
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrEndpoint
 import fr.forumhfr.redface2.core.model.FlagType
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CancellationException
@@ -104,6 +106,112 @@ class HfrNetworkDiagnosticsTest {
     }
 
     @Test
+    fun `detached slow call published immediately is aggregated without replay when its refresh joins late`() {
+        val refresh = diagnostics.begin(FlagRefreshTrigger.PULL, listOf(FlagType.CYAN))
+        val original = diagnostics.fetch(FlagType.CYAN, refresh.id)
+        refresh.attach(original, false)
+        val replacement = diagnostics.fetch(FlagType.CYAN, refreshId = null)
+        val call = HfrCallSummary(
+            id = collector.nextId(), endpoint = HfrEndpoint(HfrEndpoint.Family.PARTICIPATED, 23, 1),
+            role = HfrClientRole.AUTH, refreshId = replacement.refreshId, flagType = replacement.type,
+            phase = FlagRefreshPhase.BUCKETS, waitMs = 50, dnsMs = 10, connectMs = 100, tlsMs = 70,
+            headersSentToReceivedMs = 1_000, bodyMs = 20, totalMs = 1_500, status = 200, protocol = "h2",
+            reusedConnection = false, inFlightAtStart = collector.started(), outcome = HfrCallOutcome.OK,
+        )
+        collector.completed(call, replacement)
+        // The network already published N1 before the original refresh receives addFlag's result.
+        assertEquals(listOf(call.copy(refreshId = null).line()), details())
+        replacement.markFinished()
+        refresh.result(FlagType.CYAN, replacement)
+        refresh.published()
+        refresh.finish()
+        refresh.finish()
+
+        assertEquals(1, details().size)
+        assertEquals(1, replacement.callSnapshot().size)
+        val line = log.entries.value.last().message
+        listOf("calls=1 ", "totalCallMs=1500 ", "maxMs=1500 ", "medianMs=1500 ",
+            "fetches=2 newFetches=1 joined=1", "details-omitted=0 ", "bucketsCallMs=1500 ",
+            "waitMs=50 ", "dnsMs=10 ", "connectMs=100 ", "tlsMs=70 ", "bodyMs=20 ",
+            "headersSentToReceivedMs=1000 ").forEach {
+            assertTrue(line, line.contains(it))
+        }
+    }
+
+    @Test
+    fun `catalogue published immediately retains all timings for a late owner without replay`() {
+        val catalogue = HfrCatalogueTrace()
+        val call = complete(catalogue = catalogue)
+        val refresh = diagnostics.begin(FlagRefreshTrigger.PULL, listOf(FlagType.RED))
+        val fetch = diagnostics.fetch(FlagType.RED, refresh.id)
+        fetch.catalogue(catalogue, wasJoined = true)
+        refresh.attach(fetch, wasJoined = false)
+        refresh.result(FlagType.RED, fetch)
+        refresh.finish()
+
+        assertEquals(listOf(call.line()), details())
+        val retained = fetch.callSnapshot().single()
+        assertEquals(call.id, retained.id)
+        assertEquals(call.totalMs, retained.totalMs)
+        assertEquals(refresh.id, retained.refreshId)
+        assertEquals(FlagType.RED, retained.flagType)
+        assertEquals(FlagRefreshPhase.CATALOGUE, retained.phase)
+        val line = log.entries.value.last().message
+        listOf("calls=1 ", "catalogue=joined ", "catalogueCallMs=1500 ", "totalCallMs=1500 ",
+            "details-omitted=0 ").forEach { assertTrue(line, line.contains(it)) }
+    }
+
+    @Test
+    fun `an already published call does not consume a late refresh detail quota`() {
+        val fetch = diagnostics.fetch(FlagType.CYAN, refreshId = null)
+        val immediate = complete(fetch)
+        val refresh = diagnostics.begin(FlagRefreshTrigger.PULL, listOf(FlagType.CYAN))
+        refresh.attach(fetch, wasJoined = true)
+        repeat(13) { complete(fetch) }
+        refresh.finish()
+
+        assertEquals(13, details().size)
+        assertEquals(immediate.copy(refreshId = null).line(), details().first())
+        assertTrue(log.entries.value.last().message.contains("calls=14 "))
+        assertTrue(log.entries.value.last().message.contains("totalCallMs=21000 "))
+        assertTrue(log.entries.value.last().message.contains("details-omitted=1 "))
+    }
+
+    @Test
+    fun `two refreshes finishing a shared catalogue concurrently emit its detail exactly once`() {
+        val workers = Executors.newFixedThreadPool(2)
+        try {
+            repeat(20) {
+                log.clear()
+                val catalogue = HfrCatalogueTrace()
+                val refreshes = listOf(FlagType.CYAN, FlagType.RED).map { type ->
+                    val refresh = diagnostics.begin(FlagRefreshTrigger.PULL, listOf(type))
+                    val fetch = diagnostics.fetch(type, refresh.id)
+                    fetch.catalogue(catalogue, wasJoined = true)
+                    refresh.attach(fetch, false)
+                    refresh.result(type, fetch)
+                    refresh
+                }
+                complete(catalogue = catalogue)
+                assertTrue(details().isEmpty())
+                finishTogether(refreshes, workers)
+
+                assertEquals(1, details().size)
+                val summaries = log.entries.value.filter { it.message.contains("outcome=success ") }
+                assertEquals(2, summaries.size)
+                summaries.forEach {
+                    assertTrue(it.message, it.message.contains("calls=1 "))
+                    assertTrue(it.message, it.message.contains("catalogueCallMs=1500 "))
+                    assertTrue(it.message, it.message.contains("totalCallMs=1500 "))
+                    assertTrue(it.message, it.message.contains("details-omitted=0 "))
+                }
+            }
+        } finally {
+            workers.shutdownNow()
+        }
+    }
+
+    @Test
     fun `shared sticky sweep calls retain the twelve detail refresh quota`() {
         val refresh = diagnostics.begin(FlagRefreshTrigger.PULL, listOf(FlagType.CYAN, FlagType.RED))
         val first = diagnostics.fetch(FlagType.CYAN, refresh.id)
@@ -175,6 +283,21 @@ class HfrNetworkDiagnosticsTest {
         } finally {
             workers.shutdownNow()
         }
+    }
+
+    private fun finishTogether(refreshes: List<FlagRefreshTrace>, workers: ExecutorService) {
+        val ready = CountDownLatch(refreshes.size)
+        val start = CountDownLatch(1)
+        val finishing = refreshes.map { refresh ->
+            workers.submit {
+                ready.countDown()
+                check(start.await(5, TimeUnit.SECONDS))
+                refresh.finish()
+            }
+        }
+        assertTrue(ready.await(5, TimeUnit.SECONDS))
+        start.countDown()
+        finishing.forEach { it.get(5, TimeUnit.SECONDS) }
     }
 
     private fun complete(

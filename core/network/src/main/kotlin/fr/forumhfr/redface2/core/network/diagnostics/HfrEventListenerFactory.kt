@@ -48,6 +48,8 @@ private class HfrTimingListener(
     private val connections = mutableListOf<ConnectionAttempt>()
     private val successfulConnections = mutableListOf<ConnectionAttempt>()
     private var tlsStart: Long? = null
+    private var tlsAttempt: ConnectionAttempt? = null
+    private var tlsThread: Thread? = null
     private val completedTls = ArrayDeque<Long>()
     private var connectAttempts = 0
     private var connectFailures = 0
@@ -90,19 +92,21 @@ private class HfrTimingListener(
     }
     // OkHttp 5.5 fast fallback races TCP on TaskRunner, then negotiates TLS serially on the
     // caller. TLS has no route in its callbacks: retain it per call and associate completed
-    // handshakes with connectEnd in order, without any thread identity.
+    // handshakes with connectEnd in order. TCP and TLS do not need to run on the same thread.
     @Synchronized
     override fun secureConnectStart(call: Call) {
         if (ended.get()) return
         val start = nanoTime()
         tlsStart?.let { recordFailedTls(elapsedDiagnosticMs(it, start)) }
         tlsStart = start
+        tlsAttempt = connections.singleOrNull()
+        tlsThread = Thread.currentThread()
     }
     @Synchronized
     override fun secureConnectEnd(call: Call, handshake: Handshake?) {
         if (ended.get()) return
         tlsStart?.let { completedTls.addLast(elapsedDiagnosticMs(it, nanoTime())) }
-        tlsStart = null
+        clearPendingTls()
     }
     @Synchronized
     override fun connectEnd(call: Call, inetSocketAddress: InetSocketAddress, proxy: Proxy, protocol: Protocol?) {
@@ -131,11 +135,16 @@ private class HfrTimingListener(
         } else {
             connectFailures++
             recordFailedConnect(attempt.durationMs)
-            // A losing TCP racer can fail while the winner negotiates TLS. Its failure must
-            // not close that handshake. If routes remain unresolved, TLS stays pending until
-            // secureConnectEnd, the next negotiation, cancellation or terminal call failure.
-            if (connections.isEmpty()) finishFailedTls(end)
+            if (failedNegotiatingRoute(attempt) || connections.isEmpty()) finishFailedTls(end)
         }
+    }
+
+    private fun failedNegotiatingRoute(attempt: ConnectionAttempt): Boolean {
+        if (tlsAttempt != null) return tlsAttempt === attempt
+        // OkHttp 5.5 ConnectPlan.connectTlsEtc invokes secureConnectStart and its failure
+        // callback synchronously. TCP racers fail on TaskRunner, independently of that thread.
+        // This matches callbacks within TLS, never the thread that started the TCP attempt.
+        return tlsStart != null && tlsThread === Thread.currentThread()
     }
 
     private fun recordFailedConnect(duration: Long) {
@@ -145,8 +154,14 @@ private class HfrTimingListener(
 
     private fun finishFailedTls(end: Long) {
         tlsStart?.let { recordFailedTls(elapsedDiagnosticMs(it, end)) }
-        tlsStart = null
+        clearPendingTls()
         while (completedTls.isNotEmpty()) recordFailedTls(completedTls.removeFirst())
+    }
+
+    private fun clearPendingTls() {
+        tlsStart = null
+        tlsAttempt = null
+        tlsThread = null
     }
 
     private fun recordFailedTls(duration: Long) {

@@ -28,6 +28,7 @@ class HfrCatalogueTrace : AbstractCoroutineContextElement(Key) {
     }
 
     private class CatalogueOwner(private val refreshId: Long, private val type: FlagType) {
+        // Reattribution keeps the shared detail claim; each refresh still aggregates the call.
         fun summary(call: HfrCallSummary): HfrCallSummary =
             call.copy(refreshId = refreshId, flagType = type, phase = FlagRefreshPhase.CATALOGUE)
     }

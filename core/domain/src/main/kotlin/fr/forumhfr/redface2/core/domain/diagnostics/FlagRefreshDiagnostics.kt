@@ -102,25 +102,77 @@ class FlagRefreshTrace internal constructor(
         // either belongs to this snapshot or uses the immediate quota, never a stale owner.
         val calls = publication.finish() ?: return
         val gaps = resultFetches.values.filterNotNull().flatMap { it.gapSnapshot() }.distinct()
+        val omitted = publishDetails(calls)
+        // Write the summary last; details of this refresh cannot evict its trigger or summary.
+        log.record(DiagnosticsLog.Level.INFO, FlagRefreshDiagnostics.TAG,
+            "refresh=$id types=${types.joinToString { it.name }} ${resultLine(gaps)} " +
+                "${fetchLine()} ${callLine(calls, omitted)} ${transportLine(calls)} ${phaseLine(calls)} " +
+                "triggerToBeginMs=$triggerToBeginMs firstFreshPublicationMs=${publicationMs ?: "-"} " +
+                "totalMs=${elapsedDiagnosticMs(started)} slowest=[${slowestLine(calls)}]")
+    }
+
+    private fun publishDetails(calls: List<HfrCallSummary>): Int {
+        val details = calls.filter(HfrCallDetailPolicy::includes)
+        var emitted = 0
+        for (summary in details) {
+            if (emitted == HfrCallDetailPolicy.MAX_REFRESH_DETAILS) break
+            if (summary.claimDetail()) {
+                log.record(DiagnosticsLog.Level.INFO, "HfrCall", summary.line())
+                emitted++
+            }
+        }
+        return details.count { !it.isDetailPublished() }
+    }
+
+    private fun resultLine(gaps: List<FlagRefreshGap>): String {
         // Outcome follows the result actually published, even if a superseded attempt failed.
-        val failed = failureClass
         val outcome = when {
-            failed != null -> "failure"
+            failureClass != null -> "failure"
             gaps.isNotEmpty() -> "success-incomplete"
             else -> "success"
         }
+        return "outcome=$outcome exception=${failureClass ?: "-"} " +
+            "reasons=${gaps.joinToString { it.name.lowercase() }}"
+    }
+
+    private fun fetchLine(): String =
+        "fetches=${fetches.size} newFetches=${fetches.size - joined} joined=$joined " +
+            "pendingFetches=${fetches.count { !it.isFinished() }} " +
+            "fetchRefreshIds=${fetches.map { it.refreshId }.distinct()} " +
+            "fetchFailureClasses=${fetches.mapNotNull { it.failureClass }.distinct()} " +
+            "categories=${fetches.sumOf { it.categoryCount }} bucketPages=${fetches.sumOf { it.bucketPages }} " +
+            "stickyPages=${fetches.sumOf { it.stickyPages }} " +
+            "catalogue=${if (fetches.any { it.joinedCatalogue() }) "joined" else "local"} " +
+            "stickyGenerationRefused=${fetches.sumOf { it.stickyGenerationRefused }} " +
+            "stickySweepsJoined=${fetches.sumOf { it.stickySweepsJoined }}"
+
+    private fun callLine(calls: List<HfrCallSummary>, omitted: Int): String {
         val durations = calls.map { it.totalMs }.sorted()
-        val phases = FlagRefreshPhase.entries.joinToString { phase ->
+        return "calls=${calls.size} callRefreshIds=${calls.mapNotNull { it.refreshId }.distinct()} " +
+            "details-omitted=$omitted connectAttempts=${calls.sumOf { it.connectAttempts }} " +
+            "connectFailures=${calls.sumOf { it.connectFailures }} " +
+            "connectAbandoned=${calls.sumOf { it.connectAbandoned }} " +
+            "callFailures=${calls.count { it.outcome != HfrCallOutcome.OK }} " +
+            "reused=${calls.count { it.reusedConnection }} maxMs=${durations.lastOrNull() ?: 0} " +
+            "medianMs=${durations.getOrNull(durations.size / 2) ?: 0}"
+    }
+
+    private fun phaseLine(calls: List<HfrCallSummary>): String =
+        FlagRefreshPhase.entries.joinToString { phase ->
             val wall = fetches.sumOf { it.phaseMs(phase) }
             val transport = calls.filter { it.phase == phase }
             "${phase.name.lowercase()}Ms=$wall " +
                 "${phase.name.lowercase()}CallMs=${transport.sumOf { it.totalMs }} " +
                 "${phase.name.lowercase()}Failures=${fetches.sumOf { it.failures(phase) }}"
         }
-        val slowest = calls.sortedByDescending { it.totalMs }.take(3).joinToString(";") {
+
+    private fun slowestLine(calls: List<HfrCallSummary>): String =
+        calls.sortedByDescending { it.totalMs }.take(3).joinToString(";") {
             "${it.endpoint.label()} totalMs=${it.totalMs}"
         }
-        val transport = "waitMs=${calls.sumOf { it.waitMs ?: 0L }} " +
+
+    private fun transportLine(calls: List<HfrCallSummary>): String =
+        "waitMs=${calls.sumOf { it.waitMs ?: 0L }} " +
             "waitMeasuredCalls=${calls.count { it.waitMs != null }} dnsMs=${calls.sumOf { it.dnsMs }} " +
             "connectMs=${calls.sumOf { it.connectMs }} tlsMs=${calls.sumOf { it.tlsMs }} " +
             "failedConnectMs=${calls.sumOf { it.failedConnectMs }} " +
@@ -130,35 +182,6 @@ class FlagRefreshTrace internal constructor(
             "headersSentToReceivedMs=${calls.sumOf { it.headersSentToReceivedMs ?: 0L }} " +
             "bodyMs=${calls.sumOf { it.bodyMs }} totalCallMs=${calls.sumOf { it.totalMs }} " +
             "peakInFlight=${calls.maxOfOrNull { it.inFlightAtStart } ?: 0}"
-        val details = calls.filter(HfrCallDetailPolicy::includes)
-        details.take(HfrCallDetailPolicy.MAX_REFRESH_DETAILS).forEach {
-            log.record(DiagnosticsLog.Level.INFO, "HfrCall", it.line())
-        }
-        // Write the summary last; details of this refresh cannot evict its trigger or summary.
-        log.record(DiagnosticsLog.Level.INFO, FlagRefreshDiagnostics.TAG,
-            "refresh=$id types=${types.joinToString { it.name }} outcome=$outcome " +
-                "exception=${failed ?: "-"} reasons=${gaps.joinToString { it.name.lowercase() }} " +
-                "fetches=${fetches.size} newFetches=${fetches.size - joined} joined=$joined " +
-                "pendingFetches=${fetches.count { !it.isFinished() }} " +
-                "fetchRefreshIds=${fetches.map { it.refreshId }.distinct()} " +
-                "callRefreshIds=${calls.mapNotNull { it.refreshId }.distinct()} " +
-                "fetchFailureClasses=${fetches.mapNotNull { it.failureClass }.distinct()} " +
-                "categories=${fetches.sumOf { it.categoryCount }} bucketPages=${fetches.sumOf { it.bucketPages }} " +
-                "stickyPages=${fetches.sumOf { it.stickyPages }} calls=${calls.size} " +
-                "catalogue=${if (fetches.any { it.joinedCatalogue() }) "joined" else "local"} " +
-                "details-omitted=${(details.size - HfrCallDetailPolicy.MAX_REFRESH_DETAILS).coerceAtLeast(0)} " +
-                "connectAttempts=${calls.sumOf { it.connectAttempts }} " +
-                "connectFailures=${calls.sumOf { it.connectFailures }} " +
-                "connectAbandoned=${calls.sumOf { it.connectAbandoned }} " +
-                "callFailures=${calls.count { it.outcome != HfrCallOutcome.OK }} " +
-                "reused=${calls.count { it.reusedConnection }} maxMs=${durations.lastOrNull() ?: 0} " +
-                "medianMs=${durations.getOrNull(durations.size / 2) ?: 0} $transport $phases " +
-                "stickyGenerationRefused=${fetches.sumOf { it.stickyGenerationRefused }} " +
-                "stickySweepsJoined=${fetches.sumOf { it.stickySweepsJoined }} " +
-                "triggerToBeginMs=$triggerToBeginMs firstFreshPublicationMs=${publicationMs ?: "-"} " +
-                "totalMs=${elapsedDiagnosticMs(started)} " +
-                "slowest=[$slowest]")
-    }
 
     companion object Key : CoroutineContext.Key<FlagRefreshTrace>
 }

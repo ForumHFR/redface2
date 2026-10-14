@@ -63,7 +63,7 @@ class FlagRefreshDiagnosticsTest {
     }
 
     @Test
-    fun `a refresh creating both generations counts both as new but only its returned result determines completeness`() {
+    fun `both generations are new but only the returned result determines completeness`() {
         val log = DiagnosticsLog()
         val trace = FlagRefreshDiagnostics(log).begin(FlagRefreshTrigger.PULL, listOf(FlagType.CYAN))
         val superseded = FlagFetchTrace(trace.id, FlagType.CYAN)
