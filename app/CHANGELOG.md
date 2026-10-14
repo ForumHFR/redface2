@@ -16,6 +16,23 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.63.1` — `internal` (dev) — 2026-10-14
+
+Deuxième lot du chantier « refresh des drapeaux lent ou bloqué » ([#984](https://github.com/ForumHFR/redface2/issues/984)) : défauts établis par lecture du code, indépendants des mesures de 0.63.0.
+
+### Drapeaux : refresh plus fiable ([#984](https://github.com/ForumHFR/redface2/issues/984), [#1473](https://github.com/ForumHFR/redface2/pull/1473))
+
+- **Plus de refresh « réussi » sans les épinglés** : un refresh demandé ne rejoint plus un chargement lancé avant un changement et devenu périmé ; un chargement remplacé est annulé au lieu de finir ses requêtes.
+- **Les requêtes en cours sont vraiment annulées** quand on quitte l'écran ou qu'un refresh est remplacé, au lieu d'aller jusqu'au timeout.
+- **Un drapeau supprimé ne réapparaît plus** quand un chargement en cours se termine.
+- **Liste incomplète signalée** : si les épinglés d'une catégorie ou une page ne se chargent pas, la liste fraîche s'affiche avec « Liste incomplète : … » et un bouton Réessayer, rattaché à son onglet (agrégé pour Super), au lieu d'une liste trouée présentée comme complète. Le délai minimal entre deux refresh automatiques est conservé, le prochain essai n'est pas retardé.
+
+### Dépendances
+
+- Compose BOM 2026.09.00 (Compose 1.12.1, correctifs seulement) ([#1459](https://github.com/ForumHFR/redface2/pull/1459)).
+
+---
+
 ## `0.63.0` — `internal` (dev) — 2026-10-14
 
 Premier lot du chantier « refresh des drapeaux lent ou bloqué » ([#984](https://github.com/ForumHFR/redface2/issues/984)) : mesurer avant de corriger.

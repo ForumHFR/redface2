@@ -1,3 +1,4 @@
-Redface 2 v0.63.0 — dev.
-- Drapeaux : l'app mesure désormais chaque refresh (durée de chaque requête au forum, phases, échecs), pour trouver pourquoi il est parfois lent ou bloqué.
-- Après un refresh lent : menu du compte → Diagnostics → Copier, puis collez le texte sur le topic DEV. La copie ne contient que ces mesures, ni pseudo ni sujet.
+Redface 2 v0.63.1 — dev.
+- Drapeaux : refresh plus fiable. Quitter l'écran annule vraiment les requêtes en cours, un drapeau supprimé ne réapparaît plus, les épinglés ne disparaissent plus après deux refresh rapprochés.
+- Si une partie de la liste ne charge pas : « Liste incomplète » avec un bouton Réessayer.
+- Après un refresh lent : Diagnostics → Copier, puis collez sur le topic DEV.
