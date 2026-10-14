@@ -1,3 +1,4 @@
-Redface 2 v0.63.0 — dev.
-- Flags: the app now measures every refresh (each forum request, phases, failures) to find out why it is sometimes slow or stuck.
-- After a slow refresh: account menu → Diagnostics → Copy, then paste the text on the DEV topic. The copy only holds these measurements, no username or topic.
+Redface 2 v0.63.1 — dev.
+- Flags: more reliable refresh. Leaving the screen really cancels pending requests, a removed flag no longer comes back, pinned topics no longer vanish after two quick refreshes.
+- If part of the list fails to load: a « Liste incomplète » warning with a retry action.
+- After a slow refresh: Diagnostics → Copy, then paste on the DEV topic.
