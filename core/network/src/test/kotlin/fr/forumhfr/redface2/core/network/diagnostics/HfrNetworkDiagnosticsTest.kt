@@ -141,7 +141,15 @@ class HfrNetworkDiagnosticsTest {
     @Test
     fun `catalogue published immediately retains all timings for a late owner without replay`() {
         val catalogue = HfrCatalogueTrace()
-        val call = complete(catalogue = catalogue)
+        val call = HfrCallSummary(
+            id = collector.nextId(), endpoint = HfrEndpoint(HfrEndpoint.Family.CATEGORIES),
+            role = HfrClientRole.ANON, refreshId = null, phase = FlagRefreshPhase.CATALOGUE,
+            waitMs = 11, dnsMs = 23, connectMs = 37, tlsMs = 17,
+            headersSentToReceivedMs = 1_401, bodyMs = 29, totalMs = 1_501,
+            status = 200, protocol = "h2", reusedConnection = false,
+            inFlightAtStart = collector.started(), outcome = HfrCallOutcome.OK,
+        )
+        collector.completed(call, fetch = null, catalogue = catalogue)
         val refresh = diagnostics.begin(FlagRefreshTrigger.PULL, listOf(FlagType.RED))
         val fetch = diagnostics.fetch(FlagType.RED, refresh.id)
         fetch.catalogue(catalogue, wasJoined = true)
@@ -153,11 +161,19 @@ class HfrNetworkDiagnosticsTest {
         val retained = fetch.callSnapshot().single()
         assertEquals(call.id, retained.id)
         assertEquals(call.totalMs, retained.totalMs)
+        assertEquals(call.waitMs, retained.waitMs)
+        assertEquals(call.dnsMs, retained.dnsMs)
+        assertEquals(call.connectMs, retained.connectMs)
+        assertEquals(call.tlsMs, retained.tlsMs)
+        assertEquals(call.headersSentToReceivedMs, retained.headersSentToReceivedMs)
+        assertEquals(call.bodyMs, retained.bodyMs)
         assertEquals(refresh.id, retained.refreshId)
         assertEquals(FlagType.RED, retained.flagType)
         assertEquals(FlagRefreshPhase.CATALOGUE, retained.phase)
         val line = log.entries.value.last().message
-        listOf("calls=1 ", "catalogue=joined ", "catalogueCallMs=1500 ", "totalCallMs=1500 ",
+        listOf("calls=1 ", "catalogue=joined ", "catalogueCallMs=1501 ", "totalCallMs=1501 ",
+            "waitMs=11 ", "dnsMs=23 ", "connectMs=37 ", "tlsMs=17 ",
+            "headersSentToReceivedMs=1401 ", "bodyMs=29 ",
             "details-omitted=0 ").forEach { assertTrue(line, line.contains(it)) }
     }
 

@@ -22,6 +22,7 @@ import io.mockk.mockk
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
@@ -45,6 +46,42 @@ class DefaultForumRepositoryTest {
     private val json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
+    }
+
+    @Test
+    fun `categories cancellation propagates even when a stale fallback exists - 984`() = runTest {
+        val cancellation = CancellationException("cancel catalogue")
+        val api = mockk<HfrApiClient>()
+        coEvery { api.getCategories(any()) } returns fixture("rest_categories.json")
+        val initial = Instant.parse("2026-05-03T12:00:00Z")
+        val clock = MutableClock(initial)
+        val repo = repository(api, clock)
+        assertTrue(repo.getCategories(forceRefreshIfStale = true) is ForumResult.Success)
+        clock.advance(java.time.Duration.ofDays(2))
+        coEvery { api.getCategories(any()) } throws cancellation
+
+        assertCancellation(cancellation,
+            runCatching { repo.getCategories(forceRefreshIfStale = true) }.exceptionOrNull())
+    }
+
+    @Test
+    fun `subcategories cancellation is not converted to Failure - 984`() = runTest {
+        val cancellation = CancellationException("cancel subcategories")
+        val api = mockk<HfrApiClient>()
+        coEvery { api.getSubcategories(13) } throws cancellation
+        assertCancellation(cancellation,
+            runCatching { repository(api).refreshSubcategories(13) }.exceptionOrNull())
+    }
+
+    @Test
+    fun `topic list cancellation is not converted to Failure - 984`() = runTest {
+        val cancellation = CancellationException("cancel topics")
+        val api = mockk<HfrApiClient>()
+        coEvery {
+            api.getTopicList(cat = 13, subcat = null, page = 1, resultsPerPage = any(), useAuth = true)
+        } throws cancellation
+        assertCancellation(cancellation,
+            runCatching { repository(api).refreshTopicList(13, null, 1) }.exceptionOrNull())
     }
 
     @Test
@@ -533,6 +570,11 @@ class DefaultForumRepositoryTest {
         val result = repo.getFlagFilteredTopics(cat = 23, subcat = null, bucket = FlagFilterBucket.READ)
 
         assertTrue("expected Failure, got $result", result is ForumResult.Failure)
+    }
+
+    private fun assertCancellation(expected: CancellationException, actual: Throwable?) {
+        assertTrue("CancellationException must propagate, got $actual", actual is CancellationException)
+        assertEquals(expected.message, actual?.message)
     }
 
     private fun repository(

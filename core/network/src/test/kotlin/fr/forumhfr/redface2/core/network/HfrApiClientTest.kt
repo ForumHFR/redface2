@@ -2,12 +2,24 @@ package fr.forumhfr.redface2.core.network
 
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
+import java.io.IOException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.runTest
+import okhttp3.Call
+import okhttp3.EventListener
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.SocketPolicy
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -28,12 +40,41 @@ class HfrApiClientTest {
             authenticated = okHttp,
             anonymous = okHttp,
             baseUrl = server.url("/"),
+            ioDispatcher = Dispatchers.IO,
         )
     }
 
     @After
     fun tearDown() {
         server.shutdown()
+    }
+
+    @Test
+    fun `authenticated REST cancellation interrupts pending headers - 984`() =
+        assertRestCancellation(useAuth = true, duringBody = false)
+
+    @Test
+    fun `anonymous REST cancellation interrupts pending headers - 984`() =
+        assertRestCancellation(useAuth = false, duringBody = false)
+
+    @Test
+    fun `authenticated REST cancellation interrupts body reading - 984`() =
+        assertRestCancellation(useAuth = true, duringBody = true)
+
+    @Test
+    fun `anonymous REST cancellation interrupts body reading - 984`() =
+        assertRestCancellation(useAuth = false, duringBody = true)
+
+    @Test
+    fun `REST preserves network errors while the coroutine stays active - 984`() = runTest {
+        val failure = IOException("network failure")
+        val okHttp = OkHttpClient.Builder().addInterceptor { throw failure }.build()
+        val failingClient = HfrApiClient(okHttp, okHttp, server.url("/"), Dispatchers.IO)
+        listOf(false, true).forEach { useAuth ->
+            val error = runCatching { failingClient.getCategories(useAuth) }.exceptionOrNull()
+            assertTrue("IOException must propagate, got $error", error is IOException)
+            assertEquals(failure.message, error?.message)
+        }
     }
 
     @Test
@@ -314,4 +355,59 @@ class HfrApiClientTest {
             rewritten.queryParameterValues("uri"),
         )
     }
+
+    private fun assertRestCancellation(useAuth: Boolean, duringBody: Boolean) = runTest {
+        val listener = CallLifecycleListener()
+        val okHttp = OkHttpClient.Builder().eventListener(listener).build()
+        val cancellable = HfrApiClient(okHttp, okHttp, server.url("/"), Dispatchers.IO)
+        server.enqueue(if (duringBody) {
+            MockResponse().setBody("ab").throttleBody(1, 30, TimeUnit.SECONDS)
+        } else {
+            MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE)
+        })
+        val inFlight = async(Dispatchers.IO) { cancellable.getCategories(useAuth) }
+        try {
+            val ready = if (duringBody) listener.responseBodyStarted else listener.requestHeadersSent
+            assertTrue("REST call did not reach the barrier", ready.await(CALL_EVENT_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+            if (!duringBody) assertEquals(1L, listener.responseHeadersReceived.count)
+            inFlight.assertCancelledAtCallLevel(listener)
+        } finally {
+            // Manual cancellation only cleans up a failing red test, after the assertions.
+            listener.activeCall?.cancel()
+            inFlight.cancel()
+        }
+    }
+
+    private suspend fun Deferred<String>.assertCancelledAtCallLevel(listener: CallLifecycleListener) {
+        val completed = CountDownLatch(1)
+        invokeOnCompletion { completed.countDown() }
+        cancel()
+        assertTrue("coroutine cancellation must invoke Call.cancel()",
+            listener.canceled.await(CALL_EVENT_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+        assertTrue(requireNotNull(listener.activeCall).isCanceled())
+        assertTrue("cancelled REST call must fail promptly",
+            listener.terminalFailure.await(CALL_EVENT_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+        assertTrue("cancelled coroutine must complete promptly",
+            completed.await(CALL_EVENT_TIMEOUT_SECONDS, TimeUnit.SECONDS))
+        val error = runCatching { await() }.exceptionOrNull()
+        assertTrue("CancellationException must propagate, got $error", error is CancellationException)
+    }
+
+    private class CallLifecycleListener : EventListener() {
+        @Volatile var activeCall: Call? = null
+        val requestHeadersSent = CountDownLatch(1)
+        val responseHeadersReceived = CountDownLatch(1)
+        val responseBodyStarted = CountDownLatch(1)
+        val canceled = CountDownLatch(1)
+        val terminalFailure = CountDownLatch(1)
+
+        override fun callStart(call: Call) { activeCall = call }
+        override fun requestHeadersEnd(call: Call, request: Request) { requestHeadersSent.countDown() }
+        override fun responseHeadersEnd(call: Call, response: Response) { responseHeadersReceived.countDown() }
+        override fun responseBodyStart(call: Call) { responseBodyStarted.countDown() }
+        override fun canceled(call: Call) { canceled.countDown() }
+        override fun callFailed(call: Call, ioe: IOException) { terminalFailure.countDown() }
+    }
+
+    private companion object { const val CALL_EVENT_TIMEOUT_SECONDS = 5L }
 }

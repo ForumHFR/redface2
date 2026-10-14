@@ -19,6 +19,7 @@ import java.time.Clock
 import java.time.Instant
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.channels.BufferOverflow
@@ -299,6 +300,7 @@ class DefaultForumRepository @Inject constructor(
                 ForumResult.Success(list)
             },
             onFailure = { throwable ->
+                if (throwable is CancellationException) throw throwable
                 Log.w(LOG_TAG, "Categories fetch failed", throwable)
                 ForumResult.Failure(throwable)
             },
@@ -316,6 +318,7 @@ class DefaultForumRepository @Inject constructor(
                 ForumResult.Success(list)
             },
             onFailure = { throwable ->
+                if (throwable is CancellationException) throw throwable
                 Log.w(LOG_TAG, "Subcategories fetch failed for cat=$cat", throwable)
                 ForumResult.Failure(throwable)
             },
@@ -345,6 +348,7 @@ class DefaultForumRepository @Inject constructor(
         }.fold(
             onSuccess = { ForumResult.Success(it) },
             onFailure = { throwable ->
+                if (throwable is CancellationException) throw throwable
                 Log.w(LOG_TAG, "Topic list fetch failed for cat=$cat subcat=$subcat page=$page", throwable)
                 ForumResult.Failure(throwable)
             },
