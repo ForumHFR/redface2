@@ -31,7 +31,8 @@ class AppForegroundDiagnosticsTest {
         now = 72_999_000_000L
         val captured = diagnostics.snapshot()
         assertEquals(DiagnosticsTimingSnapshot(72, 2), captured)
-        // MainActivity skips backgrounded on a configuration change; its replacement starts again.
+        // MainActivity skips backgrounded on a configuration change, so the replacement's
+        // foregrounded() keeps the original foreground start (no reset on rotation).
         now = 80_000_000_000L
         diagnostics.foregrounded()
         assertEquals(DiagnosticsTimingSnapshot(80, 10), diagnostics.snapshot())

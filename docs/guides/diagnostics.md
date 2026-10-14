@@ -63,6 +63,9 @@ La famille vient uniquement de la route de `connectionAcquired`, y compris en r�
 Une tentative IPv6 échouée suivie d'une connexion IPv4 acquise donne `ip=v4` ; un `connectEnd`
 sans acquisition ne définit pas la famille. En cas d'acquisitions successives dans un appel,
 la dernière acquisition observée fournit la famille.
+Derrière un proxy configuré sur l'appareil, la famille est celle de la connexion au proxy (proxy HTTP),
+ou `-` quand l'adresse cible n'est pas résolue localement (proxy SOCKS) : `-` ne veut alors pas dire
+« aucune connexion ».
 Le détail reste limité aux appels lents (≥ 1 s), échoués ou annulés, au plus 12 par refresh.
 
 Ces nouveaux champs ne journalisent aucune adresse IP, aucun SSID, nom DNS, opérateur ou identifiant réseau.
