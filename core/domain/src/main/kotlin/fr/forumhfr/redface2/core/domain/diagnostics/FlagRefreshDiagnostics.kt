@@ -23,6 +23,7 @@ enum class FlagRefreshGap {
 class FlagRefreshDiagnostics @Inject constructor(private val log: DiagnosticsLog) {
     private val sequence = AtomicLong()
 
+    /** An unowned fetch gets a source identity from the same sequence, without beginning a refresh. */
     fun fetch(type: FlagType, refreshId: Long?): FlagFetchTrace =
         FlagFetchTrace(refreshId ?: sequence.incrementAndGet(), type)
 
@@ -61,17 +62,26 @@ class FlagRefreshTrace internal constructor(
 ) : AbstractCoroutineContextElement(Key) {
     private val triggerToBeginMs = elapsedDiagnosticMs(started)
     private val fetches = linkedSetOf<FlagFetchTrace>()
+    private val publication = HfrCallPublication()
     private val resultFetches = mutableMapOf<FlagType, FlagFetchTrace?>()
     private var joined = 0
     private var publicationMs: Long? = null
     private var failureClass: String? = null
 
+    /** New/joined counts are relative to this refresh: reuse includes a completed cached replacement. */
     @Synchronized
     fun attach(fetch: FlagFetchTrace, wasJoined: Boolean) {
-        if (fetches.add(fetch) && wasJoined) joined++
+        if (!publication.isActive()) return
+        if (fetches.add(fetch)) {
+            fetch.publishTo(publication)
+            if (wasJoined) joined++
+        }
     }
 
-    /** Select the source of the returned result; abandoned attempts remain in the transport totals. */
+    /**
+     * Select the returned result's source; abandoned attempts remain in the transport totals.
+     * A replacement created by another caller is joined, even if it belongs to a newer generation.
+     */
     @Synchronized
     fun result(type: FlagType, fetch: FlagFetchTrace?) {
         if (fetch != null && fetch !in fetches) attach(fetch, wasJoined = true)
@@ -88,7 +98,9 @@ class FlagRefreshTrace internal constructor(
 
     @Synchronized
     fun finish() {
-        val calls = fetches.flatMap { it.callSnapshot() }.distinctBy { it.id }
+        // Closing and taking the accepted calls is atomic with network completion. A late call
+        // either belongs to this snapshot or uses the immediate quota, never a stale owner.
+        val calls = publication.finish() ?: return
         val gaps = resultFetches.values.filterNotNull().flatMap { it.gapSnapshot() }.distinct()
         // Outcome follows the result actually published, even if a superseded attempt failed.
         val failed = failureClass
@@ -111,6 +123,10 @@ class FlagRefreshTrace internal constructor(
         val transport = "waitMs=${calls.sumOf { it.waitMs ?: 0L }} " +
             "waitMeasuredCalls=${calls.count { it.waitMs != null }} dnsMs=${calls.sumOf { it.dnsMs }} " +
             "connectMs=${calls.sumOf { it.connectMs }} tlsMs=${calls.sumOf { it.tlsMs }} " +
+            "failedConnectMs=${calls.sumOf { it.failedConnectMs }} " +
+            "maxFailedConnectMs=${calls.maxOfOrNull { it.maxFailedConnectMs } ?: 0} " +
+            "failedTlsMs=${calls.sumOf { it.failedTlsMs }} " +
+            "maxFailedTlsMs=${calls.maxOfOrNull { it.maxFailedTlsMs } ?: 0} " +
             "headersSentToReceivedMs=${calls.sumOf { it.headersSentToReceivedMs ?: 0L }} " +
             "bodyMs=${calls.sumOf { it.bodyMs }} totalCallMs=${calls.sumOf { it.totalMs }} " +
             "peakInFlight=${calls.maxOfOrNull { it.inFlightAtStart } ?: 0}"
@@ -133,6 +149,7 @@ class FlagRefreshTrace internal constructor(
                 "details-omitted=${(details.size - HfrCallDetailPolicy.MAX_REFRESH_DETAILS).coerceAtLeast(0)} " +
                 "connectAttempts=${calls.sumOf { it.connectAttempts }} " +
                 "connectFailures=${calls.sumOf { it.connectFailures }} " +
+                "connectAbandoned=${calls.sumOf { it.connectAbandoned }} " +
                 "callFailures=${calls.count { it.outcome != HfrCallOutcome.OK }} " +
                 "reused=${calls.count { it.reusedConnection }} maxMs=${durations.lastOrNull() ?: 0} " +
                 "medianMs=${durations.getOrNull(durations.size / 2) ?: 0} $transport $phases " +
@@ -150,6 +167,8 @@ class FlagRefreshTrace internal constructor(
 class FlagFetchTrace(val refreshId: Long, val type: FlagType) : AbstractCoroutineContextElement(Key) {
     private val calls = mutableListOf<HfrCallSummary>()
     private val catalogues = linkedSetOf<HfrCatalogueTrace>()
+    private val stickySweeps = linkedSetOf<FlagFetchTrace>()
+    private val publications = linkedSetOf<HfrCallPublication>()
     private var catalogueJoined = false
     private val gaps = mutableSetOf<FlagRefreshGap>()
     private val phases = mutableMapOf<FlagRefreshPhase, Long>()
@@ -167,11 +186,28 @@ class FlagFetchTrace(val refreshId: Long, val type: FlagType) : AbstractCoroutin
     var failureClass: String? = null
         private set
 
-    @Synchronized fun call(summary: HfrCallSummary) { calls += summary }
+    @Synchronized fun call(summary: HfrCallSummary): Boolean {
+        calls += summary
+        publications.removeAll { !it.isActive() }
+        var deferred = false
+        publications.forEach { deferred = it.call(summary) || deferred }
+        return deferred
+    }
+    @Synchronized internal fun publishTo(publication: HfrCallPublication) {
+        publications.removeAll { !it.isActive() }
+        if (!publication.isActive() || !publications.add(publication)) return
+        calls.forEach { publication.call(it) }
+        catalogues.forEach { it.publishTo(publication, refreshId, type) }
+        stickySweeps.forEach { it.publishTo(publication) }
+    }
     @Synchronized fun markFinished() { finished = true }
     @Synchronized fun isFinished(): Boolean = finished
     @Synchronized fun joinedStickySweep() { stickySweepsJoined++ }
+    @Synchronized fun sticky(sweep: FlagFetchTrace) {
+        if (stickySweeps.add(sweep)) publications.forEach { sweep.publishTo(it) }
+    }
     @Synchronized fun absorbSticky(sweep: FlagFetchTrace) {
+        sticky(sweep)
         calls += sweep.callSnapshot()
         stickyPages += sweep.stickyPages
         gaps += sweep.gapSnapshot()
@@ -181,7 +217,7 @@ class FlagFetchTrace(val refreshId: Long, val type: FlagType) : AbstractCoroutin
     @Synchronized fun catalogue(trace: HfrCatalogueTrace, wasJoined: Boolean) {
         catalogues += trace
         catalogueJoined = catalogueJoined || wasJoined
-        trace.correlate()
+        publications.forEach { trace.publishTo(it, refreshId, type) }
     }
     @Synchronized fun joinedCatalogue(): Boolean = catalogueJoined
     @Synchronized fun callSnapshot(): List<HfrCallSummary> =

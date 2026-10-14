@@ -94,7 +94,8 @@ class DefaultFlagRepositoryTest {
         assertEquals(2, diagnostics.entries.value.size)
         val summary = diagnostics.entries.value.last().message
         listOf("outcome=success ", "categories=2", "bucketPages=2", "stickyPages=2", "calls=4",
-            "callFailures=0", "reused=4", "bucketsFailures=0", "stickiesFailures=0", "joined=0").forEach {
+            "callFailures=0", "reused=4", "bucketsFailures=0", "stickiesFailures=0",
+            "fetches=1 newFetches=1 joined=0").forEach {
             assertTrue(summary, summary.contains(it))
         }
         assertTrue(repo.observe(FlagType.CYAN).first() is FlagsResult.Success)
@@ -206,6 +207,7 @@ class DefaultFlagRepositoryTest {
         observeJob.join()
         refreshJob.join()
         val joined = diagnostics.entries.value.single { it.message.contains("joined=1") }.message
+        assertTrue(joined, joined.contains("fetches=1 newFetches=0 joined=1"))
         assertTrue(joined, joined.contains("fetchRefreshIds=[1]"))
         assertTrue(joined, joined.contains("bucketPages=2"))
         assertTrue(joined, joined.contains("stickyGenerationRefused=1"))
@@ -1557,16 +1559,23 @@ class DefaultFlagRepositoryTest {
         }
         runCurrent()
         assertTrue(repo.addFlag(sampleFlagAddContext()).isSuccess)
+        // The active observer makes addFlag launch its detached replacement before the old
+        // request resumes. That fetch is new globally, but reused by the initial refresh.
+        assertEquals("addFlag must start the replacement before releasing the old fetch", 2, favoriteCalls)
         gate.complete(Unit)
         observeJob.join()
 
         assertEquals(listOf(35395), observed?.flags?.map { it.topicId })
         assertEquals("the invalidated generation must run a second REST fetch", 2, favoriteCalls)
-        val summary = diagnostics.entries.value.single {
-            it.tag == FlagRefreshDiagnostics.TAG && it.message.contains("outcome=")
-        }.message
+        val refreshEntries = diagnostics.entries.value.filter { it.tag == FlagRefreshDiagnostics.TAG }
+        // Identity 2 belongs to the detached fetch, not to a second refresh lifecycle.
+        assertEquals(2, refreshEntries.size)
+        assertTrue(refreshEntries.first().message.startsWith("refresh=1 trigger=initial-observe "))
+        val summary = refreshEntries.single { it.message.contains("outcome=") }.message
+        assertTrue(summary, summary.startsWith("refresh=1 "))
         assertTrue(summary, summary.contains("outcome=success "))
-        assertTrue(summary, summary.contains("fetches=2 newFetches=2"))
+        assertTrue(summary, summary.contains("fetches=2 newFetches=1 joined=1"))
+        assertTrue(summary, summary.contains("fetchRefreshIds=[1, 2]"))
         assertTrue(summary, !summary.contains("cache_generation"))
         coVerify(exactly = 1) {
             flagDao.replaceForType(

@@ -47,13 +47,20 @@ private class HfrTimingListener(
     private var dnsStart: Long? = null
     private val connections = mutableListOf<ConnectionAttempt>()
     private val successfulConnections = mutableListOf<ConnectionAttempt>()
+    private var tlsStart: Long? = null
+    private val completedTls = ArrayDeque<Long>()
     private var connectAttempts = 0
     private var connectFailures = 0
+    private var connectAbandoned = 0
     private var headersStart: Long? = null
     private var bodyStart: Long? = null
     private var dnsMs = 0L
     private var connectMs = 0L
     private var tlsMs = 0L
+    private var failedConnectMs = 0L
+    private var maxFailedConnectMs = 0L
+    private var failedTlsMs = 0L
+    private var maxFailedTlsMs = 0L
     private var headersMs = 0L
     private var receivedHeaders = false
     private var bodyMs = 0L
@@ -61,12 +68,15 @@ private class HfrTimingListener(
     private var status: Int? = null
     private var protocol: String? = null
 
+    @Synchronized
     override fun callStart(call: Call) {
         started = nanoTime()
         inFlight = diagnostics.started()
     }
 
+    @Synchronized
     override fun dnsStart(call: Call, domainName: String) { dnsStart = nanoTime() }
+    @Synchronized
     override fun dnsEnd(call: Call, domainName: String, inetAddressList: List<java.net.InetAddress>) {
         dnsMs += dnsStart?.let { elapsedDiagnosticMs(it, nanoTime()) } ?: 0L
         dnsStart = null
@@ -74,20 +84,25 @@ private class HfrTimingListener(
 
     @Synchronized
     override fun connectStart(call: Call, inetSocketAddress: InetSocketAddress, proxy: Proxy) {
-        connections += ConnectionAttempt(inetSocketAddress, proxy, Thread.currentThread(), nanoTime())
+        if (ended.get()) return
+        connections += ConnectionAttempt(inetSocketAddress, proxy, nanoTime())
         connectAttempts++
     }
-    // OkHttp's TLS callbacks have no address. They run on the thread of their connect attempt.
+    // OkHttp 5.5 fast fallback races TCP on TaskRunner, then negotiates TLS serially on the
+    // caller. TLS has no route in its callbacks: retain it per call and associate completed
+    // handshakes with connectEnd in order, without any thread identity.
     @Synchronized
     override fun secureConnectStart(call: Call) {
-        currentAttempt()?.tlsStart = nanoTime()
+        if (ended.get()) return
+        val start = nanoTime()
+        tlsStart?.let { recordFailedTls(elapsedDiagnosticMs(it, start)) }
+        tlsStart = start
     }
     @Synchronized
     override fun secureConnectEnd(call: Call, handshake: Handshake?) {
-        currentAttempt()?.let { attempt ->
-            attempt.tlsMs += pending(attempt.tlsStart, nanoTime())
-            attempt.tlsStart = null
-        }
+        if (ended.get()) return
+        tlsStart?.let { completedTls.addLast(elapsedDiagnosticMs(it, nanoTime())) }
+        tlsStart = null
     }
     @Synchronized
     override fun connectEnd(call: Call, inetSocketAddress: InetSocketAddress, proxy: Proxy, protocol: Protocol?) {
@@ -101,29 +116,54 @@ private class HfrTimingListener(
         protocol: Protocol?,
         ioe: IOException,
     ) {
-        connectFailures++
         finishConnect(inetSocketAddress, proxy, successful = false)
     }
 
-    private fun currentAttempt(): ConnectionAttempt? =
-        connections.lastOrNull { it.thread === Thread.currentThread() }
-
     private fun finishConnect(address: InetSocketAddress, proxy: Proxy, successful: Boolean) {
-        val candidates = connections.filter { it.address == address && it.proxy == proxy }
-        val attempt = candidates.firstOrNull { it.thread === Thread.currentThread() }
-            ?: candidates.firstOrNull() ?: return
+        if (ended.get()) return
+        val attempt = connections.firstOrNull { it.address == address && it.proxy == proxy } ?: return
         connections.remove(attempt)
+        val end = nanoTime()
+        attempt.durationMs = elapsedDiagnosticMs(attempt.started, end)
         if (successful) {
-            val end = nanoTime()
-            attempt.durationMs = elapsedDiagnosticMs(attempt.started, end)
-            attempt.tlsMs += pending(attempt.tlsStart, end)
-            attempt.tlsStart = null
+            attempt.tlsMs = completedTls.removeFirstOrNull() ?: 0L
             successfulConnections += attempt
+        } else {
+            connectFailures++
+            recordFailedConnect(attempt.durationMs)
+            // A losing TCP racer can fail while the winner negotiates TLS. Its failure must
+            // not close that handshake. If routes remain unresolved, TLS stays pending until
+            // secureConnectEnd, the next negotiation, cancellation or terminal call failure.
+            if (connections.isEmpty()) finishFailedTls(end)
         }
+    }
+
+    private fun recordFailedConnect(duration: Long) {
+        failedConnectMs += duration
+        maxFailedConnectMs = maxOf(maxFailedConnectMs, duration)
+    }
+
+    private fun finishFailedTls(end: Long) {
+        tlsStart?.let { recordFailedTls(elapsedDiagnosticMs(it, end)) }
+        tlsStart = null
+        while (completedTls.isNotEmpty()) recordFailedTls(completedTls.removeFirst())
+    }
+
+    private fun recordFailedTls(duration: Long) {
+        failedTlsMs += duration
+        maxFailedTlsMs = maxOf(maxFailedTlsMs, duration)
+    }
+
+    private fun finishPendingConnections(end: Long) {
+        connections.forEach { recordFailedConnect(elapsedDiagnosticMs(it.started, end)) }
+        connectAbandoned += connections.size
+        connections.clear()
+        finishFailedTls(end)
     }
 
     @Synchronized
     override fun connectionAcquired(call: Call, connection: Connection) {
+        if (ended.get()) return
         val route = connection.route()
         val winner = successfulConnections.firstOrNull {
             it.address == route.socketAddress && it.proxy == route.proxy
@@ -138,7 +178,9 @@ private class HfrTimingListener(
         successfulConnections.clear()
         protocol = connection.protocol().toString()
     }
+    @Synchronized
     override fun requestHeadersEnd(call: Call, request: Request) { headersStart = nanoTime() }
+    @Synchronized
     override fun responseHeadersEnd(call: Call, response: Response) {
         headersMs += headersStart?.let { elapsedDiagnosticMs(it, nanoTime()) } ?: 0L
         headersStart = null
@@ -146,13 +188,17 @@ private class HfrTimingListener(
         status = response.code
         protocol = response.protocol.toString()
     }
+    @Synchronized
     override fun responseBodyStart(call: Call) { bodyStart = nanoTime() }
+    @Synchronized
     override fun responseBodyEnd(call: Call, byteCount: Long) {
         bodyMs += bodyStart?.let { elapsedDiagnosticMs(it, nanoTime()) } ?: 0L
         bodyStart = null
     }
 
+    @Synchronized
     override fun requestFailed(call: Call, ioe: IOException) { finishPendingResponse() }
+    @Synchronized
     override fun responseFailed(call: Call, ioe: IOException) { finishPendingResponse() }
 
     private fun finishPendingResponse() {
@@ -163,11 +209,18 @@ private class HfrTimingListener(
 
     override fun callEnd(call: Call) { finish(call, null) }
     override fun callFailed(call: Call, ioe: IOException) { finish(call, ioe) }
+    @Synchronized
+    override fun canceled(call: Call) {
+        // canceled is not terminal in OkHttp. Close pending attempts now, but publish the call
+        // only at callEnd/callFailed so cancellation cannot decrement in-flight calls twice.
+        if (!ended.get()) finishPendingConnections(nanoTime())
+    }
 
     @Synchronized
     private fun finish(call: Call, failure: IOException?) {
         if (!ended.compareAndSet(false, true)) return
         val end = nanoTime()
+        finishPendingConnections(end)
         val wait = tag?.let { elapsedDiagnosticMs(it.queuedNanos, it.executeNanos ?: started) }
         val outcome = when {
             call.isCanceled() -> HfrCallOutcome.CANCELLED
@@ -183,6 +236,8 @@ private class HfrTimingListener(
             status = status, protocol = protocol, reusedConnection = reused, inFlightAtStart = inFlight,
             outcome = outcome, exceptionClass = failure?.diagnosticClassName(), flagType = tag?.fetch?.type,
             connectAttempts = connectAttempts, connectFailures = connectFailures,
+            connectAbandoned = connectAbandoned, failedConnectMs = failedConnectMs,
+            maxFailedConnectMs = maxFailedConnectMs, failedTlsMs = failedTlsMs, maxFailedTlsMs = maxFailedTlsMs,
         ), tag?.fetch, tag?.catalogue)
         connections.clear()
         successfulConnections.clear()
@@ -204,10 +259,8 @@ private class HfrTimingListener(
     private class ConnectionAttempt(
         val address: InetSocketAddress,
         val proxy: Proxy,
-        val thread: Thread,
         val started: Long,
     ) {
-        var tlsStart: Long? = null
         var tlsMs: Long = 0L
         var durationMs: Long = 0L
     }

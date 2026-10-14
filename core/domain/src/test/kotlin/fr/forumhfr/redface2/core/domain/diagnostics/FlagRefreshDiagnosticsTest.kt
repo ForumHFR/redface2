@@ -32,7 +32,7 @@ class FlagRefreshDiagnosticsTest {
         trace.finish()
         assertEquals(2, log.entries.value.size)
         val line = log.entries.value.last().message
-        listOf("outcome=success", "joined=1", "calls=4", "maxMs=80", "medianMs=60", "reused=4",
+        listOf("outcome=success", "fetches=2 newFetches=1 joined=1", "calls=4", "maxMs=80", "medianMs=60", "reused=4",
             "categories=4", "bucketPages=2", "callFailures=0", "firstFreshPublicationMs=").forEach {
             assertTrue(line, line.contains(it))
         }
@@ -63,7 +63,7 @@ class FlagRefreshDiagnosticsTest {
     }
 
     @Test
-    fun `a replaced generation keeps attempt counters but only the returned result determines completeness`() {
+    fun `a refresh creating both generations counts both as new but only its returned result determines completeness`() {
         val log = DiagnosticsLog()
         val trace = FlagRefreshDiagnostics(log).begin(FlagRefreshTrigger.PULL, listOf(FlagType.CYAN))
         val superseded = FlagFetchTrace(trace.id, FlagType.CYAN)
@@ -80,26 +80,31 @@ class FlagRefreshDiagnosticsTest {
 
         val line = log.entries.value.last().message
         assertTrue(line, line.contains("outcome=success "))
-        assertTrue(line, line.contains("fetches=2 newFetches=2"))
+        assertTrue(line, line.contains("fetches=2 newFetches=2 joined=0"))
         assertFalse(line, line.contains("cache_generation") || line.contains("sticky_request"))
     }
 
     @Test
     fun `returned cached replacement retains its own gaps instead of abandoned attempt gaps`() {
         val log = DiagnosticsLog()
-        val trace = FlagRefreshDiagnostics(log).begin(FlagRefreshTrigger.PULL, listOf(FlagType.CYAN))
+        val diagnostics = FlagRefreshDiagnostics(log)
+        val trace = diagnostics.begin(FlagRefreshTrigger.PULL, listOf(FlagType.CYAN))
         val abandoned = FlagFetchTrace(trace.id, FlagType.CYAN)
         abandoned.gap(FlagRefreshGap.CACHE_GENERATION)
         trace.attach(abandoned, false)
-        val cached = FlagFetchTrace(99, FlagType.CYAN)
+        val cached = diagnostics.fetch(FlagType.CYAN, refreshId = null)
         cached.gap(FlagRefreshGap.ROOM_WRITE)
+        cached.markFinished()
         trace.result(FlagType.CYAN, cached)
         trace.finish()
 
         val line = log.entries.value.last().message
+        // A detached source consumes an identity, but creates neither a begin nor a summary.
+        assertEquals(2, log.entries.value.size)
         assertTrue(line, line.contains("outcome=success-incomplete"))
         assertTrue(line, line.contains("reasons=room_write"))
         assertTrue(line, line.contains("fetches=2 newFetches=1 joined=1"))
+        assertTrue(line, line.contains("fetchRefreshIds=[1, 2]"))
         assertFalse(line, line.contains("cache_generation"))
     }
 

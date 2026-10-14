@@ -856,7 +856,10 @@ class DefaultFlagRepository @Inject constructor(
             val observed = synchronized(inFlightFetches) {
                 inFlightFetches[key]?.takeIf { it.deferred.isActive }?.also { joined = true }
                     ?: run {
-                        val trace = refreshDiagnostics.fetch(type, caller?.id)
+                        val trace = refreshDiagnostics.fetch(type, caller?.id).also {
+                            // Register publication before a detached fetch can complete its first call.
+                            caller?.attach(it, wasJoined = false)
+                        }
                         val deferred = fetchScope.async(trace + HfrRequestQueued()) {
                             fetch(type = type, userId = userId, startCacheGeneration = cacheGeneration)
                         }
@@ -1251,10 +1254,13 @@ class DefaultFlagRepository @Inject constructor(
         val existing = stickySweeps[key]
         if (existing != null) {
             parentTrace?.joinedStickySweep()
+            existing.trace?.let { parentTrace?.sticky(it) }
             existing
         } else {
             stickySweeps.keys.filter { it != key }.forEach(stickySweeps::remove)
-            val trace = parentTrace?.let { FlagFetchTrace(it.refreshId, it.type) }
+            val trace = parentTrace?.let { parent ->
+                FlagFetchTrace(parent.refreshId, parent.type).also { parent.sticky(it) }
+            }
             val deferred = fetchScope.async(trace ?: kotlin.coroutines.EmptyCoroutineContext) {
                 coroutineScope {
                     cats.map { category ->

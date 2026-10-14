@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.HfrClientRole
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshDiagnostics
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrigger
 import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshPhase
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrace
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrCatalogueTrace
 import fr.forumhfr.redface2.core.model.FlagType
 import java.io.IOException
@@ -38,6 +39,7 @@ class HfrEventListenerFactoryTest {
     private var now = 0L
     private val factory = HfrEventListenerFactory(collector, HfrClientRole.AUTH) { now }
     private val address = InetSocketAddress.createUnresolved("unused", 443)
+    private var activeRefresh: FlagRefreshTrace? = null
 
     @Test
     fun `new and reused connections retain all timings without consuming buffer entries`() {
@@ -82,11 +84,12 @@ class HfrEventListenerFactoryTest {
 
     @Test
     fun `slow failed cancelled and HTTP failure calls produce safe lines exactly once`() {
+        beginRefresh()
         val (slow, slowListener) = newCall()
         slowListener.callStart(slow)
         at(1_000) { slowListener.responseHeadersEnd(slow, response(slow, 200)); slowListener.callEnd(slow) }
         slowListener.callEnd(slow)
-        assertTrue(log.entries.value.isEmpty())
+        assertTrue(log.entries.value.none { it.tag == "HfrCall" })
 
         val (failed, failedListener) = newCall()
         failedListener.callStart(failed)
@@ -116,6 +119,7 @@ class HfrEventListenerFactoryTest {
 
     @Test
     fun `waiting before execute alone can make an otherwise fast call slow`() {
+        beginRefresh()
         val (call, listener) = newCall()
         at(1_500) { call.request().tag(HfrCallTag::class.java)!!.executing(now); listener.callStart(call) }
         at(1_501) { listener.responseHeadersEnd(call, response(call, 200)); listener.callEnd(call) }
@@ -157,13 +161,13 @@ class HfrEventListenerFactoryTest {
         try {
             listener.callStart(call)
             at(10) { workerA.submit { listener.connectStart(call, address, Proxy.NO_PROXY) }.get() }
-            at(20) { workerA.submit { listener.secureConnectStart(call) }.get() }
             at(30) { workerB.submit { listener.connectStart(call, secondAddress, Proxy.NO_PROXY) }.get() }
-            at(40) { workerB.submit { listener.secureConnectStart(call) }.get() }
             val winner = if (winnerIsA) workerA else workerB
             val loser = if (winnerIsA) workerB else workerA
             val winningAddress = if (winnerIsA) address else secondAddress
             val losingAddress = if (winnerIsA) secondAddress else address
+            // Fast fallback negotiates TLS only for the selected TCP route, serially per call.
+            at(40) { winner.submit { listener.secureConnectStart(call) }.get() }
             at(50) {
                 loser.submit {
                     listener.connectFailed(call, losingAddress, Proxy.NO_PROXY, null, IOException("Secret"))
@@ -178,7 +182,10 @@ class HfrEventListenerFactoryTest {
 
             val summary = fetch.callSnapshot().single()
             assertEquals(if (winnerIsA) 80L else 60L, summary.connectMs)
-            assertEquals(if (winnerIsA) 50L else 30L, summary.tlsMs)
+            assertEquals(30L, summary.tlsMs)
+            assertEquals(if (winnerIsA) 20L else 40L, summary.failedConnectMs)
+            assertEquals(summary.failedConnectMs, summary.maxFailedConnectMs)
+            assertEquals(0L, summary.failedTlsMs)
             assertEquals(2, summary.connectAttempts)
             assertEquals(1, summary.connectFailures)
             assertFalse(summary.reusedConnection)
@@ -191,6 +198,7 @@ class HfrEventListenerFactoryTest {
 
     @Test
     fun `responseFailed followed by callFailed accounts for the body and call only once`() {
+        beginRefresh()
         val (call, listener) = newCall()
         listener.callStart(call)
         at(10) { listener.requestHeadersEnd(call, call.request()) }
@@ -265,7 +273,198 @@ class HfrEventListenerFactoryTest {
         assertEquals(20L, summary.tlsMs)
         assertEquals(2, summary.connectAttempts)
         assertEquals(1, summary.connectFailures)
+        assertEquals(30L, summary.failedConnectMs)
+        assertEquals(30L, summary.maxFailedConnectMs)
+        assertEquals(20L, summary.failedTlsMs)
+        assertEquals(20L, summary.maxFailedTlsMs)
         assertEquals(HfrCallOutcome.OK, summary.outcome)
+    }
+
+    @Test
+    fun `blocked TCP and failed TLS attempts retain cumulative and maximum durations in the export`() {
+        beginRefresh()
+        val (call, listener) = newCall()
+        listener.callStart(call)
+        at(100) { listener.connectStart(call, address, Proxy.NO_PROXY) }
+        at(10_100) { listener.connectFailed(call, address, Proxy.NO_PROXY, null, IOException("SecretTCP")) }
+        at(10_200) { listener.connectStart(call, address, Proxy.NO_PROXY) }
+        at(10_300) { listener.secureConnectStart(call) }
+        at(12_300) { listener.connectFailed(call, address, Proxy.NO_PROXY, null, IOException("SecretTLS")) }
+        at(12_400) { listener.connectStart(call, address, Proxy.NO_PROXY) }
+        at(12_500) { listener.secureConnectStart(call) }
+        at(13_500) { listener.connectFailed(call, address, Proxy.NO_PROXY, null, IOException("SecretRetry")) }
+        at(13_600) { listener.callFailed(call, IOException("SecretTerminal")) }
+
+        val summary = fetch.callSnapshot().single()
+        assertEquals(0L, summary.connectMs)
+        assertEquals(0L, summary.tlsMs)
+        assertEquals(13_200L, summary.failedConnectMs)
+        assertEquals(10_000L, summary.maxFailedConnectMs)
+        assertEquals(3_000L, summary.failedTlsMs)
+        assertEquals(2_000L, summary.maxFailedTlsMs)
+        assertEquals(3, summary.connectFailures)
+        flushRefresh()
+        log.entries.value.filter { it.tag == "HfrCall" || it.message.contains("outcome=") }.forEach {
+            assertTrue(it.message, it.message.contains("failedConnectMs=13200 maxFailedConnectMs=10000"))
+            assertTrue(it.message, it.message.contains("failedTlsMs=3000 maxFailedTlsMs=2000"))
+            listOf("Secret", "unused", "443", "https", "Cookie").forEach { secret ->
+                assertFalse(it.message, it.message.contains(secret))
+            }
+        }
+    }
+
+    @Test
+    fun `callFailed closes every pending connection and handshake exactly once`() {
+        val (call, listener) = newCall()
+        val secondAddress = InetSocketAddress.createUnresolved("SecretHost", 443)
+        listener.callStart(call)
+        at(100) { listener.connectStart(call, address, Proxy.NO_PROXY) }
+        at(200) { listener.connectStart(call, secondAddress, Proxy.NO_PROXY) }
+        at(300) { listener.secureConnectStart(call) }
+        at(10_300) { listener.callFailed(call, IOException("SecretTerminal")) }
+        at(10_400) {
+            listener.connectFailed(call, address, Proxy.NO_PROXY, null, IOException("SecretLate"))
+            listener.connectEnd(call, secondAddress, Proxy.NO_PROXY, Protocol.HTTP_2)
+            listener.secureConnectEnd(call, null)
+            listener.callFailed(call, IOException("SecretDuplicate"))
+        }
+
+        val summary = fetch.callSnapshot().single()
+        assertEquals(20_300L, summary.failedConnectMs)
+        assertEquals(10_200L, summary.maxFailedConnectMs)
+        assertEquals(10_000L, summary.failedTlsMs)
+        assertEquals(10_000L, summary.maxFailedTlsMs)
+        assertEquals(2, summary.connectAbandoned)
+        assertEquals(0, summary.connectFailures)
+        assertEquals(HfrCallOutcome.FAILURE, summary.outcome)
+        assertEquals(1, log.entries.value.count { it.tag == "HfrCall" })
+        assertFalse(log.entries.value.single().message.contains("SecretHost"))
+    }
+
+    @Test
+    fun `cancellation closes a pending TLS attempt before terminal call failure without double counting`() {
+        val (call, listener) = newCall()
+        listener.callStart(call)
+        at(100) { listener.connectStart(call, address, Proxy.NO_PROXY) }
+        at(200) { listener.secureConnectStart(call) }
+        at(10_200) { call.cancel(); listener.canceled(call) }
+        at(10_300) {
+            listener.connectFailed(call, address, Proxy.NO_PROXY, null, IOException("SecretLate"))
+            listener.callFailed(call, IOException("SecretCancelled"))
+        }
+        listener.canceled(call)
+
+        val summary = fetch.callSnapshot().single()
+        assertEquals(10_100L, summary.failedConnectMs)
+        assertEquals(10_100L, summary.maxFailedConnectMs)
+        assertEquals(10_000L, summary.failedTlsMs)
+        assertEquals(10_000L, summary.maxFailedTlsMs)
+        assertEquals(1, summary.connectAbandoned)
+        assertEquals(HfrCallOutcome.CANCELLED, summary.outcome)
+        val (next, nextListener) = newCall()
+        nextListener.callStart(next)
+        nextListener.callEnd(next)
+        assertEquals(1, fetch.callSnapshot().last().inFlightAtStart)
+        assertEquals(1, log.entries.value.count { it.tag == "HfrCall" })
+    }
+
+    @Test
+    fun `TCP racers and TLS callbacks on different threads retain the acquired handshake`() {
+        val (call, listener) = newCall()
+        val secondAddress = InetSocketAddress.createUnresolved("SecretOtherHost", 443)
+        val tcpWorker = Executors.newSingleThreadExecutor()
+        val tlsWorker = Executors.newSingleThreadExecutor()
+        try {
+            listener.callStart(call)
+            at(10) { tcpWorker.submit { listener.connectStart(call, address, Proxy.NO_PROXY) }.get() }
+            at(20) { tcpWorker.submit { listener.connectStart(call, secondAddress, Proxy.NO_PROXY) }.get() }
+            at(30) { tlsWorker.submit { listener.secureConnectStart(call) }.get() }
+            at(40) {
+                tcpWorker.submit {
+                    listener.connectFailed(call, secondAddress, Proxy.NO_PROXY, null, IOException("SecretTCP"))
+                }.get()
+            }
+            at(70) { listener.secureConnectEnd(call, null) }
+            at(90) {
+                tlsWorker.submit { listener.connectEnd(call, address, Proxy.NO_PROXY, Protocol.HTTP_2) }.get()
+            }
+            listener.connectionAcquired(call, connection())
+            at(100) { listener.callEnd(call) }
+
+            val summary = fetch.callSnapshot().single()
+            assertEquals(80L, summary.connectMs)
+            assertEquals(40L, summary.tlsMs)
+            assertEquals(20L, summary.failedConnectMs)
+            assertEquals(0L, summary.failedTlsMs)
+            assertFalse(summary.reusedConnection)
+        } finally {
+            tcpWorker.shutdownNow()
+            tlsWorker.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `TLS failure on a different thread from TCP retains the handshake duration`() {
+        val (call, listener) = newCall()
+        val tcpWorker = Executors.newSingleThreadExecutor()
+        val tlsWorker = Executors.newSingleThreadExecutor()
+        try {
+            listener.callStart(call)
+            at(10) { tcpWorker.submit { listener.connectStart(call, address, Proxy.NO_PROXY) }.get() }
+            at(20) { tlsWorker.submit { listener.secureConnectStart(call) }.get() }
+            at(10_020) {
+                listener.connectFailed(call, address, Proxy.NO_PROXY, null, IOException("SecretTLS"))
+            }
+            at(10_100) { listener.callFailed(call, IOException("SecretTerminal")) }
+
+            val summary = fetch.callSnapshot().single()
+            assertEquals(10_010L, summary.failedConnectMs)
+            assertEquals(10_000L, summary.failedTlsMs)
+            assertEquals(10_000L, summary.maxFailedTlsMs)
+            assertEquals(HfrCallOutcome.FAILURE, summary.outcome)
+        } finally {
+            tcpWorker.shutdownNow()
+            tlsWorker.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `connections to the same address through different proxies keep separate attempt timings`() {
+        val (call, listener) = newCall()
+        val proxy = Proxy(Proxy.Type.HTTP, InetSocketAddress.createUnresolved("SecretProxyHost", 8080))
+        listener.callStart(call)
+        at(10) { listener.connectStart(call, address, Proxy.NO_PROXY) }
+        at(20) { listener.connectStart(call, address, proxy) }
+        at(30) { listener.secureConnectStart(call) }
+        at(60) { listener.secureConnectEnd(call, null) }
+        at(70) { listener.connectFailed(call, address, Proxy.NO_PROXY, null, IOException("SecretTCP")) }
+        at(90) { listener.connectEnd(call, address, proxy, Protocol.HTTP_2) }
+        listener.connectionAcquired(call, connection(routeProxy = proxy))
+        at(100) { listener.callEnd(call) }
+
+        val summary = fetch.callSnapshot().single()
+        assertEquals(70L, summary.connectMs)
+        assertEquals(30L, summary.tlsMs)
+        assertEquals(60L, summary.failedConnectMs)
+        assertEquals(0L, summary.failedTlsMs)
+        listOf("unused", "SecretProxyHost", "8080").forEach {
+            assertFalse(summary.line(), summary.line().contains(it))
+        }
+    }
+
+    @Test
+    fun `listener publishes a late failure after its refresh has closed`() {
+        val refresh = beginRefresh()
+        val (call, listener) = newCall()
+        listener.callStart(call)
+        at(10) { listener.connectStart(call, address, Proxy.NO_PROXY) }
+        refresh.finish()
+        assertTrue(log.entries.value.none { it.tag == "HfrCall" })
+        at(1_500) { listener.callFailed(call, IOException("SecretLateFailure")) }
+
+        assertEquals(1, log.entries.value.count { it.tag == "HfrCall" })
+        assertEquals(fetch.callSnapshot().single().copy(refreshId = null).line(), log.entries.value.last().message)
+        assertTrue(log.entries.value.last().message.contains("failedConnectMs=1490"))
     }
 
     @Test
@@ -359,11 +558,16 @@ class HfrEventListenerFactoryTest {
     }
 
     private fun flushRefresh() {
-        val trace = FlagRefreshDiagnostics(log).begin(FlagRefreshTrigger.PULL, listOf(FlagType.CYAN))
-        trace.attach(fetch, false)
+        val trace = activeRefresh ?: beginRefresh()
         trace.result(FlagType.CYAN, fetch)
         trace.finish()
     }
+
+    private fun beginRefresh(): FlagRefreshTrace =
+        FlagRefreshDiagnostics(log).begin(FlagRefreshTrigger.PULL, listOf(FlagType.CYAN)).also {
+            it.attach(fetch, false)
+            activeRefresh = it
+        }
 
     private fun newCall(correlated: Boolean = true): Pair<Call, EventListener> {
         val tag = HfrCallTag(now, if (correlated) fetch else null)
@@ -381,7 +585,10 @@ class HfrEventListenerFactoryTest {
         .request(call.request()).protocol(Protocol.HTTP_2).code(code).message("SecretResponse")
         .header("Set-Cookie", "SecretResponseCookie").body("SecretBody".toResponseBody()).build()
 
-    private fun connection(socketAddress: InetSocketAddress = address): Connection = object : Connection {
+    private fun connection(
+        socketAddress: InetSocketAddress = address,
+        routeProxy: Proxy = Proxy.NO_PROXY,
+    ): Connection = object : Connection {
         override fun route(): Route {
             val client = OkHttpClient()
             val address = Address(
@@ -391,7 +598,7 @@ class HfrEventListenerFactoryTest {
                 proxy = null, protocols = client.protocols, connectionSpecs = client.connectionSpecs,
                 proxySelector = client.proxySelector,
             )
-            return Route(address, Proxy.NO_PROXY, socketAddress)
+            return Route(address, routeProxy, socketAddress)
         }
         override fun socket(): Socket = error("Not used by diagnostics")
         override fun handshake(): Handshake? = null

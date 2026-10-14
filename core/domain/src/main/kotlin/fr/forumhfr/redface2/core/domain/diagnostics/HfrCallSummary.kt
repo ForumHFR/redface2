@@ -52,12 +52,20 @@ data class HfrCallSummary(
     val flagType: FlagType? = null,
     val connectAttempts: Int = 0,
     val connectFailures: Int = 0,
+    val connectAbandoned: Int = 0,
+    // Like connectMs, failedConnectMs includes TLS; TLS is also reported separately.
+    val failedConnectMs: Long = 0,
+    val maxFailedConnectMs: Long = 0,
+    val failedTlsMs: Long = 0,
+    val maxFailedTlsMs: Long = 0,
 ) {
     fun line(): String =
         "refresh=${refreshId ?: "-"} ${endpoint.label()} role=${role.name.lowercase()} " +
             "type=${flagType?.name ?: "-"} phase=${phase?.name?.lowercase() ?: "-"} " +
             "waitMs=${waitMs ?: "-"} dnsMs=$dnsMs " +
             "connectMs=$connectMs tlsMs=$tlsMs connectAttempts=$connectAttempts connectFailures=$connectFailures " +
+            "connectAbandoned=$connectAbandoned failedConnectMs=$failedConnectMs " +
+            "maxFailedConnectMs=$maxFailedConnectMs failedTlsMs=$failedTlsMs maxFailedTlsMs=$maxFailedTlsMs " +
             "headersSentToReceivedMs=${headersSentToReceivedMs ?: "-"} " +
             "bodyMs=$bodyMs totalMs=$totalMs status=${status ?: "-"} protocol=${protocol ?: "-"} " +
             "reused=$reusedConnection inFlight=$inFlightAtStart outcome=${outcome.name.lowercase()} " +
