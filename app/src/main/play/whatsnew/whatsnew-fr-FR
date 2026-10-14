@@ -1,4 +1,3 @@
-Redface 2 v0.62.0 — bêta.
-- « Aller à une page » : raccourcis Première page / Dernière page, dans les sujets comme dans les MP.
-- Dans un sujet, revenir à la page précédente restaure la position exacte si vous l'aviez déjà ouverte.
-- Envoyer un message confirme enfin l'envoi : tout de suite dans le sujet, et aussi depuis la liste des drapeaux.
+Redface 2 v0.63.0 — dev.
+- Drapeaux : l'app mesure désormais chaque refresh (durée de chaque requête au forum, phases, échecs), pour trouver pourquoi il est parfois lent ou bloqué.
+- Après un refresh lent : menu du compte → Diagnostics → Copier, puis collez le texte sur le topic DEV. La copie ne contient que ces mesures, ni pseudo ni sujet.
