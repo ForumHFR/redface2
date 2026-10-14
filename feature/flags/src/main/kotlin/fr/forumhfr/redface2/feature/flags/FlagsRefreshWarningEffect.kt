@@ -20,6 +20,7 @@ import kotlinx.coroutines.launch
 
 /** Session/view changes cancel both the display and its locally retained Retry action. */
 @Composable
+@Suppress("LongParameterList") // Effect API: warning + session/view scope + snackbar host + two callbacks.
 internal fun FlagsRefreshWarningEffect(
     warning: FlagsRefreshWarning?,
     authSessionKey: String?,
@@ -29,29 +30,42 @@ internal fun FlagsRefreshWarningEffect(
     onRetry: (FlagsRefreshWarning) -> Unit,
 ) {
     val resources = LocalContext.current.resources
+    val currentWarning by rememberUpdatedState(warning)
     val currentOnConsumed by rememberUpdatedState(onConsumed)
     val currentOnRetry by rememberUpdatedState(onRetry)
-    LaunchedEffect(warning, authSessionKey, selectedTab) {
+    LaunchedEffect(warning?.presentation, authSessionKey, selectedTab, host) {
         if (warning != null && warning.pseudo == authSessionKey && warning.tab == selectedTab) {
             // A previous composition already presented this event. Its suspended display was
             // cancelled, so finish the handoff without showing it again after recreation.
-            if (warning.wasPresented) {
+            if (warning.presentation.wasPresented) {
                 currentOnConsumed(warning)
                 return@LaunchedEffect
             }
             val result = host.showRefreshWarning(
-                message = refreshWarningMessage(resources, warning.issue),
+                // Causes may change while this SAME presentation is suspended. Reading the latest
+                // snapshot also updates the visible text, without cancelling its Retry action.
+                message = {
+                    val latest = currentWarning?.takeIf { it.presentation === warning.presentation } ?: warning
+                    refreshWarningMessage(resources, latest.issue)
+                },
                 retryLabel = resources.getString(R.string.flags_retry),
-                onPresented = { warning.wasPresented = true },
+                onPresented = { warning.presentation.wasPresented = true },
             )
-            currentOnConsumed(warning)
-            if (result == SnackbarResult.ActionPerformed) currentOnRetry(warning)
+            val latest = currentWarning?.takeIf { it.presentation === warning.presentation } ?: return@LaunchedEffect
+            currentOnConsumed(latest)
+            if (result == SnackbarResult.ActionPerformed) currentOnRetry(latest)
         }
     }
 }
 
 internal suspend fun SnackbarHostState.showRefreshWarning(
     message: String,
+    retryLabel: String,
+    onPresented: () -> Unit = {},
+): SnackbarResult = showRefreshWarning({ message }, retryLabel, onPresented)
+
+internal suspend fun SnackbarHostState.showRefreshWarning(
+    message: () -> String,
     retryLabel: String,
     onPresented: () -> Unit = {},
 ): SnackbarResult = coroutineScope {
@@ -78,9 +92,10 @@ internal suspend fun SnackbarHostState.showRefreshWarning(
 }
 
 private class RefreshWarningVisuals(
-    override val message: String,
+    private val currentMessage: () -> String,
     override val actionLabel: String,
 ) : SnackbarVisuals {
+    override val message: String get() = currentMessage()
     override val withDismissAction = true
     override val duration = SnackbarDuration.Long
 }

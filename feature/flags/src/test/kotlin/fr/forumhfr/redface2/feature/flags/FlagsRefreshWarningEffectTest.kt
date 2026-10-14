@@ -12,6 +12,7 @@ import fr.forumhfr.redface2.core.domain.flags.FlagRefreshIssue
 import fr.forumhfr.redface2.core.model.FlagType
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -122,6 +123,83 @@ class FlagsRefreshWarningEffectTest {
     }
 
     @Test
+    fun `resolving Cyan while Super is presenting keeps the Red warning and retry`() {
+        val host = SnackbarHostState()
+        val types = listOf(FlagType.CYAN, FlagType.RED, FlagType.FAVORITE)
+        val warning = mutableStateOf<FlagsRefreshWarning?>(superWarning())
+        val tab = mutableStateOf<FlagTab>(FlagTab.Cyan)
+        var consumed = 0
+        var retried: FlagsRefreshWarning? = null
+        compose.setContent {
+            FlagsRefreshWarningEffect(
+                warning = warning.value,
+                authSessionKey = "old",
+                selectedTab = tab.value,
+                host = host,
+                onConsumed = { consumed++; warning.value = null },
+                onRetry = { retried = it },
+            )
+        }
+        compose.waitForIdle()
+        assertNull(host.currentSnackbarData)
+        // Cyan is refreshing; return to Super before its complete result arrives.
+        compose.runOnIdle { tab.value = FlagTab.Super; Snapshot.sendApplyNotifications() }
+        compose.waitUntil(TIMEOUT_MS) { host.currentSnackbarData != null }
+        compose.waitForIdle()
+        val shown = requireNotNull(host.currentSnackbarData)
+        val remaining = requireNotNull(requireNotNull(warning.value).without(FlagType.CYAN))
+        compose.runOnIdle { warning.value = remaining; Snapshot.sendApplyNotifications() }
+        compose.waitForIdle()
+        assertSame("updating causes must keep the suspended presentation", shown, host.currentSnackbarData)
+        assertEquals("Liste incomplète : toutes les pages n'ont pas été chargées", shown.visuals.message)
+        assertEquals("Réessayer", shown.visuals.actionLabel)
+        assertEquals(0, consumed)
+        compose.runOnIdle { shown.performAction() }
+        compose.waitUntil(TIMEOUT_MS) { consumed == 1 && retried != null }
+        assertSame("retry must receive the remaining causes", remaining, retried)
+        assertEquals(types, requireNotNull(retried).retryTypes)
+        assertNull(host.currentSnackbarData)
+    }
+
+    @Test
+    fun `remounting an updated Super warning cannot replay it or retain its old action`() {
+        val host = SnackbarHostState()
+        val warning = mutableStateOf<FlagsRefreshWarning?>(superWarning())
+        val mount = mutableIntStateOf(0)
+        var consumed = 0
+        var retried = 0
+        compose.setContent {
+            key(mount.intValue) {
+                FlagsRefreshWarningEffect(
+                    warning = warning.value,
+                    authSessionKey = "old",
+                    selectedTab = FlagTab.Super,
+                    host = host,
+                    onConsumed = { consumed++; warning.value = null },
+                    onRetry = { retried++ },
+                )
+            }
+        }
+        compose.waitUntil(TIMEOUT_MS) { host.currentSnackbarData != null }
+        compose.waitForIdle()
+        val shown = requireNotNull(host.currentSnackbarData)
+        compose.runOnIdle {
+            warning.value = requireNotNull(warning.value).without(FlagType.CYAN)
+            Snapshot.sendApplyNotifications()
+        }
+        compose.waitForIdle()
+        assertSame(shown, host.currentSnackbarData)
+        assertEquals(0, consumed)
+        compose.runOnIdle { mount.intValue++; Snapshot.sendApplyNotifications() }
+        compose.waitForIdle()
+        assertNull(host.currentSnackbarData)
+        assertEquals(1, consumed)
+        compose.runOnIdle { shown.performAction() }
+        compose.waitForIdle()
+        assertEquals(0, retried)
+    }
+
+    @Test
     fun `a complete snapshot withdraws a warning queued behind another snackbar`() {
         val host = SnackbarHostState()
         val warning = mutableStateOf<FlagsRefreshWarning?>(null)
@@ -211,6 +289,17 @@ class FlagsRefreshWarningEffectTest {
         assertEquals(0, consumed)
         assertEquals(0, retried)
     }
+
+    private fun superWarning(): FlagsRefreshWarning = FlagsRefreshWarning(
+        issuesByType = mapOf(
+            FlagType.CYAN to FlagRefreshIssue(stickyCategories = listOf(FlagRefreshCategory(13, "Programmation"))),
+            FlagType.RED to FlagRefreshIssue(paginationTruncated = true),
+        ),
+        tab = FlagTab.Super,
+        retryTypes = listOf(FlagType.CYAN, FlagType.RED, FlagType.FAVORITE),
+        sessionGeneration = 1,
+        pseudo = "old",
+    )
 
     private fun warning(): FlagsRefreshWarning = FlagsRefreshWarning(
         issuesByType = mapOf(

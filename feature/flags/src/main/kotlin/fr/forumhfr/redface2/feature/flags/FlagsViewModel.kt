@@ -547,8 +547,9 @@ class FlagsViewModel @Inject constructor(
             .distinctUntilChanged()
         val filteredFlags = combine(
             flagRepository.observe(type).onEach { result ->
-                // Explicit refreshes are reported by their returned outcome, once per serialized
-                // batch (Super included). Initial and stale-disk observations have no such owner.
+                // Explicit refreshes are reported by their returned outcome, once per requesting
+                // view after the serialized queue (Super included). Initial and stale-disk
+                // observations have no such owner.
                 if (isCurrentFlagsSession(session, pseudo) &&
                     !(refreshingSessionGeneration == session && type in refreshingCoveredTypes)
                 ) {
@@ -927,7 +928,7 @@ class FlagsViewModel @Inject constructor(
 
     fun consumeRefreshWarning(warning: FlagsRefreshWarning) {
         refreshWarnings.update { warnings ->
-            if (warnings[warning.tab] === warning) warnings - warning.tab else warnings
+            if (warnings[warning.tab]?.presentation === warning.presentation) warnings - warning.tab else warnings
         }
     }
 
@@ -988,8 +989,12 @@ class FlagsViewModel @Inject constructor(
                 FlagRefreshTrigger.PULL, types, throttled = false,
                 deferredTypes = types.filterNot { it in refreshingCoveredTypes },
             )
-            // Dedup: a type already covered by the in-flight batch is being refreshed right now, so
-            // queuing it again would immediately re-fetch what just landed — ignore it (pre-lot semantics).
+            // Join covered types to this view too, including a type that already finished inside
+            // the current batch. Its result belongs to the request without another fetch.
+            refreshingWarningTabs = refreshingWarningTabs.mapValues { (type, tabs) ->
+                if (type in types) tabs + warningTab else tabs
+            }
+            // Only uncovered types need a queued fetch; repeated pulls keep all requesting views.
             val deferredTypes = types.filterNot { it in refreshingCoveredTypes }
             val queuedAt = System.nanoTime()
             deferredTypes.forEach { pendingManualDiagnosticStarts.putIfAbsent(it, queuedAt) }
@@ -1160,12 +1165,21 @@ class FlagsViewModel @Inject constructor(
         var types = initialTypes
         var initialBatch = true
         var batchStartedNanos = startedNanos
+        val session = flagsSessionGeneration
+        val pseudo = (authState.value as? AuthState.Authenticated)?.pseudo
+        // One bounded aggregate for the whole queue: a Super pull can join an in-flight type and
+        // queue the other two. Publish only after all of their outcomes are known.
+        val issueTypes = linkedSetOf<FlagType>()
+        val warningTabs = linkedMapOf<FlagType, Set<FlagTab>>()
         try {
             while (true) {
                 fetchRefreshBatch(
                     types, if (initialBatch) trigger else FlagRefreshTrigger.PULL,
                     batchStartedNanos,
-                )
+                ) { type, result ->
+                    if (isCurrentFlagsSession(session, pseudo)) collectRefreshIssue(type, result, issueTypes)
+                }
+                collectRefreshWarningTabs(warningTabs)
                 if (initialBatch) {
                     onInitialSuccess()
                     initialBatch = false
@@ -1176,37 +1190,68 @@ class FlagsViewModel @Inject constructor(
                 pendingManualRefreshTypes.clear()
                 val landing = deferredLandingType
                 if (landing != null && landing in types) deferredLandingType = null
-                val warningTabs = types.associateWith { requireNotNull(pendingManualWarningTabs.remove(it)) }
-                generation = beginRefresh(type = types.first(), coveredTypes = types.toSet(), warningTabs = warningTabs)
+                val batchWarningTabs = types.associateWith { requireNotNull(pendingManualWarningTabs.remove(it)) }
+                generation = beginRefresh(
+                    type = types.first(), coveredTypes = types.toSet(), warningTabs = batchWarningTabs,
+                )
             }
         } finally {
+            collectRefreshWarningTabs(warningTabs)
+            publishRefreshWarnings(issueTypes, warningTabs, session, pseudo)
             endRefresh(generation)
         }
     }
 
+    private fun collectRefreshIssue(
+        type: FlagType,
+        result: FlagsResult,
+        issueTypes: MutableSet<FlagType>,
+    ) {
+        if (takeRefreshIssue(type, result) != null) {
+            issueTypes.add(type)
+        } else if (result is FlagsResult.Success && result.issue == null) {
+            issueTypes.remove(type)
+        }
+    }
+
+    private fun collectRefreshWarningTabs(warningTabs: MutableMap<FlagType, Set<FlagTab>>) {
+        // Read after suspension: a pull can attach another view while the batch is in flight.
+        refreshingWarningTabs.forEach { (type, tabs) -> warningTabs[type] = warningTabs[type].orEmpty() + tabs }
+    }
+
+    private fun publishRefreshWarnings(
+        issueTypes: Set<FlagType>,
+        warningTabs: Map<FlagType, Set<FlagTab>>,
+        session: Long,
+        pseudo: String?,
+    ) {
+        if (issueTypes.isEmpty() || !isCurrentFlagsSession(session, pseudo)) return
+        // An observation may have resolved an earlier type while a later batch was suspended.
+        // Use the current causes so the aggregate cannot resurrect an obsolete partial snapshot.
+        val issues = reportedRefreshIssues.filterKeys { it in issueTypes }
+        warningTabs.values.flatten().distinct().forEach { tab ->
+            val tabTypes = SUPER_FAVORITE_BACKING_TYPES.filter { tab in warningTabs[it].orEmpty() }
+            val tabIssues = issues.filterKeys { it in tabTypes }
+            if (tabIssues.isNotEmpty()) {
+                publishRefreshWarning(tab, tabIssues, tabTypes, session, requireNotNull(pseudo))
+            }
+        }
+    }
+
     /** Fetches one serialized batch of types, keeping [refreshingType] in sync for the top bar. */
-    private suspend fun fetchRefreshBatch(types: List<FlagType>, trigger: FlagRefreshTrigger, startedNanos: Long) {
-        val session = flagsSessionGeneration
-        val pseudo = (authState.value as? AuthState.Authenticated)?.pseudo
-        val issues = linkedMapOf<FlagType, FlagRefreshIssue>()
-        val warningTabs = refreshingWarningTabs
+    private suspend fun fetchRefreshBatch(
+        types: List<FlagType>,
+        trigger: FlagRefreshTrigger,
+        startedNanos: Long,
+        onResult: (FlagType, FlagsResult) -> Unit,
+    ) {
         val trace = refreshDiagnostics.begin(trigger, types, startedNanos)
         try {
             withContext(trace) {
                 types.forEach { type ->
                     refreshingType = type
                     val result = flagRepository.refresh(type)
-                    if (isCurrentFlagsSession(session, pseudo)) {
-                        takeRefreshIssue(type, result)?.let { issues[type] = it }
-                    }
-                }
-            }
-            if (issues.isNotEmpty() && isCurrentFlagsSession(session, pseudo)) {
-                issues.keys.flatMap { warningTabs.getValue(it) }.distinct().forEach { tab ->
-                    val tabTypes = types.filter { tab in warningTabs.getValue(it) }
-                    publishRefreshWarning(
-                        tab, issues.filterKeys { it in tabTypes }, tabTypes, session, requireNotNull(pseudo),
-                    )
+                    onResult(type, result)
                 }
             }
         } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
@@ -1522,22 +1567,26 @@ private fun flagTabForType(type: FlagType): FlagTab = when (type) {
     FlagType.FAVORITE -> FlagTab.Favorite
 }
 
-/** One transient warning per origin view, fenced to its session; retry keeps the batch order. */
+/** One transient warning per origin view, fenced to its session; retry keeps the requested type order. */
 class FlagsRefreshWarning(
     private val issuesByType: Map<FlagType, FlagRefreshIssue>,
     val retryTypes: List<FlagType>,
     val tab: FlagTab,
     internal val sessionGeneration: Long,
     internal val pseudo: String,
+    internal val presentation: Presentation = Presentation(),
 ) {
     val issue = FlagRefreshIssue(
         stickyCategories = issuesByType.values.flatMap { it.stickyCategories }.distinctBy { it.id },
         paginationTruncated = issuesByType.values.any { it.paginationTruncated },
     )
 
-    // Set only when the host actually presents it, not while it waits behind another snackbar.
-    // Kept on the VM-owned event so cancelling the display (rotation/navigation) cannot replay it.
-    internal var wasPresented = false
+    // Shared by updated snapshots of this warning. Compose keys its display on this identity,
+    // while reading the latest causes. A remount still sees whether it was already presented.
+    class Presentation internal constructor() {
+        // Set only when the host actually presents it, not while it waits behind another snackbar.
+        internal var wasPresented = false
+    }
 
     internal fun without(type: FlagType): FlagsRefreshWarning? {
         if (type !in issuesByType) return this
@@ -1545,9 +1594,7 @@ class FlagsRefreshWarning(
         return if (remaining.isEmpty()) {
             null
         } else {
-            FlagsRefreshWarning(remaining, retryTypes, tab, sessionGeneration, pseudo).also {
-                it.wasPresented = wasPresented
-            }
+            FlagsRefreshWarning(remaining, retryTypes, tab, sessionGeneration, pseudo, presentation)
         }
     }
 }

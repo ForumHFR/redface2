@@ -425,13 +425,13 @@ class FlagsViewModelTest {
         vm.selectTab(FlagTab.Favorite)
         vm.refresh()
         vm.selectTab(FlagTab.Super)
-        vm.refresh() // Red and Favorite are already queued: keep both their views and Super.
+        vm.refresh() // Cyan is in flight, Red and Favorite are queued: attach all three to Super.
         flags.refreshGate?.complete(Unit)
         advanceUntilIdle()
         assertEquals(listOf(FlagType.CYAN, FlagType.RED, FlagType.FAVORITE), flags.refreshCalls)
         val superWarning = requireNotNull(vm.refreshWarning.value)
         assertEquals(FlagTab.Super, superWarning.tab)
-        assertEquals(listOf(FlagType.RED, FlagType.FAVORITE), superWarning.retryTypes)
+        assertEquals(listOf(FlagType.CYAN, FlagType.RED, FlagType.FAVORITE), superWarning.retryTypes)
         vm.selectTab(FlagTab.Favorite)
         advanceUntilIdle()
         val favoriteWarning = requireNotNull(vm.refreshWarning.value)
@@ -445,6 +445,102 @@ class FlagsViewModelTest {
         vm.selectTab(FlagTab.Cyan)
         advanceUntilIdle()
         assertEquals(listOf(FlagType.CYAN), requireNotNull(vm.refreshWarning.value).retryTypes)
+    }
+
+    @Test
+    fun `a Super pull joins in flight Cyan and aggregates both partial results before retry - 984`() = runTest {
+        val cyanGate = CompletableDeferred<Unit>()
+        val redGate = CompletableDeferred<Unit>()
+        val flags = FakeFlagRepository().apply {
+            refreshGate = cyanGate
+            refreshResults = mapOf(
+                FlagType.CYAN to incompleteSuccess(),
+                FlagType.RED to FlagsResult.Success(emptyList(), FlagRefreshIssue(paginationTruncated = true)),
+            )
+        }
+        val vm = viewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), flags, FakeForumRepository())
+        vm.maybeAutoRefresh()
+        vm.selectTab(FlagTab.Super)
+        vm.refresh()
+        assertEquals(listOf(FlagType.CYAN), flags.refreshCalls)
+        flags.refreshGate = redGate
+        cyanGate.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(listOf(FlagType.CYAN, FlagType.RED), flags.refreshCalls)
+        assertNull("Super waits for the entire joined request", vm.refreshWarning.value)
+        redGate.complete(Unit)
+        advanceUntilIdle()
+        val types = listOf(FlagType.CYAN, FlagType.RED, FlagType.FAVORITE)
+        assertEquals("joining must not fetch Cyan again", types, flags.refreshCalls)
+        assertFalse(vm.isRefreshing.value)
+        val warning = requireNotNull(vm.refreshWarning.value)
+        assertEquals(FlagTab.Super, warning.tab)
+        assertEquals(listOf(FlagRefreshCategory(13, "Programmation")), warning.issue.stickyCategories)
+        assertTrue(warning.issue.paginationTruncated)
+        assertEquals(types, warning.retryTypes)
+        flags.refreshResults = types.associateWith { FlagsResult.Success(emptyList()) }
+        vm.retryRefreshWarning(warning)
+        advanceUntilIdle()
+        assertEquals(types + types, flags.refreshCalls)
+        assertNull(vm.refreshWarning.value)
+    }
+
+    @Test
+    fun `a Super pull warns and retries when only the already running Cyan is partial - 984`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val flags = FakeFlagRepository().apply {
+            refreshGate = gate
+            refreshResults = mapOf(FlagType.CYAN to incompleteSuccess())
+        }
+        val vm = viewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), flags, FakeForumRepository())
+        vm.refresh()
+        vm.selectTab(FlagTab.Super)
+        vm.refresh()
+        assertEquals(listOf(FlagType.CYAN), flags.refreshCalls)
+        gate.complete(Unit)
+        advanceUntilIdle()
+        val types = listOf(FlagType.CYAN, FlagType.RED, FlagType.FAVORITE)
+        assertEquals(types, flags.refreshCalls)
+        val warning = requireNotNull(vm.refreshWarning.value)
+        assertEquals(FlagTab.Super, warning.tab)
+        assertEquals(listOf(FlagRefreshCategory(13, "Programmation")), warning.issue.stickyCategories)
+        assertFalse(warning.issue.paginationTruncated)
+        assertEquals(types, warning.retryTypes)
+        flags.refreshResults = types.associateWith { FlagsResult.Success(emptyList()) }
+        vm.consumeRefreshWarning(warning)
+        vm.retryRefreshWarning(warning)
+        advanceUntilIdle()
+        assertEquals(types + types, flags.refreshCalls)
+        assertNull(vm.refreshWarning.value)
+    }
+
+    @Test
+    fun `a complete Cyan observation during the queue cannot reappear in the Super aggregate - 984`() = runTest {
+        val cyanGate = CompletableDeferred<Unit>()
+        val redGate = CompletableDeferred<Unit>()
+        val flags = FakeFlagRepository().apply {
+            refreshGate = cyanGate
+            refreshResults = mapOf(FlagType.CYAN to incompleteSuccess())
+        }
+        val vm = viewModel(FakeAuthRepository(AuthState.Authenticated("xaat")), flags, FakeForumRepository())
+        vm.refresh()
+        vm.selectTab(FlagTab.Super)
+        vm.refresh()
+        flags.refreshGate = redGate
+        cyanGate.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(listOf(FlagType.CYAN, FlagType.RED), flags.refreshCalls)
+        vm.selectTab(FlagTab.Cyan)
+        advanceUntilIdle()
+        flags.emit(FlagType.CYAN, FlagsResult.Success(emptyList()))
+        advanceUntilIdle()
+        redGate.complete(Unit)
+        advanceUntilIdle()
+        assertNull(vm.refreshWarning.value)
+        vm.selectTab(FlagTab.Super)
+        advanceUntilIdle()
+        assertNull(vm.refreshWarning.value)
+        assertEquals(listOf(FlagType.CYAN, FlagType.RED, FlagType.FAVORITE), flags.refreshCalls)
     }
 
     @Test
