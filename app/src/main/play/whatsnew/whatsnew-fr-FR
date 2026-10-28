@@ -1,4 +1,3 @@
-Redface 2 v0.63.2 — dev.
-- Diagnostics des drapeaux : l'export indique aussi le type de réseau (wifi, mobile, VPN), le DNS privé, le temps depuis le démarrage du téléphone et IPv4/IPv6, sans IP ni nom de réseau.
-- Nouvelle permission « voir les connexions réseau » pour lire le type de réseau.
-- Collez vos exports sur le topic DEV après les refresh lents, mais aussi après des refresh rapides.
+Redface 2 v0.64.0 — dev.
+- Smileys favoris : les favoris de votre compte HFR apparaissent en tête de l'onglet Standard du sélecteur de smileys (réponse, citation, édition, nouveau sujet, MP), dans l'ordre du site.
+- Ils se gèrent toujours sur le site (wiki smilies) : pas d'ajout ni de retrait depuis l'app pour l'instant.

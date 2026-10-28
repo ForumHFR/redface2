@@ -16,6 +16,18 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.64.0` — `internal` (dev) — 2026-10-28
+
+Premier lot du chantier « smileys favoris » ([#1154](https://github.com/ForumHFR/redface2/issues/1154)).
+
+### Éditeur : smileys favoris du compte HFR ([#1154](https://github.com/ForumHFR/redface2/issues/1154), [#1481](https://github.com/ForumHFR/redface2/pull/1481))
+
+- **Les smileys favoris de votre compte HFR** apparaissent dans une section « Favoris » en tête de l'onglet Standard du sélecteur de smileys, dans le même ordre que sur le site : réponse, citation, édition, nouveau sujet et MP.
+- Ce sont les favoris gérés sur le site (wiki smilies, « Supprimer des smilies favoris ») ; la section n'apparaît pas si le compte n'en a aucun.
+- Lecture seule : pas d'ajout ni de retrait depuis l'app pour l'instant, et aucune requête réseau en plus (la liste vient du formulaire déjà chargé).
+
+---
+
 ## `0.63.2` — `internal` (dev) — 2026-10-15
 
 Troisième lot du chantier « refresh des drapeaux lent ou bloqué » ([#984](https://github.com/ForumHFR/redface2/issues/984)) : donner du contexte aux mesures des testeurs.
