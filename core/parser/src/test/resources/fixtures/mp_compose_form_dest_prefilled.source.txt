@@ -3,3 +3,11 @@ Captured page: message.php?config=hfr.inc&cat=prive&sond=0&p=1&subcat=0&dest=boz
 Notes: variante du composer nouveau MP avec dest= prerempli par l'URL -> <input name="dest" value="bozoleclown">.
   Prouve que le param GET dest preremplit le champ destinataire. AUCUN POST envoye.
 Privacy: scrubbe comme mp_compose_form_scrubbed.html. "bozoleclown" est un pseudo public HFR utilise comme valeur de test.
+
+Assainissement complémentaire #1154 (2026-10-28) : noms des smileys du compte
+remplacés par les jetons fictifs fictif_c, fictif_a:3, fictif_b, fictif_d:5,
+fictif_e:1, fictif_f, fictif_f:1 et fictif_f:2, uniquement là où ils apparaissaient.
+Attributs alt/title et chemins d'images perso remplacés ensemble ; nombre, ordre et
+structure du DOM conservés. Pour les sauvegardes navigateur, ces seules images
+utilisent désormais des URL HFR absolues fictives. Les identités publiques sans
+rapport avec ces smileys ne sont pas modifiées. Aucun favori réel ajouté.

@@ -27,3 +27,11 @@ Scrub :
   Conserves : pseudo public XaTriX, id smiley 54596, structure DOM, hrefs et champs de form.
   Note : email@hostname.com est un placeholder de la doc BBcode HFR, pas une adresse reelle.
   Verification : grep -iE 'hash_check"? ?value="[0-9a-f]{8}|verifrequet"? ?value="[0-9]'  => 0 resultat.
+
+Assainissement complémentaire #1154 (2026-10-28) : noms des smileys du compte
+remplacés par les jetons fictifs fictif_c, fictif_a:3, fictif_b, fictif_d:5,
+fictif_e:1, fictif_f, fictif_f:1 et fictif_f:2, uniquement là où ils apparaissaient.
+Attributs alt/title et chemins d'images perso remplacés ensemble ; nombre, ordre et
+structure du DOM conservés. Pour les sauvegardes navigateur, ces seules images
+utilisent désormais des URL HFR absolues fictives. Les identités publiques sans
+rapport avec ces smileys ne sont pas modifiées. Aucun favori réel ajouté.
