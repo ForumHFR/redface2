@@ -34,6 +34,55 @@ class SmileyPickerControllerTest {
     )
 
     @Test
+    fun `open exposes HFR favorites in server order without a wiki search`() = runTest {
+        val favorites = listOf("[:fictif_z:3]", "[:fictif_a]").map { token ->
+            EditorSmiley(token, "https://example.invalid/$token.gif", EditorSmileySource.HFR_FAVORITE)
+        }
+        val controller = SmileyPickerController(
+            scope = this,
+            searchWiki = { _, _ -> error("Favorites must not trigger a search") },
+            favoriteSmileys = { favorites },
+        )
+        controller.open()
+        assertEquals(favorites, (controller.state.value as SmileyPickerState.Open).favoriteSmileys)
+    }
+
+    @Test
+    fun `empty form favorites leave no favorites section in the state`() = runTest {
+        val controller = SmileyPickerController(this, { _, _ -> emptyList() })
+        controller.open()
+        assertTrue((controller.state.value as SmileyPickerState.Open).favoriteSmileys.isEmpty())
+    }
+
+    @Test
+    fun `form refresh updates visible favorites and reopening never restores stale favorites`() = runTest {
+        var favorites = listOf(
+            EditorSmiley("[:fictif_a]", "https://example.invalid/a.gif", EditorSmileySource.HFR_FAVORITE),
+        )
+        val controller = SmileyPickerController(
+            scope = this,
+            searchWiki = { _, _ -> emptyList() },
+            favoriteSmileys = { favorites },
+        )
+        controller.open()
+        controller.onQueryChanged("ab")
+        favorites = listOf(
+            EditorSmiley("[:fictif_b:3]", "https://example.invalid/b.gif", EditorSmileySource.HFR_FAVORITE),
+        )
+        controller.refreshFavorites()
+        val open = controller.state.value as SmileyPickerState.Open
+        assertEquals(favorites, open.favoriteSmileys)
+        assertEquals("ab", open.query)
+        controller.dismiss()
+        favorites = emptyList()
+        controller.refreshFavorites()
+        assertEquals(SmileyPickerState.Hidden, controller.state.value)
+        controller.open()
+        assertTrue((controller.state.value as SmileyPickerState.Open).favoriteSmileys.isEmpty())
+        assertEquals("ab", (controller.state.value as SmileyPickerState.Open).query)
+    }
+
+    @Test
     fun `open is idempotent and dismiss resets to Hidden`() = runTest {
         val controller = SmileyPickerController(this, { _, _ -> emptyList() })
 

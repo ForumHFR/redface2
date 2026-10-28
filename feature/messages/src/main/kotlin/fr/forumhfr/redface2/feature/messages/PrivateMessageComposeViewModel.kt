@@ -97,6 +97,26 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     val effects: Flow<PrivateMessageComposeEffect> = _effects.receiveAsFlow()
 
     private var loadedForm: ReplyForm? = null
+        set(value) {
+            field = value
+            // #1154 — replace favorites on every form result, even while the sheet is open.
+            smileyPicker.refreshFavorites()
+        }
+
+    /**
+     * #387 — smiley picker (Standard + Wiki), same sheet as the post editors. The controller owns
+     * the picker state machine (debounce, race guards) ; this ViewModel only handles insertion.
+     * userId comes from the loaded compose form ([ReplyForm.userId], HFR's `find_smilies_timer`
+     * second argument). The controller falls back to 0 while the form is still loading
+     * (Codex review, PR #440).
+     */
+    val smileyPicker = SmileyPickerController(
+        scope = viewModelScope,
+        searchWiki = smileyRepository::searchWiki,
+        favoriteSmileys = { loadedForm?.favoriteSmileys.orEmpty() },
+        userId = { loadedForm?.userId },
+    )
+
     private var formJob: Job? = null
     private var submitJob: Job? = null
 
@@ -479,20 +499,6 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         }
         scheduleAutosave()
     }
-
-    /**
-     * #387 — smiley picker (Standard + Wiki), same sheet as the post editors. The controller owns
-     * the picker state machine (debounce, race guards) ; this ViewModel only handles insertion.
-     * userId comes from the loaded compose form ([ReplyForm.userId], HFR's `find_smilies_timer`
-     * second argument) so the wiki search prioritizes the user's own smileys exactly like the
-     * post editors do ; the controller falls back to 0 while the form is still loading
-     * (Codex review, PR #440).
-     */
-    val smileyPicker = SmileyPickerController(
-        scope = viewModelScope,
-        searchWiki = smileyRepository::searchWiki,
-        userId = { loadedForm?.userId },
-    )
 
     fun onSmileySelected(token: String) {
         _state.update { current ->

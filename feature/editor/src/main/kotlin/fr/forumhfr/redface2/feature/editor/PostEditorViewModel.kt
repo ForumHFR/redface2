@@ -124,6 +124,44 @@ class PostEditorViewModel @AssistedInject constructor(
      * through Compose snapshot tooling / state restoration.
      */
     private var loadedForm: ReplyForm? = null
+        set(value) {
+            field = value
+            // #1154 — replace favorites on every form result, even while the sheet is open.
+            smileyPicker.refreshFavorites()
+        }
+
+    /**
+     * #441 — smiley picker (Standard + Wiki search), delegated to the shared
+     * [SmileyPickerController] exactly like the MP composers (#387/#440) : the controller owns
+     * open/dismiss/query, the 300 ms debounce and its race guards, and the #824
+     * restore-search-on-reopen contract. This ViewModel keeps only the insertion
+     * ([onSmileySelected] — a draft mutation, so it stays an MVI intent). Mixed wiring is
+     * deliberate : the sheet talks to the controller directly for open/dismiss/query and goes
+     * through [PostEditorIntent.SmileySelected] for insertion — do not re-route one into the
+     * other for « consistency ».
+     *
+     * Lifecycle (réserve Codex #441) : this ViewModel's editorial context is frozen at
+     * construction (`@Assisted request` ; one `PostEditorRoute` nav entry = one ViewModel,
+     * cf. `RedfaceNavigation`), so the controller can never be re-armed for another post —
+     * no targeted reset is needed beyond the ViewModel's own death.
+     *
+     * Failure logging stays a policy of THIS feature (the MP composers keep the controller's
+     * no-op default) : class name only — never the query nor the userId (anti-leak test).
+     */
+    val smileyPicker = SmileyPickerController(
+        scope = viewModelScope,
+        searchWiki = smileyRepository::searchWiki,
+        favoriteSmileys = { loadedForm?.favoriteSmileys.orEmpty() },
+        userId = { _state.value.userId },
+        onSearchFailed = { error ->
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG_VM,
+                "wiki smiley search failed: ${error::class.simpleName}",
+            )
+        },
+    )
+
     private var submitJob: Job? = null
 
     /**
@@ -505,37 +543,6 @@ class PostEditorViewModel @AssistedInject constructor(
         savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] =
             EditorDraftStore.Draft(body = body).restoreOfferFingerprint()
     }
-
-    /**
-     * #441 — smiley picker (Standard + Wiki search), delegated to the shared
-     * [SmileyPickerController] exactly like the MP composers (#387/#440) : the controller owns
-     * open/dismiss/query, the 300 ms debounce and its race guards, and the #824
-     * restore-search-on-reopen contract. This ViewModel keeps only the insertion
-     * ([onSmileySelected] — a draft mutation, so it stays an MVI intent). Mixed wiring is
-     * deliberate : the sheet talks to the controller directly for open/dismiss/query and goes
-     * through [PostEditorIntent.SmileySelected] for insertion — do not re-route one into the
-     * other for « consistency ».
-     *
-     * Lifecycle (réserve Codex #441) : this ViewModel's editorial context is frozen at
-     * construction (`@Assisted request` ; one `PostEditorRoute` nav entry = one ViewModel,
-     * cf. `RedfaceNavigation`), so the controller can never be re-armed for another post —
-     * no targeted reset is needed beyond the ViewModel's own death.
-     *
-     * Failure logging stays a policy of THIS feature (the MP composers keep the controller's
-     * no-op default) : class name only — never the query nor the userId (anti-leak test).
-     */
-    val smileyPicker = SmileyPickerController(
-        scope = viewModelScope,
-        searchWiki = smileyRepository::searchWiki,
-        userId = { _state.value.userId },
-        onSearchFailed = { error ->
-            diagnostics.record(
-                DiagnosticsLog.Level.WARN,
-                LOG_TAG_VM,
-                "wiki smiley search failed: ${error::class.simpleName}",
-            )
-        },
-    )
 
     private fun onSmileySelected(token: String) {
         // Reuse the formatter helper so the surrounding-spaces convention from HFR's web

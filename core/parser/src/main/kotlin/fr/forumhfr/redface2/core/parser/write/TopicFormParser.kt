@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.TopicForm
 import fr.forumhfr.redface2.core.model.write.TopicFormSubcategoryChoice
 import fr.forumhfr.redface2.core.model.write.TopicPollForm
+import fr.forumhfr.redface2.core.parser.smiley.SmileySearchParser
 import fr.forumhfr.redface2.core.parser.smiley.SmileyUserIdExtractor
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
@@ -134,6 +135,7 @@ class TopicFormParser {
                 subject = subject,
                 initialContent = initialContent,
                 userId = SmileyUserIdExtractor.extract(html),
+                favoriteSmileys = SmileySearchParser().parseFavorites(form),
                 selectedSubcat = selectedSubcat,
                 subcategoryChoices = subcategoryChoices,
                 hasSubcategorySelect = hasSubcategorySelect,

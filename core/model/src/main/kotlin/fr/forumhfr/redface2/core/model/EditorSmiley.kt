@@ -22,8 +22,8 @@ package fr.forumhfr.redface2.core.model
  *    no leading/trailing whitespace itself.
  *  - [imageUrl] is the absolute URL HFR served for the preview image. It is read from the
  *    HTML/JSON HFR actually returned, never reconstructed from the token.
- *  - [source] disambiguates the tab the picker offered : a smiley present in both the
- *    canonical builtin set and the wiki search returns two distinct [EditorSmiley] entries.
+ *  - [source] identifies the origin : builtins, wiki search or HFR account favorites.
+ *    A smiley can appear in both the account favorites and the wiki search.
  *    Callers that need to merge / dedupe rely on `token` equality, not on identity.
  */
 data class EditorSmiley(
@@ -33,9 +33,8 @@ data class EditorSmiley(
 )
 
 /**
- * Where the smiley entry came from. Drives the picker tab the user sees and, downstream, the
- * caching strategy (builtin is static and shipped with the app ; wiki is a live REST hit per
- * search query).
+ * Where the smiley entry came from. Favorites are read from the already downloaded HFR form ;
+ * builtins ship with the app and wiki results come from a live search.
  */
 enum class EditorSmileySource {
     // Canonical HFR built-in set served from `/icones/smilies/<name>.gif`. ~25 entries that
@@ -45,4 +44,7 @@ enum class EditorSmileySource {
     // HFR wiki search via GET /message-smi-mp-aj.php?config=hfr.inc&user_id=...&findsmilies=...
     // — a live REST hit per query, returns the perso corpus filtered by the search term.
     WIKI,
+
+    // Read-only HFR account favorites from `div#dynamic_smilies` in the editor form.
+    HFR_FAVORITE,
 }

@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.CircularProgressIndicator
@@ -48,6 +49,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
@@ -73,8 +75,8 @@ import fr.forumhfr.redface2.core.ui.sheet.clampSheetTopOverscroll
  * to `:core:ui` for the MP editors (#387) — same pattern as `EditorOptionsSheet` (#388).
  *
  * Two tabs :
- *  - **Standard** : the canonical `BUILTIN_HFR_SMILEYS` constant, ~25 entries, available
- *    synchronously without a network call.
+ *  - **Standard** : the HFR form's optional favorites section, then the canonical
+ *    `BUILTIN_HFR_SMILEYS` constant, available synchronously without a network call.
  *  - **Wiki** : live search on HFR's perso corpus via `SmileyRepository.searchWiki`. Idle
  *    until the user types more than 2 characters (HFR's web composer threshold). Loading
  *    / Results / Error / Empty handled in [WikiTabContent].
@@ -152,7 +154,11 @@ fun SmileyPickerSheet(
                 )
             }
             when (tabIndex) {
-                0 -> StandardTabContent(onSmileyClicked = onSmileyClicked, layout = layout)
+                0 -> StandardTabContent(
+                    favoriteSmileys = state.favoriteSmileys,
+                    onSmileyClicked = onSmileyClicked,
+                    layout = layout,
+                )
                 else -> WikiTabContent(
                     state = state,
                     onQueryChange = onQueryChange,
@@ -165,8 +171,17 @@ fun SmileyPickerSheet(
 }
 
 @Composable
-private fun StandardTabContent(onSmileyClicked: (String) -> Unit, layout: SmileyPickerLayoutSpec) {
-    SmileyPickerGrid(items = BUILTIN_HFR_SMILEYS, onSmileyClicked = onSmileyClicked, layout = layout)
+private fun StandardTabContent(
+    favoriteSmileys: List<EditorSmiley>,
+    onSmileyClicked: (String) -> Unit,
+    layout: SmileyPickerLayoutSpec,
+) {
+    SmileyPickerGrid(
+        items = BUILTIN_HFR_SMILEYS,
+        onSmileyClicked = onSmileyClicked,
+        layout = layout,
+        favoriteSmileys = favoriteSmileys,
+    )
 }
 
 @Composable
@@ -273,6 +288,7 @@ fun SmileyPickerGrid(
     onSmileyClicked: (String) -> Unit,
     modifier: Modifier = Modifier,
     layout: SmileyPickerLayoutSpec = SmileyPickerLayoutSpec.Current,
+    favoriteSmileys: List<EditorSmiley> = emptyList(),
 ) {
     // #900 volet 2 (CharLee, TU #2791061) — the grid cap scales with the screen so the sheet
     // reaches ~3/4 of a phone display instead of the fixed 320 dp, which wasted the bottom half
@@ -315,6 +331,24 @@ fun SmileyPickerGrid(
                 .fillMaxWidth()
                 .heightIn(max = gridHeightCap),
         ) {
+            // One scrollable grid shares the #900 height budget across both Standard sections.
+            // Source-prefixed keys also allow a favorite to appear in another section safely.
+            if (favoriteSmileys.isNotEmpty()) {
+                item(key = "favorites_title", span = { GridItemSpan(maxLineSpan) }) {
+                    SmileySectionTitle(stringResource(R.string.editor_smiley_section_favorites))
+                }
+                items(items = favoriteSmileys, key = { "favorite:${it.token}:${it.imageUrl}" }) { smiley ->
+                    SmileyCell(
+                        smiley = smiley,
+                        geometry = geometry,
+                        layout = layout,
+                        onClick = { onSmileyClicked(smiley.token) },
+                    )
+                }
+                item(key = "standard_title", span = { GridItemSpan(maxLineSpan) }) {
+                    SmileySectionTitle(stringResource(R.string.editor_smiley_tab_standard))
+                }
+            }
             items(items = items, key = { it.token to it.imageUrl }) { smiley ->
                 SmileyCell(
                     smiley = smiley,
@@ -325,6 +359,16 @@ fun SmileyPickerGrid(
             }
         }
     }
+}
+
+@Composable
+private fun SmileySectionTitle(title: String) {
+    Text(
+        text = title,
+        style = MaterialTheme.typography.titleSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        modifier = Modifier.padding(vertical = 8.dp).semantics { heading() },
+    )
 }
 
 @Composable
@@ -347,7 +391,8 @@ private fun SmileyCell(
     // TTL/generations only matter to the posts' retry pipeline.
     val ledger = LocalMediaAttemptLedger.current
     val platformContext = LocalPlatformContext.current
-    if (smiley.source == EditorSmileySource.WIKI) {
+    val isPerso = smiley.source != EditorSmileySource.BUILTIN
+    if (isPerso) {
         LaunchedEffect(smiley.imageUrl) {
             measureAndCacheIntrinsicMediaSize(
                 url = smiley.imageUrl,
@@ -359,7 +404,7 @@ private fun SmileyCell(
             )
         }
     }
-    val measuredPx = if (smiley.source == EditorSmileySource.WIKI) sizeCache.get(smiley.imageUrl)?.size else null
+    val measuredPx = if (isPerso) sizeCache.get(smiley.imageUrl)?.size else null
     val outlineColor = MaterialTheme.colorScheme.outlineVariant
     Box(
         modifier = Modifier
@@ -427,7 +472,7 @@ private fun SmileyCell(
             // look better bilinear-filtered when the cell cap scales them down.
             filterQuality = when (smiley.source) {
                 EditorSmileySource.BUILTIN -> FilterQuality.None
-                EditorSmileySource.WIKI -> FilterQuality.Low
+                EditorSmileySource.WIKI, EditorSmileySource.HFR_FAVORITE -> FilterQuality.Low
             },
         )
     }
@@ -443,7 +488,7 @@ private fun SmileyCell(
  */
 @Composable
 private fun SmileyCellDebugOverlay(smiley: EditorSmiley, measuredPx: IntSize?) {
-    val isPerso = smiley.source == EditorSmileySource.WIKI
+    val isPerso = smiley.source != EditorSmileySource.BUILTIN
     val stateColor = when {
         !isPerso -> DEBUG_BUILTIN_COLOR
         measuredPx != null -> DEBUG_MEASURED_COLOR

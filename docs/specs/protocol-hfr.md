@@ -812,12 +812,53 @@ GET /message-smi-mp-aj.php?config=hfr.inc&user_id={user_id}&findsmilies={query}
 | Paramètre | Source | Notes |
 |---|---|---|
 | `config` | constante `"hfr.inc"` | Idem reste du protocole. |
-| `user_id` | parsé depuis `find_smilies_timer('hfr.inc', N)` du form HTML (cf. `SmileyUserIdExtractor`) | Plumbé via `ReplyForm.userId` / `TopicForm.userId`. `0` accepté pour les probes anonymes (le endpoint ne refuse pas), mais un user id authentifié laisse HFR pager les favoris en premier. |
+| `user_id` | parsé depuis `find_smilies_timer('hfr.inc', N)` du form HTML (cf. `SmileyUserIdExtractor`) | Plumbé via `ReplyForm.userId` / `TopicForm.userId`. `0` accepté pour les probes anonymes (le endpoint ne refuse pas). **Non vérifié** : un user id authentifié ferait remonter les favoris en premier dans les résultats du wiki. |
 | `findsmilies` | la query utilisateur, **URL-encodée** | HFR gate sur `query.length > 2` dans `find_smilies_timer` ; le client reproduit ce seuil + le debounce 300 ms du JS web. |
 
 Réponse : fragment HTML (pas de `<html>/<body>` wrapper), une `<img src="…" alt="[:token]" title="[:token]" onclick="putSmiley(this.alt,this.src)" />` par smiley match. HFR peut émettre le même `(alt, src)` deux fois — le parser dédup. Tokens préservés verbatim : variantes avec espaces (`[:haha jap]`), underscores (`[:menkahoure_4]`), tirets (`[:55-]`), `:N` variants (`[:eneytihi:5]`).
 
 L'endpoint accepte session anonyme (`user_id=0`) ; côté client, l'appel passe par le client OkHttp **anonymous** pour ne pas exposer la query dans les diagnostics authentifiés.
+
+### Smileys favoris du compte
+
+Contrat observé le **2026-10-28** (#1154), y compris sur un compte avec un favori : les
+formulaires authentifiés `message.php` de réponse, citation, édition, création de sujet,
+réponse et composition de MP contiennent les favoris dans `div#dynamic_smilies`, sous
+`input#search_smilies`. Le HTML est déjà téléchargé par les éditeurs : **aucune requête
+supplémentaire**, aucun stockage local, aucune lecture via l'API REST.
+
+- Sélecteur : `div#dynamic_smilies > img[onclick^=putSmiley]`, limité au formulaire chargé.
+  Jeton = `alt` non vide, avec repli sur `title` ; URL = `src` non vide. Les autres éléments,
+  le lien `supprperso.php` et les images hors de ce bloc ne sont pas des entrées.
+  L'extraction réutilise celle du wiki ; un doublon `(jeton, URL)` conserve sa première occurrence.
+- Les favoris observés sont des smileys perso : `[:nom]` → `/images/perso/nom.gif`,
+  `[:nom:N]` → `/images/perso/N/nom.gif`. Un nom peut contenir des espaces, y compris dans
+  le `src` littéral. Conserver le jeton et le `src` tels que servis et confier l'encodage
+  de l'URL au même chemin Coil/OkHttp que les résultats Wiki ; ne pas reconstruire l'image.
+- Conserver **l'ordre du serveur**, non alphabétique et identique entre les formulaires
+  observés. La limite de **10** rapportée par Redface 1 reste **non vérifiée** en 2026 ;
+  l'application ne plafonne pas la liste.
+- Sans favori, et en anonyme, le bloc est vide : `<div id="dynamic_smilies"></div>`.
+  Le lien « Supprimer des smilies favoris » n'est présent que lorsque la liste est peuplée.
+  La section « Favoris » du sélecteur est absente si la liste est vide ; sinon elle précède
+  les smileys « Standard ». L'insertion réutilise le jeton perso, puis ferme la feuille.
+- `ReplyForm.favoriteSmileys` et `TopicForm.favoriteSmileys` exposent une liste ordonnée
+  d'`EditorSmiley`, source `HFR_FAVORITE`, vide par défaut. Elle suit le dernier formulaire
+  chargé et reste réutilisable indépendamment de la feuille. La réponse rapide n'ouvre
+  aucun sélecteur de smileys.
+
+**Écriture non implémentée** (lecture seule dans #1154) :
+
+- Ajout : `POST /user/addperso.php?config=hfr.inc`, champs `hash_check` et `smilie`
+  (jeton complet `[:nom]` ou `[:nom:N]`), formulaire proposé par `wikismilies.php`.
+- Suppression : `GET /user/supprperso.php?config=hfr.inc`, puis
+  `POST /user/supprperso_validation.php?config=hfr.inc&codehex=<secret>` avec `hash_check`,
+  les champs `smiley{i}` et les cases `delete{i}` sélectionnées. La forme de ces lignes
+  a été observée le 2026-10-28 ; aucune mutation n'a été effectuée lors de cette capture.
+- **`codehex` est un secret de compte**, distinct de `hash_check` et observé identique
+  au jeton du lien de déconnexion : ne jamais le journaliser, l'exposer dans un diagnostic
+  ou le publier dans une fixture. Les réponses de succès/échec et le plafond d'ajout issus
+  de Redface 1 n'ont pas été revérifiés ; aucun client de mutation n'est implémenté.
 
 ---
 

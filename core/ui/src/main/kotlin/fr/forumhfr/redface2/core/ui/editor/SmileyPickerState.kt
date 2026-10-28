@@ -20,6 +20,8 @@ sealed interface SmileyPickerState {
     data class Open(
         val query: String = "",
         val wiki: WikiSearchState = WikiSearchState.Idle,
+        /** Standard tab's optional first section, ordered exactly as the last HFR form. */
+        val favoriteSmileys: List<EditorSmiley> = emptyList(),
     ) : SmileyPickerState
 }
 

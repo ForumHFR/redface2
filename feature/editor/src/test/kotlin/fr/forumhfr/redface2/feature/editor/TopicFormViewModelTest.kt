@@ -1,4 +1,5 @@
 package fr.forumhfr.redface2.feature.editor
+import fr.forumhfr.redface2.core.model.EditorSmileySource
 import fr.forumhfr.redface2.core.ui.editor.UploadError
 
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
@@ -541,6 +542,55 @@ class TopicFormViewModelTest {
     // SmileyPickerControllerTest — no duplicate coverage here. These tests only exercise
     // what stays a ViewModel concern : the insertion intent, the userId plumbed from the
     // parsed form, and the diagnostics policy on search failure.
+
+    @Test
+    fun `topic form favorites reach the picker and insert the exact perso token`() = runTest {
+        val favorite = EditorSmiley(
+            "[:fictif espace:3]", "https://example.invalid/fictif.gif", EditorSmileySource.HFR_FAVORITE,
+        )
+        topicFormRepository.formResult = topicFormRepository.formResult.copy(favoriteSmileys = listOf(favorite))
+        val viewModel = newViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.smileyPicker.open()
+        val open = viewModel.smileyPicker.state.value as SmileyPickerState.Open
+        assertEquals(listOf(favorite), open.favoriteSmileys)
+        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("hello", TextRange(5))))
+        viewModel.submit(TopicFormIntent.SmileySelected(open.favoriteSmileys.single().token))
+
+        assertEquals("hello [:fictif espace:3] ", viewModel.state.value.draft.text)
+        assertEquals(SmileyPickerState.Hidden, viewModel.smileyPicker.state.value)
+        assertEquals(0, smileyRepository.callCount)
+    }
+
+    @Test
+    fun `reloaded topic forms replace favorites then remove the section while the picker stays open`() = runTest {
+        val favoriteA = EditorSmiley(
+            "[:fictif_a:3]", "https://example.invalid/fictif_a.gif", EditorSmileySource.HFR_FAVORITE,
+        )
+        val favoriteB = favoriteA.copy(token = "[:fictif_b]", imageUrl = "https://example.invalid/fictif_b.gif")
+        topicFormRepository.formResult = topicFormRepository.formResult.copy(favoriteSmileys = listOf(favoriteA))
+        topicFormRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
+        val viewModel = newViewModel()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.smileyPicker.open()
+        assertEquals(listOf(favoriteA), (viewModel.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys)
+
+        topicFormRepository.formResult = topicFormRepository.formResult.copy(favoriteSmileys = listOf(favoriteB))
+        viewModel.submit(TopicFormIntent.SubmitClicked)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(2, topicFormRepository.formFetches)
+        assertEquals(listOf(favoriteB), (viewModel.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys)
+
+        topicFormRepository.formResult = topicFormRepository.formResult.copy(favoriteSmileys = emptyList())
+        viewModel.submit(TopicFormIntent.SubmitClicked)
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(3, topicFormRepository.formFetches)
+        assertTrue((viewModel.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys.isEmpty())
+    }
 
     @Test
     fun `the wiki search carries the hydrated userId (#441)`() = runTest {
