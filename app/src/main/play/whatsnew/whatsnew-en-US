@@ -1,4 +1,3 @@
-Redface 2 v0.63.2 — dev.
-- Flag diagnostics: the export now also shows the network type (wifi, mobile, VPN), private DNS, time since the phone booted and IPv4/IPv6, with no IP or network name.
-- New "view network connections" permission to read the network type.
-- Paste your exports on the DEV topic after slow refreshes, and after fast ones too.
+Redface 2 v0.64.0 — dev.
+- Favorite smileys: your HFR account's favorites now show at the top of the Standard tab of the smiley picker (reply, quote, edit, new topic, PM), in the site's order.
+- They are still managed on the website (smiley wiki): no adding or removing from the app yet.
