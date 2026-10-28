@@ -1,5 +1,9 @@
 package fr.forumhfr.redface2.feature.messages
 
+import fr.forumhfr.redface2.core.model.EditorSmiley
+import fr.forumhfr.redface2.core.model.EditorSmileySource
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
+
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
@@ -247,6 +251,35 @@ class PrivateMessageComposeViewModelTest {
             ),
             diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
         )
+    }
+
+    @Test
+    fun `compose favorites insert the perso token and follow a reloaded form while open`() = runTest {
+        val favorite = EditorSmiley(
+            "[:fictif espace:3]", "https://example.invalid/fictif.gif", EditorSmileySource.HFR_FAVORITE,
+        )
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm().copy(favoriteSmileys = listOf(favorite))
+        val vm = viewModel(repository)
+        vm.smileyPicker.open()
+        val open = vm.smileyPicker.state.value as SmileyPickerState.Open
+        assertEquals(listOf(favorite), open.favoriteSmileys)
+        vm.onContentChanged(TextFieldValue("hello", TextRange(5)))
+        vm.onSmileySelected(open.favoriteSmileys.single().token)
+        assertEquals("hello [:fictif espace:3] ", vm.state.value.draft.text)
+        assertEquals(SmileyPickerState.Hidden, vm.smileyPicker.state.value)
+
+        vm.smileyPicker.open()
+        val replacement = favorite.copy(token = "[:fictif_b]", imageUrl = "https://example.invalid/fictif_b.gif")
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm().copy(favoriteSmileys = listOf(replacement))
+        vm.retryFormLoad()
+        advanceUntilIdle()
+        assertEquals(listOf(replacement), (vm.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys)
+
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        vm.retryFormLoad()
+        advanceUntilIdle()
+        assertTrue((vm.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys.isEmpty())
     }
 
     @Test

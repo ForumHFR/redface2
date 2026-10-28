@@ -1,5 +1,9 @@
 package fr.forumhfr.redface2.feature.messages
 
+import fr.forumhfr.redface2.core.model.EditorSmiley
+import fr.forumhfr.redface2.core.model.EditorSmileySource
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
+
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
@@ -420,6 +424,42 @@ class PrivateMessageReplyViewModelTest {
                 allowEmbeddedFallback = true,
             )
         }
+    }
+
+    @Test
+    fun `reply favorites insert the perso token and follow a reloaded form while open`() = runTest {
+        val favorite = EditorSmiley(
+            "[:fictif espace:3]", "https://example.invalid/fictif.gif", EditorSmileySource.HFR_FAVORITE,
+        )
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form().copy(favoriteSmileys = listOf(favorite))
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            smileyRepository(),
+        )
+        viewModel.smileyPicker.open()
+        val open = viewModel.smileyPicker.state.value as SmileyPickerState.Open
+        assertEquals(listOf(favorite), open.favoriteSmileys)
+        viewModel.onContentChanged(TextFieldValue("hello", TextRange(5)))
+        viewModel.onSmileySelected(open.favoriteSmileys.single().token)
+        assertEquals("hello [:fictif espace:3] ", viewModel.state.value.draft.text)
+        assertEquals(SmileyPickerState.Hidden, viewModel.smileyPicker.state.value)
+
+        viewModel.smileyPicker.open()
+        val replacement = favorite.copy(token = "[:fictif_b]", imageUrl = "https://example.invalid/fictif_b.gif")
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form().copy(favoriteSmileys = listOf(replacement))
+        viewModel.retryFormLoad()
+        advanceUntilIdle()
+        assertEquals(
+            listOf(replacement),
+            (viewModel.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys,
+        )
+
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        viewModel.retryFormLoad()
+        advanceUntilIdle()
+        assertTrue((viewModel.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys.isEmpty())
     }
 
     @Test

@@ -41,6 +41,8 @@ import kotlinx.coroutines.launch
  * [searchWiki] is a lambda (not `SmileyRepository`) so `:core:ui` gains no dependency on
  * `:core:domain` ; [userId] feeds HFR's wiki endpoint and falls back to 0 when the session
  * has not resolved an id (proven harmless — same fallback as `PostEditorViewModel`).
+ * [favoriteSmileys] reads the latest loaded form ; hosts call [refreshFavorites] when that form
+ * changes. Reopening restores the wiki search but always reads the current favorites.
  * [onSearchFailed] lets a host apply its own failure policy (the `:feature:editor` ViewModels
  * record a diagnostics WARN — class name only, never the query nor the userId — while the MP
  * composers keep the no-op default).
@@ -50,6 +52,7 @@ class SmileyPickerController(
     private val searchWiki: suspend (userId: Int, query: String) -> List<EditorSmiley>,
     private val userId: () -> Int? = { null },
     private val onSearchFailed: (Throwable) -> Unit = {},
+    private val favoriteSmileys: () -> List<EditorSmiley> = { emptyList() },
 ) {
 
     private val _state = MutableStateFlow<SmileyPickerState>(SmileyPickerState.Hidden)
@@ -70,12 +73,20 @@ class SmileyPickerController(
             if (current is SmileyPickerState.Open) {
                 // Idempotent while visible : a redundant open() must NOT clobber the live
                 // query/results with the stale dismissal snapshot below.
-                current
+                current.copy(favoriteSmileys = favoriteSmileys())
             } else {
                 // #824 — restore the last dismissed search (query + results) so reopening
                 // right after an insertion / accidental swipe-down never costs a retype.
-                lastDismissed ?: SmileyPickerState.Open()
+                (lastDismissed ?: SmileyPickerState.Open()).copy(favoriteSmileys = favoriteSmileys())
             }
+        }
+    }
+
+    /** Hosts notify after a form reload, including when the sheet is already visible. */
+    fun refreshFavorites() {
+        _state.update { current ->
+            val open = current as? SmileyPickerState.Open ?: return@update current
+            open.copy(favoriteSmileys = favoriteSmileys())
         }
     }
 

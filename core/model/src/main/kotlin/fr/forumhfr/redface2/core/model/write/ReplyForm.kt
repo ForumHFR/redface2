@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.core.model.write
 
+import fr.forumhfr.redface2.core.model.EditorSmiley
+
 /**
  * Parsed view of HFR's `message.php` reply form. Carries the volatile bits that the
  * subsequent `bddpost.php` POST has to echo back — chiefly the per-session CSRF
@@ -71,7 +73,7 @@ data class ReplyForm(
      * HFR user id parsed from the JS bootstrap call `find_smilies_timer('hfr.inc', N)`
      * embedded in the form HTML. Used by the Phase 2F-B (#11 partial) wiki smiley picker
      * to call `GET /message-smi-mp-aj.php?config=hfr.inc&user_id=N&findsmilies=…` with the
-     * logged-in id, so HFR pages the user's favourite perso first. `null` on anonymous /
+     * logged-in id. Favorite-first ranking in wiki search is unverified. `null` on anonymous /
      * unparseable forms — the repository falls back to `user_id=0`.
      */
     val userId: Int? = null,
@@ -91,6 +93,8 @@ data class ReplyForm(
      * non-owner gets a roster to read but never the member editor.
      */
     val recipientsRoster: String? = null,
+    /** Read-only HFR account favorites, in server order ; empty when absent or anonymous. */
+    val favoriteSmileys: List<EditorSmiley> = emptyList(),
 ) {
     /**
      * #606 — CSV of the DT/MultiMP members HFR prefills inside `<input name="newdest">`, served
