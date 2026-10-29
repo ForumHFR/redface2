@@ -41,7 +41,7 @@ class SmileyPickerControllerTest {
         val controller = SmileyPickerController(
             scope = this,
             searchWiki = { _, _ -> error("Favorites must not trigger a search") },
-            favoriteSmileys = { favorites },
+            favoriteSources = SmileyPickerFavoriteSources(favoriteSmileys = { favorites }),
         )
         controller.open()
         assertEquals(favorites, (controller.state.value as SmileyPickerState.Open).favoriteSmileys)
@@ -62,7 +62,7 @@ class SmileyPickerControllerTest {
         val controller = SmileyPickerController(
             scope = this,
             searchWiki = { _, _ -> emptyList() },
-            favoriteSmileys = { favorites },
+            favoriteSources = SmileyPickerFavoriteSources(favoriteSmileys = { favorites }),
         )
         controller.open()
         controller.onQueryChanged("ab")

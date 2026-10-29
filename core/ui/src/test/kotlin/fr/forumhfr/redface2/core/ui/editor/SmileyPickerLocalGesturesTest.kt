@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.ui.editor
 
 import android.content.Context
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -191,16 +192,60 @@ class SmileyPickerLocalGesturesTest {
     }
 
     @Test
-    fun `rotation preserves a user selection after leaving a restored Wiki query`() {
+    fun `saved tab preserves a user selection after leaving a restored Wiki query`() {
         val controller = controller()
         controller.onQueryChanged("fictif")
         controller.dismiss()
         controller.open()
+        // StateRestorationTester replaces the host registry, not ModalBottomSheet's dialog registry.
+        // Exercise the production saveable state in the reachable registry instead of claiming a rotation.
+        lateinit var selection: MutableState<Int>
         val restoration = StateRestorationTester(compose)
-        restoration.setContent { Sheet(controller) }
+        restoration.setContent {
+            val state by controller.state.collectAsState()
+            selection = rememberSmileyPickerTab((state as SmileyPickerState.Open).initialTab)
+        }
+        compose.runOnIdle {
+            assertEquals(SmileyPickerTab.WIKI.ordinal, selection.value)
+            selection.value = SmileyPickerTab.STANDARD.ordinal
+        }
+        restoration.emulateSavedInstanceStateRestore()
+        compose.runOnIdle { assertEquals(SmileyPickerTab.STANDARD.ordinal, selection.value) }
+    }
+
+    @Test
+    fun `restored Wiki opening ignores a saved Standard slot`() {
+        // Deliberately not Compose state: change the decision only when the saved tree is recreated,
+        // leaving a Standard value in the old registry to challenge the restored Wiki opening (#824).
+        var initialTab = SmileyPickerTab.STANDARD
+        lateinit var selection: MutableState<Int>
+        val restoration = StateRestorationTester(compose)
+        restoration.setContent { selection = rememberSmileyPickerTab(initialTab) }
+        compose.runOnIdle {
+            assertEquals(SmileyPickerTab.STANDARD.ordinal, selection.value)
+            initialTab = SmileyPickerTab.WIKI
+        }
+        restoration.emulateSavedInstanceStateRestore()
+        compose.runOnIdle { assertEquals(SmileyPickerTab.WIKI.ordinal, selection.value) }
+    }
+
+    @Test
+    fun `user selection after leaving restored Wiki survives collection updates during the opening`() {
+        val controller = controller()
+        controller.onQueryChanged("fictif")
+        controller.dismiss()
+        controller.open()
+        mount(controller)
         tab(R.string.editor_smiley_tab_wiki).assertIsSelected()
         tab(R.string.editor_smiley_tab_standard).performClick()
-        restoration.emulateSavedInstanceStateRestore()
+        compose.runOnIdle {
+            locals.snapshot.value = SmileyLocalCollectionSnapshot(
+                "alice", listOf(LocalFavoriteSmiley(wiki.token, wiki.imageUrl, 1)),
+            )
+            dispatcher.scheduler.runCurrent()
+            controller.open()
+            controller.refreshFavorites()
+        }
         tab(R.string.editor_smiley_tab_standard).assertIsSelected()
     }
 
@@ -218,12 +263,15 @@ class SmileyPickerLocalGesturesTest {
     }
 
     private fun controller(hfr: List<EditorSmiley> = emptyList()) = SmileyPickerController(
-        CoroutineScope(dispatcher), { _, _ -> listOf(wiki) }, favoriteSmileys = { hfr },
-        hfrFavoriteMutations = SmileyFavoriteMutations(
-            { HfrFavoriteSmileyMutationResult.Success(listOf(wiki)) },
-            { HfrFavoriteSmileyMutationResult.Success(emptyList()) },
+        CoroutineScope(dispatcher), { _, _ -> listOf(wiki) },
+        favoriteSources = SmileyPickerFavoriteSources(
+            favoriteSmileys = { hfr },
+            hfrFavoriteMutations = SmileyFavoriteMutations(
+                { HfrFavoriteSmileyMutationResult.Success(listOf(wiki)) },
+                { HfrFavoriteSmileyMutationResult.Success(emptyList()) },
+            ),
+            localCollections = locals,
         ),
-        localCollections = locals,
     ).also { dispatcher.scheduler.runCurrent(); it.open() }
 
     private fun mount(controller: SmileyPickerController) = compose.setContent { Sheet(controller) }

@@ -568,10 +568,12 @@ class SmileyPickerHfrGesturesTest {
     ) = SmileyPickerController(
         scope = CoroutineScope(dispatcher),
         searchWiki = { _, _ -> wikiItems },
-        favoriteSmileys = { favorites },
-        hfrFavoriteMutations = SmileyFavoriteMutations(
-            addHfrFavorite = { added += it; add(it) },
-            removeHfrFavorite = { removed += it; remove(it) },
+        favoriteSources = SmileyPickerFavoriteSources(
+            favoriteSmileys = { favorites },
+            hfrFavoriteMutations = SmileyFavoriteMutations(
+                addHfrFavorite = { added += it; add(it) },
+                removeHfrFavorite = { removed += it; remove(it) },
+            ),
         ),
     ).also { it.open() }
 

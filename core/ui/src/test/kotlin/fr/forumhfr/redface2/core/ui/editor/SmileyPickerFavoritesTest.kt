@@ -102,7 +102,7 @@ class SmileyPickerFavoritesTest {
     private fun controller(items: List<EditorSmiley>) = SmileyPickerController(
         scope = CoroutineScope(StandardTestDispatcher()),
         searchWiki = { _, _ -> error("Standard must not search the wiki") },
-        favoriteSmileys = { items },
+        favoriteSources = SmileyPickerFavoriteSources(favoriteSmileys = { items }),
     ).also { it.open() }
 
     private fun description(smiley: EditorSmiley) =

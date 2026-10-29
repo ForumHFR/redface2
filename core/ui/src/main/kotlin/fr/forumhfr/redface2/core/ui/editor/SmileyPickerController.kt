@@ -6,7 +6,6 @@ import fr.forumhfr.redface2.core.model.HfrFavoriteSmileyMutationResult
 import fr.forumhfr.redface2.core.domain.smiley.LocalFavoriteSmileyFailure
 import fr.forumhfr.redface2.core.domain.smiley.LocalFavoriteSmileyMutationResult
 import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollectionSnapshot
-import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollections
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -47,8 +46,9 @@ import kotlinx.coroutines.launch
  * Repository operations are callbacks supplied by the hosts, without Hilt in this controller.
  * [userId] feeds HFR's wiki endpoint and falls back to 0 when the session
  * has not resolved an id (proven harmless — same fallback as `PostEditorViewModel`).
- * [favoriteSmileys] reads the latest loaded form ; hosts call [refreshFavorites] when that form
- * changes. Reopening restores the wiki search but always reads the current favorites.
+ * [SmileyPickerFavoriteSources.favoriteSmileys] reads the latest loaded form ; hosts call
+ * [refreshFavorites] when that form changes. Reopening restores the wiki search but always
+ * reads the current favorites.
  * [onSearchFailed] lets a host apply its own failure policy (the `:feature:editor` ViewModels
  * record a diagnostics WARN — class name only, never the query nor the userId — while the MP
  * composers keep the no-op default).
@@ -58,9 +58,7 @@ class SmileyPickerController(
     private val searchWiki: suspend (userId: Int, query: String) -> List<EditorSmiley>,
     private val userId: () -> Int? = { null },
     private val onSearchFailed: (Throwable) -> Unit = {},
-    private val favoriteSmileys: () -> List<EditorSmiley> = { emptyList() },
-    private val hfrFavoriteMutations: SmileyFavoriteMutations? = null,
-    private val localCollections: SmileyLocalCollections? = null,
+    private val favoriteSources: SmileyPickerFavoriteSources = SmileyPickerFavoriteSources(),
 ) {
 
     private val _state = MutableStateFlow<SmileyPickerState>(SmileyPickerState.Hidden)
@@ -76,14 +74,14 @@ class SmileyPickerController(
     private var favoriteFeedbackGeneration = 0L
     private var accountGeneration = 0L
     private val favoriteCommand: ((EditorSmiley) -> Unit)? =
-        if (hfrFavoriteMutations != null) ::onFavoriteClicked else null
+        if (favoriteSources.hfrFavoriteMutations != null) ::onFavoriteClicked else null
     private var localSnapshot = SmileyLocalCollectionSnapshot()
     private val localCommand: (EditorSmiley) -> Unit = ::onLocalFavoriteClicked
 
     init {
         // Collect for the whole ViewModel lifetime, including while the sheet is hidden.
         scope.launch {
-            localCollections?.observe()?.collect { snapshot ->
+            favoriteSources.localCollections?.observe()?.collect { snapshot ->
                 if (localSnapshot.owner != snapshot.owner) {
                     accountGeneration++
                     favoriteFeedback = null
@@ -107,7 +105,7 @@ class SmileyPickerController(
         ?: mergedFavorites()
 
     private fun mergedFavorites(): List<EditorSmiley> {
-        val base = favoriteSmileys()
+        val base = favoriteSources.favoriteSmileys()
         val confirmed = currentFavoriteSnapshot() ?: return base
         val byToken = confirmed.items.associateBy { it.token }
         val baseTokens = base.mapTo(mutableSetOf()) { it.token }
@@ -120,7 +118,8 @@ class SmileyPickerController(
         val confirmed = currentFavoriteSnapshot() ?: return emptySet()
         val favoriteTokens = confirmed.items.mapTo(mutableSetOf()) { it.token }
         // Removed tokens stay eligible for re-addition from the Wiki.
-        return favoriteSmileys().mapTo(mutableSetOf()) { it.token } - favoriteTokens - confirmed.removedTokens
+        return favoriteSources.favoriteSmileys().mapTo(mutableSetOf()) { it.token } -
+            favoriteTokens - confirmed.removedTokens
     }
 
     private fun withFavorites(open: SmileyPickerState.Open): SmileyPickerState.Open {
@@ -185,7 +184,7 @@ class SmileyPickerController(
         } else {
             SmileyFavoriteAction.ADD
         }
-        val collections = requireNotNull(localCollections)
+        val collections = requireNotNull(favoriteSources.localCollections)
         favoriteFeedback = null
         val generation = ++favoriteFeedbackGeneration
         val account = accountGeneration
@@ -235,7 +234,7 @@ class SmileyPickerController(
     fun onFavoriteClicked(smiley: EditorSmiley) {
         val open = _state.value as? SmileyPickerState.Open ?: return
         val action = open.favoriteAction(smiley) ?: return
-        val callbacks = requireNotNull(hfrFavoriteMutations)
+        val callbacks = requireNotNull(favoriteSources.hfrFavoriteMutations)
         val mutation = when (action) {
             SmileyFavoriteAction.ADD -> callbacks.addHfrFavorite
             SmileyFavoriteAction.REMOVE -> callbacks.removeHfrFavorite

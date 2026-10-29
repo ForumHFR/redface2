@@ -32,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -112,14 +113,7 @@ fun SmileyPickerSheet(
         sheetMaxWidth = SMILEY_SHEET_MAX_WIDTH,
         sheetState = sheetState,
     ) {
-        // #824 — open() chooses the initial tab with the restored search. Key the saveable
-        // slot by THAT decision: a stale Standard slot cannot override a restored Wiki opening,
-        // even if its Open reaches composition one frame later. On rotation the decision stays
-        // identical, so the saved USER selection wins, including after leaving a restored search.
-        // Late collections keep initialTab unchanged and never take selection back.
-        var tabIndex by key(state.initialTab.ordinal) {
-            rememberSaveable { mutableStateOf(state.initialTab.ordinal) }
-        }
+        var tabIndex by rememberSmileyPickerTab(state.initialTab)
         val sheetTitle = stringResource(R.string.editor_smiley_title)
         Column(
             modifier = Modifier
@@ -191,6 +185,18 @@ fun SmileyPickerSheet(
             }
         }
     }
+}
+
+/**
+ * #824 — key the saveable slot by open()'s initial decision, so an old Standard slot cannot
+ * override a restored Wiki opening, including when that Open arrives one frame later.
+ * The decision stays unchanged during an opening and across rotation: the saved USER choice
+ * wins even after leaving a restored search. Late collections never take selection back.
+ * Kept separate so restoration can be tested outside ModalBottomSheet's dialog registry.
+ */
+@Composable
+internal fun rememberSmileyPickerTab(initialTab: SmileyPickerTab): MutableState<Int> = key(initialTab.ordinal) {
+    rememberSaveable { mutableStateOf(initialTab.ordinal) }
 }
 
 @Composable

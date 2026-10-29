@@ -36,7 +36,10 @@ class SmileyPickerLocalCollectionsTest {
     @Test
     fun `initial tab uses any known collection and restored Wiki always wins`() = runTest {
         val locals = FakePickerLocalCollections()
-        val controller = SmileyPickerController(backgroundScope, { _, _ -> emptyList() }, localCollections = locals)
+        val controller = SmileyPickerController(
+            backgroundScope, { _, _ -> emptyList() },
+            favoriteSources = SmileyPickerFavoriteSources(localCollections = locals),
+        )
         runCurrent()
         controller.open()
         assertEquals(SmileyPickerTab.STANDARD, controller.openState().initialTab)
@@ -57,7 +60,10 @@ class SmileyPickerLocalCollectionsTest {
         controller.dismiss()
         controller.open()
         assertEquals(SmileyPickerTab.WIKI, controller.openState().initialTab)
-        val hfr = SmileyPickerController(backgroundScope, { _, _ -> emptyList() }, favoriteSmileys = { listOf(perso) })
+        val hfr = SmileyPickerController(
+            backgroundScope, { _, _ -> emptyList() },
+            favoriteSources = SmileyPickerFavoriteSources(favoriteSmileys = { listOf(perso) }),
+        )
         hfr.open()
         assertEquals(SmileyPickerTab.FAVORITES, hfr.openState().initialTab)
     }
@@ -68,7 +74,10 @@ class SmileyPickerLocalCollectionsTest {
         locals.snapshot.value = SmileyLocalCollectionSnapshot(
             "alice", favorites = listOf(LocalFavoriteSmiley("unresolvable", addedAt = 1)),
         )
-        val controller = SmileyPickerController(backgroundScope, { _, _ -> emptyList() }, localCollections = locals)
+        val controller = SmileyPickerController(
+            backgroundScope, { _, _ -> emptyList() },
+            favoriteSources = SmileyPickerFavoriteSources(localCollections = locals),
+        )
         runCurrent()
         controller.open()
         assertEquals(SmileyPickerTab.FAVORITES, controller.openState().initialTab)
@@ -85,7 +94,10 @@ class SmileyPickerLocalCollectionsTest {
             listOf(SmileyUsageEntry(perso.token, 4, 1), SmileyUsageEntry(builtin.token, 3, 1)),
         )
         val controller = SmileyPickerController(
-            backgroundScope, { _, _ -> listOf(perso) }, favoriteSmileys = { listOf(perso) }, localCollections = locals,
+            backgroundScope, { _, _ -> listOf(perso) },
+            favoriteSources = SmileyPickerFavoriteSources(
+                favoriteSmileys = { listOf(perso) }, localCollections = locals,
+            ),
         )
         runCurrent()
         controller.open()
@@ -116,7 +128,10 @@ class SmileyPickerLocalCollectionsTest {
     fun `local gesture captures owner before coroutine and account switch replaces every local row`() = runTest {
         val locals = FakePickerLocalCollections()
         locals.snapshot.value = SmileyLocalCollectionSnapshot("alice")
-        val controller = SmileyPickerController(backgroundScope, { _, _ -> emptyList() }, localCollections = locals)
+        val controller = SmileyPickerController(
+            backgroundScope, { _, _ -> emptyList() },
+            favoriteSources = SmileyPickerFavoriteSources(localCollections = locals),
+        )
         runCurrent()
         controller.open()
         controller.openState().onLocalFavoriteChange?.invoke(builtin)
@@ -149,7 +164,10 @@ class SmileyPickerLocalCollectionsTest {
             "alice", listOf(LocalFavoriteSmiley(perso.token, addedAt = 1)),
             listOf(SmileyUsageEntry(perso.token, 2, 1)),
         )
-        val controller = SmileyPickerController(backgroundScope, { _, _ -> listOf(perso) }, localCollections = locals)
+        val controller = SmileyPickerController(
+            backgroundScope, { _, _ -> listOf(perso) },
+            favoriteSources = SmileyPickerFavoriteSources(localCollections = locals),
+        )
         runCurrent()
         controller.open()
         assertEquals(EditorSmileySource.WIKI, controller.openState().localFavoriteSmileys.single().source)
@@ -168,8 +186,10 @@ class SmileyPickerLocalCollectionsTest {
         val gate = CompletableDeferred<HfrFavoriteSmileyMutationResult>()
         val controller = SmileyPickerController(
             backgroundScope, { _, _ -> emptyList() },
-            hfrFavoriteMutations = SmileyFavoriteMutations({ gate.await() }, { gate.await() }),
-            localCollections = locals,
+            favoriteSources = SmileyPickerFavoriteSources(
+                hfrFavoriteMutations = SmileyFavoriteMutations({ gate.await() }, { gate.await() }),
+                localCollections = locals,
+            ),
         )
         runCurrent()
         controller.open()
@@ -193,8 +213,10 @@ class SmileyPickerLocalCollectionsTest {
             val gate = CompletableDeferred<HfrFavoriteSmileyMutationResult>()
             val controller = SmileyPickerController(
                 backgroundScope, { _, _ -> emptyList() },
-                hfrFavoriteMutations = SmileyFavoriteMutations({ gate.await() }, { gate.await() }),
-                localCollections = locals,
+                favoriteSources = SmileyPickerFavoriteSources(
+                    hfrFavoriteMutations = SmileyFavoriteMutations({ gate.await() }, { gate.await() }),
+                    localCollections = locals,
+                ),
             )
             runCurrent()
             controller.open()
@@ -226,11 +248,13 @@ class SmileyPickerLocalCollectionsTest {
             locals.addResult = { gate.await() }
             val controller = SmileyPickerController(
                 backgroundScope, { _, _ -> emptyList() },
-                hfrFavoriteMutations = SmileyFavoriteMutations(
-                    { HfrFavoriteSmileyMutationResult.Success(listOf(perso)) },
-                    { HfrFavoriteSmileyMutationResult.Success(emptyList()) },
+                favoriteSources = SmileyPickerFavoriteSources(
+                    hfrFavoriteMutations = SmileyFavoriteMutations(
+                        { HfrFavoriteSmileyMutationResult.Success(listOf(perso)) },
+                        { HfrFavoriteSmileyMutationResult.Success(emptyList()) },
+                    ),
+                    localCollections = locals,
                 ),
-                localCollections = locals,
             )
             runCurrent()
             controller.open()
@@ -259,8 +283,10 @@ class SmileyPickerLocalCollectionsTest {
                 val gate = CompletableDeferred<HfrFavoriteSmileyMutationResult>()
                 val controller = SmileyPickerController(
                     backgroundScope, { _, _ -> emptyList() },
-                    hfrFavoriteMutations = SmileyFavoriteMutations({ gate.await() }, { gate.await() }),
-                    localCollections = locals,
+                    favoriteSources = SmileyPickerFavoriteSources(
+                        hfrFavoriteMutations = SmileyFavoriteMutations({ gate.await() }, { gate.await() }),
+                        localCollections = locals,
+                    ),
                 )
                 runCurrent()
                 controller.open()
@@ -294,11 +320,13 @@ class SmileyPickerLocalCollectionsTest {
                 locals.addResult = { gate.await() }
                 val controller = SmileyPickerController(
                     backgroundScope, { _, _ -> emptyList() },
-                    hfrFavoriteMutations = SmileyFavoriteMutations(
-                        { HfrFavoriteSmileyMutationResult.Success(listOf(perso)) },
-                        { HfrFavoriteSmileyMutationResult.Success(emptyList()) },
+                    favoriteSources = SmileyPickerFavoriteSources(
+                        hfrFavoriteMutations = SmileyFavoriteMutations(
+                            { HfrFavoriteSmileyMutationResult.Success(listOf(perso)) },
+                            { HfrFavoriteSmileyMutationResult.Success(emptyList()) },
+                        ),
+                        localCollections = locals,
                     ),
-                    localCollections = locals,
                 )
                 runCurrent()
                 controller.open()
@@ -325,7 +353,10 @@ class SmileyPickerLocalCollectionsTest {
     fun `local limit explicit failure and exception produce classified feedback`() = runTest {
         val locals = FakePickerLocalCollections()
         locals.snapshot.value = SmileyLocalCollectionSnapshot("alice")
-        val controller = SmileyPickerController(backgroundScope, { _, _ -> emptyList() }, localCollections = locals)
+        val controller = SmileyPickerController(
+            backgroundScope, { _, _ -> emptyList() },
+            favoriteSources = SmileyPickerFavoriteSources(localCollections = locals),
+        )
         runCurrent()
         controller.open()
         val outcomes = listOf(
@@ -357,11 +388,13 @@ class SmileyPickerLocalCollectionsTest {
         val hfrCalls = mutableListOf<String>()
         val controller = SmileyPickerController(
             backgroundScope, { _, _ -> emptyList() },
-            hfrFavoriteMutations = SmileyFavoriteMutations(
-                { token -> hfrCalls += token; HfrFavoriteSmileyMutationResult.Success(listOf(perso)) },
-                { HfrFavoriteSmileyMutationResult.Success(emptyList()) },
+            favoriteSources = SmileyPickerFavoriteSources(
+                hfrFavoriteMutations = SmileyFavoriteMutations(
+                    { token -> hfrCalls += token; HfrFavoriteSmileyMutationResult.Success(listOf(perso)) },
+                    { HfrFavoriteSmileyMutationResult.Success(emptyList()) },
+                ),
+                localCollections = locals,
             ),
-            localCollections = locals,
         )
         runCurrent()
         controller.open()
@@ -381,7 +414,10 @@ class SmileyPickerLocalCollectionsTest {
     fun `hidden local successes are silent and hidden failures last for one opening`() = runTest {
         val locals = FakePickerLocalCollections()
         locals.snapshot.value = SmileyLocalCollectionSnapshot("alice")
-        val controller = SmileyPickerController(backgroundScope, { _, _ -> emptyList() }, localCollections = locals)
+        val controller = SmileyPickerController(
+            backgroundScope, { _, _ -> emptyList() },
+            favoriteSources = SmileyPickerFavoriteSources(localCollections = locals),
+        )
         runCurrent()
         controller.open()
         val success = CompletableDeferred<LocalFavoriteSmileyMutationResult>()
