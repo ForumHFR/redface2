@@ -1,0 +1,6 @@
+Fixture : hfr_favorite_smiley_addperso_success.html
+Origine : réponse HTTP 200 (pas de Location) de POST /user/addperso.php?config=hfr.inc
+Requête : hash_check=<hash_check>&smilie=[:fictif_a] (liste de 1 favori avant l'ajout)
+Cas : succès, forme courante : « Ajout effectué avec succès ! » + meta Refresh 2 s vers wikismilies.php?alpha=a&threecol=1
+Capture : live le 2026-10-29, authentifié sous XaTelitte (compte de test de l'agent), #1154, capture de mutation (004). État des favoris restauré à l'identique après la passe.
+Sous-arbre assaini : head réduit à la meta Content-Type et à la meta Refresh d’origine (verbatim), body réduit au chemin div.container > div#mesdiscussions > div.hop (bloc verbatim). Feuilles de style et style inline d'origine retirés (doctype conservé). La réponse d'origine ne contient ni hash_check, ni codehex, ni cookie, ni cryptlink (vérifié).
