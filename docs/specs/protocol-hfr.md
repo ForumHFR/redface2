@@ -863,8 +863,8 @@ supplémentaire**, aucun stockage local, aucune lecture via l'API REST.
   Dans la section Favoris de Standard, il ouvre le retrait si l'entrée est éligible.
   Chaque cellule éligible porte le même libellé d'appui long et d'action personnalisée TalkBack.
   Aucun geste de favoris sur les builtins. Dès qu'une liste confirmée existe pour la génération
-  courante, une entrée de la base absente de cette liste est connue comme entrée du compte :
-  insertion seule, sans menu, action TalkBack ni libellé d'appui long, y compris dans le Wiki.
+  courante, une entrée de la base absente de cette liste, hors jetons masqués par un retrait,
+  est connue comme entrée du compte : insertion seule, sans menu, action TalkBack ni libellé d'appui long, y compris dans le Wiki.
   Avant confirmation, le premier essai de retrait d'une telle entrée donne `NotInFavorites`,
   puis n'est plus proposé. Un nouveau formulaire efface ce savoir ; aucun rapprochement par pseudo.
 - Une seule mutation à la fois : tous les gestes de favoris sont indisponibles pendant l'attente.
