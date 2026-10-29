@@ -1,3 +1,3 @@
-Redface 2 v0.64.2 — dev.
-- Smiley picker: in the Wiki tab, the HFR favorites message now shows briefly without shifting the search field, and messages clear when the picker closes.
-- Picker texts made consistent.
+Redface 2 v0.64.3 — dev.
+- Smileys: your own custom smileys no longer vanish from Favorites after adding an HFR favorite.
+- Your own custom smileys no longer show a false "Removed" message.

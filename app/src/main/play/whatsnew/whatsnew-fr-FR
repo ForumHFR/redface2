@@ -1,3 +1,3 @@
-Redface 2 v0.64.2 — dev.
-- Sélecteur de smileys : dans l'onglet Wiki, le message des favoris HFR s'affiche brièvement sans décaler la recherche, et les messages s'effacent à la fermeture.
-- Textes du sélecteur harmonisés (vouvoiement).
+Redface 2 v0.64.3 — dev.
+- Smileys : vos smileys perso ne disparaissent plus de la section Favoris après l'ajout d'un favori HFR.
+- Un smiley perso du compte n'affiche plus « Retiré » à tort.
