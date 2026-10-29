@@ -862,16 +862,30 @@ supplémentaire**, aucun stockage local, aucune lecture via l'API REST.
   feuille fermée, clavier rouvert seulement s'il l'était auparavant. Taille et décoration réglables,
   plafond de grille à 62 % de l'écran avec plancher de 320 dp et recherche Wiki sont conservés.
 - Les listes confirmées du dépôt remplacent la projection optimiste, avec l'ordre et les images
-  du serveur, y compris pour `AlreadyPresent`, `Full` et `VerificationFailed`. Sans liste confirmée,
-  retour à la liste précédant le geste ; `AccountChanged` n'applique rien et reste silencieux.
-- Le résultat est conservé même feuille fermée. Une génération logique empêche un formulaire reçu
-  **pendant** la mutation de remplacer son résultat ; le prochain formulaire reçu **après** sa fin
-  reprend la main. Ouvrir ou fermer la feuille ne supprime pas cette surcouche.
-- Une zone de statut persistante en tête de Favoris, également affichée en tête du Wiki, donne le
-  résultat en français et l'annonce poliment à TalkBack. Une erreur reçue feuille fermée est visible à la
-  réouverture. Elle indique notamment le plafond renvoyé par `Full.limit`, la liste rechargée pour
-  `VerificationFailed`, la session expirée, l'échec réseau ou la réponse HFR inattendue. Le statut
-  est remplacé au prochain geste ; il ne nécessite aucun composant dans les quatre écrans hôtes.
+  du serveur, pour `Success`, `AlreadyPresent`, `Full` et `VerificationFailed`.
+- Sans liste confirmée (`TransportFailure`, `UnknownResponse`, `NotFound`, `InvalidToken`,
+  `NotAuthenticated`), seule la projection optimiste est retirée : aucun instantané n'est créé.
+  La base courante réapparaît, y compris un formulaire reçu **pendant** la mutation, ou un
+  instantané confirmé antérieur encore valide selon sa génération. Sans nouveau formulaire,
+  cela restitue l'état précédant le geste. `AccountChanged` n'applique rien et reste silencieux.
+- Une liste confirmée est conservée même feuille fermée. Une génération logique empêche un
+  formulaire reçu **pendant** la mutation de remplacer cette liste ; le prochain formulaire reçu
+  **après** sa fin reprend la main. Ouvrir ou fermer la feuille ne supprime pas cette surcouche.
+- Le statut en tête de Favoris donne le résultat en français et l'annonce poliment à TalkBack.
+  Dans le Wiki, une surface compacte avec marges affiche le même message en surcouche brève en bas,
+  sans déplacer le champ de recherche ni la grille ; son fond suit le thème clair ou sombre.
+  Elle disparaît après le délai recommandé par l'accessibilité (4 secondes par défaut, comme un
+  Snackbar M3 court), libérant les cellules couvertes. Chaque nouveau geste relance ce délai,
+  même si le message est identique. Une surcouche expirée ne revient pas au changement d'onglet.
+  Cette visibilité est locale à l'interface : le statut de Favoris reste jusqu'à la fermeture,
+  sans minuteur.
+  Il indique notamment le plafond renvoyé par `Full.limit`, la liste rechargée pour
+  `VerificationFailed`, la session expirée, l'échec réseau ou la réponse HFR inattendue.
+- Le contrôleur conserve un message jusqu'à la fermeture qui termine la première ouverture de
+  la feuille pendant laquelle il a été visible. Un succès (`Added`, `Removed`) reçu feuille fermée est silencieux.
+  Tout autre message reçu feuille fermée attend la réouverture, puis disparaît à la fermeture de
+  cette ouverture. Un nouveau geste remplace le statut courant. Aucun minuteur dans le contrôleur
+  ni composant supplémentaire dans les quatre écrans hôtes n'est nécessaire.
 
 **Protocole d'écriture (B1 de #1154)** :
 

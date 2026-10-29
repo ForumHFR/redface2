@@ -37,6 +37,7 @@ class SmileyPickerHfrFavoritesTest {
         controller.dismiss()
         controller.open()
         assertEquals(confirmed, controller.openState().favoriteSmileys)
+        assertNull(controller.openState().favoriteFeedback)
     }
 
     @Test
@@ -52,6 +53,9 @@ class SmileyPickerHfrFavoritesTest {
         advanceUntilIdle()
         assertEquals(listOf(other), controller.openState().favoriteSmileys)
         assertEquals(SmileyFavoriteFeedback.Removed, controller.openState().favoriteFeedback)
+        controller.dismiss()
+        controller.open()
+        assertNull(controller.openState().favoriteFeedback)
     }
 
     @Test
@@ -78,28 +82,8 @@ class SmileyPickerHfrFavoritesTest {
                 HfrFavoriteSmileyMutationResult.Success(listOf(favorite)),
                 SmileyFavoriteFeedback.Added, listOf(favorite),
             ),
-            Outcome(
-                HfrFavoriteSmileyMutationResult.AlreadyPresent(listOf(favorite)),
-                SmileyFavoriteFeedback.AlreadyPresent, listOf(favorite),
-            ),
-            Outcome(
-                HfrFavoriteSmileyMutationResult.Full(7, listOf(favorite)),
-                SmileyFavoriteFeedback.Full(7), listOf(favorite),
-            ),
-            Outcome(
-                HfrFavoriteSmileyMutationResult.VerificationFailed(listOf(favorite)),
-                SmileyFavoriteFeedback.ListChanged, listOf(favorite),
-            ),
-            Outcome(HfrFavoriteSmileyMutationResult.NotFound, SmileyFavoriteFeedback.NotFound, listOf(other)),
-            Outcome(HfrFavoriteSmileyMutationResult.InvalidToken, SmileyFavoriteFeedback.NotFound, listOf(other)),
-            Outcome(HfrFavoriteSmileyMutationResult.NotAuthenticated,
-                SmileyFavoriteFeedback.NotAuthenticated, listOf(other)),
             Outcome(HfrFavoriteSmileyMutationResult.AccountChanged, null, listOf(other)),
-            Outcome(HfrFavoriteSmileyMutationResult.UnknownResponse,
-                SmileyFavoriteFeedback.UnknownResponse, listOf(other)),
-            Outcome(HfrFavoriteSmileyMutationResult.TransportFailure,
-                SmileyFavoriteFeedback.TransportFailure, listOf(other)),
-        )
+        ) + failureCases
         cases.forEach { outcome ->
             val controller = controller(this, { listOf(other) }, add = { outcome.result })
             controller.onFavoriteClicked(wiki)
@@ -190,22 +174,45 @@ class SmileyPickerHfrFavoritesTest {
     }
 
     @Test
-    fun `rollback preserves the preceding overlay despite a form received during the next mutation`() = runTest {
-        var form = listOf(other)
-        val gate = CompletableDeferred<HfrFavoriteSmileyMutationResult>()
-        val controller = controller(
-            this, { form },
-            add = { HfrFavoriteSmileyMutationResult.Success(listOf(other, favorite)) },
-            remove = { gate.await() },
-        )
-        controller.onFavoriteClicked(wiki)
-        advanceUntilIdle()
-        controller.onFavoriteClicked(other)
-        form = emptyList()
-        controller.refreshFavorites()
-        gate.complete(HfrFavoriteSmileyMutationResult.TransportFailure)
-        advanceUntilIdle()
-        assertEquals(listOf(other, favorite), controller.openState().favoriteSmileys)
+    fun `unconfirmed failures reveal a newer form`() = runTest {
+        unconfirmedFailures.forEach { result ->
+            var form = listOf(other)
+            val gate = CompletableDeferred<HfrFavoriteSmileyMutationResult>()
+            val controller = controller(
+                this, { form },
+                add = { HfrFavoriteSmileyMutationResult.Success(listOf(other, favorite)) },
+                remove = { gate.await() },
+            )
+            controller.onFavoriteClicked(wiki)
+            advanceUntilIdle()
+            controller.onFavoriteClicked(other)
+            form = emptyList()
+            controller.refreshFavorites()
+            assertEquals(listOf(other, favorite), controller.openState().favoriteSmileys)
+            gate.complete(result)
+            advanceUntilIdle()
+            assertEquals(result.toString(), form, controller.openState().favoriteSmileys)
+            assertNull(controller.openState().pendingFavoriteToken)
+        }
+    }
+
+    @Test
+    fun `unconfirmed failures preserve a valid snapshot`() = runTest {
+        unconfirmedFailures.forEach { result ->
+            val confirmed = listOf(other, favorite)
+            val controller = controller(
+                this, { listOf(other) },
+                add = { HfrFavoriteSmileyMutationResult.Success(confirmed) },
+                remove = { result },
+            )
+            controller.onFavoriteClicked(wiki)
+            advanceUntilIdle()
+            controller.onFavoriteClicked(other)
+            advanceUntilIdle()
+            assertEquals(result.toString(), confirmed, controller.openState().favoriteSmileys)
+            controller.refreshFavorites()
+            assertEquals(result.toString(), listOf(other), controller.openState().favoriteSmileys)
+        }
     }
 
     @Test
@@ -226,17 +233,53 @@ class SmileyPickerHfrFavoritesTest {
     }
 
     @Test
-    fun `a failure arriving while hidden is displayed on reopening`() = runTest {
-        val gate = CompletableDeferred<HfrFavoriteSmileyMutationResult>()
-        val controller = controller(this, add = { gate.await() })
-        controller.onFavoriteClicked(wiki)
-        controller.dismiss()
-        gate.complete(HfrFavoriteSmileyMutationResult.TransportFailure)
-        advanceUntilIdle()
-        assertEquals(SmileyPickerState.Hidden, controller.state.value)
-        controller.open()
-        assertTrue(controller.openState().favoriteSmileys.isEmpty())
-        assertEquals(SmileyFavoriteFeedback.TransportFailure, controller.openState().favoriteFeedback)
+    fun `hidden failures expire after their first opening`() = runTest {
+        failureCases.forEach { outcome ->
+            val gate = CompletableDeferred<HfrFavoriteSmileyMutationResult>()
+            val controller = controller(this, { listOf(other) }, add = { gate.await() })
+            controller.onFavoriteClicked(wiki)
+            controller.dismiss()
+            gate.complete(outcome.result)
+            advanceUntilIdle()
+            assertEquals(SmileyPickerState.Hidden, controller.state.value)
+            controller.dismiss()
+            controller.open()
+            assertEquals(outcome.favorites, controller.openState().favoriteSmileys)
+            assertEquals(outcome.message, controller.openState().favoriteFeedback)
+            controller.open()
+            assertEquals(outcome.message, controller.openState().favoriteFeedback)
+            controller.dismiss()
+            controller.open()
+            assertNull(controller.openState().favoriteFeedback)
+        }
+    }
+
+    @Test
+    fun `visible failures expire on dismissal`() = runTest {
+        failureCases.forEach { outcome ->
+            val controller = controller(this, { listOf(other) }, add = { outcome.result })
+            controller.onFavoriteClicked(wiki)
+            advanceUntilIdle()
+            assertEquals(outcome.message, controller.openState().favoriteFeedback)
+            controller.dismiss()
+            controller.open()
+            assertNull(controller.openState().favoriteFeedback)
+        }
+    }
+
+    @Test
+    fun `hidden successes stay silent`() = runTest {
+        listOf(emptyList(), listOf(favorite)).forEach { initial ->
+            val gate = CompletableDeferred<HfrFavoriteSmileyMutationResult>()
+            val controller = controller(this, { initial }, add = { gate.await() }, remove = { gate.await() })
+            controller.onFavoriteClicked(wiki)
+            controller.dismiss()
+            gate.complete(HfrFavoriteSmileyMutationResult.Success(listOf(other)))
+            advanceUntilIdle()
+            controller.open()
+            assertEquals(listOf(other), controller.openState().favoriteSmileys)
+            assertNull(controller.openState().favoriteFeedback)
+        }
     }
 
     @Test
@@ -290,6 +333,37 @@ class SmileyPickerHfrFavoritesTest {
         val result: HfrFavoriteSmileyMutationResult,
         val message: SmileyFavoriteFeedback?,
         val favorites: List<EditorSmiley>,
+    )
+
+    private val unconfirmedFailures = listOf(
+        HfrFavoriteSmileyMutationResult.TransportFailure,
+        HfrFavoriteSmileyMutationResult.UnknownResponse,
+        HfrFavoriteSmileyMutationResult.NotFound,
+        HfrFavoriteSmileyMutationResult.InvalidToken,
+        HfrFavoriteSmileyMutationResult.NotAuthenticated,
+    )
+
+    private val failureCases = listOf(
+        Outcome(
+            HfrFavoriteSmileyMutationResult.AlreadyPresent(listOf(favorite)),
+            SmileyFavoriteFeedback.AlreadyPresent, listOf(favorite),
+        ),
+        Outcome(
+            HfrFavoriteSmileyMutationResult.Full(7, listOf(favorite)),
+            SmileyFavoriteFeedback.Full(7), listOf(favorite),
+        ),
+        Outcome(
+            HfrFavoriteSmileyMutationResult.VerificationFailed(listOf(favorite)),
+            SmileyFavoriteFeedback.ListChanged, listOf(favorite),
+        ),
+        Outcome(HfrFavoriteSmileyMutationResult.NotFound, SmileyFavoriteFeedback.NotFound, listOf(other)),
+        Outcome(HfrFavoriteSmileyMutationResult.InvalidToken, SmileyFavoriteFeedback.NotFound, listOf(other)),
+        Outcome(HfrFavoriteSmileyMutationResult.NotAuthenticated,
+            SmileyFavoriteFeedback.NotAuthenticated, listOf(other)),
+        Outcome(HfrFavoriteSmileyMutationResult.UnknownResponse,
+            SmileyFavoriteFeedback.UnknownResponse, listOf(other)),
+        Outcome(HfrFavoriteSmileyMutationResult.TransportFailure,
+            SmileyFavoriteFeedback.TransportFailure, listOf(other)),
     )
 
     private fun controller(

@@ -27,6 +27,8 @@ sealed interface SmileyPickerState {
         val favoriteFeedback: SmileyFavoriteFeedback? = null,
         /** Stable command supplied by the controller so all four sheets share the same gestures. */
         val onFavoriteChange: ((EditorSmiley) -> Unit)? = null,
+        /** Distinguishes repeated feedback even when Compose skips the intermediate null state. */
+        val favoriteFeedbackGeneration: Long = 0L,
     ) : SmileyPickerState {
         fun favoriteAction(smiley: EditorSmiley): SmileyFavoriteAction? = when {
             onFavoriteChange == null || pendingFavoriteToken != null -> null
@@ -40,7 +42,7 @@ sealed interface SmileyPickerState {
 
 enum class SmileyFavoriteAction { ADD, REMOVE }
 
-/** Retained across dismissal, including failures received while the sheet is hidden. */
+/** Cleared after its first visible opening; hidden successes are silent, hidden failures wait for reopening. */
 sealed interface SmileyFavoriteFeedback {
     data object Added : SmileyFavoriteFeedback
     data object Removed : SmileyFavoriteFeedback

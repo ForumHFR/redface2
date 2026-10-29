@@ -1,15 +1,22 @@
 package fr.forumhfr.redface2.core.ui.editor
 
 import android.content.Context
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.AccessibilityManager
+import androidx.compose.ui.platform.LocalAccessibilityManager
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithContentDescription
@@ -33,6 +40,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -122,11 +130,14 @@ class SmileyPickerHfrGesturesTest {
     }
 
     @Test
-    fun `builtin exposes no favorite gesture and keeps insertion`() {
+    fun `builtin keeps insertion without favorite actions`() {
         val controller = controller()
         mount(controller)
         val builtin = BUILTIN_HFR_SMILEYS.first()
         assertNoFavoriteActions(builtin)
+        compose.onNodeWithContentDescription(description(builtin)).assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf(description(builtin))),
+        )
         compose.onNodeWithContentDescription(description(builtin)).performClick()
         compose.runOnIdle {
             assertEquals(builtin.token, inserted)
@@ -134,6 +145,251 @@ class SmileyPickerHfrGesturesTest {
             assertTrue(added.isEmpty())
             assertTrue(removed.isEmpty())
         }
+    }
+
+    @Test
+    fun `wiki without callbacks keeps insertion`() {
+        val controller = SmileyPickerController(
+            scope = CoroutineScope(dispatcher),
+            searchWiki = { _, _ -> listOf(wiki) },
+        ).also { it.open() }
+        showWiki(controller)
+        mount(controller)
+        assertNoFavoriteActions(wiki)
+        compose.onNodeWithContentDescription(description(wiki)).performClick()
+        compose.runOnIdle {
+            assertEquals(wiki.token, inserted)
+            assertEquals(SmileyPickerState.Hidden, controller.state.value)
+        }
+    }
+
+    @Test
+    fun `wiki feedback never moves search or grid`() {
+        var feedback by mutableStateOf<SmileyFavoriteFeedback?>(null)
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                SmileyPickerSheet(
+                    state = SmileyPickerState.Open(
+                        query = "fictif",
+                        wiki = WikiSearchState.Results(listOf(wiki, other)),
+                        favoriteFeedback = feedback,
+                    ),
+                    onDismiss = {}, onQueryChange = {}, onSmileyClicked = {},
+                )
+            }
+        }
+        val search = compose.onNode(hasSetTextAction())
+        val cell = compose.onNodeWithContentDescription(description(wiki))
+        val searchBounds = search.fetchSemanticsNode().boundsInRoot
+        val cellBounds = cell.fetchSemanticsNode().boundsInRoot
+        val messages = listOf(
+            SmileyFavoriteFeedback.Added to context.getString(R.string.editor_smiley_favorite_added),
+            SmileyFavoriteFeedback.Full(7) to context.getString(R.string.editor_smiley_favorite_full, 7),
+        )
+        messages.forEach { (value, message) ->
+            compose.runOnIdle { feedback = value }
+            compose.onNodeWithText(message).assertIsDisplayed().assert(
+                SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite),
+            )
+            assertEquals(searchBounds, search.fetchSemanticsNode().boundsInRoot)
+            assertEquals(cellBounds, cell.fetchSemanticsNode().boundsInRoot)
+            compose.runOnIdle { feedback = null }
+            compose.onNodeWithText(message).assertDoesNotExist()
+            assertEquals(searchBounds, search.fetchSemanticsNode().boundsInRoot)
+            assertEquals(cellBounds, cell.fetchSemanticsNode().boundsInRoot)
+        }
+    }
+
+    @Test
+    fun `wiki feedback expires and the last row accepts touch insertion again`() {
+        val controller = controller(wikiItems = listOf(other, other.copy(token = "[:fictif c]"), wiki))
+        showWiki(controller)
+        mount(controller)
+        compose.mainClock.autoAdvance = false
+        val search = compose.onNode(hasSetTextAction())
+        // Three results fit in a single row; the third cell lies under the centered feedback.
+        val cell = compose.onNodeWithContentDescription(description(wiki))
+        val searchBounds = search.fetchSemanticsNode().boundsInRoot
+        val cellBounds = cell.fetchSemanticsNode().boundsInRoot
+        compose.runOnIdle {
+            controller.onFavoriteClicked(wiki)
+            dispatcher.scheduler.runCurrent()
+        }
+        compose.mainClock.advanceTimeByFrame()
+        val message = compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_added))
+        message.assertIsDisplayed()
+        val coveredBounds = cellBounds.intersect(message.fetchSemanticsNode().boundsInRoot)
+        assertTrue(coveredBounds.width > 0f && coveredBounds.height > 0f)
+        val touchPosition = coveredBounds.center - cellBounds.topLeft
+        compose.mainClock.advanceTimeBy(3500L)
+        message.assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(500L)
+        compose.mainClock.advanceTimeByFrame()
+        message.assertDoesNotExist()
+        assertEquals(searchBounds, search.fetchSemanticsNode().boundsInRoot)
+        assertEquals(cellBounds, cell.fetchSemanticsNode().boundsInRoot)
+        compose.runOnIdle {
+            val open = controller.state.value as SmileyPickerState.Open
+            assertEquals(SmileyFavoriteFeedback.Added, open.favoriteFeedback)
+        }
+        // A semantics click would bypass the Surface's touch interception and miss the regression.
+        cell.performTouchInput { click(touchPosition) }
+        compose.mainClock.advanceTimeByFrame()
+        compose.runOnIdle {
+            assertEquals(wiki.token, inserted)
+            assertEquals(SmileyPickerState.Hidden, controller.state.value)
+        }
+    }
+
+    @Test
+    fun `successive wiki additions redisplay identical feedback without an intermediate frame`() {
+        val controller = controller(add = {
+            val confirmed = listOf(wiki, other).filter { it.token in added }
+                .map { it.copy(source = EditorSmileySource.HFR_FAVORITE) }
+            HfrFavoriteSmileyMutationResult.Success(confirmed)
+        })
+        showWiki(controller)
+        mount(controller)
+        compose.mainClock.autoAdvance = false
+        compose.runOnIdle {
+            controller.onFavoriteClicked(wiki)
+            dispatcher.scheduler.runCurrent()
+        }
+        compose.mainClock.advanceTimeByFrame()
+        val message = compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_added))
+        message.assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(4000L)
+        compose.mainClock.advanceTimeByFrame()
+        message.assertDoesNotExist()
+        compose.runOnIdle {
+            controller.onFavoriteClicked(other)
+            assertNull((controller.state.value as SmileyPickerState.Open).favoriteFeedback)
+            // Complete before Compose can observe null: the gesture generation must reset visibility.
+            dispatcher.scheduler.runCurrent()
+            val open = controller.state.value as SmileyPickerState.Open
+            assertEquals(SmileyFavoriteFeedback.Added, open.favoriteFeedback)
+            assertEquals(listOf(wiki.token, other.token), added)
+        }
+        compose.mainClock.advanceTimeByFrame()
+        message.assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(3500L)
+        message.assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(500L)
+        compose.mainClock.advanceTimeByFrame()
+        message.assertDoesNotExist()
+    }
+
+    @Test
+    fun `expired wiki feedback stays hidden across tab changes and a new gesture gets a fresh timeout`() {
+        val controller = controller(add = {
+            val confirmed = listOf(wiki, other).filter { it.token in added }
+                .map { it.copy(source = EditorSmileySource.HFR_FAVORITE) }
+            HfrFavoriteSmileyMutationResult.Success(confirmed)
+        })
+        showWiki(controller)
+        mount(controller)
+        compose.mainClock.autoAdvance = false
+        compose.runOnIdle {
+            controller.onFavoriteClicked(wiki)
+            dispatcher.scheduler.runCurrent()
+        }
+        compose.mainClock.advanceTimeByFrame()
+        val message = compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_added))
+        message.assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(4000L)
+        compose.mainClock.advanceTimeByFrame()
+        message.assertDoesNotExist()
+
+        compose.onNodeWithText(context.getString(R.string.editor_smiley_tab_standard)).performClick()
+        compose.mainClock.advanceTimeByFrame()
+        message.assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(4000L)
+        message.assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.editor_smiley_tab_wiki)).performClick()
+        compose.mainClock.advanceTimeByFrame()
+        message.assertDoesNotExist()
+
+        compose.runOnIdle {
+            controller.onFavoriteClicked(other)
+            // Complete before Compose observes null; the new generation must also reset expiration.
+            dispatcher.scheduler.runCurrent()
+        }
+        compose.mainClock.advanceTimeByFrame()
+        message.assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(3500L)
+        message.assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(500L)
+        compose.mainClock.advanceTimeByFrame()
+        message.assertDoesNotExist()
+    }
+
+    @Test
+    fun `failure received while hidden displays a fresh wiki overlay on reopening`() {
+        val gate = CompletableDeferred<HfrFavoriteSmileyMutationResult>()
+        val controller = controller(add = { gate.await() })
+        showWiki(controller)
+        mount(controller)
+        compose.mainClock.autoAdvance = false
+        compose.runOnIdle {
+            controller.onFavoriteClicked(wiki)
+            dispatcher.scheduler.runCurrent()
+            controller.dismiss()
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithText(context.getString(R.string.editor_smiley_tab_wiki)).assertDoesNotExist()
+        compose.runOnIdle {
+            gate.complete(HfrFavoriteSmileyMutationResult.TransportFailure)
+            dispatcher.scheduler.runCurrent()
+            assertEquals(SmileyPickerState.Hidden, controller.state.value)
+        }
+        // Time spent hidden must not consume the next opening's overlay timeout.
+        compose.mainClock.advanceTimeBy(8000L)
+        compose.runOnIdle { controller.open() }
+        // Let the modal entry animation settle before checking visibility, within the 4 s timeout.
+        compose.mainClock.advanceTimeBy(1000L)
+        val message = compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_network_error))
+        message.assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(2500L)
+        message.assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(1500L)
+        compose.mainClock.advanceTimeByFrame()
+        message.assertDoesNotExist()
+    }
+
+    @Test
+    fun `wiki feedback uses the accessibility recommended text timeout`() {
+        val accessibilityManager = object : AccessibilityManager {
+            override fun calculateRecommendedTimeoutMillis(
+                originalTimeoutMillis: Long,
+                containsIcons: Boolean,
+                containsText: Boolean,
+                containsControls: Boolean,
+            ): Long {
+                assertEquals(4000L, originalTimeoutMillis)
+                assertEquals(false, containsIcons)
+                assertEquals(true, containsText)
+                assertEquals(false, containsControls)
+                return 8000L
+            }
+        }
+        var expired by mutableStateOf(false)
+        compose.setContent {
+            CompositionLocalProvider(LocalAccessibilityManager provides accessibilityManager) {
+                RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                    if (!expired) {
+                        SmileyFavoriteOverlay(SmileyFavoriteFeedback.Added, onExpired = { expired = true })
+                    }
+                }
+            }
+        }
+        compose.mainClock.autoAdvance = false
+        val message = compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_added))
+        message.assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(4000L)
+        message.assertIsDisplayed()
+        compose.mainClock.advanceTimeBy(4000L)
+        compose.mainClock.advanceTimeByFrame()
+        message.assertDoesNotExist()
     }
 
     @Test
@@ -246,12 +502,13 @@ class SmileyPickerHfrGesturesTest {
 
     private fun controller(
         favorites: List<EditorSmiley> = emptyList(),
+        wikiItems: List<EditorSmiley> = listOf(wiki, wiki, other),
         add: suspend (String) -> HfrFavoriteSmileyMutationResult = {
             HfrFavoriteSmileyMutationResult.Success(listOf(favorite))
         },
     ) = SmileyPickerController(
         scope = CoroutineScope(dispatcher),
-        searchWiki = { _, _ -> listOf(wiki, wiki, other) },
+        searchWiki = { _, _ -> wikiItems },
         favoriteSmileys = { favorites },
         hfrFavoriteMutations = SmileyFavoriteMutations(
             addHfrFavorite = { added += it; add(it) },

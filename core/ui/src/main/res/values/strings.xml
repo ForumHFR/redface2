@@ -132,10 +132,10 @@
     <string name="editor_smiley_section_favorites">Favoris</string>
     <string name="editor_smiley_tab_wiki">Wiki</string>
     <string name="editor_smiley_search_label">Rechercher un smiley perso</string>
-    <string name="editor_smiley_search_hint">Tape au moins 3 caractères pour interroger le wiki HFR.</string>
+    <string name="editor_smiley_search_hint">Tapez au moins 3 caractères pour interroger le wiki HFR.</string>
     <string name="editor_smiley_search_loading">Recherche…</string>
     <string name="editor_smiley_search_empty">Aucun smiley trouvé.</string>
-    <string name="editor_smiley_search_error">Erreur réseau. Réessaie dans un instant.</string>
+    <string name="editor_smiley_search_error">Erreur réseau. Réessayez dans un instant.</string>
     <string name="editor_smiley_insert_description">Insérer %1$s</string>
     <string name="editor_smiley_favorite_add">Ajouter aux favoris HFR</string>
     <string name="editor_smiley_favorite_remove">Retirer des favoris HFR</string>

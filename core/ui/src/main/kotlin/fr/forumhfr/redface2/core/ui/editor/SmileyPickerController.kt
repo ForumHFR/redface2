@@ -68,6 +68,7 @@ class SmileyPickerController(
     private var pendingFavoriteToken: String? = null
     private var optimisticFavorites: List<EditorSmiley>? = null
     private var favoriteFeedback: SmileyFavoriteFeedback? = null
+    private var favoriteFeedbackGeneration = 0L
     private val favoriteCommand: ((EditorSmiley) -> Unit)? =
         if (hfrFavoriteMutations != null) ::onFavoriteClicked else null
 
@@ -81,6 +82,7 @@ class SmileyPickerController(
         favoriteSmileys = currentFavorites(),
         pendingFavoriteToken = pendingFavoriteToken,
         favoriteFeedback = favoriteFeedback,
+        favoriteFeedbackGeneration = favoriteFeedbackGeneration,
         onFavoriteChange = favoriteCommand,
     )
 
@@ -136,6 +138,7 @@ class SmileyPickerController(
             SmileyFavoriteAction.REMOVE -> before
         }
         favoriteFeedback = null
+        favoriteFeedbackGeneration++
         publishFavorites()
         scope.launch {
             try {
@@ -143,12 +146,16 @@ class SmileyPickerController(
                     if (error is CancellationException) throw error
                     HfrFavoriteSmileyMutationResult.TransportFailure
                 }
-                // Stamp at completion: a form received DURING the mutation cannot supersede this list.
-                // An account change applies no snapshot, including no rollback over a newly received form.
-                if (result != HfrFavoriteSmileyMutationResult.AccountChanged) {
-                    confirmedFavorites = FavoriteSnapshot(formGeneration, result.confirmedList() ?: before)
+                // Only confirmed lists are stamped at completion, superseding forms received DURING the mutation.
+                // Without one, dropping the optimistic layer reveals the current base or still-valid snapshot.
+                result.confirmedList()?.let { confirmed ->
+                    confirmedFavorites = FavoriteSnapshot(formGeneration, confirmed)
                 }
-                favoriteFeedback = result.feedback(action)
+                favoriteFeedback = when (val feedback = result.feedback(action)) {
+                    SmileyFavoriteFeedback.Added, SmileyFavoriteFeedback.Removed ->
+                        feedback.takeIf { _state.value is SmileyPickerState.Open }
+                    else -> feedback
+                }
             } finally {
                 optimisticFavorites = null
                 pendingFavoriteToken = null
@@ -167,6 +174,8 @@ class SmileyPickerController(
         // one editing session is acceptable (issue #824, immediate-reopen use case).
         val current = _state.value
         if (current is SmileyPickerState.Open) {
+            // End the first opening that displayed this feedback; hidden failures wait for an opening.
+            favoriteFeedback = null
             lastDismissed = current.copy(
                 wiki = when (val wiki = current.wiki) {
                     is WikiSearchState.Results -> wiki

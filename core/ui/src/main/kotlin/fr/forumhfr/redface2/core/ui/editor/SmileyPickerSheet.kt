@@ -32,6 +32,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -98,6 +99,8 @@ fun SmileyPickerSheet(
     modifier: Modifier = Modifier,
     layout: SmileyPickerLayoutSpec = SmileyPickerLayoutSpec.Current,
 ) {
+    // All four hosts remove the sheet on Hidden: expiration survives tab changes, not a new opening.
+    var favoriteOverlayExpired by remember(state.favoriteFeedbackGeneration) { mutableStateOf(false) }
     // #1193 — force skipPartiallyExpanded: the tall, scrollable picker otherwise anchors at M3's
     // PartiallyExpanded and its underdamped settle overshoots the top butée on opening. Same fix as
     // QuickReplySheet / MessageEditorComponents; scope is Fix 1 only (no tab/IME/search change).
@@ -152,18 +155,32 @@ fun SmileyPickerSheet(
                     text = { Text(stringResource(R.string.editor_smiley_tab_wiki)) },
                 )
             }
-            when (tabIndex) {
-                0 -> StandardTabContent(
-                    state = state,
-                    onSmileyClicked = onSmileyClicked,
-                    layout = layout,
-                )
-                else -> WikiTabContent(
-                    state = state,
-                    onQueryChange = onQueryChange,
-                    onSmileyClicked = onSmileyClicked,
-                    layout = layout,
-                )
+            Box {
+                when (tabIndex) {
+                    0 -> StandardTabContent(
+                        state = state,
+                        onSmileyClicked = onSmileyClicked,
+                        layout = layout,
+                    )
+                    else -> WikiTabContent(
+                        state = state,
+                        onQueryChange = onQueryChange,
+                        onSmileyClicked = onSmileyClicked,
+                        layout = layout,
+                    )
+                }
+                key(state.favoriteFeedbackGeneration) {
+                    if (tabIndex == 1 && !favoriteOverlayExpired) {
+                        state.favoriteFeedback?.let { feedback ->
+                            // Restart even if null was not composed; measure after the content to keep its bounds.
+                            SmileyFavoriteOverlay(
+                                feedback = feedback,
+                                onExpired = { favoriteOverlayExpired = true },
+                                modifier = Modifier.matchParentSize(),
+                            )
+                        }
+                    }
+                }
             }
         }
     }
@@ -210,7 +227,6 @@ private fun WikiTabContent(
         mutableStateOf(TextFieldValue(text = state.query, selection = TextRange(state.query.length)))
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        state.favoriteFeedback?.let { SmileyFavoriteStatus(it) }
         OutlinedTextField(
             value = fieldValue,
             onValueChange = { newValue ->
@@ -231,51 +247,60 @@ private fun WikiTabContent(
                 .fillMaxWidth()
                 .focusRequester(searchFocus),
         )
-        when (val wiki = state.wiki) {
-            WikiSearchState.Idle -> Text(
-                text = stringResource(R.string.editor_smiley_search_hint),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(vertical = 8.dp),
-            )
-            WikiSearchState.Loading -> {
-                val loadingDescription = stringResource(R.string.editor_smiley_search_loading)
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(vertical = 16.dp)
-                        // a11y : `mergeDescendants = true` ensures TalkBack treats this Box as a
-                        // single node and reads the `contentDescription` ("Recherche…") instead
-                        // of falling through to the child `CircularProgressIndicator` whose
-                        // own ProgressBar role would otherwise win the announcement.
-                        .semantics(mergeDescendants = true) { contentDescription = loadingDescription },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    CircularProgressIndicator(modifier = Modifier.size(24.dp))
-                }
+        WikiSearchContent(state, onSmileyClicked, layout)
+    }
+}
+
+@Composable
+private fun WikiSearchContent(
+    state: SmileyPickerState.Open,
+    onSmileyClicked: (String) -> Unit,
+    layout: SmileyPickerLayoutSpec,
+) {
+    when (val wiki = state.wiki) {
+        WikiSearchState.Idle -> Text(
+            text = stringResource(R.string.editor_smiley_search_hint),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(vertical = 8.dp),
+        )
+        WikiSearchState.Loading -> {
+            val loadingDescription = stringResource(R.string.editor_smiley_search_loading)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 16.dp)
+                    // a11y : `mergeDescendants = true` ensures TalkBack treats this Box as a
+                    // single node and reads the `contentDescription` ("Recherche…") instead
+                    // of falling through to the child `CircularProgressIndicator` whose
+                    // own ProgressBar role would otherwise win the announcement.
+                    .semantics(mergeDescendants = true) { contentDescription = loadingDescription },
+                contentAlignment = Alignment.Center,
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(24.dp))
             }
-            WikiSearchState.Error -> Text(
-                text = stringResource(R.string.editor_smiley_search_error),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-                modifier = Modifier.padding(vertical = 8.dp),
-            )
-            is WikiSearchState.Results -> {
-                if (wiki.items.isEmpty()) {
-                    Text(
-                        text = stringResource(R.string.editor_smiley_search_empty),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(vertical = 8.dp),
-                    )
-                } else {
-                    SmileyPickerGrid(
-                        items = wiki.items,
-                        onSmileyClicked = onSmileyClicked,
-                        layout = layout,
-                        favorites = state,
-                    )
-                }
+        }
+        WikiSearchState.Error -> Text(
+            text = stringResource(R.string.editor_smiley_search_error),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.padding(vertical = 8.dp),
+        )
+        is WikiSearchState.Results -> {
+            if (wiki.items.isEmpty()) {
+                Text(
+                    text = stringResource(R.string.editor_smiley_search_empty),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(vertical = 8.dp),
+                )
+            } else {
+                SmileyPickerGrid(
+                    items = wiki.items,
+                    onSmileyClicked = onSmileyClicked,
+                    layout = layout,
+                    favorites = state,
+                )
             }
         }
     }
@@ -386,7 +411,7 @@ fun SmileyPickerGrid(
 private fun SmileyFavoriteSectionHeader(feedback: SmileyFavoriteFeedback?) {
     Column {
         SmileySectionTitle(stringResource(R.string.editor_smiley_section_favorites))
-        if (feedback != null) SmileyFavoriteStatus(feedback)
+        if (feedback != null) SmileyFavoriteStatus(feedback, Modifier.fillMaxWidth())
     }
 }
 
