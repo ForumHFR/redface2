@@ -714,6 +714,7 @@ enum class EditorSmileySource { BUILTIN, WIKI, HFR_FAVORITE }
 sealed interface HfrFavoriteSmileyMutationResult {
     data class Success(val favorites: List<EditorSmiley>) : HfrFavoriteSmileyMutationResult
     data class AlreadyPresent(val favorites: List<EditorSmiley>) : HfrFavoriteSmileyMutationResult
+    data class NotInFavorites(val favorites: List<EditorSmiley>) : HfrFavoriteSmileyMutationResult
     data class Full(val limit: Int, val favorites: List<EditorSmiley>) : HfrFavoriteSmileyMutationResult
     data object NotFound : HfrFavoriteSmileyMutationResult
     data object InvalidToken : HfrFavoriteSmileyMutationResult
@@ -731,10 +732,15 @@ pour éviter une perte lors du retrait ; une image cassée peut donc donner un `
 ou relatif. Les listes sont en ordre serveur, source `HFR_FAVORITE`, sans déduplication dans
 le formulaire de gestion. Les `favoriteSmileys` de `ReplyForm` et `TopicForm` sont vides par défaut ;
 les éditeurs les lisent depuis `#dynamic_smilies` en réutilisant l'extraction du wiki.
+D'après un signalement non capturé (cf. `protocol-hfr.md`), cette base contient aussi les smileys
+perso du compte, également parsés en `HFR_FAVORITE` ;
+la liste du formulaire de gestion fait seule foi pour les favoris retirables.
 
 `HfrFavoriteSmileyRepository.add(token)` / `remove(token)` retournent ce résultat sans HTML,
-exception ni secret. `Success.favorites` est la liste confirmée après mutation (ou fraîchement
-lue si le retrait est déjà fait). `AlreadyPresent` et `Full` contiennent la liste du GET préalable.
+exception ni secret. `Success.favorites` est la liste confirmée après mutation.
+`NotInFavorites.favorites` est la liste fraîche quand le jeton à retirer est absent ; aucun POST
+n'est envoyé et l'interface signale l'échec du retrait. `AlreadyPresent` et `Full` contiennent
+la liste du GET préalable.
 `Full.limit` reprend le nombre annoncé par HFR, avec repli à 10 ; le pré-contrôle local reste à 10.
 `VerificationFailed` rapporte la liste réelle quand le jeton ajouté est absent après acquittement,
 ou quand le retrait n'a pas laissé les jetons attendus dans leur ordre ; aucune liste optimiste n'est construite ici.

@@ -74,7 +74,7 @@ class DefaultHfrFavoriteSmileyRepository @Inject constructor(
         val form = readForm()
         val index = form.favorites.indexOfFirst { it.token == token }
         if (!isCurrentAccount(account)) return@mutate HfrFavoriteSmileyMutationResult.AccountChanged
-        if (index < 0) return@mutate HfrFavoriteSmileyMutationResult.Success(form.favorites)
+        if (index < 0) return@mutate HfrFavoriteSmileyMutationResult.NotInFavorites(form.favorites)
         val expected = form.favorites.filterIndexed { row, _ -> row != index }.map { it.token }
         // No suspension / interaction between the final account check and the POST call.
         if (!isCurrentAccount(account)) return@mutate HfrFavoriteSmileyMutationResult.AccountChanged

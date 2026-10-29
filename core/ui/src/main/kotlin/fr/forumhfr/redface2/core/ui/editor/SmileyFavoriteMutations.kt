@@ -12,6 +12,7 @@ data class SmileyFavoriteMutations(
 internal fun HfrFavoriteSmileyMutationResult.confirmedList(): List<EditorSmiley>? = when (this) {
     is HfrFavoriteSmileyMutationResult.Success -> favorites
     is HfrFavoriteSmileyMutationResult.AlreadyPresent -> favorites
+    is HfrFavoriteSmileyMutationResult.NotInFavorites -> favorites
     is HfrFavoriteSmileyMutationResult.Full -> favorites
     is HfrFavoriteSmileyMutationResult.VerificationFailed -> favorites
     else -> null
@@ -24,6 +25,7 @@ internal fun HfrFavoriteSmileyMutationResult.feedback(action: SmileyFavoriteActi
             SmileyFavoriteAction.REMOVE -> SmileyFavoriteFeedback.Removed
         }
         is HfrFavoriteSmileyMutationResult.AlreadyPresent -> SmileyFavoriteFeedback.AlreadyPresent
+        is HfrFavoriteSmileyMutationResult.NotInFavorites -> SmileyFavoriteFeedback.NotInFavorites
         is HfrFavoriteSmileyMutationResult.Full -> SmileyFavoriteFeedback.Full(limit)
         HfrFavoriteSmileyMutationResult.NotFound, HfrFavoriteSmileyMutationResult.InvalidToken ->
             SmileyFavoriteFeedback.NotFound

@@ -21,7 +21,7 @@ sealed interface SmileyPickerState {
     data class Open(
         val query: String = "",
         val wiki: WikiSearchState = WikiSearchState.Idle,
-        /** Standard tab's optional first section: server order, with a pending addition appended. */
+        /** Standard tab's first section: form order, with new confirmed or pending favorites appended. */
         val favoriteSmileys: List<EditorSmiley> = emptyList(),
         val pendingFavoriteToken: String? = null,
         val favoriteFeedback: SmileyFavoriteFeedback? = null,
@@ -29,10 +29,13 @@ sealed interface SmileyPickerState {
         val onFavoriteChange: ((EditorSmiley) -> Unit)? = null,
         /** Distinguishes repeated feedback even when Compose skips the intermediate null state. */
         val favoriteFeedbackGeneration: Long = 0L,
+        /** Form entries absent from this generation's confirmed removable favorites; insertion only. */
+        val accountSmileyTokens: Set<String> = emptySet(),
     ) : SmileyPickerState {
         fun favoriteAction(smiley: EditorSmiley): SmileyFavoriteAction? = when {
             onFavoriteChange == null || pendingFavoriteToken != null -> null
             smiley.source == EditorSmileySource.BUILTIN -> null
+            smiley.token in accountSmileyTokens -> null
             smiley.source == EditorSmileySource.HFR_FAVORITE -> SmileyFavoriteAction.REMOVE
             favoriteSmileys.any { it.token == smiley.token } -> SmileyFavoriteAction.REMOVE
             else -> SmileyFavoriteAction.ADD
@@ -47,6 +50,7 @@ sealed interface SmileyFavoriteFeedback {
     data object Added : SmileyFavoriteFeedback
     data object Removed : SmileyFavoriteFeedback
     data object AlreadyPresent : SmileyFavoriteFeedback
+    data object NotInFavorites : SmileyFavoriteFeedback
     data class Full(val limit: Int) : SmileyFavoriteFeedback
     data object NotFound : SmileyFavoriteFeedback
     data object ListChanged : SmileyFavoriteFeedback

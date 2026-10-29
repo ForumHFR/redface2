@@ -2,9 +2,11 @@ package fr.forumhfr.redface2.core.model
 
 /** #1154 — account favorites only. No HTML, credentials or transport exceptions cross this boundary. */
 sealed interface HfrFavoriteSmileyMutationResult {
-    /** Server order and images, reloaded after a mutation (or freshly read when removal is already done). */
+    /** Server order and images, reloaded after a mutation. */
     data class Success(val favorites: List<EditorSmiley>) : HfrFavoriteSmileyMutationResult
     data class AlreadyPresent(val favorites: List<EditorSmiley>) : HfrFavoriteSmileyMutationResult
+    /** Fresh removable favorites; the requested token is absent, so no removal POST was sent. */
+    data class NotInFavorites(val favorites: List<EditorSmiley>) : HfrFavoriteSmileyMutationResult
     data class Full(val limit: Int, val favorites: List<EditorSmiley>) : HfrFavoriteSmileyMutationResult
     data object NotFound : HfrFavoriteSmileyMutationResult
     data object InvalidToken : HfrFavoriteSmileyMutationResult

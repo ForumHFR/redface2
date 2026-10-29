@@ -143,6 +143,7 @@
     <string name="editor_smiley_favorite_added">Ajouté aux favoris HFR</string>
     <string name="editor_smiley_favorite_removed">Retiré des favoris HFR</string>
     <string name="editor_smiley_favorite_already_present">Déjà dans vos favoris HFR</string>
+    <string name="editor_smiley_favorite_not_in_favorites">Ce smiley ne figure pas dans vos favoris HFR : il ne peut pas en être retiré.</string>
     <string name="editor_smiley_favorite_full">Liste pleine (%1$d au plus) : retirez d\'abord un favori</string>
     <string name="editor_smiley_favorite_not_found">Ce smiley n\'existe pas sur HFR</string>
     <string name="editor_smiley_favorite_list_changed">La liste a changé sur HFR, elle a été rechargée</string>

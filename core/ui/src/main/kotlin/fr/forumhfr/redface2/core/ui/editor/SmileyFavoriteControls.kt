@@ -145,6 +145,7 @@ private fun smileyFavoriteMessage(feedback: SmileyFavoriteFeedback): String = wh
     SmileyFavoriteFeedback.Added -> stringResource(R.string.editor_smiley_favorite_added)
     SmileyFavoriteFeedback.Removed -> stringResource(R.string.editor_smiley_favorite_removed)
     SmileyFavoriteFeedback.AlreadyPresent -> stringResource(R.string.editor_smiley_favorite_already_present)
+    SmileyFavoriteFeedback.NotInFavorites -> stringResource(R.string.editor_smiley_favorite_not_in_favorites)
     is SmileyFavoriteFeedback.Full -> stringResource(R.string.editor_smiley_favorite_full, feedback.limit)
     SmileyFavoriteFeedback.NotFound -> stringResource(R.string.editor_smiley_favorite_not_found)
     SmileyFavoriteFeedback.ListChanged -> stringResource(R.string.editor_smiley_favorite_list_changed)

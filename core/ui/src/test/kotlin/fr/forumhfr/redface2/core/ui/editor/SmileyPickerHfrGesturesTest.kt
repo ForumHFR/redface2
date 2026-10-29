@@ -23,6 +23,7 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ApplicationProvider
 import coil3.ColorImage
@@ -127,6 +128,41 @@ class SmileyPickerHfrGesturesTest {
         compose.runOnIdle { dispatcher.scheduler.runCurrent() }
         compose.runOnIdle { assertEquals(listOf(favorite.token), removed) }
         compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_removed)).assertExists()
+    }
+
+    @Test
+    fun `absent removal leaves account insertion without menu or TalkBack action in either tab`() {
+        val account = other.copy(source = EditorSmileySource.HFR_FAVORITE)
+        val controller = controller(
+            favorites = listOf(account, favorite),
+            remove = { HfrFavoriteSmileyMutationResult.NotInFavorites(listOf(favorite)) },
+        )
+        mount(controller)
+        assertFavoriteActions(account, R.string.editor_smiley_favorite_remove)
+        compose.onNodeWithContentDescription(description(account)).performTouchInput { longClick() }
+        compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_remove)).performClick()
+        compose.runOnIdle { dispatcher.scheduler.runCurrent() }
+        assertNoFavoriteActions(account)
+        assertFavoriteActions(favorite, R.string.editor_smiley_favorite_remove)
+        compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_remove)).assertDoesNotExist()
+        val message = context.getString(R.string.editor_smiley_favorite_not_in_favorites)
+        compose.onNodeWithText(message).assertIsDisplayed().assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite),
+        )
+
+        compose.runOnIdle { showWiki(controller) }
+        compose.onNodeWithText(context.getString(R.string.editor_smiley_section_favorites)).assertDoesNotExist()
+        compose.onNodeWithText(message).assertIsDisplayed()
+        assertNoFavoriteActions(other)
+        assertFavoriteActions(wiki, R.string.editor_smiley_favorite_remove)
+        // The ephemeral Wiki message still covers the only result row: insert through the accessibility click.
+        compose.onNodeWithContentDescription(description(other)).performSemanticsAction(SemanticsActions.OnClick)
+        compose.runOnIdle {
+            assertEquals(other.token, inserted)
+            assertEquals(listOf(other.token), removed)
+            assertEquals(SmileyPickerState.Hidden, controller.state.value)
+            assertTrue(added.isEmpty())
+        }
     }
 
     @Test
@@ -465,6 +501,8 @@ class SmileyPickerHfrGesturesTest {
             SmileyFavoriteFeedback.Removed to context.getString(R.string.editor_smiley_favorite_removed),
             SmileyFavoriteFeedback.AlreadyPresent to context.getString(R.string.editor_smiley_favorite_already_present),
             SmileyFavoriteFeedback.Full(7) to "Liste pleine (7 au plus) : retirez d'abord un favori",
+            SmileyFavoriteFeedback.NotInFavorites to
+                "Ce smiley ne figure pas dans vos favoris HFR : il ne peut pas en être retiré.",
             SmileyFavoriteFeedback.NotFound to context.getString(R.string.editor_smiley_favorite_not_found),
             SmileyFavoriteFeedback.ListChanged to context.getString(R.string.editor_smiley_favorite_list_changed),
             SmileyFavoriteFeedback.NotAuthenticated to
@@ -512,13 +550,16 @@ class SmileyPickerHfrGesturesTest {
         add: suspend (String) -> HfrFavoriteSmileyMutationResult = {
             HfrFavoriteSmileyMutationResult.Success(listOf(favorite))
         },
+        remove: suspend (String) -> HfrFavoriteSmileyMutationResult = {
+            HfrFavoriteSmileyMutationResult.Success(emptyList())
+        },
     ) = SmileyPickerController(
         scope = CoroutineScope(dispatcher),
         searchWiki = { _, _ -> wikiItems },
         favoriteSmileys = { favorites },
         hfrFavoriteMutations = SmileyFavoriteMutations(
             addHfrFavorite = { added += it; add(it) },
-            removeHfrFavorite = { removed += it; HfrFavoriteSmileyMutationResult.Success(emptyList()) },
+            removeHfrFavorite = { removed += it; remove(it) },
         ),
     ).also { it.open() }
 
