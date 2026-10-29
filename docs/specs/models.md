@@ -29,6 +29,36 @@ Ces autres modèles émergeront du premier prototype de chaque écran. Pas de sp
 
 ---
 
+## Favoris locaux de smileys
+
+Moteur local livré sans affichage (#1154, C2), distinct des favoris du compte HFR.
+Les deux modèles `:core:model` sont sérialisables avec kotlinx.serialization ; leurs dates
+sont des `Long` en epoch millis, comme celles du document local de blacklist.
+
+```kotlin
+data class LocalFavoriteSmiley(
+    val token: String,            // identité exacte, espaces et variantes conservés
+    val imageUrl: String? = null,
+    val addedAt: Long,
+)
+
+data class LocalFavoriteSmileySnapshot(
+    val version: Int,
+    val favorites: List<LocalFavoriteSmiley>, // l'ordre de la liste fait foi
+    val tombstones: List<Tombstone>,
+    val orderUpdatedAt: Long,
+) {
+    data class Tombstone(val token: String, val removedAt: Long)
+}
+```
+
+Version actuelle : `LocalFavoriteSmileySnapshot.CURRENT_VERSION = 1`. L'instantané exporté
+est le document persisté, sans propriétaire ; le pseudo reste uniquement dans la clé locale.
+Les garanties de conservation, les limites et les décisions de synchronisation différées
+figurent dans l'[ADR-019]({{ site.baseurl }}/adr/019-smileys-favoris-locaux-et-top-usage).
+
+---
+
 ## Profil utilisateur
 
 Phase 2 finish (#208). Modèle `UserProfile` dans `:core:model`, parser dans `:core:parser/profile/ProfileParser.kt`. Champs fragiles nullables pour tolérance aux variations HFR.
