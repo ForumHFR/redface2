@@ -345,8 +345,14 @@ class SmileyPickerHfrGesturesTest {
         // Time spent hidden must not consume the next opening's overlay timeout.
         compose.mainClock.advanceTimeBy(8000L)
         compose.runOnIdle { controller.open() }
-        // Let the modal entry animation settle before checking visibility, within the 4 s timeout.
-        compose.mainClock.advanceTimeBy(1000L)
+        // The new dialog needs Android measure/layout between Compose frames to enter the screen.
+        // Keep the clock paused and drive about 1 s of entry animation, within the 4 s timeout.
+        repeat(60) {
+            compose.mainClock.advanceTimeByFrame()
+            compose.waitForIdle()
+        }
+        compose.onNode(hasSetTextAction()).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.editor_smiley_section_favorites)).assertDoesNotExist()
         val message = compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_network_error))
         message.assertIsDisplayed()
         compose.mainClock.advanceTimeBy(2500L)
