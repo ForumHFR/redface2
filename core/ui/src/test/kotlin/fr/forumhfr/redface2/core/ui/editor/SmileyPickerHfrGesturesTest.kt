@@ -23,6 +23,7 @@ import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ApplicationProvider
 import coil3.ColorImage
@@ -154,7 +155,8 @@ class SmileyPickerHfrGesturesTest {
         compose.onNodeWithText(message).assertIsDisplayed()
         assertNoFavoriteActions(other)
         assertFavoriteActions(wiki, R.string.editor_smiley_favorite_remove)
-        compose.onNodeWithContentDescription(description(other)).performClick()
+        // The ephemeral Wiki message still covers the only result row: insert through the accessibility click.
+        compose.onNodeWithContentDescription(description(other)).performSemanticsAction(SemanticsActions.OnClick)
         compose.runOnIdle {
             assertEquals(other.token, inserted)
             assertEquals(listOf(other.token), removed)
