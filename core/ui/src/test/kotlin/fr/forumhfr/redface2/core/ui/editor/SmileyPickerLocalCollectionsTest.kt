@@ -23,6 +23,15 @@ import org.junit.Test
 class SmileyPickerLocalCollectionsTest {
     private val builtin = BUILTIN_HFR_SMILEYS.first()
     private val perso = EditorSmiley("[:fictif a:2]", "https://example.invalid/a.gif", EditorSmileySource.WIKI)
+    private val hfrFailures = listOf(
+        HfrFavoriteSmileyMutationResult.Full(7, emptyList()) to SmileyFavoriteFeedback.Full(7),
+        HfrFavoriteSmileyMutationResult.TransportFailure to SmileyFavoriteFeedback.TransportFailure,
+    )
+    private val localFailures = listOf(
+        LocalFavoriteSmileyMutationResult.LimitReached to SmileyFavoriteFeedback.LocalLimitReached,
+        LocalFavoriteSmileyMutationResult.Failure(LocalFavoriteSmileyFailure.STORAGE_FAILURE) to
+            SmileyFavoriteFeedback.LocalStorageFailure,
+    )
 
     @Test
     fun `initial tab uses any known collection and restored Wiki always wins`() = runTest {
@@ -91,6 +100,14 @@ class SmileyPickerLocalCollectionsTest {
         )
         assertEquals(
             "https://forum-images.hardware.fr/images/perso/fictif a.gif", resolver.resolve("[:fictif a]")?.imageUrl,
+        )
+        assertEquals(
+            "https://forum-images.hardware.fr/images/perso/fictif:interne.gif",
+            resolver.resolve("[:fictif:interne]")?.imageUrl,
+        )
+        assertEquals(
+            "https://forum-images.hardware.fr/images/perso/2/fictif:interne.gif",
+            resolver.resolve("[:fictif:interne:2]")?.imageUrl,
         )
         assertNull(resolver.resolve("not a smiley"))
     }
@@ -166,6 +183,142 @@ class SmileyPickerLocalCollectionsTest {
         gate.complete(HfrFavoriteSmileyMutationResult.Success(listOf(perso)))
         runCurrent()
         assertEquals(SmileyFavoriteFeedback.LocalAdded, controller.openState().favoriteFeedback)
+    }
+
+    @Test
+    fun `late HFR failures replace newer local success and restart the feedback generation`() = runTest {
+        hfrFailures.forEach { (result, feedback) ->
+            val locals = FakePickerLocalCollections()
+            locals.snapshot.value = SmileyLocalCollectionSnapshot("alice")
+            val gate = CompletableDeferred<HfrFavoriteSmileyMutationResult>()
+            val controller = SmileyPickerController(
+                backgroundScope, { _, _ -> emptyList() },
+                hfrFavoriteMutations = SmileyFavoriteMutations({ gate.await() }, { gate.await() }),
+                localCollections = locals,
+            )
+            runCurrent()
+            controller.open()
+            controller.onFavoriteClicked(perso)
+            runCurrent()
+            assertEquals(listOf(perso.token), controller.openState().favoriteSmileys.map { it.token })
+            assertEquals(perso.token, controller.openState().pendingFavoriteToken)
+            controller.openState().onLocalFavoriteChange?.invoke(builtin)
+            runCurrent()
+            assertEquals(SmileyFavoriteFeedback.LocalAdded, controller.openState().favoriteFeedback)
+            val generation = controller.openState().favoriteFeedbackGeneration
+
+            gate.complete(result)
+            runCurrent()
+            assertEquals(result.toString(), feedback, controller.openState().favoriteFeedback)
+            assertEquals(generation + 1, controller.openState().favoriteFeedbackGeneration)
+            assertEquals(emptyList<EditorSmiley>(), controller.openState().favoriteSmileys)
+            assertNull(controller.openState().pendingFavoriteToken)
+            assertEquals(listOf(builtin), controller.openState().localFavoriteSmileys)
+        }
+    }
+
+    @Test
+    fun `late local failures replace newer HFR success and restart the feedback generation`() = runTest {
+        localFailures.forEach { (result, feedback) ->
+            val locals = FakePickerLocalCollections()
+            locals.snapshot.value = SmileyLocalCollectionSnapshot("alice")
+            val gate = CompletableDeferred<LocalFavoriteSmileyMutationResult>()
+            locals.addResult = { gate.await() }
+            val controller = SmileyPickerController(
+                backgroundScope, { _, _ -> emptyList() },
+                hfrFavoriteMutations = SmileyFavoriteMutations(
+                    { HfrFavoriteSmileyMutationResult.Success(listOf(perso)) },
+                    { HfrFavoriteSmileyMutationResult.Success(emptyList()) },
+                ),
+                localCollections = locals,
+            )
+            runCurrent()
+            controller.open()
+            controller.openState().onLocalFavoriteChange?.invoke(builtin)
+            runCurrent()
+            controller.onFavoriteClicked(perso)
+            runCurrent()
+            assertEquals(SmileyFavoriteFeedback.Added, controller.openState().favoriteFeedback)
+            val generation = controller.openState().favoriteFeedbackGeneration
+
+            gate.complete(result)
+            runCurrent()
+            assertEquals(result.toString(), feedback, controller.openState().favoriteFeedback)
+            assertEquals(generation + 1, controller.openState().favoriteFeedbackGeneration)
+            assertEquals(listOf(perso), controller.openState().favoriteSmileys)
+            assertEquals(emptyList<EditorSmiley>(), controller.openState().localFavoriteSmileys)
+        }
+    }
+
+    @Test
+    fun `late HFR failures stay silent across account changes and returns`() = runTest {
+        listOf("bob", "alice").forEach { completionOwner ->
+            hfrFailures.forEach { (result, _) ->
+                val locals = FakePickerLocalCollections()
+                locals.snapshot.value = SmileyLocalCollectionSnapshot("alice")
+                val gate = CompletableDeferred<HfrFavoriteSmileyMutationResult>()
+                val controller = SmileyPickerController(
+                    backgroundScope, { _, _ -> emptyList() },
+                    hfrFavoriteMutations = SmileyFavoriteMutations({ gate.await() }, { gate.await() }),
+                    localCollections = locals,
+                )
+                runCurrent()
+                controller.open()
+                controller.onFavoriteClicked(perso)
+                runCurrent()
+                locals.snapshot.value = SmileyLocalCollectionSnapshot("bob")
+                runCurrent()
+                locals.snapshot.value = SmileyLocalCollectionSnapshot(completionOwner)
+                runCurrent()
+                controller.openState().onLocalFavoriteChange?.invoke(builtin)
+                runCurrent()
+                val generation = controller.openState().favoriteFeedbackGeneration
+                assertEquals(SmileyFavoriteFeedback.LocalAdded, controller.openState().favoriteFeedback)
+
+                gate.complete(result)
+                runCurrent()
+                assertEquals(SmileyFavoriteFeedback.LocalAdded, controller.openState().favoriteFeedback)
+                assertEquals(generation, controller.openState().favoriteFeedbackGeneration)
+                assertNull(controller.openState().pendingFavoriteToken)
+            }
+        }
+    }
+
+    @Test
+    fun `late local failures stay silent across account changes and returns`() = runTest {
+        listOf("bob", "alice").forEach { completionOwner ->
+            localFailures.forEach { (result, _) ->
+                val locals = FakePickerLocalCollections()
+                locals.snapshot.value = SmileyLocalCollectionSnapshot("alice")
+                val gate = CompletableDeferred<LocalFavoriteSmileyMutationResult>()
+                locals.addResult = { gate.await() }
+                val controller = SmileyPickerController(
+                    backgroundScope, { _, _ -> emptyList() },
+                    hfrFavoriteMutations = SmileyFavoriteMutations(
+                        { HfrFavoriteSmileyMutationResult.Success(listOf(perso)) },
+                        { HfrFavoriteSmileyMutationResult.Success(emptyList()) },
+                    ),
+                    localCollections = locals,
+                )
+                runCurrent()
+                controller.open()
+                controller.openState().onLocalFavoriteChange?.invoke(builtin)
+                runCurrent()
+                locals.snapshot.value = SmileyLocalCollectionSnapshot("bob")
+                runCurrent()
+                locals.snapshot.value = SmileyLocalCollectionSnapshot(completionOwner)
+                runCurrent()
+                controller.onFavoriteClicked(perso)
+                runCurrent()
+                val generation = controller.openState().favoriteFeedbackGeneration
+                assertEquals(SmileyFavoriteFeedback.Added, controller.openState().favoriteFeedback)
+
+                gate.complete(result)
+                runCurrent()
+                assertEquals(SmileyFavoriteFeedback.Added, controller.openState().favoriteFeedback)
+                assertEquals(generation, controller.openState().favoriteFeedbackGeneration)
+            }
+        }
     }
 
     @Test

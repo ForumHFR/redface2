@@ -74,6 +74,7 @@ class SmileyPickerController(
     private var optimisticFavorites: List<EditorSmiley>? = null
     private var favoriteFeedback: SmileyFavoriteFeedback? = null
     private var favoriteFeedbackGeneration = 0L
+    private var accountGeneration = 0L
     private val favoriteCommand: ((EditorSmiley) -> Unit)? =
         if (hfrFavoriteMutations != null) ::onFavoriteClicked else null
     private var localSnapshot = SmileyLocalCollectionSnapshot()
@@ -84,6 +85,7 @@ class SmileyPickerController(
         scope.launch {
             localCollections?.observe()?.collect { snapshot ->
                 if (localSnapshot.owner != snapshot.owner) {
+                    accountGeneration++
                     favoriteFeedback = null
                     favoriteFeedbackGeneration++
                 }
@@ -186,6 +188,7 @@ class SmileyPickerController(
         val collections = requireNotNull(localCollections)
         favoriteFeedback = null
         val generation = ++favoriteFeedbackGeneration
+        val account = accountGeneration
         publishFavorites()
         scope.launch {
             val result = runCatching {
@@ -197,15 +200,23 @@ class SmileyPickerController(
                 if (error is CancellationException) throw error
                 LocalFavoriteSmileyMutationResult.Failure(LocalFavoriteSmileyFailure.STORAGE_FAILURE)
             }
-            // A completed old-account gesture must not announce itself in the new account.
-            if (localSnapshot.owner == owner && favoriteFeedbackGeneration == generation) {
-                val feedback = result.localFeedback(action)
-                val success = feedback == SmileyFavoriteFeedback.LocalAdded ||
-                    feedback == SmileyFavoriteFeedback.LocalRemoved
-                favoriteFeedback = feedback.takeUnless { success && _state.value is SmileyPickerState.Hidden }
-                publishFavorites()
-            }
+            updateFavoriteFeedback(result.localFeedback(action), generation, account)
+            publishFavorites()
         }
+    }
+
+    private fun updateFavoriteFeedback(feedback: SmileyFavoriteFeedback?, generation: Long, account: Long) {
+        // Account invalidation is independent of message priority, including a switch away and back.
+        if (accountGeneration != account || feedback == null) return
+        val success = when (feedback) {
+            SmileyFavoriteFeedback.Added, SmileyFavoriteFeedback.Removed,
+            SmileyFavoriteFeedback.LocalAdded, SmileyFavoriteFeedback.LocalRemoved -> true
+            else -> false
+        }
+        if (success && favoriteFeedbackGeneration != generation) return
+        // A failure must explain the rollback even after a newer gesture; restart its overlay timeout.
+        if (!success) favoriteFeedbackGeneration++
+        favoriteFeedback = feedback.takeUnless { success && _state.value is SmileyPickerState.Hidden }
     }
 
     /** Hosts notify after a form reload, including when the sheet is already visible. */
@@ -240,6 +251,7 @@ class SmileyPickerController(
         favoriteFeedback = null
         favoriteFeedbackGeneration++
         val feedbackGeneration = favoriteFeedbackGeneration
+        val account = accountGeneration
         publishFavorites()
         scope.launch {
             try {
@@ -250,13 +262,7 @@ class SmileyPickerController(
                 // Only confirmed lists are stamped at completion; reads merge them with the current form base.
                 // Without one, dropping the optimistic layer reveals the current base or still-valid snapshot.
                 confirmFavorites(result, action, smiley.token)
-                if (favoriteFeedbackGeneration == feedbackGeneration) favoriteFeedback = when (
-                    val feedback = result.feedback(action)
-                ) {
-                    SmileyFavoriteFeedback.Added, SmileyFavoriteFeedback.Removed ->
-                        feedback.takeIf { _state.value is SmileyPickerState.Open }
-                    else -> feedback
-                }
+                updateFavoriteFeedback(result.feedback(action), feedbackGeneration, account)
             } finally {
                 optimisticFavorites = null
                 pendingFavoriteToken = null

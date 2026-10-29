@@ -150,7 +150,11 @@ class SmileyPickerHfrGesturesTest {
             SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite),
         )
 
-        compose.runOnIdle { showWiki(controller) }
+        compose.runOnIdle {
+            // Keep this opening alive: dismiss() would consume the NotInFavorites feedback.
+            controller.onQueryChanged("fictif")
+            dispatcher.scheduler.advanceUntilIdle()
+        }
         compose.onNodeWithText(context.getString(R.string.editor_smiley_tab_wiki)).performClick()
         compose.onNodeWithText(context.getString(R.string.editor_smiley_section_favorites)).assertDoesNotExist()
         compose.onNodeWithText(message).assertIsDisplayed()
@@ -547,6 +551,7 @@ class SmileyPickerHfrGesturesTest {
     private fun showWiki(controller: SmileyPickerController) {
         controller.onQueryChanged("fictif")
         dispatcher.scheduler.advanceUntilIdle()
+        // Pre-mount setup: restoring the search selects Wiki, but dismiss() also consumes visible feedback.
         controller.dismiss()
         controller.open()
     }

@@ -923,7 +923,11 @@ supplémentaire**, aucun stockage local, aucune lecture via l'API REST.
   Les résultats locaux utilisent aussi ce canal : « Ajouté aux favoris de l'appareil »,
   « Retiré des favoris de l'appareil », « Limite de 256 favoris de l'appareil atteinte » ou échec
   de stockage. `favoriteFeedbackGeneration` distingue deux gestes au résultat identique ;
-  une mutation plus ancienne ne remplace pas le retour du geste plus récent.
+  un succès HFR ou local tardif ne remplace pas le retour d'un geste plus récent.
+  Un échec HFR ou local du compte courant est toujours affiché, même après un geste plus récent,
+  avec une nouvelle génération d'affichage qui relance la surcouche.
+  Cette priorité est indépendante de l'invalidation au changement de compte : aucun résultat d'un
+  geste de l'ancien compte n'est annoncé, même si l'utilisateur revient ensuite sur ce compte.
 - Le contrôleur conserve un message jusqu'à la fermeture qui termine la première ouverture de
   la feuille pendant laquelle il a été visible. Un succès HFR ou local reçu feuille fermée est silencieux.
   Tout autre message reçu feuille fermée attend la réouverture, puis disparaît à la fermeture de
