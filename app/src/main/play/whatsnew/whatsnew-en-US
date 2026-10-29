@@ -1,3 +1,3 @@
-Redface 2 v0.64.3 — dev.
-- Smileys: your own custom smileys no longer vanish from Favorites after adding an HFR favorite.
-- Your own custom smileys no longer show a false "Removed" message.
+Redface 2 v0.64.4 — dev.
+- Smileys: new Favorites tab with your device favorites, HFR favorites and most-used smileys.
+- Long-press a smiley to add it to or remove it from your favorites.
