@@ -12,6 +12,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import fr.forumhfr.redface2.core.domain.smiley.LocalFavoriteSmileyRepository
+import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollections
 import javax.inject.Singleton
 
 @Module
@@ -32,6 +33,10 @@ object LocalFavoriteSmileyModule {
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class LocalFavoriteSmileyBindingsModule {
+    @Binds
+    @Singleton
+    abstract fun bindSmileyLocalCollections(impl: DefaultSmileyLocalCollections): SmileyLocalCollections
+
     @Binds
     @Singleton
     abstract fun bindLocalFavoriteSmileyRepository(

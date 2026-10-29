@@ -846,29 +846,47 @@ supplémentaire**, aucun stockage local, aucune lecture via l'API REST.
 - Sans favori sur le compte capturé (sans smiley perso propre), et en anonyme, le bloc est vide :
   `<div id="dynamic_smilies"></div>`.
   Le lien « Supprimer des smilies favoris » n'est présent que lorsque la liste est peuplée.
-  La section « Favoris » du sélecteur est absente si la liste est vide et qu'aucun statut de
-  mutation n'est à afficher ; sinon elle précède les smileys « Standard ». L'insertion réutilise
-  le jeton perso, puis ferme la feuille.
+  La section « Favoris HFR » du sélecteur est absente si la liste est vide. Elle vit dans
+  l'onglet Favoris, entre « Favoris de l'appareil » et « Les plus utilisés » ; le statut de
+  mutation reste en tête de cet onglet même sans section HFR. Standard ne contient que les builtins.
+  L'insertion réutilise le jeton perso, puis ferme la feuille.
 - `ReplyForm.favoriteSmileys` et `TopicForm.favoriteSmileys` exposent une liste ordonnée
   d'`EditorSmiley`, source `HFR_FAVORITE`, vide par défaut. Cette base suit le dernier formulaire
   chargé ; le contrôleur lui superpose les mutations décrites ci-dessous. La réponse rapide
   n'ouvre aucun sélecteur de smileys.
 
-**Gestion depuis la feuille Smileys (B2 de #1154)** :
+**Gestion depuis la feuille Smileys (B2 et D de #1154)** :
+
+- Trois onglets **Favoris | Standard | Wiki**. Favoris partage une grille défilante (budget #900,
+  cellules #989) entre les favoris locaux du compte, la liste HFR fusionnée ci-dessous et le Top 24,
+  dans l'ordre de leurs dépôts. Sections absentes si vides ; aide au vouvoiement si tout est vide.
+  Un jeton peut figurer dans plusieurs sections, avec des clés préfixées par section.
+  Le contrôleur choisit à `open()` Favoris si une liste connue est non vide, Standard sinon ; une
+  recherche restaurée ouvre Wiki (#824). Les observations locales commencent dès sa création.
+  Ni une arrivée tardive ni une rotation ne reprennent la sélection à l'utilisateur.
+- Un seul composant `SmileyLocalCollections` observe le propriétaire normalisé (`lowercase()`, sans trim)
+  et bascule les favoris locaux et le Top au changement de compte. Anonyme ou pseudo inconnu/blanc :
+  aucune section ni action locale. Une mutation capture le propriétaire au moment du geste.
+  Les métadonnées d'image et la reconstruction des persos sans URL suivent
+  l'[ADR-019]({{ site.baseurl }}/adr/019-smileys-favoris-locaux-et-top-usage).
+  L'observation des collections locales n'ajoute aucune requête HFR.
 
 - Les quatre éditeurs (post, sujet, réponse MP, composition MP) fournissent au contrôleur les
   callbacks `add` / `remove` du dépôt. Aucun formulaire n'est rechargé à cause d'une mutation.
 - Sur un perso du Wiki, l'appui long ouvre « Ajouter aux favoris HFR », ou « Retirer des favoris
   HFR » si le **jeton exact** figure déjà dans la liste courante (variante et espaces compris).
-  Dans la section Favoris de Standard, il ouvre le retrait si l'entrée est éligible.
-  Chaque cellule éligible porte le même libellé d'appui long et d'action personnalisée TalkBack.
-  Aucun geste de favoris sur les builtins. Dès qu'une liste confirmée existe pour la génération
+  Dans la section Favoris HFR, il ouvre le retrait si l'entrée est éligible.
+  Le menu liste aussi l'ajout/retrait des favoris de l'appareil pour tout smiley, builtins compris,
+  selon son jeton exact dans la liste locale. Chaque action porte son propre libellé TalkBack ;
+  le libellé d'appui long commun est « Gérer les favoris ». Dès qu'une liste confirmée existe pour la génération
   courante, une entrée de la base absente de cette liste, hors jetons masqués par un retrait,
-  est connue comme entrée du compte : insertion seule, sans menu, action TalkBack ni libellé d'appui long, y compris dans le Wiki.
+  est connue comme entrée du compte :
+  aucun geste HFR, y compris dans le Wiki ; l'action locale reste disponible si le propriétaire est connu.
   Avant confirmation, le premier essai de retrait d'une telle entrée donne `NotInFavorites`,
   puis n'est plus proposé. Un nouveau formulaire efface ce savoir ; aucun rapprochement par pseudo.
-- Une seule mutation à la fois : tous les gestes de favoris sont indisponibles pendant l'attente.
-  Un ajout apparaît provisoirement en fin de Favoris ; un retrait garde sa cellule marquée en cours.
+- Une seule mutation HFR à la fois : les gestes HFR sont indisponibles pendant l'attente,
+  sans bloquer les gestes locaux. Une mutation locale ne bloque pas les gestes HFR.
+  Un ajout apparaît provisoirement en fin de la section Favoris HFR ; un retrait garde sa cellule marquée en cours.
   La cellule visée porte un indicateur discret. Le clic d'insertion reste disponible : jeton inséré,
   feuille fermée, clavier rouvert seulement s'il l'était auparavant. Taille et décoration réglables,
   plafond de grille à 62 % de l'écran avec plancher de 320 dp et recherche Wiki sont conservés.
@@ -891,7 +909,7 @@ supplémentaire**, aucun stockage local, aucune lecture via l'API REST.
   formulaire reçu **pendant** la mutation de remplacer cette liste ; le prochain formulaire reçu
   **après** sa fin reprend la main. Ouvrir ou fermer la feuille ne supprime pas cette surcouche.
 - Le statut en tête de Favoris donne le résultat en français et l'annonce poliment à TalkBack.
-  Dans le Wiki, une surface compacte avec marges affiche le même message en surcouche brève en bas,
+  Dans Standard et Wiki, une surface compacte avec marges affiche le même message en surcouche brève en bas,
   sans déplacer le champ de recherche ni la grille ; son fond suit le thème clair ou sombre.
   Elle disparaît après le délai recommandé par l'accessibilité (4 secondes par défaut, comme un
   Snackbar M3 court), libérant les cellules couvertes. Chaque nouveau geste relance ce délai,
@@ -901,9 +919,17 @@ supplémentaire**, aucun stockage local, aucune lecture via l'API REST.
   Il indique notamment le plafond renvoyé par `Full.limit`, la liste rechargée pour
   `VerificationFailed`, la session expirée, l'échec réseau ou la réponse HFR inattendue.
   `NotInFavorites` donne le message d'échec « Ce smiley ne figure pas dans vos favoris HFR :
-  il ne peut pas en être retiré. », au même emplacement dans les deux onglets.
+  il ne peut pas en être retiré. », selon le même canal dans les trois onglets.
+  Les résultats locaux utilisent aussi ce canal : « Ajouté aux favoris de l'appareil »,
+  « Retiré des favoris de l'appareil », « Limite de 256 favoris de l'appareil atteinte » ou échec
+  de stockage. `favoriteFeedbackGeneration` distingue deux gestes au résultat identique ;
+  un succès HFR ou local tardif ne remplace pas le retour d'un geste plus récent.
+  Un échec HFR ou local du compte courant est toujours affiché, même après un geste plus récent,
+  avec une nouvelle génération d'affichage qui relance la surcouche.
+  Cette priorité est indépendante de l'invalidation au changement de compte : aucun résultat d'un
+  geste de l'ancien compte n'est annoncé, même si l'utilisateur revient ensuite sur ce compte.
 - Le contrôleur conserve un message jusqu'à la fermeture qui termine la première ouverture de
-  la feuille pendant laquelle il a été visible. Un succès (`Added`, `Removed`) reçu feuille fermée est silencieux.
+  la feuille pendant laquelle il a été visible. Un succès HFR ou local reçu feuille fermée est silencieux.
   Tout autre message reçu feuille fermée attend la réouverture, puis disparaît à la fermeture de
   cette ouverture. Un nouveau geste remplace le statut courant. Aucun minuteur dans le contrôleur
   ni composant supplémentaire dans les quatre écrans hôtes n'est nécessaire.

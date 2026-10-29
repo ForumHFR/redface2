@@ -31,7 +31,7 @@ Ces autres modèles émergeront du premier prototype de chaque écran. Pas de sp
 
 ## Favoris locaux de smileys
 
-Moteur local livré sans affichage (#1154, C2), distinct des favoris du compte HFR.
+Moteur local (#1154, C2), affiché dans l'onglet Favoris par D, distinct des favoris du compte HFR.
 Les deux modèles `:core:model` sont sérialisables avec kotlinx.serialization ; leurs dates
 sont des `Long` en epoch millis, comme celles du document local de blacklist.
 
@@ -61,7 +61,7 @@ figurent dans l'[ADR-019]({{ site.baseurl }}/adr/019-smileys-favoris-locaux-et-t
 
 ## Top d'usage des smileys
 
-Moteur local livré sans affichage (#1154, C1). Modèle sérialisable dans `:core:model`,
+Moteur local (#1154, C1), affiché dans « Les plus utilisés » par D. Modèle sérialisable dans `:core:model`,
 indépendant d'`EditorSmiley` : un jeton saisi à la main n'a pas nécessairement d'URL d'image.
 
 ```kotlin
@@ -727,7 +727,10 @@ sealed interface HfrFavoriteSmileyMutationResult {
 ```
 
 `token` est conservé verbatim (espaces internes et variantes compris) ; `imageUrl` vient du
-HTML HFR, sans reconstruction. Le formulaire de gestion conserve même les entrées hors format
+HTML HFR ou des métadonnées locales. Pour les collections locales sans URL, le sélecteur utilise
+la table builtin, une autre liste chargée, puis la reconstruction perso documentée dans l'ADR-019.
+`source` décrit le rendu, indépendamment de la section : les builtins restent `BUILTIN`, les persos
+locaux utilisent `WIKI`, les entrées HFR gardent `HFR_FAVORITE`. Le formulaire de gestion conserve les entrées hors format
 pour éviter une perte lors du retrait ; une image cassée peut donc donner un `imageUrl` vide
 ou relatif. Les listes sont en ordre serveur, source `HFR_FAVORITE`, sans déduplication dans
 le formulaire de gestion. Les `favoriteSmileys` de `ReplyForm` et `TopicForm` sont vides par défaut ;
@@ -735,6 +738,14 @@ les éditeurs les lisent depuis `#dynamic_smilies` en réutilisant l'extraction 
 D'après un signalement non capturé (cf. `protocol-hfr.md`), cette base contient aussi les smileys
 perso du compte, également parsés en `HFR_FAVORITE` ;
 la liste du formulaire de gestion fait seule foi pour les favoris retirables.
+
+Le contrat `SmileyLocalCollections` de `:core:domain` expose `observe()` et les mutations locales
+avec propriétaire capturé. Son `SmileyLocalCollectionSnapshot` contient `owner: String?`,
+`favorites: List<LocalFavoriteSmiley>` et `top: List<SmileyUsageEntry>` ; aucun propriétaire signifie
+des collections vides. `SmileyPickerState.Open` (`:core:ui`) projette ces collections vers
+`localFavoriteSmileys` / `mostUsedSmileys`, garde les jetons exacts dans `localFavoriteTokens` et
+expose `onLocalFavoriteChange`. `initialTab: SmileyPickerTab` (`FAVORITES`, `STANDARD`, `WIKI`)
+est choisi à l'ouverture par le contrôleur, puis la sélection visible reste sauvegardée dans la feuille.
 
 `HfrFavoriteSmileyRepository.add(token)` / `remove(token)` retournent ce résultat sans HTML,
 exception ni secret. `Success.favorites` est la liste confirmée après mutation.

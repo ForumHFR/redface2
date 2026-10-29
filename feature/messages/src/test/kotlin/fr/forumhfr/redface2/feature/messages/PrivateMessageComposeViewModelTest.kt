@@ -1,5 +1,9 @@
 package fr.forumhfr.redface2.feature.messages
 
+import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollectionSnapshot
+import fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS
+import fr.forumhfr.redface2.core.model.SmileyUsageEntry
+
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.EditorSmileySource
 import fr.forumhfr.redface2.core.model.HfrFavoriteSmileyMutationResult
@@ -98,6 +102,7 @@ class PrivateMessageComposeViewModelTest {
 
     private val draftStore = FakeEditorDraftStore()
     private val favoriteRepository = FakeHfrFavoriteSmileyRepository()
+    private val localCollections = FakeSmileyLocalCollections()
 
     @Suppress("LongParameterList") // test factory mirroring the ViewModel's injected dependencies.
     private fun viewModel(
@@ -121,6 +126,7 @@ class PrivateMessageComposeViewModelTest {
         diagnostics = diagnostics,
         smileyRepository = smileyRepository,
         hfrFavoriteSmileyRepository = favoriteRepository,
+        smileyLocalCollections = localCollections,
         savedStateHandle = savedStateHandle,
     )
 
@@ -254,6 +260,25 @@ class PrivateMessageComposeViewModelTest {
             ),
             diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
         )
+    }
+
+    @Test
+    fun `local collections and gestures use the injected shared component`() = runTest {
+        val smiley = BUILTIN_HFR_SMILEYS.first()
+        localCollections.snapshot.value = SmileyLocalCollectionSnapshot(
+            "alice", top = listOf(SmileyUsageEntry(smiley.token, 2, 1)),
+        )
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val viewModel = viewModel(repository)
+        testScheduler.advanceUntilIdle()
+        viewModel.smileyPicker.open()
+        val open = viewModel.smileyPicker.state.value as SmileyPickerState.Open
+        assertEquals(listOf(smiley), open.mostUsedSmileys)
+        requireNotNull(open.onLocalFavoriteChange)(smiley)
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf(Triple("alice", smiley.token, smiley.imageUrl)), localCollections.added)
+        coVerify(exactly = 1) { repository.fetchComposeForm(any()) }
     }
 
     @Test

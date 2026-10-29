@@ -19,6 +19,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -31,6 +32,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -74,9 +76,9 @@ import fr.forumhfr.redface2.core.ui.sheet.clampSheetTopOverscroll
  * Phase 2F-B (#11 partial) — bottom-sheet smiley picker. Promoted from `:feature:editor`
  * to `:core:ui` for the MP editors (#387) — same pattern as `EditorOptionsSheet` (#388).
  *
- * Two tabs :
- *  - **Standard** : the HFR form's optional favorites section, then the canonical
- *    `BUILTIN_HFR_SMILEYS` constant, available synchronously without a network call.
+ * Three tabs :
+ *  - **Favorites** : device favorites, HFR favorites and local usage ranking, in one grid.
+ *  - **Standard** : the canonical `BUILTIN_HFR_SMILEYS`, available without a network call.
  *  - **Wiki** : live search on HFR's perso corpus via `SmileyRepository.searchWiki`. Idle
  *    until the user types more than 2 characters (HFR's web composer threshold). Loading
  *    / Results / Error / Empty handled in [WikiTabContent].
@@ -111,20 +113,7 @@ fun SmileyPickerSheet(
         sheetMaxWidth = SMILEY_SHEET_MAX_WIDTH,
         sheetState = sheetState,
     ) {
-        // Local-only tab selection : the picker's tab state is not worth piping all the
-        // way into the ViewModel. `rememberSaveable` so a configuration change (rotation,
-        // dark mode toggle) does not reset the user back to the Standard tab while the
-        // bottom-sheet is still open.
-        var tabIndex by rememberSaveable { mutableStateOf(0) }
-        // #824 — land on the Wiki tab when a restored search materialises. An initial-value
-        // capture is NOT enough: the controller may deliver the restored Open state a frame
-        // after the sheet first composes, and the saveable registry can also replay a stale
-        // Standard selection over the computed initial (both observed at dogfood). Keying the
-        // effect on "has a query" keeps it one-shot per restore and inert during typing —
-        // the search field only exists on the Wiki tab, so forcing index 1 there is a no-op.
-        LaunchedEffect(state.query.isNotEmpty()) {
-            if (state.query.isNotEmpty()) tabIndex = 1
-        }
+        var tabIndex by rememberSmileyPickerTab(state.initialTab)
         val sheetTitle = stringResource(R.string.editor_smiley_title)
         Column(
             modifier = Modifier
@@ -134,7 +123,7 @@ fun SmileyPickerSheet(
                 // (closest nested-scroll parent to the grid's LazyVerticalGrid), not the sheet.
                 .clampSheetTopOverscroll(sheetState)
                 // #900 — header density pass (tinc, DEV #2790993) : the VISIBLE « Smileys » title
-                // line is gone (the Standard/Wiki tabs already name the surface visually), spacing
+                // line is gone (the tabs already name the surface visually), spacing
                 // tightened 12 → 8 dp. The sheet keeps an ACCESSIBLE name through paneTitle —
                 // TalkBack still announces the surface (gate Sol r1). Touch targets keep 48 dp.
                 // #989 — the horizontal padding is a spike knob (rogner les marges = one of the
@@ -147,17 +136,29 @@ fun SmileyPickerSheet(
                 Tab(
                     selected = tabIndex == 0,
                     onClick = { tabIndex = 0 },
-                    text = { Text(stringResource(R.string.editor_smiley_tab_standard)) },
+                    text = { Text(stringResource(R.string.editor_smiley_tab_favorites)) },
                 )
                 Tab(
                     selected = tabIndex == 1,
                     onClick = { tabIndex = 1 },
+                    text = { Text(stringResource(R.string.editor_smiley_tab_standard)) },
+                )
+                Tab(
+                    selected = tabIndex == 2,
+                    onClick = { tabIndex = 2 },
                     text = { Text(stringResource(R.string.editor_smiley_tab_wiki)) },
                 )
             }
             Box {
                 when (tabIndex) {
-                    0 -> StandardTabContent(
+                    0 -> SmileyPickerGrid(
+                        items = emptyList(),
+                        onSmileyClicked = onSmileyClicked,
+                        layout = layout,
+                        favorites = state,
+                        showFavoriteSection = true,
+                    )
+                    1 -> StandardTabContent(
                         state = state,
                         onSmileyClicked = onSmileyClicked,
                         layout = layout,
@@ -170,7 +171,7 @@ fun SmileyPickerSheet(
                     )
                 }
                 key(state.favoriteFeedbackGeneration) {
-                    if (tabIndex == 1 && !favoriteOverlayExpired) {
+                    if (tabIndex != 0 && !favoriteOverlayExpired) {
                         state.favoriteFeedback?.let { feedback ->
                             // Restart even if null was not composed; measure after the content to keep its bounds.
                             SmileyFavoriteOverlay(
@@ -186,6 +187,18 @@ fun SmileyPickerSheet(
     }
 }
 
+/**
+ * #824 — key the saveable slot by open()'s initial decision, so an old Standard slot cannot
+ * override a restored Wiki opening, including when that Open arrives one frame later.
+ * The decision stays unchanged during an opening and across rotation: the saved USER choice
+ * wins even after leaving a restored search. Late collections never take selection back.
+ * Kept separate so restoration can be tested outside ModalBottomSheet's dialog registry.
+ */
+@Composable
+internal fun rememberSmileyPickerTab(initialTab: SmileyPickerTab): MutableState<Int> = key(initialTab.ordinal) {
+    rememberSaveable { mutableStateOf(initialTab.ordinal) }
+}
+
 @Composable
 private fun StandardTabContent(
     state: SmileyPickerState.Open,
@@ -197,7 +210,6 @@ private fun StandardTabContent(
         onSmileyClicked = onSmileyClicked,
         layout = layout,
         favorites = state,
-        showFavoriteSection = true,
     )
 }
 
@@ -324,12 +336,6 @@ fun SmileyPickerGrid(
     favorites: SmileyPickerState.Open? = null,
     showFavoriteSection: Boolean = false,
 ) {
-    val favoriteSmileys = if (showFavoriteSection) {
-        favorites?.favoriteSmileys.orEmpty().distinctBy { it.token to it.imageUrl }
-    } else {
-        emptyList()
-    }
-    val favoriteFeedback = if (showFavoriteSection) favorites?.favoriteFeedback else null
     val uniqueItems = items.distinctBy { it.token to it.imageUrl }
     // #900 volet 2 (CharLee, TU #2791061) — the grid cap scales with the screen so the sheet
     // reaches ~3/4 of a phone display instead of the fixed 320 dp, which wasted the bottom half
@@ -372,27 +378,8 @@ fun SmileyPickerGrid(
                 .fillMaxWidth()
                 .heightIn(max = gridHeightCap),
         ) {
-            // One scrollable grid shares the #900 height budget across both Standard sections.
-            // Source-prefixed keys also allow a favorite to appear in another section safely.
-            if (favoriteSmileys.isNotEmpty() || favoriteFeedback != null) {
-                item(key = "favorites_title", span = { GridItemSpan(maxLineSpan) }) {
-                    SmileyFavoriteSectionHeader(favoriteFeedback)
-                }
-                items(
-                    items = favoriteSmileys,
-                    key = { "favorite:${it.token.length}:${it.token}:${it.imageUrl}" },
-                ) { smiley ->
-                    SmileyGridCell(
-                        smiley = smiley,
-                        geometry = geometry,
-                        layout = layout,
-                        onClick = { onSmileyClicked(smiley.token) },
-                        favorites = favorites,
-                    )
-                }
-                item(key = "standard_title", span = { GridItemSpan(maxLineSpan) }) {
-                    SmileySectionTitle(stringResource(R.string.editor_smiley_tab_standard))
-                }
+            if (showFavoriteSection && favorites != null) {
+                favoriteSections(favorites, geometry, layout, onSmileyClicked)
             }
             items(items = uniqueItems, key = { "smiley:${it.token.length}:${it.token}:${it.imageUrl}" }) { smiley ->
                 SmileyGridCell(
@@ -407,11 +394,37 @@ fun SmileyPickerGrid(
     }
 }
 
-@Composable
-private fun SmileyFavoriteSectionHeader(feedback: SmileyFavoriteFeedback?) {
-    Column {
-        SmileySectionTitle(stringResource(R.string.editor_smiley_section_favorites))
-        if (feedback != null) SmileyFavoriteStatus(feedback, Modifier.fillMaxWidth())
+private fun LazyGridScope.favoriteSections(
+    state: SmileyPickerState.Open,
+    geometry: SmileyGridGeometry,
+    layout: SmileyPickerLayoutSpec,
+    onSmileyClicked: (String) -> Unit,
+) {
+    state.favoriteFeedback?.let { feedback ->
+        item(key = "favorite_status", span = { GridItemSpan(maxLineSpan) }) {
+            SmileyFavoriteStatus(feedback, Modifier.fillMaxWidth())
+        }
+    }
+    val sections = listOf(
+        R.string.editor_smiley_section_local to state.localFavoriteSmileys,
+        R.string.editor_smiley_section_favorites to state.favoriteSmileys,
+        R.string.editor_smiley_section_top to state.mostUsedSmileys,
+    )
+    if (sections.all { it.second.isEmpty() }) {
+        item(key = "favorites_hint", span = { GridItemSpan(maxLineSpan) }) {
+            Text(stringResource(R.string.editor_smiley_favorites_hint), style = MaterialTheme.typography.bodyMedium)
+        }
+    }
+    sections.filter { it.second.isNotEmpty() }.forEach { (title, smileys) ->
+        item(key = "title:$title", span = { GridItemSpan(maxLineSpan) }) {
+            SmileySectionTitle(stringResource(title))
+        }
+        items(
+            items = smileys.distinctBy { it.token to it.imageUrl },
+            key = { "$title:${it.token.length}:${it.token}:${it.imageUrl}" },
+        ) { smiley ->
+            SmileyGridCell(smiley, geometry, layout, { onSmileyClicked(smiley.token) }, state)
+        }
     }
 }
 

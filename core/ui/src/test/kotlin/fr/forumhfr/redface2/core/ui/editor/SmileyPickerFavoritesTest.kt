@@ -58,7 +58,7 @@ class SmileyPickerFavoritesTest {
     }
 
     @Test
-    fun `favorites precede Standard and tapping preserves the perso token then closes the sheet`() {
+    fun `HFR favorites keep form order in Favorites and Standard contains only builtins`() {
         val controller = controller(favorites)
         var inserted: String? = null
         composeSheet(controller) { token ->
@@ -73,11 +73,14 @@ class SmileyPickerFavoritesTest {
         val second = composeTestRule.onNodeWithContentDescription(description(favorites[1]))
         val firstBounds = first.fetchSemanticsNode().boundsInRoot
         val secondBounds = second.fetchSemanticsNode().boundsInRoot
-        val standardTop = composeTestRule.onAllNodesWithText(standardTitle)[1]
-            .fetchSemanticsNode().boundsInRoot.top
         assertTrue(titleTop < firstBounds.top)
         assertTrue(firstBounds.left < secondBounds.left)
-        assertTrue(firstBounds.bottom <= standardTop)
+        composeTestRule.onNodeWithContentDescription(description(BUILTIN_HFR_SMILEYS.first())).assertDoesNotExist()
+        composeTestRule.onNodeWithText(standardTitle).performClick()
+        composeTestRule.onNodeWithText(favoritesTitle).assertDoesNotExist()
+        composeTestRule.onNodeWithContentDescription(description(BUILTIN_HFR_SMILEYS.first())).assertExists()
+        first.assertDoesNotExist()
+        composeTestRule.onNodeWithText(context.getString(R.string.editor_smiley_tab_favorites)).performClick()
 
         first.performClick()
         composeTestRule.runOnIdle {
@@ -99,7 +102,7 @@ class SmileyPickerFavoritesTest {
     private fun controller(items: List<EditorSmiley>) = SmileyPickerController(
         scope = CoroutineScope(StandardTestDispatcher()),
         searchWiki = { _, _ -> error("Standard must not search the wiki") },
-        favoriteSmileys = { items },
+        favoriteSources = SmileyPickerFavoriteSources(favoriteSmileys = { items }),
     ).also { it.open() }
 
     private fun description(smiley: EditorSmiley) =

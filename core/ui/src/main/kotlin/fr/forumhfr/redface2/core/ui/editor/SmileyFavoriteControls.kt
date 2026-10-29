@@ -34,7 +34,7 @@ import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.ui.R
 import kotlinx.coroutines.delay
 
-/** The cell keeps its insertion semantics; only eligible, idle cells expose a favorite gesture. */
+/** Local and HFR eligibility are independent; insertion remains available during either mutation. */
 @Composable
 internal fun SmileyFavoriteTarget(
     smiley: EditorSmiley,
@@ -42,19 +42,36 @@ internal fun SmileyFavoriteTarget(
     onClick: () -> Unit,
     content: @Composable (Modifier) -> Unit,
 ) {
-    val action = state?.favoriteAction(smiley)
+    val actions = buildList {
+        state?.localFavoriteAction(smiley)?.let { action ->
+            val label = when (action) {
+                SmileyFavoriteAction.ADD -> stringResource(R.string.editor_smiley_local_favorite_add)
+                SmileyFavoriteAction.REMOVE -> stringResource(R.string.editor_smiley_local_favorite_remove)
+            }
+            add(FavoriteMenuAction(label) { state?.onLocalFavoriteChange?.invoke(smiley) })
+        }
+        state?.favoriteAction(smiley)?.let { action ->
+            val label = when (action) {
+                SmileyFavoriteAction.ADD -> stringResource(R.string.editor_smiley_favorite_add)
+                SmileyFavoriteAction.REMOVE -> stringResource(R.string.editor_smiley_favorite_remove)
+            }
+            add(FavoriteMenuAction(label) { state?.onFavoriteChange?.invoke(smiley) })
+        }
+    }
     val pending = state?.pendingFavoriteToken == smiley.token
     val progressLabel = stringResource(R.string.editor_smiley_favorite_pending)
+    val progress = Modifier.semantics { if (pending) stateDescription = progressLabel }
     Box {
-        if (action == null) {
-            content(Modifier.clickable(onClick = onClick).semantics { if (pending) stateDescription = progressLabel })
+        if (actions.isEmpty()) {
+            content(Modifier.clickable(onClick = onClick).then(progress))
         } else {
             SmileyFavoriteGesture(
                 smiley = smiley,
-                action = action,
+                actions = actions,
                 onClick = onClick,
-                onFavoriteChange = { state?.onFavoriteChange?.invoke(smiley) },
-                content = content,
+                content = { gestures ->
+                    content(gestures.then(progress))
+                },
             )
         }
         if (pending) {
@@ -67,40 +84,42 @@ internal fun SmileyFavoriteTarget(
     }
 }
 
+private data class FavoriteMenuAction(val label: String, val invoke: () -> Unit)
+
 @Composable
 private fun SmileyFavoriteGesture(
     smiley: EditorSmiley,
-    action: SmileyFavoriteAction,
+    actions: List<FavoriteMenuAction>,
     onClick: () -> Unit,
-    onFavoriteChange: () -> Unit,
     content: @Composable (Modifier) -> Unit,
 ) {
-    val label = when (action) {
-        SmileyFavoriteAction.ADD -> stringResource(R.string.editor_smiley_favorite_add)
-        SmileyFavoriteAction.REMOVE -> stringResource(R.string.editor_smiley_favorite_remove)
-    }
+    val label = stringResource(R.string.editor_smiley_favorite_manage)
     var menuOpen by remember(smiley.token) { mutableStateOf(false) }
     // Ineligible cells leave this composition entirely; a changed action also closes the menu.
-    LaunchedEffect(action) { menuOpen = false }
+    LaunchedEffect(actions.map { it.label }) { menuOpen = false }
     content(
         Modifier.combinedClickable(
             onClick = onClick,
             onLongClick = { menuOpen = true },
             onLongClickLabel = label,
         ).semantics {
-            customActions = listOf(CustomAccessibilityAction(label) { onFavoriteChange(); true })
+            customActions = actions.map { action ->
+                CustomAccessibilityAction(action.label) { action.invoke(); true }
+            }
         },
     )
     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-        DropdownMenuItem(
-            text = { Text(label) },
-            onClick = { menuOpen = false; onFavoriteChange() },
-        )
+        actions.forEach { action ->
+            DropdownMenuItem(
+                text = { Text(action.label) },
+                onClick = { menuOpen = false; action.invoke() },
+            )
+        }
     }
 }
 
 /**
- * A brief Wiki overlay, excluded from content measurement by the caller and keyed per favorite gesture.
+ * A brief Standard/Wiki overlay, excluded from measurement and keyed per favorite gesture.
  * Calls [onExpired] after the accessibility-recommended short snackbar timeout.
  * The sheet retains expiration for this opening so tab changes cannot revive an expired overlay.
  */
@@ -129,7 +148,7 @@ internal fun SmileyFavoriteOverlay(
     }
 }
 
-/** Both tabs expose the same polite announcement for the current opening. */
+/** All three tabs expose the same polite announcement for the current opening. */
 @Composable
 internal fun SmileyFavoriteStatus(feedback: SmileyFavoriteFeedback, modifier: Modifier = Modifier) {
     Text(
@@ -152,4 +171,14 @@ private fun smileyFavoriteMessage(feedback: SmileyFavoriteFeedback): String = wh
     SmileyFavoriteFeedback.NotAuthenticated -> stringResource(R.string.editor_smiley_favorite_session_expired)
     SmileyFavoriteFeedback.TransportFailure -> stringResource(R.string.editor_smiley_favorite_network_error)
     SmileyFavoriteFeedback.UnknownResponse -> stringResource(R.string.editor_smiley_favorite_unknown_response)
+    SmileyFavoriteFeedback.LocalAdded, SmileyFavoriteFeedback.LocalRemoved,
+    SmileyFavoriteFeedback.LocalLimitReached, SmileyFavoriteFeedback.LocalStorageFailure ->
+        stringResource(localFavoriteMessageResource(feedback))
+}
+
+private fun localFavoriteMessageResource(feedback: SmileyFavoriteFeedback): Int = when (feedback) {
+    SmileyFavoriteFeedback.LocalAdded -> R.string.editor_smiley_local_favorite_added
+    SmileyFavoriteFeedback.LocalRemoved -> R.string.editor_smiley_local_favorite_removed
+    SmileyFavoriteFeedback.LocalLimitReached -> R.string.editor_smiley_local_favorite_limit
+    else -> R.string.editor_smiley_local_favorite_error
 }

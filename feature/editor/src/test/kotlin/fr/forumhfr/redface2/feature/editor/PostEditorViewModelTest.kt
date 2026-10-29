@@ -1,4 +1,8 @@
 package fr.forumhfr.redface2.feature.editor
+
+import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollectionSnapshot
+import fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS
+import fr.forumhfr.redface2.core.model.SmileyUsageEntry
 import fr.forumhfr.redface2.core.model.EditorSmileySource
 import fr.forumhfr.redface2.core.model.HfrFavoriteSmileyMutationResult
 import fr.forumhfr.redface2.core.ui.editor.UploadError
@@ -96,6 +100,7 @@ class PostEditorViewModelTest {
     private val smileyRepository = FakeSmileyRepository()
     private val draftStore = FakeEditorDraftStore()
     private val favoriteRepository = FakeHfrFavoriteSmileyRepository()
+    private val localCollections = FakeSmileyLocalCollections()
     private val uploadRepository = FakeUploadRepository()
     private val imageUploadReader = FakeImageUploadReader()
 
@@ -903,6 +908,7 @@ class PostEditorViewModelTest {
             editPostRepository = editPostRepository,
             smileyRepository = smileyRepository,
             hfrFavoriteSmileyRepository = favoriteRepository,
+            smileyLocalCollections = localCollections,
             userPreferencesRepository = userPreferencesRepository,
             draftStore = draftStore,
             diagnostics = diagnostics,
@@ -919,6 +925,24 @@ class PostEditorViewModelTest {
     // SmileyPickerControllerTest — no duplicate coverage here. These tests only exercise
     // what stays a ViewModel concern : the insertion intent, the userId plumbed from the
     // parsed form, and the diagnostics policy on search failure.
+
+    @Test
+    fun `local collections and gestures use the injected shared component`() = runTest {
+        val smiley = BUILTIN_HFR_SMILEYS.first()
+        localCollections.snapshot.value = SmileyLocalCollectionSnapshot(
+            "alice", top = listOf(SmileyUsageEntry(smiley.token, 2, 1)),
+        )
+        val viewModel = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+        val fetches = replyRepository.formFetches
+        viewModel.smileyPicker.open()
+        val open = viewModel.smileyPicker.state.value as SmileyPickerState.Open
+        assertEquals(listOf(smiley), open.mostUsedSmileys)
+        requireNotNull(open.onLocalFavoriteChange)(smiley)
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf(Triple("alice", smiley.token, smiley.imageUrl)), localCollections.added)
+        assertEquals(fetches, replyRepository.formFetches)
+    }
 
     @Test
     fun `picker invokes the injected HFR add and remove without reloading the form`() = runTest {
@@ -1612,6 +1636,7 @@ class PostEditorViewModelTest {
             editPostRepository = editPostRepository,
             smileyRepository = smileyRepository,
             hfrFavoriteSmileyRepository = favoriteRepository,
+            smileyLocalCollections = localCollections,
             userPreferencesRepository = userPreferencesRepository,
             draftStore = draftStore,
             diagnostics = diagnostics,

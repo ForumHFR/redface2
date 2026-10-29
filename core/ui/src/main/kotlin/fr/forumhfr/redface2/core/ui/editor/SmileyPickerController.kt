@@ -3,6 +3,9 @@ package fr.forumhfr.redface2.core.ui.editor
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.EditorSmileySource
 import fr.forumhfr.redface2.core.model.HfrFavoriteSmileyMutationResult
+import fr.forumhfr.redface2.core.domain.smiley.LocalFavoriteSmileyFailure
+import fr.forumhfr.redface2.core.domain.smiley.LocalFavoriteSmileyMutationResult
+import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollectionSnapshot
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -43,8 +46,9 @@ import kotlinx.coroutines.launch
  * Repository operations are callbacks supplied by the hosts, without Hilt in this controller.
  * [userId] feeds HFR's wiki endpoint and falls back to 0 when the session
  * has not resolved an id (proven harmless — same fallback as `PostEditorViewModel`).
- * [favoriteSmileys] reads the latest loaded form ; hosts call [refreshFavorites] when that form
- * changes. Reopening restores the wiki search but always reads the current favorites.
+ * [SmileyPickerFavoriteSources.favoriteSmileys] reads the latest loaded form ; hosts call
+ * [refreshFavorites] when that form changes. Reopening restores the wiki search but always
+ * reads the current favorites.
  * [onSearchFailed] lets a host apply its own failure policy (the `:feature:editor` ViewModels
  * record a diagnostics WARN — class name only, never the query nor the userId — while the MP
  * composers keep the no-op default).
@@ -54,8 +58,7 @@ class SmileyPickerController(
     private val searchWiki: suspend (userId: Int, query: String) -> List<EditorSmiley>,
     private val userId: () -> Int? = { null },
     private val onSearchFailed: (Throwable) -> Unit = {},
-    private val favoriteSmileys: () -> List<EditorSmiley> = { emptyList() },
-    private val hfrFavoriteMutations: SmileyFavoriteMutations? = null,
+    private val favoriteSources: SmileyPickerFavoriteSources = SmileyPickerFavoriteSources(),
 ) {
 
     private val _state = MutableStateFlow<SmileyPickerState>(SmileyPickerState.Hidden)
@@ -69,8 +72,26 @@ class SmileyPickerController(
     private var optimisticFavorites: List<EditorSmiley>? = null
     private var favoriteFeedback: SmileyFavoriteFeedback? = null
     private var favoriteFeedbackGeneration = 0L
+    private var accountGeneration = 0L
     private val favoriteCommand: ((EditorSmiley) -> Unit)? =
-        if (hfrFavoriteMutations != null) ::onFavoriteClicked else null
+        if (favoriteSources.hfrFavoriteMutations != null) ::onFavoriteClicked else null
+    private var localSnapshot = SmileyLocalCollectionSnapshot()
+    private val localCommand: (EditorSmiley) -> Unit = ::onLocalFavoriteClicked
+
+    init {
+        // Collect for the whole ViewModel lifetime, including while the sheet is hidden.
+        scope.launch {
+            favoriteSources.localCollections?.observe()?.collect { snapshot ->
+                if (localSnapshot.owner != snapshot.owner) {
+                    accountGeneration++
+                    favoriteFeedback = null
+                    favoriteFeedbackGeneration++
+                }
+                localSnapshot = snapshot
+                publishFavorites()
+            }
+        }
+    }
 
     private data class FavoriteSnapshot(
         val generation: Long,
@@ -84,7 +105,7 @@ class SmileyPickerController(
         ?: mergedFavorites()
 
     private fun mergedFavorites(): List<EditorSmiley> {
-        val base = favoriteSmileys()
+        val base = favoriteSources.favoriteSmileys()
         val confirmed = currentFavoriteSnapshot() ?: return base
         val byToken = confirmed.items.associateBy { it.token }
         val baseTokens = base.mapTo(mutableSetOf()) { it.token }
@@ -97,17 +118,31 @@ class SmileyPickerController(
         val confirmed = currentFavoriteSnapshot() ?: return emptySet()
         val favoriteTokens = confirmed.items.mapTo(mutableSetOf()) { it.token }
         // Removed tokens stay eligible for re-addition from the Wiki.
-        return favoriteSmileys().mapTo(mutableSetOf()) { it.token } - favoriteTokens - confirmed.removedTokens
+        return favoriteSources.favoriteSmileys().mapTo(mutableSetOf()) { it.token } -
+            favoriteTokens - confirmed.removedTokens
     }
 
-    private fun withFavorites(open: SmileyPickerState.Open) = open.copy(
-        favoriteSmileys = currentFavorites(),
-        pendingFavoriteToken = pendingFavoriteToken,
-        favoriteFeedback = favoriteFeedback,
-        favoriteFeedbackGeneration = favoriteFeedbackGeneration,
-        onFavoriteChange = favoriteCommand,
-        accountSmileyTokens = accountSmileyTokens(),
-    )
+    private fun withFavorites(open: SmileyPickerState.Open): SmileyPickerState.Open {
+        val local = localSnapshot.favorites.takeIf { localSnapshot.owner != null }.orEmpty()
+        val top = localSnapshot.top.takeIf { localSnapshot.owner != null }.orEmpty()
+        val wiki = (open.wiki as? WikiSearchState.Results)?.items.orEmpty()
+        val localImages = local.mapNotNull { item ->
+            item.imageUrl?.let { EditorSmiley(item.token, it, EditorSmileySource.WIKI) }
+        }
+        val resolver = SmileyImageResolver(wiki + localImages + currentFavorites())
+        return open.copy(
+            favoriteSmileys = currentFavorites(),
+            pendingFavoriteToken = pendingFavoriteToken,
+            favoriteFeedback = favoriteFeedback,
+            favoriteFeedbackGeneration = favoriteFeedbackGeneration,
+            onFavoriteChange = favoriteCommand,
+            accountSmileyTokens = accountSmileyTokens(),
+            localFavoriteSmileys = local.mapNotNull { resolver.resolve(it.token, it.imageUrl) },
+            mostUsedSmileys = top.mapNotNull { resolver.resolve(it.token) },
+            localFavoriteTokens = local.mapTo(mutableSetOf()) { it.token },
+            onLocalFavoriteChange = localCommand.takeIf { localSnapshot.owner != null },
+        )
+    }
 
     /**
      * #824 — snapshot of the last dismissed Open state, already normalised by [dismiss]
@@ -126,9 +161,61 @@ class SmileyPickerController(
             } else {
                 // #824 — restore the last dismissed search (query + results) so reopening
                 // right after an insertion / accidental swipe-down never costs a retype.
-                withFavorites(lastDismissed ?: SmileyPickerState.Open())
+                val restored = withFavorites(lastDismissed ?: SmileyPickerState.Open())
+                restored.copy(initialTab = initialTab(restored))
             }
         }
+    }
+
+    private fun initialTab(open: SmileyPickerState.Open): SmileyPickerTab = when {
+        open.query.isNotEmpty() -> SmileyPickerTab.WIKI
+        open.favoriteSmileys.isNotEmpty() -> SmileyPickerTab.FAVORITES
+        localSnapshot.owner == null -> SmileyPickerTab.STANDARD
+        localSnapshot.favorites.isNotEmpty() -> SmileyPickerTab.FAVORITES
+        localSnapshot.top.isNotEmpty() -> SmileyPickerTab.FAVORITES
+        else -> SmileyPickerTab.STANDARD
+    }
+
+    private fun onLocalFavoriteClicked(smiley: EditorSmiley) {
+        val open = _state.value as? SmileyPickerState.Open ?: return
+        val owner = localSnapshot.owner ?: return
+        val action = if (smiley.token in open.localFavoriteTokens) {
+            SmileyFavoriteAction.REMOVE
+        } else {
+            SmileyFavoriteAction.ADD
+        }
+        val collections = requireNotNull(favoriteSources.localCollections)
+        favoriteFeedback = null
+        val generation = ++favoriteFeedbackGeneration
+        val account = accountGeneration
+        publishFavorites()
+        scope.launch {
+            val result = runCatching {
+                when (action) {
+                    SmileyFavoriteAction.ADD -> collections.add(owner, smiley.token, smiley.imageUrl)
+                    SmileyFavoriteAction.REMOVE -> collections.remove(owner, smiley.token)
+                }
+            }.getOrElse { error ->
+                if (error is CancellationException) throw error
+                LocalFavoriteSmileyMutationResult.Failure(LocalFavoriteSmileyFailure.STORAGE_FAILURE)
+            }
+            updateFavoriteFeedback(result.localFeedback(action), generation, account)
+            publishFavorites()
+        }
+    }
+
+    private fun updateFavoriteFeedback(feedback: SmileyFavoriteFeedback?, generation: Long, account: Long) {
+        // Account invalidation is independent of message priority, including a switch away and back.
+        if (accountGeneration != account || feedback == null) return
+        val success = when (feedback) {
+            SmileyFavoriteFeedback.Added, SmileyFavoriteFeedback.Removed,
+            SmileyFavoriteFeedback.LocalAdded, SmileyFavoriteFeedback.LocalRemoved -> true
+            else -> false
+        }
+        if (success && favoriteFeedbackGeneration != generation) return
+        // A failure must explain the rollback even after a newer gesture; restart its overlay timeout.
+        if (!success) favoriteFeedbackGeneration++
+        favoriteFeedback = feedback.takeUnless { success && _state.value is SmileyPickerState.Hidden }
     }
 
     /** Hosts notify after a form reload, including when the sheet is already visible. */
@@ -147,7 +234,7 @@ class SmileyPickerController(
     fun onFavoriteClicked(smiley: EditorSmiley) {
         val open = _state.value as? SmileyPickerState.Open ?: return
         val action = open.favoriteAction(smiley) ?: return
-        val callbacks = requireNotNull(hfrFavoriteMutations)
+        val callbacks = requireNotNull(favoriteSources.hfrFavoriteMutations)
         val mutation = when (action) {
             SmileyFavoriteAction.ADD -> callbacks.addHfrFavorite
             SmileyFavoriteAction.REMOVE -> callbacks.removeHfrFavorite
@@ -162,6 +249,8 @@ class SmileyPickerController(
         }
         favoriteFeedback = null
         favoriteFeedbackGeneration++
+        val feedbackGeneration = favoriteFeedbackGeneration
+        val account = accountGeneration
         publishFavorites()
         scope.launch {
             try {
@@ -172,11 +261,7 @@ class SmileyPickerController(
                 // Only confirmed lists are stamped at completion; reads merge them with the current form base.
                 // Without one, dropping the optimistic layer reveals the current base or still-valid snapshot.
                 confirmFavorites(result, action, smiley.token)
-                favoriteFeedback = when (val feedback = result.feedback(action)) {
-                    SmileyFavoriteFeedback.Added, SmileyFavoriteFeedback.Removed ->
-                        feedback.takeIf { _state.value is SmileyPickerState.Open }
-                    else -> feedback
-                }
+                updateFavoriteFeedback(result.feedback(action), feedbackGeneration, account)
             } finally {
                 optimisticFavorites = null
                 pendingFavoriteToken = null
@@ -275,7 +360,7 @@ class SmileyPickerController(
         _state.update { current ->
             val open = current as? SmileyPickerState.Open ?: return@update current
             if (open.query != query) return@update current
-            open.copy(wiki = wiki)
+            withFavorites(open.copy(wiki = wiki))
         }
     }
 

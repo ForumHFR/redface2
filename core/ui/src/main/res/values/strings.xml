@@ -129,7 +129,18 @@
     <!-- #387 — smiley picker (promu depuis :feature:editor avec SmileyPickerSheet). -->
     <string name="editor_smiley_title">Smileys</string>
     <string name="editor_smiley_tab_standard">Standard</string>
-    <string name="editor_smiley_section_favorites">Favoris</string>
+    <string name="editor_smiley_tab_favorites">Favoris</string>
+    <string name="editor_smiley_section_favorites">Favoris HFR</string>
+    <string name="editor_smiley_section_local">Favoris de l\'appareil</string>
+    <string name="editor_smiley_section_top">Les plus utilisés</string>
+    <string name="editor_smiley_favorites_hint">Appui long sur un smiley pour l\'ajouter à vos favoris. Les smileys que vous envoyez le plus apparaîtront aussi ici.</string>
+    <string name="editor_smiley_favorite_manage">Gérer les favoris</string>
+    <string name="editor_smiley_local_favorite_add">Ajouter aux favoris de l\'appareil</string>
+    <string name="editor_smiley_local_favorite_remove">Retirer des favoris de l\'appareil</string>
+    <string name="editor_smiley_local_favorite_added">Ajouté aux favoris de l\'appareil</string>
+    <string name="editor_smiley_local_favorite_removed">Retiré des favoris de l\'appareil</string>
+    <string name="editor_smiley_local_favorite_limit">Limite de 256 favoris de l\'appareil atteinte</string>
+    <string name="editor_smiley_local_favorite_error">Échec de l\'enregistrement des favoris de l\'appareil</string>
     <string name="editor_smiley_tab_wiki">Wiki</string>
     <string name="editor_smiley_search_label">Rechercher un smiley perso</string>
     <string name="editor_smiley_search_hint">Tapez au moins 3 caractères pour interroger le wiki HFR.</string>

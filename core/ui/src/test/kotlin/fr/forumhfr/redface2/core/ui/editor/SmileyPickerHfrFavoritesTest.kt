@@ -542,8 +542,10 @@ class SmileyPickerHfrFavoritesTest {
     ) = SmileyPickerController(
         scope = scope,
         searchWiki = { _, _ -> emptyList() },
-        favoriteSmileys = form,
-        hfrFavoriteMutations = SmileyFavoriteMutations(add, remove),
+        favoriteSources = SmileyPickerFavoriteSources(
+            favoriteSmileys = form,
+            hfrFavoriteMutations = SmileyFavoriteMutations(add, remove),
+        ),
     ).also { it.open() }
 
     private fun SmileyPickerController.openState() = state.value as SmileyPickerState.Open

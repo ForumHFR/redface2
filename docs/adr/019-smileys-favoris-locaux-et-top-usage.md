@@ -101,11 +101,44 @@ instrumenté : les écritures techniques MPStorage ne passent pas par ces points
 d'occurrences non positif est refusé explicitement sans écriture. Les mutations sont
 transactionnelles, avec résultats d'échec explicites comme pour C2 ; aucune URL d'image requise.
 
+## Mise à jour 29/10/2026 : affichage
+
+Le lot D de #1154 branche les moteurs dans les quatre éditeurs, sans synchronisation MPStorage :
+
+- Trois onglets **Favoris | Standard | Wiki**. Standard contient uniquement les builtins.
+  Favoris partage une grille défilante et le budget de hauteur #900 / géométrie #989 entre
+  **Favoris de l'appareil**, **Favoris HFR** (base fusionnée, smileys du compte compris), puis
+  **Les plus utilisés** (`observeTop(owner)`, Top 24). Chaque section vide est absente ; si tout
+  est vide, un texte explique l'appui long et le classement des smileys envoyés.
+- Le contrôleur observe les collections dès sa création dans la portée du ViewModel.
+  À `open()`, Favoris est initial si une liste connue est non vide, Standard sinon ; une recherche
+  Wiki restaurée (#824) ouvre toujours Wiki. Aucune arrivée tardive de données ne reprend la
+  sélection à l'utilisateur. La sélection pendant l'ouverture survit à la rotation.
+- `SmileyLocalCollections` (`:core:domain`), implémenté par `DefaultSmileyLocalCollections`
+  (`:core:data`), observe le pseudo normalisé et bascule les deux observations ensemble.
+  Anonyme ou pseudo blanc : aucune collection ni action locale. Les quatre ViewModels injectent
+  ce seul composant, sans logique de propriétaire dupliquée. Le propriétaire est capturé au geste.
+- Un favori local utilise son URL enregistrée à l'ajout. Sinon, un builtin reprend la table
+  `BUILTIN_HFR_SMILEYS` ; un perso utilise une URL connue des listes chargées avant reconstruction :
+  `[:nom]` → `https://forum-images.hardware.fr/images/perso/nom.gif`,
+  `[:nom:N]` → `https://forum-images.hardware.fr/images/perso/N/nom.gif`.
+  Le nom reste littéral, espaces compris ; l'encodage appartient au chemin Coil/OkHttp existant.
+  Un jeton non résoluble est omis. Une image en échec garde le nom accessible de la cellule.
+  `EditorSmileySource` reste un type de rendu : un builtin garde `BUILTIN` dans toutes les sections.
+- L'appui long « Gérer les favoris » et les actions personnalisées TalkBack proposent toutes
+  les actions applicables : ajout/retrait local pour tout smiley, builtins compris ; actions HFR
+  existantes pour les persos éligibles. Les mutations locales et HFR sont indépendantes.
+  Succès local, limite de 256 ou échec de stockage empruntent le statut en tête de Favoris et la
+  surcouche brève sur Standard/Wiki, avec la même durée de vie et génération de retour.
+- Réordonnancement, effacement dans les Réglages, export et synchronisation restent hors périmètre.
+  Les règles de comptage du Top ne changent pas.
+
 ## Conséquences
 
-- C1 et C2 livrent leurs moteurs et leurs tests, sans sélecteur, écran ou ViewModel supplémentaire.
-  L'affichage viendra séparément ; aucune nouvelle valeur d'`EditorSmileySource` avant un consommateur.
-- L'utilisateur ne dispose pas encore d'un accès à ces collections ni de leur effacement dans l'UI.
+- C1 et C2 fournissent les moteurs ; D affiche leurs collections dans le sélecteur partagé,
+  sans écran supplémentaire ni nouvelle valeur d'`EditorSmileySource`.
+- L'utilisateur peut consulter et gérer ses favoris locaux ; leur effacement global dans les
+  Réglages reste à venir.
 - Les dates et tombstones préparent un export fidèle, sans définir une résolution des conflits
   entre appareils. Le Top suit une fréquence d'utilisation et reste une donnée locale personnelle.
 
