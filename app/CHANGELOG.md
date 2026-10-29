@@ -16,6 +16,15 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.64.3` — `internal` (dev) — 2026-10-29
+
+Correctif du sélecteur de smileys signalé sur le topic DEV ([#1154](https://github.com/ForumHFR/redface2/issues/1154), [#1490](https://github.com/ForumHFR/redface2/pull/1490)).
+
+- **Smileys perso du compte** (`[:pseudo:1]`, `[:pseudo:2]`…) : ils ne disparaissent plus de la section Favoris après l'ajout ou le retrait d'un favori HFR. Le formulaire de rédaction les mêle aux favoris, alors que la page de gestion de HFR ne liste que les favoris retirables.
+- **Retrait** : un smiley qui ne figure pas dans les favoris HFR (smiley perso du compte) n'affiche plus « Retiré » à tort ; l'app indique qu'il ne peut pas être retiré, puis ne propose plus son retrait.
+
+---
+
 ## `0.64.2` — `internal` (dev) — 2026-10-29
 
 Finition du sélecteur de smileys après la gestion des favoris HFR ([#1154](https://github.com/ForumHFR/redface2/issues/1154), [#1488](https://github.com/ForumHFR/redface2/pull/1488)).
