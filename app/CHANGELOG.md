@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.64.4` — `internal` (dev) — 2026-10-29
+
+Onglet Favoris du sélecteur de smileys ([#1154](https://github.com/ForumHFR/redface2/issues/1154), [#1492](https://github.com/ForumHFR/redface2/pull/1492)), proposé par nicko sur le topic DEV.
+
+- **Trois onglets : Favoris | Standard | Wiki.** L'onglet Favoris regroupe trois sections : « Favoris de l'appareil », « Favoris HFR » (déplacés depuis Standard) et « Les plus utilisés » (Top local des smileys envoyés). Il s'ouvre en premier dès qu'il a du contenu ; une recherche Wiki en cours rouvre toujours le Wiki.
+- **Appui long sur n'importe quel smiley**, builtins compris : « Gérer les favoris », pour ajouter ou retirer des favoris de l'appareil (256 au plus), en plus des actions HFR existantes sur les persos. Chaque action est aussi disponible avec TalkBack.
+- Données conservées sur l'appareil, par compte ; pas encore de synchronisation entre appareils.
+
+---
+
 ## `0.64.3` — `internal` (dev) — 2026-10-29
 
 Correctif du sélecteur de smileys signalé sur le topic DEV ([#1154](https://github.com/ForumHFR/redface2/issues/1154), [#1490](https://github.com/ForumHFR/redface2/pull/1490)).
