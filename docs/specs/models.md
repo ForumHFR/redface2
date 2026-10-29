@@ -732,7 +732,8 @@ pour éviter une perte lors du retrait ; une image cassée peut donc donner un `
 ou relatif. Les listes sont en ordre serveur, source `HFR_FAVORITE`, sans déduplication dans
 le formulaire de gestion. Les `favoriteSmileys` de `ReplyForm` et `TopicForm` sont vides par défaut ;
 les éditeurs les lisent depuis `#dynamic_smilies` en réutilisant l'extraction du wiki.
-Cette base contient aussi les smileys perso du compte, également parsés en `HFR_FAVORITE` ;
+D'après un signalement non capturé (cf. `protocol-hfr.md`), cette base contient aussi les smileys
+perso du compte, également parsés en `HFR_FAVORITE` ;
 la liste du formulaire de gestion fait seule foi pour les favoris retirables.
 
 `HfrFavoriteSmileyRepository.add(token)` / `remove(token)` retournent ce résultat sans HTML,

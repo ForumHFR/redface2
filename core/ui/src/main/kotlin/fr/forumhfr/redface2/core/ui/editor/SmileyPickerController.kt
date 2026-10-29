@@ -169,7 +169,7 @@ class SmileyPickerController(
                     if (error is CancellationException) throw error
                     HfrFavoriteSmileyMutationResult.TransportFailure
                 }
-                // Only confirmed lists are stamped at completion, superseding forms received DURING the mutation.
+                // Only confirmed lists are stamped at completion; reads merge them with the current form base.
                 // Without one, dropping the optimistic layer reveals the current base or still-valid snapshot.
                 confirmFavorites(result, action, smiley.token)
                 favoriteFeedback = when (val feedback = result.feedback(action)) {
