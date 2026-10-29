@@ -821,7 +821,7 @@ L'endpoint accepte session anonyme (`user_id=0`) ; côté client, l'appel passe 
 
 ### Smileys favoris du compte
 
-Contrat observé le **2026-10-28** (#1154), y compris sur un compte avec un favori : les
+Contrat de lecture observé le **2026-10-28**, mutations capturées le **2026-10-29** (#1154) : les
 formulaires authentifiés `message.php` de réponse, citation, édition, création de sujet,
 réponse et composition de MP contiennent les favoris dans `div#dynamic_smilies`, sous
 `input#search_smilies`. Le HTML est déjà téléchargé par les éditeurs : **aucune requête
@@ -835,9 +835,9 @@ supplémentaire**, aucun stockage local, aucune lecture via l'API REST.
   `[:nom:N]` → `/images/perso/N/nom.gif`. Un nom peut contenir des espaces, y compris dans
   le `src` littéral. Conserver le jeton et le `src` tels que servis et confier l'encodage
   de l'URL au même chemin Coil/OkHttp que les résultats Wiki ; ne pas reconstruire l'image.
-- Conserver **l'ordre du serveur**, non alphabétique et identique entre les formulaires
-  observés. La limite de **10** rapportée par Redface 1 reste **non vérifiée** en 2026 ;
-  l'application ne plafonne pas la liste.
+- Conserver **l'ordre du serveur** : ordre d'ajout, nouveau favori en fin, identique entre
+  `#dynamic_smilies` et `supprperso.php`. Un retrait conserve l'ordre relatif. Le plafond
+  d'ajout de **10** est confirmé ; la lecture conserve néanmoins toutes les entrées servies.
 - Sans favori, et en anonyme, le bloc est vide : `<div id="dynamic_smilies"></div>`.
   Le lien « Supprimer des smilies favoris » n'est présent que lorsque la liste est peuplée.
   La section « Favoris » du sélecteur est absente si la liste est vide ; sinon elle précède
@@ -847,18 +847,92 @@ supplémentaire**, aucun stockage local, aucune lecture via l'API REST.
   chargé et reste réutilisable indépendamment de la feuille. La réponse rapide n'ouvre
   aucun sélecteur de smileys.
 
-**Écriture non implémentée** (lecture seule dans #1154) :
+**Protocole d'écriture (B1, sans gestes UI ; branchement du sélecteur en B2)** :
 
-- Ajout : `POST /user/addperso.php?config=hfr.inc`, champs `hash_check` et `smilie`
-  (jeton complet `[:nom]` ou `[:nom:N]`), formulaire proposé par `wikismilies.php`.
-- Suppression : `GET /user/supprperso.php?config=hfr.inc`, puis
-  `POST /user/supprperso_validation.php?config=hfr.inc&codehex=<secret>` avec `hash_check`,
-  les champs `smiley{i}` et les cases `delete{i}` sélectionnées. La forme de ces lignes
-  a été observée le 2026-10-28 ; aucune mutation n'a été effectuée lors de cette capture.
-- **`codehex` est un secret de compte**, distinct de `hash_check` et observé identique
-  au jeton du lien de déconnexion : ne jamais le journaliser, l'exposer dans un diagnostic
-  ou le publier dans une fixture. Les réponses de succès/échec et le plafond d'ajout issus
-  de Redface 1 n'ont pas été revérifiés ; aucun client de mutation n'est implémenté.
+`HfrFavoriteSmileyRepository` (`:core:domain/smiley`) expose `add(token)` et `remove(token)`.
+`DefaultHfrFavoriteSmileyRepository` orchestre `HfrFavoriteSmileyClient` et les deux analyseurs dédiés
+`HfrFavoriteSmileyFormParser` / `HfrFavoriteSmileyResponseParser` dans `:core:parser/smiley`.
+Les résultats et listes utilisables par B2 sont décrits dans
+[Modèles des favoris HFR]({{ site.baseurl }}/specs/models#smileys-de-léditeur-et-favoris-hfr).
+
+Une seule page de travail : `GET /user/supprperso.php?config=hfr.inc`, authentifié, donne
+`hash_check`, l'action de `form[name=test]` et la liste fraîche avec ses images (une ligne
+`tr.s2Topic` par favori). Aucun GET du wiki n'est nécessaire pour muter.
+
+**Ajout** : refuser localement tout ce qui n'est pas un jeton perso canonique `[:nom]` /
+`[:nom:N]` (espaces internes, accents, apostrophes, tirets, underscores et deux-points internes
+conservés). Les builtins, le vide et les noms nus sont refusés avant tout réseau. HFR accepte
+pourtant un nom nu existant (`aaa`) et le stocke tel quel, produisant une image cassée : ne
+jamais lui envoyer ce format. Après lecture du formulaire, un jeton exact déjà présent donne
+`AlreadyPresent` sans POST ; sinon 10 entrées ou plus donnent `Full(10, favorites)` sans POST.
+Ce pré-contrôle local utilise le plafond capturé le 29/10/2026. Une réponse contenant « vous
+ne pouvez rajouter plus de » donne `Full` avec le nombre annoncé par HFR, ou 10 s'il est illisible.
+Le serveur vérifie le plein **avant** le doublon ; le raccourci local privilégie le doublon.
+
+`POST /user/addperso.php?config=hfr.inc` transmet `hash_check` puis `smilie` (jeton complet),
+en `application/x-www-form-urlencoded`. Toutes les réponses capturées sont HTTP 200 ; seul
+le texte normalisé de `div.hop` (accents, casse, espaces) classe le résultat :
+
+| Texte capturé | Résultat |
+|---|---|
+| « Ajout effectué avec succès ! » | Succès, confirmé par un nouveau GET de la page de travail |
+| « Ce smilie est déjà dans votre liste ! » | `AlreadyPresent(favorites)` |
+| « Désolé, vous ne pouvez rajouter plus de 10 smilies » | `Full(10, favorites)` |
+| « Le smiley correspondant à ce code n'existe pas » | `NotFound` (aussi observé pour `:o`, `:pt1cable:`) |
+
+Le succès existe avec meta Refresh **ou sans Refresh avec un lien Retour** : aucune navigation
+n'est nécessaire. Les réponses doublon/plein renvoient la liste du GET préalable. Formulaire
+de login → `NotAuthenticated` ; absence de `div.hop` ou texte inconnu → `UnknownResponse`.
+
+**Retrait : réécriture intégrale de la liste.**
+`POST /user/supprperso_validation.php?config=hfr.inc&codehex=<secret>` parcourt les champs
+`smiley0`, `smiley1`, … tant qu'ils se suivent, garde ceux dont `delete{i}` n'est pas coché,
+puis remplace la liste dans cet ordre. Un POST partiel peut tout effacer ; un trou tronque
+la liste ; une valeur décalée fait perdre une autre entrée. La réponse HTTP 200 dit toujours
+« Suppression effectuée avec succès ! », même après effacement intégral : ce texte ne prouve rien.
+
+1. GET de la page de travail **juste avant** le POST ; aucune interaction ni attente utilisateur
+   entre les deux. Lire tous les `input[type=hidden][name^=smiley]` dans l'ordre du document.
+2. Abandonner (`UnknownResponse`) si les noms ne sont pas exactement `smiley0..smiley{N-1}`,
+   si leur nombre diffère de celui des `tr.s2Topic`, ou si leur association aux lignes/cases
+   est ambiguë. Rejeter aussi tout `input[name^=smiley]`, `input[name^=delete]` ou `tr.s2Topic`
+   hors du formulaire retenu. Une liste vide valide se distingue d'un formulaire absent ou invalide.
+3. Accepter tout jeton non vide, même cassé (`aaa`), et le trouver par **valeur exacte** dans
+   cette liste fraîche. Absent → `Success` sans POST ; vide → `InvalidToken` avant tout GET.
+4. Envoyer `hash_check`, **les N valeurs verbatim**, HTML décodé puis encodé comme formulaire,
+   et une seule case `delete{k}=on` pour la cible. Conserver même les entrées cassées (`aaa`,
+   image sans `src`), sans trou, sans tri, sans filtrage. Ne jamais utiliser un index d'UI périmé.
+5. Relire obligatoirement la page de travail après le POST et comparer les **jetons ordonnés**
+   à « liste fraîche moins la cible ». Identiques → `Success(favorites)` ;
+   différents → `VerificationFailed(favorites)` avec la liste réelle. Les images viennent du GET final.
+
+Les mutations de l'application sont sérialisées du GET initial à la relecture finale.
+Une fenêtre de course subsiste uniquement avec le web ou un autre appareil entre le GET et le POST : un
+ajout extérieur peut être perdu. La relecture détecte un écart à l'état attendu, sans garantir
+la détection d'un ajout extérieur effacé. Le réordonnancement est possible côté serveur en
+changeant l'ordre des valeurs envoyées, mais **non implémenté** dans l'application.
+
+**Compte et secrets** : lire le compte courant au début, le revérifier immédiatement avant
+chaque POST. Changement de compte ou passage anonyme → `AccountChanged`, sans POST.
+L'identité du compte est le pseudo en minuscules ; la résolution de `userId` ne change pas de compte.
+Les listes relues après mutation sont également rattachées au compte initial.
+`codehex` est distinct de `hash_check` et identique au jeton de déconnexion. Tous deux sont
+des **secrets de compte stables**, observés identiques entre sessions et d'un jour à l'autre :
+une fuite est durable. `codehex` reste uniquement dans un formulaire technique transitoire,
+au `toString()` expurgé, jamais dans un modèle métier, état, stockage ou cache. Les seuls jetons
+des fixtures sont fictifs. L'action est validée : même origine HTTPS, chemin exact
+`/user/supprperso_validation.php`, `config=hfr.inc`, seul autre paramètre `codehex` hexadécimal ;
+tout autre hôte, chemin, paramètre supplémentaire/dupliqué ou fragment fait abandonner.
+
+Ces POST utilisent un dérivé de `@MutationClient`, sans redirection ni rejeu (corps à usage
+unique, y compris pour les reprises HTTP). Le chemin d'exécution sensible n'expose aucune URL,
+query, page brute ou cause d'exception d'origine. Aucun cache HTTP pour cette page de travail.
+Les diagnostics du dépôt se limitent à l'opération et à la classe de résultat.
+Ces appels sont exclus des diagnostics réseau génériques ; aucun détail de requête n'y est ajouté.
+
+**Non testé lors de la capture** : validation des valeurs injectées par une réécriture
+(existence, plafond, doublons), ordre des contrôles « inexistant » / « plein » à l'ajout,
+classement des favoris dans la recherche wiki. Ces comportements ne sont pas des garanties.
 
 ---
 

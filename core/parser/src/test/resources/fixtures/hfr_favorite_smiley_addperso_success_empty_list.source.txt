@@ -1,0 +1,6 @@
+Fixture : hfr_favorite_smiley_addperso_success_empty_list.html
+Origine : réponse HTTP 200 (pas de Location) de POST /user/addperso.php?config=hfr.inc
+Requête : hash_check=<hash_check>&smilie=[:fictif c:10] (liste VIDE avant l'ajout ; nom réel remplacé)
+Cas : succès, variante observée sur une liste vide : même texte, sans meta Refresh, avec le lien « Retour à la page précédente »
+Capture : live le 2026-10-29, authentifié sous XaTelitte (compte de test de l'agent), #1154, capture de mutation (046). État des favoris restauré à l'identique après la passe.
+Sous-arbre assaini : head réduit à la meta Content-Type (la réponse d’origine n’a pas de meta Refresh), body réduit au chemin div.container > div#mesdiscussions > div.hop (bloc verbatim). Feuilles de style et style inline d'origine retirés (doctype conservé). La réponse d'origine ne contient ni hash_check, ni codehex, ni cookie, ni cryptlink (vérifié).

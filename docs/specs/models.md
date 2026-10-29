@@ -584,6 +584,7 @@ data class ReplyForm(
     val hiddenFields: Map<String, String>,   // password filtré au parse ; pseudo anonyme filtré
     val isAnonymous: Boolean,
     val initialContent: String = "",  // Phase 2C (#146) : reply → "" ; quote → bloc `[quotemsg=…]` prérempli par HFR (verbatim, jamais reconstruit côté app)
+    val favoriteSmileys: List<EditorSmiley> = emptyList(), // #1481 : favoris du compte, ordre du formulaire
 )
 
 data class PollVoteForm(              // #779 : extrait du form action*=vote.php de la page topic
@@ -631,6 +632,7 @@ data class TopicForm(                        // Phase 2D (#148) : forme topic-le
     val msgIcon: String?,                    // icône `checked` (defense-in-depth source-of-truth)
     val poll: TopicPollForm,                 // read-only en Phase 2D #148 ; champs sondage préservés verbatim
     val isAnonymous: Boolean,
+    val favoriteSmileys: List<EditorSmiley> = emptyList(), // #1481 : favoris du compte, ordre du formulaire
 )
 
 data class TopicFormSubcategoryChoice(
@@ -671,6 +673,59 @@ remet `Topic.pollVoteForm` à `null`. Les gardes pré-POST produisent tous les
 `PollVoteFailureReason` sauf `UnexpectedResponse`, réservé au parser de réponse.
 
 Les contrats HFR sous-jacents sont documentés dans [`protocol-hfr.md` § Form fields critiques]({{ site.baseurl }}/specs/protocol-hfr#form-fields-critiques). Les `ReplyFailureReason` mappent un-à-un sur les fixtures `write_*_error.html` / `write_*_response.html` capturées en Phase 2A.
+
+---
+
+## Smileys de l'éditeur et favoris HFR
+
+Modèles dans `:core:model`, distincts du `SmileyKind` de l'AST des posts. La lecture des
+favoris dans les formulaires est livrée par #1481 ; B1 de #1154 ajoute les mutations du compte,
+sans UI. Les favoris locaux relèvent d'un dépôt séparé.
+
+```kotlin
+data class EditorSmiley(
+    val token: String,
+    val imageUrl: String,
+    val source: EditorSmileySource,
+)
+
+enum class EditorSmileySource { BUILTIN, WIKI, HFR_FAVORITE }
+
+sealed interface HfrFavoriteSmileyMutationResult {
+    data class Success(val favorites: List<EditorSmiley>) : HfrFavoriteSmileyMutationResult
+    data class AlreadyPresent(val favorites: List<EditorSmiley>) : HfrFavoriteSmileyMutationResult
+    data class Full(val limit: Int, val favorites: List<EditorSmiley>) : HfrFavoriteSmileyMutationResult
+    data object NotFound : HfrFavoriteSmileyMutationResult
+    data object InvalidToken : HfrFavoriteSmileyMutationResult
+    data class VerificationFailed(val favorites: List<EditorSmiley>) : HfrFavoriteSmileyMutationResult
+    data object NotAuthenticated : HfrFavoriteSmileyMutationResult
+    data object AccountChanged : HfrFavoriteSmileyMutationResult
+    data object UnknownResponse : HfrFavoriteSmileyMutationResult
+    data object TransportFailure : HfrFavoriteSmileyMutationResult
+}
+```
+
+`token` est conservé verbatim (espaces internes et variantes compris) ; `imageUrl` vient du
+HTML HFR, sans reconstruction. Le formulaire de gestion conserve même les entrées hors format
+pour éviter une perte lors du retrait ; une image cassée peut donc donner un `imageUrl` vide
+ou relatif. Les listes sont en ordre serveur, source `HFR_FAVORITE`, sans déduplication dans
+le formulaire de gestion. Les `favoriteSmileys` de `ReplyForm` et `TopicForm` sont vides par défaut ;
+les éditeurs les lisent depuis `#dynamic_smilies` en réutilisant l'extraction du wiki.
+
+`HfrFavoriteSmileyRepository.add(token)` / `remove(token)` retournent ce résultat sans HTML,
+exception ni secret. `Success.favorites` est la liste confirmée après mutation (ou fraîchement
+lue si le retrait est déjà fait). `AlreadyPresent` et `Full` contiennent la liste du GET préalable.
+`Full.limit` reprend le nombre annoncé par HFR, avec repli à 10 ; le pré-contrôle local reste à 10.
+`VerificationFailed` rapporte la liste réelle quand le jeton ajouté est absent après acquittement,
+ou quand le retrait n'a pas laissé les jetons attendus dans leur ordre ; aucune liste optimiste n'est construite ici.
+`InvalidToken` refuse avant réseau tout jeton non canonique perso à l'ajout, et seulement le vide
+au retrait. `NotFound` vient du serveur. `NotAuthenticated` indique un compte anonyme ou une session expirée ;
+`AccountChanged` un compte différent de celui du début de l'opération. `UnknownResponse`
+couvre un formulaire ambigu ou une réponse non reconnue ; `TransportFailure` un échec HTTP/réseau.
+
+`hash_check` et `codehex` du formulaire de gestion restent dans un type technique transitoire
+de `:core:parser` au `toString()` expurgé, sans cache ni persistance. Contrat détaillé et limites :
+[protocol-hfr.md § Smileys favoris du compte]({{ site.baseurl }}/specs/protocol-hfr#smileys-favoris-du-compte).
 
 ---
 

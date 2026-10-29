@@ -20,8 +20,9 @@ package fr.forumhfr.redface2.core.model
  *    spaces and apostrophes all survive verbatim. The token is meant to be wrapped by an
  *    insertion helper that adds spaces around it (cf. HFR's `putSmiley` JS), so it carries
  *    no leading/trailing whitespace itself.
- *  - [imageUrl] is the absolute URL HFR served for the preview image. It is read from the
- *    HTML/JSON HFR actually returned, never reconstructed from the token.
+ *  - [imageUrl] is the URL HFR served for the preview image, never reconstructed from the token.
+ *    The account management form also preserves broken historical entries: their URL may be
+ *    relative or empty, and their token may be noncanonical. Mutations must round-trip those rows.
  *  - [source] identifies the origin : builtins, wiki search or HFR account favorites.
  *    A smiley can appear in both the account favorites and the wiki search.
  *    Callers that need to merge / dedupe rely on `token` equality, not on identity.
@@ -33,7 +34,7 @@ data class EditorSmiley(
 )
 
 /**
- * Where the smiley entry came from. Favorites are read from the already downloaded HFR form ;
+ * Where the smiley entry came from. Favorites are read from an editor or account management form ;
  * builtins ship with the app and wiki results come from a live search.
  */
 enum class EditorSmileySource {
@@ -45,6 +46,6 @@ enum class EditorSmileySource {
     // — a live REST hit per query, returns the perso corpus filtered by the search term.
     WIKI,
 
-    // Read-only HFR account favorites from `div#dynamic_smilies` in the editor form.
+    // HFR account favorites from `div#dynamic_smilies` or the fresh account management form.
     HFR_FAVORITE,
 }

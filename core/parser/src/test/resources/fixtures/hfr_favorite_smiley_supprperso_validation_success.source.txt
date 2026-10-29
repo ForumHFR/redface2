@@ -1,0 +1,6 @@
+Fixture : hfr_favorite_smiley_supprperso_validation_success.html
+Origine : réponse HTTP 200 (pas de Location) de POST /user/supprperso_validation.php?config=hfr.inc&codehex=<codehex>
+Requête : hash_check=<hash_check> + smiley0..smiley3 (liste complète) + delete3=on
+Cas : succès : « Suppression effectuée avec succès ! » + meta Refresh 1 s vers supprperso.php. ATTENTION : texte identique même quand la liste a été vidée par un POST partiel (§ 8 du rapport)
+Capture : live le 2026-10-29, authentifié sous XaTelitte (compte de test de l'agent), #1154, capture de mutation (019). État des favoris restauré à l'identique après la passe.
+Sous-arbre assaini : head réduit à la meta Content-Type et à la meta Refresh d’origine (verbatim), body réduit au chemin div.container > div#mesdiscussions > div.hop (bloc verbatim). Feuilles de style et style inline d'origine retirés (doctype conservé). La réponse d'origine ne contient ni hash_check, ni codehex, ni cookie, ni cryptlink (vérifié).
