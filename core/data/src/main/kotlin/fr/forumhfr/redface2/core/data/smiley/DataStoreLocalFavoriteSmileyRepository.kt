@@ -25,7 +25,6 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.SerializationException
-import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 /**
@@ -176,9 +175,10 @@ class DataStoreLocalFavoriteSmileyRepository @Inject constructor(
     ): LocalFavoriteSmileyMutationResult = when {
         change.snapshot == current -> change.result
         change.snapshot == null -> {
-            if (preferences.remove(key) == null) {
+            if (key !in preferences) {
                 LocalFavoriteSmileyMutationResult.Unchanged
             } else {
+                preferences.remove(key)
                 change.result
             }
         }

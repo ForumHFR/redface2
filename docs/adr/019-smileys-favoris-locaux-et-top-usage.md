@@ -16,7 +16,7 @@ Accepté — 2026-10-29, décision du mainteneur pour [#1154](https://github.com
 
 Les favoris du compte HFR sont déjà lus depuis le formulaire de rédaction. Les favoris locaux
 et le Top d'usage sont deux collections distinctes, conservées sur l'appareil. Le mainteneur
-demande leurs moteurs avant leur affichage ; C2 livre les favoris locaux, C1 livrera le Top.
+demande leurs moteurs avant leur affichage ; C2 livre les favoris locaux, C1 livre le Top sans affichage.
 Leur future synchronisation ne dispose pas encore d'un contrat smileys.
 
 ## Décision
@@ -40,6 +40,8 @@ Leur future synchronisation ne dispose pas encore d'un contrat smileys.
   version inconnue : observation vide, export et écritures refusés explicitement, document
   conservé, y compris lors d'un `clear`. Les autres propriétaires restent utilisables si le
   fichier Preferences est lisible. Aucun remplacement automatique du fichier en cas de corruption.
+  Toute montée de `CURRENT_VERSION` impose une migration de lecture ; sinon les documents v1
+  deviennent illisibles, préservés mais inutilisables. Cette règle vaut pour les deux magasins.
 - Les tombstones sont conservées, sauf **sous pression de taille lors d'un retrait** : si le document
   résultant dépasse 256 Kio, les tombstones les plus anciennes (`removedAt` croissant) sont élaguées
   jusqu'à respecter la borne. Le retrait ne peut ainsi pas être bloqué par la limite documentaire ;
@@ -48,7 +50,7 @@ Leur future synchronisation ne dispose pas encore d'un contrat smileys.
   L'export est seulement son point d'accroche : aucun moteur de fusion, CRDT, identifiant
   d'appareil, worker ou enveloppe MPStorage smileys. Le client MPStorage v0.1 existe déjà
   ([ADR-014]({{ site.baseurl }}/adr/014-mpstorage-v01-de-facto)) ; aucune dépendance à MPStorage2.
-- **Top d'usage (C1, à venir)** : compter uniquement après un envoi reconnu réussi, sur le
+- **Top d'usage (C1, moteur livré sans affichage)** : compter uniquement après un envoi reconnu réussi, sur le
   contenu effectivement envoyé ; en édition, seulement le delta positif d'occurrences par
   jeton. Exclure citations et blocs de code ; aucun comptage si les smileys sont désactivés.
   Suivre au plus **512 entrées**, exposer un **Top 24**, trié par compteur décroissant, puis
@@ -56,10 +58,52 @@ Leur future synchronisation ne dispose pas encore d'un contrat smileys.
   anciennes. Conserver uniquement **jeton, compteur et date**, sans contenu du message ni
   identifiant de conversation. Une panne du magasin local ne change jamais un envoi HFR
   réussi en échec ; une interruption du processus peut perdre un comptage local.
+  Le dernier départage de l'éviction conserve le jeton le plus petit dans l'ordre lexical,
+  comme le classement. Les compteurs `Long` saturent à `Long.MAX_VALUE` sans débordement.
+
+### Extraction et enregistrement du Top
+
+`SmileyUsageExtractor` utilise un scanner indépendant du `Tokenizer` BBCode et du rendu de preview
+qui ignore volontairement les builtins courts. Sans récursion, il indexe les fermetures de crochets
+puis parcourt le texte en temps linéaire, chaque segment étant visité un nombre borné de fois.
+Il reconnaît toute la table `BUILTIN_HFR_SMILEYS` et les jetons perso `[:nom]` / `[:nom:N]`,
+avec espaces et casse conservés. Il exclut les blocs
+`quote`, `quotemsg`, `code`, `cpp`, `fixed`, `img`, y compris imbriqués ; un bloc exclu mal fermé
+reste exclu jusqu'à la fin. Les paramètres de balises, destinations `[url]…[/url]` et URL nues
+(schéma `…://` ou `www.`) ne comptent pas ; le libellé de `[url=…]` reste éligible.
+Une URL nue s'arrête à toute balise BBCode reconnue, ouvrante ou fermante, y compris de formatage ;
+les crochets inconnus dans son chemin, ses paramètres de requête ou son fragment
+(par exemple `?q[x]=:D`) restent dans l'URL exclue du comptage.
+Un builtin ne peut jouxter une lettre, un chiffre, `_` ou `/` ; un `:` immédiatement avant
+l'exclut aussi, pour éviter les faux positifs dans les mots, chemins et heures.
+
+`SuccessfulSmileyUsageRecorder` capture le propriétaire courant normalisé **avant le POST**.
+L'anonymat ne produit aucune écriture. Après classification `Success`, les dépôts lui passent
+la valeur `content_form` du corps réellement envoyé, donc déjà assainie, et l'option finale
+`smileyDisabled`. Les éditions passent aussi `form.initialContent` pour le delta positif.
+Les six points d'appel sont :
+
+- `DefaultReplyRepository.submitReply` (réponse, citation, réponse rapide) ;
+- `DefaultEditPostRepository.submitEditPost` ;
+- `DefaultTopicFormRepository.submitNewTopic` et `submitEditFirstPost` ;
+- `DefaultPrivateMessageWriteRepository.submitReply` et `submitNewMessage`.
+
+L'extraction et l'écriture sont lancées dans la portée applicative injectée `ApplicationScope`,
+sur son dispatcher IO : aucun disque attendu au retour de l'envoi, aucune annulation par
+fermeture de l'écran. Les échecs explicites et exceptions du magasin sont absorbés ; les
+diagnostics ne contiennent ni contenu, ni jeton, ni message d'exception. `HfrClient` n'est pas
+instrumenté : les écritures techniques MPStorage ne passent pas par ces points métier.
+
+`SmileyUsageRepository` expose `observeTop(owner, limit = 24)`, `record(owner, usages)` et
+`clear(owner)`. Le fichier dédié `smiley_usage` contient par propriétaire un document JSON v1
+(`version`, `entries`), dont chaque entrée contient seulement `token`, `count`, `lastUsedAt`
+(epoch millis, `Clock` injecté). Un propriétaire blanc, un jeton blanc ou un nombre
+d'occurrences non positif est refusé explicitement sans écriture. Les mutations sont
+transactionnelles, avec résultats d'échec explicites comme pour C2 ; aucune URL d'image requise.
 
 ## Conséquences
 
-- C2 livre le moteur des favoris et ses tests, sans sélecteur, écran ou ViewModel supplémentaire.
+- C1 et C2 livrent leurs moteurs et leurs tests, sans sélecteur, écran ou ViewModel supplémentaire.
   L'affichage viendra séparément ; aucune nouvelle valeur d'`EditorSmileySource` avant un consommateur.
 - L'utilisateur ne dispose pas encore d'un accès à ces collections ni de leur effacement dans l'UI.
 - Les dates et tombstones préparent un export fidèle, sans définir une résolution des conflits

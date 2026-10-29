@@ -1,6 +1,8 @@
 package fr.forumhfr.redface2.core.data.write
 
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.smiley.SmileyUsageFailure
+import fr.forumhfr.redface2.core.domain.smiley.SmileyUsageMutationResult
 import fr.forumhfr.redface2.core.model.write.PrivateMessageQuote
 import fr.forumhfr.redface2.core.model.write.PrivateMessageReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -11,6 +13,7 @@ import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.messages.PrivateMessageReplyLinkParser
 import fr.forumhfr.redface2.core.parser.write.ReplyFormParser
 import fr.forumhfr.redface2.core.parser.write.ReplySubmitResponseParser
+import java.io.IOException
 import java.net.URLDecoder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
@@ -38,10 +41,12 @@ class DefaultPrivateMessageWriteRepositoryTest {
     private lateinit var server: MockWebServer
     private lateinit var client: HfrClient
     private lateinit var repository: DefaultPrivateMessageWriteRepository
+    private lateinit var usage: SmileyUsageRecorderFixture
     private lateinit var diagnostics: DiagnosticsLog
 
     @Before
     fun setUp() {
+        usage = SmileyUsageRecorderFixture()
         server = MockWebServer().apply { start() }
         val okHttp = OkHttpClient.Builder().build()
         client = HfrClient(
@@ -58,12 +63,14 @@ class DefaultPrivateMessageWriteRepositoryTest {
             replyLinkParser = PrivateMessageReplyLinkParser(),
             replySubmitResponseParser = ReplySubmitResponseParser(),
             diagnostics = diagnostics,
+            smileyUsageRecorder = usage.recorder,
             ioDispatcher = Dispatchers.Unconfined,
         )
     }
 
     @After
     fun tearDown() {
+        usage.close()
         server.shutdown()
     }
 
@@ -611,6 +618,68 @@ class DefaultPrivateMessageWriteRepositoryTest {
 
         assertEquals(ReplySubmitResult.Failure(ReplyFailureReason.LoginRequired), result)
         assertEquals(0, server.requestCount)
+    }
+
+    @Test
+    fun `private reply and new conversation record the sanitized body once under the captured owner`() = runTest {
+        listOf(false, true).forEach { compose ->
+            usage.calls.clear()
+            server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+            assertTrue(submitUsageMessage(compose) is ReplySubmitResult.Success)
+            assertEquals(
+                listOf(SmileyUsageRecorderFixture.Call("alice", mapOf(":o" to 2, "[:fictif b:3]" to 1))),
+                usage.calls,
+            )
+        }
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun `failed unknown and exceptional private writes never record usage`() = runTest {
+        listOf(false, true).forEach { compose ->
+            listOf(fixture("write_invalid_token_error.html"), "").forEach { html ->
+                server.enqueue(MockResponse().setBody(html))
+                assertTrue(submitUsageMessage(compose) is ReplySubmitResult.Failure)
+            }
+            server.enqueue(MockResponse().setResponseCode(503))
+            assertTrue(runCatching { submitUsageMessage(compose) }.isFailure)
+            assertTrue(usage.calls.isEmpty())
+        }
+    }
+
+    @Test
+    fun `disabled private smileys skip accounting and storage failures preserve both send results`() = runTest {
+        listOf(false, true).forEach { compose ->
+            usage.calls.clear()
+            usage.storageError = null
+            usage.storageResult = SmileyUsageMutationResult.Updated
+            server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+            assertTrue(
+                submitUsageMessage(compose, ReplyFormOptions(smileyDisabled = true)) is ReplySubmitResult.Success,
+            )
+            assertTrue(usage.calls.isEmpty())
+            usage.storageResult = SmileyUsageMutationResult.Failure(SmileyUsageFailure.STORAGE_FAILURE)
+            server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+            assertTrue(submitUsageMessage(compose) is ReplySubmitResult.Success)
+            usage.storageError = IOException("[:fictif_a]")
+            server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+            assertTrue(submitUsageMessage(compose) is ReplySubmitResult.Success)
+            assertEquals(2, usage.calls.size)
+        }
+    }
+
+    private suspend fun submitUsageMessage(
+        compose: Boolean,
+        options: ReplyFormOptions = ReplyFormOptions(),
+    ): ReplySubmitResult {
+        val fixtureName = if (compose) "mp_compose_form.html" else "private_message_thread.html"
+        val form = ReplyFormParser().parse(fixture(fixtureName)).getOrThrow()
+        val content = ":o :\uD83D\uDE00o [:fictif b:3] [quote]:D[/quote]"
+        return if (compose) {
+            repository.submitNewMessage(form, "FictifRecipient", "Usage test", content, options)
+        } else {
+            repository.submitReply(context, form, content, options)
+        }
     }
 
     private fun fixture(name: String): String {

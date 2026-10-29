@@ -47,6 +47,7 @@ class DefaultEditPostRepository @Inject constructor(
     private val replyFormParser: ReplyFormParser,
     private val replySubmitResponseParser: ReplySubmitResponseParser,
     private val diagnostics: DiagnosticsLog,
+    private val smileyUsageRecorder: SuccessfulSmileyUsageRecorder,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : EditPostRepository {
 
@@ -135,8 +136,14 @@ class DefaultEditPostRepository @Inject constructor(
         val formBody = buildEditFormBody(context, form, bbcodeContent, options)
         return try {
             withContext(ioDispatcher) {
+                val smileyUsageOwner = smileyUsageRecorder.captureOwner()
                 val responseHtml = hfrClient.submitEditPost(formBody)
                 val outcome = replySubmitResponseParser.parse(responseHtml)
+                if (outcome is ReplySubmitResult.Success) {
+                    smileyUsageRecorder.record(
+                        smileyUsageOwner, formBody, options.smileyDisabled, form.initialContent,
+                    )
+                }
                 when (outcome) {
                     is ReplySubmitResult.Success ->
                         // HFR's edit success refresh URL anchors the edited

@@ -1,5 +1,8 @@
 package fr.forumhfr.redface2.core.data.write
 
+import fr.forumhfr.redface2.core.domain.smiley.SmileyUsageFailure
+import fr.forumhfr.redface2.core.domain.smiley.SmileyUsageMutationResult
+import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
@@ -7,12 +10,15 @@ import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.write.ReplyFormParser
 import fr.forumhfr.redface2.core.parser.write.ReplySubmitResponseParser
+import java.io.IOException
 import java.net.URLDecoder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
+import okhttp3.mockwebserver.Dispatcher
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
+import okhttp3.mockwebserver.RecordedRequest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -27,9 +33,11 @@ class DefaultReplyRepositoryTest {
     private lateinit var server: MockWebServer
     private lateinit var client: HfrClient
     private lateinit var repository: DefaultReplyRepository
+    private lateinit var usage: SmileyUsageRecorderFixture
 
     @Before
     fun setUp() {
+        usage = SmileyUsageRecorderFixture()
         server = MockWebServer().apply { start() }
         val okHttp = OkHttpClient.Builder().build()
         client = HfrClient(
@@ -44,12 +52,14 @@ class DefaultReplyRepositoryTest {
             replyFormParser = ReplyFormParser(),
             replySubmitResponseParser = ReplySubmitResponseParser(),
             diagnostics = fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog(),
+            smileyUsageRecorder = usage.recorder,
             ioDispatcher = Dispatchers.Unconfined,
         )
     }
 
     @After
     fun tearDown() {
+        usage.close()
         server.shutdown()
     }
 
@@ -388,6 +398,71 @@ class DefaultReplyRepositoryTest {
         // presence as a switch to the quote form).
         assertNull("Reply URL must not carry numrep", url.queryParameter("numrep"))
         assertNull("Reply URL must not carry ref", url.queryParameter("ref"))
+    }
+
+    @Test
+    fun `success records the sanitized body once for the owner captured before the post`() = runTest {
+        val form = ReplyFormParser().parse(fixture("write_reply_form_open_topic.html")).getOrThrow()
+        server.dispatcher = object : Dispatcher() {
+            override fun dispatch(request: RecordedRequest): MockResponse {
+                usage.authState.value = AuthState.Authenticated("Bob")
+                return MockResponse().setBody(fixture("write_reply_success_response.html"))
+            }
+        }
+        val content = ":\uD83D\uDE00o :o [:fictif_a] [quote]:D[/quote]"
+        val result = repository.submitReply(ReplyContext(23, 550, 35395, 20), form, content)
+        assertTrue(result is ReplySubmitResult.Success)
+        assertEquals(
+            listOf(SmileyUsageRecorderFixture.Call("alice", mapOf(":o" to 2, "[:fictif_a]" to 1))),
+            usage.calls,
+        )
+        assertEquals(1, server.requestCount)
+        val sent = parseFormBody(server.takeRequest().body.readUtf8())
+        assertEquals(":o :o [:fictif_a] [quote]:D[/quote]", sent["content_form"])
+    }
+
+    @Test
+    fun `quote shares reply accounting and excludes quoted occurrences`() = runTest {
+        val form = ReplyFormParser().parse(fixture("write_reply_form_open_topic.html")).getOrThrow()
+        server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+        val result = repository.submitReply(
+            ReplyContext(23, 550, 35395, 20, quotedNumreponse = 123, quoteRef = 1),
+            form, "[quotemsg=123,1,2]:o [:fictif_a][/quotemsg] :o",
+        )
+        assertTrue(result is ReplySubmitResult.Success)
+        assertEquals(listOf(SmileyUsageRecorderFixture.Call("alice", mapOf(":o" to 1))), usage.calls)
+    }
+
+    @Test
+    fun `failed unknown and exceptional reply submissions never record usage`() = runTest {
+        val form = ReplyFormParser().parse(fixture("write_reply_form_open_topic.html")).getOrThrow()
+        val context = ReplyContext(23, 550, 35395, 20)
+        listOf(fixture("write_invalid_token_error.html"), "").forEach { html ->
+            server.enqueue(MockResponse().setBody(html))
+            assertTrue(repository.submitReply(context, form, ":o") is ReplySubmitResult.Failure)
+        }
+        server.enqueue(MockResponse().setResponseCode(503))
+        assertTrue(runCatching { repository.submitReply(context, form, ":o") }.isFailure)
+        assertTrue(usage.calls.isEmpty())
+    }
+
+    @Test
+    fun `disabled reply smileys skip accounting and storage failures preserve send success`() = runTest {
+        val form = ReplyFormParser().parse(fixture("write_reply_form_open_topic.html")).getOrThrow()
+        val context = ReplyContext(23, 550, 35395, 20)
+        server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+        assertTrue(
+            repository.submitReply(context, form, ":o", ReplyFormOptions(smileyDisabled = true))
+                is ReplySubmitResult.Success,
+        )
+        assertTrue(usage.calls.isEmpty())
+        usage.storageResult = SmileyUsageMutationResult.Failure(SmileyUsageFailure.STORAGE_FAILURE)
+        server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+        assertTrue(repository.submitReply(context, form, ":o") is ReplySubmitResult.Success)
+        usage.storageError = IOException("[:fictif_a]")
+        server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+        assertTrue(repository.submitReply(context, form, ":o") is ReplySubmitResult.Success)
+        assertEquals(2, usage.calls.size)
     }
 
     private fun fixture(name: String): String {
