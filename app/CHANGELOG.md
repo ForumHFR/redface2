@@ -16,6 +16,17 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.64.2` — `internal` (dev) — 2026-10-29
+
+Finition du sélecteur de smileys après la gestion des favoris HFR ([#1154](https://github.com/ForumHFR/redface2/issues/1154), [#1488](https://github.com/ForumHFR/redface2/pull/1488)).
+
+- **Onglet Wiki** : le message (ajouté, retiré, échec…) s'affiche brièvement en bas, sans plus décaler le champ de recherche ni la grille, puis disparaît (après 4 s par défaut, plus longtemps si les réglages d'accessibilité le demandent).
+- **Messages** : effacés à la fermeture du sélecteur. Un succès obtenu sélecteur fermé reste silencieux ; un échec s'affiche à la réouverture.
+- **Échec sans réponse exploitable de HFR** (réseau, réponse inattendue) : l'app ne fige plus l'ancienne liste de favoris si une liste plus récente a été chargée entre-temps.
+- **Textes** du sélecteur alignés sur le vouvoiement du reste de l'app (« Tapez », « Réessayez »).
+
+---
+
 ## `0.64.1` — `internal` (dev) — 2026-10-29
 
 Deuxième lot du chantier « smileys favoris » ([#1154](https://github.com/ForumHFR/redface2/issues/1154)).
