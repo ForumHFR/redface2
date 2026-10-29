@@ -827,6 +827,11 @@ réponse et composition de MP contiennent les favoris dans `div#dynamic_smilies`
 `input#search_smilies`. Le HTML est déjà téléchargé par les éditeurs : **aucune requête
 supplémentaire**, aucun stockage local, aucune lecture via l'API REST.
 
+- Ce bloc contient **aussi les smileys perso du compte** (`[:nom]`, `[:nom:N]`), en plus des
+  favoris ajoutés depuis le wiki : signalement d'un testeur le **29/10/2026 en v351**, non capturé.
+  Les captures du compte XaTelitte, sans smiley perso propre, ne montraient que les favoris.
+  La position des smileys du compte avant ou après les favoris n'a **pas été observée** ;
+  aucun traitement ne doit en dépendre. Seule `supprperso.php` fait foi pour les favoris retirables.
 - Sélecteur : `div#dynamic_smilies > img[onclick^=putSmiley]`, limité au formulaire chargé.
   Jeton = `alt` non vide, avec repli sur `title` ; URL = `src` non vide. Les autres éléments,
   le lien `supprperso.php` et les images hors de ce bloc ne sont pas des entrées.
@@ -835,10 +840,11 @@ supplémentaire**, aucun stockage local, aucune lecture via l'API REST.
   `[:nom:N]` → `/images/perso/N/nom.gif`. Un nom peut contenir des espaces, y compris dans
   le `src` littéral. Conserver le jeton et le `src` tels que servis et confier l'encodage
   de l'URL au même chemin Coil/OkHttp que les résultats Wiki ; ne pas reconstruire l'image.
-- Conserver **l'ordre du serveur** : ordre d'ajout, nouveau favori en fin, identique entre
-  `#dynamic_smilies` et `supprperso.php`. Un retrait conserve l'ordre relatif. Le plafond
-  d'ajout de **10** est confirmé ; la lecture conserve néanmoins toutes les entrées servies.
-- Sans favori, et en anonyme, le bloc est vide : `<div id="dynamic_smilies"></div>`.
+- Conserver **l'ordre du serveur** : pour les favoris uniquement, ordre d'ajout, nouveau favori
+  en fin, identique entre `#dynamic_smilies` et `supprperso.php`. Un retrait conserve l'ordre relatif.
+  Le plafond d'ajout de **10** est confirmé ; la lecture conserve néanmoins toutes les entrées servies.
+- Sans favori sur le compte capturé (sans smiley perso propre), et en anonyme, le bloc est vide :
+  `<div id="dynamic_smilies"></div>`.
   Le lien « Supprimer des smilies favoris » n'est présent que lorsque la liste est peuplée.
   La section « Favoris » du sélecteur est absente si la liste est vide et qu'aucun statut de
   mutation n'est à afficher ; sinon elle précède les smileys « Standard ». L'insertion réutilise
@@ -854,15 +860,28 @@ supplémentaire**, aucun stockage local, aucune lecture via l'API REST.
   callbacks `add` / `remove` du dépôt. Aucun formulaire n'est rechargé à cause d'une mutation.
 - Sur un perso du Wiki, l'appui long ouvre « Ajouter aux favoris HFR », ou « Retirer des favoris
   HFR » si le **jeton exact** figure déjà dans la liste courante (variante et espaces compris).
-  Dans la section Favoris de Standard, il ouvre le retrait. Chaque cellule éligible porte le même
-  libellé d'appui long et d'action personnalisée TalkBack. Aucun geste de favoris sur les builtins.
+  Dans la section Favoris de Standard, il ouvre le retrait si l'entrée est éligible.
+  Chaque cellule éligible porte le même libellé d'appui long et d'action personnalisée TalkBack.
+  Aucun geste de favoris sur les builtins. Dès qu'une liste confirmée existe pour la génération
+  courante, une entrée de la base absente de cette liste est connue comme entrée du compte :
+  insertion seule, sans menu, action TalkBack ni libellé d'appui long, y compris dans le Wiki.
+  Avant confirmation, le premier essai de retrait d'une telle entrée donne `NotInFavorites`,
+  puis n'est plus proposé. Un nouveau formulaire efface ce savoir ; aucun rapprochement par pseudo.
 - Une seule mutation à la fois : tous les gestes de favoris sont indisponibles pendant l'attente.
   Un ajout apparaît provisoirement en fin de Favoris ; un retrait garde sa cellule marquée en cours.
   La cellule visée porte un indicateur discret. Le clic d'insertion reste disponible : jeton inséré,
   feuille fermée, clavier rouvert seulement s'il l'était auparavant. Taille et décoration réglables,
   plafond de grille à 62 % de l'écran avec plancher de 320 dp et recherche Wiki sont conservés.
-- Les listes confirmées du dépôt remplacent la projection optimiste, avec l'ordre et les images
-  du serveur, pour `Success`, `AlreadyPresent`, `Full` et `VerificationFailed`.
+- Les listes confirmées du dépôt (`Success`, `AlreadyPresent`, `NotInFavorites`, `Full`,
+  `VerificationFailed`) remplacent la projection optimiste par une **fusion à la lecture** avec
+  la base du formulaire de la génération courante. Les entrées de la base restent dans leur ordre,
+  y compris les smileys du compte absents de la liste confirmée. Un favori confirmé déjà dans
+  la base garde sa position et reçoit l'image confirmée ; les favoris confirmés absents de la base
+  sont ajoutés à la fin dans l'ordre confirmé. Après un REMOVE, le jeton cible est masqué jusqu'au
+  prochain formulaire dès qu'il est absent de la liste confirmée, y compris sur `VerificationFailed`,
+  sauf pour `NotInFavorites` : cette entrée du compte reste affichée. Une réapparition dans une
+  liste confirmée permet le réajout d'un jeton masqué. **Limite acceptée** : un favori retiré ailleurs depuis le
+  chargement du formulaire reste affiché comme entrée du compte jusqu'au rechargement du formulaire.
 - Sans liste confirmée (`TransportFailure`, `UnknownResponse`, `NotFound`, `InvalidToken`,
   `NotAuthenticated`), seule la projection optimiste est retirée : aucun instantané n'est créé.
   La base courante réapparaît, y compris un formulaire reçu **pendant** la mutation, ou un
@@ -881,6 +900,8 @@ supplémentaire**, aucun stockage local, aucune lecture via l'API REST.
   sans minuteur.
   Il indique notamment le plafond renvoyé par `Full.limit`, la liste rechargée pour
   `VerificationFailed`, la session expirée, l'échec réseau ou la réponse HFR inattendue.
+  `NotInFavorites` donne le message d'échec « Ce smiley ne figure pas dans vos favoris HFR :
+  il ne peut pas en être retiré. », au même emplacement dans les deux onglets.
 - Le contrôleur conserve un message jusqu'à la fermeture qui termine la première ouverture de
   la feuille pendant laquelle il a été visible. Un succès (`Added`, `Removed`) reçu feuille fermée est silencieux.
   Tout autre message reçu feuille fermée attend la réouverture, puis disparaît à la fermeture de
@@ -938,7 +959,8 @@ la liste ; une valeur décalée fait perdre une autre entrée. La réponse HTTP 
    est ambiguë. Rejeter aussi tout `input[name^=smiley]`, `input[name^=delete]` ou `tr.s2Topic`
    hors du formulaire retenu. Une liste vide valide se distingue d'un formulaire absent ou invalide.
 3. Accepter tout jeton non vide, même cassé (`aaa`), et le trouver par **valeur exacte** dans
-   cette liste fraîche. Absent → `Success` sans POST ; vide → `InvalidToken` avant tout GET.
+   cette liste fraîche. Absent → `NotInFavorites(favorites)` sans POST ;
+   vide → `InvalidToken` avant tout GET.
 4. Envoyer `hash_check`, **les N valeurs verbatim**, HTML décodé puis encodé comme formulaire,
    et une seule case `delete{k}=on` pour la cible. Conserver même les entrées cassées (`aaa`,
    image sans `src`), sans trou, sans tri, sans filtrage. Ne jamais utiliser un index d'UI périmé.

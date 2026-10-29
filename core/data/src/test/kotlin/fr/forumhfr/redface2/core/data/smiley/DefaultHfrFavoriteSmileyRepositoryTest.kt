@@ -136,10 +136,15 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
     }
 
     @Test
-    fun `absent remove is a confirmed success without POST even if another variant exists`() = runTest {
+    fun `absent remove returns fresh favorites without POST even if another variant exists`() = runTest {
         coEvery { client.getFavoriteSmileyForm() } returns form("[:nom:2]")
-        assertEquals(HfrFavoriteSmileyMutationResult.Success(favorites("[:nom:2]")), repository.remove("[:nom]"))
+        assertEquals(
+            HfrFavoriteSmileyMutationResult.NotInFavorites(favorites("[:nom:2]")),
+            repository.remove("[:nom]"),
+        )
+        coVerify(exactly = 1) { client.getFavoriteSmileyForm() }
         coVerify(exactly = 0) { client.removeFavoriteSmileys(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { client.addFavoriteSmiley(any(), any()) }
     }
 
     @Test
@@ -162,7 +167,10 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
     fun `nonempty noncanonical removal tokens are not normalized and absent ones need no POST`() = runTest {
         coEvery { client.getFavoriteSmileyForm() } returns form("[:aaa]", "aaa")
         listOf("AAA", " aaa", "aaa ", ":o", " ").forEach { token ->
-            assertEquals(HfrFavoriteSmileyMutationResult.Success(favorites("[:aaa]", "aaa")), repository.remove(token))
+            assertEquals(
+                HfrFavoriteSmileyMutationResult.NotInFavorites(favorites("[:aaa]", "aaa")),
+                repository.remove(token),
+            )
         }
         coVerify(exactly = 5) { client.getFavoriteSmileyForm() }
         coVerify(exactly = 0) { client.removeFavoriteSmileys(any(), any(), any(), any()) }

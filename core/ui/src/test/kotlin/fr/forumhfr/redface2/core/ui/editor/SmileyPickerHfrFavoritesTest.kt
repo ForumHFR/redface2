@@ -19,9 +19,11 @@ class SmileyPickerHfrFavoritesTest {
     private val wiki = EditorSmiley("[:fictif_a:2]", "https://example.invalid/a.gif", EditorSmileySource.WIKI)
     private val favorite = wiki.copy(source = EditorSmileySource.HFR_FAVORITE)
     private val other = favorite.copy(token = "[:fictif b]", imageUrl = "https://example.invalid/b.gif")
+    private val accountOne = favorite.copy(token = "[:compte_fictif:1]")
+    private val accountTwo = favorite.copy(token = "[:compte_fictif:2]")
 
     @Test
-    fun `add appends optimistically then adopts the confirmed order and images`() = runTest {
+    fun `add appends optimistically then merges confirmed images in base order`() = runTest {
         val gate = CompletableDeferred<HfrFavoriteSmileyMutationResult>()
         val controller = controller(this, { listOf(other) }, add = { gate.await() })
         controller.onFavoriteClicked(wiki)
@@ -31,13 +33,175 @@ class SmileyPickerHfrFavoritesTest {
         val confirmed = listOf(favorite.copy(imageUrl = "https://example.invalid/confirmed.gif"), other)
         gate.complete(HfrFavoriteSmileyMutationResult.Success(confirmed))
         advanceUntilIdle()
-        assertEquals(confirmed, controller.openState().favoriteSmileys)
+        val merged = listOf(other, confirmed.first())
+        assertEquals(merged, controller.openState().favoriteSmileys)
         assertNull(controller.openState().pendingFavoriteToken)
         assertEquals(SmileyFavoriteFeedback.Added, controller.openState().favoriteFeedback)
         controller.dismiss()
         controller.open()
-        assertEquals(confirmed, controller.openState().favoriteSmileys)
+        assertEquals(merged, controller.openState().favoriteSmileys)
         assertNull(controller.openState().favoriteFeedback)
+    }
+
+    @Test
+    fun `account smileys survive addition and removal wherever they appear in the base`() = runTest {
+        val bases = listOf(
+            listOf(accountOne, accountTwo, favorite),
+            listOf(favorite, accountOne, accountTwo),
+            listOf(accountOne, favorite, accountTwo),
+        )
+        bases.forEach { base ->
+            val controller = controller(
+                this, { base },
+                add = { HfrFavoriteSmileyMutationResult.Success(listOf(favorite, other)) },
+                remove = { HfrFavoriteSmileyMutationResult.Success(listOf(other)) },
+            )
+            controller.onFavoriteClicked(other.copy(source = EditorSmileySource.WIKI))
+            advanceUntilIdle()
+            assertEquals(base + other, controller.openState().favoriteSmileys)
+            assertNull(controller.openState().favoriteAction(accountOne))
+            assertNull(controller.openState().favoriteAction(accountTwo))
+            assertEquals(SmileyFavoriteAction.REMOVE, controller.openState().favoriteAction(favorite))
+
+            controller.onFavoriteClicked(favorite)
+            advanceUntilIdle()
+            assertEquals(listOf(accountOne, accountTwo, other), controller.openState().favoriteSmileys)
+            assertEquals(SmileyFavoriteAction.ADD, controller.openState().favoriteAction(wiki))
+            controller.dismiss()
+            controller.open()
+            assertEquals(listOf(accountOne, accountTwo, other), controller.openState().favoriteSmileys)
+        }
+    }
+
+    @Test
+    fun `absent removal keeps the account smiley and disables removal until a new form generation`() = runTest {
+        val base = listOf(accountOne, accountTwo, favorite)
+        val calls = mutableListOf<String>()
+        val controller = controller(this, { base }, remove = {
+            calls += it
+            HfrFavoriteSmileyMutationResult.NotInFavorites(listOf(favorite))
+        })
+        assertEquals(SmileyFavoriteAction.REMOVE, controller.openState().favoriteAction(accountOne))
+        controller.onFavoriteClicked(accountOne)
+        advanceUntilIdle()
+        val open = controller.openState()
+        assertEquals(base, open.favoriteSmileys)
+        assertEquals(SmileyFavoriteFeedback.NotInFavorites, open.favoriteFeedback)
+        assertNull(open.pendingFavoriteToken)
+        assertNull(open.favoriteAction(accountOne))
+        assertNull(open.favoriteAction(accountTwo.copy(source = EditorSmileySource.WIKI)))
+        assertEquals(SmileyFavoriteAction.REMOVE, open.favoriteAction(favorite))
+        controller.onFavoriteClicked(accountOne)
+        advanceUntilIdle()
+        assertEquals(listOf(accountOne.token), calls)
+
+        controller.dismiss()
+        controller.open()
+        assertNull(controller.openState().favoriteAction(accountOne))
+        controller.refreshFavorites()
+        assertEquals(base, controller.openState().favoriteSmileys)
+        assertEquals(SmileyFavoriteAction.REMOVE, controller.openState().favoriteAction(accountOne))
+        assertEquals(SmileyFavoriteAction.REMOVE, controller.openState().favoriteAction(accountTwo))
+    }
+
+    @Test
+    fun `successive confirmed removals stay hidden and a readded token returns at its base position`() = runTest {
+        val base = listOf(accountOne, favorite, other, accountTwo)
+        var confirmed = listOf(favorite, other)
+        val controller = controller(
+            this, { base },
+            add = { token ->
+                confirmed = confirmed + base.single { it.token == token }
+                HfrFavoriteSmileyMutationResult.Success(confirmed)
+            },
+            remove = { token ->
+                confirmed = confirmed.filterNot { it.token == token }
+                HfrFavoriteSmileyMutationResult.Success(confirmed)
+            },
+        )
+        controller.onFavoriteClicked(favorite)
+        advanceUntilIdle()
+        controller.onFavoriteClicked(other)
+        advanceUntilIdle()
+        assertEquals(listOf(accountOne, accountTwo), controller.openState().favoriteSmileys)
+        assertEquals(SmileyFavoriteAction.ADD, controller.openState().favoriteAction(wiki))
+        controller.onFavoriteClicked(wiki)
+        advanceUntilIdle()
+        assertEquals(listOf(accountOne, favorite, accountTwo), controller.openState().favoriteSmileys)
+        assertEquals(SmileyFavoriteAction.REMOVE, controller.openState().favoriteAction(wiki))
+        controller.refreshFavorites()
+        assertEquals(base, controller.openState().favoriteSmileys)
+        assertEquals(SmileyFavoriteAction.REMOVE, controller.openState().favoriteAction(accountOne))
+    }
+
+    @Test
+    fun `a favorite removed elsewhere stays as an account entry until the form reloads`() = runTest {
+        var base = listOf(accountOne, favorite)
+        val controller = controller(
+            this, { base },
+            add = { HfrFavoriteSmileyMutationResult.Success(listOf(other)) },
+        )
+        controller.onFavoriteClicked(other.copy(source = EditorSmileySource.WIKI))
+        advanceUntilIdle()
+        assertEquals(base + other, controller.openState().favoriteSmileys)
+        assertNull(controller.openState().favoriteAction(favorite))
+        assertEquals(SmileyFavoriteAction.REMOVE, controller.openState().favoriteAction(other))
+        base = listOf(accountOne, other)
+        controller.refreshFavorites()
+        assertEquals(base, controller.openState().favoriteSmileys)
+        assertEquals(SmileyFavoriteAction.ADD, controller.openState().favoriteAction(wiki))
+    }
+
+    @Test
+    fun `confirmed lists merge with the base read at each opening`() = runTest {
+        var base = listOf(accountOne, favorite)
+        val controller = controller(
+            this, { base },
+            add = { HfrFavoriteSmileyMutationResult.Success(listOf(favorite, other)) },
+        )
+        controller.onFavoriteClicked(other.copy(source = EditorSmileySource.WIKI))
+        advanceUntilIdle()
+        base = listOf(favorite, accountTwo)
+        controller.open()
+        assertEquals(listOf(favorite, accountTwo, other), controller.openState().favoriteSmileys)
+        assertEquals(setOf(accountTwo.token), controller.openState().accountSmileyTokens)
+    }
+
+    @Test
+    fun `confirmed favorites keep base positions and append new tokens in confirmed order`() = runTest {
+        val added = favorite.copy(token = "[:ajout_fictif]", source = EditorSmileySource.WIKI)
+        val external = favorite.copy(token = "[:externe_fictif]")
+        val updatedFavorite = favorite.copy(imageUrl = "https://example.invalid/updated-a.gif")
+        val updatedOther = other.copy(imageUrl = "https://example.invalid/updated-b.gif")
+        val addedFavorite = added.copy(source = EditorSmileySource.HFR_FAVORITE)
+        val confirmed = listOf(external, updatedOther, addedFavorite, updatedFavorite)
+        val controller = controller(
+            this, { listOf(accountOne, favorite, accountTwo, other) },
+            add = { HfrFavoriteSmileyMutationResult.Success(confirmed) },
+        )
+        controller.onFavoriteClicked(added)
+        advanceUntilIdle()
+        assertEquals(
+            listOf(accountOne, updatedFavorite, accountTwo, updatedOther, external, addedFavorite),
+            controller.openState().favoriteSmileys,
+        )
+    }
+
+    @Test
+    fun `verification failure hides the removed token while preserving account smileys`() = runTest {
+        val base = listOf(accountOne, favorite, other, accountTwo)
+        val controller = controller(
+            this, { base },
+            remove = { HfrFavoriteSmileyMutationResult.VerificationFailed(listOf(other)) },
+        )
+        controller.onFavoriteClicked(favorite)
+        advanceUntilIdle()
+        assertEquals(listOf(accountOne, other, accountTwo), controller.openState().favoriteSmileys)
+        assertEquals(SmileyFavoriteFeedback.ListChanged, controller.openState().favoriteFeedback)
+        assertEquals(SmileyFavoriteAction.ADD, controller.openState().favoriteAction(wiki))
+        assertNull(controller.openState().favoriteAction(accountOne))
+        assertNull(controller.openState().favoriteAction(accountTwo))
+        assertEquals(SmileyFavoriteAction.REMOVE, controller.openState().favoriteAction(other))
     }
 
     @Test
@@ -76,11 +240,11 @@ class SmileyPickerHfrFavoritesTest {
     }
 
     @Test
-    fun `each result selects its feedback and only confirmed lists replace favorites`() = runTest {
+    fun `each result selects its feedback and only confirmed lists merge with favorites`() = runTest {
         val cases = listOf(
             Outcome(
                 HfrFavoriteSmileyMutationResult.Success(listOf(favorite)),
-                SmileyFavoriteFeedback.Added, listOf(favorite),
+                SmileyFavoriteFeedback.Added, listOf(other, favorite),
             ),
             Outcome(HfrFavoriteSmileyMutationResult.AccountChanged, null, listOf(other)),
         ) + failureCases
@@ -110,7 +274,7 @@ class SmileyPickerHfrFavoritesTest {
     }
 
     @Test
-    fun `verification failure adopts the actual list even when removal was requested`() = runTest {
+    fun `verification failure merges the actual list even when removal was requested`() = runTest {
         val actual = listOf(other, favorite)
         val controller = controller(
             this,
@@ -119,7 +283,7 @@ class SmileyPickerHfrFavoritesTest {
         )
         controller.onFavoriteClicked(favorite)
         advanceUntilIdle()
-        assertEquals(actual, controller.openState().favoriteSmileys)
+        assertEquals(listOf(favorite, other), controller.openState().favoriteSmileys)
         assertEquals(SmileyFavoriteFeedback.ListChanged, controller.openState().favoriteFeedback)
     }
 
@@ -295,7 +459,7 @@ class SmileyPickerHfrFavoritesTest {
         advanceUntilIdle()
         assertEquals(SmileyPickerState.Hidden, controller.state.value)
         controller.open()
-        assertEquals(listOf(favorite), controller.openState().favoriteSmileys)
+        assertEquals(listOf(other, favorite), controller.openState().favoriteSmileys)
         controller.dismiss()
         controller.refreshFavorites()
         controller.open()
@@ -346,15 +510,19 @@ class SmileyPickerHfrFavoritesTest {
     private val failureCases = listOf(
         Outcome(
             HfrFavoriteSmileyMutationResult.AlreadyPresent(listOf(favorite)),
-            SmileyFavoriteFeedback.AlreadyPresent, listOf(favorite),
+            SmileyFavoriteFeedback.AlreadyPresent, listOf(other, favorite),
+        ),
+        Outcome(
+            HfrFavoriteSmileyMutationResult.NotInFavorites(listOf(favorite)),
+            SmileyFavoriteFeedback.NotInFavorites, listOf(other, favorite),
         ),
         Outcome(
             HfrFavoriteSmileyMutationResult.Full(7, listOf(favorite)),
-            SmileyFavoriteFeedback.Full(7), listOf(favorite),
+            SmileyFavoriteFeedback.Full(7), listOf(other, favorite),
         ),
         Outcome(
             HfrFavoriteSmileyMutationResult.VerificationFailed(listOf(favorite)),
-            SmileyFavoriteFeedback.ListChanged, listOf(favorite),
+            SmileyFavoriteFeedback.ListChanged, listOf(other, favorite),
         ),
         Outcome(HfrFavoriteSmileyMutationResult.NotFound, SmileyFavoriteFeedback.NotFound, listOf(other)),
         Outcome(HfrFavoriteSmileyMutationResult.InvalidToken, SmileyFavoriteFeedback.NotFound, listOf(other)),

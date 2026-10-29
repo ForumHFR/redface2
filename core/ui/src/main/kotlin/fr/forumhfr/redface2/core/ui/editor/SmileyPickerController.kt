@@ -72,11 +72,33 @@ class SmileyPickerController(
     private val favoriteCommand: ((EditorSmiley) -> Unit)? =
         if (hfrFavoriteMutations != null) ::onFavoriteClicked else null
 
-    private data class FavoriteSnapshot(val generation: Long, val items: List<EditorSmiley>)
+    private data class FavoriteSnapshot(
+        val generation: Long,
+        val items: List<EditorSmiley>,
+        val removedTokens: Set<String>,
+    )
+
+    private fun currentFavoriteSnapshot() = confirmedFavorites?.takeIf { it.generation == formGeneration }
 
     private fun currentFavorites(): List<EditorSmiley> = optimisticFavorites
-        ?: confirmedFavorites?.takeIf { it.generation == formGeneration }?.items
-        ?: favoriteSmileys()
+        ?: mergedFavorites()
+
+    private fun mergedFavorites(): List<EditorSmiley> {
+        val base = favoriteSmileys()
+        val confirmed = currentFavoriteSnapshot() ?: return base
+        val byToken = confirmed.items.associateBy { it.token }
+        val baseTokens = base.mapTo(mutableSetOf()) { it.token }
+        // The form also contains account smileys; only a REMOVE confirmed absent can hide a base entry.
+        val retained = base.filterNot { it.token in confirmed.removedTokens }.map { byToken[it.token] ?: it }
+        return retained + confirmed.items.filterNot { it.token in baseTokens }
+    }
+
+    private fun accountSmileyTokens(): Set<String> {
+        val confirmed = currentFavoriteSnapshot() ?: return emptySet()
+        val favoriteTokens = confirmed.items.mapTo(mutableSetOf()) { it.token }
+        // Removed tokens stay eligible for re-addition from the Wiki.
+        return favoriteSmileys().mapTo(mutableSetOf()) { it.token } - favoriteTokens - confirmed.removedTokens
+    }
 
     private fun withFavorites(open: SmileyPickerState.Open) = open.copy(
         favoriteSmileys = currentFavorites(),
@@ -84,6 +106,7 @@ class SmileyPickerController(
         favoriteFeedback = favoriteFeedback,
         favoriteFeedbackGeneration = favoriteFeedbackGeneration,
         onFavoriteChange = favoriteCommand,
+        accountSmileyTokens = accountSmileyTokens(),
     )
 
     /**
@@ -148,9 +171,7 @@ class SmileyPickerController(
                 }
                 // Only confirmed lists are stamped at completion, superseding forms received DURING the mutation.
                 // Without one, dropping the optimistic layer reveals the current base or still-valid snapshot.
-                result.confirmedList()?.let { confirmed ->
-                    confirmedFavorites = FavoriteSnapshot(formGeneration, confirmed)
-                }
+                confirmFavorites(result, action, smiley.token)
                 favoriteFeedback = when (val feedback = result.feedback(action)) {
                     SmileyFavoriteFeedback.Added, SmileyFavoriteFeedback.Removed ->
                         feedback.takeIf { _state.value is SmileyPickerState.Open }
@@ -162,6 +183,24 @@ class SmileyPickerController(
                 publishFavorites()
             }
         }
+    }
+
+    private fun confirmFavorites(
+        result: HfrFavoriteSmileyMutationResult,
+        action: SmileyFavoriteAction,
+        token: String,
+    ) {
+        val confirmed = result.confirmedList() ?: return
+        val previousRemovals = currentFavoriteSnapshot()?.removedTokens.orEmpty()
+        val removed = if (
+            action == SmileyFavoriteAction.REMOVE && result !is HfrFavoriteSmileyMutationResult.NotInFavorites
+        ) {
+            previousRemovals + token
+        } else {
+            previousRemovals
+        }
+        val confirmedTokens = confirmed.mapTo(mutableSetOf()) { it.token }
+        confirmedFavorites = FavoriteSnapshot(formGeneration, confirmed, removed - confirmedTokens)
     }
 
     fun dismiss() {
