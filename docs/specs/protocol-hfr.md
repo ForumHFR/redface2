@@ -886,7 +886,7 @@ supplémentaire**, aucun stockage local, aucune lecture via l'API REST.
   puis n'est plus proposé. Un nouveau formulaire efface ce savoir ; aucun rapprochement par pseudo.
 - Une seule mutation HFR à la fois : les gestes HFR sont indisponibles pendant l'attente,
   sans bloquer les gestes locaux. Une mutation locale ne bloque pas les gestes HFR.
-  Un ajout apparaît provisoirement en fin de Favoris ; un retrait garde sa cellule marquée en cours.
+  Un ajout apparaît provisoirement en fin de la section Favoris HFR ; un retrait garde sa cellule marquée en cours.
   La cellule visée porte un indicateur discret. Le clic d'insertion reste disponible : jeton inséré,
   feuille fermée, clavier rouvert seulement s'il l'était auparavant. Taille et décoration réglables,
   plafond de grille à 62 % de l'écran avec plancher de 320 dp et recherche Wiki sont conservés.
