@@ -3,7 +3,6 @@ package fr.forumhfr.redface2.core.ui.editor
 import fr.forumhfr.redface2.core.ui.R
 
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -155,7 +154,7 @@ fun SmileyPickerSheet(
             }
             when (tabIndex) {
                 0 -> StandardTabContent(
-                    favoriteSmileys = state.favoriteSmileys,
+                    state = state,
                     onSmileyClicked = onSmileyClicked,
                     layout = layout,
                 )
@@ -172,7 +171,7 @@ fun SmileyPickerSheet(
 
 @Composable
 private fun StandardTabContent(
-    favoriteSmileys: List<EditorSmiley>,
+    state: SmileyPickerState.Open,
     onSmileyClicked: (String) -> Unit,
     layout: SmileyPickerLayoutSpec,
 ) {
@@ -180,7 +179,8 @@ private fun StandardTabContent(
         items = BUILTIN_HFR_SMILEYS,
         onSmileyClicked = onSmileyClicked,
         layout = layout,
-        favoriteSmileys = favoriteSmileys,
+        favorites = state,
+        showFavoriteSection = true,
     )
 }
 
@@ -210,6 +210,7 @@ private fun WikiTabContent(
         mutableStateOf(TextFieldValue(text = state.query, selection = TextRange(state.query.length)))
     }
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        state.favoriteFeedback?.let { SmileyFavoriteStatus(it) }
         OutlinedTextField(
             value = fieldValue,
             onValueChange = { newValue ->
@@ -268,7 +269,12 @@ private fun WikiTabContent(
                         modifier = Modifier.padding(vertical = 8.dp),
                     )
                 } else {
-                    SmileyPickerGrid(items = wiki.items, onSmileyClicked = onSmileyClicked, layout = layout)
+                    SmileyPickerGrid(
+                        items = wiki.items,
+                        onSmileyClicked = onSmileyClicked,
+                        layout = layout,
+                        favorites = state,
+                    )
                 }
             }
         }
@@ -282,14 +288,24 @@ private fun WikiTabContent(
  * comparing a copy against itself. Callers inside the sheet pass the spec down from
  * [SmileyPickerSheet]; the default is the shipped geometry.
  */
+// Like the sheet above, independent rendering options keep defaults for the device spike.
+@Suppress("LongParameterList")
 @Composable
 fun SmileyPickerGrid(
     items: List<EditorSmiley>,
     onSmileyClicked: (String) -> Unit,
     modifier: Modifier = Modifier,
     layout: SmileyPickerLayoutSpec = SmileyPickerLayoutSpec.Current,
-    favoriteSmileys: List<EditorSmiley> = emptyList(),
+    favorites: SmileyPickerState.Open? = null,
+    showFavoriteSection: Boolean = false,
 ) {
+    val favoriteSmileys = if (showFavoriteSection) {
+        favorites?.favoriteSmileys.orEmpty().distinctBy { it.token to it.imageUrl }
+    } else {
+        emptyList()
+    }
+    val favoriteFeedback = if (showFavoriteSection) favorites?.favoriteFeedback else null
+    val uniqueItems = items.distinctBy { it.token to it.imageUrl }
     // #900 volet 2 (CharLee, TU #2791061) — the grid cap scales with the screen so the sheet
     // reaches ~3/4 of a phone display instead of the fixed 320 dp, which wasted the bottom half
     // on tall screens. The 320 dp FLOOR keeps short screens (landscape, split-screen) exactly at
@@ -333,31 +349,44 @@ fun SmileyPickerGrid(
         ) {
             // One scrollable grid shares the #900 height budget across both Standard sections.
             // Source-prefixed keys also allow a favorite to appear in another section safely.
-            if (favoriteSmileys.isNotEmpty()) {
+            if (favoriteSmileys.isNotEmpty() || favoriteFeedback != null) {
                 item(key = "favorites_title", span = { GridItemSpan(maxLineSpan) }) {
-                    SmileySectionTitle(stringResource(R.string.editor_smiley_section_favorites))
+                    SmileyFavoriteSectionHeader(favoriteFeedback)
                 }
-                items(items = favoriteSmileys, key = { "favorite:${it.token}:${it.imageUrl}" }) { smiley ->
-                    SmileyCell(
+                items(
+                    items = favoriteSmileys,
+                    key = { "favorite:${it.token.length}:${it.token}:${it.imageUrl}" },
+                ) { smiley ->
+                    SmileyGridCell(
                         smiley = smiley,
                         geometry = geometry,
                         layout = layout,
                         onClick = { onSmileyClicked(smiley.token) },
+                        favorites = favorites,
                     )
                 }
                 item(key = "standard_title", span = { GridItemSpan(maxLineSpan) }) {
                     SmileySectionTitle(stringResource(R.string.editor_smiley_tab_standard))
                 }
             }
-            items(items = items, key = { it.token to it.imageUrl }) { smiley ->
-                SmileyCell(
+            items(items = uniqueItems, key = { "smiley:${it.token.length}:${it.token}:${it.imageUrl}" }) { smiley ->
+                SmileyGridCell(
                     smiley = smiley,
                     geometry = geometry,
                     layout = layout,
                     onClick = { onSmileyClicked(smiley.token) },
+                    favorites = favorites,
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun SmileyFavoriteSectionHeader(feedback: SmileyFavoriteFeedback?) {
+    Column {
+        SmileySectionTitle(stringResource(R.string.editor_smiley_section_favorites))
+        if (feedback != null) SmileyFavoriteStatus(feedback)
     }
 }
 
@@ -372,11 +401,24 @@ private fun SmileySectionTitle(title: String) {
 }
 
 @Composable
-private fun SmileyCell(
+private fun SmileyGridCell(
     smiley: EditorSmiley,
     geometry: SmileyGridGeometry,
     layout: SmileyPickerLayoutSpec,
     onClick: () -> Unit,
+    favorites: SmileyPickerState.Open?,
+) {
+    SmileyFavoriteTarget(smiley, favorites, onClick) { gestures ->
+        SmileyCell(smiley = smiley, geometry = geometry, layout = layout, modifier = gestures)
+    }
+}
+
+@Composable
+private fun SmileyCell(
+    smiley: EditorSmiley,
+    geometry: SmileyGridGeometry,
+    layout: SmileyPickerLayoutSpec,
+    modifier: Modifier,
 ) {
     val description = stringResource(R.string.editor_smiley_insert_description, smiley.token)
     // #871 — persos reuse the posts' intrinsic-measurement pipeline (#175) : a bounded Coil probe
@@ -439,7 +481,7 @@ private fun SmileyCell(
                     SmileyPickerDecoration.NONE -> Modifier
                 }
             )
-            .clickable(onClick = onClick)
+            .then(modifier)
             .semantics { contentDescription = description },
         contentAlignment = Alignment.Center,
     ) {

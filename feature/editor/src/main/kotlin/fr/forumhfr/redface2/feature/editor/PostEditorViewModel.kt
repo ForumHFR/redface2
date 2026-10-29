@@ -18,6 +18,7 @@ import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.smiley.HfrFavoriteSmileyRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadException
@@ -39,6 +40,7 @@ import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.SmileyFavoriteMutations
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.UploadError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
@@ -96,6 +98,7 @@ class PostEditorViewModel @AssistedInject constructor(
     private val imageUploadReader: ImageUploadReader,
     private val authRepository: AuthRepository,
     private val quoteMaterializer: TopicReplyQuoteMaterializer,
+    hfrFavoriteSmileyRepository: HfrFavoriteSmileyRepository,
     private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
 
@@ -148,10 +151,15 @@ class PostEditorViewModel @AssistedInject constructor(
      * Failure logging stays a policy of THIS feature (the MP composers keep the controller's
      * no-op default) : class name only — never the query nor the userId (anti-leak test).
      */
+    // Keep before init: loadedForm's setter can run synchronously there and crash on an uninitialized picker.
     val smileyPicker = SmileyPickerController(
         scope = viewModelScope,
         searchWiki = smileyRepository::searchWiki,
         favoriteSmileys = { loadedForm?.favoriteSmileys.orEmpty() },
+        hfrFavoriteMutations = SmileyFavoriteMutations(
+            addHfrFavorite = hfrFavoriteSmileyRepository::add,
+            removeHfrFavorite = hfrFavoriteSmileyRepository::remove,
+        ),
         userId = { _state.value.userId },
         onSearchFailed = { error ->
             diagnostics.record(

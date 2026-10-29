@@ -840,14 +840,40 @@ supplémentaire**, aucun stockage local, aucune lecture via l'API REST.
   d'ajout de **10** est confirmé ; la lecture conserve néanmoins toutes les entrées servies.
 - Sans favori, et en anonyme, le bloc est vide : `<div id="dynamic_smilies"></div>`.
   Le lien « Supprimer des smilies favoris » n'est présent que lorsque la liste est peuplée.
-  La section « Favoris » du sélecteur est absente si la liste est vide ; sinon elle précède
-  les smileys « Standard ». L'insertion réutilise le jeton perso, puis ferme la feuille.
+  La section « Favoris » du sélecteur est absente si la liste est vide et qu'aucun statut de
+  mutation n'est à afficher ; sinon elle précède les smileys « Standard ». L'insertion réutilise
+  le jeton perso, puis ferme la feuille.
 - `ReplyForm.favoriteSmileys` et `TopicForm.favoriteSmileys` exposent une liste ordonnée
-  d'`EditorSmiley`, source `HFR_FAVORITE`, vide par défaut. Elle suit le dernier formulaire
-  chargé et reste réutilisable indépendamment de la feuille. La réponse rapide n'ouvre
-  aucun sélecteur de smileys.
+  d'`EditorSmiley`, source `HFR_FAVORITE`, vide par défaut. Cette base suit le dernier formulaire
+  chargé ; le contrôleur lui superpose les mutations décrites ci-dessous. La réponse rapide
+  n'ouvre aucun sélecteur de smileys.
 
-**Protocole d'écriture (B1, sans gestes UI ; branchement du sélecteur en B2)** :
+**Gestion depuis la feuille Smileys (B2 de #1154)** :
+
+- Les quatre éditeurs (post, sujet, réponse MP, composition MP) fournissent au contrôleur les
+  callbacks `add` / `remove` du dépôt. Aucun formulaire n'est rechargé à cause d'une mutation.
+- Sur un perso du Wiki, l'appui long ouvre « Ajouter aux favoris HFR », ou « Retirer des favoris
+  HFR » si le **jeton exact** figure déjà dans la liste courante (variante et espaces compris).
+  Dans la section Favoris de Standard, il ouvre le retrait. Chaque cellule éligible porte le même
+  libellé d'appui long et d'action personnalisée TalkBack. Aucun geste de favoris sur les builtins.
+- Une seule mutation à la fois : tous les gestes de favoris sont indisponibles pendant l'attente.
+  Un ajout apparaît provisoirement en fin de Favoris ; un retrait garde sa cellule marquée en cours.
+  La cellule visée porte un indicateur discret. Le clic d'insertion reste disponible : jeton inséré,
+  feuille fermée, clavier rouvert seulement s'il l'était auparavant. Taille et décoration réglables,
+  plafond de grille à 62 % de l'écran avec plancher de 320 dp et recherche Wiki sont conservés.
+- Les listes confirmées du dépôt remplacent la projection optimiste, avec l'ordre et les images
+  du serveur, y compris pour `AlreadyPresent`, `Full` et `VerificationFailed`. Sans liste confirmée,
+  retour à la liste précédant le geste ; `AccountChanged` n'applique rien et reste silencieux.
+- Le résultat est conservé même feuille fermée. Une génération logique empêche un formulaire reçu
+  **pendant** la mutation de remplacer son résultat ; le prochain formulaire reçu **après** sa fin
+  reprend la main. Ouvrir ou fermer la feuille ne supprime pas cette surcouche.
+- Une zone de statut persistante en tête de Favoris, également affichée en tête du Wiki, donne le
+  résultat en français et l'annonce poliment à TalkBack. Une erreur reçue feuille fermée est visible à la
+  réouverture. Elle indique notamment le plafond renvoyé par `Full.limit`, la liste rechargée pour
+  `VerificationFailed`, la session expirée, l'échec réseau ou la réponse HFR inattendue. Le statut
+  est remplacé au prochain geste ; il ne nécessite aucun composant dans les quatre écrans hôtes.
+
+**Protocole d'écriture (B1 de #1154)** :
 
 `HfrFavoriteSmileyRepository` (`:core:domain/smiley`) expose `add(token)` et `remove(token)`.
 `DefaultHfrFavoriteSmileyRepository` orchestre `HfrFavoriteSmileyClient` et les deux analyseurs dédiés

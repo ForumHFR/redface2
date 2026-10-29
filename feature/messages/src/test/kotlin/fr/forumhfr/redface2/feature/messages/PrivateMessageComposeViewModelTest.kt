@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.messages
 
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.EditorSmileySource
+import fr.forumhfr.redface2.core.model.HfrFavoriteSmileyMutationResult
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 
 import androidx.compose.ui.text.TextRange
@@ -96,6 +97,7 @@ class PrivateMessageComposeViewModelTest {
     )
 
     private val draftStore = FakeEditorDraftStore()
+    private val favoriteRepository = FakeHfrFavoriteSmileyRepository()
 
     @Suppress("LongParameterList") // test factory mirroring the ViewModel's injected dependencies.
     private fun viewModel(
@@ -118,6 +120,7 @@ class PrivateMessageComposeViewModelTest {
         imageUploadReader = imageUploadReader,
         diagnostics = diagnostics,
         smileyRepository = smileyRepository,
+        hfrFavoriteSmileyRepository = favoriteRepository,
         savedStateHandle = savedStateHandle,
     )
 
@@ -251,6 +254,28 @@ class PrivateMessageComposeViewModelTest {
             ),
             diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
         )
+    }
+
+    @Test
+    fun `picker invokes the injected HFR add and remove without reloading the form`() = runTest {
+        val wiki = EditorSmiley("[:fictif_geste:2]", "https://example.invalid/geste.gif", EditorSmileySource.WIKI)
+        val favorite = wiki.copy(source = EditorSmileySource.HFR_FAVORITE)
+        favoriteRepository.addResult = HfrFavoriteSmileyMutationResult.Success(listOf(favorite))
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val viewModel = viewModel(repository)
+        testScheduler.advanceUntilIdle()
+        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.onFavoriteClicked(wiki)
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf(wiki.token), favoriteRepository.added)
+        assertEquals(listOf(favorite), (viewModel.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys)
+
+        viewModel.smileyPicker.onFavoriteClicked(wiki)
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf(wiki.token), favoriteRepository.removed)
+        assertTrue((viewModel.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys.isEmpty())
+        coVerify(exactly = 1) { repository.fetchComposeForm(any()) }
     }
 
     @Test

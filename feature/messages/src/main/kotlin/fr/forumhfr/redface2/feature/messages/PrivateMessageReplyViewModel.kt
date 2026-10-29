@@ -18,6 +18,7 @@ import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.smiley.HfrFavoriteSmileyRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadException
@@ -34,6 +35,7 @@ import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.SmileyFavoriteMutations
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.UploadError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
@@ -83,6 +85,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     private val imageUploadReader: ImageUploadReader,
     private val diagnostics: DiagnosticsLog,
     smileyRepository: SmileyRepository,
+    hfrFavoriteSmileyRepository: HfrFavoriteSmileyRepository,
     private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
 
@@ -113,10 +116,15 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
      * second argument). The controller falls back to 0 while the form is still loading
      * (Codex review, PR #440).
      */
+    // Keep before init: loadedForm's setter can run synchronously there and crash on an uninitialized picker.
     val smileyPicker = SmileyPickerController(
         scope = viewModelScope,
         searchWiki = smileyRepository::searchWiki,
         favoriteSmileys = { loadedForm?.favoriteSmileys.orEmpty() },
+        hfrFavoriteMutations = SmileyFavoriteMutations(
+            addHfrFavorite = hfrFavoriteSmileyRepository::add,
+            removeHfrFavorite = hfrFavoriteSmileyRepository::remove,
+        ),
         userId = { loadedForm?.userId },
     )
 

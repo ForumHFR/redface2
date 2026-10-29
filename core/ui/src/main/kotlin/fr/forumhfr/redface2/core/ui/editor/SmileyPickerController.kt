@@ -1,6 +1,8 @@
 package fr.forumhfr.redface2.core.ui.editor
 
 import fr.forumhfr.redface2.core.model.EditorSmiley
+import fr.forumhfr.redface2.core.model.EditorSmileySource
+import fr.forumhfr.redface2.core.model.HfrFavoriteSmileyMutationResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -38,8 +40,8 @@ import kotlinx.coroutines.launch
  * editorial context is frozen at construction, so « editor closed = search forgotten » is the
  * ViewModel lifecycle itself.
  *
- * [searchWiki] is a lambda (not `SmileyRepository`) so `:core:ui` gains no dependency on
- * `:core:domain` ; [userId] feeds HFR's wiki endpoint and falls back to 0 when the session
+ * Repository operations are callbacks supplied by the hosts, without Hilt in this controller.
+ * [userId] feeds HFR's wiki endpoint and falls back to 0 when the session
  * has not resolved an id (proven harmless — same fallback as `PostEditorViewModel`).
  * [favoriteSmileys] reads the latest loaded form ; hosts call [refreshFavorites] when that form
  * changes. Reopening restores the wiki search but always reads the current favorites.
@@ -53,12 +55,34 @@ class SmileyPickerController(
     private val userId: () -> Int? = { null },
     private val onSearchFailed: (Throwable) -> Unit = {},
     private val favoriteSmileys: () -> List<EditorSmiley> = { emptyList() },
+    private val hfrFavoriteMutations: SmileyFavoriteMutations? = null,
 ) {
 
     private val _state = MutableStateFlow<SmileyPickerState>(SmileyPickerState.Hidden)
     val state: StateFlow<SmileyPickerState> = _state.asStateFlow()
 
     private var searchJob: Job? = null
+
+    private var formGeneration = 0L
+    private var confirmedFavorites: FavoriteSnapshot? = null
+    private var pendingFavoriteToken: String? = null
+    private var optimisticFavorites: List<EditorSmiley>? = null
+    private var favoriteFeedback: SmileyFavoriteFeedback? = null
+    private val favoriteCommand: ((EditorSmiley) -> Unit)? =
+        if (hfrFavoriteMutations != null) ::onFavoriteClicked else null
+
+    private data class FavoriteSnapshot(val generation: Long, val items: List<EditorSmiley>)
+
+    private fun currentFavorites(): List<EditorSmiley> = optimisticFavorites
+        ?: confirmedFavorites?.takeIf { it.generation == formGeneration }?.items
+        ?: favoriteSmileys()
+
+    private fun withFavorites(open: SmileyPickerState.Open) = open.copy(
+        favoriteSmileys = currentFavorites(),
+        pendingFavoriteToken = pendingFavoriteToken,
+        favoriteFeedback = favoriteFeedback,
+        onFavoriteChange = favoriteCommand,
+    )
 
     /**
      * #824 — snapshot of the last dismissed Open state, already normalised by [dismiss]
@@ -73,20 +97,63 @@ class SmileyPickerController(
             if (current is SmileyPickerState.Open) {
                 // Idempotent while visible : a redundant open() must NOT clobber the live
                 // query/results with the stale dismissal snapshot below.
-                current.copy(favoriteSmileys = favoriteSmileys())
+                withFavorites(current)
             } else {
                 // #824 — restore the last dismissed search (query + results) so reopening
                 // right after an insertion / accidental swipe-down never costs a retype.
-                (lastDismissed ?: SmileyPickerState.Open()).copy(favoriteSmileys = favoriteSmileys())
+                withFavorites(lastDismissed ?: SmileyPickerState.Open())
             }
         }
     }
 
     /** Hosts notify after a form reload, including when the sheet is already visible. */
     fun refreshFavorites() {
+        formGeneration++
+        publishFavorites()
+    }
+
+    private fun publishFavorites() {
         _state.update { current ->
             val open = current as? SmileyPickerState.Open ?: return@update current
-            open.copy(favoriteSmileys = favoriteSmileys())
+            withFavorites(open)
+        }
+    }
+
+    fun onFavoriteClicked(smiley: EditorSmiley) {
+        val open = _state.value as? SmileyPickerState.Open ?: return
+        val action = open.favoriteAction(smiley) ?: return
+        val callbacks = requireNotNull(hfrFavoriteMutations)
+        val mutation = when (action) {
+            SmileyFavoriteAction.ADD -> callbacks.addHfrFavorite
+            SmileyFavoriteAction.REMOVE -> callbacks.removeHfrFavorite
+        }
+        val before = currentFavorites()
+        // Set synchronously, before launch: a second gesture in the same frame is ignored.
+        pendingFavoriteToken = smiley.token
+        optimisticFavorites = when (action) {
+            SmileyFavoriteAction.ADD -> before + smiley.copy(source = EditorSmileySource.HFR_FAVORITE)
+            // Keep the removal target marked in progress so insertion and its spinner remain available.
+            SmileyFavoriteAction.REMOVE -> before
+        }
+        favoriteFeedback = null
+        publishFavorites()
+        scope.launch {
+            try {
+                val result = runCatching { mutation(smiley.token) }.getOrElse { error ->
+                    if (error is CancellationException) throw error
+                    HfrFavoriteSmileyMutationResult.TransportFailure
+                }
+                // Stamp at completion: a form received DURING the mutation cannot supersede this list.
+                // An account change applies no snapshot, including no rollback over a newly received form.
+                if (result != HfrFavoriteSmileyMutationResult.AccountChanged) {
+                    confirmedFavorites = FavoriteSnapshot(formGeneration, result.confirmedList() ?: before)
+                }
+                favoriteFeedback = result.feedback(action)
+            } finally {
+                optimisticFavorites = null
+                pendingFavoriteToken = null
+                publishFavorites()
+            }
         }
     }
 
@@ -113,7 +180,7 @@ class SmileyPickerController(
 
     fun onQueryChanged(query: String) {
         // A late callback landing after dismiss() must not arm a search : Hidden means
-        // "no live work", and the debounce below would otherwise fire a network call whose
+        // "no live wiki search", and the debounce below would otherwise fire a network call whose
         // result is only THEN dropped by the Open guards (Codex review, PR #440).
         if (_state.value !is SmileyPickerState.Open) return
         _state.update { current ->

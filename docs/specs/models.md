@@ -700,7 +700,7 @@ Les contrats HFR sous-jacents sont documentés dans [`protocol-hfr.md` § Form f
 
 Modèles dans `:core:model`, distincts du `SmileyKind` de l'AST des posts. La lecture des
 favoris dans les formulaires est livrée par #1481 ; B1 de #1154 ajoute les mutations du compte,
-sans UI. Les favoris locaux relèvent d'un dépôt séparé.
+B2 les branche dans le sélecteur des quatre éditeurs. Les favoris locaux relèvent d'un dépôt séparé.
 
 ```kotlin
 data class EditorSmiley(
