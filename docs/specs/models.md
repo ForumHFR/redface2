@@ -59,6 +59,26 @@ figurent dans l'[ADR-019]({{ site.baseurl }}/adr/019-smileys-favoris-locaux-et-t
 
 ---
 
+## Top d'usage des smileys
+
+Moteur local livré sans affichage (#1154, C1). Modèle sérialisable dans `:core:model`,
+indépendant d'`EditorSmiley` : un jeton saisi à la main n'a pas nécessairement d'URL d'image.
+
+```kotlin
+data class SmileyUsageEntry(
+    val token: String,       // identité exacte, espaces et variantes conservés
+    val count: Long,         // compteur positif, saturation à Long.MAX_VALUE
+    val lastUsedAt: Long,    // epoch millis
+)
+```
+
+Le document JSON local v1 contient `version` et `entries: List<SmileyUsageEntry>` ; le
+propriétaire reste dans la clé DataStore, sans contenu de message ni identifiant de conversation.
+Contrat du classement, rétention et comptage dans
+l'[ADR-019]({{ site.baseurl }}/adr/019-smileys-favoris-locaux-et-top-usage).
+
+---
+
 ## Profil utilisateur
 
 Phase 2 finish (#208). Modèle `UserProfile` dans `:core:model`, parser dans `:core:parser/profile/ProfileParser.kt`. Champs fragiles nullables pour tolérance aux variations HFR.

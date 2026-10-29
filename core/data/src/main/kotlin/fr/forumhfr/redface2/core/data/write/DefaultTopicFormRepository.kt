@@ -39,6 +39,7 @@ class DefaultTopicFormRepository @Inject constructor(
     private val topicFormParser: TopicFormParser,
     private val replySubmitResponseParser: ReplySubmitResponseParser,
     private val diagnostics: DiagnosticsLog,
+    private val smileyUsageRecorder: SuccessfulSmileyUsageRecorder,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : TopicFormRepository {
 
@@ -128,8 +129,14 @@ class DefaultTopicFormRepository @Inject constructor(
         val formBody = buildEditFirstPostBody(context, form, subject, bbcodeContent, selectedSubcat, options)
         return try {
             withContext(ioDispatcher) {
+                val smileyUsageOwner = smileyUsageRecorder.captureOwner()
                 val responseHtml = hfrClient.submitEditPost(formBody)
                 val outcome = replySubmitResponseParser.parse(responseHtml)
+                if (outcome is ReplySubmitResult.Success) {
+                    smileyUsageRecorder.record(
+                        smileyUsageOwner, formBody, options.smileyDisabled, form.initialContent,
+                    )
+                }
                 when (outcome) {
                     is ReplySubmitResult.Success ->
                         // HFR anchors the FP edit success refresh on
@@ -323,6 +330,7 @@ class DefaultTopicFormRepository @Inject constructor(
         val formBody = buildNewTopicBody(context, form, subject, bbcodeContent, selectedSubcat, options)
         return try {
             withContext(ioDispatcher) {
+                val smileyUsageOwner = smileyUsageRecorder.captureOwner()
                 val responseHtml = hfrClient.submitNewTopic(formBody)
                 // The wire endpoint is shared with reply/quote ; the same classifier
                 // disambiguates Success vs the failure variants (#214 added the
@@ -335,6 +343,9 @@ class DefaultTopicFormRepository @Inject constructor(
                 // possible because HFR never exposes the freshly-allocated id.
                 when (val outcome = replySubmitResponseParser.parse(responseHtml)) {
                     is ReplySubmitResult.Success -> {
+                        smileyUsageRecorder.record(
+                            smileyUsageOwner, formBody, options.smileyDisabled,
+                        )
                         diagnostics.record(
                             DiagnosticsLog.Level.INFO,
                             LOG_TAG,

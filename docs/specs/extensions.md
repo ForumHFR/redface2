@@ -112,7 +112,10 @@ Redface 2 intègre les plus populaires et les plus utiles **nativement dans l'ap
   distincte des favoris HFR, isolée par compte et persistante après déconnexion. Contrat et
   limites dans l'[ADR-019]({{ site.baseurl }}/adr/019-smileys-favoris-locaux-et-top-usage) ;
   modèles dans [Modèles de données]({{ site.baseurl }}/specs/models#favoris-locaux-de-smileys).
-- **Top d'usage — à venir (C1)** : classement par fréquence après envoi réussi, selon l'ADR-019.
+- **Top d'usage — moteur livré, affichage à venir** : classement local par fréquence après
+  envoi reconnu réussi (édition : delta positif), isolé par compte. Extraction et points
+  d'enregistrement dans l'ADR-019 ; modèle dans
+  [Modèles de données]({{ site.baseurl }}/specs/models#top-dusage-des-smileys).
 - Recherche par mot-clé dans le wiki smileys HFR : livrée. Raccourcis clavier : à venir.
 - Synchronisation des collections locales via MPStorage : à concevoir ; l'export des favoris
   locaux prépare ce travail sans définir de protocole de fusion.

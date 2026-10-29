@@ -39,6 +39,7 @@ class DefaultReplyRepository @Inject constructor(
     private val replyFormParser: ReplyFormParser,
     private val replySubmitResponseParser: ReplySubmitResponseParser,
     private val diagnostics: DiagnosticsLog,
+    private val smileyUsageRecorder: SuccessfulSmileyUsageRecorder,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : ReplyRepository {
 
@@ -154,8 +155,14 @@ class DefaultReplyRepository @Inject constructor(
         // Same rationale as `fetchReplyForm` : keep network + Jsoup parse in a single IO block.
         return try {
             withContext(ioDispatcher) {
+                val smileyUsageOwner = smileyUsageRecorder.captureOwner()
                 val responseHtml = hfrClient.submitReply(formBody)
                 val outcome = replySubmitResponseParser.parse(responseHtml)
+                if (outcome is ReplySubmitResult.Success) {
+                    smileyUsageRecorder.record(
+                        smileyUsageOwner, formBody, options.smileyDisabled,
+                    )
+                }
                 when (outcome) {
                     is ReplySubmitResult.Success ->
                         diagnostics.record(
