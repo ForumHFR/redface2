@@ -106,11 +106,16 @@ Redface 2 intègre les plus populaires et les plus utiles **nativement dans l'ap
 
 *Inspiré de : Vos smileys favoris mod_r21 (pop. 26), Wiki smileys & raccourcis (pop. 28)*
 
-- Liste personnelle de smileys favoris (accès rapide dans l'éditeur)
-- Raccourcis clavier pour les smileys fréquents
-- Recherche de smileys par mot-clé (wiki smileys HFR)
-- Statistiques d'utilisation (les plus utilisés remontent)
-- Synchronisation via MPStorage
+- **Favoris du compte HFR — lecture livrée** : lus depuis le formulaire de rédaction et
+  disponibles dans le sélecteur. Les mutations du compte HFR font l'objet d'un chantier séparé.
+- **Favoris locaux — moteur livré, affichage à venir** : collection ordonnée sur l'appareil,
+  distincte des favoris HFR, isolée par compte et persistante après déconnexion. Contrat et
+  limites dans l'[ADR-019]({{ site.baseurl }}/adr/019-smileys-favoris-locaux-et-top-usage) ;
+  modèles dans [Modèles de données]({{ site.baseurl }}/specs/models#favoris-locaux-de-smileys).
+- **Top d'usage — à venir (C1)** : classement par fréquence après envoi réussi, selon l'ADR-019.
+- Recherche par mot-clé dans le wiki smileys HFR : livrée. Raccourcis clavier : à venir.
+- Synchronisation des collections locales via MPStorage : à concevoir ; l'export des favoris
+  locaux prépare ce travail sans définir de protocole de fusion.
 
 ### Suppression rapide de posts
 

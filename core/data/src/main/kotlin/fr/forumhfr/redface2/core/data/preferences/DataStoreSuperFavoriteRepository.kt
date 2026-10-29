@@ -137,7 +137,7 @@ private val TITLE_ENCODER: Base64.Encoder = Base64.getUrlEncoder().withoutPaddin
 private val TITLE_DECODER: Base64.Decoder = Base64.getUrlDecoder()
 
 private fun accountId(state: AuthState): String =
-    (state as? AuthState.Authenticated)?.pseudo?.lowercase() ?: ANONYMOUS_ACCOUNT_ID
+    (state as? AuthState.Authenticated)?.pseudo?.let(::normalizeLocalAccountOwner) ?: ANONYMOUS_ACCOUNT_ID
 
 private fun superFavoriteKey(accountId: String): Preferences.Key<Set<String>> =
     stringSetPreferencesKey("$SUPER_FAVORITE_KEY_PREFIX$accountId")

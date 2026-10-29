@@ -46,3 +46,4 @@ Les numéros `004` à `007` sont volontairement laissés libres pour des décisi
 | [ADR-016]({{ site.baseurl }}/adr/016-roborazzi-screenshot-testing) | Roborazzi pour le rendu visuel (screenshot testing JVM), mode record en Phase 4 |
 | [ADR-017]({{ site.baseurl }}/adr/017-refonte-vue-drapeaux) | Refonte vue Drapeaux (#603) : modèle de présentation, marqueur barre de couleur, super-favori local, `quotedMe` différé |
 | [ADR-018]({{ site.baseurl }}/adr/018-mp-cache-disque-opt-in) | Lecture MP : cache disque opt-in activé, rémanence SQLite scrubée à l'événement — **supersède l'ADR-013 et en reprend les décisions actives** |
+| [ADR-019]({{ site.baseurl }}/adr/019-smileys-favoris-locaux-et-top-usage) | Smileys : favoris locaux par compte, export versionné et Top d'usage |

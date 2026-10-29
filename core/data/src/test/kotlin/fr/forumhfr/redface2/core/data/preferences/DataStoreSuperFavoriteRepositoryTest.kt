@@ -150,6 +150,18 @@ class DataStoreSuperFavoriteRepositoryTest {
     }
 
     @Test
+    fun `account normalization lowercases without trimming the pseudo`() = runTest(dispatcher) {
+        authRepository.authenticate(" Alice ")
+        repository.setSuperFavorite(flag(topicId = 42), enabled = true)
+
+        val stored = dataStore.data.first()
+        assertEquals(null, stored[ALICE_KEY])
+        assertEquals(1, stored[stringSetPreferencesKey("super_favorite_topic_ids_ alice ")]?.size)
+        authRepository.authenticate(" ALICE ")
+        assertEquals(setOf(flag(topicId = 42).toStoredTopic()), repository.observeSuperFavoriteTopics().first())
+    }
+
+    @Test
     fun `legacy global key migrates to the first authenticated account that reads it`() = runTest(dispatcher) {
         dataStore.edit { it[LEGACY_KEY] = setOf("42") }
 
