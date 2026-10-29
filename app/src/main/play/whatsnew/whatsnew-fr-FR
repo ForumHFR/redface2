@@ -1,3 +1,3 @@
-Redface 2 v0.64.0 — dev.
-- Smileys favoris : les favoris de votre compte HFR apparaissent en tête de l'onglet Standard du sélecteur de smileys (réponse, citation, édition, nouveau sujet, MP), dans l'ordre du site.
-- Ils se gèrent toujours sur le site (wiki smilies) : pas d'ajout ni de retrait depuis l'app pour l'instant.
+Redface 2 v0.64.1 — dev.
+- Favoris HFR : appui long sur un smiley perso du Wiki pour l'ajouter à vos favoris HFR, appui long dans Favoris pour le retirer (10 au plus, comme sur le site).
+- En coulisses : favoris locaux et Top des smileys les plus utilisés (comptés sur l'appareil après envoi), pas encore affichés.

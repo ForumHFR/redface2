@@ -16,6 +16,23 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.64.1` — `internal` (dev) — 2026-10-29
+
+Deuxième lot du chantier « smileys favoris » ([#1154](https://github.com/ForumHFR/redface2/issues/1154)).
+
+### Éditeur : gérer ses favoris HFR depuis le sélecteur ([#1484](https://github.com/ForumHFR/redface2/pull/1484), [#1486](https://github.com/ForumHFR/redface2/pull/1486))
+
+- **Ajouter un favori HFR** : appui long sur un smiley perso de l'onglet Wiki, puis « Ajouter aux favoris HFR ». **Retirer** : appui long dans la section Favoris (ou sur un smiley du Wiki déjà en favori), puis « Retirer des favoris HFR ». Actions aussi disponibles avec TalkBack.
+- Ce sont les favoris du compte HFR, les mêmes que sur le site : 10 au plus, smileys perso seulement. Un message indique le résultat (ajouté, retiré, déjà présent, liste pleine, échec).
+- Sécurité : avant chaque retrait, l'app relit la liste sur HFR et vérifie le résultat ensuite (HFR réécrit toute la liste à chaque retrait) ; une seule opération à la fois.
+
+### Moteurs sans affichage ([#1483](https://github.com/ForumHFR/redface2/pull/1483), [#1485](https://github.com/ForumHFR/redface2/pull/1485))
+
+- **Favoris locaux** : liste personnelle de smileys sur l'appareil, distincte des favoris HFR, préparée pour une synchronisation future entre appareils. Pas encore visible.
+- **Top d'usage** : l'app compte désormais, sur l'appareil et par compte, les smileys de vos messages envoyés avec succès (hors citations et code), pour proposer plus tard les plus utilisés. Seuls le code du smiley, un compteur et une date sont gardés. Pas encore visible.
+
+---
+
 ## `0.64.0` — `internal` (dev) — 2026-10-28
 
 Premier lot du chantier « smileys favoris » ([#1154](https://github.com/ForumHFR/redface2/issues/1154)).
