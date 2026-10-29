@@ -19,6 +19,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.HfrFavoriteSmileyRepository
+import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollections
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadException
@@ -84,6 +85,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     private val diagnostics: DiagnosticsLog,
     smileyRepository: SmileyRepository,
     hfrFavoriteSmileyRepository: HfrFavoriteSmileyRepository,
+    smileyLocalCollections: SmileyLocalCollections,
     private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
 
@@ -107,7 +109,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         }
 
     /**
-     * #387 — smiley picker (Standard + Wiki), same sheet as the post editors. The controller owns
+     * #387 — shared smiley picker (Favorites + Standard + Wiki). The controller owns
      * the picker state machine (debounce, race guards) ; this ViewModel only handles insertion.
      * userId comes from the loaded compose form ([ReplyForm.userId], HFR's `find_smilies_timer`
      * second argument). The controller falls back to 0 while the form is still loading
@@ -122,6 +124,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
             addHfrFavorite = hfrFavoriteSmileyRepository::add,
             removeHfrFavorite = hfrFavoriteSmileyRepository::remove,
         ),
+        localCollections = smileyLocalCollections,
         userId = { loadedForm?.userId },
     )
 

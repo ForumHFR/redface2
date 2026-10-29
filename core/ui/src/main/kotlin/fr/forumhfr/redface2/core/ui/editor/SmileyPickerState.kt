@@ -21,7 +21,7 @@ sealed interface SmileyPickerState {
     data class Open(
         val query: String = "",
         val wiki: WikiSearchState = WikiSearchState.Idle,
-        /** Standard tab's first section: form order, with new confirmed or pending favorites appended. */
+        /** HFR section: form order, with new confirmed or pending favorites appended. */
         val favoriteSmileys: List<EditorSmiley> = emptyList(),
         val pendingFavoriteToken: String? = null,
         val favoriteFeedback: SmileyFavoriteFeedback? = null,
@@ -29,8 +29,15 @@ sealed interface SmileyPickerState {
         val onFavoriteChange: ((EditorSmiley) -> Unit)? = null,
         /** Distinguishes repeated feedback even when Compose skips the intermediate null state. */
         val favoriteFeedbackGeneration: Long = 0L,
-        /** Form entries absent from this generation's confirmed removable favorites; insertion only. */
+        /** Form entries absent from confirmed removable favorites; no HFR action, local actions unaffected. */
         val accountSmileyTokens: Set<String> = emptySet(),
+        /** Decided by open(), never recomputed by composition when collections arrive late. */
+        val initialTab: SmileyPickerTab = if (query.isNotEmpty()) SmileyPickerTab.WIKI else SmileyPickerTab.STANDARD,
+        val localFavoriteSmileys: List<EditorSmiley> = emptyList(),
+        val mostUsedSmileys: List<EditorSmiley> = emptyList(),
+        /** Exact membership includes local entries whose image cannot be resolved. */
+        val localFavoriteTokens: Set<String> = emptySet(),
+        val onLocalFavoriteChange: ((EditorSmiley) -> Unit)? = null,
     ) : SmileyPickerState {
         fun favoriteAction(smiley: EditorSmiley): SmileyFavoriteAction? = when {
             onFavoriteChange == null || pendingFavoriteToken != null -> null
@@ -40,10 +47,18 @@ sealed interface SmileyPickerState {
             favoriteSmileys.any { it.token == smiley.token } -> SmileyFavoriteAction.REMOVE
             else -> SmileyFavoriteAction.ADD
         }
+
+        fun localFavoriteAction(smiley: EditorSmiley): SmileyFavoriteAction? = when {
+            onLocalFavoriteChange == null -> null
+            smiley.token in localFavoriteTokens -> SmileyFavoriteAction.REMOVE
+            else -> SmileyFavoriteAction.ADD
+        }
     }
 }
 
 enum class SmileyFavoriteAction { ADD, REMOVE }
+
+enum class SmileyPickerTab { FAVORITES, STANDARD, WIKI }
 
 /** Cleared after its first visible opening; hidden successes are silent, hidden failures wait for reopening. */
 sealed interface SmileyFavoriteFeedback {
@@ -57,6 +72,10 @@ sealed interface SmileyFavoriteFeedback {
     data object NotAuthenticated : SmileyFavoriteFeedback
     data object TransportFailure : SmileyFavoriteFeedback
     data object UnknownResponse : SmileyFavoriteFeedback
+    data object LocalAdded : SmileyFavoriteFeedback
+    data object LocalRemoved : SmileyFavoriteFeedback
+    data object LocalLimitReached : SmileyFavoriteFeedback
+    data object LocalStorageFailure : SmileyFavoriteFeedback
 }
 
 /**

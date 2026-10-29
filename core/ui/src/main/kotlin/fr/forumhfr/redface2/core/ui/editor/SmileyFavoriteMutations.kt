@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.ui.editor
 
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.HfrFavoriteSmileyMutationResult
+import fr.forumhfr.redface2.core.domain.smiley.LocalFavoriteSmileyMutationResult
 
 /** Host-supplied operations; the picker reconciles the returned list without reloading the editor form. */
 data class SmileyFavoriteMutations(
@@ -34,4 +35,14 @@ internal fun HfrFavoriteSmileyMutationResult.feedback(action: SmileyFavoriteActi
         HfrFavoriteSmileyMutationResult.AccountChanged -> null
         HfrFavoriteSmileyMutationResult.UnknownResponse -> SmileyFavoriteFeedback.UnknownResponse
         HfrFavoriteSmileyMutationResult.TransportFailure -> SmileyFavoriteFeedback.TransportFailure
+    }
+
+internal fun LocalFavoriteSmileyMutationResult.localFeedback(action: SmileyFavoriteAction): SmileyFavoriteFeedback =
+    when (this) {
+        LocalFavoriteSmileyMutationResult.LimitReached -> SmileyFavoriteFeedback.LocalLimitReached
+        is LocalFavoriteSmileyMutationResult.Failure -> SmileyFavoriteFeedback.LocalStorageFailure
+        else -> when (action) {
+            SmileyFavoriteAction.ADD -> SmileyFavoriteFeedback.LocalAdded
+            SmileyFavoriteAction.REMOVE -> SmileyFavoriteFeedback.LocalRemoved
+        }
     }

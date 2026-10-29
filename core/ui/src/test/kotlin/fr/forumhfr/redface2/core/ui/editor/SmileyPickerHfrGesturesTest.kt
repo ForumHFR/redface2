@@ -119,7 +119,7 @@ class SmileyPickerHfrGesturesTest {
     }
 
     @Test
-    fun `Standard favorite long press offers removal with the same accessibility label`() {
+    fun `Favorites long press offers removal with the same accessibility label`() {
         val controller = controller(listOf(favorite))
         mount(controller)
         assertFavoriteActions(favorite, R.string.editor_smiley_favorite_remove)
@@ -151,6 +151,7 @@ class SmileyPickerHfrGesturesTest {
         )
 
         compose.runOnIdle { showWiki(controller) }
+        compose.onNodeWithText(context.getString(R.string.editor_smiley_tab_wiki)).performClick()
         compose.onNodeWithText(context.getString(R.string.editor_smiley_section_favorites)).assertDoesNotExist()
         compose.onNodeWithText(message).assertIsDisplayed()
         assertNoFavoriteActions(other)
@@ -166,7 +167,7 @@ class SmileyPickerHfrGesturesTest {
     }
 
     @Test
-    fun `builtin keeps insertion without favorite actions`() {
+    fun `builtin without local collections keeps insertion without HFR favorite actions`() {
         val controller = controller()
         mount(controller)
         val builtin = BUILTIN_HFR_SMILEYS.first()
@@ -336,7 +337,7 @@ class SmileyPickerHfrGesturesTest {
         compose.mainClock.advanceTimeByFrame()
         message.assertDoesNotExist()
 
-        compose.onNodeWithText(context.getString(R.string.editor_smiley_tab_standard)).performClick()
+        compose.onNodeWithText(context.getString(R.string.editor_smiley_tab_favorites)).performClick()
         compose.mainClock.advanceTimeByFrame()
         message.assertIsDisplayed()
         compose.mainClock.advanceTimeBy(4000L)
@@ -449,7 +450,7 @@ class SmileyPickerHfrGesturesTest {
     }
 
     @Test
-    fun `in flight disables every favorite gesture but permits insertion and retains a hidden failure`() {
+    fun `in flight disables HFR gestures but permits insertion and retains a hidden failure`() {
         val gate = CompletableDeferred<HfrFavoriteSmileyMutationResult>()
         val controller = controller(add = { gate.await() })
         showWiki(controller)
@@ -515,7 +516,9 @@ class SmileyPickerHfrGesturesTest {
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 SmileyPickerSheet(
-                    state = SmileyPickerState.Open(favoriteFeedback = feedback),
+                    state = SmileyPickerState.Open(
+                        favoriteFeedback = feedback, initialTab = SmileyPickerTab.FAVORITES,
+                    ),
                     onDismiss = {}, onQueryChange = {}, onSmileyClicked = {},
                 )
             }
@@ -529,7 +532,9 @@ class SmileyPickerHfrGesturesTest {
     private fun assertFavoriteActions(smiley: EditorSmiley, labelResource: Int) {
         val label = context.getString(labelResource)
         val semantics = compose.onNodeWithContentDescription(description(smiley)).fetchSemanticsNode().config
-        assertEquals(label, semantics[SemanticsActions.OnLongClick].label)
+        assertEquals(
+            context.getString(R.string.editor_smiley_favorite_manage), semantics[SemanticsActions.OnLongClick].label,
+        )
         assertEquals(listOf(label), semantics[SemanticsActions.CustomActions].map { it.label })
     }
 
@@ -542,6 +547,8 @@ class SmileyPickerHfrGesturesTest {
     private fun showWiki(controller: SmileyPickerController) {
         controller.onQueryChanged("fictif")
         dispatcher.scheduler.advanceUntilIdle()
+        controller.dismiss()
+        controller.open()
     }
 
     private fun controller(

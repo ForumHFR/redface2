@@ -92,6 +92,7 @@ class TopicFormViewModelTest {
     private val smileyRepository = FakeSmileyRepository()
     private val draftStore = FakeEditorDraftStore()
     private val favoriteRepository = FakeHfrFavoriteSmileyRepository()
+    private val localCollections = FakeSmileyLocalCollections()
 
     @Before
     fun setUp() {
@@ -1606,6 +1607,7 @@ class TopicFormViewModelTest {
         topicFormRepository = topicFormRepository,
         smileyRepository = smileyRepository,
         hfrFavoriteSmileyRepository = favoriteRepository,
+        smileyLocalCollections = localCollections,
         userPreferencesRepository = userPreferencesRepository,
         draftStore = draftStore,
         diagnostics = diagnostics,
@@ -1642,6 +1644,7 @@ class TopicFormViewModelTest {
         topicFormRepository = topicFormRepository,
         smileyRepository = smileyRepository,
         hfrFavoriteSmileyRepository = favoriteRepository,
+        smileyLocalCollections = localCollections,
         userPreferencesRepository = userPreferencesRepository,
         draftStore = draftStore,
         diagnostics = diagnostics,

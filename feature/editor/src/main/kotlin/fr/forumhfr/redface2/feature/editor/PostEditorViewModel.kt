@@ -19,6 +19,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.HfrFavoriteSmileyRepository
+import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollections
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadException
@@ -99,6 +100,7 @@ class PostEditorViewModel @AssistedInject constructor(
     private val authRepository: AuthRepository,
     private val quoteMaterializer: TopicReplyQuoteMaterializer,
     hfrFavoriteSmileyRepository: HfrFavoriteSmileyRepository,
+    smileyLocalCollections: SmileyLocalCollections,
     private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
 
@@ -134,7 +136,7 @@ class PostEditorViewModel @AssistedInject constructor(
         }
 
     /**
-     * #441 — smiley picker (Standard + Wiki search), delegated to the shared
+     * #441 — smiley picker (Favorites + Standard + Wiki), delegated to the shared
      * [SmileyPickerController] exactly like the MP composers (#387/#440) : the controller owns
      * open/dismiss/query, the 300 ms debounce and its race guards, and the #824
      * restore-search-on-reopen contract. This ViewModel keeps only the insertion
@@ -160,6 +162,7 @@ class PostEditorViewModel @AssistedInject constructor(
             addHfrFavorite = hfrFavoriteSmileyRepository::add,
             removeHfrFavorite = hfrFavoriteSmileyRepository::remove,
         ),
+        localCollections = smileyLocalCollections,
         userId = { _state.value.userId },
         onSearchFailed = { error ->
             diagnostics.record(
