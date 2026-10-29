@@ -106,8 +106,11 @@ Redface 2 intègre les plus populaires et les plus utiles **nativement dans l'ap
 
 *Inspiré de : Vos smileys favoris mod_r21 (pop. 26), Wiki smileys & raccourcis (pop. 28)*
 
-- **Favoris du compte HFR — lecture livrée** : lus depuis le formulaire de rédaction et
-  disponibles dans le sélecteur. Les mutations du compte HFR font l'objet d'un chantier séparé.
+- **Favoris du compte HFR — lecture et gestion depuis le sélecteur livrées** : lus depuis le
+  formulaire de rédaction, affichés en tête de Standard ; ajout ou retrait par appui long sur
+  un perso du Wiki, retrait depuis la section Favoris. Les mêmes actions sont accessibles avec
+  TalkBack ; les builtins sont exclus. Comportement de la feuille et contrat serveur dans
+  [Favoris HFR]({{ site.baseurl }}/specs/protocol-hfr#smileys-favoris-du-compte).
 - **Favoris locaux — moteur livré, affichage à venir** : collection ordonnée sur l'appareil,
   distincte des favoris HFR, isolée par compte et persistante après déconnexion. Contrat et
   limites dans l'[ADR-019]({{ site.baseurl }}/adr/019-smileys-favoris-locaux-et-top-usage) ;

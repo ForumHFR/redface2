@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.ui.editor
 
 import fr.forumhfr.redface2.core.model.EditorSmiley
+import fr.forumhfr.redface2.core.model.EditorSmileySource
 
 /**
  * State of the [SmileyPickerSheet], promoted from `:feature:editor` with the sheet (#387) so any
@@ -9,7 +10,7 @@ import fr.forumhfr.redface2.core.model.EditorSmiley
 /**
  * Phase 2F-B (#11 partial) — visibility + content of the smiley bottom-sheet picker.
  *
- *  - [Hidden] : sheet collapsed, no live work.
+ *  - [Hidden] : sheet collapsed; a favorite mutation can still finish in the controller.
  *  - [Open] : sheet visible. `query` drives the wiki search ; `wiki` reflects the lifecycle
  *    of the latest search. The Standard tab does not need its own status because the
  *    [BUILTIN_HFR_SMILEYS][fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS] constant is
@@ -20,9 +21,36 @@ sealed interface SmileyPickerState {
     data class Open(
         val query: String = "",
         val wiki: WikiSearchState = WikiSearchState.Idle,
-        /** Standard tab's optional first section, ordered exactly as the last HFR form. */
+        /** Standard tab's optional first section: server order, with a pending addition appended. */
         val favoriteSmileys: List<EditorSmiley> = emptyList(),
-    ) : SmileyPickerState
+        val pendingFavoriteToken: String? = null,
+        val favoriteFeedback: SmileyFavoriteFeedback? = null,
+        /** Stable command supplied by the controller so all four sheets share the same gestures. */
+        val onFavoriteChange: ((EditorSmiley) -> Unit)? = null,
+    ) : SmileyPickerState {
+        fun favoriteAction(smiley: EditorSmiley): SmileyFavoriteAction? = when {
+            onFavoriteChange == null || pendingFavoriteToken != null -> null
+            smiley.source == EditorSmileySource.BUILTIN -> null
+            smiley.source == EditorSmileySource.HFR_FAVORITE -> SmileyFavoriteAction.REMOVE
+            favoriteSmileys.any { it.token == smiley.token } -> SmileyFavoriteAction.REMOVE
+            else -> SmileyFavoriteAction.ADD
+        }
+    }
+}
+
+enum class SmileyFavoriteAction { ADD, REMOVE }
+
+/** Retained across dismissal, including failures received while the sheet is hidden. */
+sealed interface SmileyFavoriteFeedback {
+    data object Added : SmileyFavoriteFeedback
+    data object Removed : SmileyFavoriteFeedback
+    data object AlreadyPresent : SmileyFavoriteFeedback
+    data class Full(val limit: Int) : SmileyFavoriteFeedback
+    data object NotFound : SmileyFavoriteFeedback
+    data object ListChanged : SmileyFavoriteFeedback
+    data object NotAuthenticated : SmileyFavoriteFeedback
+    data object TransportFailure : SmileyFavoriteFeedback
+    data object UnknownResponse : SmileyFavoriteFeedback
 }
 
 /**

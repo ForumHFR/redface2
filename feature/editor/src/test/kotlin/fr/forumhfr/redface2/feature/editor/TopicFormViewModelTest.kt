@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.editor
 import fr.forumhfr.redface2.core.model.EditorSmileySource
+import fr.forumhfr.redface2.core.model.HfrFavoriteSmileyMutationResult
 import fr.forumhfr.redface2.core.ui.editor.UploadError
 
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
@@ -90,6 +91,7 @@ class TopicFormViewModelTest {
     private val topicFormRepository = FakeTopicFormRepository()
     private val smileyRepository = FakeSmileyRepository()
     private val draftStore = FakeEditorDraftStore()
+    private val favoriteRepository = FakeHfrFavoriteSmileyRepository()
 
     @Before
     fun setUp() {
@@ -542,6 +544,27 @@ class TopicFormViewModelTest {
     // SmileyPickerControllerTest — no duplicate coverage here. These tests only exercise
     // what stays a ViewModel concern : the insertion intent, the userId plumbed from the
     // parsed form, and the diagnostics policy on search failure.
+
+    @Test
+    fun `picker invokes the injected HFR add and remove without reloading the form`() = runTest {
+        val wiki = EditorSmiley("[:fictif_geste:2]", "https://example.invalid/geste.gif", EditorSmileySource.WIKI)
+        val favorite = wiki.copy(source = EditorSmileySource.HFR_FAVORITE)
+        favoriteRepository.addResult = HfrFavoriteSmileyMutationResult.Success(listOf(favorite))
+        val viewModel = newViewModel()
+        testScheduler.advanceUntilIdle()
+        val fetches = topicFormRepository.formFetches
+        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.onFavoriteClicked(wiki)
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf(wiki.token), favoriteRepository.added)
+        assertEquals(listOf(favorite), (viewModel.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys)
+
+        viewModel.smileyPicker.onFavoriteClicked(wiki)
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf(wiki.token), favoriteRepository.removed)
+        assertTrue((viewModel.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys.isEmpty())
+        assertEquals(fetches, topicFormRepository.formFetches)
+    }
 
     @Test
     fun `topic form favorites reach the picker and insert the exact perso token`() = runTest {
@@ -1582,6 +1605,7 @@ class TopicFormViewModelTest {
         previewParser = previewParser,
         topicFormRepository = topicFormRepository,
         smileyRepository = smileyRepository,
+        hfrFavoriteSmileyRepository = favoriteRepository,
         userPreferencesRepository = userPreferencesRepository,
         draftStore = draftStore,
         diagnostics = diagnostics,
@@ -1617,6 +1641,7 @@ class TopicFormViewModelTest {
         previewParser = previewParser,
         topicFormRepository = topicFormRepository,
         smileyRepository = smileyRepository,
+        hfrFavoriteSmileyRepository = favoriteRepository,
         userPreferencesRepository = userPreferencesRepository,
         draftStore = draftStore,
         diagnostics = diagnostics,
