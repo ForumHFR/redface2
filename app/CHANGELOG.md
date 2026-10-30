@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.64.7` — `internal` (dev) — 2026-10-30
+
+Retours sur le détail du smiley ([#1154](https://github.com/ForumHFR/redface2/issues/1154), [#1499](https://github.com/ForumHFR/redface2/pull/1499)).
+
+- **Toutes les commandes du détail sont visibles sans défiler** : en-tête compact (smiley à gauche, code, nombre d'envois et favoris à droite), puis « Insérer dans le message », « Copier le code » et les favoris. Les mots-clés passent en dernier, sur deux lignes, avec « Tout afficher » s'il y en a plus.
+- **La feuille ne se ferme plus pendant l'appui long** : un léger glissement du doigt après l'ouverture du détail pouvait être pris pour un « glisser pour fermer ». Le reste du geste est désormais ignoré.
+- **Diagnostic** : le sélecteur de smileys note ses ouvertures, fermetures et chargements de mots-clés, sans aucun code de smiley. Réglages → Réseau et cache → Maintenance → Diagnostic → Copier.
+
+---
+
 ## `0.64.6` — `internal` (dev) — 2026-10-30
 
 Mots-clés du wiki dans le détail du smiley ([#1154](https://github.com/ForumHFR/redface2/issues/1154), [#1496](https://github.com/ForumHFR/redface2/pull/1496)), lot 2 de la maquette B.
