@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.64.8` — `internal` (dev) — 2026-10-30
+
+Configuration matérielle dans la carte profil ([#1467](https://github.com/ForumHFR/redface2/issues/1467), [#1501](https://github.com/ForumHFR/redface2/pull/1501)), suggestion d'AnthonyD.
+
+- **La carte profil ouverte depuis un post affiche la configuration matérielle du membre**, après les actions, repliée à quatre lignes avec « Tout afficher ». Le texte est sélectionnable pour recopier une référence.
+- **Page profil complète** : même section, sans repli.
+- La configuration est lue sans compte, à part du profil : elle n'en retarde pas l'affichage. Membre sans configuration : rien ne s'affiche. Échec réseau : « Configuration indisponible » avec « Réessayer ».
+
+---
+
 ## `0.64.7` — `internal` (dev) — 2026-10-30
 
 Retours sur le détail du smiley ([#1154](https://github.com/ForumHFR/redface2/issues/1154), [#1499](https://github.com/ForumHFR/redface2/pull/1499)).
