@@ -472,7 +472,7 @@ class SmileyPickerHfrFavoritesTest {
         val open = controller.openState()
         assertEquals(SmileyFavoriteAction.REMOVE, open.favoriteAction(wiki.copy(imageUrl = "different.gif")))
         assertEquals(SmileyFavoriteAction.ADD, open.favoriteAction(wiki.copy(token = "[:fictif_a]")))
-        assertEquals(SmileyFavoriteAction.REMOVE, open.favoriteAction(other))
+        assertEquals(SmileyFavoriteAction.ADD, open.favoriteAction(other))
         assertNull(open.favoriteAction(wiki.copy(source = EditorSmileySource.BUILTIN)))
     }
 

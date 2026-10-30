@@ -108,7 +108,7 @@ Le lot D de #1154 branche les moteurs dans les quatre éditeurs, sans synchronis
 - Trois onglets **Favoris | Standard | Wiki**. Standard contient uniquement les builtins.
   Favoris partage une grille défilante et le budget de hauteur #900 / géométrie #989 entre
   **Favoris de l'appareil**, **Favoris HFR** (base fusionnée, smileys du compte compris), puis
-  **Les plus utilisés** (`observeTop(owner)`, Top 24). Chaque section vide est absente ; si tout
+  **Les plus utilisés** (Top 24). Chaque section vide est absente ; si tout
   est vide, un texte explique l'appui long et le classement des smileys envoyés.
 - Le contrôleur observe les collections dès sa création dans la portée du ViewModel.
   À `open()`, Favoris est initial si une liste connue est non vide, Standard sinon ; une recherche
@@ -125,13 +125,55 @@ Le lot D de #1154 branche les moteurs dans les quatre éditeurs, sans synchronis
   Le nom reste littéral, espaces compris ; l'encodage appartient au chemin Coil/OkHttp existant.
   Un jeton non résoluble est omis. Une image en échec garde le nom accessible de la cellule.
   `EditorSmileySource` reste un type de rendu : un builtin garde `BUILTIN` dans toutes les sections.
-- L'appui long « Gérer les favoris » et les actions personnalisées TalkBack proposent toutes
-  les actions applicables : ajout/retrait local pour tout smiley, builtins compris ; actions HFR
-  existantes pour les persos éligibles. Les mutations locales et HFR sont indépendantes.
+- Les actions personnalisées TalkBack proposent toutes les actions applicables : ajout/retrait
+  local pour tout smiley, builtins compris ; actions HFR existantes pour les persos éligibles.
+  Les mutations locales et HFR sont indépendantes. Le menu d'appui long initial est remplacé
+  par le détail décrit dans la mise à jour du 30/10 ci-dessous.
   Succès local, limite de 256 ou échec de stockage empruntent le statut en tête de Favoris et la
   surcouche brève sur Standard/Wiki, avec la même durée de vie et génération de retour.
 - Réordonnancement, effacement dans les Réglages, export et synchronisation restent hors périmètre.
   Les règles de comptage du Top ne changent pas.
+
+## Mise à jour 30/10/2026 : détail du smiley
+
+XaTriX choisit l'**option B** de #1154 : l'appui long sur tout smiley (Standard, Wiki ou n'importe
+quelle section de Favoris) ouvre une **page de détail dans la même feuille**, à la place du menu
+ancré. Il ne dépend plus de l'éligibilité aux favoris. Le tap continue d'insérer le jeton exact.
+
+- La cible `EditorSmiley` vit dans `SmileyPickerState.Open`, porté par le contrôleur des quatre
+  ViewModels hôtes ; elle survit à la rotation sans dépendre de la cellule paresseuse ni du
+  registre du dialogue. `Hidden`, un nouvel `open()` ou un changement de compte la suppriment.
+- Le détail présente une barre de retour et un titre accessible comme en-tête, l'image d'origine,
+  le jeton exact en chasse fixe, le compteur local et les appartenances aux favoris. L'aperçu
+  plafonne à **96 × 72 dp**, avec un agrandissement maximal de **1,5×** pour les persos mesurés ;
+  les builtins passent de 20 à **32 dp**. Même URL, mêmes mesures intrinsèques et caches Coil que
+  la grille : aucune image de résolution supérieure n'est supposée disponible.
+- Le bouton « Insérer dans le message » appelle exactement le callback du tap. La liste propose
+  « Copier le code », l'ajout/retrait local et l'action HFR éligible. Les builtins et entrées
+  reconnues du compte n'ont pas d'action HFR. Une mutation HFR affiche son état en cours ; elle
+  ne bloque ni l'insertion ni les actions locales. Le détail reste ouvert après un retrait ;
+  actions et puces suivent les listes courantes, sans inférer l'appartenance depuis la source
+  de rendu conservée dans la cible. Les retours `SmileyFavoriteFeedback` restent visibles dans
+  le détail, sous les actions défilantes, avec les générations, priorités d'échec et règles de
+  compte existantes. La copie utilise le retour système dès Android 13, un Toast avant.
+- Une seule observation `observeTop(owner, limit = MAX_ENTRIES)` fournit les **512 entrées**
+  retenues. `SmileyLocalCollectionSnapshot` transmet leur dictionnaire de compteurs et projette
+  séparément les **24 premières** pour le Top affiché. Pas de lecture disque à l'appui long,
+  pas de nouvelle API de dépôt ni de requête réseau. Une absence d'entrée affiche
+  « Pas encore envoyé sur cet appareil » ; sinon le compteur `Long` est conservé intégralement.
+- La flèche et le retour système reviennent à la grille. Un callback sur le **dispatcher du
+  dialogue** intercepte le retour avant celui de Material : un retour prédictif annulé conserve
+  le détail ; un retour validé le ferme sans animer la fermeture de la feuille. Onglet, recherche,
+  sélection de texte et positions des grilles sont sauvegardés pendant cette visite. L'ouverture
+  du détail retire le focus de saisie et masque le clavier ; le retour ne redemande pas le focus
+  Wiki. Glisser la feuille ou toucher son voile ferme toujours l'ensemble.
+- Les actions TalkBack des cellules sont conservées avec « Afficher le détail », également libellé
+  de l'appui long. Le retour du **focus TalkBack sur la cellule d'origine n'est pas garanti** :
+  les nœuds de la grille sont recréés, et la cellule peut disparaître après un retrait. Aucun
+  transfert forcé de focus de saisie ne prétend résoudre ce focus d'accessibilité ; contrôle sur
+  appareil nécessaire, comme pour le clavier et le retour prédictif réel.
+- Les mots-clés réseau restent au **lot 2** ; leur place naturelle sera sous l'en-tête, avant
+  l'insertion. Aucun chargement ni emplacement vide n'est introduit dans ce lot.
 
 ## Conséquences
 

@@ -82,13 +82,14 @@ class SmileyPickerController(
         // Collect for the whole ViewModel lifetime, including while the sheet is hidden.
         scope.launch {
             favoriteSources.localCollections?.observe()?.collect { snapshot ->
-                if (localSnapshot.owner != snapshot.owner) {
+                val accountChanged = localSnapshot.owner != snapshot.owner
+                if (accountChanged) {
                     accountGeneration++
                     favoriteFeedback = null
                     favoriteFeedbackGeneration++
                 }
                 localSnapshot = snapshot
-                publishFavorites()
+                publishFavorites(resetDetail = accountChanged)
             }
         }
     }
@@ -141,6 +142,8 @@ class SmileyPickerController(
             mostUsedSmileys = top.mapNotNull { resolver.resolve(it.token) },
             localFavoriteTokens = local.mapTo(mutableSetOf()) { it.token },
             onLocalFavoriteChange = localCommand.takeIf { localSnapshot.owner != null },
+            onDetailChange = ::onDetailChanged,
+            usageCounts = localSnapshot.usageCounts.takeIf { localSnapshot.owner != null }.orEmpty(),
         )
     }
 
@@ -155,15 +158,22 @@ class SmileyPickerController(
     fun open() {
         _state.update { current ->
             if (current is SmileyPickerState.Open) {
-                // Idempotent while visible : a redundant open() must NOT clobber the live
-                // query/results with the stale dismissal snapshot below.
-                withFavorites(current)
+                // Keep the live search on a redundant open(), but always start on the grid.
+                withFavorites(current.copy(detailSmiley = null))
             } else {
                 // #824 — restore the last dismissed search (query + results) so reopening
                 // right after an insertion / accidental swipe-down never costs a retype.
                 val restored = withFavorites(lastDismissed ?: SmileyPickerState.Open())
                 restored.copy(initialTab = initialTab(restored))
             }
+        }
+    }
+
+    /** Null returns to the grid without dismissing the sheet or changing the live search. */
+    fun onDetailChanged(smiley: EditorSmiley?) {
+        _state.update { current ->
+            val open = current as? SmileyPickerState.Open ?: return@update current
+            open.copy(detailSmiley = smiley)
         }
     }
 
@@ -224,10 +234,10 @@ class SmileyPickerController(
         publishFavorites()
     }
 
-    private fun publishFavorites() {
+    private fun publishFavorites(resetDetail: Boolean = false) {
         _state.update { current ->
             val open = current as? SmileyPickerState.Open ?: return@update current
-            withFavorites(open)
+            withFavorites(if (resetDetail) open.copy(detailSmiley = null) else open)
         }
     }
 
@@ -301,6 +311,7 @@ class SmileyPickerController(
             // End the first opening that displayed this feedback; hidden failures wait for an opening.
             favoriteFeedback = null
             lastDismissed = current.copy(
+                detailSmiley = null,
                 wiki = when (val wiki = current.wiki) {
                     is WikiSearchState.Results -> wiki
                     WikiSearchState.Idle, WikiSearchState.Loading, WikiSearchState.Error ->

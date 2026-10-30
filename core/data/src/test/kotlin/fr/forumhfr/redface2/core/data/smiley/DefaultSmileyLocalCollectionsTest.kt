@@ -31,6 +31,29 @@ class DefaultSmileyLocalCollectionsTest {
     private val state = MutableStateFlow<AuthState>(AuthState.Authenticated(" Alice "))
 
     @Test
+    fun `one observation supplies all counts and limits the displayed Top to 24`() = runTest {
+        state.value = AuthState.Authenticated("alice")
+        every { auth.observeAuthState() } returns state
+        every { favorites.observeFavorites("alice") } returns MutableStateFlow(emptyList())
+        val entries = (1..SmileyUsageRepository.MAX_ENTRIES).map { index ->
+            SmileyUsageEntry("[:fictif_$index]", (513 - index).toLong(), 1)
+        }
+        val usages = MutableStateFlow(entries)
+        every { usage.observeTop("alice", SmileyUsageRepository.MAX_ENTRIES) } returns usages
+        val snapshots = mutableListOf<SmileyLocalCollectionSnapshot>()
+        backgroundScope.launch { DefaultSmileyLocalCollections(auth, favorites, usage).observe().toList(snapshots) }
+        runCurrent()
+        val snapshot = snapshots.last()
+        assertEquals(entries.take(24), snapshot.top)
+        assertEquals(512, snapshot.usageCounts.size)
+        assertEquals(1L, snapshot.usageCounts[entries.last().token])
+        usages.value = listOf(entries.last().copy(count = 8))
+        runCurrent()
+        assertEquals(mapOf(entries.last().token to 8L), snapshots.last().usageCounts)
+        verify(exactly = 1) { usage.observeTop("alice", SmileyUsageRepository.MAX_ENTRIES) }
+    }
+
+    @Test
     fun `normalization keeps spaces and switching cancels former owner collections`() = runTest {
         every { auth.observeAuthState() } returns state
         val alice = MutableStateFlow(listOf(LocalFavoriteSmiley(":o", addedAt = 1)))

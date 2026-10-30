@@ -17,6 +17,7 @@ import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.test.core.app.ApplicationProvider
@@ -118,24 +119,52 @@ class SmileyPickerLocalGesturesTest {
     }
 
     @Test
-    fun `builtin has local menu and matching TalkBack action while tap still inserts`() {
+    fun `builtin detail has local action and matching TalkBack action while insertion is unchanged`() {
         val controller = controller()
         mount(controller)
         assertActions(builtin, listOf(R.string.editor_smiley_local_favorite_add))
         compose.onNodeWithContentDescription(description(builtin)).performTouchInput { longClick() }
-        tab(R.string.editor_smiley_local_favorite_add).performClick()
+        tab(R.string.editor_smiley_local_favorite_add).performScrollTo().performClick()
         compose.runOnIdle {
             dispatcher.scheduler.runCurrent()
             assertNull(inserted)
             assertEquals(listOf(Triple("alice", builtin.token, builtin.imageUrl)), locals.calls)
         }
         tab(R.string.editor_smiley_local_favorite_added).assertIsDisplayed()
-        compose.onNodeWithContentDescription(description(builtin)).performClick()
+        tab(R.string.editor_smiley_detail_insert).performScrollTo().performClick()
         compose.runOnIdle { assertEquals(builtin.token, inserted) }
     }
 
     @Test
-    fun `Wiki perso menu lists both applicable actions and TalkBack can invoke local addition`() {
+    fun `local feedback for A stays in Favorites but is absent from B and a new visit to A`() {
+        locals.snapshot.value = SmileyLocalCollectionSnapshot(
+            "alice", top = listOf(SmileyUsageEntry(wiki.token, 2, 1)),
+        )
+        mount(controller())
+        tab(R.string.editor_smiley_tab_standard).performClick()
+        compose.onNodeWithContentDescription(description(builtin)).performTouchInput { longClick() }
+        tab(R.string.editor_smiley_local_favorite_add).performScrollTo().performClick()
+        compose.runOnIdle { dispatcher.scheduler.runCurrent() }
+        tab(R.string.editor_smiley_local_favorite_added).assertIsDisplayed()
+
+        compose.onNodeWithContentDescription(context.getString(R.string.editor_smiley_detail_back)).performClick()
+        tab(R.string.editor_smiley_tab_favorites).performClick()
+        tab(R.string.editor_smiley_local_favorite_added).assertIsDisplayed()
+        compose.onNodeWithContentDescription(description(wiki)).performTouchInput { longClick() }
+        tab(R.string.editor_smiley_detail_title).assertIsDisplayed()
+        tab(R.string.editor_smiley_local_favorite_added).assertDoesNotExist()
+        tab(R.string.editor_smiley_detail_local_favorite).assertDoesNotExist()
+        tab(R.string.editor_smiley_local_favorite_add).assertExists()
+
+        compose.onNodeWithContentDescription(context.getString(R.string.editor_smiley_detail_back)).performClick()
+        tab(R.string.editor_smiley_local_favorite_added).assertIsDisplayed()
+        compose.onNodeWithContentDescription(description(builtin)).performTouchInput { longClick() }
+        tab(R.string.editor_smiley_local_favorite_added).assertDoesNotExist()
+        tab(R.string.editor_smiley_detail_local_favorite).assertIsDisplayed()
+    }
+
+    @Test
+    fun `Wiki perso detail lists both applicable actions and TalkBack can invoke local addition`() {
         locals.snapshot.value = SmileyLocalCollectionSnapshot(
             "alice", listOf(LocalFavoriteSmiley(wiki.token, wiki.imageUrl, 1)),
         )
@@ -148,12 +177,14 @@ class SmileyPickerLocalGesturesTest {
         val labels = listOf(R.string.editor_smiley_local_favorite_remove, R.string.editor_smiley_favorite_add)
         assertActions(wiki, labels)
         compose.onNodeWithContentDescription(description(wiki)).performTouchInput { longClick() }
-        labels.forEach { tab(it).assertIsDisplayed() }
-        tab(R.string.editor_smiley_local_favorite_remove).performClick()
+        labels.forEach { tab(it).performScrollTo().assertIsDisplayed() }
+        tab(R.string.editor_smiley_local_favorite_remove).performScrollTo().performClick()
         compose.runOnIdle { dispatcher.scheduler.runCurrent() }
+        compose.onNodeWithContentDescription(context.getString(R.string.editor_smiley_detail_back)).performClick()
         assertActions(wiki, listOf(R.string.editor_smiley_local_favorite_add, R.string.editor_smiley_favorite_add))
         val action = compose.onNodeWithContentDescription(description(wiki)).fetchSemanticsNode()
-            .config[SemanticsActions.CustomActions].first().action
+            .config[SemanticsActions.CustomActions]
+            .single { it.label == context.getString(R.string.editor_smiley_local_favorite_add) }.action
         compose.runOnIdle {
             action()
             dispatcher.scheduler.runCurrent()
@@ -293,9 +324,10 @@ class SmileyPickerLocalGesturesTest {
         val node = compose.onNodeWithContentDescription(description(smiley))
         val config = node.fetchSemanticsNode().config
         assertEquals(
-            context.getString(R.string.editor_smiley_favorite_manage), config[SemanticsActions.OnLongClick].label,
+            context.getString(R.string.editor_smiley_detail_show), config[SemanticsActions.OnLongClick].label,
         )
-        assertEquals(resources.map { context.getString(it) }, config[SemanticsActions.CustomActions].map { it.label })
+        assertEquals((listOf(R.string.editor_smiley_detail_show) + resources).map { context.getString(it) },
+            config[SemanticsActions.CustomActions].map { it.label })
         node.assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf(description(smiley))))
     }
 

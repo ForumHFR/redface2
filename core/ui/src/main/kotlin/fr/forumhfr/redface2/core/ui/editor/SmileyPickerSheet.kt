@@ -33,11 +33,14 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -48,6 +51,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
@@ -59,17 +64,12 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil3.SingletonImageLoader
 import coil3.compose.AsyncImage
-import coil3.compose.LocalPlatformContext
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.EditorSmileySource
-import fr.forumhfr.redface2.core.ui.post.LocalIntrinsicMediaSizeCache
 import fr.forumhfr.redface2.core.ui.theme.LocalSmileyPickerDecoration
-import fr.forumhfr.redface2.core.ui.post.LocalMediaAttemptLedger
-import fr.forumhfr.redface2.core.ui.post.measureAndCacheIntrinsicMediaSize
 import fr.forumhfr.redface2.core.ui.sheet.clampSheetTopOverscroll
 
 /**
@@ -102,7 +102,10 @@ fun SmileyPickerSheet(
     layout: SmileyPickerLayoutSpec = SmileyPickerLayoutSpec.Current,
 ) {
     // All four hosts remove the sheet on Hidden: expiration survives tab changes, not a new opening.
-    var favoriteOverlayExpired by remember(state.favoriteFeedbackGeneration) { mutableStateOf(false) }
+    val favoriteOverlayExpired = rememberSmileyPickerOverlayExpired(state.favoriteFeedbackGeneration)
+    val gridState = rememberSaveableStateHolder()
+    val wikiAutofocus = rememberSaveable { mutableStateOf(state.detailSmiley == null) }
+    val uiState = SmileyPickerUiState(wikiAutofocus, favoriteOverlayExpired)
     // #1193 — force skipPartiallyExpanded: the tall, scrollable picker otherwise anchors at M3's
     // PartiallyExpanded and its underdamped settle overshoots the top butée on opening. Same fix as
     // QuickReplySheet / MessageEditorComponents; scope is Fix 1 only (no tab/IME/search change).
@@ -113,8 +116,11 @@ fun SmileyPickerSheet(
         sheetMaxWidth = SMILEY_SHEET_MAX_WIDTH,
         sheetState = sheetState,
     ) {
-        var tabIndex by rememberSmileyPickerTab(state.initialTab)
-        val sheetTitle = stringResource(R.string.editor_smiley_title)
+        SmileyDetailBackHandler(state)
+        SmileyDetailFocusEffect(state.detailSmiley, wikiAutofocus)
+        val sheetTitle = stringResource(
+            if (state.detailSmiley == null) R.string.editor_smiley_title else R.string.editor_smiley_detail_title,
+        )
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -132,55 +138,90 @@ fun SmileyPickerSheet(
                 .semantics { paneTitle = sheetTitle },
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            PrimaryTabRow(selectedTabIndex = tabIndex) {
-                Tab(
-                    selected = tabIndex == 0,
-                    onClick = { tabIndex = 0 },
-                    text = { Text(stringResource(R.string.editor_smiley_tab_favorites)) },
-                )
-                Tab(
-                    selected = tabIndex == 1,
-                    onClick = { tabIndex = 1 },
-                    text = { Text(stringResource(R.string.editor_smiley_tab_standard)) },
-                )
-                Tab(
-                    selected = tabIndex == 2,
-                    onClick = { tabIndex = 2 },
-                    text = { Text(stringResource(R.string.editor_smiley_tab_wiki)) },
-                )
-            }
-            Box {
-                when (tabIndex) {
-                    0 -> SmileyPickerGrid(
-                        items = emptyList(),
-                        onSmileyClicked = onSmileyClicked,
-                        layout = layout,
-                        favorites = state,
-                        showFavoriteSection = true,
-                    )
-                    1 -> StandardTabContent(
-                        state = state,
-                        onSmileyClicked = onSmileyClicked,
-                        layout = layout,
-                    )
-                    else -> WikiTabContent(
-                        state = state,
-                        onQueryChange = onQueryChange,
-                        onSmileyClicked = onSmileyClicked,
-                        layout = layout,
+            val detail = state.detailSmiley
+            if (detail != null) {
+                val feedback = rememberSmileyDetailFeedback(detail, state)
+                SmileyDetailContent(detail, state, feedback, onSmileyClicked)
+                if (feedback != null) {
+                    // Only feedback actually composed in detail is consumed. A pending result
+                    // received after returning to the grid still gets its overlay.
+                    SideEffect { favoriteOverlayExpired.value = true }
+                }
+            } else {
+                // Removing the grid also removes its focus/semantics. Save its lazy positions,
+                // selected tab and Wiki TextFieldValue rather than composing an invisible grid.
+                gridState.SaveableStateProvider("grid") {
+                    SmileyPickerGridPage(
+                        state, onQueryChange, onSmileyClicked, layout, uiState,
                     )
                 }
-                key(state.favoriteFeedbackGeneration) {
-                    if (tabIndex != 0 && !favoriteOverlayExpired) {
-                        state.favoriteFeedback?.let { feedback ->
-                            // Restart even if null was not composed; measure after the content to keep its bounds.
-                            SmileyFavoriteOverlay(
-                                feedback = feedback,
-                                onExpired = { favoriteOverlayExpired = true },
-                                modifier = Modifier.matchParentSize(),
-                            )
-                        }
-                    }
+            }
+        }
+    }
+}
+
+private data class SmileyPickerUiState(
+    val wikiAutofocus: MutableState<Boolean>,
+    val favoriteOverlayExpired: MutableState<Boolean>,
+)
+
+/** Read the dialog's locals, which replace the host's keyboard controller and focus manager. */
+@Composable
+internal fun SmileyDetailFocusEffect(detail: EditorSmiley?, wikiAutofocus: MutableState<Boolean>) {
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(detail) {
+        if (detail != null) {
+            wikiAutofocus.value = false
+            focusManager.clearFocus(force = true)
+            keyboard?.hide()
+        }
+    }
+}
+
+@Composable
+private fun SmileyPickerGridPage(
+    state: SmileyPickerState.Open,
+    onQueryChange: (String) -> Unit,
+    onSmileyClicked: (String) -> Unit,
+    layout: SmileyPickerLayoutSpec,
+    uiState: SmileyPickerUiState,
+) {
+    var tabIndex by rememberSmileyPickerTab(state.initialTab)
+    val tabsState = rememberSaveableStateHolder()
+    PrimaryTabRow(selectedTabIndex = tabIndex) {
+        listOf(
+            R.string.editor_smiley_tab_favorites, R.string.editor_smiley_tab_standard, R.string.editor_smiley_tab_wiki,
+        ).forEachIndexed { index, title ->
+            Tab(
+                selected = tabIndex == index,
+                onClick = {
+                    uiState.wikiAutofocus.value = true
+                    tabIndex = index
+                },
+                text = { Text(stringResource(title)) },
+            )
+        }
+    }
+    Box {
+        tabsState.SaveableStateProvider(tabIndex) {
+            when (tabIndex) {
+                0 -> SmileyPickerGrid(
+                    items = emptyList(), onSmileyClicked = onSmileyClicked, layout = layout,
+                    favorites = state, showFavoriteSection = true,
+                )
+                1 -> StandardTabContent(state, onSmileyClicked, layout)
+                else -> WikiTabContent(state, onQueryChange, onSmileyClicked, layout, uiState.wikiAutofocus.value)
+            }
+        }
+        key(state.favoriteFeedbackGeneration) {
+            if (tabIndex != 0 && !uiState.favoriteOverlayExpired.value) {
+                state.favoriteFeedback?.let { feedback ->
+                    SmileyFavoriteOverlay(
+                        feedback = feedback,
+                        onExpired = { uiState.favoriteOverlayExpired.value = true },
+                        modifier = Modifier.matchParentSize(),
+                    )
                 }
             }
         }
@@ -198,6 +239,16 @@ fun SmileyPickerSheet(
 internal fun rememberSmileyPickerTab(initialTab: SmileyPickerTab): MutableState<Int> = key(initialTab.ordinal) {
     rememberSaveable { mutableStateOf(initialTab.ordinal) }
 }
+
+/** Save the consumed generation too: rememberSaveable inputs are not checked against restored values. */
+@Composable
+internal fun rememberSmileyPickerOverlayExpired(generation: Long): MutableState<Boolean> = rememberSaveable(
+    generation,
+    stateSaver = listSaver<Boolean, Any>(
+        save = { listOf(generation, it) },
+        restore = { saved -> saved[0] == generation && (saved[1] as Boolean) },
+    ),
+) { mutableStateOf(false) }
 
 @Composable
 private fun StandardTabContent(
@@ -219,25 +270,14 @@ private fun WikiTabContent(
     onQueryChange: (String) -> Unit,
     onSmileyClicked: (String) -> Unit,
     layout: SmileyPickerLayoutSpec,
+    autofocus: Boolean,
 ) {
-    // #250 — reveal search on tab switch: focus + IME as soon as the Wiki tab composes, instead of
-    // waiting for an extra tap on the field. `LaunchedEffect(Unit)` fires on each ENTRY into the
-    // tab (the `when (tabIndex)` swaps this content in) and never again while the user stays on it.
+    // #250 — focus on entry from another tab, but never on return from the smiley detail.
     val searchFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) {
-        searchFocus.requestFocus()
+        if (autofocus) searchFocus.requestFocus()
     }
-    // #901 — the field owns a TextFieldValue seeded from the (possibly #824-restored) query
-    // with the caret at the END, so a restored word can be completed or erased right away.
-    // The String overload of OutlinedTextField builds its internal TextFieldValue with
-    // selection = TextRange(0), which put the restored caret at the START of the word.
-    // Seeded ONCE (no resync from state.query) : while this tab is composed the only query
-    // writer is this very field (the #824 restore happens in open(), atomically with the
-    // Hidden→Open transition that composes the sheet), and a composition-time resync would
-    // race the collectAsStateWithLifecycle echo of onQueryChange, clobbering fast typing.
-    var fieldValue by remember {
-        mutableStateOf(TextFieldValue(text = state.query, selection = TextRange(state.query.length)))
-    }
+    var fieldValue by rememberSmileyWikiFieldValue(state.query)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(
             value = fieldValue,
@@ -260,6 +300,27 @@ private fun WikiTabContent(
                 .focusRequester(searchFocus),
         )
         WikiSearchContent(state, onSmileyClicked, layout)
+    }
+}
+
+/** Kept separate to test restoration outside ModalBottomSheet's dialog registry, like the tab state. */
+@Composable
+internal fun rememberSmileyWikiFieldValue(query: String): MutableState<TextFieldValue> {
+    // #901 — seed from the (possibly #824-restored) query with the caret at the END.
+    // The String overload of OutlinedTextField instead starts its selection at TextRange(0).
+    val fieldValue = rememberSaveable(stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(text = query, selection = TextRange(query.length)))
+    }
+    // Reconcile ONCE on entry: the host's saved grid can outlive the controller across
+    // process death. Returning from detail keeps the selection when the saved text matches.
+    // Never resync during typing: the collectAsStateWithLifecycle
+    // echo of onQueryChange can lag behind a fast edit and clobber it.
+    return remember {
+        fieldValue.apply {
+            if (value.text != query) {
+                value = TextFieldValue(text = query, selection = TextRange(query.length))
+            }
+        }
     }
 }
 
@@ -343,8 +404,7 @@ fun SmileyPickerGrid(
     // the previous behaviour — the night gate's condition (Sol r1) : never LESS room than before,
     // and the M3 sheet still clamps itself to the window insets beyond that. The fraction leaves
     // headroom for the sheet chrome (tabs + search field), which grows with fontScale on its own.
-    val screenHeight = LocalConfiguration.current.screenHeightDp.dp
-    val gridHeightCap = maxOf(SMILEY_GRID_MIN_HEIGHT_CAP, screenHeight * SMILEY_GRID_SCREEN_FRACTION)
+    val gridHeightCap = smileyPickerHeightCap()
     // #989 — the constraints give the grid its own width, so the target-cell solver can resolve a
     // KNOWN column count and cell width ([smileyGridGeometry]) — and therefore an image cap that
     // follows the cell instead of the hardcoded 44 dp.
@@ -465,26 +525,7 @@ private fun SmileyCell(
     // sized when it later renders inside a post — and vice versa. Builtins are never measured
     // (known ~16 px sprites, same contract as the posts). The cache read is a tracked snapshot
     // read : the cell recomposes at the measured size the moment the probe lands.
-    val sizeCache = LocalIntrinsicMediaSizeCache.current
-    // #960 — the shared measurement seam settles probe outcomes on the ambient attempt ledger
-    // (single source of truth for failures) ; the picker keeps its fire-once effect, the ledger's
-    // TTL/generations only matter to the posts' retry pipeline.
-    val ledger = LocalMediaAttemptLedger.current
-    val platformContext = LocalPlatformContext.current
-    val isPerso = smiley.source != EditorSmileySource.BUILTIN
-    if (isPerso) {
-        LaunchedEffect(smiley.imageUrl) {
-            measureAndCacheIntrinsicMediaSize(
-                url = smiley.imageUrl,
-                cache = sizeCache,
-                ledger = ledger,
-                context = platformContext,
-                imageLoader = SingletonImageLoader.get(platformContext),
-                isContentMedia = false,
-            )
-        }
-    }
-    val measuredPx = if (isPerso) sizeCache.get(smiley.imageUrl)?.size else null
+    val measuredPx = rememberSmileyIntrinsicSize(smiley)
     val outlineColor = MaterialTheme.colorScheme.outlineVariant
     Box(
         modifier = Modifier
@@ -612,6 +653,12 @@ private val SMILEY_SHEET_MAX_WIDTH = 840.dp
  */
 private val SMILEY_GRID_MIN_HEIGHT_CAP = 320.dp
 private const val SMILEY_GRID_SCREEN_FRACTION = 0.62f
+
+@Composable
+internal fun smileyPickerHeightCap() = maxOf(
+    SMILEY_GRID_MIN_HEIGHT_CAP,
+    LocalConfiguration.current.screenHeightDp.dp * SMILEY_GRID_SCREEN_FRACTION,
+)
 
 /** #989 — corner radius of the optional cell hairline (candidate product option). */
 private val CELL_OUTLINE_RADIUS = 8.dp
