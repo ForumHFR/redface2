@@ -916,6 +916,25 @@ class HfrClient @Inject constructor(
     }
 
     /**
+     * #1467 — public hardware configuration, fetched separately from the profile page.
+     * Always anonymous: this auxiliary read must never carry the user's session cookies.
+     */
+    suspend fun getUserConfiguration(pseudo: String): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("configuration.php")
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("pseudo", pseudo)
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        return anonymous.newDiagnosticCall(request).executeCancellable { response ->
+            if (!response.isSuccessful) {
+                throw HfrServerException(response.code, url.toString())
+            }
+            response.body.string()
+        }
+    }
+
+    /**
      * #1112 / #221 — GET the GLOBAL staff directory (« Contacter un responsable »), the primary
      * source of the author-role badge.
      *

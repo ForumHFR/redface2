@@ -1,0 +1,5 @@
+https://forum.hardware.fr/configuration.php?config=hfr.inc&pseudo=zzqqxxnexistepas
+Saved: 2026-10-30 (anonymous session, no cookies; public capture supplied for #1467)
+Notes: nonexistent pseudo returns the same successful empty cell (&nbsp;) as an existing empty user.
+Reduced to h4.Ext and configuration rows of table.main. Styles, search form and navigation removed.
+No cookies, tokens, emails or local paths.

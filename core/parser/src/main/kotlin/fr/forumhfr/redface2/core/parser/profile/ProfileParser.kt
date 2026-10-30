@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.model.UserProfile
 import fr.forumhfr.redface2.core.parser.authorRoleFromLabel
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
+import org.jsoup.nodes.TextNode
 
 /**
  * Phase 2 finish (#208) — parses `/hfr/profil-{userId}.htm` into a [UserProfile].
@@ -89,6 +90,32 @@ class ProfileParser {
             signatureText = signatureText,
             rawFields = rawFields,
         )
+    }
+
+    /**
+     * #1467 — parses the separate, anonymous `configuration.php` page.
+     * An empty cell is valid; a missing page marker, table or content row is a parse failure.
+     */
+    fun parseConfiguration(html: String): List<String> {
+        val document = Jsoup.parse(html)
+        require(document.select("h4.Ext").any { it.text().contains("Configuration matérielle") }) {
+            "Missing hardware configuration heading"
+        }
+        val table = requireNotNull(document.selectFirst("table.main")) {
+            "Missing hardware configuration table"
+        }
+        val labelRow = requireNotNull(table.select("tr.profil").firstOrNull { row ->
+            row.selectFirst("td.cBackTab2")?.text()?.trimLabel() == "Configuration matérielle"
+        }) { "Missing hardware configuration label" }
+        val contentRow = requireNotNull(labelRow.nextElementSibling()?.takeIf { it.hasClass("profil") }) {
+            "Missing hardware configuration row"
+        }
+        val cell = requireNotNull(contentRow.selectFirst("td")) { "Missing hardware configuration cell" }
+        cell.select("br").forEach { it.replaceWith(TextNode("\n")) }
+        return cell.wholeText().lineSequence()
+            .map { it.replace('\u00a0', ' ').trim().replace(CONFIGURATION_WHITESPACE, " ") }
+            .filter(String::isNotEmpty)
+            .toList()
     }
 
     /**
@@ -214,6 +241,7 @@ class ProfileParser {
         this.trim().trimEnd(':', ' ', ' ').trim()
 
     private companion object {
+        private val CONFIGURATION_WHITESPACE = Regex("\\s+")
         private const val KEY_PSEUDO = "Pseudo"
         private const val KEY_POST_COUNT = "Nombre de messages postés"
         private const val KEY_REGISTERED_AT = "Date d'arrivée sur le forum"

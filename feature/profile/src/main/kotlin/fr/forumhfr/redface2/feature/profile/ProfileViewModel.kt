@@ -12,7 +12,10 @@ import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.profile.ProfileRepository
 import fr.forumhfr.redface2.core.model.AuthState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -64,6 +67,9 @@ class ProfileViewModel @AssistedInject constructor(
      * on Retry spawn N concurrent coroutines whose results race to update [_state].
      */
     private var loadJob: Job? = null
+    private var configurationJob: Job? = null
+    private var configurationPseudo: String? = null
+    private var configurationSession: Any? = null
 
     init {
         loadProfile()
@@ -74,8 +80,26 @@ class ProfileViewModel @AssistedInject constructor(
     fun onIntent(intent: ProfileIntent) {
         when (intent) {
             ProfileIntent.Retry -> loadProfile()
+            ProfileIntent.RetryConfiguration -> configurationPseudo?.let { loadConfiguration(it, force = true) }
             ProfileIntent.ToggleBlocked -> toggleBlocked()
         }
+    }
+
+    /** The Activity can retain this VM; configuration results belong only to the current opening. */
+    fun onOpened() {
+        if (configurationSession != null) return
+        configurationSession = Any()
+        val profile = (_state.value.mode as? ProfileUiState.Mode.Loaded)?.profile
+        loadConfiguration(profile?.pseudo ?: pseudoHint)
+    }
+
+    /** Invalidate before cancelling, including a repository response that ignores cancellation. */
+    fun onClosed() {
+        configurationSession = null
+        configurationPseudo = null
+        configurationJob?.cancel()
+        configurationJob = null
+        _state.update { it.copy(configuration = ProfileUiState.Configuration.Loaded(emptyList())) }
     }
 
     /**
@@ -143,6 +167,9 @@ class ProfileViewModel @AssistedInject constructor(
             profileRepository.getProfile(userId).fold(
                 onSuccess = { profile ->
                     _state.update { it.copy(mode = ProfileUiState.Mode.Loaded(profile)) }
+                    // A hint starts the independent load immediately. Correct it only if the profile
+                    // supplies a different usable pseudo; a missing hint waits for this identity.
+                    loadConfiguration(profile.pseudo)
                 },
                 onFailure = { error ->
                     // Review feedback I7: ViewModel must not carry a localised String. It
@@ -157,6 +184,31 @@ class ProfileViewModel @AssistedInject constructor(
                             ),
                         )
                     }
+                },
+            )
+        }
+    }
+
+    private fun loadConfiguration(pseudo: String, force: Boolean = false) {
+        val session = configurationSession
+        val name = pseudo.trim()
+        val invalidPseudo = name.isEmpty() || name == "?"
+        val reuseCurrentRequest = !force && name.equals(configurationPseudo, ignoreCase = true)
+        if (session == null || invalidPseudo || reuseCurrentRequest) return
+        configurationPseudo = name
+        configurationJob?.cancel()
+        configurationJob = viewModelScope.launch {
+            _state.update { it.copy(configuration = ProfileUiState.Configuration.Loading) }
+            val result = profileRepository.getUserConfiguration(name)
+            currentCoroutineContext().ensureActive()
+            if (session !== configurationSession) return@launch
+            result.fold(
+                onSuccess = { lines ->
+                    _state.update { it.copy(configuration = ProfileUiState.Configuration.Loaded(lines)) }
+                },
+                onFailure = { error ->
+                    if (error is CancellationException) throw error
+                    _state.update { it.copy(configuration = ProfileUiState.Configuration.Error) }
                 },
             )
         }

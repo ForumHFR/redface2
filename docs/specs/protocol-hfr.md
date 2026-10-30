@@ -55,6 +55,7 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 | Ajouter aux drapeaux | GET | `/user/addflag.php?config=hfr.inc&cat={cat}&post={post}&numreponse={numreponse}` | **oui** |
 | Retirer un drapeau | GET | `/user/delflag.php?config=hfr.inc&cat={cat}&subcat={subcat}&post={topicId}&page={page}&p=1&sondage=0&owntopic={1,2,3}&new=0` | **oui** |
 | Profil public | GET | `/hfr/profil-{user_id}.htm` | non |
+| Configuration matérielle (#1467) | GET | `/configuration.php?config=hfr.inc&pseudo={pseudo_encodé}` | non |
 | Annuaire staff (responsables) | GET | `/message-smi-mp-aj.php?config=hfr.inc&user_id=0&responsable=1` | non |
 | Paramètres utilisateur | GET | `/editprofil.php?config=hfr.inc&page={1..7}` | **oui** |
 | Modération (alerte) | GET/POST | `/user/modo.php?config=hfr.inc&cat={cat}&post={topicId}&numreponse={numreponse}&page={page}&ref=1` (voir ci-dessous) | **oui** |
@@ -304,6 +305,62 @@ absent, vide ou non reconnu → `null`. La **source primaire** du badge est l'an
 - `core/parser/src/test/resources/fixtures/profile/profile_xatrix_authenticated.html` — userId=54596, session auth, fixture complète avec signature.
 - `core/parser/src/test/resources/fixtures/profile/profile_ezzz_anonymous.html` — userId=15867, session anonyme, pas de localisation (cas `Statut = Membre`).
 - `core/parser/src/test/resources/fixtures/profile/profile_moderator_anonymous.html` — userId=15461 (Ernestor), session anonyme, cas `Statut = Modérateur` (#1112, capture curl assainie).
+
+### Configuration matérielle — `configuration.php` (#1467)
+
+Contrat issu des **captures publiques anonymes du 30/10/2026** fournies pour #1467 :
+
+```text
+GET https://forum.hardware.fr/configuration.php?config=hfr.inc&pseudo={pseudo_encodé}
+```
+
+- La page profil ne contient **pas le texte de la configuration**. Sa ligne facultative
+  « Configuration matérielle » contient un lien `a.cLink` vers cette page ; le texte du lien
+  peut rester dans `UserProfile.rawFields` et ne doit pas être affiché comme du matériel.
+- La requête se construit depuis le pseudo, encodé comme valeur de query par `HttpUrl` :
+  `Colonel MythO` devient `pseudo=Colonel%20MythO`. La navigation profil reste indexée par `userId`.
+- `HfrClient.getUserConfiguration(pseudo)` utilise exclusivement **`@AnonymousClient`**, sans cookies,
+  comme `getProfile` (voir la règle canonique de lecture annexe / prefetch ci-dessous).
+  Ne jamais journaliser le corps de la réponse.
+- Réponse observée : **HTTP 200**, `text/html; charset=utf-8`, environ 2 Ko.
+
+**Structure et parsing** (`ProfileParser.parseConfiguration`, exposé par
+`HfrParser.parseUserConfiguration`) :
+
+1. `h4.Ext` contient « Configuration matérielle » et le pseudo du membre.
+2. `table.main` contient une `tr.profil` de libellé, avec
+   `td.cBackTab2` dont le texte normalisé vaut « Configuration matérielle ».
+3. La `tr.profil` suivante contient une `td` de texte libre. Les `<br />` séparent les lignes.
+4. Résultat : `List<String>` avec entités HTML décodées, espaces insécables remplacés par des
+   espaces, blancs normalisés et retirés aux extrémités, lignes vides éliminées, ordre conservé.
+
+Une cellule `&nbsp;` produit une **liste vide valide**. Un pseudo inexistant produit la même page
+vide : on ne peut pas distinguer « configuration vide » et « utilisateur inconnu » avec cet endpoint.
+En revanche, l'absence du titre, de la table, du libellé ou de la cellule attendue est une **erreur
+de parsing**, jamais un résultat vide. Les échecs HTTP/réseau restent également des erreurs.
+
+`ProfileRepository.getUserConfiguration` porte ce résultat séparément de `UserProfile` et effectue
+le parsing sur le dispatcher IO. Le ViewModel lance la lecture depuis le pseudo connu à l'ouverture,
+indépendamment du chargement du profil ; il corrige le pseudo depuis le profil chargé si nécessaire.
+Un réessai de configuration ne recharge pas le profil. Aucune requête n'est déclenchée par une
+recomposition ; la configuration est liée à l'ouverture de la carte ou de la page, annulée à la
+fermeture et rechargée à chaque ouverture.
+
+La carte profil masque la section vide et la place après ses actions, avec quatre lignes visuelles
+au maximum avant « Tout afficher ». L'ensemble de la carte défile dans la feuille extensible.
+Le titre est un `heading`, le texte est sélectionnable et complet après dépliage. La page profil
+complète utilise la même section sans repli. Le chargement ne réserve aucun espace ; une erreur
+affiche « Réessayer » uniquement pour cette section.
+
+**Fixtures réduites et provenance** dans `core/parser/src/test/resources/fixtures/profile/`
+(chaque HTML a un `.source.txt`) :
+
+| Fixture | Cas capturé |
+|---|---|
+| `configuration_xatrix_anonymous.html` | XaTriX, 12 lignes, NBSP final |
+| `configuration_colonel_anonymous.html` | Colonel MythO, pseudo avec espace, 12 lignes dans la capture |
+| `configuration_ezzz_anonymous.html` | Membre existant, cellule vide |
+| `configuration_unknown_anonymous.html` | Pseudo inexistant `zzqqxxnexistepas`, même cellule vide |
 
 ### Annuaire staff (responsables) — source PRIMAIRE du rôle (#1112, #221)
 
