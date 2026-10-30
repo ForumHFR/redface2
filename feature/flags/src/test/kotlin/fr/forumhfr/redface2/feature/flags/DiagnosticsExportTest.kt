@@ -80,16 +80,18 @@ class DiagnosticsExportTest {
     }
 
     @Test
-    fun `copy exports only the closed set of network tags and counts excluded local entries`() {
+    fun `copy exports network and smiley picker tags and counts excluded local entries`() {
         val messages = listOf(
             "FlagRepository" to "delflag OK topic=35395",
             "ReplyRepository" to "redirect=https://forum.hardware.fr/?hash_check=SecretHash " +
                 "body=<html>SecretBody</html>",
             "ReplyRepository" to "IOException: SecretMessage Cookie=SecretCookie",
             "FlagsRefreshExtra" to "SecretUnknownProducer",
+            "SmileyPickerExtra" to "SecretUnknownPicker",
             "FlagsRefresh" to "refresh=1 outcome=success",
             "HfrCall" to "refresh=1 rest:categories totalMs=1200 ip=v6",
             "AppForeground" to "backgroundMs=4000",
+            "SmileyPicker" to "sheet_close cause=unknown",
         )
         val entries = messages.mapIndexed { index, (tag, message) ->
             DiagnosticsLog.Entry(index.toLong(), DiagnosticsLog.Level.INFO, tag, message, 0)
@@ -98,14 +100,14 @@ class DiagnosticsExportTest {
         val environment = DiagnosticsEnvironment("0.62.0", 72, "dev", 33, "Google", "Pixel 7")
         val export = formatDiagnosticsExport(entries, format, environment)
 
-        assertEquals(6, export.lines().size)
-        assertEquals("4 entrées locales non exportées", export.lines().last())
+        assertEquals(7, export.lines().size)
+        assertEquals("5 entrées locales non exportées", export.lines().last())
         listOf("topic=", "35395", "https://", "hash_check", "Secret", "<html>", "IOException").forEach {
             assertFalse(export, export.contains(it))
         }
-        messages.takeLast(3).forEach { (tag, message) -> assertTrue(export.contains("$tag  $message")) }
+        messages.takeLast(4).forEach { (tag, message) -> assertTrue(export.contains("$tag  $message")) }
         // Filtering never mutates the local viewer's complete snapshot.
-        assertEquals(7, entries.size)
+        assertEquals(9, entries.size)
         assertEquals(
             "0 entrées locales non exportées",
             formatDiagnosticsExport(emptyList(), format, environment).lines().last(),

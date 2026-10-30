@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.flags
 
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.diagnostics.SmileyPickerDiagnostics
 import java.text.SimpleDateFormat
 import java.util.Date
 
@@ -18,7 +19,7 @@ internal data class DiagnosticsEnvironment(
 // Entire messages of these tags are exported. New fields must use closed values/numbers only,
 // including refresh network context and the acquired connection's IP family (never its address).
 // Legacy producers remain visible only in the local viewer.
-private val networkExportTags = setOf("FlagsRefresh", "HfrCall", "AppForeground")
+private val diagnosticsExportTags = setOf("FlagsRefresh", "HfrCall", "AppForeground", SmileyPickerDiagnostics.TAG)
 
 internal fun formatDiagnosticsExport(
     entries: List<DiagnosticsLog.Entry>,
@@ -29,7 +30,7 @@ internal fun formatDiagnosticsExport(
         "channel=${environment.channel.singleLine()}")
     appendLine("Android API=${environment.apiLevel} manufacturer=${environment.manufacturer.singleLine()} " +
         "model=${environment.model.singleLine()}")
-    val exported = entries.filter { it.tag in networkExportTags }
+    val exported = entries.filter { it.tag in diagnosticsExportTags }
     exported.forEach { entry ->
         val level = when (entry.level) {
             DiagnosticsLog.Level.INFO -> "I"

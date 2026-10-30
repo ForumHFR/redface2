@@ -12,6 +12,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.diagnostics.SmileyPickerCloseCause
 import fr.forumhfr.redface2.core.domain.diagnostics.recordImagePickerEvent
 import fr.forumhfr.redface2.core.domain.diagnostics.recordImagesPicked
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
@@ -157,6 +158,7 @@ class PostEditorViewModel @AssistedInject constructor(
      */
     // Keep before init: loadedForm's setter can run synchronously there and crash on an uninitialized picker.
     val smileyPicker = SmileyPickerController(
+        diagnostics = diagnostics,
         scope = viewModelScope,
         searchWiki = smileyRepository::searchWiki,
         wikiKeywords = SmileyWikiKeywordsSource(
@@ -590,7 +592,7 @@ class PostEditorViewModel @AssistedInject constructor(
         // smiley if they want to chain — #824 restores the search they just used. This
         // matches HFR web behaviour and keeps the sheet from squatting the screen between
         // two distant insertions.
-        smileyPicker.dismiss()
+        smileyPicker.dismiss(SmileyPickerCloseCause.INSERTION)
         scheduleAutosave()
     }
 

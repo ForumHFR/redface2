@@ -149,7 +149,7 @@ fun DiagnosticsScreen(
 }
 
 /**
- * Copy only the allowed network measurements to the clipboard as plain text. Format:
+ * Copy the allowed network and smiley-picker diagnostics to the clipboard as plain text. Format:
  * `HH:mm:ss.SSS  L  TAG  message` per line — same shape rendered by [DiagnosticsRow]
  * but flat, so the alpha tester can paste it into a bug report or a HFR post without
  * losing context.

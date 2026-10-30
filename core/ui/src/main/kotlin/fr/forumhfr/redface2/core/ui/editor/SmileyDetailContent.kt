@@ -28,11 +28,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -60,13 +62,11 @@ internal fun SmileyDetailContent(
     Column(Modifier.fillMaxWidth().heightIn(max = smileyPickerHeightCap())) {
         SmileyDetailTopBar { state.onDetailChange?.invoke(null) }
         Column(
-            modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.weight(1f, fill = false).testTag("smiley_detail_viewport")
+                .verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             SmileyDetailHeader(smiley, state)
-            if (smiley.source != EditorSmileySource.BUILTIN) {
-                SmileyWikiKeywordsContent(state.wikiKeywords) { state.onWikiKeywordsRetry?.invoke() }
-            }
             Button(
                 onClick = { onSmileyClicked(smiley.token) },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
@@ -75,6 +75,12 @@ internal fun SmileyDetailContent(
             }
             HorizontalDivider()
             SmileyDetailActions(smiley, state)
+            // Commands precede secondary metadata, even while keywords arrive or are expanded.
+            if (smiley.source != EditorSmileySource.BUILTIN) {
+                key(smiley.token) {
+                    SmileyWikiKeywordsContent(state.wikiKeywords) { state.onWikiKeywordsRetry?.invoke() }
+                }
+            }
         }
         favoriteFeedback?.let { feedback ->
             // Fixed below the scrolling actions: mutation results stay visible on small screens.
@@ -114,10 +120,10 @@ private fun SmileyDetailTopBar(onBack: () -> Unit) {
 
 @Composable
 private fun SmileyDetailHeader(smiley: EditorSmiley, state: SmileyPickerState.Open) {
-    Column(
+    Row(
         modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         val measured = rememberSmileyIntrinsicSize(smiley)
         Surface(shape = MaterialTheme.shapes.medium, color = MaterialTheme.colorScheme.surfaceContainerHigh) {
@@ -135,23 +141,25 @@ private fun SmileyDetailHeader(smiley: EditorSmiley, state: SmileyPickerState.Op
                 )
             }
         }
-        Text(smiley.token, style = MaterialTheme.typography.titleMedium, fontFamily = FontFamily.Monospace)
-        val count = state.usageCounts[smiley.token]
-        Text(
-            text = if (count == null) {
-                stringResource(R.string.editor_smiley_detail_unused)
-            } else {
-                // The stored counter is Long; only the plural selector is bounded to Int.
-                pluralStringResource(
-                    R.plurals.editor_smiley_detail_usage,
-                    count.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
-                    count,
-                )
-            },
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        SmileyDetailMembership(smiley, state)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(smiley.token, style = MaterialTheme.typography.titleMedium, fontFamily = FontFamily.Monospace)
+            val count = state.usageCounts[smiley.token]
+            Text(
+                text = if (count == null) {
+                    stringResource(R.string.editor_smiley_detail_unused)
+                } else {
+                    // The stored counter is Long; only the plural selector is bounded to Int.
+                    pluralStringResource(
+                        R.plurals.editor_smiley_detail_usage,
+                        count.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+                        count,
+                    )
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SmileyDetailMembership(smiley, state)
+        }
     }
 }
 

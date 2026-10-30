@@ -220,6 +220,7 @@ class SmileyPickerControllerTest {
         advanceUntilIdle()
         assertEquals(1, calls)
 
+        val diagnostics = (controller.state.value as SmileyPickerState.Open).diagnostics
         controller.dismiss() // insertion and swipe-down both land here
         controller.open()
 
@@ -227,7 +228,7 @@ class SmileyPickerControllerTest {
             "the dismissed search must come back verbatim — no refetch",
             SmileyPickerState.Open(query = "jap", wiki = WikiSearchState.Results(listOf(smiley)),
                 onDetailChange = controller::onDetailChanged,
-                onWikiKeywordsRetry = controller::retryWikiKeywords),
+                onWikiKeywordsRetry = controller::retryWikiKeywords, diagnostics = diagnostics),
             controller.state.value,
         )
         advanceUntilIdle()
@@ -249,6 +250,7 @@ class SmileyPickerControllerTest {
             (controller.state.value as SmileyPickerState.Open).wiki,
         )
 
+        val diagnostics = (controller.state.value as SmileyPickerState.Open).diagnostics
         controller.dismiss() // cancels the hanging job
         controller.open()
 
@@ -256,7 +258,7 @@ class SmileyPickerControllerTest {
         assertEquals(
             SmileyPickerState.Open(query = "jap", wiki = WikiSearchState.Idle,
                 onDetailChange = controller::onDetailChanged,
-                onWikiKeywordsRetry = controller::retryWikiKeywords),
+                onWikiKeywordsRetry = controller::retryWikiKeywords, diagnostics = diagnostics),
             controller.state.value,
         )
     }
@@ -273,13 +275,14 @@ class SmileyPickerControllerTest {
             (controller.state.value as SmileyPickerState.Open).wiki,
         )
 
+        val diagnostics = (controller.state.value as SmileyPickerState.Open).diagnostics
         controller.dismiss()
         controller.open()
 
         assertEquals(
             SmileyPickerState.Open(query = "jap", wiki = WikiSearchState.Idle,
                 onDetailChange = controller::onDetailChanged,
-                onWikiKeywordsRetry = controller::retryWikiKeywords),
+                onWikiKeywordsRetry = controller::retryWikiKeywords, diagnostics = diagnostics),
             controller.state.value,
         )
     }
@@ -291,6 +294,7 @@ class SmileyPickerControllerTest {
 
         controller.open()
         controller.onQueryChanged("ja") // below MIN_WIKI_QUERY_LENGTH → Idle, no search
+        val diagnostics = (controller.state.value as SmileyPickerState.Open).diagnostics
         controller.dismiss()
         controller.open()
         advanceUntilIdle()
@@ -298,7 +302,7 @@ class SmileyPickerControllerTest {
         assertEquals(
             SmileyPickerState.Open(query = "ja", wiki = WikiSearchState.Idle,
                 onDetailChange = controller::onDetailChanged,
-                onWikiKeywordsRetry = controller::retryWikiKeywords),
+                onWikiKeywordsRetry = controller::retryWikiKeywords, diagnostics = diagnostics),
             controller.state.value,
         )
         assertEquals(0, calls)
