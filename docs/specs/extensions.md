@@ -119,7 +119,11 @@ Redface 2 intègre les plus populaires et les plus utiles **nativement dans l'ap
   envoi reconnu réussi (édition : delta positif), isolé par compte. Extraction et points
   d'enregistrement dans l'ADR-019 ; modèle dans
   [Modèles de données]({{ site.baseurl }}/specs/models#top-dusage-des-smileys).
-- Recherche par mot-clé dans le wiki smileys HFR : livrée. Raccourcis clavier : à venir.
+- Recherche par mot-clé dans le wiki smileys HFR : livrée. Le détail d'un perso affiche aussi
+  ses mots-clés publics en puces non interactives, avec chargement, liste vide et réessai ;
+  cache en mémoire indépendant du compte. Contrat dans
+  [Mots-clés du détail wiki]({{ site.baseurl }}/specs/protocol-hfr#mots-clés-du-détail-wiki),
+  décisions dans l'ADR-019 (lot 2 du 30/10). Raccourcis clavier : à venir.
 - Synchronisation des collections locales via MPStorage : à concevoir ; l'export des favoris
   locaux prépare ce travail sans définir de protocole de fusion.
 

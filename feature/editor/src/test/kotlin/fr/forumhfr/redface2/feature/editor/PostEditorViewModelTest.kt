@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.editor
 import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollectionSnapshot
 import fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS
 import fr.forumhfr.redface2.core.model.SmileyUsageEntry
+import fr.forumhfr.redface2.core.model.SmileyWikiKeywordsResult
 import fr.forumhfr.redface2.core.model.EditorSmileySource
 import fr.forumhfr.redface2.core.model.HfrFavoriteSmileyMutationResult
 import fr.forumhfr.redface2.core.ui.editor.UploadError
@@ -2751,6 +2752,10 @@ class PostEditorViewModelTest {
      */
     private class FakeSmileyRepository :
         fr.forumhfr.redface2.core.domain.smiley.SmileyRepository {
+        override fun cachedWikiKeywords(token: String): SmileyWikiKeywordsResult.Loaded? = null
+
+        override suspend fun getWikiKeywords(token: String) = SmileyWikiKeywordsResult.Failed
+
         private var pending: kotlinx.coroutines.CompletableDeferred<List<EditorSmiley>>? = null
         var lastUserId: Int? = null
             private set

@@ -98,13 +98,17 @@ class SmileyPickerStateRestorationTest {
         val smiley = BUILTIN_HFR_SMILEYS.first()
         var state by mutableStateOf(SmileyPickerState.Open(
             favoriteFeedback = SmileyFavoriteFeedback.LocalRemoved, favoriteFeedbackGeneration = 3L,
+            favoriteFeedbackToken = smiley.token, favoriteFeedbackEmission = 3L, detailFeedbackEmissionAtEntry = 3L,
         ))
         var feedback: SmileyFavoriteFeedback? = null
         val restoration = StateRestorationTester(compose)
         restoration.setContent { feedback = rememberSmileyDetailFeedback(smiley, state) }
         compose.runOnIdle {
             assertNull(feedback)
-            state = state.copy(favoriteFeedback = SmileyFavoriteFeedback.LocalAdded, favoriteFeedbackGeneration = 4L)
+            state = state.copy(
+                favoriteFeedback = SmileyFavoriteFeedback.LocalAdded,
+                favoriteFeedbackGeneration = 4L, favoriteFeedbackEmission = 4L,
+            )
         }
         compose.runOnIdle { assertEquals(SmileyFavoriteFeedback.LocalAdded, feedback) }
         restoration.emulateSavedInstanceStateRestore()
@@ -114,14 +118,20 @@ class SmileyPickerStateRestorationTest {
     @Test
     fun `restoring a different detail discards the previous smiley entry generation`() {
         var smiley = BUILTIN_HFR_SMILEYS.first()
-        var state = SmileyPickerState.Open(favoriteFeedbackGeneration = 3L)
+        var state = SmileyPickerState.Open(
+            favoriteFeedbackGeneration = 3L, favoriteFeedbackEmission = 3L,
+            favoriteFeedbackToken = smiley.token, detailFeedbackEmissionAtEntry = 3L,
+        )
         var feedback: SmileyFavoriteFeedback? = null
         val restoration = StateRestorationTester(compose)
         restoration.setContent { feedback = rememberSmileyDetailFeedback(smiley, state) }
         compose.runOnIdle {
-            // Change only on recreation, challenging the saved token rather than live inputs.
+            // A completion for the previous token remains ineligible after recreation.
             smiley = BUILTIN_HFR_SMILEYS[1]
-            state = state.copy(favoriteFeedback = SmileyFavoriteFeedback.LocalAdded, favoriteFeedbackGeneration = 4L)
+            state = state.copy(
+                favoriteFeedback = SmileyFavoriteFeedback.LocalAdded,
+                favoriteFeedbackGeneration = 4L, favoriteFeedbackEmission = 4L,
+            )
         }
         restoration.emulateSavedInstanceStateRestore()
         compose.runOnIdle { assertNull(feedback) }

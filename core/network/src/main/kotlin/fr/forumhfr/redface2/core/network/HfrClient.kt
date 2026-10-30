@@ -615,6 +615,17 @@ class HfrClient @Inject constructor(
         return anonymous.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
+    /** #1154 — public Wiki detail, without cookies. Never log the HTML response body. */
+    suspend fun getSmileyWikiDetail(token: String): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("wikismilies.php")
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("detail", token)
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        return anonymous.newDiagnosticCall(request).executeAuthenticatedHtml()
+    }
+
     /**
      * Phase 2G-A/B (#150 partiel) — fetches HFR's search result page.
      *

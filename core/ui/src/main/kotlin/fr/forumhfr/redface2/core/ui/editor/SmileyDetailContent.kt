@@ -28,8 +28,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.saveable.listSaver
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.FilterQuality
@@ -66,7 +64,9 @@ internal fun SmileyDetailContent(
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             SmileyDetailHeader(smiley, state)
-            // Future Wiki metadata belongs between the header and the insertion action (#1154 lot 2).
+            if (smiley.source != EditorSmileySource.BUILTIN) {
+                SmileyWikiKeywordsContent(state.wikiKeywords) { state.onWikiKeywordsRetry?.invoke() }
+            }
             Button(
                 onClick = { onSmileyClicked(smiley.token) },
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
@@ -83,24 +83,16 @@ internal fun SmileyDetailContent(
     }
 }
 
-/** Only feedback newer than entry belongs to this visit, even after restoring the detail. */
+/** Completion identity and entry order live with the detail in the controller, including rotation. */
 @Composable
 internal fun rememberSmileyDetailFeedback(
     smiley: EditorSmiley,
     state: SmileyPickerState.Open,
 ): SmileyFavoriteFeedback? {
-    // Token identity survives membership changes. Leaving detail drops this slot; rotation saves it
-    // so a result already displayed stays visible. Save the token too: restored inputs are not checked.
-    val generationAtEntry = rememberSaveable(
-        smiley.token,
-        saver = listSaver<Long, Any>(
-            save = { listOf(smiley.token, it) },
-            restore = { saved ->
-                (saved[1] as Long).takeIf { saved[0] == smiley.token && it <= state.favoriteFeedbackGeneration }
-            },
-        ),
-    ) { state.favoriteFeedbackGeneration }
-    return state.favoriteFeedback.takeIf { state.favoriteFeedbackGeneration > generationAtEntry }
+    return state.favoriteFeedback.takeIf {
+        state.favoriteFeedbackToken == smiley.token &&
+            state.favoriteFeedbackEmission > state.detailFeedbackEmissionAtEntry
+    }
 }
 
 @Composable
