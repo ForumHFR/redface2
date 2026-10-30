@@ -17,13 +17,18 @@ import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.withContext
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -53,6 +58,7 @@ class ProfileViewModelTest {
         // synchronously, matching the test pattern used in FlagsViewModelTest.
         Dispatchers.setMain(UnconfinedTestDispatcher())
         repository = mockk()
+        coEvery { repository.getUserConfiguration(any()) } returns Result.success(emptyList())
         blacklist = FakeBlacklistRepository()
     }
 
@@ -83,7 +89,7 @@ class ProfileViewModelTest {
         userId = userId,
         pseudoHint = pseudo,
         avatarUrlHint = avatarUrl,
-    )
+    ).also { it.onOpened() }
 
     @Test
     fun `initial state has correct hints`() = runTest {
@@ -229,6 +235,210 @@ class ProfileViewModelTest {
         createViewModel()
 
         coVerify(exactly = 1) { repository.getProfile(54596) }
+    }
+
+    @Test
+    fun `a slow configuration never delays the loaded profile`() = runTest {
+        val configuration = CompletableDeferred<Result<List<String>>>()
+        coEvery { repository.getProfile(54596) } returns Result.success(dummyProfile)
+        coEvery { repository.getUserConfiguration("XaTriX") } coAnswers { configuration.await() }
+
+        val vm = createViewModel()
+
+        assertEquals(ProfileUiState.Mode.Loaded(dummyProfile), vm.state.value.mode)
+        assertEquals(ProfileUiState.Configuration.Loading, vm.state.value.configuration)
+        configuration.complete(Result.success(listOf("PC", "Écran")))
+        runCurrent()
+        assertEquals(ProfileUiState.Configuration.Loaded(listOf("PC", "Écran")), vm.state.value.configuration)
+        coVerify(exactly = 1) { repository.getUserConfiguration("XaTriX") }
+    }
+
+    @Test
+    fun `configuration loads before the profile and survives its failure`() = runTest {
+        val profile = CompletableDeferred<Result<UserProfile>>()
+        coEvery { repository.getProfile(54596) } coAnswers { profile.await() }
+        coEvery { repository.getUserConfiguration("XaTriX") } returns Result.success(listOf("PC"))
+
+        val vm = createViewModel()
+
+        assertEquals(ProfileUiState.Mode.Loading, vm.state.value.mode)
+        assertEquals(ProfileUiState.Configuration.Loaded(listOf("PC")), vm.state.value.configuration)
+        profile.complete(Result.failure(IOException("offline")))
+        runCurrent()
+        assertTrue(vm.state.value.mode is ProfileUiState.Mode.Error)
+        assertEquals(ProfileUiState.Configuration.Loaded(listOf("PC")), vm.state.value.configuration)
+    }
+
+    @Test
+    fun `configuration retry only reloads configuration and exposes its loading state`() = runTest {
+        val retry = CompletableDeferred<Result<List<String>>>()
+        coEvery { repository.getProfile(54596) } returns Result.success(dummyProfile)
+        coEvery { repository.getUserConfiguration("XaTriX") } returns Result.failure(IOException("offline"))
+        val vm = createViewModel()
+        assertEquals(ProfileUiState.Configuration.Error, vm.state.value.configuration)
+
+        coEvery { repository.getUserConfiguration("XaTriX") } coAnswers { retry.await() }
+        vm.onIntent(ProfileIntent.RetryConfiguration)
+
+        assertEquals(ProfileUiState.Configuration.Loading, vm.state.value.configuration)
+        assertEquals(ProfileUiState.Mode.Loaded(dummyProfile), vm.state.value.mode)
+        retry.complete(Result.success(emptyList()))
+        runCurrent()
+        assertEquals(ProfileUiState.Configuration.Loaded(emptyList()), vm.state.value.configuration)
+        coVerify(exactly = 1) { repository.getProfile(54596) }
+        coVerify(exactly = 2) { repository.getUserConfiguration("XaTriX") }
+    }
+
+    @Test
+    fun `a canonical pseudo correction cancels the stale configuration load`() = runTest {
+        val profile = CompletableDeferred<Result<UserProfile>>()
+        val stale = CompletableDeferred<Result<List<String>>>()
+        coEvery { repository.getProfile(54596) } coAnswers { profile.await() }
+        coEvery { repository.getUserConfiguration("OldHint") } coAnswers { stale.await() }
+        coEvery { repository.getUserConfiguration("XaTriX") } returns Result.success(listOf("Current PC"))
+        val vm = createViewModel(pseudo = "OldHint")
+
+        profile.complete(Result.success(dummyProfile))
+        runCurrent()
+        stale.complete(Result.success(listOf("Stale PC")))
+        runCurrent()
+
+        assertEquals(ProfileUiState.Configuration.Loaded(listOf("Current PC")), vm.state.value.configuration)
+        coVerify(exactly = 1) { repository.getUserConfiguration("OldHint") }
+        coVerify(exactly = 1) { repository.getUserConfiguration("XaTriX") }
+    }
+
+    @Test
+    fun `missing hint waits for a usable pseudo from the profile`() = runTest {
+        val profile = CompletableDeferred<Result<UserProfile>>()
+        coEvery { repository.getProfile(54596) } coAnswers { profile.await() }
+        val vm = createViewModel(pseudo = "?")
+        coVerify(exactly = 0) { repository.getUserConfiguration(any()) }
+
+        profile.complete(Result.success(dummyProfile))
+        runCurrent()
+
+        coVerify(exactly = 1) { repository.getUserConfiguration("XaTriX") }
+        assertEquals(ProfileUiState.Configuration.Loaded(emptyList()), vm.state.value.configuration)
+    }
+
+    @Test
+    fun `repeated configuration retry cancels a pending attempt`() = runTest {
+        val stale = CompletableDeferred<Result<List<String>>>()
+        coEvery { repository.getProfile(54596) } returns Result.success(dummyProfile)
+        coEvery { repository.getUserConfiguration("XaTriX") } coAnswers { stale.await() }
+        val vm = createViewModel()
+        coEvery { repository.getUserConfiguration("XaTriX") } returns Result.success(listOf("Current PC"))
+
+        vm.onIntent(ProfileIntent.RetryConfiguration)
+        stale.complete(Result.success(listOf("Stale PC")))
+        runCurrent()
+
+        assertEquals(ProfileUiState.Configuration.Loaded(listOf("Current PC")), vm.state.value.configuration)
+        coVerify(exactly = 2) { repository.getUserConfiguration("XaTriX") }
+    }
+
+    @Test
+    fun `closing cancels the request and ignores its late success while another member is open`() = runTest {
+        val stale = CompletableDeferred<Result<List<String>>>()
+        var requestJob: Job? = null
+        var lateResponseReturned = false
+        coEvery { repository.getProfile(54596) } returns Result.success(dummyProfile)
+        coEvery { repository.getUserConfiguration("XaTriX") } coAnswers {
+            requestJob = currentCoroutineContext()[Job]
+            val result = withContext(NonCancellable) { stale.await() }
+            lateResponseReturned = true
+            result
+        }
+        val vm = createViewModel()
+
+        vm.onClosed()
+
+        assertTrue(requireNotNull(requestJob).isCancelled)
+        val otherProfile = dummyProfile.copy(userId = 123, pseudo = "OtherMember")
+        coEvery { repository.getProfile(123) } returns Result.success(otherProfile)
+        coEvery { repository.getUserConfiguration("OtherMember") } returns Result.success(listOf("Other PC"))
+        val otherVm = createViewModel(userId = 123, pseudo = "OtherMember")
+        stale.complete(Result.success(listOf("Stale PC")))
+        runCurrent()
+
+        assertTrue("the cancelled repository call still returned its response", lateResponseReturned)
+        assertEquals(ProfileUiState.Configuration.Loaded(emptyList()), vm.state.value.configuration)
+        assertEquals(ProfileUiState.Configuration.Loaded(listOf("Other PC")), otherVm.state.value.configuration)
+
+        val fresh = CompletableDeferred<Result<List<String>>>()
+        coEvery { repository.getUserConfiguration("XaTriX") } coAnswers { fresh.await() }
+        vm.onOpened()
+
+        assertEquals(ProfileUiState.Configuration.Loading, vm.state.value.configuration)
+        coVerify(exactly = 2) { repository.getUserConfiguration("XaTriX") }
+        fresh.complete(Result.success(listOf("Fresh PC")))
+        runCurrent()
+        assertEquals(ProfileUiState.Configuration.Loaded(listOf("Fresh PC")), vm.state.value.configuration)
+    }
+
+    @Test
+    fun `late failure from a closed opening cannot replace the reopened loading state`() = runTest {
+        val stale = CompletableDeferred<Result<List<String>>>()
+        val fresh = CompletableDeferred<Result<List<String>>>()
+        coEvery { repository.getProfile(54596) } returns Result.success(dummyProfile)
+        coEvery { repository.getUserConfiguration("XaTriX") } coAnswers {
+            withContext(NonCancellable) { stale.await() }
+        }
+        val vm = createViewModel()
+        vm.onClosed()
+        coEvery { repository.getUserConfiguration("XaTriX") } coAnswers { fresh.await() }
+        vm.onOpened()
+
+        stale.complete(Result.failure(IOException("late failure")))
+        runCurrent()
+
+        assertEquals(ProfileUiState.Configuration.Loading, vm.state.value.configuration)
+        fresh.complete(Result.success(listOf("Fresh PC")))
+        runCurrent()
+        assertEquals(ProfileUiState.Configuration.Loaded(listOf("Fresh PC")), vm.state.value.configuration)
+        coVerify(exactly = 2) { repository.getUserConfiguration("XaTriX") }
+    }
+
+    @Test
+    fun `a late profile response and retry cannot load configuration while closed`() = runTest {
+        val profile = CompletableDeferred<Result<UserProfile>>()
+        coEvery { repository.getProfile(54596) } coAnswers { profile.await() }
+        val vm = createViewModel(pseudo = "OldHint")
+        vm.onClosed()
+
+        profile.complete(Result.success(dummyProfile))
+        runCurrent()
+        vm.onIntent(ProfileIntent.RetryConfiguration)
+
+        coVerify(exactly = 1) { repository.getUserConfiguration("OldHint") }
+        coVerify(exactly = 0) { repository.getUserConfiguration("XaTriX") }
+        assertEquals(ProfileUiState.Configuration.Loaded(emptyList()), vm.state.value.configuration)
+
+        vm.onOpened()
+
+        coVerify(exactly = 1) { repository.getUserConfiguration("XaTriX") }
+    }
+
+    @Test
+    fun `successful configuration is reused only within the same opening`() = runTest {
+        coEvery { repository.getProfile(54596) } returns Result.success(dummyProfile)
+        coEvery { repository.getUserConfiguration("XaTriX") } returnsMany listOf(
+            Result.success(listOf("First PC")),
+            Result.success(listOf("Updated PC")),
+        )
+        val vm = createViewModel()
+
+        vm.onOpened()
+
+        coVerify(exactly = 1) { repository.getUserConfiguration("XaTriX") }
+        assertEquals(ProfileUiState.Configuration.Loaded(listOf("First PC")), vm.state.value.configuration)
+        vm.onClosed()
+        assertEquals(ProfileUiState.Configuration.Loaded(emptyList()), vm.state.value.configuration)
+        vm.onOpened()
+
+        coVerify(exactly = 2) { repository.getUserConfiguration("XaTriX") }
+        assertEquals(ProfileUiState.Configuration.Loaded(listOf("Updated PC")), vm.state.value.configuration)
     }
 
     @Test

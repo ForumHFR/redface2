@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -19,10 +21,12 @@ import androidx.compose.material3.SheetState
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -72,9 +76,8 @@ fun ProfilePreviewSheet(
     // whose `ViewModelStoreOwner` is the Activity (shared across every profile sheet open).
     // Without an explicit key, Hilt caches the first instance and skips `creationCallback`,
     // so tapping a different profile would show the first profile. With the key, each userId
-    // gets a distinct Activity-scoped VM; reopening the same user reuses its last loaded state
-    // until Activity destruction. That is an accepted MVP trade-off until a profile cache /
-    // shared sheet-page owner is introduced.
+    // gets a distinct Activity-scoped VM. The profile stays cached until Activity destruction;
+    // configuration loading is scoped to this opening by DisposableEffect below.
     viewModel: ProfileViewModel = hiltViewModel<ProfileViewModel, ProfileViewModel.Factory>(
         key = "profile-$userId",
         creationCallback = { factory ->
@@ -86,36 +89,46 @@ fun ProfilePreviewSheet(
         },
     ),
 ) {
+    DisposableEffect(viewModel) {
+        viewModel.onOpened()
+        onDispose { viewModel.onClosed() }
+    }
     val state by viewModel.state.collectAsStateWithLifecycle()
-    // Review feedback M5: `skipPartiallyExpanded = false` was redundant — that's the
-    // default for `rememberModalBottomSheetState`. Removed the explicit argument.
+    ProfilePreviewSheetContent(
+        state = state,
+        onIntent = viewModel::onIntent,
+        onDismiss = onDismiss,
+        onOpenFullProfile = {
+            val profile = (state.mode as? ProfileUiState.Mode.Loaded)?.profile
+            onOpenFullProfile(userId, profile?.pseudo ?: pseudoHint, profile?.avatarUrl ?: avatarUrlHint)
+        },
+    )
+}
+
+/** Stateless sheet entry point, also exercised by the Robolectric layout tests. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun ProfilePreviewSheetContent(
+    state: ProfileUiState,
+    onIntent: (ProfileIntent) -> Unit,
+    onDismiss: () -> Unit,
+    onOpenFullProfile: () -> Unit,
+) {
     val sheetState = rememberModalBottomSheetState()
     val coroutineScope = rememberCoroutineScope()
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
+        modifier = Modifier.testTag("profile_preview_sheet"),
     ) {
         ProfilePreviewContent(
             state = state,
-            pseudoHint = pseudoHint,
-            avatarUrlHint = avatarUrlHint,
-            onIntent = viewModel::onIntent,
+            onIntent = onIntent,
             onOpenFullProfile = {
-                val pseudo = (state.mode as? ProfileUiState.Mode.Loaded)
-                    ?.profile
-                    ?.pseudo
-                    ?: pseudoHint
-                val avatarUrl = (state.mode as? ProfileUiState.Mode.Loaded)
-                    ?.profile
-                    ?.avatarUrl
-                    ?: avatarUrlHint
-                // Review feedback I4: animate `hide()` first, then fire the navigation
-                // callback once the sheet is actually off-screen. The previous code
-                // nulled `profileSheetRequest` synchronously inside the host, snapping
-                // the sheet away without the slide-down animation Material 3 ships.
+                // Review feedback I4: animate hide() before navigating to the full profile.
                 hideThenNavigate(coroutineScope, sheetState) {
-                    onOpenFullProfile(userId, pseudo, avatarUrl)
+                    onOpenFullProfile()
                 }
             },
         )
@@ -144,8 +157,6 @@ private fun hideThenNavigate(
 @Composable
 private fun ProfilePreviewContent(
     state: ProfileUiState,
-    pseudoHint: String,
-    avatarUrlHint: String?,
     onIntent: (ProfileIntent) -> Unit,
     onOpenFullProfile: () -> Unit,
 ) {
@@ -153,17 +164,37 @@ private fun ProfilePreviewContent(
         modifier = Modifier
             .padding(horizontal = 16.dp, vertical = 8.dp)
             .navigationBarsPadding()
-            .fillMaxWidth(),
+            .fillMaxWidth()
+            .verticalScroll(rememberScrollState()),
     ) {
+        ProfilePreviewDetails(state = state, onIntent = onIntent)
+
+        Spacer(Modifier.height(16.dp))
+
+        ProfilePreviewActions(state, onIntent, onOpenFullProfile)
+
+        // Keep the original action order above the optional configuration. The whole card scrolls
+        // and M3 retains its partial/expanded anchors, including in landscape and with large fonts.
+        ProfileConfigurationSection(
+            configuration = state.configuration,
+            onRetry = { onIntent(ProfileIntent.RetryConfiguration) },
+            collapsed = true,
+        )
+    }
+}
+
+@Composable
+private fun ProfilePreviewDetails(state: ProfileUiState, onIntent: (ProfileIntent) -> Unit) {
+    Column {
         when (val mode = state.mode) {
             ProfileUiState.Mode.Loading -> {
-                ProfilePreviewHero(pseudo = pseudoHint, avatarUrl = avatarUrlHint)
+                ProfilePreviewHero(pseudo = state.pseudoHint, avatarUrl = state.avatarUrlHint)
                 Spacer(Modifier.height(16.dp))
                 CircularProgressIndicator(modifier = Modifier.align(Alignment.CenterHorizontally))
             }
 
             is ProfileUiState.Mode.Error -> {
-                ProfilePreviewHero(pseudo = pseudoHint, avatarUrl = avatarUrlHint)
+                ProfilePreviewHero(pseudo = state.pseudoHint, avatarUrl = state.avatarUrlHint)
                 Spacer(Modifier.height(8.dp))
                 Text(
                     // Review feedback I7: localised via stringResource ; the ViewModel
@@ -188,9 +219,16 @@ private fun ProfilePreviewContent(
                 ProfilePreviewLoaded(profile = mode.profile)
             }
         }
+    }
+}
 
-        Spacer(Modifier.height(16.dp))
-
+@Composable
+private fun ProfilePreviewActions(
+    state: ProfileUiState,
+    onIntent: (ProfileIntent) -> Unit,
+    onOpenFullProfile: () -> Unit,
+) {
+    Column {
         Button(
             onClick = onOpenFullProfile,
             modifier = Modifier.fillMaxWidth(),

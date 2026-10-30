@@ -37,9 +37,18 @@ data class ProfileUiState(
      * is pointless).
      */
     val isOwnProfile: Boolean = false,
+    /** #1467 — auxiliary anonymous load; never gates [mode] or the profile actions. */
+    val configuration: Configuration = Configuration.Loaded(emptyList()),
 ) {
     /** #509 — the blacklist toggle is shown only on someone else's profile, and gated by its own write. */
     val canToggleBlocked: Boolean get() = !isOwnProfile && !isUpdatingBlocked
+
+    sealed interface Configuration {
+        data object Loading : Configuration
+        data class Loaded(val lines: List<String>) : Configuration
+        data object Error : Configuration
+    }
+
     sealed interface Mode {
         data object Loading : Mode
 
@@ -74,6 +83,8 @@ data class ProfileUiState(
 
 sealed interface ProfileIntent {
     data object Retry : ProfileIntent
+
+    data object RetryConfiguration : ProfileIntent
 
     /** #509 — add or remove this user from the local blacklist (toggles on [ProfileUiState.isBlocked]). */
     data object ToggleBlocked : ProfileIntent

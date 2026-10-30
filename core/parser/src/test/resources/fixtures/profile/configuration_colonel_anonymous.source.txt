@@ -1,0 +1,5 @@
+https://forum.hardware.fr/configuration.php?config=hfr.inc&pseudo=Colonel%20MythO
+Saved: 2026-10-30 (anonymous session, no cookies; public capture supplied for #1467)
+Notes: pseudo containing a space; the supplied capture contains 12 non-empty lines (including audio).
+Reduced to h4.Ext and configuration rows of table.main. Styles, search form and navigation removed.
+CR line endings normalized; public hardware text preserved. No cookies, tokens, emails or local paths.

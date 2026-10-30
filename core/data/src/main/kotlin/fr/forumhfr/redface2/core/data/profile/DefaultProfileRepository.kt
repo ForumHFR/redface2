@@ -47,6 +47,17 @@ class DefaultProfileRepository @Inject constructor(
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : ProfileRepository {
 
+    override suspend fun getUserConfiguration(pseudo: String): Result<List<String>> =
+        withContext(ioDispatcher) {
+            val lines = runCatching {
+                parser.parseUserConfiguration(client.getUserConfiguration(pseudo))
+            }.getOrElse { error ->
+                if (error is CancellationException) throw error
+                return@withContext Result.failure(error)
+            }
+            Result.success(lines)
+        }
+
     override suspend fun getProfile(userId: Int): Result<UserProfile> =
         withContext(ioDispatcher) {
             try {

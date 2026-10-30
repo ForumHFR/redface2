@@ -22,6 +22,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -79,6 +80,10 @@ fun ProfileRoute(
             )
         },
     )
+    DisposableEffect(viewModel) {
+        viewModel.onOpened()
+        onDispose { viewModel.onClosed() }
+    }
     val state by viewModel.state.collectAsStateWithLifecycle()
     ProfileScreen(
         state = state,
@@ -181,6 +186,11 @@ internal fun ProfileScreen(
                     )
                 }
             }
+            ProfileConfigurationSection(
+                configuration = state.configuration,
+                onRetry = { onIntent(ProfileIntent.RetryConfiguration) },
+            )
+            Spacer(Modifier.height(16.dp))
         }
     }
 }

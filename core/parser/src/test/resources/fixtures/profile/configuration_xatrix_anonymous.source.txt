@@ -1,0 +1,5 @@
+https://forum.hardware.fr/configuration.php?config=hfr.inc&pseudo=XaTriX
+Saved: 2026-10-30 (anonymous session, no cookies; public capture supplied for #1467)
+Notes: reduced to the original h4.Ext and table.main, including its search form (empty hash_check); 12 non-empty lines.
+Removed: stylesheets, wrappers and return link. CR line endings and form indentation normalized.
+Public hardware text preserved; no cookies, tokens, emails or local paths.

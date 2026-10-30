@@ -227,6 +227,9 @@ class AppAccountViewModelTest {
     private class FakeProfileRepository(
         private val avatarByUserId: Map<Int, String?> = emptyMap(),
     ) : ProfileRepository {
+        override suspend fun getUserConfiguration(pseudo: String): Result<List<String>> =
+            error("AppAccountViewModel must not fetch hardware configurations")
+
         var getProfileCallCount: Int = 0
             private set
 
