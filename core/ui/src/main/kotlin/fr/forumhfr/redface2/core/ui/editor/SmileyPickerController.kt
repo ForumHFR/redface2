@@ -1,5 +1,10 @@
 package fr.forumhfr.redface2.core.ui.editor
 
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.diagnostics.SmileyDetailCloseCause
+import fr.forumhfr.redface2.core.domain.diagnostics.SmileyKeywordsOutcome
+import fr.forumhfr.redface2.core.domain.diagnostics.SmileyPickerCloseCause
+import fr.forumhfr.redface2.core.domain.diagnostics.SmileyPickerDiagnostics
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.EditorSmileySource
 import fr.forumhfr.redface2.core.model.HfrFavoriteSmileyMutationResult
@@ -54,6 +59,8 @@ import kotlinx.coroutines.launch
  * record a diagnostics WARN — class name only, never the query nor the userId — while the MP
  * composers keep the no-op default).
  */
+// Repository callbacks and the optional shared diagnostics sink are independent host dependencies.
+@Suppress("LongParameterList")
 class SmileyPickerController(
     private val scope: CoroutineScope,
     private val searchWiki: suspend (userId: Int, query: String) -> List<EditorSmiley>,
@@ -61,7 +68,10 @@ class SmileyPickerController(
     private val onSearchFailed: (Throwable) -> Unit = {},
     private val favoriteSources: SmileyPickerFavoriteSources = SmileyPickerFavoriteSources(),
     private val wikiKeywords: SmileyWikiKeywordsSource = SmileyWikiKeywordsSource(),
+    diagnostics: DiagnosticsLog? = null,
 ) {
+
+    private val pickerDiagnostics = SmileyPickerDiagnostics(diagnostics)
 
     private val _state = MutableStateFlow<SmileyPickerState>(SmileyPickerState.Hidden)
     val state: StateFlow<SmileyPickerState> = _state.asStateFlow()
@@ -153,6 +163,7 @@ class SmileyPickerController(
             onDetailChange = ::onDetailChanged,
             onWikiKeywordsRetry = ::retryWikiKeywords,
             usageCounts = localSnapshot.usageCounts.takeIf { localSnapshot.owner != null }.orEmpty(),
+            diagnostics = pickerDiagnostics,
         )
     }
 
@@ -165,6 +176,11 @@ class SmileyPickerController(
     private var lastDismissed: SmileyPickerState.Open? = null
 
     fun open() {
+        val before = _state.value
+        if (before is SmileyPickerState.Hidden) pickerDiagnostics.sheetOpened()
+        if ((before as? SmileyPickerState.Open)?.detailSmiley != null) {
+            pickerDiagnostics.detailClosed(SmileyDetailCloseCause.REOPEN)
+        }
         cancelKeywords()
         _state.update { current ->
             if (current is SmileyPickerState.Open) {
@@ -181,8 +197,14 @@ class SmileyPickerController(
 
     /** Null returns to the grid without dismissing the sheet or changing the live search. */
     fun onDetailChanged(smiley: EditorSmiley?) {
-        if (_state.value !is SmileyPickerState.Open) return
+        val before = _state.value as? SmileyPickerState.Open ?: return
+        if (before.detailSmiley != null) {
+            val cause = if (smiley == null) SmileyDetailCloseCause.BACK else SmileyDetailCloseCause.REPLACED
+            pickerDiagnostics.detailClosed(cause)
+        }
+        if (smiley != null) pickerDiagnostics.detailOpened(smiley.source == EditorSmileySource.BUILTIN)
         cancelKeywords()
+        val started = pickerDiagnostics.keywordsStarted()
         val keywords = when {
             smiley == null || smiley.source == EditorSmileySource.BUILTIN -> SmileyWikiKeywordsState.Hidden
             else -> wikiKeywords.cached(smiley.token)?.let { SmileyWikiKeywordsState.Loaded(it.keywords) }
@@ -195,6 +217,9 @@ class SmileyPickerController(
                 wikiKeywords = keywords,
                 detailFeedbackEmissionAtEntry = favoriteFeedbackEmission,
             )
+        }
+        if (keywords is SmileyWikiKeywordsState.Loaded) {
+            pickerDiagnostics.keywordsFinished(keywords.keywords.outcome(), started, cached = true)
         }
         if (smiley != null && keywords == SmileyWikiKeywordsState.Loading) loadWikiKeywords(smiley.token)
     }
@@ -217,19 +242,29 @@ class SmileyPickerController(
     private fun loadWikiKeywords(token: String) {
         val generation = detailGeneration
         keywordsJob = scope.launch {
+            val started = pickerDiagnostics.keywordsStarted()
             val result = runCatching { wikiKeywords.load(token) }.getOrElse { error ->
                 if (error is CancellationException) throw error
                 SmileyWikiKeywordsResult.Failed
             }
-            _state.update { current ->
-                val open = current as? SmileyPickerState.Open ?: return@update current
-                // A cancelled/non-cooperative callback cannot update another visit, even to the same token.
-                if (generation != detailGeneration || open.detailSmiley?.token != token) return@update current
-                open.copy(wikiKeywords = when (result) {
-                    is SmileyWikiKeywordsResult.Loaded -> SmileyWikiKeywordsState.Loaded(result.keywords)
-                    SmileyWikiKeywordsResult.NotApplicable -> SmileyWikiKeywordsState.Hidden
-                    SmileyWikiKeywordsResult.Failed -> SmileyWikiKeywordsState.Failed
-                })
+            val visit = _state.value as? SmileyPickerState.Open
+            if (generation == detailGeneration && visit?.detailSmiley?.token == token) {
+                val outcome = when (result) {
+                    is SmileyWikiKeywordsResult.Loaded -> result.keywords.outcome()
+                    SmileyWikiKeywordsResult.Failed -> SmileyKeywordsOutcome.FAILED
+                    SmileyWikiKeywordsResult.NotApplicable -> SmileyKeywordsOutcome.NOT_APPLICABLE
+                }
+                pickerDiagnostics.keywordsFinished(outcome, started)
+                _state.update { current ->
+                    val open = current as? SmileyPickerState.Open ?: return@update current
+                    // A cancelled/non-cooperative callback cannot update another visit, even to the same token.
+                    if (generation != detailGeneration || open.detailSmiley?.token != token) return@update current
+                    open.copy(wikiKeywords = when (result) {
+                        is SmileyWikiKeywordsResult.Loaded -> SmileyWikiKeywordsState.Loaded(result.keywords)
+                        SmileyWikiKeywordsResult.NotApplicable -> SmileyWikiKeywordsState.Hidden
+                        SmileyWikiKeywordsResult.Failed -> SmileyWikiKeywordsState.Failed
+                    })
+                }
             }
         }
     }
@@ -299,7 +334,12 @@ class SmileyPickerController(
     }
 
     private fun publishFavorites(resetDetail: Boolean = false) {
-        if (resetDetail) cancelKeywords()
+        if (resetDetail) {
+            if ((_state.value as? SmileyPickerState.Open)?.detailSmiley != null) {
+                pickerDiagnostics.detailClosed(SmileyDetailCloseCause.ACCOUNT_CHANGED)
+            }
+            cancelKeywords()
+        }
         _state.update { current ->
             val open = current as? SmileyPickerState.Open ?: return@update current
             withFavorites(if (resetDetail) {
@@ -367,7 +407,9 @@ class SmileyPickerController(
         confirmedFavorites = FavoriteSnapshot(formGeneration, confirmed, removed - confirmedTokens)
     }
 
-    fun dismiss() {
+    fun dismiss() = dismiss(SmileyPickerCloseCause.CONTROLLER)
+
+    fun dismiss(cause: SmileyPickerCloseCause) {
         cancelKeywords()
         searchJob?.cancel()
         searchJob = null
@@ -378,6 +420,8 @@ class SmileyPickerController(
         // one editing session is acceptable (issue #824, immediate-reopen use case).
         val current = _state.value
         if (current is SmileyPickerState.Open) {
+            if (current.detailSmiley != null) pickerDiagnostics.detailClosed(SmileyDetailCloseCause.SHEET_CLOSED)
+            pickerDiagnostics.sheetClosed(cause)
             // End the first opening that displayed this feedback; hidden failures wait for an opening.
             favoriteFeedback = null
             lastDismissed = current.copy(
@@ -454,3 +498,5 @@ class SmileyPickerController(
         const val MIN_WIKI_QUERY_LENGTH = 3
     }
 }
+
+private fun List<String>.outcome() = if (isEmpty()) SmileyKeywordsOutcome.EMPTY else SmileyKeywordsOutcome.LOADED

@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.ui.editor
 
+import fr.forumhfr.redface2.core.domain.diagnostics.SmileyPickerDiagnostics
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.EditorSmileySource
 
@@ -49,6 +50,8 @@ sealed interface SmileyPickerState {
         val favoriteFeedbackEmission: Long = 0L,
         /** Captured at the gesture, before composition can receive an already-completed mutation. */
         val detailFeedbackEmissionAtEntry: Long = 0L,
+        /** Same sink as the controller; UI records only sheet geometry and gesture causes. */
+        val diagnostics: SmileyPickerDiagnostics? = null,
     ) : SmileyPickerState {
         /** The detail can show an eligible action's pending state while mutations remain blocked. */
         fun favoriteAction(smiley: EditorSmiley, includePending: Boolean = false): SmileyFavoriteAction? = when {

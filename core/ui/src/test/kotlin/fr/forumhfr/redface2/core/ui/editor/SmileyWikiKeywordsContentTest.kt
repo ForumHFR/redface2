@@ -1,7 +1,11 @@
 package fr.forumhfr.redface2.core.ui.editor
 
 import android.content.Context
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -10,12 +14,19 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.test.core.app.ApplicationProvider
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
 import coil3.ColorImage
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
@@ -41,7 +52,7 @@ import org.robolectric.annotation.GraphicsMode
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
+@Config(sdk = [34], qualifiers = "w360dp-h760dp-xxhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class SmileyWikiKeywordsContentTest {
     @get:Rule
@@ -86,22 +97,97 @@ class SmileyWikiKeywordsContentTest {
     }
 
     @Test
-    fun `keywords wrap below memberships before the insertion action`() {
+    fun `overflow is limited to two measured rows and can be expanded and collapsed`() {
         val keywords = (1..18).map { "mot-clé-$it" }
-        state = state.copy(
-            wikiKeywords = SmileyWikiKeywordsState.Loaded(keywords), localFavoriteTokens = setOf(perso.token),
-        )
-        mount()
-        val membership = text(R.string.editor_smiley_detail_local_favorite).getUnclippedBoundsInRoot()
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                Box(Modifier.width(328.dp)) {
+                    SmileyWikiKeywordsContent(SmileyWikiKeywordsState.Loaded(keywords)) {}
+                }
+            }
+        }
         val heading = title().getUnclippedBoundsInRoot()
         val first = compose.onNodeWithText(keywords.first()).getUnclippedBoundsInRoot()
-        val last = compose.onNodeWithText(keywords.last()).getUnclippedBoundsInRoot()
-        val insert = text(R.string.editor_smiley_detail_insert).getUnclippedBoundsInRoot()
-        assertTrue(membership.bottom <= heading.top)
         assertTrue(heading.bottom <= first.top)
-        assertTrue(first.top < last.top)
-        assertTrue(last.bottom <= insert.top)
-        text(R.string.editor_smiley_detail_insert).performScrollTo().assertIsDisplayed()
+        val visible = keywords.map { compose.onNodeWithText(it) }.filter { it.isDisplayed() }
+        assertEquals(2, visible.map { it.getUnclippedBoundsInRoot().top }.distinct().size)
+        compose.onNodeWithText(keywords.last()).assertIsNotDisplayed()
+        val expand = context.getString(R.string.editor_smiley_wiki_keywords_expand, keywords.size)
+        compose.onNodeWithText(expand).assertIsDisplayed().performClick()
+        compose.onNodeWithText(keywords.last()).assertIsDisplayed()
+        text(R.string.editor_smiley_wiki_keywords_collapse).performClick()
+        compose.onNodeWithText(keywords.last()).assertIsNotDisplayed()
+        compose.onNodeWithText(expand).assertIsDisplayed()
+    }
+
+    @Test
+    fun `all commands fit without scrolling at 360 by 760 with ten keywords and both memberships`() {
+        state = state.copy(
+            favoriteSmileys = listOf(perso), localFavoriteTokens = setOf(perso.token),
+            onLocalFavoriteChange = {}, onFavoriteChange = {},
+            wikiKeywords = SmileyWikiKeywordsState.Loaded(
+                listOf("feu", "feux", "fire", "brule", "bruler", "burn", "chaud", "hot", "cramer", "cramé"),
+            ),
+        )
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                SmileyPickerSheet(state, {}, {}, {})
+            }
+        }
+        val viewport = compose.onNodeWithTag("smiley_detail_viewport")
+        val bounds = viewport.getUnclippedBoundsInRoot()
+        listOf(
+            R.string.editor_smiley_detail_insert, R.string.editor_smiley_detail_copy,
+            R.string.editor_smiley_local_favorite_remove, R.string.editor_smiley_favorite_remove,
+        ).forEach { resource ->
+            val action = text(resource).assertIsDisplayed().getUnclippedBoundsInRoot()
+            assertTrue("$resource top=$action viewport=$bounds", action.top >= bounds.top)
+            assertTrue("$resource bottom=$action viewport=$bounds", action.bottom <= bounds.bottom)
+        }
+        val scroll = viewport.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
+        assertEquals(0f, scroll.value(), 0f)
+        val lastAction = text(R.string.editor_smiley_favorite_remove).getUnclippedBoundsInRoot()
+        assertTrue(lastAction.bottom <= title().getUnclippedBoundsInRoot().top)
+    }
+
+    @Test
+    fun `short keyword lists have no expansion affordance`() {
+        state = state.copy(wikiKeywords = SmileyWikiKeywordsState.Loaded(listOf("feu", "hot")))
+        mount()
+        compose.onNodeWithText(context.getString(R.string.editor_smiley_wiki_keywords_expand, 2)).assertDoesNotExist()
+        text(R.string.editor_smiley_wiki_keywords_collapse).assertDoesNotExist()
+    }
+
+    @Test
+    fun `keywords have finite bounds when the parent width is unbounded`() {
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                Box(Modifier.width(328.dp).wrapContentWidth(unbounded = true)) {
+                    SmileyWikiKeywordsContent(SmileyWikiKeywordsState.Loaded(listOf("feu", "hot"))) {}
+                }
+            }
+        }
+        val first = compose.onNodeWithText("feu").assertIsDisplayed().getUnclippedBoundsInRoot()
+        val last = compose.onNodeWithText("hot").assertIsDisplayed().getUnclippedBoundsInRoot()
+        assertEquals(first.top, last.top)
+        assertTrue(last.right > first.right)
+    }
+
+    @Config(qualifiers = "w760dp-h360dp-xxhdpi")
+    @Test
+    fun `landscape with large font keeps every command reachable by scrolling`() {
+        state = state.copy(onLocalFavoriteChange = {}, onFavoriteChange = {})
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(LocalDensity provides Density(LocalDensity.current.density, 2f)) {
+                    SmileyPickerSheet(state, {}, {}, {})
+                }
+            }
+        }
+        listOf(
+            R.string.editor_smiley_detail_insert, R.string.editor_smiley_detail_copy,
+            R.string.editor_smiley_local_favorite_add, R.string.editor_smiley_favorite_add,
+        ).forEach { text(it).performScrollTo().assertIsDisplayed() }
     }
 
     @Test

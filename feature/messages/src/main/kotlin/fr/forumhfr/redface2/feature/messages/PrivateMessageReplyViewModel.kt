@@ -12,6 +12,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.diagnostics.SmileyPickerCloseCause
 import fr.forumhfr.redface2.core.domain.diagnostics.recordImagePickerEvent
 import fr.forumhfr.redface2.core.domain.diagnostics.recordImagesPicked
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
@@ -122,6 +123,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
      */
     // Keep before init: loadedForm's setter can run synchronously there and crash on an uninitialized picker.
     val smileyPicker = SmileyPickerController(
+        diagnostics = diagnostics,
         scope = viewModelScope,
         searchWiki = smileyRepository::searchWiki,
         wikiKeywords = SmileyWikiKeywordsSource(
@@ -472,7 +474,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                 ),
             )
         }
-        smileyPicker.dismiss()
+        smileyPicker.dismiss(SmileyPickerCloseCause.INSERTION)
         scheduleAutosave()
     }
 

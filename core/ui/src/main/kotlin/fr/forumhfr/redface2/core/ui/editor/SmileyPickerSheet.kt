@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.ui.editor
 import fr.forumhfr.redface2.core.ui.R
 
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -22,6 +23,7 @@ import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.LazyGridScope
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
@@ -30,6 +32,7 @@ import androidx.compose.material3.PrimaryTabRow
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
@@ -37,7 +40,10 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
@@ -51,12 +57,16 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.dismiss
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
@@ -65,12 +75,14 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil3.compose.AsyncImage
+import fr.forumhfr.redface2.core.domain.diagnostics.SmileyPickerCloseCause
 import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.EditorSmileySource
 import fr.forumhfr.redface2.core.ui.theme.LocalSmileyPickerDecoration
 import fr.forumhfr.redface2.core.ui.sheet.clampSheetTopOverscroll
+import kotlinx.coroutines.launch
 
 /**
  * Phase 2F-B (#11 partial) — bottom-sheet smiley picker. Promoted from `:feature:editor`
@@ -106,57 +118,114 @@ fun SmileyPickerSheet(
     val gridState = rememberSaveableStateHolder()
     val wikiAutofocus = rememberSaveable { mutableStateOf(state.detailSmiley == null) }
     val uiState = SmileyPickerUiState(wikiAutofocus, favoriteOverlayExpired)
+    val gestures = remember { SmileySheetGestures() }
+    val scope = rememberCoroutineScope()
     // #1193 — force skipPartiallyExpanded: the tall, scrollable picker otherwise anchors at M3's
     // PartiallyExpanded and its underdamped settle overshoots the top butée on opening. Same fix as
     // QuickReplySheet / MessageEditorComponents; scope is Fix 1 only (no tab/IME/search change).
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val height = remember { mutableIntStateOf(0) }
+    val density = LocalDensity.current
+    SmileySheetTrace(state.diagnostics, sheetState, height.intValue)
+    val currentDetailChange = rememberUpdatedState(state.onDetailChange)
+    val guardedDetailChange: (EditorSmiley?) -> Unit = remember(gestures) {
+        { smiley ->
+            if (smiley != null) gestures.openingDetail()
+            currentDetailChange.value?.invoke(smiley)
+        }
+    }
+    val dismissAnimated: (SmileyPickerCloseCause) -> Unit = { cause ->
+        scope.launch {
+            sheetState.hide()
+            if (!sheetState.isVisible) {
+                state.diagnostics?.dismissRequested(cause)
+                onDismiss()
+            }
+        }
+    }
     ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        modifier = modifier,
+        onDismissRequest = {
+            // M3 1.4.0 shares this callback between scrim, settle and system back. A preceding
+            // displacement cannot identify the event that actually closed it (scrim during settle).
+            state.diagnostics?.dismissRequested(SmileyPickerCloseCause.UNKNOWN)
+            onDismiss()
+        },
+        modifier = modifier.testTag("smiley_picker_sheet_layout").onSizeChanged {
+            height.intValue = with(density) { it.height.toDp().value.toInt() }
+        },
         sheetMaxWidth = SMILEY_SHEET_MAX_WIDTH,
         sheetState = sheetState,
+        // Own the handle's dismissal callback too: M3 otherwise merges it with scrim taps.
+        dragHandle = null,
     ) {
-        SmileyDetailBackHandler(state)
-        SmileyDetailFocusEffect(state.detailSmiley, wikiAutofocus)
-        val sheetTitle = stringResource(
-            if (state.detailSmiley == null) R.string.editor_smiley_title else R.string.editor_smiley_detail_title,
-        )
+        // M3 appends draggableAnchors AFTER its supplied modifier. Observe pointers and measure
+        // the visible sheet inside that offset, on a container surviving grid -> detail replacement.
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                // #1193 residual — swallow the upward overscroll left over at the Expanded anchor so
-                // the M3 spring settle cannot overshoot above it. Sits on the content wrapper
-                // (closest nested-scroll parent to the grid's LazyVerticalGrid), not the sheet.
-                .clampSheetTopOverscroll(sheetState)
-                // #900 — header density pass (tinc, DEV #2790993) : the VISIBLE « Smileys » title
-                // line is gone (the tabs already name the surface visually), spacing
-                // tightened 12 → 8 dp. The sheet keeps an ACCESSIBLE name through paneTitle —
-                // TalkBack still announces the surface (gate Sol r1). Touch targets keep 48 dp.
-                // #989 — the horizontal padding is a spike knob (rogner les marges = one of the
-                // levers on the cell width); the vertical one stays at the #900 value.
-                .padding(horizontal = layout.gridPadding, vertical = 8.dp)
-                .semantics { paneTitle = sheetTitle },
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            Modifier.fillMaxWidth().smileySheetGestures(gestures).testTag("smiley_picker_sheet"),
         ) {
-            val detail = state.detailSmiley
-            if (detail != null) {
-                val feedback = rememberSmileyDetailFeedback(detail, state)
-                SmileyDetailContent(detail, state, feedback, onSmileyClicked)
-                if (feedback != null) {
-                    // Only feedback actually composed in detail is consumed. A pending result
-                    // received after returning to the grid still gets its overlay.
-                    SideEffect { favoriteOverlayExpired.value = true }
-                }
-            } else {
-                // Removing the grid also removes its focus/semantics. Save its lazy positions,
-                // selected tab and Wiki TextFieldValue rather than composing an invisible grid.
-                gridState.SaveableStateProvider("grid") {
-                    SmileyPickerGridPage(
-                        state, onQueryChange, onSmileyClicked, layout, uiState,
-                    )
+            SmileySheetHandle(
+                onDismiss = { dismissAnimated(SmileyPickerCloseCause.SHEET_ACTION) },
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+            )
+            SmileyDetailBackHandler(state)
+            SmileyDetailFocusEffect(state.detailSmiley, wikiAutofocus)
+            val sheetTitle = stringResource(
+                if (state.detailSmiley == null) R.string.editor_smiley_title else R.string.editor_smiley_detail_title,
+            )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .smileySheetNestedScroll(gestures)
+                    // #1193 residual — swallow the upward overscroll left over at the Expanded anchor so
+                    // the M3 spring settle cannot overshoot above it. Sits on the content wrapper
+                    // (closest nested-scroll parent to the grid's LazyVerticalGrid), not the sheet.
+                    .clampSheetTopOverscroll(sheetState)
+                    // #900 — header density pass (tinc, DEV #2790993) : the VISIBLE « Smileys » title
+                    // line is gone (the tabs already name the surface visually), spacing
+                    // tightened 12 → 8 dp. The sheet keeps an ACCESSIBLE name through paneTitle —
+                    // TalkBack still announces the surface (gate Sol r1). Touch targets keep 48 dp.
+                    // #989 — the horizontal padding is a spike knob (rogner les marges = one of the
+                    // levers on the cell width); the vertical one stays at the #900 value.
+                    .padding(horizontal = layout.gridPadding, vertical = 8.dp)
+                    .semantics { paneTitle = sheetTitle },
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                val detail = state.detailSmiley
+                if (detail != null) {
+                    val feedback = rememberSmileyDetailFeedback(detail, state)
+                    SmileyDetailContent(detail, state, feedback, onSmileyClicked)
+                    if (feedback != null) {
+                        // Only feedback actually composed in detail is consumed. A pending result
+                        // received after returning to the grid still gets its overlay.
+                        SideEffect { favoriteOverlayExpired.value = true }
+                    }
+                } else {
+                    // Removing the grid also removes its focus/semantics. Save its lazy positions,
+                    // selected tab and Wiki TextFieldValue rather than composing an invisible grid.
+                    gridState.SaveableStateProvider("grid") {
+                        SmileyPickerGridPage(
+                            state.copy(onDetailChange = guardedDetailChange.takeIf { state.onDetailChange != null }),
+                            onQueryChange, onSmileyClicked, layout, uiState,
+                        )
+                    }
                 }
             }
         }
+    }
+}
+
+/** Same M3 handle and touch target, with an explicit cause for taps and accessibility dismissal. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SmileySheetHandle(onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+    Box(
+        modifier.minimumInteractiveComponentSize().clickable(
+            role = Role.Button,
+            onClickLabel = stringResource(R.string.editor_smiley_picker_close),
+            onClick = onDismiss,
+        ).semantics { dismiss { onDismiss(); true } },
+    ) {
+        BottomSheetDefaults.DragHandle()
     }
 }
 

@@ -148,6 +148,9 @@
     <string name="editor_smiley_detail_local_favorite">Favori de l\'appareil</string>
     <string name="editor_smiley_detail_hfr_favorite">Favori HFR</string>
     <string name="editor_smiley_wiki_keywords_title">Mots-clés du wiki</string>
+    <string name="editor_smiley_wiki_keywords_expand">Tout afficher (%1$d)</string>
+    <string name="editor_smiley_wiki_keywords_collapse">Réduire</string>
+    <string name="editor_smiley_picker_close">Fermer le sélecteur de smileys</string>
     <string name="editor_smiley_wiki_keywords_loading">Chargement des mots-clés…</string>
     <string name="editor_smiley_wiki_keywords_empty">Aucun mot-clé sur le wiki</string>
     <string name="editor_smiley_wiki_keywords_failed">Mots-clés indisponibles</string>

@@ -14,6 +14,7 @@ import androidx.compose.ui.platform.LocalView
  * can still be the Activity's, inherited across the dialog subcomposition. Resolve the VIEW
  * tree instead, and register after M3: a committed back closes only the detail, while a
  * cancelled predictive gesture does nothing. Outside taps and swipes still dismiss the sheet.
+ * On the grid this callback is disabled: M3 keeps progression, cancellation and commit.
  */
 @Composable
 internal fun SmileyDetailBackHandler(state: SmileyPickerState.Open) {
