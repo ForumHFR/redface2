@@ -140,8 +140,9 @@ fun SmileyPickerSheet(
         ) {
             val detail = state.detailSmiley
             if (detail != null) {
-                SmileyDetailContent(detail, state, onSmileyClicked)
-                if (state.favoriteFeedback != null) {
+                val feedback = rememberSmileyDetailFeedback(detail, state)
+                SmileyDetailContent(detail, state, feedback, onSmileyClicked)
+                if (feedback != null) {
                     // Only feedback actually composed in detail is consumed. A pending result
                     // received after returning to the grid still gets its overlay.
                     SideEffect { favoriteOverlayExpired.value = true }

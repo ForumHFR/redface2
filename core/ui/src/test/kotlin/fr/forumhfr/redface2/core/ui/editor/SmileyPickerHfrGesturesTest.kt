@@ -15,10 +15,12 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onAllNodes
 import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
@@ -204,6 +206,79 @@ class SmileyPickerHfrGesturesTest {
         message.assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.editor_smiley_tab_wiki)).performClick()
         message.assertIsDisplayed()
+    }
+
+    @Test
+    fun `opening another detail during grid feedback neither displays nor consumes that feedback`() {
+        val controller = controller()
+        showWiki(controller)
+        mount(controller)
+        compose.mainClock.autoAdvance = false
+        val addAction = compose.onNodeWithContentDescription(description(wiki)).fetchSemanticsNode()
+            .config[SemanticsActions.CustomActions]
+            .single { it.label == context.getString(R.string.editor_smiley_favorite_add) }.action
+        compose.runOnIdle {
+            assertTrue(addAction())
+            dispatcher.scheduler.runCurrent()
+        }
+        compose.mainClock.advanceTimeByFrame()
+        val message = compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_added))
+        message.assertIsDisplayed()
+
+        listOf(
+            R.string.editor_smiley_tab_wiki to other,
+            R.string.editor_smiley_tab_standard to BUILTIN_HFR_SMILEYS.first(),
+        ).forEach { (tab, smiley) ->
+            compose.onNodeWithText(context.getString(tab)).performClick()
+            compose.mainClock.advanceTimeByFrame()
+            val detailAction = compose.onNodeWithContentDescription(description(smiley)).fetchSemanticsNode()
+                .config[SemanticsActions.CustomActions]
+                .single { it.label == context.getString(R.string.editor_smiley_detail_show) }.action
+            compose.runOnIdle { assertTrue(detailAction()) }
+            compose.mainClock.advanceTimeByFrame()
+            compose.onNodeWithText(context.getString(R.string.editor_smiley_detail_title)).assertIsDisplayed()
+            message.assertDoesNotExist()
+            backToGrid()
+            compose.mainClock.advanceTimeByFrame()
+            message.assertIsDisplayed()
+        }
+    }
+
+    @Test
+    fun `another smiley keeps its disabled add or remove label without progress during an HFR mutation`() {
+        val third = other.copy(token = "[:fictif c]")
+        val gate = CompletableDeferred<HfrFavoriteSmileyMutationResult>()
+        val controller = controller(
+            favorites = listOf(other.copy(source = EditorSmileySource.HFR_FAVORITE)),
+            wikiItems = listOf(wiki, other, third), add = { gate.await() },
+        )
+        showWiki(controller)
+        mount(controller)
+        compose.onNodeWithContentDescription(description(wiki)).performTouchInput { longClick() }
+        compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_add)).performScrollTo().performClick()
+        compose.runOnIdle { dispatcher.scheduler.runCurrent() }
+        compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_pending))
+            .performScrollTo().assertIsDisplayed().assertIsNotEnabled()
+        val progress = SemanticsMatcher.keyIsDefined(SemanticsProperties.ProgressBarRangeInfo)
+        compose.onAllNodes(progress, useUnmergedTree = true).assertCountEquals(1)
+        backToGrid()
+
+        listOf(
+            other to R.string.editor_smiley_favorite_remove,
+            third to R.string.editor_smiley_favorite_add,
+        ).forEach { (smiley, label) ->
+            compose.onNodeWithContentDescription(description(smiley)).performTouchInput { longClick() }
+            compose.onNodeWithText(context.getString(label)).performScrollTo().assertIsDisplayed().assertIsNotEnabled()
+            compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_pending)).assertDoesNotExist()
+            compose.onAllNodes(progress, useUnmergedTree = true).assertCountEquals(0)
+            backToGrid()
+        }
+        compose.runOnIdle {
+            assertEquals(listOf(wiki.token), added)
+            assertTrue(removed.isEmpty())
+            gate.complete(HfrFavoriteSmileyMutationResult.Success(listOf(favorite, other)))
+            dispatcher.scheduler.runCurrent()
+        }
     }
 
     @Test

@@ -28,6 +28,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.FilterQuality
@@ -54,6 +56,7 @@ import kotlin.math.roundToInt
 internal fun SmileyDetailContent(
     smiley: EditorSmiley,
     state: SmileyPickerState.Open,
+    favoriteFeedback: SmileyFavoriteFeedback?,
     onSmileyClicked: (String) -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().heightIn(max = smileyPickerHeightCap())) {
@@ -64,17 +67,40 @@ internal fun SmileyDetailContent(
         ) {
             SmileyDetailHeader(smiley, state)
             // Future Wiki metadata belongs between the header and the insertion action (#1154 lot 2).
-            Button(onClick = { onSmileyClicked(smiley.token) }, modifier = Modifier.fillMaxWidth()) {
+            Button(
+                onClick = { onSmileyClicked(smiley.token) },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            ) {
                 Text(stringResource(R.string.editor_smiley_detail_insert))
             }
             HorizontalDivider()
             SmileyDetailActions(smiley, state)
         }
-        state.favoriteFeedback?.let { feedback ->
+        favoriteFeedback?.let { feedback ->
             // Fixed below the scrolling actions: mutation results stay visible on small screens.
             SmileyFavoriteStatus(feedback, Modifier.fillMaxWidth().padding(8.dp))
         }
     }
+}
+
+/** Only feedback newer than entry belongs to this visit, even after restoring the detail. */
+@Composable
+internal fun rememberSmileyDetailFeedback(
+    smiley: EditorSmiley,
+    state: SmileyPickerState.Open,
+): SmileyFavoriteFeedback? {
+    // Token identity survives membership changes. Leaving detail drops this slot; rotation saves it
+    // so a result already displayed stays visible. Save the token too: restored inputs are not checked.
+    val generationAtEntry = rememberSaveable(
+        smiley.token,
+        saver = listSaver<Long, Any>(
+            save = { listOf(smiley.token, it) },
+            restore = { saved ->
+                (saved[1] as Long).takeIf { saved[0] == smiley.token && it <= state.favoriteFeedbackGeneration }
+            },
+        ),
+    ) { state.favoriteFeedbackGeneration }
+    return state.favoriteFeedback.takeIf { state.favoriteFeedbackGeneration > generationAtEntry }
 }
 
 @Composable
@@ -188,13 +214,16 @@ private fun SmileyDetailActions(smiley: EditorSmiley, state: SmileyPickerState.O
 @Composable
 private fun SmileyDetailHfrAction(smiley: EditorSmiley, state: SmileyPickerState.Open) {
     val action = state.favoriteAction(smiley, includePending = true) ?: return
-    val pending = state.pendingFavoriteToken != null
+    val pending = state.pendingFavoriteToken == smiley.token
     val label = when {
         pending -> R.string.editor_smiley_favorite_pending
         action == SmileyFavoriteAction.ADD -> R.string.editor_smiley_favorite_add
         else -> R.string.editor_smiley_favorite_remove
     }
-    SmileyDetailAction(stringResource(label), R.drawable.ic_ms_star, pending = pending) {
+    SmileyDetailAction(
+        stringResource(label), R.drawable.ic_ms_star,
+        pending = pending, enabled = state.pendingFavoriteToken == null,
+    ) {
         state.onFavoriteChange?.invoke(smiley)
     }
 }
@@ -204,6 +233,7 @@ private fun SmileyDetailAction(
     label: String,
     @DrawableRes icon: Int,
     pending: Boolean = false,
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     ListItem(
@@ -214,7 +244,7 @@ private fun SmileyDetailAction(
         } else {
             null
         },
-        modifier = Modifier.clickable(enabled = !pending, role = Role.Button, onClick = onClick),
+        modifier = Modifier.clickable(enabled = enabled && !pending, role = Role.Button, onClick = onClick),
     )
 }
 

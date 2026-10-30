@@ -136,6 +136,34 @@ class SmileyPickerLocalGesturesTest {
     }
 
     @Test
+    fun `local feedback for A stays in Favorites but is absent from B and a new visit to A`() {
+        locals.snapshot.value = SmileyLocalCollectionSnapshot(
+            "alice", top = listOf(SmileyUsageEntry(wiki.token, 2, 1)),
+        )
+        mount(controller())
+        tab(R.string.editor_smiley_tab_standard).performClick()
+        compose.onNodeWithContentDescription(description(builtin)).performTouchInput { longClick() }
+        tab(R.string.editor_smiley_local_favorite_add).performScrollTo().performClick()
+        compose.runOnIdle { dispatcher.scheduler.runCurrent() }
+        tab(R.string.editor_smiley_local_favorite_added).assertIsDisplayed()
+
+        compose.onNodeWithContentDescription(context.getString(R.string.editor_smiley_detail_back)).performClick()
+        tab(R.string.editor_smiley_tab_favorites).performClick()
+        tab(R.string.editor_smiley_local_favorite_added).assertIsDisplayed()
+        compose.onNodeWithContentDescription(description(wiki)).performTouchInput { longClick() }
+        tab(R.string.editor_smiley_detail_title).assertIsDisplayed()
+        tab(R.string.editor_smiley_local_favorite_added).assertDoesNotExist()
+        tab(R.string.editor_smiley_detail_local_favorite).assertDoesNotExist()
+        tab(R.string.editor_smiley_local_favorite_add).assertExists()
+
+        compose.onNodeWithContentDescription(context.getString(R.string.editor_smiley_detail_back)).performClick()
+        tab(R.string.editor_smiley_local_favorite_added).assertIsDisplayed()
+        compose.onNodeWithContentDescription(description(builtin)).performTouchInput { longClick() }
+        tab(R.string.editor_smiley_local_favorite_added).assertDoesNotExist()
+        tab(R.string.editor_smiley_detail_local_favorite).assertIsDisplayed()
+    }
+
+    @Test
     fun `Wiki perso detail lists both applicable actions and TalkBack can invoke local addition`() {
         locals.snapshot.value = SmileyLocalCollectionSnapshot(
             "alice", listOf(LocalFavoriteSmiley(wiki.token, wiki.imageUrl, 1)),
