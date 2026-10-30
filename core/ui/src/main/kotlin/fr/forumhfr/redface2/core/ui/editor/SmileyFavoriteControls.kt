@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.ui.editor
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
@@ -35,10 +36,12 @@ internal fun SmileyFavoriteTarget(
     onClick: () -> Unit,
     content: @Composable (Modifier) -> Unit,
 ) {
+    val onDetailChange = state?.onDetailChange
+    val detailLabel = stringResource(R.string.editor_smiley_detail_show)
     val actions = buildList {
-        add(SmileyAccessibilityAction(stringResource(R.string.editor_smiley_detail_show)) {
-            state?.onDetailChange?.invoke(smiley)
-        })
+        if (onDetailChange != null) {
+            add(SmileyAccessibilityAction(detailLabel) { onDetailChange(smiley) })
+        }
         state?.localFavoriteAction(smiley)?.let { action ->
             val label = when (action) {
                 SmileyFavoriteAction.ADD -> stringResource(R.string.editor_smiley_local_favorite_add)
@@ -57,16 +60,22 @@ internal fun SmileyFavoriteTarget(
     val pending = state?.pendingFavoriteToken == smiley.token
     val progressLabel = stringResource(R.string.editor_smiley_favorite_pending)
     val progress = Modifier.semantics { if (pending) stateDescription = progressLabel }
-    val detailLabel = stringResource(R.string.editor_smiley_detail_show)
+    val gestures = if (onDetailChange == null) {
+        Modifier.clickable(onClick = onClick)
+    } else {
+        Modifier.combinedClickable(
+            onClick = onClick,
+            onLongClick = { onDetailChange(smiley) },
+            onLongClickLabel = detailLabel,
+        )
+    }
     Box {
         content(
-            Modifier.combinedClickable(
-                onClick = onClick,
-                onLongClick = { state?.onDetailChange?.invoke(smiley) },
-                onLongClickLabel = detailLabel,
-            ).semantics {
-                customActions = actions.map { action ->
-                    CustomAccessibilityAction(action.label) { action.invoke(); true }
+            gestures.semantics {
+                if (actions.isNotEmpty()) {
+                    customActions = actions.map { action ->
+                        CustomAccessibilityAction(action.label) { action.invoke(); true }
+                    }
                 }
             }.then(progress),
         )

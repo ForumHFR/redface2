@@ -4,9 +4,13 @@ import android.content.ClipboardManager
 import android.content.Context
 import androidx.activity.BackEventCompat
 import androidx.activity.ComponentDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.SoftwareKeyboardController
 import androidx.compose.ui.semantics.SemanticsActions
@@ -44,6 +48,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.StandardTestDispatcher
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -72,11 +79,6 @@ class SmileyPickerDetailGesturesTest {
         EditorSmiley("[:fictif $it:2]", "https://example.invalid/$it.gif", EditorSmileySource.WIKI)
     }
     private var inserted: String? = null
-    private var keyboardHides = 0
-    private val keyboard = object : SoftwareKeyboardController {
-        override fun show() = Unit
-        override fun hide() { keyboardHides++ }
-    }
 
     @OptIn(coil3.annotation.DelicateCoilApi::class)
     @Before
@@ -119,6 +121,50 @@ class SmileyPickerDetailGesturesTest {
         assertEquals(context.getString(R.string.editor_smiley_detail_show), action.label)
         compose.runOnIdle { action.action() }
         text(R.string.editor_smiley_detail_title).assertIsDisplayed()
+    }
+
+    @Test
+    fun `grid without state or detail command only exposes insertion`() {
+        var favorites by mutableStateOf<SmileyPickerState.Open?>(null)
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                SmileyPickerGrid(listOf(builtin), { inserted = it }, favorites = favorites)
+            }
+        }
+        listOf(null, SmileyPickerState.Open()).forEach { state ->
+            compose.runOnIdle { favorites = state; inserted = null }
+            val cell = compose.onNodeWithContentDescription(description(builtin))
+            val semantics = cell.fetchSemanticsNode().config
+            assertFalse(semantics.contains(SemanticsActions.OnLongClick))
+            assertFalse(semantics.contains(SemanticsActions.CustomActions))
+            cell.performClick()
+            compose.runOnIdle { assertEquals(builtin.token, inserted) }
+        }
+    }
+
+    @Test
+    fun `grid without detail command keeps its available favorite accessibility action`() {
+        var favorite: EditorSmiley? = null
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                SmileyPickerGrid(
+                    listOf(builtin), { inserted = it },
+                    favorites = SmileyPickerState.Open(onLocalFavoriteChange = { favorite = it }),
+                )
+            }
+        }
+        val cell = compose.onNodeWithContentDescription(description(builtin))
+        val semantics = cell.fetchSemanticsNode().config
+        assertFalse(semantics.contains(SemanticsActions.OnLongClick))
+        val action = semantics[SemanticsActions.CustomActions].single()
+        assertEquals(context.getString(R.string.editor_smiley_local_favorite_add), action.label)
+        compose.runOnIdle {
+            assertTrue(action.action())
+            assertEquals(builtin, favorite)
+            assertNull(inserted)
+        }
+        cell.performClick()
+        compose.runOnIdle { assertEquals(builtin.token, inserted) }
     }
 
     @Test
@@ -173,7 +219,7 @@ class SmileyPickerDetailGesturesTest {
         val bounds = cell.fetchSemanticsNode().boundsInRoot
         cell.performTouchInput { longClick() }
         text(R.string.editor_smiley_tab_wiki).assertDoesNotExist()
-        compose.runOnIdle { assertTrue(keyboardHides > 0) }
+        // Keyboard hiding is checked below with a provider inside the dialog's own Compose owner.
         back()
         text(R.string.editor_smiley_tab_wiki).assertIsSelected()
         val search = compose.onNode(hasSetTextAction()).assertIsNotFocused()
@@ -182,6 +228,48 @@ class SmileyPickerDetailGesturesTest {
         compose.runOnIdle {
             assertNull((controller.state.value as SmileyPickerState.Open).detailSmiley)
             assertNull(inserted)
+        }
+    }
+
+    @OptIn(ExperimentalMaterial3Api::class)
+    @Test
+    fun `detail focus effect hides the dialog keyboard without reopening it on return`() {
+        var detail by mutableStateOf<EditorSmiley?>(null)
+        val autofocus = mutableStateOf(true)
+        var keyboardHides = 0
+        var keyboardShows = 0
+        val keyboard = object : SoftwareKeyboardController {
+            override fun show() { keyboardShows++ }
+            override fun hide() { keyboardHides++ }
+        }
+        var dialogKeyboard: SoftwareKeyboardController? = null
+        compose.setContent {
+            CompositionLocalProvider(LocalSoftwareKeyboardController provides keyboard) {
+                ModalBottomSheet(onDismissRequest = {}) {
+                    dialogKeyboard = LocalSoftwareKeyboardController.current
+                    // The dialog's Compose owner replaces the host provider. Inject INSIDE it
+                    // to test the same focus effect that the real sheet runs in this scope.
+                    CompositionLocalProvider(LocalSoftwareKeyboardController provides keyboard) {
+                        SmileyDetailFocusEffect(detail, autofocus)
+                    }
+                }
+            }
+        }
+        compose.runOnIdle {
+            assertNotNull(dialogKeyboard)
+            assertNotSame(keyboard, dialogKeyboard)
+            assertEquals(0, keyboardHides)
+            detail = builtin
+        }
+        compose.runOnIdle {
+            assertTrue(keyboardHides > 0)
+            assertFalse(autofocus.value)
+            detail = null
+        }
+        compose.runOnIdle {
+            assertEquals(1, keyboardHides)
+            assertEquals(0, keyboardShows)
+            assertFalse(autofocus.value)
         }
     }
 
@@ -277,15 +365,13 @@ class SmileyPickerDetailGesturesTest {
 
     private fun mount(controller: SmileyPickerController) {
         compose.setContent {
-            CompositionLocalProvider(LocalSoftwareKeyboardController provides keyboard) {
-                RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                    val state by controller.state.collectAsState()
-                    (state as? SmileyPickerState.Open)?.let { open ->
-                        SmileyPickerSheet(open, controller::dismiss, controller::onQueryChanged, {
-                            inserted = it
-                            controller.dismiss()
-                        })
-                    }
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                val state by controller.state.collectAsState()
+                (state as? SmileyPickerState.Open)?.let { open ->
+                    SmileyPickerSheet(open, controller::dismiss, controller::onQueryChanged, {
+                        inserted = it
+                        controller.dismiss()
+                    })
                 }
             }
         }

@@ -24,7 +24,6 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
-import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ApplicationProvider
 import coil3.ColorImage
@@ -128,7 +127,8 @@ class SmileyPickerHfrGesturesTest {
         mount(controller)
         assertFavoriteActions(favorite, R.string.editor_smiley_favorite_remove)
         compose.onNodeWithContentDescription(description(favorite)).performTouchInput { longClick() }
-        compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_remove)).performScrollTo().performClick()
+        compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_remove))
+            .performScrollTo().performClick()
         compose.runOnIdle { dispatcher.scheduler.runCurrent() }
         compose.runOnIdle { assertEquals(listOf(favorite.token), removed) }
         compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_removed)).assertExists()
@@ -160,6 +160,53 @@ class SmileyPickerHfrGesturesTest {
     }
 
     @Test
+    fun `feedback seen in detail is not replayed in Wiki or Standard and stays in Favorites`() {
+        val controller = controller()
+        showWiki(controller)
+        mount(controller)
+        compose.onNodeWithContentDescription(description(wiki)).performTouchInput { longClick() }
+        compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_add)).performScrollTo().performClick()
+        compose.runOnIdle { dispatcher.scheduler.runCurrent() }
+        val message = compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_added))
+        message.assertIsDisplayed()
+
+        backToGrid()
+        message.assertDoesNotExist()
+        compose.onNodeWithText(context.getString(R.string.editor_smiley_tab_standard)).performClick()
+        message.assertDoesNotExist()
+        compose.onNodeWithText(context.getString(R.string.editor_smiley_tab_favorites)).performClick()
+        message.assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.editor_smiley_tab_wiki)).performClick()
+        message.assertDoesNotExist()
+    }
+
+    @Test
+    fun `HFR result received after leaving detail still shows an overlay in Standard and Wiki`() {
+        val gate = CompletableDeferred<HfrFavoriteSmileyMutationResult>()
+        val controller = controller(add = { gate.await() })
+        showWiki(controller)
+        mount(controller)
+        compose.onNodeWithContentDescription(description(wiki)).performTouchInput { longClick() }
+        compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_add)).performScrollTo().performClick()
+        compose.runOnIdle { dispatcher.scheduler.runCurrent() }
+        compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_pending))
+            .performScrollTo().assertIsDisplayed()
+        backToGrid()
+        compose.onNodeWithText(context.getString(R.string.editor_smiley_tab_standard)).performClick()
+        val message = compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_added))
+        message.assertDoesNotExist()
+
+        compose.runOnIdle {
+            // Success keeps the pending gesture's generation: merely opening detail must not consume it.
+            gate.complete(HfrFavoriteSmileyMutationResult.Success(listOf(favorite)))
+            dispatcher.scheduler.runCurrent()
+        }
+        message.assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.editor_smiley_tab_wiki)).performClick()
+        message.assertIsDisplayed()
+    }
+
+    @Test
     fun `absent removal leaves account insertion and detail without HFR actions in either tab`() {
         val account = other.copy(source = EditorSmileySource.HFR_FAVORITE)
         val controller = controller(
@@ -169,7 +216,8 @@ class SmileyPickerHfrGesturesTest {
         mount(controller)
         assertFavoriteActions(account, R.string.editor_smiley_favorite_remove)
         compose.onNodeWithContentDescription(description(account)).performTouchInput { longClick() }
-        compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_remove)).performScrollTo().performClick()
+        compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_remove))
+            .performScrollTo().performClick()
         compose.runOnIdle { dispatcher.scheduler.runCurrent() }
         compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_remove)).assertDoesNotExist()
         val message = context.getString(R.string.editor_smiley_favorite_not_in_favorites)
@@ -177,6 +225,8 @@ class SmileyPickerHfrGesturesTest {
             SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite),
         )
         backToGrid()
+        // Favorites keeps its persistent status even when detail already displayed this feedback.
+        compose.onNodeWithText(message).assertIsDisplayed()
         assertNoFavoriteActions(account)
         assertFavoriteActions(favorite, R.string.editor_smiley_favorite_remove)
 
@@ -187,11 +237,10 @@ class SmileyPickerHfrGesturesTest {
         }
         compose.onNodeWithText(context.getString(R.string.editor_smiley_tab_wiki)).performClick()
         compose.onNodeWithText(context.getString(R.string.editor_smiley_section_favorites)).assertDoesNotExist()
-        compose.onNodeWithText(message).assertIsDisplayed()
+        compose.onNodeWithText(message).assertDoesNotExist()
         assertNoFavoriteActions(other)
         assertFavoriteActions(wiki, R.string.editor_smiley_favorite_remove)
-        // The ephemeral Wiki message still covers the only result row: insert through the accessibility click.
-        compose.onNodeWithContentDescription(description(other)).performSemanticsAction(SemanticsActions.OnClick)
+        compose.onNodeWithContentDescription(description(other)).performClick()
         compose.runOnIdle {
             assertEquals(other.token, inserted)
             assertEquals(listOf(other.token), removed)
@@ -578,7 +627,9 @@ class SmileyPickerHfrGesturesTest {
 
     private fun assertNoFavoriteActions(smiley: EditorSmiley) {
         val semantics = compose.onNodeWithContentDescription(description(smiley)).fetchSemanticsNode().config
-        assertEquals(context.getString(R.string.editor_smiley_detail_show), semantics[SemanticsActions.OnLongClick].label)
+        assertEquals(
+            context.getString(R.string.editor_smiley_detail_show), semantics[SemanticsActions.OnLongClick].label,
+        )
         assertEquals(listOf(context.getString(R.string.editor_smiley_detail_show)),
             semantics[SemanticsActions.CustomActions].map { it.label })
     }

@@ -33,6 +33,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -103,6 +104,7 @@ fun SmileyPickerSheet(
     val favoriteOverlayExpired = remember(state.favoriteFeedbackGeneration) { mutableStateOf(false) }
     val gridState = rememberSaveableStateHolder()
     val wikiAutofocus = rememberSaveable { mutableStateOf(state.detailSmiley == null) }
+    val uiState = SmileyPickerUiState(wikiAutofocus, favoriteOverlayExpired)
     // #1193 — force skipPartiallyExpanded: the tall, scrollable picker otherwise anchors at M3's
     // PartiallyExpanded and its underdamped settle overshoots the top butée on opening. Same fix as
     // QuickReplySheet / MessageEditorComponents; scope is Fix 1 only (no tab/IME/search change).
@@ -114,15 +116,7 @@ fun SmileyPickerSheet(
         sheetState = sheetState,
     ) {
         SmileyDetailBackHandler(state)
-        val focusManager = LocalFocusManager.current
-        val keyboard = LocalSoftwareKeyboardController.current
-        LaunchedEffect(state.detailSmiley) {
-            if (state.detailSmiley != null) {
-                wikiAutofocus.value = false
-                focusManager.clearFocus(force = true)
-                keyboard?.hide()
-            }
-        }
+        SmileyDetailFocusEffect(state.detailSmiley, wikiAutofocus)
         val sheetTitle = stringResource(
             if (state.detailSmiley == null) R.string.editor_smiley_title else R.string.editor_smiley_detail_title,
         )
@@ -146,15 +140,39 @@ fun SmileyPickerSheet(
             val detail = state.detailSmiley
             if (detail != null) {
                 SmileyDetailContent(detail, state, onSmileyClicked)
+                if (state.favoriteFeedback != null) {
+                    // Only feedback actually composed in detail is consumed. A pending result
+                    // received after returning to the grid still gets its overlay.
+                    SideEffect { favoriteOverlayExpired.value = true }
+                }
             } else {
                 // Removing the grid also removes its focus/semantics. Save its lazy positions,
                 // selected tab and Wiki TextFieldValue rather than composing an invisible grid.
                 gridState.SaveableStateProvider("grid") {
                     SmileyPickerGridPage(
-                        state, onQueryChange, onSmileyClicked, layout, wikiAutofocus, favoriteOverlayExpired,
+                        state, onQueryChange, onSmileyClicked, layout, uiState,
                     )
                 }
             }
+        }
+    }
+}
+
+private data class SmileyPickerUiState(
+    val wikiAutofocus: MutableState<Boolean>,
+    val favoriteOverlayExpired: MutableState<Boolean>,
+)
+
+/** Read the dialog's locals, which replace the host's keyboard controller and focus manager. */
+@Composable
+internal fun SmileyDetailFocusEffect(detail: EditorSmiley?, wikiAutofocus: MutableState<Boolean>) {
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+    LaunchedEffect(detail) {
+        if (detail != null) {
+            wikiAutofocus.value = false
+            focusManager.clearFocus(force = true)
+            keyboard?.hide()
         }
     }
 }
@@ -165,8 +183,7 @@ private fun SmileyPickerGridPage(
     onQueryChange: (String) -> Unit,
     onSmileyClicked: (String) -> Unit,
     layout: SmileyPickerLayoutSpec,
-    wikiAutofocus: MutableState<Boolean>,
-    favoriteOverlayExpired: MutableState<Boolean>,
+    uiState: SmileyPickerUiState,
 ) {
     var tabIndex by rememberSmileyPickerTab(state.initialTab)
     val tabsState = rememberSaveableStateHolder()
@@ -177,7 +194,7 @@ private fun SmileyPickerGridPage(
             Tab(
                 selected = tabIndex == index,
                 onClick = {
-                    wikiAutofocus.value = true
+                    uiState.wikiAutofocus.value = true
                     tabIndex = index
                 },
                 text = { Text(stringResource(title)) },
@@ -192,15 +209,15 @@ private fun SmileyPickerGridPage(
                     favorites = state, showFavoriteSection = true,
                 )
                 1 -> StandardTabContent(state, onSmileyClicked, layout)
-                else -> WikiTabContent(state, onQueryChange, onSmileyClicked, layout, wikiAutofocus.value)
+                else -> WikiTabContent(state, onQueryChange, onSmileyClicked, layout, uiState.wikiAutofocus.value)
             }
         }
         key(state.favoriteFeedbackGeneration) {
-            if (tabIndex != 0 && !favoriteOverlayExpired.value) {
+            if (tabIndex != 0 && !uiState.favoriteOverlayExpired.value) {
                 state.favoriteFeedback?.let { feedback ->
                     SmileyFavoriteOverlay(
                         feedback = feedback,
-                        onExpired = { favoriteOverlayExpired.value = true },
+                        onExpired = { uiState.favoriteOverlayExpired.value = true },
                         modifier = Modifier.matchParentSize(),
                     )
                 }

@@ -229,11 +229,16 @@ private fun copySmileyCode(context: Context, token: String, feedback: String) {
 
 /** Modest enlargement of the original image: 96×72 dp cap, at most 1.5× measured perso size. */
 internal fun smileyDetailImageSize(source: EditorSmileySource, measured: IntSize?): DpSize {
-    if (source == EditorSmileySource.BUILTIN) return DpSize(32.dp, 32.dp)
-    val native = measured?.takeIf { it.width > 0 && it.height > 0 } ?: return DpSize(96.dp, 72.dp)
-    val scale = minOf(96f / native.width, 72f / native.height, 1.5f)
-    return DpSize(
-        (native.width * scale).roundToInt().coerceAtLeast(1).dp,
-        (native.height * scale).roundToInt().coerceAtLeast(1).dp,
-    )
+    val native = measured?.takeIf { it.width > 0 && it.height > 0 }
+    return when {
+        source == EditorSmileySource.BUILTIN -> DpSize(32.dp, 32.dp)
+        native == null -> DpSize(96.dp, 72.dp)
+        else -> {
+            val scale = minOf(96f / native.width, 72f / native.height, 1.5f)
+            DpSize(
+                (native.width * scale).roundToInt().coerceAtLeast(1).dp,
+                (native.height * scale).roundToInt().coerceAtLeast(1).dp,
+            )
+        }
+    }
 }
