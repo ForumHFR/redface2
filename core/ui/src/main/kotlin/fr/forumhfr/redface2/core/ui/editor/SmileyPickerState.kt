@@ -38,12 +38,17 @@ sealed interface SmileyPickerState {
         /** Exact membership includes local entries whose image cannot be resolved. */
         val localFavoriteTokens: Set<String> = emptySet(),
         val onLocalFavoriteChange: ((EditorSmiley) -> Unit)? = null,
+        /** Kept by the host ViewModel's controller, even if its original lazy cell disappears. */
+        val detailSmiley: EditorSmiley? = null,
+        val onDetailChange: ((EditorSmiley?) -> Unit)? = null,
+        val usageCounts: Map<String, Long> = emptyMap(),
     ) : SmileyPickerState {
-        fun favoriteAction(smiley: EditorSmiley): SmileyFavoriteAction? = when {
-            onFavoriteChange == null || pendingFavoriteToken != null -> null
+        /** The detail can show an eligible action's pending state while mutations remain blocked. */
+        fun favoriteAction(smiley: EditorSmiley, includePending: Boolean = false): SmileyFavoriteAction? = when {
+            onFavoriteChange == null -> null
+            pendingFavoriteToken != null && !includePending -> null
             smiley.source == EditorSmileySource.BUILTIN -> null
             smiley.token in accountSmileyTokens -> null
-            smiley.source == EditorSmileySource.HFR_FAVORITE -> SmileyFavoriteAction.REMOVE
             favoriteSmileys.any { it.token == smiley.token } -> SmileyFavoriteAction.REMOVE
             else -> SmileyFavoriteAction.ADD
         }

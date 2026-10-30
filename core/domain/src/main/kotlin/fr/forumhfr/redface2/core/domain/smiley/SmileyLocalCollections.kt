@@ -18,5 +18,8 @@ interface SmileyLocalCollections {
 data class SmileyLocalCollectionSnapshot(
     val owner: String? = null,
     val favorites: List<LocalFavoriteSmiley> = emptyList(),
+    /** Ranked projection for the grid, limited to [SmileyUsageRepository.TOP_LIMIT]. */
     val top: List<SmileyUsageEntry> = emptyList(),
+    /** Exact counts for all retained tokens (up to 512), independently of the displayed Top 24. */
+    val usageCounts: Map<String, Long> = top.associate { it.token to it.count },
 )

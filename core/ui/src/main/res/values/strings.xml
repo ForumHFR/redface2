@@ -133,8 +133,20 @@
     <string name="editor_smiley_section_favorites">Favoris HFR</string>
     <string name="editor_smiley_section_local">Favoris de l\'appareil</string>
     <string name="editor_smiley_section_top">Les plus utilisés</string>
-    <string name="editor_smiley_favorites_hint">Appui long sur un smiley pour l\'ajouter à vos favoris. Les smileys que vous envoyez le plus apparaîtront aussi ici.</string>
-    <string name="editor_smiley_favorite_manage">Gérer les favoris</string>
+    <string name="editor_smiley_favorites_hint">Appui long sur un smiley pour voir son détail et l\'ajouter à vos favoris. Les smileys que vous envoyez le plus apparaîtront aussi ici.</string>
+    <string name="editor_smiley_detail_title">Détail du smiley</string>
+    <string name="editor_smiley_detail_back">Retour aux smileys</string>
+    <string name="editor_smiley_detail_show">Afficher le détail</string>
+    <string name="editor_smiley_detail_insert">Insérer dans le message</string>
+    <string name="editor_smiley_detail_copy">Copier le code</string>
+    <string name="editor_smiley_detail_copied">Code copié</string>
+    <string name="editor_smiley_detail_unused">Pas encore envoyé sur cet appareil</string>
+    <plurals name="editor_smiley_detail_usage">
+        <item quantity="one">Envoyé %1$d fois sur cet appareil</item>
+        <item quantity="other">Envoyé %1$d fois sur cet appareil</item>
+    </plurals>
+    <string name="editor_smiley_detail_local_favorite">Favori de l\'appareil</string>
+    <string name="editor_smiley_detail_hfr_favorite">Favori HFR</string>
     <string name="editor_smiley_local_favorite_add">Ajouter aux favoris de l\'appareil</string>
     <string name="editor_smiley_local_favorite_remove">Retirer des favoris de l\'appareil</string>
     <string name="editor_smiley_local_favorite_added">Ajouté aux favoris de l\'appareil</string>

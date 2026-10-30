@@ -34,9 +34,19 @@ class DefaultSmileyLocalCollections @Inject constructor(
                 // Never expose the previous account's rows while the new stores are loading.
                 emit(SmileyLocalCollectionSnapshot(owner))
                 if (owner != null) {
-                    emitAll(combine(favorites.observeFavorites(owner), usage.observeTop(owner)) { local, top ->
-                        SmileyLocalCollectionSnapshot(owner, local, top)
-                    })
+                    emitAll(
+                        combine(
+                            favorites.observeFavorites(owner),
+                            usage.observeTop(owner, SmileyUsageRepository.MAX_ENTRIES),
+                        ) { local, entries ->
+                            SmileyLocalCollectionSnapshot(
+                                owner = owner,
+                                favorites = local,
+                                top = entries.take(SmileyUsageRepository.TOP_LIMIT),
+                                usageCounts = entries.associate { it.token to it.count },
+                            )
+                        },
+                    )
                 }
             }
         }

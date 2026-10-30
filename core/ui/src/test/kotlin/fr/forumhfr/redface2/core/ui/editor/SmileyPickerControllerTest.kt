@@ -225,7 +225,8 @@ class SmileyPickerControllerTest {
 
         assertEquals(
             "the dismissed search must come back verbatim — no refetch",
-            SmileyPickerState.Open(query = "jap", wiki = WikiSearchState.Results(listOf(smiley))),
+            SmileyPickerState.Open(query = "jap", wiki = WikiSearchState.Results(listOf(smiley)),
+                onDetailChange = controller::onDetailChanged),
             controller.state.value,
         )
         advanceUntilIdle()
@@ -252,7 +253,8 @@ class SmileyPickerControllerTest {
 
         // A restored Loading would spin forever (its job is dead) : it must normalise to Idle.
         assertEquals(
-            SmileyPickerState.Open(query = "jap", wiki = WikiSearchState.Idle),
+            SmileyPickerState.Open(query = "jap", wiki = WikiSearchState.Idle,
+                onDetailChange = controller::onDetailChanged),
             controller.state.value,
         )
     }
@@ -273,7 +275,8 @@ class SmileyPickerControllerTest {
         controller.open()
 
         assertEquals(
-            SmileyPickerState.Open(query = "jap", wiki = WikiSearchState.Idle),
+            SmileyPickerState.Open(query = "jap", wiki = WikiSearchState.Idle,
+                onDetailChange = controller::onDetailChanged),
             controller.state.value,
         )
     }
@@ -290,7 +293,8 @@ class SmileyPickerControllerTest {
         advanceUntilIdle()
 
         assertEquals(
-            SmileyPickerState.Open(query = "ja", wiki = WikiSearchState.Idle),
+            SmileyPickerState.Open(query = "ja", wiki = WikiSearchState.Idle,
+                onDetailChange = controller::onDetailChanged),
             controller.state.value,
         )
         assertEquals(0, calls)

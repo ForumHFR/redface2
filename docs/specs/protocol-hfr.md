@@ -873,18 +873,26 @@ supplémentaire**, aucun stockage local, aucune lecture via l'API REST.
 
 - Les quatre éditeurs (post, sujet, réponse MP, composition MP) fournissent au contrôleur les
   callbacks `add` / `remove` du dépôt. Aucun formulaire n'est rechargé à cause d'une mutation.
-- Sur un perso du Wiki, l'appui long ouvre « Ajouter aux favoris HFR », ou « Retirer des favoris
-  HFR » si le **jeton exact** figure déjà dans la liste courante (variante et espaces compris).
-  Dans la section Favoris HFR, il ouvre le retrait si l'entrée est éligible.
-  Le menu liste aussi l'ajout/retrait des favoris de l'appareil pour tout smiley, builtins compris,
-  selon son jeton exact dans la liste locale. Chaque action porte son propre libellé TalkBack ;
-  le libellé d'appui long commun est « Gérer les favoris ». Dès qu'une liste confirmée existe pour la génération
+- L'appui long sur **tout** smiley ouvre « Détail du smiley » dans la même feuille (option B,
+  décision du 30/10/2026). La cible vit dans le contrôleur ; flèche et retour système, y compris
+  prédictif, reviennent à la grille avec son onglet, sa recherche et son défilement. Le clavier
+  est fermé à l'ouverture du détail et ne se rouvre pas au retour. Une fermeture de la feuille,
+  une réouverture ou un changement de compte effacent la cible. Contenu, compteurs locaux et
+  limites de focus : [ADR-019]({{ site.baseurl }}/adr/019-smileys-favoris-locaux-et-top-usage).
+  Le détail offre l'insertion, la copie du jeton exact et les actions de favoris applicables.
+  Sur un perso, l'action HFR est « Ajouter aux favoris HFR », ou « Retirer des favoris HFR » si
+  le **jeton exact** figure dans la liste courante (variante et espaces compris). L'action locale
+  suit la liste de l'appareil, builtins compris. Un retrait conserve le détail et inverse l'action.
+  Chaque action reste accessible directement avec TalkBack ; « Afficher le détail » est ajouté
+  aux actions personnalisées et devient le libellé d'appui long commun.
+  Dès qu'une liste confirmée existe pour la génération
   courante, une entrée de la base absente de cette liste, hors jetons masqués par un retrait,
   est connue comme entrée du compte :
   aucun geste HFR, y compris dans le Wiki ; l'action locale reste disponible si le propriétaire est connu.
   Avant confirmation, le premier essai de retrait d'une telle entrée donne `NotInFavorites`,
   puis n'est plus proposé. Un nouveau formulaire efface ce savoir ; aucun rapprochement par pseudo.
 - Une seule mutation HFR à la fois : les gestes HFR sont indisponibles pendant l'attente,
+  et la ligne éligible du détail affiche « Modification des favoris HFR en cours »,
   sans bloquer les gestes locaux. Une mutation locale ne bloque pas les gestes HFR.
   Un ajout apparaît provisoirement en fin de la section Favoris HFR ; un retrait garde sa cellule marquée en cours.
   La cellule visée porte un indicateur discret. Le clic d'insertion reste disponible : jeton inséré,
@@ -908,7 +916,9 @@ supplémentaire**, aucun stockage local, aucune lecture via l'API REST.
 - Une liste confirmée est conservée même feuille fermée. Une génération logique empêche un
   formulaire reçu **pendant** la mutation de remplacer cette liste ; le prochain formulaire reçu
   **après** sa fin reprend la main. Ouvrir ou fermer la feuille ne supprime pas cette surcouche.
-- Le statut en tête de Favoris donne le résultat en français et l'annonce poliment à TalkBack.
+- Dans le détail, le statut sous la liste défilante des actions donne le résultat en français et
+  l'annonce poliment à TalkBack ; il reste visible sans minuteur. Sur la grille, le statut en tête
+  de Favoris conserve le même rôle.
   Dans Standard et Wiki, une surface compacte avec marges affiche le même message en surcouche brève en bas,
   sans déplacer le champ de recherche ni la grille ; son fond suit le thème clair ou sombre.
   Elle disparaît après le délai recommandé par l'accessibilité (4 secondes par défaut, comme un

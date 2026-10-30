@@ -1,23 +1,16 @@
 package fr.forumhfr.redface2.core.ui.editor
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalAccessibilityManager
@@ -43,37 +36,40 @@ internal fun SmileyFavoriteTarget(
     content: @Composable (Modifier) -> Unit,
 ) {
     val actions = buildList {
+        add(SmileyAccessibilityAction(stringResource(R.string.editor_smiley_detail_show)) {
+            state?.onDetailChange?.invoke(smiley)
+        })
         state?.localFavoriteAction(smiley)?.let { action ->
             val label = when (action) {
                 SmileyFavoriteAction.ADD -> stringResource(R.string.editor_smiley_local_favorite_add)
                 SmileyFavoriteAction.REMOVE -> stringResource(R.string.editor_smiley_local_favorite_remove)
             }
-            add(FavoriteMenuAction(label) { state?.onLocalFavoriteChange?.invoke(smiley) })
+            add(SmileyAccessibilityAction(label) { state?.onLocalFavoriteChange?.invoke(smiley) })
         }
         state?.favoriteAction(smiley)?.let { action ->
             val label = when (action) {
                 SmileyFavoriteAction.ADD -> stringResource(R.string.editor_smiley_favorite_add)
                 SmileyFavoriteAction.REMOVE -> stringResource(R.string.editor_smiley_favorite_remove)
             }
-            add(FavoriteMenuAction(label) { state?.onFavoriteChange?.invoke(smiley) })
+            add(SmileyAccessibilityAction(label) { state?.onFavoriteChange?.invoke(smiley) })
         }
     }
     val pending = state?.pendingFavoriteToken == smiley.token
     val progressLabel = stringResource(R.string.editor_smiley_favorite_pending)
     val progress = Modifier.semantics { if (pending) stateDescription = progressLabel }
+    val detailLabel = stringResource(R.string.editor_smiley_detail_show)
     Box {
-        if (actions.isEmpty()) {
-            content(Modifier.clickable(onClick = onClick).then(progress))
-        } else {
-            SmileyFavoriteGesture(
-                smiley = smiley,
-                actions = actions,
+        content(
+            Modifier.combinedClickable(
                 onClick = onClick,
-                content = { gestures ->
-                    content(gestures.then(progress))
-                },
-            )
-        }
+                onLongClick = { state?.onDetailChange?.invoke(smiley) },
+                onLongClickLabel = detailLabel,
+            ).semantics {
+                customActions = actions.map { action ->
+                    CustomAccessibilityAction(action.label) { action.invoke(); true }
+                }
+            }.then(progress),
+        )
         if (pending) {
             CircularProgressIndicator(
                 modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).size(14.dp)
@@ -84,39 +80,7 @@ internal fun SmileyFavoriteTarget(
     }
 }
 
-private data class FavoriteMenuAction(val label: String, val invoke: () -> Unit)
-
-@Composable
-private fun SmileyFavoriteGesture(
-    smiley: EditorSmiley,
-    actions: List<FavoriteMenuAction>,
-    onClick: () -> Unit,
-    content: @Composable (Modifier) -> Unit,
-) {
-    val label = stringResource(R.string.editor_smiley_favorite_manage)
-    var menuOpen by remember(smiley.token) { mutableStateOf(false) }
-    // Ineligible cells leave this composition entirely; a changed action also closes the menu.
-    LaunchedEffect(actions.map { it.label }) { menuOpen = false }
-    content(
-        Modifier.combinedClickable(
-            onClick = onClick,
-            onLongClick = { menuOpen = true },
-            onLongClickLabel = label,
-        ).semantics {
-            customActions = actions.map { action ->
-                CustomAccessibilityAction(action.label) { action.invoke(); true }
-            }
-        },
-    )
-    DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
-        actions.forEach { action ->
-            DropdownMenuItem(
-                text = { Text(action.label) },
-                onClick = { menuOpen = false; action.invoke() },
-            )
-        }
-    }
-}
+private data class SmileyAccessibilityAction(val label: String, val invoke: () -> Unit)
 
 /**
  * A brief Standard/Wiki overlay, excluded from measurement and keyed per favorite gesture.
