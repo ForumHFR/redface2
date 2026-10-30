@@ -16,6 +16,21 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.64.5` — `internal` (dev) — 2026-10-30
+
+Détail du smiley à l'appui long ([#1154](https://github.com/ForumHFR/redface2/issues/1154), [#1494](https://github.com/ForumHFR/redface2/pull/1494)), forme choisie par XaTriX sur maquettes.
+
+- **L'appui long sur un smiley ouvre son détail** dans le sélecteur, à la place du petit menu. On y trouve :
+  - le smiley en grand, son code et le nombre d'envois sur cet appareil ;
+  - son appartenance aux favoris de l'appareil et aux favoris HFR ;
+  - « Insérer dans le message » et « Copier le code » ;
+  - les actions de favoris.
+- **Le retour** (flèche ou geste) ramène à la grille, sur le même onglet et au même endroit, sans perdre la recherche Wiki ; la feuille reste ouverte.
+- **TalkBack** : chaque smiley propose « Afficher le détail », en plus des actions directes de favoris.
+- Les mots-clés du wiki HFR arrivent dans un prochain lot.
+
+---
+
 ## `0.64.4` — `internal` (dev) — 2026-10-29
 
 Onglet Favoris du sélecteur de smileys ([#1154](https://github.com/ForumHFR/redface2/issues/1154), [#1492](https://github.com/ForumHFR/redface2/pull/1492)), proposé par nicko sur le topic DEV.

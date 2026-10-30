@@ -1,3 +1,3 @@
-Redface 2 v0.64.4 — dev.
-- Smileys : nouvel onglet Favoris avec vos favoris de l'appareil, vos favoris HFR et vos smileys les plus utilisés.
-- Appui long sur un smiley pour l'ajouter ou le retirer de vos favoris.
+Redface 2 v0.64.5 — dev.
+- Smileys : l'appui long ouvre le détail du smiley (code, nombre d'envois, favoris, copier le code).
+- Le retour ramène à la grille, au même endroit.
