@@ -16,6 +16,19 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.64.6` — `internal` (dev) — 2026-10-30
+
+Mots-clés du wiki dans le détail du smiley ([#1154](https://github.com/ForumHFR/redface2/issues/1154), [#1496](https://github.com/ForumHFR/redface2/pull/1496)), lot 2 de la maquette B.
+
+- **Le détail d'un smiley perso affiche ses mots-clés du wiki HFR**, en puces sous le code et le compteur. Lecture publique, sans compte.
+  - « Aucun mot-clé sur le wiki » quand le smiley n'en a pas ou n'est pas dans le wiki ;
+  - « Mots-clés indisponibles » avec « Réessayer » en cas d'échec réseau ;
+  - rien pour les smileys standard, qui ne sont pas dans le wiki.
+- Les mots-clés déjà chargés restent en mémoire : revenir sur un smiley ou tourner l'écran ne recharge rien.
+- **Correctif** : un échec d'ajout ou de retrait d'un favori HFR ne s'affiche plus dans le détail d'un autre smiley.
+
+---
+
 ## `0.64.5` — `internal` (dev) — 2026-10-30
 
 Détail du smiley à l'appui long ([#1154](https://github.com/ForumHFR/redface2/issues/1154), [#1494](https://github.com/ForumHFR/redface2/pull/1494)), forme choisie par XaTriX sur maquettes.

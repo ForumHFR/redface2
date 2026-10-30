@@ -1,3 +1,3 @@
-Redface 2 v0.64.5 — dev.
-- Smileys: long-press opens the smiley detail (code, send count, favorites, copy code).
-- Back returns to the grid, right where you left it.
+Redface 2 v0.64.6 — dev.
+- Smileys: a custom smiley's detail shows its HFR wiki keywords.
+- Fix: an HFR favorite failure no longer shows in another smiley's detail.
