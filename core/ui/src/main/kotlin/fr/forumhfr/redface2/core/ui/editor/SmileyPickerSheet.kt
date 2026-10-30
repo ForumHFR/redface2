@@ -38,6 +38,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
@@ -101,7 +102,7 @@ fun SmileyPickerSheet(
     layout: SmileyPickerLayoutSpec = SmileyPickerLayoutSpec.Current,
 ) {
     // All four hosts remove the sheet on Hidden: expiration survives tab changes, not a new opening.
-    val favoriteOverlayExpired = remember(state.favoriteFeedbackGeneration) { mutableStateOf(false) }
+    val favoriteOverlayExpired = rememberSmileyPickerOverlayExpired(state.favoriteFeedbackGeneration)
     val gridState = rememberSaveableStateHolder()
     val wikiAutofocus = rememberSaveable { mutableStateOf(state.detailSmiley == null) }
     val uiState = SmileyPickerUiState(wikiAutofocus, favoriteOverlayExpired)
@@ -238,6 +239,16 @@ internal fun rememberSmileyPickerTab(initialTab: SmileyPickerTab): MutableState<
     rememberSaveable { mutableStateOf(initialTab.ordinal) }
 }
 
+/** Save the consumed generation too: rememberSaveable inputs are not checked against restored values. */
+@Composable
+internal fun rememberSmileyPickerOverlayExpired(generation: Long): MutableState<Boolean> = rememberSaveable(
+    generation,
+    stateSaver = listSaver<Boolean, Any>(
+        save = { listOf(generation, it) },
+        restore = { saved -> saved[0] == generation && (saved[1] as Boolean) },
+    ),
+) { mutableStateOf(false) }
+
 @Composable
 private fun StandardTabContent(
     state: SmileyPickerState.Open,
@@ -265,17 +276,7 @@ private fun WikiTabContent(
     LaunchedEffect(Unit) {
         if (autofocus) searchFocus.requestFocus()
     }
-    // #901 — the field owns a TextFieldValue seeded from the (possibly #824-restored) query
-    // with the caret at the END, so a restored word can be completed or erased right away.
-    // The String overload of OutlinedTextField builds its internal TextFieldValue with
-    // selection = TextRange(0), which put the restored caret at the START of the word.
-    // Seeded ONCE (no resync from state.query) : while this tab is composed the only query
-    // writer is this very field (the #824 restore happens in open(), atomically with the
-    // Hidden→Open transition that composes the sheet), and a composition-time resync would
-    // race the collectAsStateWithLifecycle echo of onQueryChange, clobbering fast typing.
-    var fieldValue by rememberSaveable(stateSaver = TextFieldValue.Saver) {
-        mutableStateOf(TextFieldValue(text = state.query, selection = TextRange(state.query.length)))
-    }
+    var fieldValue by rememberSmileyWikiFieldValue(state.query)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         OutlinedTextField(
             value = fieldValue,
@@ -298,6 +299,27 @@ private fun WikiTabContent(
                 .focusRequester(searchFocus),
         )
         WikiSearchContent(state, onSmileyClicked, layout)
+    }
+}
+
+/** Kept separate to test restoration outside ModalBottomSheet's dialog registry, like the tab state. */
+@Composable
+internal fun rememberSmileyWikiFieldValue(query: String): MutableState<TextFieldValue> {
+    // #901 — seed from the (possibly #824-restored) query with the caret at the END.
+    // The String overload of OutlinedTextField instead starts its selection at TextRange(0).
+    val fieldValue = rememberSaveable(stateSaver = TextFieldValue.Saver) {
+        mutableStateOf(TextFieldValue(text = query, selection = TextRange(query.length)))
+    }
+    // Reconcile ONCE on entry: the host's saved grid can outlive the controller across
+    // process death. Returning from detail keeps the selection when the saved text matches.
+    // Never resync during typing: the collectAsStateWithLifecycle
+    // echo of onQueryChange can lag behind a fast edit and clobber it.
+    return remember {
+        fieldValue.apply {
+            if (value.text != query) {
+                value = TextFieldValue(text = query, selection = TextRange(query.length))
+            }
+        }
     }
 }
 

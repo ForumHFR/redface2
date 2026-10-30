@@ -79,6 +79,7 @@ class SmileyPickerDetailGesturesTest {
         EditorSmiley("[:fictif $it:2]", "https://example.invalid/$it.gif", EditorSmileySource.WIKI)
     }
     private var inserted: String? = null
+    private var dismissals = 0
 
     @OptIn(coil3.annotation.DelicateCoilApi::class)
     @Before
@@ -168,7 +169,7 @@ class SmileyPickerDetailGesturesTest {
     }
 
     @Test
-    fun `system back on the actual dialog returns to grid without dismissing the sheet`() {
+    fun `system back returns to grid then dismisses the sheet and reopening has no detail`() {
         val controller = controller()
         mount(controller)
         openDetail(builtin)
@@ -179,7 +180,20 @@ class SmileyPickerDetailGesturesTest {
         compose.runOnIdle {
             assertTrue(dialog.isShowing)
             assertNull((controller.state.value as SmileyPickerState.Open).detailSmiley)
+            assertEquals(0, dismissals)
         }
+
+        compose.runOnIdle { dialog.onBackPressedDispatcher.onBackPressed() }
+        text(R.string.editor_smiley_tab_standard).assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(1, dismissals)
+            assertEquals(SmileyPickerState.Hidden, controller.state.value)
+            assertFalse(dialog.isShowing)
+            controller.open()
+        }
+        text(R.string.editor_smiley_tab_standard).assertIsSelected()
+        text(R.string.editor_smiley_detail_title).assertDoesNotExist()
+        compose.runOnIdle { assertNull((controller.state.value as SmileyPickerState.Open).detailSmiley) }
     }
 
     @Test
@@ -368,7 +382,7 @@ class SmileyPickerDetailGesturesTest {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 val state by controller.state.collectAsState()
                 (state as? SmileyPickerState.Open)?.let { open ->
-                    SmileyPickerSheet(open, controller::dismiss, controller::onQueryChanged, {
+                    SmileyPickerSheet(open, { dismissals++; controller.dismiss() }, controller::onQueryChanged, {
                         inserted = it
                         controller.dismiss()
                     })
