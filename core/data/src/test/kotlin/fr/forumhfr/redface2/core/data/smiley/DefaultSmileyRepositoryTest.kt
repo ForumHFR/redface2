@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.data.smiley
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.smiley.SmileySearchParser
+import fr.forumhfr.redface2.core.parser.smiley.SmileyWikiKeywordsParser
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -35,6 +36,7 @@ class DefaultSmileyRepositoryTest {
         parser = parser,
         diagnostics = diagnostics,
         ioDispatcher = UnconfinedTestDispatcher(),
+        keywordsParser = SmileyWikiKeywordsParser(),
     )
 
     @Test

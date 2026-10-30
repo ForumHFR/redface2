@@ -55,6 +55,25 @@ class HfrClientTest {
     }
 
     @Test
+    fun `Wiki detail encodes the full token and uses the anonymous client`() = runTest {
+        val html = sharedParserFixture("smiley_wiki_detail-ticento-6.html")
+        server.enqueue(MockResponse().addHeader("Content-Type", "text/html; charset=utf-8").setBody(html))
+
+        assertEquals(html, client.getSmileyWikiDetail("[:ticento:6]"))
+        val request = server.takeRequest()
+        assertEquals("/wikismilies.php?config=hfr.inc&detail=%5B%3Aticento%3A6%5D", request.path)
+        assertEquals("anonymous", request.getHeader("X-RF2-Client"))
+        assertNull(request.getHeader("Cookie"))
+    }
+
+    @Test
+    fun `Wiki detail HTTP failure propagates as a server error`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(503))
+        val error = runCatching { client.getSmileyWikiDetail("[:ticento:6]") }.exceptionOrNull()
+        assertTrue(error is HfrServerException)
+    }
+
+    @Test
     fun `getPrivateMessageListPage throws SessionExpired on login form served as HTTP 200`() = runTest {
         server.enqueue(
             MockResponse()

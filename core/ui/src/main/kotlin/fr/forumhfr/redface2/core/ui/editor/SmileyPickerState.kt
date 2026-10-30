@@ -42,6 +42,13 @@ sealed interface SmileyPickerState {
         val detailSmiley: EditorSmiley? = null,
         val onDetailChange: ((EditorSmiley?) -> Unit)? = null,
         val usageCounts: Map<String, Long> = emptyMap(),
+        val wikiKeywords: SmileyWikiKeywordsState = SmileyWikiKeywordsState.Hidden,
+        val onWikiKeywordsRetry: (() -> Unit)? = null,
+        /** Mutation target and completion order, independent of the overlay's gesture generation. */
+        val favoriteFeedbackToken: String? = null,
+        val favoriteFeedbackEmission: Long = 0L,
+        /** Captured at the gesture, before composition can receive an already-completed mutation. */
+        val detailFeedbackEmissionAtEntry: Long = 0L,
     ) : SmileyPickerState {
         /** The detail can show an eligible action's pending state while mutations remain blocked. */
         fun favoriteAction(smiley: EditorSmiley, includePending: Boolean = false): SmileyFavoriteAction? = when {
@@ -64,6 +71,13 @@ sealed interface SmileyPickerState {
 enum class SmileyFavoriteAction { ADD, REMOVE }
 
 enum class SmileyPickerTab { FAVORITES, STANDARD, WIKI }
+
+sealed interface SmileyWikiKeywordsState {
+    data object Hidden : SmileyWikiKeywordsState
+    data object Loading : SmileyWikiKeywordsState
+    data class Loaded(val keywords: List<String>) : SmileyWikiKeywordsState
+    data object Failed : SmileyWikiKeywordsState
+}
 
 /** Cleared after its first visible opening; hidden successes are silent, hidden failures wait for reopening. */
 sealed interface SmileyFavoriteFeedback {

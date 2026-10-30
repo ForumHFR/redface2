@@ -37,6 +37,7 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.SmileyFavoriteMutations
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerFavoriteSources
+import fr.forumhfr.redface2.core.ui.editor.SmileyWikiKeywordsSource
 import fr.forumhfr.redface2.core.ui.editor.UploadError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
@@ -120,6 +121,10 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     val smileyPicker = SmileyPickerController(
         scope = viewModelScope,
         searchWiki = smileyRepository::searchWiki,
+        wikiKeywords = SmileyWikiKeywordsSource(
+            cached = smileyRepository::cachedWikiKeywords,
+            load = smileyRepository::getWikiKeywords,
+        ),
         favoriteSources = SmileyPickerFavoriteSources(
             favoriteSmileys = { loadedForm?.favoriteSmileys.orEmpty() },
             hfrFavoriteMutations = SmileyFavoriteMutations(

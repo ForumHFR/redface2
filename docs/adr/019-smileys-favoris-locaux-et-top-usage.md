@@ -172,8 +172,49 @@ ancré. Il ne dépend plus de l'éligibilité aux favoris. Le tap continue d'ins
   les nœuds de la grille sont recréés, et la cellule peut disparaître après un retrait. Aucun
   transfert forcé de focus de saisie ne prétend résoudre ce focus d'accessibilité ; contrôle sur
   appareil nécessaire, comme pour le clavier et le retour prédictif réel.
-- Les mots-clés réseau restent au **lot 2** ; leur place naturelle sera sous l'en-tête, avant
-  l'insertion. Aucun chargement ni emplacement vide n'est introduit dans ce lot.
+- Le lot 1 ne chargeait pas les mots-clés réseau ; le lot 2 ci-dessous occupe leur place sous
+  l'en-tête, avant l'insertion.
+
+## Mise à jour 30/10/2026 : mots-clés du wiki (lot 2)
+
+- Le détail d'un perso charge les mots-clés publics du wiki **à son ouverture**, sans compte ni
+  cookies. Aucun appel ni section pour un builtin. Le contrat et les captures anonymes du 30/10
+  sont décrits dans [Protocole HFR]({{ site.baseurl }}/specs/protocol-hfr#mots-clés-du-détail-wiki).
+- `HfrClient.getSmileyWikiDetail` lit la page ; `SmileyWikiKeywordsParser` (`:core:parser`) extrait
+  la ligne correspondant au jeton exact. `SmileyRepository` (`:core:domain`) expose
+  `getWikiKeywords` et la lecture immédiate `cachedWikiKeywords`, implémentées par
+  `DefaultSmileyRepository` (`:core:data`), avec réseau et parse dans `withContext(ioDispatcher)`.
+  Le résultat typé `SmileyWikiKeywordsResult` vit dans `:core:model`, partagé par le dépôt et
+  les consommateurs : `Loaded(List<String>)`, `Failed`, `NotApplicable` pour les builtins.
+  Inconnu du wiki et connu sans mot-clé produisent tous deux `Loaded(emptyList())` ; l'inconnu
+  n'est reconnu qu'au marqueur HFR « Désolé, aucune réponse n'a été trouvée », avec un champ
+  `detail` égal au jeton. Toute autre page sans ligne cible est un échec non mis en cache.
+- Le **cache LRU en mémoire de 256 entrées** appartient au dépôt singleton, donc au processus,
+  sans disque ni invalidation au changement de compte. Clé : jeton exact. Seuls les résultats
+  réussis, listes vides comprises, sont mémorisés ; les échecs ne le sont jamais. Une lecture
+  synchrone du cache évite de flasher un chargement au retour sur un smiley, y compris dans un
+  nouvel éditeur. Le cache disparaît à la mort du processus ; pas de catalogue hors ligne ni TTL.
+- `SmileyPickerState.Open.wikiKeywords` porte `Hidden`, `Loading`, `Loaded(List<String>)` ou
+  `Failed`. Les quatre hôtes fournissent les callbacks du dépôt au contrôleur partagé. Un job
+  enfant de la portée du ViewModel charge la cible ; quitter le détail, fermer/réouvrir la feuille,
+  changer de cible ou de compte l'annule. Une génération de visite et le jeton rejettent aussi
+  les réponses tardives d'un callback non coopératif. La rotation conserve la cible et son état.
+- La section **« Mots-clés du wiki »**, titre sémantique TalkBack, suit le code, le compteur et
+  les appartenances, avant **« Insérer dans le message »**, conformément à la maquette B.
+  Des `Surface` textuelles sans action de clic reprennent les puces d'appartenance, dans un
+  `FlowRow` qui conserve l'ordre et passe à la ligne. Un minimum de hauteur de 72 dp réserve
+  le titre et une ligne pendant le chargement ; le contenu complet défile avec le détail.
+  Chargement discret, liste vide « Aucun mot-clé sur le wiki », échec « Mots-clés indisponibles »
+  avec bouton **« Réessayer »**, relançant seulement le chargement de la cible courante.
+- **Retour favori (finding Fable du lot 1)** : conserver le jeton de la mutation et un compteur
+  d'émission à sa terminaison, distinct de la génération de geste utilisée par la surcouche.
+  Le contrôleur capture ce compteur à l'ouverture du détail, avant toute composition. Le détail
+  affiche un retour uniquement pour son jeton et s'il a été émis depuis cette ouverture ; un échec
+  tardif d'un autre smiley reste disponible pour la grille, sans être consommé par ce détail.
+  Les priorités d'échec et les règles de compte existantes restent applicables.
+
+Le contrôle sur appareil doit inclure TalkBack (titre puis textes sans rôle de bouton), petits
+écrans et grande police, rotation pendant le chargement, retour prédictif et réessai sur réseau réel.
 
 ## Conséquences
 

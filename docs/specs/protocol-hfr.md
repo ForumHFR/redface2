@@ -819,6 +819,40 @@ Réponse : fragment HTML (pas de `<html>/<body>` wrapper), une `<img src="…" a
 
 L'endpoint accepte session anonyme (`user_id=0`) ; côté client, l'appel passe par le client OkHttp **anonymous** pour ne pas exposer la query dans les diagnostics authentifiés.
 
+### Mots-clés du détail wiki
+
+Contrat observé le **30/10/2026 en anonyme, sans cookies**, pour #1154 lot 2 ; captures publiques
+réduites dans `core/parser/src/test/resources/fixtures/smiley_wiki_detail-*.html`, provenance dans
+les fichiers `.source.txt` associés. Cette lecture ne concerne que les persos (`[:nom]`, `[:nom:N]`) :
+**aucun appel pour un builtin** (`:o`, `:D`…).
+
+```text
+GET /wikismilies.php?config=hfr.inc&detail={jeton URL-encodé}
+GET /wikismilies.php?config=hfr.inc&detail=%5B%3Aticento%3A6%5D
+```
+
+- Réponse observée : **200**, `text/html; charset=utf-8`, page complète d'environ 30 Ko.
+  Utiliser le client OkHttp `anonymous`, sans identifiant de compte. Ne jamais journaliser le corps.
+- Dans le formulaire de détail `wikismilies.php`, identifier la ligne `tr.s2Topic` dont
+  `input[type=hidden][name=smiley0]` a pour `value` le **jeton demandé**, avant de lire
+  `input[type=text][name=keywords0]` dans **cette même ligne**. Ignorer l'historique des modifications.
+- Jsoup décode les entités des attributs. Séparer les mots-clés par les espaces, retirer les vides
+  et les doublons en conservant l'ordre du wiki. Un tiret reste dans le mot (`jean-marc`).
+  Pour `[:ticento:6]` : `feu feux fire brule bruler burn chaud hot cramer cramé`.
+- `keywords0=""` (`[:t-w:6]`) donne une liste vide. Un jeton inconnu (`[:nexistepas-xyz]`) donne
+  aussi une page **200**, sans `smiley0` ni `keywords0`, dont une ligne `tr.s2Topic` porte le
+  marqueur « Désolé, aucune réponse n'a été trouvée » : même rendu « Aucun mot-clé sur le wiki ».
+  Sans ligne cible, seule la présence de ce marqueur autorise une liste vide ; sinon (autre jeton,
+  `smiley0` sans `value`, message reformulé par HFR), c'est un échec réessayable. Le champ caché
+  `detail` du formulaire doit aussi valoir le jeton demandé. Ne jamais emprunter les mots-clés
+  d'un autre jeton.
+- Une erreur réseau/HTTP ou une structure manquante (formulaire, lignes, champ `keywords0` de
+  la cible) est un échec réessayable, pas une liste vide. Le `hash_check` observé est vide en anonyme ;
+  aucun POST ni édition de mots-clés n'est effectué.
+
+Cache public borné et indépendant du compte, annulation et rendu accessible du détail :
+[ADR-019, lot 2]({{ site.baseurl }}/adr/019-smileys-favoris-locaux-et-top-usage).
+
 ### Smileys favoris du compte
 
 Contrat de lecture observé le **2026-10-28**, mutations capturées le **2026-10-29** (#1154) : les

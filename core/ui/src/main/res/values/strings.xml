@@ -147,6 +147,11 @@
     </plurals>
     <string name="editor_smiley_detail_local_favorite">Favori de l\'appareil</string>
     <string name="editor_smiley_detail_hfr_favorite">Favori HFR</string>
+    <string name="editor_smiley_wiki_keywords_title">Mots-clés du wiki</string>
+    <string name="editor_smiley_wiki_keywords_loading">Chargement des mots-clés…</string>
+    <string name="editor_smiley_wiki_keywords_empty">Aucun mot-clé sur le wiki</string>
+    <string name="editor_smiley_wiki_keywords_failed">Mots-clés indisponibles</string>
+    <string name="editor_smiley_wiki_keywords_retry">Réessayer</string>
     <string name="editor_smiley_local_favorite_add">Ajouter aux favoris de l\'appareil</string>
     <string name="editor_smiley_local_favorite_remove">Retirer des favoris de l\'appareil</string>
     <string name="editor_smiley_local_favorite_added">Ajouté aux favoris de l\'appareil</string>

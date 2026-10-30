@@ -724,6 +724,14 @@ sealed interface HfrFavoriteSmileyMutationResult {
     data object UnknownResponse : HfrFavoriteSmileyMutationResult
     data object TransportFailure : HfrFavoriteSmileyMutationResult
 }
+
+// #1154 lot 2 — mots-clés publics du wiki, lus dans le détail d'un perso (ADR-019).
+// Inconnu du wiki et connu sans mot-clé donnent tous deux `Loaded(emptyList())`.
+sealed interface SmileyWikiKeywordsResult {
+    data class Loaded(val keywords: List<String>) : SmileyWikiKeywordsResult
+    data object Failed : SmileyWikiKeywordsResult
+    data object NotApplicable : SmileyWikiKeywordsResult // builtin, hors wiki
+}
 ```
 
 `token` est conservé verbatim (espaces internes et variantes compris) ; `imageUrl` vient du

@@ -48,6 +48,7 @@ import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.model.EditorSmiley
+import fr.forumhfr.redface2.core.model.SmileyWikiKeywordsResult
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
@@ -1858,6 +1859,10 @@ class TopicFormViewModelTest {
      * loading / success / error transitions of the wiki search without touching the network.
      */
     private class FakeSmileyRepository : SmileyRepository {
+        override fun cachedWikiKeywords(token: String): SmileyWikiKeywordsResult.Loaded? = null
+
+        override suspend fun getWikiKeywords(token: String) = SmileyWikiKeywordsResult.Failed
+
         private var pending: CompletableDeferred<List<EditorSmiley>>? = null
         var lastUserId: Int? = null
             private set
