@@ -1,10 +1,15 @@
 package fr.forumhfr.redface2.feature.profile
 
+import android.content.ClipboardManager
+import android.content.Context
 import android.widget.Magnifier
+import androidx.activity.ComponentDialog
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -13,6 +18,10 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasAnyDescendant
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
@@ -24,10 +33,13 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.text.TextLayoutResult
+import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.model.UserProfile
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import org.junit.Assert.assertEquals
@@ -43,6 +55,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.annotation.Implementation
 import org.robolectric.annotation.Implements
+import org.robolectric.shadows.ShadowDialog
 
 @RunWith(RobolectricTestRunner::class)
 @Config(
@@ -64,327 +77,387 @@ class ProfileConfigurationUiTest {
         postCount = 213400,
         location = "Katowice (PL)",
         signatureText = null,
+        hasHardwareConfiguration = true,
     )
 
     private var configurationLines = XATRIX_LINES
+    private var nextConfiguration: ProfileUiState.ConfigurationSheet =
+        ProfileUiState.ConfigurationSheet.Loaded(XATRIX_LINES)
+    private val state = mutableStateOf(loadedState())
+    private val intents = mutableListOf<ProfileIntent>()
 
     @Before
     fun resetFontScale() {
         RuntimeEnvironment.setFontScale(1f)
     }
 
-    @Config(qualifiers = "w360dp-h760dp-xxhdpi")
     @Test
-    fun `empty configuration takes no section space in the sheet`() {
-        showSheet(ProfileUiState.Configuration.Loaded(emptyList()))
+    fun `card hides the link when HFR does not offer it`() {
+        val withoutLink = profile.copy(hasHardwareConfiguration = false)
+        showProfile(loadedState().copy(mode = ProfileUiState.Mode.Loaded(withoutLink)))
 
         assertTextAbsent(TITLE)
-        assertTextAbsent("Tout afficher")
         assertActionsVisible()
+        assertEquals(emptyList<ProfileIntent>(), intents)
     }
 
-    @Config(qualifiers = "w360dp-h760dp-xxhdpi")
     @Test
-    fun `loading an empty configuration never changes the card height or action positions`() {
-        val state = mutableStateOf(loadedState(ProfileUiState.Configuration.Loading))
-        compose.setContent {
-            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                ProfilePreviewSheetContent(state.value, {}, {}, {})
-            }
+    fun `card hides the link while the profile loads and when it fails`() {
+        showProfile(ProfileUiState.initial(profile.userId, profile.pseudo, null))
+        assertTextAbsent(TITLE)
+        assertActionsVisible()
+
+        compose.runOnIdle {
+            state.value = state.value.copy(mode = ProfileUiState.Mode.Error(HfrErrorKind.Network))
         }
 
         assertTextAbsent(TITLE)
-        assertTextAbsent("Chargement…")
-        val loadingBounds = sheetBounds()
-        val loadingActions = actionBounds()
-        val before = measurements()
-        assertActionsVisible()
-
-        // Include a slow response: no loading placeholder should change the card's geometry.
-        compose.mainClock.advanceTimeBy(500)
-        assertEquals(message("a slow empty load must preserve the sheet; before=$before"), loadingBounds, sheetBounds())
-        compose.runOnIdle { state.value = loadedState(ProfileUiState.Configuration.Loaded(emptyList())) }
-
-        assertTextAbsent(TITLE)
-        assertEquals(
-            message("an empty response must preserve the sheet height; before=$before"),
-            loadingBounds.height, sheetBounds().height, 1f,
-        )
-        assertEquals(
-            message("an empty response must preserve the sheet position; before=$before"),
-            loadingBounds.top, sheetBounds().top, 1f,
-        )
-        assertEquals(
-            message("an empty response must preserve the actions; before=$before"), loadingActions, actionBounds(),
-        )
-        assertActionsVisible()
-    }
-
-    @Config(qualifiers = "w360dp-h760dp-xxhdpi")
-    @Test
-    fun `configuration follows fully visible actions at opening and after expansion`() {
-        showSheet(ProfileUiState.Configuration.Loaded(XATRIX_LINES))
-        assertActionsVisible()
-        assertConfigurationAfterActions()
-
-        expandSheet()
-
-        assertActionsVisible()
-        assertConfigurationAfterActions()
-    }
-
-    @Config(qualifiers = "w760dp-h360dp-land-xxhdpi")
-    @Test
-    fun `landscape expansion shows both actions and nonzero profile information`() {
-        showSheet(ProfileUiState.Configuration.Loaded(XATRIX_LINES))
-        expandSheet()
-
-        assertActionsVisible()
-        assertVisible(compose.onNodeWithText("Katowice (PL)"), "profile location")
-        assertVisible(compose.onNodeWithText("213400"), "post count")
-        unfoldConfiguration()
-        assertLastLineReachable()
         assertActionsReachable()
+        assertEquals(emptyList<ProfileIntent>(), intents)
     }
 
-    @Config(qualifiers = "w360dp-h760dp-xxhdpi")
     @Test
-    fun `twelve hardware lines fold to four rendered lines and expand accessibly`() {
-        showSheet(ProfileUiState.Configuration.Loaded(XATRIX_LINES))
+    fun `one button link follows visible card actions at 360 by 760 dp`() {
+        showProfile()
         assertActionsVisible()
-        expandSheet()
-
-        val heading = compose.onNodeWithText(TITLE).performScrollTo()
-        assertVisible(heading, "configuration heading")
-        heading.assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading)) {
-            message("the configuration title must be a heading")
+        val link = compose.onNodeWithText(TITLE)
+        assertVisible(link, "configuration link")
+        link.assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
+        assertEquals(1, compose.onAllNodes(hasText(TITLE)).fetchSemanticsNodes().size)
+        val bounds = fullBounds(link.fetchSemanticsNode())
+        val density = link.fetchSemanticsNode().layoutInfo.density.density
+        assertTrue(message("configuration link must be at least 48 dp high"), bounds.height >= 48f * density)
+        actionBounds().forEach { action ->
+            assertTrue(message("configuration link must follow the actions"), action.bottom <= bounds.top)
         }
-        assertEquals(message("the preview must have four rendered lines"), 4, configurationLayout().lineCount)
-        assertTrue(message("the folded configuration must be ellipsized"), configurationLayout().hasVisualOverflow)
-
-        unfoldConfiguration()
-
-        assertTextAbsent("Tout afficher")
-        assertTrue(message("all twelve hardware lines must be laid out"), configurationLayout().lineCount >= 12)
-        assertFalse(
-            message("the expanded configuration must not be ellipsized"), configurationLayout().hasVisualOverflow,
-        )
-        // Text semantics contain every line for TalkBack, including the last network reference.
-        compose.onNodeWithText(XATRIX_LINES.joinToString("\n")).assertExists(message("TalkBack must have every line"))
-        assertLastLineReachable()
-        assertActionsReachable()
+        assertTextAbsent(configurationLines.joinToString("\n"))
+        assertEquals(emptyList<ProfileIntent>(), intents)
     }
 
-    @Config(qualifiers = "w360dp-h760dp-xxhdpi")
     @Test
-    fun `long expanded configuration reaches its last line and actions remain reachable`() {
-        showSheet(ProfileUiState.Configuration.Loaded(SCROLL_LINES))
-        assertActionsVisible()
-        expandSheet()
+    fun `touching the card link opens a separate sheet with twelve complete lines`() {
+        showProfile()
+        val card = ShadowDialog.getLatestDialog()
 
-        unfoldConfiguration()
+        openConfiguration()
 
-        assertLastLineReachable()
-        assertActionsReachable()
-    }
-
-    @Config(qualifiers = "w360dp-h760dp-xxhdpi")
-    @Test
-    fun `double font scale reaches the last line and both actions in the dialog`() {
-        showSheet(ProfileUiState.Configuration.Loaded(XATRIX_LINES), fontScale = 2f)
-
-        // RuntimeEnvironment scales the dialog owner too; verify the density of the actual Text.
-        assertEquals(
-            message("the dialog Text must use fontScale 2"),
-            2f, configurationLayout().layoutInput.density.fontScale, 0f,
-        )
-        assertActionsVisible()
-        expandSheet()
-        assertActionsVisible()
-        unfoldConfiguration()
-
-        assertFalse(
-            message("large text must not be ellipsized after expansion"), configurationLayout().hasVisualOverflow,
-        )
-        assertLastLineReachable()
-        assertActionsReachable()
-    }
-
-    @Config(qualifiers = "w760dp-h360dp-land-xxhdpi")
-    @Test
-    fun `landscape at double font scale keeps each action and the last configuration line reachable`() {
-        showSheet(ProfileUiState.Configuration.Loaded(XATRIX_LINES), fontScale = 2f)
-        assertEquals(
-            message("the landscape Text must use fontScale 2"),
-            2f, configurationLayout().layoutInput.density.fontScale, 0f,
-        )
-        expandSheet()
-        assertActionsReachable()
-
-        unfoldConfiguration()
-
-        assertLastLineReachable()
-        assertActionsReachable()
-    }
-
-    @Config(qualifiers = "w360dp-h760dp-xxhdpi")
-    @Test
-    fun `long press and drag at the bottom and top of configuration never dismisses or moves the sheet`() {
-        var dismissals = 0
-        showSheet(ProfileUiState.Configuration.Loaded(SCROLL_LINES), onDismiss = { dismissals++ })
-        expandSheet()
-        unfoldConfiguration()
-        assertLastLineReachable()
-        assertSelectionKeepsSheet { dismissals }
-
-        // Replay at offset zero: an unconsumed downward drag could otherwise move the sheet.
-        scrollBy(-configurationScrollRange().value())
-        assertEquals(
-            message("selection must also be exercised at scroll offset zero"),
-            0f, configurationScrollRange().value(), 1f,
-        )
-        assertSelectionKeepsSheet { dismissals }
-        assertActionsReachable()
-    }
-
-    @Config(qualifiers = "w360dp-h760dp-xxhdpi")
-    @Test
-    fun `a single long wrapping line also offers expansion`() {
-        val longLine = List(12) { XATRIX_LINES.first() }.joinToString(" / ")
-        showSheet(ProfileUiState.Configuration.Loaded(listOf(longLine)))
-        assertActionsVisible()
-        expandSheet()
-
-        unfoldConfiguration()
-
-        compose.onNodeWithText(longLine).assertExists(message("the complete wrapping line must remain in semantics"))
+        val configuration = ShadowDialog.getLatestDialog()
+        assertTrue("the configuration must have its own window", card.window !== configuration.window)
+        assertTrue("the profile dialog must stay open", card.isShowing)
+        assertHeadingAndPseudo()
+        assertTrue(message("all twelve lines must be laid out"), configurationLayout().lineCount >= 12)
+        assertFalse(message("configuration must never ellipsize"), configurationLayout().hasVisualOverflow)
         assertTextAbsent("Tout afficher")
         assertLastLineReachable()
-        assertActionsReachable()
+        assertEquals(listOf(ProfileIntent.RequestConfiguration), intents)
     }
 
-    @Config(qualifiers = "w360dp-h760dp-xxhdpi")
     @Test
-    fun `configuration failure retries independently and keeps profile actions available`() {
-        val intents = mutableListOf<ProfileIntent>()
-        showSheet(ProfileUiState.Configuration.Error, intents::add)
+    fun `configuration starts with a discrete loading indicator only after the touch`() {
+        nextConfiguration = ProfileUiState.ConfigurationSheet.Loading
+        showProfile()
+        compose.onNodeWithContentDescription(LOADING).assertDoesNotExist()
 
-        assertVisible(compose.onNodeWithText("Configuration indisponible").performScrollTo(), "configuration error")
-        val retry = compose.onNodeWithContentDescription("Réessayer la configuration matérielle").performScrollTo()
+        openConfiguration()
+
+        compose.onNodeWithContentDescription(LOADING).assertExists()
+        assertTextAbsent(XATRIX_LINES.joinToString("\n"))
+        compose.runOnIdle {
+            state.value = state.value.copy(configurationSheet = ProfileUiState.ConfigurationSheet.Loaded(XATRIX_LINES))
+        }
+        compose.onNodeWithContentDescription(LOADING).assertDoesNotExist()
+        assertLastLineReachable()
+    }
+
+    @Test
+    fun `an empty configuration has an explicit empty message`() {
+        nextConfiguration = ProfileUiState.ConfigurationSheet.Loaded(emptyList())
+        showProfile()
+
+        openConfiguration()
+
+        assertHeadingAndPseudo()
+        assertVisible(compose.onNodeWithText("Aucune configuration renseignée"), "empty configuration")
+        dismissConfigurationWithBack()
+        assertActionsVisible()
+        compose.onNodeWithTag("profile_configuration_sheet").assertDoesNotExist()
+    }
+
+    @Test
+    fun `configuration failure offers an explicit retry that replaces only the sheet content`() {
+        nextConfiguration = ProfileUiState.ConfigurationSheet.Error
+        showProfile()
+        openConfiguration()
+        assertVisible(compose.onNodeWithText("Configuration indisponible"), "configuration failure")
+        val retry = compose.onNodeWithContentDescription("Réessayer la configuration matérielle")
         assertVisible(retry, "configuration retry")
         assertEnabled(retry, "configuration retry")
+        nextConfiguration = ProfileUiState.ConfigurationSheet.Loaded(XATRIX_LINES)
+
         retry.performClick()
-        assertEquals(
-            message("retry must only request the configuration"), listOf(ProfileIntent.RetryConfiguration), intents,
-        )
-        assertActionsReachable()
-        compose.onNodeWithText("Masquer cet utilisateur").performClick()
-        assertEquals(message("the block action must remain available"), ProfileIntent.ToggleBlocked, intents.last())
-    }
 
-    @Config(qualifiers = "w360dp-h760dp-xxhdpi")
-    @Test
-    fun `loading configuration keeps profile information and actions visible through completion`() {
-        val state = mutableStateOf(loadedState(ProfileUiState.Configuration.Loading))
-        compose.setContent {
-            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                ProfilePreviewSheetContent(state.value, {}, {}, {})
-            }
-        }
-
-        assertTextAbsent(TITLE)
-        assertTextAbsent("Chargement…")
-        assertVisible(compose.onNodeWithText("Katowice (PL)"), "profile location while loading")
-        assertActionsVisible()
-
-        compose.runOnIdle { state.value = loadedState(ProfileUiState.Configuration.Loaded(XATRIX_LINES)) }
-
-        assertTextAbsent("Chargement…")
-        assertVisible(compose.onNodeWithText("Katowice (PL)"), "profile location after loading")
-        assertActionsVisible()
-        // A nonempty response may change M3's anchors. Assert content order, not anchor offsets.
-        assertConfigurationAfterActions()
-    }
-
-    @Config(qualifiers = "w360dp-h760dp-xxhdpi")
-    @Test
-    fun `full profile shows all configuration lines without expansion`() {
-        compose.setContent {
-            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                ProfileScreen(loadedState(ProfileUiState.Configuration.Loaded(XATRIX_LINES)), {}, {}, {})
-            }
-        }
-
-        assertVisible(compose.onNodeWithText(TITLE).performScrollTo(), "full profile configuration heading")
-        assertTrue(message("the full profile must lay out every hardware line"), configurationLayout().lineCount >= 12)
-        assertFalse(
-            message("the full profile must not ellipsize configuration"), configurationLayout().hasVisualOverflow,
-        )
-        assertTextAbsent("Tout afficher")
+        assertTextAbsent("Configuration indisponible")
+        assertEquals(listOf(ProfileIntent.RequestConfiguration, ProfileIntent.RetryConfiguration), intents)
         assertLastLineReachable()
+        dismissConfigurationWithBack()
+        assertActionsVisible()
     }
 
-    @Config(qualifiers = "w360dp-h760dp-xxhdpi")
     @Test
-    fun `full profile hides an empty configuration`() {
-        compose.setContent {
-            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                ProfileScreen(loadedState(ProfileUiState.Configuration.Loaded(emptyList())), {}, {}, {})
-            }
+    fun `Back closes configuration first and leaves the profile card open`() {
+        var cardDismissals = 0
+        showProfile(onDismiss = { cardDismissals++ })
+        val card = ShadowDialog.getLatestDialog()
+        openConfiguration()
+        val dialog = ShadowDialog.getLatestDialog() as ComponentDialog
+
+        dismissConfigurationWithBack()
+
+        compose.onNodeWithTag("profile_configuration_sheet").assertDoesNotExist()
+        compose.onNodeWithTag("profile_preview_sheet").assertExists()
+        assertTrue("the profile dialog must remain open", card.isShowing)
+        assertFalse("the configuration dialog must close", dialog.isShowing)
+        assertEquals(0, cardDismissals)
+        assertEquals(listOf(ProfileIntent.RequestConfiguration, ProfileIntent.DismissConfiguration), intents)
+        assertActionsVisible()
+    }
+
+    @Test
+    @Config(qualifiers = "w760dp-h760dp-xxhdpi")
+    fun `the configuration scrim dismisses only the upper sheet`() {
+        var cardDismissals = 0
+        showProfile(onDismiss = { cardDismissals++ })
+        val card = ShadowDialog.getLatestDialog()
+        openConfiguration()
+        val dialog = ShadowDialog.getLatestDialog()
+        val scrim = compose.onNode(
+            hasClickAction() and hasAnyAncestor(configurationDialogMatcher()) and
+                !hasAnyAncestor(hasTestTag("profile_configuration_sheet")),
+        )
+        val scrimNode = scrim.fetchSemanticsNode()
+        val scrimBounds = scrimNode.boundsInRoot
+        val surface = sheetBounds()
+        // performClick() taps the scrim's centre, which is covered by the sheet. Robolectric also
+        // reports the outer sheet at y=0 before M3's anchor offset. A wide window exposes a side
+        // gutter: its x coordinates are independent of that offset and of the sheet's height.
+        val exposedWidth = surface.left - scrimBounds.left
+        assertTrue("no exposed scrim: scrim=$scrimBounds sheet=$surface", exposedWidth > 0f)
+        val tap = Offset(scrimBounds.left + exposedWidth / 2f, scrimBounds.center.y)
+        assertTrue("scrim tap $tap must be inside scrim=$scrimBounds", scrimBounds.contains(tap))
+        assertTrue("scrim tap $tap must be left of sheet=$surface", tap.x < surface.left)
+
+        scrim.performTouchInput { click(tap - scrimNode.positionInRoot) }
+        compose.waitForIdle()
+
+        compose.onNodeWithTag("profile_configuration_sheet").assertDoesNotExist()
+        compose.onNodeWithTag("profile_preview_sheet").assertExists()
+        assertTrue("the profile dialog must remain open", card.isShowing)
+        assertFalse("the configuration dialog must close", dialog.isShowing)
+        assertEquals(0, cardDismissals)
+        assertEquals(listOf(ProfileIntent.RequestConfiguration, ProfileIntent.DismissConfiguration), intents)
+        assertActionsVisible()
+    }
+
+    @Test
+    fun `swiping down from the configuration handle closes only the upper sheet`() {
+        var cardDismissals = 0
+        showProfile(onDismiss = { cardDismissals++ })
+        val card = ShadowDialog.getLatestDialog()
+        openConfiguration()
+        val dialog = ShadowDialog.getLatestDialog()
+        val handle = compose.onNode(
+            SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss) and
+                hasAnyAncestor(hasTestTag("profile_configuration_sheet")),
+        ).fetchSemanticsNode()
+        val upperDialog = compose.onNode(configurationDialogMatcher())
+        val dialogNode = upperDialog.fetchSemanticsNode()
+        val dialogBounds = dialogNode.boundsInRoot
+        val start = fullBounds(handle).center
+        val end = Offset(start.x, dialogBounds.bottom - 1f)
+        val textViewport = viewportBounds()
+        assertTrue("handle start=$start must be inside dialog=$dialogBounds", dialogBounds.contains(start))
+        assertTrue("handle start=$start must precede selectable text=$textViewport", start.y < textViewport.top)
+        assertTrue(
+            "swipe must exceed half the sheet height: start=$start end=$end sheet=${sheetBounds()}",
+            end.y - start.y > sheetBounds().height / 2f,
+        )
+
+        // Inject through the upper window so the gesture can leave the handle's small bounds.
+        upperDialog.performTouchInput {
+            swipe(start - dialogNode.positionInRoot, end - dialogNode.positionInRoot, durationMillis = 150)
+        }
+        compose.waitForIdle()
+
+        compose.onNodeWithTag("profile_configuration_sheet").assertDoesNotExist()
+        compose.onNodeWithTag("profile_preview_sheet").assertExists()
+        assertTrue("the profile dialog must remain open", card.isShowing)
+        assertFalse("the configuration dialog must close", dialog.isShowing)
+        assertEquals(0, cardDismissals)
+        assertEquals(listOf(ProfileIntent.RequestConfiguration, ProfileIntent.DismissConfiguration), intents)
+        assertActionsVisible()
+    }
+
+    @Test
+    fun `double font scale reaches the last hardware line without folding`() {
+        showProfile(fontScale = 2f)
+        expandCard()
+        openConfiguration()
+        assertEquals(
+            message("configuration Text must use fontScale 2"),
+            2f, configurationLayout().layoutInput.density.fontScale, 0f,
+        )
+
+        assertLastLineReachable()
+
+        dismissConfigurationWithBack()
+        assertActionsReachable()
+    }
+
+    @Config(qualifiers = "w760dp-h360dp-land-xxhdpi")
+    @Test
+    fun `landscape at double font scale keeps configuration and card actions reachable`() {
+        showProfile(fontScale = 2f)
+        expandCard()
+        assertActionsReachable()
+        openConfiguration()
+
+        assertLastLineReachable()
+
+        dismissConfigurationWithBack()
+        assertActionsReachable()
+    }
+
+    @Test
+    fun `long press and drag at both scroll edges neither dismiss nor move either sheet`() {
+        var cardDismissals = 0
+        configurationLines = SCROLL_LINES
+        nextConfiguration = ProfileUiState.ConfigurationSheet.Loaded(configurationLines)
+        showProfile(onDismiss = { cardDismissals++ })
+        openConfiguration()
+        assertLastLineReachable()
+        assertSelectionKeepsSheet { cardDismissals }
+
+        scrollBy(-configurationScrollRange().value())
+        assertEquals(message("selection must also run at offset zero"), 0f, configurationScrollRange().value(), 1f)
+        assertSelectionKeepsSheet { cardDismissals }
+        assertEquals(listOf(ProfileIntent.RequestConfiguration), intents)
+    }
+
+    @Test
+    fun `full profile places a link after the signature and opens the shared sheet on touch`() {
+        val signedProfile = profile.copy(signatureText = "[:dawa]")
+        showProfile(loadedState().copy(mode = ProfileUiState.Mode.Loaded(signedProfile)), fullPage = true)
+        val link = compose.onNodeWithText(TITLE).performScrollTo()
+        assertVisible(link, "full profile configuration link")
+        val signature = compose.onNodeWithText("[:dawa]").fetchSemanticsNode()
+        assertTrue(
+            message("the configuration link must follow the signature"),
+            fullBounds(signature).bottom <= link.fetchSemanticsNode().positionInRoot.y,
+        )
+        assertTextAbsent(configurationLines.joinToString("\n"))
+
+        link.performClick()
+
+        assertHeadingAndPseudo()
+        assertLastLineReachable()
+        dismissConfigurationWithBack()
+        compose.onNodeWithText("Derniers messages").performScrollTo().assertExists()
+    }
+
+    @Test
+    fun `full profile hides the link during loading and when HFR has no configuration row`() {
+        showProfile(ProfileUiState.initial(profile.userId, profile.pseudo, null), fullPage = true)
+        assertTextAbsent(TITLE)
+
+        compose.runOnIdle {
+            val withoutLink = profile.copy(hasHardwareConfiguration = false)
+            state.value = loadedState().copy(mode = ProfileUiState.Mode.Loaded(withoutLink))
         }
 
         assertTextAbsent(TITLE)
+        compose.onNodeWithText("Derniers messages").performScrollTo().assertExists()
     }
 
-    private fun showSheet(
-        configuration: ProfileUiState.Configuration,
-        onIntent: (ProfileIntent) -> Unit = {},
+    private fun showProfile(
+        initialState: ProfileUiState = loadedState(),
+        fullPage: Boolean = false,
         fontScale: Float = 1f,
         onDismiss: () -> Unit = {},
     ) {
-        if (configuration is ProfileUiState.Configuration.Loaded) configurationLines = configuration.lines
+        state.value = initialState
         RuntimeEnvironment.setFontScale(fontScale)
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                ProfilePreviewSheetContent(loadedState(configuration), onIntent, onDismiss, {})
+                if (fullPage) {
+                    ProfileScreen(state.value, ::onIntent, {}, {})
+                } else {
+                    ProfilePreviewSheetContent(state.value, ::onIntent, onDismiss, {})
+                }
             }
         }
     }
 
-    private fun expandSheet() {
+    // State-hoisted UI tests; repository lifetime and real recreation are covered by
+    // ProfileViewModelTest and ProfileConfigurationRecreationTest.
+    private fun onIntent(intent: ProfileIntent) {
+        intents += intent
+        when (intent) {
+            ProfileIntent.RequestConfiguration, ProfileIntent.RetryConfiguration ->
+                state.value = state.value.copy(configurationSheet = nextConfiguration)
+            ProfileIntent.DismissConfiguration -> state.value = state.value.copy(configurationSheet = null)
+            else -> Unit
+        }
+    }
+
+    private fun openConfiguration() {
+        compose.onNodeWithText(TITLE).performScrollTo().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("profile_configuration_sheet").assertExists()
+    }
+
+    private fun dismissConfigurationWithBack() {
+        val dialog = ShadowDialog.getLatestDialog() as ComponentDialog
+        compose.runOnIdle { dialog.onBackPressedDispatcher.onBackPressed() }
+        compose.waitForIdle()
+        compose.onNodeWithTag("profile_configuration_sheet").assertDoesNotExist()
+    }
+
+    private fun expandCard() {
         val expandable = SemanticsMatcher.keyIsDefined(SemanticsActions.Expand)
-        // Robolectric can open directly at the expanded anchor. There is then nothing to expand.
-        // Anchor offsets and the presence of a partial anchor are device checks, not JVM contracts.
+        // Robolectric may open at the expanded anchor already; use the action only when available.
         if (compose.onAllNodes(expandable).fetchSemanticsNodes().isNotEmpty()) {
             var accepted = false
             compose.onNode(expandable).performSemanticsAction(SemanticsActions.Expand) { accepted = it() }
             compose.waitForIdle()
-            assertTrue(message("the sheet must accept its available expand action"), accepted)
+            assertTrue(message("the card must accept its expand action"), accepted)
         }
-        assertTrue(message("the opened sheet must have nonzero height"), sheetBounds().height > 0f)
     }
 
-    private fun unfoldConfiguration() {
-        val showAll = compose.onNodeWithText("Tout afficher").performScrollTo()
-        assertVisible(showAll, "show all configuration")
-        assertEnabled(showAll, "show all configuration")
-        showAll.performClick()
-        compose.waitForIdle()
-    }
-
-    private fun loadedState(configuration: ProfileUiState.Configuration): ProfileUiState =
-        ProfileUiState.initial(profile.userId, profile.pseudo, null).copy(
-            mode = ProfileUiState.Mode.Loaded(profile),
-            configuration = configuration,
+    private fun assertHeadingAndPseudo() {
+        val heading = compose.onNode(
+            hasText(TITLE) and SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading),
         )
+        // The heading is pinned above the scroller; it must be displayed in the upper dialog.
+        assertTrue(message("configuration heading must be displayed"), heading.isDisplayed())
+        compose.onNode(hasText(profile.pseudo) and hasAnyAncestor(configurationDialogMatcher())).assertExists()
+    }
+
+    private fun loadedState(): ProfileUiState =
+        ProfileUiState.initial(profile.userId, profile.pseudo, null).copy(mode = ProfileUiState.Mode.Loaded(profile))
+
+    private fun configurationDialogMatcher() =
+        isDialog() and hasAnyDescendant(hasTestTag("profile_configuration_sheet"))
 
     private fun assertSelectionKeepsSheet(dismissals: () -> Int) {
+        val clipboard = RuntimeEnvironment.getApplication()
+            .getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        compose.runOnIdle { clipboard.clearPrimaryClip() }
         val text = compose.onNodeWithText(configurationLines.joinToString("\n"))
         val textBefore = text.fetchSemanticsNode()
         val textPositionBefore = textBefore.positionInRoot
         val layout = configurationLayout()
         val viewport = viewportBounds()
-        val sheet = compose.onNode(isDialog())
+        val sheet = compose.onNode(configurationDialogMatcher())
         val sheetOrigin = sheet.fetchSemanticsNode().positionInRoot
         // Pick two real glyphs in the middle of the visible text, away from auto-scroll edges.
         val textPadding = textBefore.size.height - layout.size.height
@@ -394,7 +467,8 @@ class ProfileConfigurationUiTest {
             .coerceIn(0, layout.lineCount - 3)
         // Inject through the dialog: the text node's touch bounds are clipped by the viewport.
         val textOrigin = Offset(textPositionBefore.x, textTop) - sheetOrigin
-        val start = layout.getBoundingBox(layout.getLineStart(line) + 2).center + textOrigin
+        val startOffset = layout.getLineStart(line) + 2
+        val start = layout.getBoundingBox(startOffset).center + textOrigin
         // Two lines down: one line (~48 px at xxhdpi) only equals the touch slop.
         val end = layout.getBoundingBox(layout.getLineStart(line + 2) + 2).center + textOrigin
         assertTrue(
@@ -409,6 +483,7 @@ class ProfileConfigurationUiTest {
         val scrollBefore = configurationScrollRange().value()
         val actionsBefore = actionBounds()
         val sheetBefore = sheetBounds()
+        val cardBefore = fullBounds(compose.onNodeWithTag("profile_preview_sheet").fetchSemanticsNode())
         val before = measurements()
 
         sheet.performTouchInput {
@@ -428,6 +503,32 @@ class ProfileConfigurationUiTest {
             )
             assertEquals("no action displacement; $context", actionsBefore, actionBounds())
             assertEquals("no sheet displacement; $context", sheetBefore, sheetBounds())
+            assertEquals(
+                "no card displacement; $context", cardBefore,
+                fullBounds(compose.onNodeWithTag("profile_preview_sheet").fetchSemanticsNode()),
+            )
+        }
+
+        // Copy the actual touch selection through SelectionContainer's keyboard handler. Clearing
+        // the clipboard above makes an ineffective gesture fail, including at the second scroll edge.
+        sheet.performKeyInput {
+            keyDown(Key.CtrlLeft)
+            keyDown(Key.C)
+            keyUp(Key.C)
+            keyUp(Key.CtrlLeft)
+        }
+        compose.runOnIdle {
+            val copied = clipboard.primaryClip?.getItemAt(0)?.text?.toString().orEmpty()
+            assertTrue(message("the gesture must select and copy text"), copied.isNotBlank())
+            assertTrue(
+                message("copied text must come from the configuration"),
+                configurationLines.joinToString("\n").contains(copied),
+            )
+            // Visual lines may be wraps within one hardware entry, without a newline character.
+            assertTrue(
+                message("the drag must extend selection beyond the initial word: '$copied'"),
+                copied.length > layout.getWordBoundary(startOffset).length,
+            )
         }
     }
 
@@ -448,16 +549,6 @@ class ProfileConfigurationUiTest {
             message("text '$text' must be absent"),
             compose.onAllNodes(hasText(text)).fetchSemanticsNodes().isEmpty(),
         )
-    }
-
-    private fun assertConfigurationAfterActions() {
-        val heading = compose.onNodeWithText(TITLE).fetchSemanticsNode(message("configuration heading must exist"))
-        actionBounds().forEachIndexed { index, bounds ->
-            assertTrue(
-                message("configuration heading=${fullBounds(heading)} must follow ${ACTION_LABELS[index]}=$bounds"),
-                bounds.bottom <= heading.positionInRoot.y,
-            )
-        }
     }
 
     private fun assertActionsVisible() {
@@ -502,7 +593,7 @@ class ProfileConfigurationUiTest {
         assertTrue("right; $context", bounds.right <= viewport.right + 1f)
     }
 
-    private fun configurationScrollRange() = compose.onNode(hasScrollAction()).fetchSemanticsNode()
+    private fun configurationScrollRange() = scrollNode().fetchSemanticsNode()
         .config[SemanticsProperties.VerticalScrollAxisRange]
 
     private fun actionBounds() = ACTION_LABELS.map { label ->
@@ -510,13 +601,21 @@ class ProfileConfigurationUiTest {
     }
 
     private fun sheetBounds() = fullBounds(
-        compose.onNodeWithTag("profile_preview_sheet").fetchSemanticsNode(message("the profile sheet must exist")),
+        compose.onNodeWithTag("profile_configuration_sheet").fetchSemanticsNode(),
     )
 
+    private fun scrollNode(): SemanticsNodeInteraction =
+        if (state.value.configurationSheet != null) {
+            compose.onNodeWithTag("profile_configuration_scroll")
+        } else {
+            compose.onNode(hasScrollAction())
+        }
+
     private fun viewportBounds(): Rect {
-        val scroll = compose.onNode(hasScrollAction()).fetchSemanticsNode()
+        val scroll = scrollNode().fetchSemanticsNode()
         val window = fullBounds(generateSequence(scroll) { it.parent }.last())
-        val dialog = compose.onAllNodes(isDialog()).fetchSemanticsNodes().singleOrNull()?.boundsInRoot ?: window
+        val dialog = generateSequence(scroll) { it.parent }.firstOrNull { isDialog().matches(it) }
+            ?.let { fullBounds(it) } ?: window
         // Under Robolectric the sheet node reports its size at top 0, without M3's anchored offset,
         // and boundsInRoot clips descendants against that rect: measure the scroller unclipped.
         return fullBounds(scroll).intersect(window).intersect(dialog)
@@ -540,7 +639,7 @@ class ProfileConfigurationUiTest {
     private fun scrollBy(delta: Float) {
         if (delta == 0f) return
         var accepted = false
-        compose.onNode(hasScrollAction()).performSemanticsAction(SemanticsActions.ScrollBy) {
+        scrollNode().performSemanticsAction(SemanticsActions.ScrollBy) {
             accepted = it(0f, delta)
         }
         // ScrollBy starts an animation. Settle it before reading geometry or issuing another
@@ -584,9 +683,15 @@ class ProfileConfigurationUiTest {
 
     private fun measurements(): String {
         val roots = compose.onAllNodes(isRoot()).fetchSemanticsNodes().map { fullBounds(it) }
-        val dialog = compose.onAllNodes(isDialog()).fetchSemanticsNodes().singleOrNull()
-        val sheet = compose.onAllNodes(hasTestTag("profile_preview_sheet")).fetchSemanticsNodes().singleOrNull()
-        val scroll = compose.onAllNodes(hasScrollAction()).fetchSemanticsNodes().singleOrNull()
+        val dialogs = compose.onAllNodes(isDialog()).fetchSemanticsNodes().map { fullBounds(it) }
+        val tag = if (state.value.configurationSheet != null) "profile_configuration_sheet" else "profile_preview_sheet"
+        val sheet = compose.onAllNodes(hasTestTag(tag)).fetchSemanticsNodes().singleOrNull()
+        val scrollMatcher = if (state.value.configurationSheet != null) {
+            hasTestTag("profile_configuration_scroll")
+        } else {
+            hasScrollAction()
+        }
+        val scroll = compose.onAllNodes(scrollMatcher).fetchSemanticsNodes().singleOrNull()
         val range = scroll?.config?.getOrNull(SemanticsProperties.VerticalScrollAxisRange)
         val actions = ACTION_LABELS.associateWith { label ->
             compose.onAllNodes(hasText(label)).fetchSemanticsNodes().singleOrNull()?.let { fullBounds(it) }
@@ -597,7 +702,7 @@ class ProfileConfigurationUiTest {
         text?.config?.getOrNull(SemanticsActions.GetTextLayoutResult)?.action?.invoke(layouts)
         val layout = layouts.singleOrNull()
         val lastLine = if (text != null && layout != null) lastLineBounds(text, layout) else null
-        return "windows=$roots heights=${roots.map { it.height }} dialog=${dialog?.boundsInRoot} " +
+        return "windows=$roots heights=${roots.map { it.height }} dialogs=$dialogs " +
             "sheet=${sheet?.let { fullBounds(it) }} sheetClipped=${sheet?.boundsInRoot} " +
             "scrollViewport=${scroll?.boundsInRoot} scroll.value=${range?.value?.invoke()} " +
             "scroll.maxValue=${range?.maxValue?.invoke()} actions=$actions " +
@@ -607,6 +712,7 @@ class ProfileConfigurationUiTest {
 
     private companion object {
         const val TITLE = "Configuration matérielle"
+        const val LOADING = "Chargement de la configuration matérielle"
         val ACTION_LABELS = listOf("Voir le profil complet", "Masquer cet utilisateur")
 
         // Parsed lines from the real configuration_xatrix_anonymous.html capture (2026-10-30).

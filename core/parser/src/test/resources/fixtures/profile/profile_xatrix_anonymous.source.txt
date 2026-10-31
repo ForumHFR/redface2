@@ -1,0 +1,5 @@
+https://forum.hardware.fr/hfr/profil-54596.htm
+Saved: 2026-10-31 (anonymous session, no cookies; public capture supplied for #1467)
+Notes: reduced to the original h4.Ext, table.main and Configuration matérielle row, with its relative link.
+Removed: other profile rows, avatar, signature, transactions, styles and wrappers. Indentation preserved.
+No cookies, tokens, emails or local paths.

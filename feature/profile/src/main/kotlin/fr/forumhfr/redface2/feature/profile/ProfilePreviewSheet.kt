@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.profile
 
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -77,7 +78,7 @@ fun ProfilePreviewSheet(
     // Without an explicit key, Hilt caches the first instance and skips `creationCallback`,
     // so tapping a different profile would show the first profile. With the key, each userId
     // gets a distinct Activity-scoped VM. The profile stays cached until Activity destruction;
-    // configuration loading is scoped to this opening by DisposableEffect below.
+    // configuration loading is scoped to this opening, including Activity recreation.
     viewModel: ProfileViewModel = hiltViewModel<ProfileViewModel, ProfileViewModel.Factory>(
         key = "profile-$userId",
         creationCallback = { factory ->
@@ -89,9 +90,13 @@ fun ProfilePreviewSheet(
         },
     ),
 ) {
-    DisposableEffect(viewModel) {
+    val activity = LocalActivity.current
+    DisposableEffect(viewModel, activity) {
         viewModel.onOpened()
-        onDispose { viewModel.onClosed() }
+        onDispose {
+            // The Activity retains this VM on rotation; keep the sheet and its in-flight request.
+            if (activity?.isChangingConfigurations != true) viewModel.onClosed()
+        }
     }
     val state by viewModel.state.collectAsStateWithLifecycle()
     ProfilePreviewSheetContent(
@@ -133,6 +138,7 @@ internal fun ProfilePreviewSheetContent(
             },
         )
     }
+    ProfileConfigurationOverlay(state, onIntent)
 }
 
 /**
@@ -173,13 +179,11 @@ private fun ProfilePreviewContent(
 
         ProfilePreviewActions(state, onIntent, onOpenFullProfile)
 
-        // Keep the original action order above the optional configuration. The whole card scrolls
-        // and M3 retains its partial/expanded anchors, including in landscape and with large fonts.
-        ProfileConfigurationSection(
-            configuration = state.configuration,
-            onRetry = { onIntent(ProfileIntent.RetryConfiguration) },
-            collapsed = true,
-        )
+        // One link after the actions keeps their positions unchanged when HFR offers a configuration.
+        val profile = (state.mode as? ProfileUiState.Mode.Loaded)?.profile
+        if (profile?.hasHardwareConfiguration == true) {
+            ProfileConfigurationLink(onClick = { onIntent(ProfileIntent.RequestConfiguration) })
+        }
     }
 }
 

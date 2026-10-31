@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.profile
 
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -57,6 +58,7 @@ import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
  *   like [onBack] so the feature module stays navigation-graph-free.
  */
 @OptIn(ExperimentalMaterial3Api::class)
+@Suppress("LongParameterList") // Same injectable ViewModel seam as ProfilePreviewSheet.
 @Composable
 fun ProfileRoute(
     userId: Int,
@@ -64,13 +66,12 @@ fun ProfileRoute(
     avatarUrlHint: String?,
     onBack: () -> Unit,
     onShowUserPosts: (String) -> Unit,
-) {
     // `key = "profile-$userId"` derives a distinct VM per profile in the nav entry's
     // ViewModelStore. Even though each `ProfileFullRoute` navigation creates its own back
     // stack entry, navigating Profile(A) → back → Profile(B) within the same composable
     // host could otherwise return the cached A-instance because `hiltViewModel` keys by
     // class, not by `creationCallback` arguments.
-    val viewModel = hiltViewModel<ProfileViewModel, ProfileViewModel.Factory>(
+    viewModel: ProfileViewModel = hiltViewModel<ProfileViewModel, ProfileViewModel.Factory>(
         key = "profile-$userId",
         creationCallback = { factory ->
             factory.create(
@@ -79,10 +80,15 @@ fun ProfileRoute(
                 avatarUrlHint = avatarUrlHint,
             )
         },
-    )
-    DisposableEffect(viewModel) {
+    ),
+) {
+    val activity = LocalActivity.current
+    DisposableEffect(viewModel, activity) {
         viewModel.onOpened()
-        onDispose { viewModel.onClosed() }
+        onDispose {
+            // Nav3 retains this VM on rotation; keep the sheet and its in-flight request.
+            if (activity?.isChangingConfigurations != true) viewModel.onClosed()
+        }
     }
     val state by viewModel.state.collectAsStateWithLifecycle()
     ProfileScreen(
@@ -183,16 +189,14 @@ internal fun ProfileScreen(
                     ProfileFullContent(
                         profile = mode.profile,
                         onShowUserPosts = onShowUserPosts,
+                        onConfigurationRequested = { onIntent(ProfileIntent.RequestConfiguration) },
                     )
                 }
             }
-            ProfileConfigurationSection(
-                configuration = state.configuration,
-                onRetry = { onIntent(ProfileIntent.RetryConfiguration) },
-            )
             Spacer(Modifier.height(16.dp))
         }
     }
+    ProfileConfigurationOverlay(state, onIntent)
 }
 
 @Composable
@@ -221,6 +225,7 @@ private fun ProfileLoadingHero(pseudo: String, avatarUrl: String?) {
 private fun ProfileFullContent(
     profile: UserProfile,
     onShowUserPosts: (String) -> Unit,
+    onConfigurationRequested: () -> Unit,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -274,6 +279,11 @@ private fun ProfileFullContent(
             text = sig,
             style = MaterialTheme.typography.bodySmall,
         )
+    }
+
+    // HFR puts this optional field immediately after the signature.
+    if (profile.hasHardwareConfiguration) {
+        ProfileConfigurationLink(onClick = onConfigurationRequested)
     }
 
     Spacer(Modifier.height(24.dp))

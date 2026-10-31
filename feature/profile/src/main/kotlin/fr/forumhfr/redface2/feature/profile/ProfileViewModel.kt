@@ -68,7 +68,7 @@ class ProfileViewModel @AssistedInject constructor(
      */
     private var loadJob: Job? = null
     private var configurationJob: Job? = null
-    private var configurationPseudo: String? = null
+    private var isOpen = false
     private var configurationSession: Any? = null
 
     init {
@@ -80,26 +80,47 @@ class ProfileViewModel @AssistedInject constructor(
     fun onIntent(intent: ProfileIntent) {
         when (intent) {
             ProfileIntent.Retry -> loadProfile()
-            ProfileIntent.RetryConfiguration -> configurationPseudo?.let { loadConfiguration(it, force = true) }
+            ProfileIntent.RequestConfiguration -> onConfigurationRequested()
+            ProfileIntent.DismissConfiguration -> onConfigurationDismissed()
+            ProfileIntent.RetryConfiguration -> onConfigurationRetry()
             ProfileIntent.ToggleBlocked -> toggleBlocked()
         }
     }
 
-    /** The Activity can retain this VM; configuration results belong only to the current opening. */
+    /** The Activity can retain this VM; opening the profile never requests configuration.php. */
     fun onOpened() {
-        if (configurationSession != null) return
-        configurationSession = Any()
-        val profile = (_state.value.mode as? ProfileUiState.Mode.Loaded)?.profile
-        loadConfiguration(profile?.pseudo ?: pseudoHint)
+        isOpen = true
+    }
+
+    fun onClosed() {
+        isOpen = false
+        onConfigurationDismissed()
+    }
+
+    fun onConfigurationRequested() {
+        if (_state.value.configurationSheet != null) return
+        requestConfiguration()
     }
 
     /** Invalidate before cancelling, including a repository response that ignores cancellation. */
-    fun onClosed() {
+    fun onConfigurationDismissed() {
         configurationSession = null
-        configurationPseudo = null
         configurationJob?.cancel()
         configurationJob = null
-        _state.update { it.copy(configuration = ProfileUiState.Configuration.Loaded(emptyList())) }
+        _state.update { it.copy(configurationSheet = null) }
+    }
+
+    fun onConfigurationRetry() {
+        if (_state.value.configurationSheet == null) return
+        requestConfiguration()
+    }
+
+    private fun requestConfiguration() {
+        val profile = (_state.value.mode as? ProfileUiState.Mode.Loaded)?.profile ?: return
+        val usablePseudo = profile.pseudo.isNotBlank() && profile.pseudo != "?"
+        if (isOpen && profile.hasHardwareConfiguration && usablePseudo) {
+            loadConfiguration(profile.pseudo)
+        }
     }
 
     /**
@@ -167,9 +188,6 @@ class ProfileViewModel @AssistedInject constructor(
             profileRepository.getProfile(userId).fold(
                 onSuccess = { profile ->
                     _state.update { it.copy(mode = ProfileUiState.Mode.Loaded(profile)) }
-                    // A hint starts the independent load immediately. Correct it only if the profile
-                    // supplies a different usable pseudo; a missing hint waits for this identity.
-                    loadConfiguration(profile.pseudo)
                 },
                 onFailure = { error ->
                     // Review feedback I7: ViewModel must not carry a localised String. It
@@ -189,26 +207,22 @@ class ProfileViewModel @AssistedInject constructor(
         }
     }
 
-    private fun loadConfiguration(pseudo: String, force: Boolean = false) {
-        val session = configurationSession
-        val name = pseudo.trim()
-        val invalidPseudo = name.isEmpty() || name == "?"
-        val reuseCurrentRequest = !force && name.equals(configurationPseudo, ignoreCase = true)
-        if (session == null || invalidPseudo || reuseCurrentRequest) return
-        configurationPseudo = name
+    private fun loadConfiguration(pseudo: String) {
+        val session = Any()
+        configurationSession = session
         configurationJob?.cancel()
+        _state.update { it.copy(configurationSheet = ProfileUiState.ConfigurationSheet.Loading) }
         configurationJob = viewModelScope.launch {
-            _state.update { it.copy(configuration = ProfileUiState.Configuration.Loading) }
-            val result = profileRepository.getUserConfiguration(name)
+            val result = profileRepository.getUserConfiguration(pseudo)
             currentCoroutineContext().ensureActive()
             if (session !== configurationSession) return@launch
             result.fold(
                 onSuccess = { lines ->
-                    _state.update { it.copy(configuration = ProfileUiState.Configuration.Loaded(lines)) }
+                    _state.update { it.copy(configurationSheet = ProfileUiState.ConfigurationSheet.Loaded(lines)) }
                 },
                 onFailure = { error ->
                     if (error is CancellationException) throw error
-                    _state.update { it.copy(configuration = ProfileUiState.Configuration.Error) }
+                    _state.update { it.copy(configurationSheet = ProfileUiState.ConfigurationSheet.Error) }
                 },
             )
         }
