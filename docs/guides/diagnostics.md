@@ -13,7 +13,9 @@ ouvrir **menu compte → Diagnostics → Copier** après le refresh. Un export d
 également utile pour comparer les conditions. Le journal est borné et conservé en mémoire seulement.
 
 L'en-tête contient la version, le build, le canal, l'API Android, le fabricant et le modèle.
-Le bouton Copier ne conserve que les tags exacts `FlagsRefresh`, `HfrCall` et `AppForeground` ;
+Le bouton Copier ne conserve que les tags exacts `FlagsRefresh`, `HfrCall`, `AppForeground` et
+`SmileyPicker` (sélecteur de smileys : ouverture et fermeture, détail, état et hauteur de la feuille,
+chargement des mots-clés ; jamais de code de smiley) ;
 les autres entrées restent visibles localement, avec leur nombre indiqué en fin d'export.
 Le message entier des tags autorisés est copié : chaque nouveau champ doit donc être produit
 à partir de valeurs fermées ou numériques, sans donnée personnelle ni message d'exception.
