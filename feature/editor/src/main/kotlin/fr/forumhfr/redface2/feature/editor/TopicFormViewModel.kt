@@ -12,12 +12,15 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.diagnostics.SmileyPickerCloseCause
 import fr.forumhfr.redface2.core.domain.diagnostics.recordImagePickerEvent
 import fr.forumhfr.redface2.core.domain.diagnostics.recordImagesPicked
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.smiley.HfrFavoriteSmileyRepository
+import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollections
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadException
@@ -36,7 +39,10 @@ import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.model.write.TopicForm
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.SmileyFavoriteMutations
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerFavoriteSources
+import fr.forumhfr.redface2.core.ui.editor.SmileyWikiKeywordsSource
 import fr.forumhfr.redface2.core.ui.editor.UploadError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
@@ -91,6 +97,8 @@ class TopicFormViewModel @AssistedInject constructor(
     private val authRepository: AuthRepository,
     private val uploadRepository: UploadRepository,
     private val imageUploadReader: ImageUploadReader,
+    hfrFavoriteSmileyRepository: HfrFavoriteSmileyRepository,
+    smileyLocalCollections: SmileyLocalCollections,
     private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
 
@@ -118,6 +126,54 @@ class TopicFormViewModel @AssistedInject constructor(
     val effects: Flow<TopicFormEffect> = _effects.receiveAsFlow()
 
     private var loadedForm: TopicForm? = null
+        set(value) {
+            field = value
+            if (value == null) smileyPicker.refreshFavorites(null)
+        }
+
+    /**
+     * #441 — smiley picker (Favorites + Standard + Wiki), delegated to the shared
+     * [SmileyPickerController] exactly like the MP composers (#387/#440) and
+     * `PostEditorViewModel` : the controller owns open/dismiss/query, the 300 ms debounce
+     * and its race guards, and the #824 restore-search-on-reopen contract. This ViewModel
+     * keeps only the insertion ([onSmileySelected] — a draft mutation, so it stays an MVI
+     * intent) ; the mixed wiring is deliberate, do not re-route it for « consistency ».
+     *
+     * Lifecycle (réserve Codex #441) : the editorial context is frozen at construction
+     * (`@Assisted request` ; one `TopicFormRoute` nav entry = one ViewModel), so the
+     * controller can never be re-armed for another topic/form — no targeted reset needed
+     * beyond the ViewModel's own death.
+     *
+     * Failure logging stays a policy of THIS feature (the MP composers keep the controller's
+     * no-op default) : class name only — never the query nor the userId (anti-leak test).
+     */
+    // Keep before init: loadedForm's setter can run synchronously there and crash on an uninitialized picker.
+    val smileyPicker = SmileyPickerController(
+        diagnostics = diagnostics,
+        scope = viewModelScope,
+        searchWiki = smileyRepository::searchWiki,
+        wikiKeywords = SmileyWikiKeywordsSource(
+            cached = smileyRepository::cachedWikiKeywords,
+            load = smileyRepository::getWikiKeywords,
+        ),
+        favoriteSources = SmileyPickerFavoriteSources(
+            favoriteSmileys = { loadedForm?.favoriteSmileys.orEmpty() },
+            hfrFavoriteMutations = SmileyFavoriteMutations(
+                addHfrFavorite = hfrFavoriteSmileyRepository::add,
+                removeHfrFavorite = hfrFavoriteSmileyRepository::remove,
+            ),
+            localCollections = smileyLocalCollections,
+        ),
+        userId = { _state.value.userId },
+        onSearchFailed = { error ->
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG_VM,
+                "wiki smiley search failed: ${error::class.simpleName}",
+            )
+        },
+    )
+
     private var submitJob: Job? = null
 
     /**
@@ -409,35 +465,6 @@ class TopicFormViewModel @AssistedInject constructor(
         draftKey?.let { key -> draftStore.delete(draftOwner, key) }
     }
 
-    /**
-     * #441 — smiley picker (Standard + Wiki search), delegated to the shared
-     * [SmileyPickerController] exactly like the MP composers (#387/#440) and
-     * `PostEditorViewModel` : the controller owns open/dismiss/query, the 300 ms debounce
-     * and its race guards, and the #824 restore-search-on-reopen contract. This ViewModel
-     * keeps only the insertion ([onSmileySelected] — a draft mutation, so it stays an MVI
-     * intent) ; the mixed wiring is deliberate, do not re-route it for « consistency ».
-     *
-     * Lifecycle (réserve Codex #441) : the editorial context is frozen at construction
-     * (`@Assisted request` ; one `TopicFormRoute` nav entry = one ViewModel), so the
-     * controller can never be re-armed for another topic/form — no targeted reset needed
-     * beyond the ViewModel's own death.
-     *
-     * Failure logging stays a policy of THIS feature (the MP composers keep the controller's
-     * no-op default) : class name only — never the query nor the userId (anti-leak test).
-     */
-    val smileyPicker = SmileyPickerController(
-        scope = viewModelScope,
-        searchWiki = smileyRepository::searchWiki,
-        userId = { _state.value.userId },
-        onSearchFailed = { error ->
-            diagnostics.record(
-                DiagnosticsLog.Level.WARN,
-                LOG_TAG_VM,
-                "wiki smiley search failed: ${error::class.simpleName}",
-            )
-        },
-    )
-
     private fun onSmileySelected(token: String) {
         _state.update { current ->
             val draft = current.draft
@@ -461,7 +488,7 @@ class TopicFormViewModel @AssistedInject constructor(
         }
         // Close the picker on successful insertion (#824 restores the search on the next
         // open) — same contract as PostEditorViewModel.onSmileySelected.
-        smileyPicker.dismiss()
+        smileyPicker.dismiss(SmileyPickerCloseCause.INSERTION)
         scheduleAutosave()
     }
 
@@ -672,11 +699,13 @@ class TopicFormViewModel @AssistedInject constructor(
             return
         }
         _state.update { it.copy(isLoadingForm = true, submitError = null) }
+        val favoriteStamp = smileyPicker.favoriteFormStamp()
         viewModelScope.launch {
             val outcome = runCatching { topicFormRepository.fetchEditFirstPostForm(context) }
             outcome.fold(
                 onSuccess = { form ->
                     loadedForm = form
+                    smileyPicker.refreshFavorites(favoriteStamp)
                     val snapshot = _state.value
                     // Pre-compute the preview off the state lambda — same
                     // dispatcher rationale as `PostEditorViewModel`. Only matters
@@ -848,11 +877,13 @@ class TopicFormViewModel @AssistedInject constructor(
             return
         }
         _state.update { it.copy(isLoadingForm = true, submitError = null) }
+        val favoriteStamp = smileyPicker.favoriteFormStamp()
         viewModelScope.launch {
             val outcome = runCatching { topicFormRepository.fetchNewTopicForm(context) }
             outcome.fold(
                 onSuccess = { form ->
                     loadedForm = form
+                    smileyPicker.refreshFavorites(favoriteStamp)
                     // The new-topic flow never hydrates subject/draft from the
                     // server (init already locked both flags to `true`), so we
                     // don't need to recompute the preview here. We do still

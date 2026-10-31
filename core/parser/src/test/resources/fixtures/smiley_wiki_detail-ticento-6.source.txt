@@ -1,0 +1,7 @@
+Capture publique anonyme du 30/10/2026, fournie par le mainteneur pour #1154.
+Capture : curl anonyme, sans cookies de session.
+Endpoint : GET https://forum.hardware.fr/wikismilies.php?config=hfr.inc&detail=<jeton URL-encodé>
+Jeton : [:ticento:6]
+Réduction : formulaire de détail, table et ligne s2Topic utile, champ detail.
+HTML de la ligne conservé verbatim ; en-têtes, historique, Matomo, pubs et hash_check retirés.
+Aucun cookie, identifiant de compte, email ou secret. Pas de nouvelle capture dans cette session.

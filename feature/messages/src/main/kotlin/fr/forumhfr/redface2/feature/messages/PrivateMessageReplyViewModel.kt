@@ -12,12 +12,15 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.diagnostics.SmileyPickerCloseCause
 import fr.forumhfr.redface2.core.domain.diagnostics.recordImagePickerEvent
 import fr.forumhfr.redface2.core.domain.diagnostics.recordImagesPicked
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.smiley.HfrFavoriteSmileyRepository
+import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollections
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadException
@@ -34,7 +37,10 @@ import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.SmileyFavoriteMutations
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerFavoriteSources
+import fr.forumhfr.redface2.core.ui.editor.SmileyWikiKeywordsSource
 import fr.forumhfr.redface2.core.ui.editor.UploadError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
@@ -83,6 +89,8 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     private val imageUploadReader: ImageUploadReader,
     private val diagnostics: DiagnosticsLog,
     smileyRepository: SmileyRepository,
+    hfrFavoriteSmileyRepository: HfrFavoriteSmileyRepository,
+    smileyLocalCollections: SmileyLocalCollections,
     private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
 
@@ -100,6 +108,38 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     private val quoteMaterializer = PrivateMessageReplyQuoteMaterializer(repository)
 
     private var loadedForm: ReplyForm? = null
+        set(value) {
+            field = value
+            if (value == null) smileyPicker.refreshFavorites(null)
+        }
+
+    /**
+     * #387 — shared smiley picker (Favorites + Standard + Wiki). The controller owns
+     * the picker state machine (debounce, race guards) ; this ViewModel only handles insertion.
+     * userId comes from the loaded reply form ([ReplyForm.userId], HFR's `find_smilies_timer`
+     * second argument). The controller falls back to 0 while the form is still loading
+     * (Codex review, PR #440).
+     */
+    // Keep before init: loadedForm's setter can run synchronously there and crash on an uninitialized picker.
+    val smileyPicker = SmileyPickerController(
+        diagnostics = diagnostics,
+        scope = viewModelScope,
+        searchWiki = smileyRepository::searchWiki,
+        wikiKeywords = SmileyWikiKeywordsSource(
+            cached = smileyRepository::cachedWikiKeywords,
+            load = smileyRepository::getWikiKeywords,
+        ),
+        favoriteSources = SmileyPickerFavoriteSources(
+            favoriteSmileys = { loadedForm?.favoriteSmileys.orEmpty() },
+            hfrFavoriteMutations = SmileyFavoriteMutations(
+                addHfrFavorite = hfrFavoriteSmileyRepository::add,
+                removeHfrFavorite = hfrFavoriteSmileyRepository::remove,
+            ),
+            localCollections = smileyLocalCollections,
+        ),
+        userId = { loadedForm?.userId },
+    )
+
     private var loadedSubmitContext: PrivateMessageReplyContext? = null
     private var formJob: Job? = null
     private var submitJob: Job? = null
@@ -304,6 +344,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
 
     private fun loadForm() {
         formJob?.cancel()
+        val favoriteStamp = smileyPicker.favoriteFormStamp()
         _state.update { it.copy(isLoadingForm = true, formError = false) }
         formJob = viewModelScope.launch {
             try {
@@ -327,6 +368,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                     return@launch
                 }
                 loadedForm = form
+                smileyPicker.refreshFavorites(favoriteStamp)
                 loadedSubmitContext = materialized.submitContext
                 _state.update { current ->
                     // #1074 — consume HFR's quote BBCode exactly once. If the user typed while the
@@ -418,20 +460,6 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         scheduleAutosave()
     }
 
-    /**
-     * #387 — smiley picker (Standard + Wiki), same sheet as the post editors. The controller owns
-     * the picker state machine (debounce, race guards) ; this ViewModel only handles insertion.
-     * userId comes from the loaded reply form ([ReplyForm.userId], HFR's `find_smilies_timer`
-     * second argument) so the wiki search prioritizes the user's own smileys exactly like the
-     * post editors do ; the controller falls back to 0 while the form is still loading
-     * (Codex review, PR #440).
-     */
-    val smileyPicker = SmileyPickerController(
-        scope = viewModelScope,
-        searchWiki = smileyRepository::searchWiki,
-        userId = { loadedForm?.userId },
-    )
-
     fun onSmileySelected(token: String) {
         _state.update { current ->
             val outcome = insertBbcodeToken(
@@ -447,7 +475,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                 ),
             )
         }
-        smileyPicker.dismiss()
+        smileyPicker.dismiss(SmileyPickerCloseCause.INSERTION)
         scheduleAutosave()
     }
 

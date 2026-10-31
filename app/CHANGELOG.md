@@ -16,6 +16,181 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.65.0` — `open` (bêta) — 2026-10-31
+
+Promotion bêta du lot développé en dev de `0.63.0` à `0.64.9`, depuis la précédente bêta `0.62.0`. Le détail par version dev figure dans les entrées ci-dessous. Contenu :
+
+- **Smileys** ([#1154](https://github.com/ForumHFR/redface2/issues/1154)) : onglet Favoris du sélecteur (favoris HFR du compte, favoris de l'appareil, « Les plus utilisés »), ajout et retrait des favoris HFR depuis l'app, détail du smiley à l'appui long (code, nombre d'envois, favoris, insertion, copie, mots-clés du wiki HFR) ; les favoris HFR restent propres au compte connecté.
+- **Profil** ([#1467](https://github.com/ForumHFR/redface2/issues/1467)) : lien « Configuration matérielle » dans la carte et la page profil, qui ouvre la configuration du membre dans une feuille dédiée. Suggestion d'AnthonyD.
+- **Drapeaux** ([#984](https://github.com/ForumHFR/redface2/issues/984)) : refresh plus fiable (plus de liste « réussie » sans les épinglés, requêtes réellement annulées, drapeau supprimé qui ne revient plus, liste incomplète signalée avec « Réessayer »), et mesures détaillées du refresh dans Diagnostic → Copier, avec le contexte réseau, sans pseudo ni sujet ni URL. Depuis cette bêta, « Copier » n'exporte plus que ces mesures et les événements du sélecteur de smileys, précédés de la version, du canal, de l'API Android et du modèle d'appareil ; les autres entrées du journal restent visibles à l'écran.
+- Compose BOM 2026.09.00 (correctifs).
+
+Review de promotion : double relecture indépendante du diff `main...dev`, Astra (`gpt-6-astra`, xhigh) et Claude Fable 5.1. Astra a bloqué la promotion : après un changement de compte, un éditeur resté ouvert montrait les favoris HFR de l'ancien compte dans le sélecteur. Corrigé avant merge ([#1507](https://github.com/ForumHFR/redface2/pull/1507)) : favoris et commandes HFR masqués jusqu'à un formulaire du nouveau compte, compte du geste revérifié avant toute requête ; gate Fable GO (la revérification par Astra n'a pas pu tourner, quota épuisé). Fable : guide des diagnostics, ligne « À venir » des Réglages et limites connues corrigés avant merge ; mineurs fichés ([#1506](https://github.com/ForumHFR/redface2/issues/1506), [#984](https://github.com/ForumHFR/redface2/issues/984)).
+
+Limites connues : les favoris de l'appareil et le Top d'usage restent sur l'appareil, sans synchronisation ; le lien « Configuration matérielle » n'apparaît que si HFR le propose sur la page profil du membre (quelques membres ont une configuration que HFR ne lie pas) ; l'appui long sur un smiley pendant la lecture n'ouvre pas encore son détail ([#1498](https://github.com/ForumHFR/redface2/issues/1498)). Nouvelle permission `ACCESS_NETWORK_STATE` (« voir les connexions réseau », accordée d'office) pour le contexte réseau des diagnostics.
+
+---
+
+## `0.64.9` — `internal` (dev) — 2026-10-31
+
+Configuration matérielle derrière un lien ([#1467](https://github.com/ForumHFR/redface2/issues/1467), [#1503](https://github.com/ForumHFR/redface2/pull/1503)), retour de XaTriX sur la 0.64.8.
+
+- **La carte et la page profil n'affichent plus la configuration en ligne** : un lien « Configuration matérielle » ouvre une feuille dédiée, avec le texte complet et sélectionnable.
+- Le lien n'apparaît que si HFR le propose sur la page profil du membre. La configuration n'est lue qu'au toucher.
+- Retour, toucher à côté ou glisser vers le bas ferment la feuille et laissent la carte ouverte.
+
+---
+
+## `0.64.8` — `internal` (dev) — 2026-10-30
+
+Configuration matérielle dans la carte profil ([#1467](https://github.com/ForumHFR/redface2/issues/1467), [#1501](https://github.com/ForumHFR/redface2/pull/1501)), suggestion d'AnthonyD.
+
+- **La carte profil ouverte depuis un post affiche la configuration matérielle du membre**, après les actions, repliée à quatre lignes avec « Tout afficher ». Le texte est sélectionnable pour recopier une référence.
+- **Page profil complète** : même section, sans repli.
+- La configuration est lue sans compte, à part du profil : elle n'en retarde pas l'affichage. Membre sans configuration : rien ne s'affiche. Échec réseau : « Configuration indisponible » avec « Réessayer ».
+
+---
+
+## `0.64.7` — `internal` (dev) — 2026-10-30
+
+Retours sur le détail du smiley ([#1154](https://github.com/ForumHFR/redface2/issues/1154), [#1499](https://github.com/ForumHFR/redface2/pull/1499)).
+
+- **Toutes les commandes du détail sont visibles sans défiler** : en-tête compact (smiley à gauche, code, nombre d'envois et favoris à droite), puis « Insérer dans le message », « Copier le code » et les favoris. Les mots-clés passent en dernier, sur deux lignes, avec « Tout afficher » s'il y en a plus.
+- **La feuille ne se ferme plus pendant l'appui long** : un léger glissement du doigt après l'ouverture du détail pouvait être pris pour un « glisser pour fermer ». Le reste du geste est désormais ignoré.
+- **Diagnostic** : le sélecteur de smileys note ses ouvertures, fermetures et chargements de mots-clés, sans aucun code de smiley. Réglages → Réseau et cache → Maintenance → Diagnostic → Copier.
+
+---
+
+## `0.64.6` — `internal` (dev) — 2026-10-30
+
+Mots-clés du wiki dans le détail du smiley ([#1154](https://github.com/ForumHFR/redface2/issues/1154), [#1496](https://github.com/ForumHFR/redface2/pull/1496)), lot 2 de la maquette B.
+
+- **Le détail d'un smiley perso affiche ses mots-clés du wiki HFR**, en puces sous le code et le compteur. Lecture publique, sans compte.
+  - « Aucun mot-clé sur le wiki » quand le smiley n'en a pas ou n'est pas dans le wiki ;
+  - « Mots-clés indisponibles » avec « Réessayer » en cas d'échec réseau ;
+  - rien pour les smileys standard, qui ne sont pas dans le wiki.
+- Les mots-clés déjà chargés restent en mémoire : revenir sur un smiley ou tourner l'écran ne recharge rien.
+- **Correctif** : un échec d'ajout ou de retrait d'un favori HFR ne s'affiche plus dans le détail d'un autre smiley.
+
+---
+
+## `0.64.5` — `internal` (dev) — 2026-10-30
+
+Détail du smiley à l'appui long ([#1154](https://github.com/ForumHFR/redface2/issues/1154), [#1494](https://github.com/ForumHFR/redface2/pull/1494)), forme choisie par XaTriX sur maquettes.
+
+- **L'appui long sur un smiley ouvre son détail** dans le sélecteur, à la place du petit menu. On y trouve :
+  - le smiley en grand, son code et le nombre d'envois sur cet appareil ;
+  - son appartenance aux favoris de l'appareil et aux favoris HFR ;
+  - « Insérer dans le message » et « Copier le code » ;
+  - les actions de favoris.
+- **Le retour** (flèche ou geste) ramène à la grille, sur le même onglet et au même endroit, sans perdre la recherche Wiki ; la feuille reste ouverte.
+- **TalkBack** : chaque smiley propose « Afficher le détail », en plus des actions directes de favoris.
+- Les mots-clés du wiki HFR arrivent dans un prochain lot.
+
+---
+
+## `0.64.4` — `internal` (dev) — 2026-10-29
+
+Onglet Favoris du sélecteur de smileys ([#1154](https://github.com/ForumHFR/redface2/issues/1154), [#1492](https://github.com/ForumHFR/redface2/pull/1492)), proposé par nicko sur le topic DEV.
+
+- **Trois onglets : Favoris | Standard | Wiki.** L'onglet Favoris regroupe trois sections : « Favoris de l'appareil », « Favoris HFR » (déplacés depuis Standard) et « Les plus utilisés » (Top local des smileys envoyés). Il s'ouvre en premier dès qu'il a du contenu ; une recherche Wiki en cours rouvre toujours le Wiki.
+- **Appui long sur n'importe quel smiley**, builtins compris : « Gérer les favoris », pour ajouter ou retirer des favoris de l'appareil (256 au plus), en plus des actions HFR existantes sur les persos. Chaque action est aussi disponible avec TalkBack.
+- Données conservées sur l'appareil, par compte ; pas encore de synchronisation entre appareils.
+
+---
+
+## `0.64.3` — `internal` (dev) — 2026-10-29
+
+Correctif du sélecteur de smileys signalé sur le topic DEV ([#1154](https://github.com/ForumHFR/redface2/issues/1154), [#1490](https://github.com/ForumHFR/redface2/pull/1490)).
+
+- **Smileys perso du compte** (`[:pseudo:1]`, `[:pseudo:2]`…) : ils ne disparaissent plus de la section Favoris après l'ajout ou le retrait d'un favori HFR. Le formulaire de rédaction les mêle aux favoris, alors que la page de gestion de HFR ne liste que les favoris retirables.
+- **Retrait** : un smiley qui ne figure pas dans les favoris HFR (smiley perso du compte) n'affiche plus « Retiré » à tort ; l'app indique qu'il ne peut pas être retiré, puis ne propose plus son retrait.
+
+---
+
+## `0.64.2` — `internal` (dev) — 2026-10-29
+
+Finition du sélecteur de smileys après la gestion des favoris HFR ([#1154](https://github.com/ForumHFR/redface2/issues/1154), [#1488](https://github.com/ForumHFR/redface2/pull/1488)).
+
+- **Onglet Wiki** : le message (ajouté, retiré, échec…) s'affiche brièvement en bas, sans plus décaler le champ de recherche ni la grille, puis disparaît (après 4 s par défaut, plus longtemps si les réglages d'accessibilité le demandent).
+- **Messages** : effacés à la fermeture du sélecteur. Un succès obtenu sélecteur fermé reste silencieux ; un échec s'affiche à la réouverture.
+- **Échec sans réponse exploitable de HFR** (réseau, réponse inattendue) : l'app ne fige plus l'ancienne liste de favoris si une liste plus récente a été chargée entre-temps.
+- **Textes** du sélecteur alignés sur le vouvoiement du reste de l'app (« Tapez », « Réessayez »).
+
+---
+
+## `0.64.1` — `internal` (dev) — 2026-10-29
+
+Deuxième lot du chantier « smileys favoris » ([#1154](https://github.com/ForumHFR/redface2/issues/1154)).
+
+### Éditeur : gérer ses favoris HFR depuis le sélecteur ([#1484](https://github.com/ForumHFR/redface2/pull/1484), [#1486](https://github.com/ForumHFR/redface2/pull/1486))
+
+- **Ajouter un favori HFR** : appui long sur un smiley perso de l'onglet Wiki, puis « Ajouter aux favoris HFR ». **Retirer** : appui long dans la section Favoris (ou sur un smiley du Wiki déjà en favori), puis « Retirer des favoris HFR ». Actions aussi disponibles avec TalkBack.
+- Ce sont les favoris du compte HFR, les mêmes que sur le site : 10 au plus, smileys perso seulement. Un message indique le résultat (ajouté, retiré, déjà présent, liste pleine, échec).
+- Sécurité : avant chaque retrait, l'app relit la liste sur HFR et vérifie le résultat ensuite (HFR réécrit toute la liste à chaque retrait) ; une seule opération à la fois.
+
+### Moteurs sans affichage ([#1483](https://github.com/ForumHFR/redface2/pull/1483), [#1485](https://github.com/ForumHFR/redface2/pull/1485))
+
+- **Favoris locaux** : liste personnelle de smileys sur l'appareil, distincte des favoris HFR, préparée pour une synchronisation future entre appareils. Pas encore visible.
+- **Top d'usage** : l'app compte désormais, sur l'appareil et par compte, les smileys de vos messages envoyés avec succès (hors citations et code), pour proposer plus tard les plus utilisés. Seuls le code du smiley, un compteur et une date sont gardés. Pas encore visible.
+
+---
+
+## `0.64.0` — `internal` (dev) — 2026-10-28
+
+Premier lot du chantier « smileys favoris » ([#1154](https://github.com/ForumHFR/redface2/issues/1154)).
+
+### Éditeur : smileys favoris du compte HFR ([#1154](https://github.com/ForumHFR/redface2/issues/1154), [#1481](https://github.com/ForumHFR/redface2/pull/1481))
+
+- **Les smileys favoris de votre compte HFR** apparaissent dans une section « Favoris » en tête de l'onglet Standard du sélecteur de smileys, dans le même ordre que sur le site : réponse, citation, édition, nouveau sujet et MP.
+- Ce sont les favoris gérés sur le site (wiki smilies, « Supprimer des smilies favoris ») ; la section n'apparaît pas si le compte n'en a aucun.
+- Lecture seule : pas d'ajout ni de retrait depuis l'app pour l'instant, et aucune requête réseau en plus (la liste vient du formulaire déjà chargé).
+
+---
+
+## `0.63.2` — `internal` (dev) — 2026-10-15
+
+Troisième lot du chantier « refresh des drapeaux lent ou bloqué » ([#984](https://github.com/ForumHFR/redface2/issues/984)) : donner du contexte aux mesures des testeurs.
+
+### Diagnostics : contexte réseau et appareil ([#984](https://github.com/ForumHFR/redface2/issues/984), [#1478](https://github.com/ForumHFR/redface2/pull/1478))
+
+- **Chaque refresh des drapeaux exporte le contexte réseau** pris à son début : type de réseau (wifi, mobile, ethernet, VPN distinct), réseau limité ou non, connexion validée, DNS privé actif, secondes depuis le démarrage du téléphone et depuis le retour dans l'app (démarrage froid compris).
+- **Chaque appel détaillé indique la famille de la connexion** utilisée (IPv4 ou IPv6).
+- Toujours en champs fermés : ni pseudo, ni sujet, ni URL, ni adresse IP, ni nom de réseau ou de serveur DNS, ni opérateur.
+- **Nouvelle permission** `ACCESS_NETWORK_STATE` (« voir les connexions réseau », permission normale accordée d'office) pour lire le type de réseau.
+
+---
+
+## `0.63.1` — `internal` (dev) — 2026-10-14
+
+Deuxième lot du chantier « refresh des drapeaux lent ou bloqué » ([#984](https://github.com/ForumHFR/redface2/issues/984)) : défauts établis par lecture du code, indépendants des mesures de 0.63.0.
+
+### Drapeaux : refresh plus fiable ([#984](https://github.com/ForumHFR/redface2/issues/984), [#1473](https://github.com/ForumHFR/redface2/pull/1473))
+
+- **Plus de refresh « réussi » sans les épinglés** : un refresh demandé ne rejoint plus un chargement lancé avant un changement et devenu périmé ; un chargement remplacé est annulé au lieu de finir ses requêtes.
+- **Les requêtes en cours sont vraiment annulées** quand on quitte l'écran ou qu'un refresh est remplacé, au lieu d'aller jusqu'au timeout.
+- **Un drapeau supprimé ne réapparaît plus** quand un chargement en cours se termine.
+- **Liste incomplète signalée** : si les épinglés d'une catégorie ou une page ne se chargent pas, la liste fraîche s'affiche avec « Liste incomplète : … » et un bouton Réessayer, rattaché à son onglet (agrégé pour Super), au lieu d'une liste trouée présentée comme complète. Le délai minimal entre deux refresh automatiques est conservé, le prochain essai n'est pas retardé.
+
+### Dépendances
+
+- Compose BOM 2026.09.00 (Compose 1.12.1, correctifs seulement) ([#1459](https://github.com/ForumHFR/redface2/pull/1459)).
+
+---
+
+## `0.63.0` — `internal` (dev) — 2026-10-14
+
+Premier lot du chantier « refresh des drapeaux lent ou bloqué » ([#984](https://github.com/ForumHFR/redface2/issues/984)) : mesurer avant de corriger.
+
+### Diagnostics : mesures du refresh des drapeaux ([#984](https://github.com/ForumHFR/redface2/issues/984), [#1469](https://github.com/ForumHFR/redface2/pull/1469))
+
+- **Chaque refresh des drapeaux est chronométré** : déclencheur (lancement, retour d'un sujet, reprise, onglet, pull), refresh ignoré (délai minimal, refresh déjà en cours), durée de chaque phase (catalogue, drapeaux par catégorie, épinglés, écriture locale, affichage), compteurs et issue (complet, incomplet, échec). Retours de styx42, minux et Colonel MythO sur le fil TU.
+- **Chaque appel au forum est mesuré** : attente, DNS, connexion, TLS, connexion réutilisée, réponse, total, statut, échec ou annulation. Seuls les appels lents (≥ 1 s), en échec ou annulés sont détaillés, au plus 12 par refresh.
+- **Diagnostics → Copier n'exporte plus que ces mesures**, précédées de la version, du canal, de l'API Android et du modèle d'appareil : ni pseudo, ni sujet, ni URL, ni message d'erreur brut. Les autres entrées restent visibles à l'écran.
+- Aucun changement de comportement : mêmes requêtes, même ordre, mêmes délais.
+
+---
+
 ## `0.62.0` — `open` (bêta) — 2026-09-22
 
 Promotion bêta du lot développé en dev de `0.61.0` à `0.61.1`, depuis la précédente bêta `0.60.0`. Le détail par version dev figure dans les entrées ci-dessous. Contenu : le premier lot des retours de la bêta `0.60.0` (milestone « Vue · Topic 2 ») — raccourcis de page, position de lecture restaurée au retour de page, retour explicite après l'envoi d'un message — puis la correction des trois défauts que ce dernier point a révélés aux testeurs.

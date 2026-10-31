@@ -231,6 +231,16 @@ class SmileyCellImageSizeTest {
     }
 
     @Test
+    fun `HFR favorites use the wiki perso image sizing policy`() {
+        listOf(null, IntSize(15, 15), IntSize(70, 50), IntSize(140, 100)).forEach { measured ->
+            assertEquals(
+                pickerSmileyImageSize(EditorSmileySource.WIKI, measured, shippedGeometry),
+                pickerSmileyImageSize(EditorSmileySource.HFR_FAVORITE, measured, shippedGeometry),
+            )
+        }
+    }
+
+    @Test
     fun `builtin sprites render near their native scale`() {
         assertEquals(DpSize(20.dp, 20.dp), size(EditorSmileySource.BUILTIN, measuredPx = null))
     }

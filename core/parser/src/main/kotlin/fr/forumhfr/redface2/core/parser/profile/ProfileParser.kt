@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.model.UserProfile
 import fr.forumhfr.redface2.core.parser.authorRoleFromLabel
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
+import org.jsoup.nodes.TextNode
 
 /**
  * Phase 2 finish (#208) — parses `/hfr/profil-{userId}.htm` into a [UserProfile].
@@ -25,6 +26,7 @@ import org.jsoup.nodes.Element
  * account types.
  *
  * Known verified fixtures:
+ * - `profile_xatrix_anonymous.html` (userId=54596, anonymous configuration link)
  * - `profile_xatrix_authenticated.html` (userId=54596, authenticated)
  * - `profile_ezzz_anonymous.html` (userId=15867, anonymous)
  *
@@ -88,7 +90,45 @@ class ProfileParser {
             location = location,
             signatureText = signatureText,
             rawFields = rawFields,
+            hasHardwareConfiguration = hasHardwareConfiguration(document),
         )
+    }
+
+    private fun hasHardwareConfiguration(document: Element): Boolean =
+        document.select("tr.profil").any { row ->
+            val isConfiguration = row.selectFirst("td.profilCase2")?.text()?.trimLabel() == KEY_CONFIGURATION
+            val links = row.select("td.profilCase3 a[href]")
+            isConfiguration && links.any { link ->
+                // Accept both relative HFR links and absolute URLs; match the target path, not a query value.
+                val path = link.attr("href").substringBefore('?').substringBefore('#')
+                path == "configuration.php" || path.endsWith("/configuration.php")
+            }
+        }
+
+    /**
+     * #1467 — parses the separate, anonymous `configuration.php` page.
+     * An empty cell is valid; a missing page marker, table or content row is a parse failure.
+     */
+    fun parseConfiguration(html: String): List<String> {
+        val document = Jsoup.parse(html)
+        require(document.select("h4.Ext").any { it.text().contains("Configuration matérielle") }) {
+            "Missing hardware configuration heading"
+        }
+        val table = requireNotNull(document.selectFirst("table.main")) {
+            "Missing hardware configuration table"
+        }
+        val labelRow = requireNotNull(table.select("tr.profil").firstOrNull { row ->
+            row.selectFirst("td.cBackTab2")?.text()?.trimLabel() == "Configuration matérielle"
+        }) { "Missing hardware configuration label" }
+        val contentRow = requireNotNull(labelRow.nextElementSibling()?.takeIf { it.hasClass("profil") }) {
+            "Missing hardware configuration row"
+        }
+        val cell = requireNotNull(contentRow.selectFirst("td")) { "Missing hardware configuration cell" }
+        cell.select("br").forEach { it.replaceWith(TextNode("\n")) }
+        return cell.wholeText().lineSequence()
+            .map { it.replace('\u00a0', ' ').trim().replace(CONFIGURATION_WHITESPACE, " ") }
+            .filter(String::isNotEmpty)
+            .toList()
     }
 
     /**
@@ -214,12 +254,14 @@ class ProfileParser {
         this.trim().trimEnd(':', ' ', ' ').trim()
 
     private companion object {
+        private val CONFIGURATION_WHITESPACE = Regex("\\s+")
         private const val KEY_PSEUDO = "Pseudo"
         private const val KEY_POST_COUNT = "Nombre de messages postés"
         private const val KEY_REGISTERED_AT = "Date d'arrivée sur le forum"
         private const val KEY_LOCATION = "Ville"
         private const val KEY_SIGNATURE = "Signature des messages"
         private const val KEY_STATUS = "Statut"
+        private const val KEY_CONFIGURATION = "Configuration matérielle"
 
         private val PROMOTED_KEYS = setOf(
             KEY_PSEUDO,

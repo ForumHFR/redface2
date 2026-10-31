@@ -55,6 +55,7 @@ La documentation HTML est issue de la rétro-ingénierie du code de [Redface v1]
 | Ajouter aux drapeaux | GET | `/user/addflag.php?config=hfr.inc&cat={cat}&post={post}&numreponse={numreponse}` | **oui** |
 | Retirer un drapeau | GET | `/user/delflag.php?config=hfr.inc&cat={cat}&subcat={subcat}&post={topicId}&page={page}&p=1&sondage=0&owntopic={1,2,3}&new=0` | **oui** |
 | Profil public | GET | `/hfr/profil-{user_id}.htm` | non |
+| Configuration matérielle (#1467) | GET | `/configuration.php?config=hfr.inc&pseudo={pseudo_encodé}` | non |
 | Annuaire staff (responsables) | GET | `/message-smi-mp-aj.php?config=hfr.inc&user_id=0&responsable=1` | non |
 | Paramètres utilisateur | GET | `/editprofil.php?config=hfr.inc&page={1..7}` | **oui** |
 | Modération (alerte) | GET/POST | `/user/modo.php?config=hfr.inc&cat={cat}&post={topicId}&numreponse={numreponse}&page={page}&ref=1` (voir ci-dessous) | **oui** |
@@ -304,6 +305,91 @@ absent, vide ou non reconnu → `null`. La **source primaire** du badge est l'an
 - `core/parser/src/test/resources/fixtures/profile/profile_xatrix_authenticated.html` — userId=54596, session auth, fixture complète avec signature.
 - `core/parser/src/test/resources/fixtures/profile/profile_ezzz_anonymous.html` — userId=15867, session anonyme, pas de localisation (cas `Statut = Membre`).
 - `core/parser/src/test/resources/fixtures/profile/profile_moderator_anonymous.html` — userId=15461 (Ernestor), session anonyme, cas `Statut = Modérateur` (#1112, capture curl assainie).
+
+### Configuration matérielle — `configuration.php` (#1467)
+
+Contrat issu des **captures publiques anonymes des 30 et 31/10/2026** fournies pour #1467 :
+
+```text
+GET https://forum.hardware.fr/configuration.php?config=hfr.inc&pseudo={pseudo_encodé}
+```
+
+- La page profil ne contient **pas le texte de la configuration**. Sa ligne facultative
+  « Configuration matérielle » (`td.profilCase2`) contient, dans sa `td.profilCase3`, un lien
+  `a.cLink` vers cette page (URL relative ou absolue). `UserProfile.hasHardwareConfiguration`
+  vaut `true` uniquement si cette ligne contient un `a[href]` ciblant `configuration.php`.
+  Le texte du lien reste dans `UserProfile.rawFields` et ne doit pas être affiché comme du matériel.
+- La requête se construit depuis le pseudo, encodé comme valeur de query par `HttpUrl` :
+  `Colonel MythO` devient `pseudo=Colonel%20MythO`. La navigation profil reste indexée par `userId`.
+- `HfrClient.getUserConfiguration(pseudo)` utilise exclusivement **`@AnonymousClient`**, sans cookies,
+  comme `getProfile` (voir la règle canonique de lecture annexe / prefetch ci-dessous).
+  Ne jamais journaliser le corps de la réponse.
+- Réponse observée : **HTTP 200**, `text/html; charset=utf-8`, environ 2 Ko.
+
+**Structure et parsing** (`ProfileParser.parseConfiguration`, exposé par
+`HfrParser.parseUserConfiguration`) :
+
+1. `h4.Ext` contient « Configuration matérielle » et le pseudo du membre.
+2. `table.main` contient une `tr.profil` de libellé, avec
+   `td.cBackTab2` dont le texte normalisé vaut « Configuration matérielle ».
+3. La `tr.profil` suivante contient une `td` de texte libre. Les `<br />` séparent les lignes.
+4. Résultat : `List<String>` avec entités HTML décodées, espaces insécables remplacés par des
+   espaces, blancs normalisés et retirés aux extrémités, lignes vides éliminées, ordre conservé.
+
+Une cellule `&nbsp;` produit une **liste vide valide**. Un pseudo inexistant produit la même page
+vide : on ne peut pas distinguer « configuration vide » et « utilisateur inconnu » avec cet endpoint.
+En revanche, l'absence du titre, de la table, du libellé ou de la cellule attendue est une **erreur
+de parsing**, jamais un résultat vide. Les échecs HTTP/réseau restent également des erreurs.
+
+**Écart observé le 31/10/2026, en anonyme sans cookies** : la présence du lien sur le profil
+ne permet pas de déduire le contenu de `configuration.php`, et réciproquement.
+
+| Profil | Ligne-lien sur le profil | Lignes de configuration |
+|---|---|---|
+| Ernestor (15461) | présente | 28 |
+| adn (1000) | présente | 13 |
+| bernardt (5000) | présente | 4 |
+| XaTriX (54596) | présente | 12 |
+| gragra (20000), nahabet (60000), ezzz (15867) | absente | 0 |
+| FLo (1) | absente | 11 |
+| - janfy - (100) | absente | 14 |
+| pifpaflechien (40000) | absente | 1 |
+
+**Décision #1467** : suivre la page web HFR. Sans cette ligne-lien, l'application n'affiche aucun
+accès à la configuration, même si l'endpoint séparé pourrait renvoyer du texte. Elle ne sonde pas
+`configuration.php` pour découvrir cette présence. Un lien peut aussi aboutir à une liste vide.
+
+`ProfileRepository.getUserConfiguration` porte ce résultat séparément de `UserProfile` et effectue
+le parsing sur le dispatcher IO. Le ViewModel ne charge aucune configuration à l'ouverture de la
+carte ou de la page profil. Un toucher sur « Configuration matérielle », proposé après chargement du profil
+si `hasHardwareConfiguration` vaut `true`, ouvre une feuille dédiée et lance la lecture anonyme
+depuis le pseudo canonique chargé. Un réessai ne recharge que la configuration. Fermer la feuille
+annule la requête et ignore toute réponse tardive ; la rouvrir recharge. Fermer la carte ferme
+aussi la feuille et annule la lecture. Aucune requête n'est déclenchée par une recomposition.
+
+La carte place son unique lien après les actions pour préserver leur position et leur visibilité ;
+la page complète le place après la signature, comme HFR. Aucun texte matériel n'est affiché en ligne.
+La feuille commune présente le titre en `heading`, le pseudo, un indicateur discret au chargement
+et toutes les lignes sélectionnables dans une zone défilable, sans repli. Une liste vide affiche
+« Aucune configuration renseignée » ; une erreur affiche « Configuration indisponible » et
+« Réessayer », avec le nom accessible « Réessayer la configuration matérielle ».
+
+Depuis la carte, la feuille de configuration s'empile sur sa propre fenêtre et s'ouvre directement
+déployée : Retour, le voile ou un glissement vers le bas depuis la poignée M3 ferment d'abord
+cette feuille et conservent la carte. La poignée et les gestes de fermeture sont ceux des autres
+feuilles de l'application ; un appui long suivi d'un glissement dans le texte sélectionnable ne
+ferme ni ne déplace les feuilles.
+
+**Fixtures réduites et provenance** dans `core/parser/src/test/resources/fixtures/profile/`
+(chaque HTML a un `.source.txt`) :
+
+| Fixture | Cas capturé |
+|---|---|
+| `profile_xatrix_anonymous.html` | Profil anonyme, ligne-lien relative présente (31/10) |
+| `configuration_xatrix_anonymous.html` | XaTriX, 12 lignes, NBSP final |
+| `configuration_colonel_anonymous.html` | Colonel MythO, pseudo avec espace, 12 lignes dans la capture |
+| `configuration_ezzz_anonymous.html` | Membre existant, cellule vide |
+| `configuration_unknown_anonymous.html` | Pseudo inexistant `zzqqxxnexistepas`, même cellule vide |
 
 ### Annuaire staff (responsables) — source PRIMAIRE du rôle (#1112, #221)
 
@@ -812,12 +898,261 @@ GET /message-smi-mp-aj.php?config=hfr.inc&user_id={user_id}&findsmilies={query}
 | Paramètre | Source | Notes |
 |---|---|---|
 | `config` | constante `"hfr.inc"` | Idem reste du protocole. |
-| `user_id` | parsé depuis `find_smilies_timer('hfr.inc', N)` du form HTML (cf. `SmileyUserIdExtractor`) | Plumbé via `ReplyForm.userId` / `TopicForm.userId`. `0` accepté pour les probes anonymes (le endpoint ne refuse pas), mais un user id authentifié laisse HFR pager les favoris en premier. |
+| `user_id` | parsé depuis `find_smilies_timer('hfr.inc', N)` du form HTML (cf. `SmileyUserIdExtractor`) | Plumbé via `ReplyForm.userId` / `TopicForm.userId`. `0` accepté pour les probes anonymes (le endpoint ne refuse pas). **Non vérifié** : un user id authentifié ferait remonter les favoris en premier dans les résultats du wiki. |
 | `findsmilies` | la query utilisateur, **URL-encodée** | HFR gate sur `query.length > 2` dans `find_smilies_timer` ; le client reproduit ce seuil + le debounce 300 ms du JS web. |
 
 Réponse : fragment HTML (pas de `<html>/<body>` wrapper), une `<img src="…" alt="[:token]" title="[:token]" onclick="putSmiley(this.alt,this.src)" />` par smiley match. HFR peut émettre le même `(alt, src)` deux fois — le parser dédup. Tokens préservés verbatim : variantes avec espaces (`[:haha jap]`), underscores (`[:menkahoure_4]`), tirets (`[:55-]`), `:N` variants (`[:eneytihi:5]`).
 
 L'endpoint accepte session anonyme (`user_id=0`) ; côté client, l'appel passe par le client OkHttp **anonymous** pour ne pas exposer la query dans les diagnostics authentifiés.
+
+### Mots-clés du détail wiki
+
+Contrat observé le **30/10/2026 en anonyme, sans cookies**, pour #1154 lot 2 ; captures publiques
+réduites dans `core/parser/src/test/resources/fixtures/smiley_wiki_detail-*.html`, provenance dans
+les fichiers `.source.txt` associés. Cette lecture ne concerne que les persos (`[:nom]`, `[:nom:N]`) :
+**aucun appel pour un builtin** (`:o`, `:D`…).
+
+```text
+GET /wikismilies.php?config=hfr.inc&detail={jeton URL-encodé}
+GET /wikismilies.php?config=hfr.inc&detail=%5B%3Aticento%3A6%5D
+```
+
+- Réponse observée : **200**, `text/html; charset=utf-8`, page complète d'environ 30 Ko.
+  Utiliser le client OkHttp `anonymous`, sans identifiant de compte. Ne jamais journaliser le corps.
+- Dans le formulaire de détail `wikismilies.php`, identifier la ligne `tr.s2Topic` dont
+  `input[type=hidden][name=smiley0]` a pour `value` le **jeton demandé**, avant de lire
+  `input[type=text][name=keywords0]` dans **cette même ligne**. Ignorer l'historique des modifications.
+- Jsoup décode les entités des attributs. Séparer les mots-clés par les espaces, retirer les vides
+  et les doublons en conservant l'ordre du wiki. Un tiret reste dans le mot (`jean-marc`).
+  Pour `[:ticento:6]` : `feu feux fire brule bruler burn chaud hot cramer cramé`.
+- `keywords0=""` (`[:t-w:6]`) donne une liste vide. Un jeton inconnu (`[:nexistepas-xyz]`) donne
+  aussi une page **200**, sans `smiley0` ni `keywords0`, dont une ligne `tr.s2Topic` porte le
+  marqueur « Désolé, aucune réponse n'a été trouvée » : même rendu « Aucun mot-clé sur le wiki ».
+  Sans ligne cible, seule la présence de ce marqueur autorise une liste vide ; sinon (autre jeton,
+  `smiley0` sans `value`, message reformulé par HFR), c'est un échec réessayable. Le champ caché
+  `detail` du formulaire doit aussi valoir le jeton demandé. Ne jamais emprunter les mots-clés
+  d'un autre jeton.
+- Une erreur réseau/HTTP ou une structure manquante (formulaire, lignes, champ `keywords0` de
+  la cible) est un échec réessayable, pas une liste vide. Le `hash_check` observé est vide en anonyme ;
+  aucun POST ni édition de mots-clés n'est effectué.
+
+Cache public borné et indépendant du compte, annulation et rendu accessible du détail :
+[ADR-019, lot 2]({{ site.baseurl }}/adr/019-smileys-favoris-locaux-et-top-usage).
+
+### Smileys favoris du compte
+
+Contrat de lecture observé le **2026-10-28**, mutations capturées le **2026-10-29** (#1154) : les
+formulaires authentifiés `message.php` de réponse, citation, édition, création de sujet,
+réponse et composition de MP contiennent les favoris dans `div#dynamic_smilies`, sous
+`input#search_smilies`. Le HTML est déjà téléchargé par les éditeurs : **aucune requête
+supplémentaire**, aucun stockage local, aucune lecture via l'API REST.
+
+- Ce bloc contient **aussi les smileys perso du compte** (`[:nom]`, `[:nom:N]`), en plus des
+  favoris ajoutés depuis le wiki : signalement d'un testeur le **29/10/2026 en v351**, non capturé.
+  Les captures du compte XaTelitte, sans smiley perso propre, ne montraient que les favoris.
+  La position des smileys du compte avant ou après les favoris n'a **pas été observée** ;
+  aucun traitement ne doit en dépendre. Seule `supprperso.php` fait foi pour les favoris retirables.
+- Sélecteur : `div#dynamic_smilies > img[onclick^=putSmiley]`, limité au formulaire chargé.
+  Jeton = `alt` non vide, avec repli sur `title` ; URL = `src` non vide. Les autres éléments,
+  le lien `supprperso.php` et les images hors de ce bloc ne sont pas des entrées.
+  L'extraction réutilise celle du wiki ; un doublon `(jeton, URL)` conserve sa première occurrence.
+- Les favoris observés sont des smileys perso : `[:nom]` → `/images/perso/nom.gif`,
+  `[:nom:N]` → `/images/perso/N/nom.gif`. Un nom peut contenir des espaces, y compris dans
+  le `src` littéral. Conserver le jeton et le `src` tels que servis et confier l'encodage
+  de l'URL au même chemin Coil/OkHttp que les résultats Wiki ; ne pas reconstruire l'image.
+- Conserver **l'ordre du serveur** : pour les favoris uniquement, ordre d'ajout, nouveau favori
+  en fin, identique entre `#dynamic_smilies` et `supprperso.php`. Un retrait conserve l'ordre relatif.
+  Le plafond d'ajout de **10** est confirmé ; la lecture conserve néanmoins toutes les entrées servies.
+- Sans favori sur le compte capturé (sans smiley perso propre), et en anonyme, le bloc est vide :
+  `<div id="dynamic_smilies"></div>`.
+  Le lien « Supprimer des smilies favoris » n'est présent que lorsque la liste est peuplée.
+  La section « Favoris HFR » du sélecteur est absente si la liste est vide. Elle vit dans
+  l'onglet Favoris, entre « Favoris de l'appareil » et « Les plus utilisés » ; le statut de
+  mutation reste en tête de cet onglet même sans section HFR. Standard ne contient que les builtins.
+  L'insertion réutilise le jeton perso, puis ferme la feuille.
+- `ReplyForm.favoriteSmileys` et `TopicForm.favoriteSmileys` exposent une liste ordonnée
+  d'`EditorSmiley`, source `HFR_FAVORITE`, vide par défaut. Cette base suit le dernier formulaire
+  chargé ; le contrôleur lui superpose les mutations décrites ci-dessous. La réponse rapide
+  n'ouvre aucun sélecteur de smileys.
+
+**Gestion depuis la feuille Smileys (B2 et D de #1154)** :
+
+- Trois onglets **Favoris | Standard | Wiki**. Favoris partage une grille défilante (budget #900,
+  cellules #989) entre les favoris locaux du compte, la liste HFR fusionnée ci-dessous et le Top 24,
+  dans l'ordre de leurs dépôts. Sections absentes si vides ; aide au vouvoiement si tout est vide.
+  Un jeton peut figurer dans plusieurs sections, avec des clés préfixées par section.
+  Le contrôleur choisit à `open()` Favoris si une liste connue est non vide, Standard sinon ; une
+  recherche restaurée ouvre Wiki (#824). Les observations locales commencent dès sa création.
+  Ni une arrivée tardive ni une rotation ne reprennent la sélection à l'utilisateur.
+- Un seul composant `SmileyLocalCollections` observe le propriétaire normalisé (`lowercase()`, sans trim)
+  et bascule les favoris locaux et le Top au changement de compte. Anonyme ou pseudo inconnu/blanc :
+  aucune section ni action locale. Une mutation capture le propriétaire au moment du geste.
+  Les métadonnées d'image et la reconstruction des persos sans URL suivent
+  l'[ADR-019]({{ site.baseurl }}/adr/019-smileys-favoris-locaux-et-top-usage).
+  L'observation des collections locales n'ajoute aucune requête HFR.
+
+- Les quatre éditeurs (post, sujet, réponse MP, composition MP) fournissent au contrôleur les
+  callbacks `add` / `remove` du dépôt. Aucun formulaire n'est rechargé à cause d'une mutation.
+- L'appui long sur **tout** smiley ouvre « Détail du smiley » dans la même feuille (option B,
+  décision du 30/10/2026). La cible vit dans le contrôleur ; flèche et retour système, y compris
+  prédictif, reviennent à la grille avec son onglet, sa recherche et son défilement. Le clavier
+  est fermé à l'ouverture du détail et ne se rouvre pas au retour. Une fermeture de la feuille,
+  une réouverture ou un changement de compte effacent la cible. Contenu, compteurs locaux et
+  limites de focus : [ADR-019]({{ site.baseurl }}/adr/019-smileys-favoris-locaux-et-top-usage).
+  Le détail offre l'insertion, la copie du jeton exact et les actions de favoris applicables.
+  Sur un perso, l'action HFR est « Ajouter aux favoris HFR », ou « Retirer des favoris HFR » si
+  le **jeton exact** figure dans la liste courante (variante et espaces compris). L'action locale
+  suit la liste de l'appareil, builtins compris. Un retrait conserve le détail et inverse l'action.
+  Chaque action reste accessible directement avec TalkBack ; « Afficher le détail » est ajouté
+  aux actions personnalisées et devient le libellé d'appui long commun.
+  Dès qu'une liste confirmée existe pour la génération
+  courante, une entrée de la base absente de cette liste, hors jetons masqués par un retrait,
+  est connue comme entrée du compte :
+  aucun geste HFR, y compris dans le Wiki ; l'action locale reste disponible si le propriétaire est connu.
+  Avant confirmation, le premier essai de retrait d'une telle entrée donne `NotInFavorites`,
+  puis n'est plus proposé. Un nouveau formulaire efface ce savoir ; aucun rapprochement par pseudo.
+- Une seule mutation HFR à la fois : les gestes HFR sont indisponibles pendant l'attente,
+  et la ligne éligible du détail affiche « Modification des favoris HFR en cours »,
+  sans bloquer les gestes locaux. Une mutation locale ne bloque pas les gestes HFR.
+  Un ajout apparaît provisoirement en fin de la section Favoris HFR ; un retrait garde sa cellule marquée en cours.
+  La cellule visée porte un indicateur discret. Le clic d'insertion reste disponible : jeton inséré,
+  feuille fermée, clavier rouvert seulement s'il l'était auparavant. Taille et décoration réglables,
+  plafond de grille à 62 % de l'écran avec plancher de 320 dp et recherche Wiki sont conservés.
+- Les listes confirmées du dépôt (`Success`, `AlreadyPresent`, `NotInFavorites`, `Full`,
+  `VerificationFailed`) remplacent la projection optimiste par une **fusion à la lecture** avec
+  la base du formulaire de la génération courante. Les entrées de la base restent dans leur ordre,
+  y compris les smileys du compte absents de la liste confirmée. Un favori confirmé déjà dans
+  la base garde sa position et reçoit l'image confirmée ; les favoris confirmés absents de la base
+  sont ajoutés à la fin dans l'ordre confirmé. Après un REMOVE, le jeton cible est masqué jusqu'au
+  prochain formulaire dès qu'il est absent de la liste confirmée, y compris sur `VerificationFailed`,
+  sauf pour `NotInFavorites` : cette entrée du compte reste affichée. Une réapparition dans une
+  liste confirmée permet le réajout d'un jeton masqué. **Limite acceptée** : un favori retiré ailleurs depuis le
+  chargement du formulaire reste affiché comme entrée du compte jusqu'au rechargement du formulaire.
+- Sans liste confirmée (`TransportFailure`, `UnknownResponse`, `NotFound`, `InvalidToken`,
+  `NotAuthenticated`), seule la projection optimiste est retirée : aucun instantané n'est créé.
+  La base courante réapparaît, y compris un formulaire reçu **pendant** la mutation, ou un
+  instantané confirmé antérieur encore valide selon sa génération. Sans nouveau formulaire,
+  cela restitue l'état précédant le geste. `AccountChanged` n'applique rien et reste silencieux.
+- Une liste confirmée est conservée même feuille fermée. Une génération logique empêche un
+  formulaire reçu **pendant** la mutation de remplacer cette liste ; le prochain formulaire reçu
+  **après** sa fin reprend la main. Ouvrir ou fermer la feuille ne supprime pas cette surcouche.
+- Dans le détail, le statut sous la liste défilante des actions donne le résultat en français et
+  l'annonce poliment à TalkBack ; il reste visible sans minuteur. Sur la grille, le statut en tête
+  de Favoris conserve le même rôle.
+  Dans Standard et Wiki, une surface compacte avec marges affiche le même message en surcouche brève en bas,
+  sans déplacer le champ de recherche ni la grille ; son fond suit le thème clair ou sombre.
+  Elle disparaît après le délai recommandé par l'accessibilité (4 secondes par défaut, comme un
+  Snackbar M3 court), libérant les cellules couvertes. Chaque nouveau geste relance ce délai,
+  même si le message est identique. Une surcouche expirée ne revient pas au changement d'onglet.
+  Cette visibilité est locale à l'interface : le statut de Favoris reste jusqu'à la fermeture,
+  sans minuteur.
+  Il indique notamment le plafond renvoyé par `Full.limit`, la liste rechargée pour
+  `VerificationFailed`, la session expirée, l'échec réseau ou la réponse HFR inattendue.
+  `NotInFavorites` donne le message d'échec « Ce smiley ne figure pas dans vos favoris HFR :
+  il ne peut pas en être retiré. », selon le même canal dans les trois onglets.
+  Les résultats locaux utilisent aussi ce canal : « Ajouté aux favoris de l'appareil »,
+  « Retiré des favoris de l'appareil », « Limite de 256 favoris de l'appareil atteinte » ou échec
+  de stockage. `favoriteFeedbackGeneration` distingue deux gestes au résultat identique ;
+  un succès HFR ou local tardif ne remplace pas le retour d'un geste plus récent.
+  Un échec HFR ou local du compte courant est toujours affiché, même après un geste plus récent,
+  avec une nouvelle génération d'affichage qui relance la surcouche.
+  Cette priorité est indépendante de l'invalidation au changement de compte : aucun résultat d'un
+  geste de l'ancien compte n'est annoncé, même si l'utilisateur revient ensuite sur ce compte.
+- Le contrôleur conserve un message jusqu'à la fermeture qui termine la première ouverture de
+  la feuille pendant laquelle il a été visible. Un succès HFR ou local reçu feuille fermée est silencieux.
+  Tout autre message reçu feuille fermée attend la réouverture, puis disparaît à la fermeture de
+  cette ouverture. Un nouveau geste remplace le statut courant. Aucun minuteur dans le contrôleur
+  ni composant supplémentaire dans les quatre écrans hôtes n'est nécessaire.
+
+**Protocole d'écriture (B1 de #1154)** :
+
+`HfrFavoriteSmileyRepository` (`:core:domain/smiley`) expose `add(owner, token)` et `remove(owner, token)`.
+`DefaultHfrFavoriteSmileyRepository` orchestre `HfrFavoriteSmileyClient` et les deux analyseurs dédiés
+`HfrFavoriteSmileyFormParser` / `HfrFavoriteSmileyResponseParser` dans `:core:parser/smiley`.
+Les résultats et listes utilisables par B2 sont décrits dans
+[Modèles des favoris HFR]({{ site.baseurl }}/specs/models#smileys-de-léditeur-et-favoris-hfr).
+
+Une seule page de travail : `GET /user/supprperso.php?config=hfr.inc`, authentifié, donne
+`hash_check`, l'action de `form[name=test]` et la liste fraîche avec ses images (une ligne
+`tr.s2Topic` par favori). Aucun GET du wiki n'est nécessaire pour muter.
+
+**Ajout** : refuser localement tout ce qui n'est pas un jeton perso canonique `[:nom]` /
+`[:nom:N]` (espaces internes, accents, apostrophes, tirets, underscores et deux-points internes
+conservés). Les builtins, le vide et les noms nus sont refusés avant tout réseau. HFR accepte
+pourtant un nom nu existant (`aaa`) et le stocke tel quel, produisant une image cassée : ne
+jamais lui envoyer ce format. Après lecture du formulaire, un jeton exact déjà présent donne
+`AlreadyPresent` sans POST ; sinon 10 entrées ou plus donnent `Full(10, favorites)` sans POST.
+Ce pré-contrôle local utilise le plafond capturé le 29/10/2026. Une réponse contenant « vous
+ne pouvez rajouter plus de » donne `Full` avec le nombre annoncé par HFR, ou 10 s'il est illisible.
+Le serveur vérifie le plein **avant** le doublon ; le raccourci local privilégie le doublon.
+
+`POST /user/addperso.php?config=hfr.inc` transmet `hash_check` puis `smilie` (jeton complet),
+en `application/x-www-form-urlencoded`. Toutes les réponses capturées sont HTTP 200 ; seul
+le texte normalisé de `div.hop` (accents, casse, espaces) classe le résultat :
+
+| Texte capturé | Résultat |
+|---|---|
+| « Ajout effectué avec succès ! » | Succès, confirmé par un nouveau GET de la page de travail |
+| « Ce smilie est déjà dans votre liste ! » | `AlreadyPresent(favorites)` |
+| « Désolé, vous ne pouvez rajouter plus de 10 smilies » | `Full(10, favorites)` |
+| « Le smiley correspondant à ce code n'existe pas » | `NotFound` (aussi observé pour `:o`, `:pt1cable:`) |
+
+Le succès existe avec meta Refresh **ou sans Refresh avec un lien Retour** : aucune navigation
+n'est nécessaire. Les réponses doublon/plein renvoient la liste du GET préalable. Formulaire
+de login → `NotAuthenticated` ; absence de `div.hop` ou texte inconnu → `UnknownResponse`.
+
+**Retrait : réécriture intégrale de la liste.**
+`POST /user/supprperso_validation.php?config=hfr.inc&codehex=<secret>` parcourt les champs
+`smiley0`, `smiley1`, … tant qu'ils se suivent, garde ceux dont `delete{i}` n'est pas coché,
+puis remplace la liste dans cet ordre. Un POST partiel peut tout effacer ; un trou tronque
+la liste ; une valeur décalée fait perdre une autre entrée. La réponse HTTP 200 dit toujours
+« Suppression effectuée avec succès ! », même après effacement intégral : ce texte ne prouve rien.
+
+1. GET de la page de travail **juste avant** le POST ; aucune interaction ni attente utilisateur
+   entre les deux. Lire tous les `input[type=hidden][name^=smiley]` dans l'ordre du document.
+2. Abandonner (`UnknownResponse`) si les noms ne sont pas exactement `smiley0..smiley{N-1}`,
+   si leur nombre diffère de celui des `tr.s2Topic`, ou si leur association aux lignes/cases
+   est ambiguë. Rejeter aussi tout `input[name^=smiley]`, `input[name^=delete]` ou `tr.s2Topic`
+   hors du formulaire retenu. Une liste vide valide se distingue d'un formulaire absent ou invalide.
+3. Accepter tout jeton non vide, même cassé (`aaa`), et le trouver par **valeur exacte** dans
+   cette liste fraîche. Absent → `NotInFavorites(favorites)` sans POST ;
+   vide → `InvalidToken` avant tout GET.
+4. Envoyer `hash_check`, **les N valeurs verbatim**, HTML décodé puis encodé comme formulaire,
+   et une seule case `delete{k}=on` pour la cible. Conserver même les entrées cassées (`aaa`,
+   image sans `src`), sans trou, sans tri, sans filtrage. Ne jamais utiliser un index d'UI périmé.
+5. Relire obligatoirement la page de travail après le POST et comparer les **jetons ordonnés**
+   à « liste fraîche moins la cible ». Identiques → `Success(favorites)` ;
+   différents → `VerificationFailed(favorites)` avec la liste réelle. Les images viennent du GET final.
+
+Les mutations de l'application sont sérialisées du GET initial à la relecture finale.
+Une fenêtre de course subsiste uniquement avec le web ou un autre appareil entre le GET et le POST : un
+ajout extérieur peut être perdu. La relecture détecte un écart à l'état attendu, sans garantir
+la détection d'un ajout extérieur effacé. Le réordonnancement est possible côté serveur en
+changeant l'ordre des valeurs envoyées, mais **non implémenté** dans l'application.
+
+**Compte et secrets** : l'appelant capture `owner` au geste. Après acquisition du mutex et passage
+sur IO, le dépôt le compare à la session avant le premier GET, puis immédiatement avant chaque
+POST et GET de confirmation. Changement de compte ou passage anonyme → `AccountChanged`,
+sans requête supplémentaire. L'identité est le pseudo normalisé par `lowercase()`, sans trim,
+comme les collections locales ; la résolution de `userId` ne change pas de compte.
+Les listes relues après mutation restent rattachées au propriétaire du geste.
+`codehex` est distinct de `hash_check` et identique au jeton de déconnexion. Tous deux sont
+des **secrets de compte stables**, observés identiques entre sessions et d'un jour à l'autre :
+une fuite est durable. `codehex` reste uniquement dans un formulaire technique transitoire,
+au `toString()` expurgé, jamais dans un modèle métier, état, stockage ou cache. Les seuls jetons
+des fixtures sont fictifs. L'action est validée : même origine HTTPS, chemin exact
+`/user/supprperso_validation.php`, `config=hfr.inc`, seul autre paramètre `codehex` hexadécimal ;
+tout autre hôte, chemin, paramètre supplémentaire/dupliqué ou fragment fait abandonner.
+
+Ces POST utilisent un dérivé de `@MutationClient`, sans redirection ni rejeu (corps à usage
+unique, y compris pour les reprises HTTP). Le chemin d'exécution sensible n'expose aucune URL,
+query, page brute ou cause d'exception d'origine. Aucun cache HTTP pour cette page de travail.
+Les diagnostics du dépôt se limitent à l'opération et à la classe de résultat.
+Ces appels sont exclus des diagnostics réseau génériques ; aucun détail de requête n'y est ajouté.
+
+**Non testé lors de la capture** : validation des valeurs injectées par une réécriture
+(existence, plafond, doublons), ordre des contrôles « inexistant » / « plein » à l'ajout,
+classement des favoris dans la recherche wiki. Ces comportements ne sont pas des garanties.
 
 ---
 

@@ -7,6 +7,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.parser.smiley.SmileySearchParser
+import fr.forumhfr.redface2.core.parser.smiley.SmileyWikiKeywordsParser
 import javax.inject.Singleton
 
 /**
@@ -25,5 +26,9 @@ abstract class SmileyRepositoryModule {
         @Provides
         @Singleton
         fun provideSmileySearchParser(): SmileySearchParser = SmileySearchParser()
+
+        @Provides
+        @Singleton
+        fun provideSmileyWikiKeywordsParser(): SmileyWikiKeywordsParser = SmileyWikiKeywordsParser()
     }
 }

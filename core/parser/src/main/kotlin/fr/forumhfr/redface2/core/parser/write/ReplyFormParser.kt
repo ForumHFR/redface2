@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.parser.write
 
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
+import fr.forumhfr.redface2.core.parser.smiley.SmileySearchParser
 import fr.forumhfr.redface2.core.parser.smiley.SmileyUserIdExtractor
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Element
@@ -81,6 +82,7 @@ class ReplyFormParser {
                 options = parseOptions(replyForm),
                 msgIcon = parseMsgIcon(replyForm),
                 userId = SmileyUserIdExtractor.extract(html),
+                favoriteSmileys = SmileySearchParser().parseFavorites(replyForm),
                 recipientsRoster = parseRecipientsRoster(replyForm, collection.fields["newdest"]),
             ),
         )

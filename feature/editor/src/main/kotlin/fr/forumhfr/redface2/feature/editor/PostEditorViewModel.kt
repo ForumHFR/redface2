@@ -12,12 +12,15 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.diagnostics.SmileyPickerCloseCause
 import fr.forumhfr.redface2.core.domain.diagnostics.recordImagePickerEvent
 import fr.forumhfr.redface2.core.domain.diagnostics.recordImagesPicked
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.smiley.HfrFavoriteSmileyRepository
+import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollections
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadException
@@ -39,7 +42,10 @@ import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.SmileyFavoriteMutations
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerFavoriteSources
+import fr.forumhfr.redface2.core.ui.editor.SmileyWikiKeywordsSource
 import fr.forumhfr.redface2.core.ui.editor.UploadError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
@@ -96,6 +102,8 @@ class PostEditorViewModel @AssistedInject constructor(
     private val imageUploadReader: ImageUploadReader,
     private val authRepository: AuthRepository,
     private val quoteMaterializer: TopicReplyQuoteMaterializer,
+    hfrFavoriteSmileyRepository: HfrFavoriteSmileyRepository,
+    smileyLocalCollections: SmileyLocalCollections,
     private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
 
@@ -124,6 +132,56 @@ class PostEditorViewModel @AssistedInject constructor(
      * through Compose snapshot tooling / state restoration.
      */
     private var loadedForm: ReplyForm? = null
+        set(value) {
+            field = value
+            if (value == null) smileyPicker.refreshFavorites(null)
+        }
+
+    /**
+     * #441 — smiley picker (Favorites + Standard + Wiki), delegated to the shared
+     * [SmileyPickerController] exactly like the MP composers (#387/#440) : the controller owns
+     * open/dismiss/query, the 300 ms debounce and its race guards, and the #824
+     * restore-search-on-reopen contract. This ViewModel keeps only the insertion
+     * ([onSmileySelected] — a draft mutation, so it stays an MVI intent). Mixed wiring is
+     * deliberate : the sheet talks to the controller directly for open/dismiss/query and goes
+     * through [PostEditorIntent.SmileySelected] for insertion — do not re-route one into the
+     * other for « consistency ».
+     *
+     * Lifecycle (réserve Codex #441) : this ViewModel's editorial context is frozen at
+     * construction (`@Assisted request` ; one `PostEditorRoute` nav entry = one ViewModel,
+     * cf. `RedfaceNavigation`), so the controller can never be re-armed for another post —
+     * no targeted reset is needed beyond the ViewModel's own death.
+     *
+     * Failure logging stays a policy of THIS feature (the MP composers keep the controller's
+     * no-op default) : class name only — never the query nor the userId (anti-leak test).
+     */
+    // Keep before init: loadedForm's setter can run synchronously there and crash on an uninitialized picker.
+    val smileyPicker = SmileyPickerController(
+        diagnostics = diagnostics,
+        scope = viewModelScope,
+        searchWiki = smileyRepository::searchWiki,
+        wikiKeywords = SmileyWikiKeywordsSource(
+            cached = smileyRepository::cachedWikiKeywords,
+            load = smileyRepository::getWikiKeywords,
+        ),
+        favoriteSources = SmileyPickerFavoriteSources(
+            favoriteSmileys = { loadedForm?.favoriteSmileys.orEmpty() },
+            hfrFavoriteMutations = SmileyFavoriteMutations(
+                addHfrFavorite = hfrFavoriteSmileyRepository::add,
+                removeHfrFavorite = hfrFavoriteSmileyRepository::remove,
+            ),
+            localCollections = smileyLocalCollections,
+        ),
+        userId = { _state.value.userId },
+        onSearchFailed = { error ->
+            diagnostics.record(
+                DiagnosticsLog.Level.WARN,
+                LOG_TAG_VM,
+                "wiki smiley search failed: ${error::class.simpleName}",
+            )
+        },
+    )
+
     private var submitJob: Job? = null
 
     /**
@@ -260,6 +318,7 @@ class PostEditorViewModel @AssistedInject constructor(
             return
         }
         val quoteContext = context.copy(quotedNumreponse = quotes.first().numreponse, quoteRef = null)
+        val favoriteStamp = smileyPicker.favoriteFormStamp()
         _state.update { it.copy(isLoadingForm = true, submitError = null) }
         viewModelScope.launch {
             val outcome = runCatching {
@@ -272,6 +331,7 @@ class PostEditorViewModel @AssistedInject constructor(
             outcome.fold(
                 onSuccess = { form ->
                     loadedForm = form
+                    smileyPicker.refreshFavorites(favoriteStamp)
                     val prefills = form.initialContent.trimEnd()
                     _state.update { current ->
                         val existing = current.draft.text
@@ -506,37 +566,6 @@ class PostEditorViewModel @AssistedInject constructor(
             EditorDraftStore.Draft(body = body).restoreOfferFingerprint()
     }
 
-    /**
-     * #441 — smiley picker (Standard + Wiki search), delegated to the shared
-     * [SmileyPickerController] exactly like the MP composers (#387/#440) : the controller owns
-     * open/dismiss/query, the 300 ms debounce and its race guards, and the #824
-     * restore-search-on-reopen contract. This ViewModel keeps only the insertion
-     * ([onSmileySelected] — a draft mutation, so it stays an MVI intent). Mixed wiring is
-     * deliberate : the sheet talks to the controller directly for open/dismiss/query and goes
-     * through [PostEditorIntent.SmileySelected] for insertion — do not re-route one into the
-     * other for « consistency ».
-     *
-     * Lifecycle (réserve Codex #441) : this ViewModel's editorial context is frozen at
-     * construction (`@Assisted request` ; one `PostEditorRoute` nav entry = one ViewModel,
-     * cf. `RedfaceNavigation`), so the controller can never be re-armed for another post —
-     * no targeted reset is needed beyond the ViewModel's own death.
-     *
-     * Failure logging stays a policy of THIS feature (the MP composers keep the controller's
-     * no-op default) : class name only — never the query nor the userId (anti-leak test).
-     */
-    val smileyPicker = SmileyPickerController(
-        scope = viewModelScope,
-        searchWiki = smileyRepository::searchWiki,
-        userId = { _state.value.userId },
-        onSearchFailed = { error ->
-            diagnostics.record(
-                DiagnosticsLog.Level.WARN,
-                LOG_TAG_VM,
-                "wiki smiley search failed: ${error::class.simpleName}",
-            )
-        },
-    )
-
     private fun onSmileySelected(token: String) {
         // Reuse the formatter helper so the surrounding-spaces convention from HFR's web
         // composer is honoured uniformly (cf. `BbcodeFormatter.insertBbcodeToken`).
@@ -564,7 +593,7 @@ class PostEditorViewModel @AssistedInject constructor(
         // smiley if they want to chain — #824 restores the search they just used. This
         // matches HFR web behaviour and keeps the sheet from squatting the screen between
         // two distant insertions.
-        smileyPicker.dismiss()
+        smileyPicker.dismiss(SmileyPickerCloseCause.INSERTION)
         scheduleAutosave()
     }
 
@@ -801,12 +830,14 @@ class PostEditorViewModel @AssistedInject constructor(
      * anti-clobber guards on refetch.
      */
     private fun launchFormFetch(fetch: suspend () -> ReplyForm) {
+        val favoriteStamp = smileyPicker.favoriteFormStamp()
         _state.update { it.copy(isLoadingForm = true, submitError = null) }
         viewModelScope.launch {
             val outcome = runCatching { fetch() }
             outcome.fold(
                 onSuccess = { form ->
                     loadedForm = form
+                    smileyPicker.refreshFavorites(favoriteStamp)
                     // Pre-compute the preview AST outside the `_state.update {}`
                     // lambda : the lambda runs synchronously on whichever thread
                     // pumps the StateFlow (in practice the coroutine's dispatcher,

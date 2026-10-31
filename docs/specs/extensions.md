@@ -106,11 +106,26 @@ Redface 2 intègre les plus populaires et les plus utiles **nativement dans l'ap
 
 *Inspiré de : Vos smileys favoris mod_r21 (pop. 26), Wiki smileys & raccourcis (pop. 28)*
 
-- Liste personnelle de smileys favoris (accès rapide dans l'éditeur)
-- Raccourcis clavier pour les smileys fréquents
-- Recherche de smileys par mot-clé (wiki smileys HFR)
-- Statistiques d'utilisation (les plus utilisés remontent)
-- Synchronisation via MPStorage
+- **Favoris du compte HFR — lecture et gestion depuis le sélecteur livrées** : lus depuis le
+  formulaire de rédaction, affichés dans l'onglet Favoris ; ajout ou retrait depuis le détail
+  ouvert par appui long sur un smiley du sélecteur. Les mêmes actions sont accessibles directement
+  avec TalkBack ; les builtins sont exclus des actions HFR. Comportement de la feuille et contrat serveur dans
+  [Favoris HFR]({{ site.baseurl }}/specs/protocol-hfr#smileys-favoris-du-compte).
+- **Favoris locaux — moteur et affichage livrés** : collection ordonnée sur l'appareil,
+  distincte des favoris HFR, isolée par compte et persistante après déconnexion. Contrat et
+  limites dans l'[ADR-019]({{ site.baseurl }}/adr/019-smileys-favoris-locaux-et-top-usage) ;
+  modèles dans [Modèles de données]({{ site.baseurl }}/specs/models#favoris-locaux-de-smileys).
+- **Top d'usage — moteur et affichage livrés** : classement local par fréquence après
+  envoi reconnu réussi (édition : delta positif), isolé par compte. Extraction et points
+  d'enregistrement dans l'ADR-019 ; modèle dans
+  [Modèles de données]({{ site.baseurl }}/specs/models#top-dusage-des-smileys).
+- Recherche par mot-clé dans le wiki smileys HFR : livrée. Le détail d'un perso affiche aussi
+  ses mots-clés publics en puces non interactives, avec chargement, liste vide et réessai ;
+  cache en mémoire indépendant du compte. Contrat dans
+  [Mots-clés du détail wiki]({{ site.baseurl }}/specs/protocol-hfr#mots-clés-du-détail-wiki),
+  décisions dans l'ADR-019 (lot 2 du 30/10). Raccourcis clavier : à venir.
+- Synchronisation des collections locales via MPStorage : à concevoir ; l'export des favoris
+  locaux prépare ce travail sans définir de protocole de fusion.
 
 ### Suppression rapide de posts
 

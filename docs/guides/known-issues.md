@@ -22,6 +22,10 @@ Liste **vivante** des limitations connues de Redface 2 et des compromis **assum�
 - **Fraîcheur du cache de drapeaux.** Le compteur de réponses et le dernier posteur affichés peuvent être périmés jusqu'au prochain rafraîchissement (cache REST + Room). Le rafraîchissement automatique (#378/#421) couvre le cas ; un écart résiduel relève de la fraîcheur, pas d'un mauvais mapping (cf. #331, #501).
 - **Drapeaux globaux tronqués par récence.** L'endpoint REST global tronque par récence ; le détail par catégorie est complet (cf. #251).
 
+## Profil
+
+- **Lien « Configuration matérielle » seulement si HFR le propose** (#1467, `0.65.0`). L'app suit la page profil HFR : quelques membres ont une configuration non vide que HFR ne lie pas sur leur profil, et n'ont donc pas de lien (`protocol-hfr.md`, constat du 31/10/2026).
+
 ## Messages privés
 
 - **Pas de drapeau lu/non-lu serveur.** HFR n'expose aucun état lu/non-lu serveur pour les MP : l'app s'appuie sur une heuristique (dot binaire par conversation). Le compteur de badge est donc une estimation côté client, recalculée à la lecture (cf. #313, #361).
@@ -40,6 +44,8 @@ Liste **vivante** des limitations connues de Redface 2 et des compromis **assum�
 
 ## Rédaction
 
+- **Smileys : favoris de l'appareil et Top d'usage locaux** (#1154, `0.65.0`). Ils sont gardés sur l'appareil, par compte, sans synchronisation entre appareils ; ils restent après une déconnexion et réapparaissent à la reconnexion du même compte. Une mort du processus juste après un envoi peut perdre un comptage d'usage (ADR-019).
+- **Smileys : favoris HFR lus depuis le formulaire** (#1154, `0.65.0`). Un favori retiré sur le site après l'ouverture du formulaire reste affiché jusqu'au rechargement du formulaire (`protocol-hfr.md`, limite acceptée). L'appui long sur un smiley pendant la lecture n'ouvre pas encore son détail (#1498).
 - **Rédaction longue : défilement interne, hauteur contrainte en paysage** (#447, #1263, #1406, `0.60.0`). Le champ repose sur `BasicTextField(TextFieldState, …)` et son `ScrollState` : le contenu défile dans le champ, le curseur reste visible pendant la frappe et les poignées suivent une sélection étendue. L'éditeur de post range désormais son titre, sa barre d'outils et l'aperçu dans la même zone défilante que les autres contrôles ; dans les quatre éditeurs, les alertes passent en tête. Dès que 220 dp restent disponibles pour la zone et le champ, 160 dp sont réservés à la saisie. Limite restante : en paysage avec le clavier ouvert, il peut ne rester que quelques dizaines de dp disponibles. La zone de contrôles est alors très basse (≈ 33 dp dans le cas de budget analysé) et doit être parcourue par défilement pour exposer ses contrôles ; masquer le clavier rend l'espace au brouillon.
 
 ## Réseau

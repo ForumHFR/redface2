@@ -191,16 +191,25 @@ class FlagsViewModel @Inject constructor(
 ```kotlin
 interface FlagRepository {
     fun observe(type: FlagType): Flow<FlagsResult>
-    suspend fun refresh(type: FlagType)
+    suspend fun refresh(type: FlagType): FlagsResult
     fun clearSessionCache()
 }
 
 sealed class FlagsResult {
     data object Loading : FlagsResult()
-    data class Success(val flags: List<Flag>) : FlagsResult()
+    data class Success(val flags: List<Flag>, val issue: FlagRefreshIssue? = null) : FlagsResult()
     data class Failure(val cause: Throwable) : FlagsResult()
 }
 ```
+
+`FlagRefreshIssue` (types définis dans `core/domain/.../FlagRepository.kt`) porte les catégories dont
+le complément des épinglés manque et la pagination certainement tronquée (#984). Les lignes reçues
+sont affichées et remplacent le cache Room, sans conserver les anciennes lignes des parties en échec.
+L'avertissement reste transitoire : le ViewModel expose un effet consommable vers le `SnackbarHost`,
+avec « Réessayer » sur l'onglet d'origine ; Super agrège le lot Cyan → Rouge → Favoris sans l'interrompre.
+Un résultat incomplet ne bénéficie ni du TTL disque de 30 s ni de la fenêtre d'auto-refresh de 15 s.
+Une page vide avant le compteur annoncé reste un indice diagnostique, sans avertissement utilisateur :
+le compteur peut diverger sans prouver une perte de lignes. Le plafond de pagination produit l'avertissement.
 
 Les noms de champs (`Flag.cat`, `Flag.topicId`, `Flag.type`, `Flag.replyCount`, `Flag.totalPages`, `Flag.lastReadPage`, …) suivent strictement [`models.md`]({{ site.baseurl }}/specs/models#drapeaux). Pas de `topic.postId` ni `topic.flagType` ni `topic.lastDate` — ces noms n'existent pas dans le modèle.
 

@@ -1,16 +1,24 @@
 package fr.forumhfr.redface2.core.network
 
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
+import fr.forumhfr.redface2.core.network.diagnostics.HfrCallTag
+import fr.forumhfr.redface2.core.network.diagnostics.withHfrDiagnostics
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
 import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import okhttp3.Call
 import okhttp3.HttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.Response
 
 /**
  * REST client for the JSON HFR API exposed at `/webservices/rest_api.php`. Phase 1C-A
@@ -39,6 +47,7 @@ class HfrApiClient @Inject constructor(
     @param:AuthenticatedClient private val authenticated: OkHttpClient,
     @param:AnonymousClient private val anonymous: OkHttpClient,
     @param:HfrBaseUrl private val baseUrl: HttpUrl,
+    @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
 
     suspend fun getCategories(useAuth: Boolean = false): String =
@@ -194,12 +203,12 @@ class HfrApiClient @Inject constructor(
             .setEncodedQueryParameter(PARAM_URI, uri)
         extraParams.forEach { (name, value) -> builder.addQueryParameter(name, value) }
         val url = builder.build()
-        val request = Request.Builder().url(url).get().build()
+        val request = Request.Builder().url(url).get().build().withHfrDiagnostics(currentCoroutineContext())
         val client = if (useAuth) authenticated else anonymous
         return if (useAuth) {
             client.newCall(request).executeAuthenticatedJson()
         } else {
-            client.newCall(request).execute().use { response ->
+            client.newCall(request).executeCancellable { response ->
                 if (!response.isSuccessful) {
                     // #324 — typed (status code) while keeping the richer REST diagnostic line.
                     throw HfrServerException(
@@ -213,7 +222,19 @@ class HfrApiClient @Inject constructor(
         }
     }
 
-    private fun Call.executeAuthenticatedJson(): String = execute().use { response ->
+    /** Keep the cancellation bridge alive through both headers and body, as in [HfrClient]. */
+    private suspend fun <T> Call.executeCancellable(readResponse: (Response) -> T): T = withContext(ioDispatcher) {
+        val call = this@executeCancellable
+        suspendCancellableCoroutine { continuation ->
+            continuation.invokeOnCancellation { call.cancel() }
+            continuation.resumeWith(runCatching {
+                call.request().tag(HfrCallTag::class.java)?.executing()
+                call.execute().use(readResponse)
+            })
+        }
+    }
+
+    private suspend fun Call.executeAuthenticatedJson(): String = executeCancellable { response ->
         val body = response.body.string()
         if (!response.isSuccessful) {
             // #324 — typed (status code) while keeping the richer REST diagnostic line.

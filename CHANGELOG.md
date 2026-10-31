@@ -10,6 +10,17 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ---
 
+## [0.13.3] - 2026-10-31
+
+**Promotion bêta 0.65.0** : alignement des pages publiques sur la nouvelle bêta.
+
+### Changed
+
+- Pages d'entrée (`README.md`, `AGENTS.md`, `docs/index.md`, `docs/guides/contributing.md`) : état du projet = bêta publique **0.65.0**, canal dev aligné sur la bêta au 31/10/2026.
+- `docs/specs/roadmap.md` : plage de livraison de la refonte UI étendue jusqu'à la bêta **0.65.0**.
+
+---
+
 ## [0.13.2] - 2026-09-22
 
 **Promotion bêta 0.62.0** : alignement des pages publiques sur la nouvelle bêta.

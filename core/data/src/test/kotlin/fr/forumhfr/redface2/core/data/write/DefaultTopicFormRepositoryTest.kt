@@ -1,6 +1,8 @@
 package fr.forumhfr.redface2.core.data.write
 
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.smiley.SmileyUsageFailure
+import fr.forumhfr.redface2.core.domain.smiley.SmileyUsageMutationResult
 import fr.forumhfr.redface2.core.model.write.EditFirstPostContext
 import fr.forumhfr.redface2.core.model.write.NewTopicContext
 import fr.forumhfr.redface2.core.model.write.NewTopicSubmitResult
@@ -10,6 +12,7 @@ import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.write.ReplySubmitResponseParser
 import fr.forumhfr.redface2.core.parser.write.TopicFormParser
+import java.io.IOException
 import java.net.URLDecoder
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
@@ -42,9 +45,11 @@ class DefaultTopicFormRepositoryTest {
     private lateinit var client: HfrClient
     private lateinit var diagnostics: DiagnosticsLog
     private lateinit var repository: DefaultTopicFormRepository
+    private lateinit var usage: SmileyUsageRecorderFixture
 
     @Before
     fun setUp() {
+        usage = SmileyUsageRecorderFixture()
         server = MockWebServer().apply { start() }
         val okHttp = OkHttpClient.Builder().build()
         client = HfrClient(
@@ -60,12 +65,14 @@ class DefaultTopicFormRepositoryTest {
             topicFormParser = TopicFormParser(),
             replySubmitResponseParser = ReplySubmitResponseParser(),
             diagnostics = diagnostics,
+            smileyUsageRecorder = usage.recorder,
             ioDispatcher = Dispatchers.Unconfined,
         )
     }
 
     @After
     fun tearDown() {
+        usage.close()
         server.shutdown()
     }
 
@@ -501,6 +508,78 @@ class DefaultTopicFormRepositoryTest {
             "Expected at least one Success record",
             records.any { it.message.contains("POST new-topic Success") },
         )
+    }
+
+    @Test
+    fun `new topic and first post edit record sanitized occurrences with an edit delta`() = runTest {
+        listOf(false, true).forEach { edit ->
+            usage.calls.clear()
+            server.enqueue(MockResponse().setBody(fixture(usageSuccessFixture(edit))))
+            assertTrue(submitUsageCase(edit))
+            assertEquals(
+                listOf(
+                    SmileyUsageRecorderFixture.Call(
+                        "alice", mapOf(":o" to if (edit) 1 else 2, "[:fictif b:3]" to 1),
+                    ),
+                ),
+                usage.calls,
+            )
+        }
+        assertEquals(2, server.requestCount)
+    }
+
+    @Test
+    fun `failed unknown and exceptional topic writes never record usage`() = runTest {
+        listOf(false, true).forEach { edit ->
+            listOf(fixture("write_invalid_token_error.html"), "").forEach { html ->
+                server.enqueue(MockResponse().setBody(html))
+                assertFalse(submitUsageCase(edit))
+            }
+            server.enqueue(MockResponse().setResponseCode(503))
+            assertTrue(runCatching { submitUsageCase(edit) }.isFailure)
+            assertTrue(usage.calls.isEmpty())
+        }
+    }
+
+    @Test
+    fun `disabled topic smileys skip accounting and local failures preserve both successes`() = runTest {
+        listOf(false, true).forEach { edit ->
+            usage.calls.clear()
+            usage.storageError = null
+            usage.storageResult = SmileyUsageMutationResult.Updated
+            server.enqueue(MockResponse().setBody(fixture(usageSuccessFixture(edit))))
+            assertTrue(submitUsageCase(edit, ReplyFormOptions(smileyDisabled = true)))
+            assertTrue(usage.calls.isEmpty())
+            usage.storageResult = SmileyUsageMutationResult.Failure(SmileyUsageFailure.STORAGE_FAILURE)
+            server.enqueue(MockResponse().setBody(fixture(usageSuccessFixture(edit))))
+            assertTrue(submitUsageCase(edit))
+            usage.storageError = IOException("[:fictif_a]")
+            server.enqueue(MockResponse().setBody(fixture(usageSuccessFixture(edit))))
+            assertTrue(submitUsageCase(edit))
+            assertEquals(2, usage.calls.size)
+        }
+    }
+
+    private fun usageSuccessFixture(edit: Boolean): String =
+        if (edit) "write_edit_first_post_success_response.html" else "write_create_topic_success_response.html"
+
+    private suspend fun submitUsageCase(
+        edit: Boolean,
+        options: ReplyFormOptions = ReplyFormOptions(),
+    ): Boolean {
+        val content = ":o :\uD83D\uDE00o [:fictif b:3] [quote]:D[/quote]"
+        return if (edit) {
+            val form = TopicFormParser().parseEditFirstPost(fixture("write_edit_first_post_form.html")).getOrThrow()
+                .copy(initialContent = ":o :D")
+            repository.submitEditFirstPost(
+                EditFirstPostContext(10, 388, 148749, 1, 2523829), form, form.subject, content, 388, options,
+            ) is ReplySubmitResult.Success
+        } else {
+            val form = TopicFormParser().parseNewTopic(fixture("write_create_topic_form_android_cat.html")).getOrThrow()
+            repository.submitNewTopic(
+                NewTopicContext(23, 550), form, "Usage test", content, 550, options,
+            ) is NewTopicSubmitResult.Success
+        }
     }
 
     private fun fixture(name: String): String =

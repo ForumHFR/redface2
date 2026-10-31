@@ -7,6 +7,8 @@ import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.search.SearchTextScope
 import fr.forumhfr.redface2.core.model.write.FlagAddContext
+import fr.forumhfr.redface2.core.network.diagnostics.HfrCallTag
+import fr.forumhfr.redface2.core.network.diagnostics.withHfrDiagnostics
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
 import fr.forumhfr.redface2.core.network.qualifiers.AuthenticatedClient
 import fr.forumhfr.redface2.core.network.qualifiers.HfrBaseUrl
@@ -15,6 +17,7 @@ import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.Call
@@ -53,7 +56,7 @@ class HfrClient @Inject constructor(
             // caller can surface a reconnect CTA instead of a misleading empty screen. The
             // `rf2.topic` prefix scopes the trace sections to the topic feature only — other
             // callers (MP list, …) opt out of tracing by omitting the prefix.
-            authenticated.newCall(request).executeAuthenticatedHtml(tracePrefix = TOPIC_TRACE_PREFIX)
+            authenticated.newDiagnosticCall(request).executeAuthenticatedHtml(tracePrefix = TOPIC_TRACE_PREFIX)
         } else {
             // `rf2.topic.network` covers DNS + connect + TLS + headers (the part OkHttp returns
             // before we touch the body). `rf2.topic.body_read` covers the bytes-on-the-wire
@@ -63,7 +66,7 @@ class HfrClient @Inject constructor(
             // `executeCancellable` owns both the IO hop and the coroutine -> Call.cancel bridge,
             // regardless of the caller's context (cf. PR #162 v43 — repository layer forgot the
             // hop and triggered `NetworkOnMainThreadException`).
-            anonymous.newCall(request).executeCancellable(tracePrefix = TOPIC_TRACE_PREFIX) { response ->
+            anonymous.newDiagnosticCall(request).executeCancellable(tracePrefix = TOPIC_TRACE_PREFIX) { response ->
                 if (!response.isSuccessful) {
                     // #324 — typed so the read screens can tell a 5xx outage from a
                     // local network cut (cf. core.domain.error.classifyHfrError).
@@ -94,7 +97,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("quote_only", "1")
             .build()
         val request = Request.Builder().url(url).get().build()
-        return anonymous.newCall(request).executeCancellable { response ->
+        return anonymous.newDiagnosticCall(request).executeCancellable { response ->
             if (!response.isSuccessful) {
                 throw HfrServerException(response.code, response.request.url.toString())
             }
@@ -126,7 +129,7 @@ class HfrClient @Inject constructor(
             .build()
 
         val request = Request.Builder().url(url).get().build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
+        return authenticated.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -146,7 +149,7 @@ class HfrClient @Inject constructor(
             .build()
 
         val request = Request.Builder().url(url).get().build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
+        return authenticated.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -184,7 +187,7 @@ class HfrClient @Inject constructor(
             "MP reply link is not a cat=prive form"
         }
         val request = Request.Builder().url(resolved).get().build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
+        return authenticated.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -212,7 +215,7 @@ class HfrClient @Inject constructor(
             .build()
 
         val request = Request.Builder().url(url).get().build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
+        return authenticated.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -236,7 +239,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("new", "0")
             .build()
         val request = Request.Builder().url(url).get().build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
+        return authenticated.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -266,7 +269,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("new", "0")
             .build()
         val request = Request.Builder().url(url).get().build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
+        return authenticated.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -317,7 +320,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("new", "0")
             .build()
         val request = Request.Builder().url(url).get().build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
+        return authenticated.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -339,7 +342,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("config", "hfr.inc")
             .build()
         val request = Request.Builder().url(url).post(formBody).build()
-        return mutation.newCall(request).executeAuthenticatedHtml()
+        return mutation.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -357,7 +360,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("config", "hfr.inc")
             .build()
         val request = Request.Builder().url(url).post(formBody).build()
-        return mutation.newCall(request).executeAuthenticatedHtml()
+        return mutation.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -390,7 +393,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("post", topicId.toString())
             .build()
         val request = Request.Builder().url(url).get().build()
-        return mutation.newCall(request).executeAuthenticatedHtml()
+        return mutation.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /** #293 — user-initiated authenticated read; construct the URL without parsing cryptlinks. */
@@ -404,7 +407,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("page", page.toString())
             .addQueryParameter("ref", "1")
             .build()
-        return authenticated.newCall(Request.Builder().url(url).get().build()).executeAuthenticatedHtml()
+        return authenticated.newDiagnosticCall(Request.Builder().url(url).get().build()).executeAuthenticatedHtml()
     }
 
     /** #294 — user-initiated authenticated read of the active account's sanctions. */
@@ -413,7 +416,7 @@ class HfrClient @Inject constructor(
             .addPathSegments("modo/historique.php")
             .addQueryParameter("config", "hfr.inc")
             .build()
-        return authenticated.newCall(Request.Builder().url(url).get().build()).executeAuthenticatedHtml()
+        return authenticated.newDiagnosticCall(Request.Builder().url(url).get().build()).executeAuthenticatedHtml()
     }
 
     suspend fun submitModerationAlert(
@@ -454,7 +457,7 @@ class HfrClient @Inject constructor(
         if (!sameOrigin || !isModerationAction) throw IOException("Invalid moderation form action")
         val request = Request.Builder().url(url).post(body).build()
         // Authenticated cookie jar, retryOnConnectionFailure(false): never replay a moderation POST.
-        return mutation.newCall(request).executeAuthenticatedHtml()
+        return mutation.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -494,7 +497,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("numreponse", numreponse.toString())
             .build()
         val request = Request.Builder().url(url).get().build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
+        return authenticated.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -515,7 +518,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("config", "hfr.inc")
             .build()
         val request = Request.Builder().url(url).post(formBody).build()
-        return mutation.newCall(request).executeAuthenticatedHtml()
+        return mutation.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -539,7 +542,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("config", "hfr.inc")
             .build()
         val request = Request.Builder().url(url).post(formBody).build()
-        return mutation.newCall(request).executeAuthenticatedHtml()
+        return mutation.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -566,7 +569,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("new", "0")
             .build()
         val request = Request.Builder().url(url).get().build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
+        return authenticated.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -586,7 +589,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("config", "hfr.inc")
             .build()
         val request = Request.Builder().url(url).post(formBody).build()
-        return mutation.newCall(request).executeAuthenticatedHtml()
+        return mutation.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -609,7 +612,18 @@ class HfrClient @Inject constructor(
             .addQueryParameter("findsmilies", query)
             .build()
         val request = Request.Builder().url(url).get().build()
-        return anonymous.newCall(request).executeAuthenticatedHtml()
+        return anonymous.newDiagnosticCall(request).executeAuthenticatedHtml()
+    }
+
+    /** #1154 — public Wiki detail, without cookies. Never log the HTML response body. */
+    suspend fun getSmileyWikiDetail(token: String): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("wikismilies.php")
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("detail", token)
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        return anonymous.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -677,7 +691,7 @@ class HfrClient @Inject constructor(
             .also { if (page > 1) it.addQueryParameter("page", page.toString()) }
             .build()
         val request = Request.Builder().url(url).get().build()
-        return anonymous.newCall(request).executeAuthenticatedHtml()
+        return anonymous.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -759,7 +773,7 @@ class HfrClient @Inject constructor(
             .add("currentnum", currentnum.orEmpty())
             .build()
         val request = Request.Builder().url(url).post(formBody).build()
-        return authenticated.newCall(request).executeAuthenticatedHtml()
+        return authenticated.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -808,7 +822,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("subcat", context.subcat?.toString().orEmpty())
             .build()
         val request = Request.Builder().url(url).get().build()
-        return mutation.newCall(request).executeAuthenticatedHtml()
+        return mutation.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -866,7 +880,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("new", "0")
             .build()
         val request = Request.Builder().url(url).get().build()
-        return mutation.newCall(request).executeAuthenticatedHtml()
+        return mutation.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -891,10 +905,29 @@ class HfrClient @Inject constructor(
             .addPathSegment("profil-$userId.htm")
             .build()
         val request = Request.Builder().url(url).get().build()
-        return anonymous.newCall(request).executeCancellable { response ->
+        return anonymous.newDiagnosticCall(request).executeCancellable { response ->
             if (!response.isSuccessful) {
                 // #324 — typed so the profile sheet/page can tell a 5xx outage from a
                 // local network cut (cf. core.domain.error.classifyHfrError).
+                throw HfrServerException(response.code, url.toString())
+            }
+            response.body.string()
+        }
+    }
+
+    /**
+     * #1467 — public hardware configuration, fetched separately from the profile page.
+     * Always anonymous: this auxiliary read must never carry the user's session cookies.
+     */
+    suspend fun getUserConfiguration(pseudo: String): String {
+        val url = baseUrl.newBuilder()
+            .addPathSegment("configuration.php")
+            .addQueryParameter("config", "hfr.inc")
+            .addQueryParameter("pseudo", pseudo)
+            .build()
+        val request = Request.Builder().url(url).get().build()
+        return anonymous.newDiagnosticCall(request).executeCancellable { response ->
+            if (!response.isSuccessful) {
                 throw HfrServerException(response.code, url.toString())
             }
             response.body.string()
@@ -924,7 +957,7 @@ class HfrClient @Inject constructor(
             .addQueryParameter("responsable", "1")
             .build()
         val request = Request.Builder().url(url).get().build()
-        return anonymous.newCall(request).executeCancellable { response ->
+        return anonymous.newDiagnosticCall(request).executeCancellable { response ->
             if (!response.isSuccessful) {
                 throw HfrServerException(response.code, url.toString())
             }
@@ -975,7 +1008,7 @@ class HfrClient @Inject constructor(
         // kinds (cancellation, programming errors) keep propagating.
         @Suppress("SwallowedException")
         return try {
-            anonymousNoRedirect.newCall(request).executeCancellable { response ->
+            anonymousNoRedirect.newDiagnosticCall(request).executeCancellable { response ->
                 if (response.code in REDIRECT_CODE_RANGE) response.header("Location") else null
             }
         } catch (error: IOException) {
@@ -1047,6 +1080,9 @@ class HfrClient @Inject constructor(
             html
         }
 
+    private suspend fun OkHttpClient.newDiagnosticCall(request: Request): Call =
+        newCall(request.withHfrDiagnostics(currentCoroutineContext()))
+
     /**
      * Runs this blocking call on [ioDispatcher] and consumes its response while the cancellable
      * continuation stays active. Cancelling the coroutine invokes OkHttp [Call.cancel], which
@@ -1062,6 +1098,7 @@ class HfrClient @Inject constructor(
             continuation.invokeOnCancellation { call.cancel() }
             continuation.resumeWith(
                 runCatching {
+                    call.request().tag(HfrCallTag::class.java)?.executing()
                     val response = if (tracePrefix != null) {
                         trace("$tracePrefix.network") { call.execute() }
                     } else {

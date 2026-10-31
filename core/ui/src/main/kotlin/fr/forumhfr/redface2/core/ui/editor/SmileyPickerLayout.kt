@@ -190,7 +190,7 @@ internal fun pickerSmileyImageSize(
     spec: SmileyPickerLayoutSpec = SmileyPickerLayoutSpec.Current,
 ): DpSize = when (source) {
     EditorSmileySource.BUILTIN -> DpSize(spec.builtinImageSize, spec.builtinImageSize)
-    EditorSmileySource.WIKI -> {
+    EditorSmileySource.WIKI, EditorSmileySource.HFR_FAVORITE -> {
         val native = measuredPx?.takeIf { it.width > 0 && it.height > 0 }
         if (native == null) {
             DpSize(geometry.capWidth, geometry.capHeight)

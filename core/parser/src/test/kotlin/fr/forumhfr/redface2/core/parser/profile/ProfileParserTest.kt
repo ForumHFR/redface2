@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.parser.profile
 
 import fr.forumhfr.redface2.core.model.AuthorRole
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -9,6 +10,50 @@ import org.junit.Test
 class ProfileParserTest {
 
     private val parser = ProfileParser()
+
+    @Test
+    fun `anonymous XaTriX profile offers a hardware configuration link`() {
+        val profile = parser.parse(fixture("profile/profile_xatrix_anonymous.html"), 54596)
+        assertEquals("XaTriX", profile.pseudo)
+        assertTrue(profile.hasHardwareConfiguration)
+        assertEquals(
+            "Lien vers la configuration de cet utilisateur",
+            profile.rawFields["Configuration matérielle"],
+        )
+    }
+
+    @Test
+    fun `authenticated XaTriX profile also offers a hardware configuration link`() {
+        val profile = parser.parse(fixture("profile/profile_xatrix_authenticated.html"), 54596)
+        assertTrue(profile.hasHardwareConfiguration)
+    }
+
+    @Test
+    fun `ezzz profile without a configuration row does not offer a hardware configuration link`() {
+        val profile = parser.parse(fixture("profile/profile_ezzz_anonymous.html"), 15867)
+        assertFalse(profile.hasHardwareConfiguration)
+    }
+
+    @Test
+    fun `reduced moderator excerpt without the configuration row does not offer a link`() {
+        // The capture was reduced to Statut: its provenance says the configuration row was removed.
+        val profile = parser.parse(fixture("profile/profile_moderator_anonymous.html"), 15461)
+        assertFalse(profile.hasHardwareConfiguration)
+    }
+
+    @Test
+    fun `configuration detection requires both the labelled row and an anchor targeting the endpoint`() {
+        // Derive broken-link variants from a real capture; do not create a synthetic profile fixture.
+        val captured = fixture("profile/profile_xatrix_anonymous.html")
+        val variants = listOf(
+            captured.replace("href=", "data-href="),
+            captured.replace("/configuration.php?", "/other.php?next=configuration.php&"),
+            captured.replace("Configuration matérielle&nbsp;:", "Loisirs&nbsp;:"),
+        )
+        variants.forEachIndexed { index, html ->
+            assertFalse("variant $index", parser.parse(html, 54596).hasHardwareConfiguration)
+        }
+    }
 
     // ─── XaTriX fixture (authenticated capture, userId=54596) ────────────────
 

@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.parser.smiley
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.EditorSmileySource
 import org.jsoup.Jsoup
+import org.jsoup.nodes.Element
 
 /**
  * Phase 2F-B (#11 partial) — parses the wiki-search HTML fragment HFR returns at
@@ -26,10 +27,18 @@ import org.jsoup.Jsoup
  */
 class SmileySearchParser {
 
-    fun parse(fragment: String): List<EditorSmiley> {
-        val document = Jsoup.parse(fragment)
+    fun parse(fragment: String): List<EditorSmiley> =
+        parseImages(Jsoup.parse(fragment).select("img"), EditorSmileySource.WIKI)
+
+    /** #1154 — scope favorites to the form's direct putSmiley images, never page chrome. */
+    fun parseFavorites(form: Element): List<EditorSmiley> = parseImages(
+        form.select("div#dynamic_smilies > img[onclick^=putSmiley]"),
+        EditorSmileySource.HFR_FAVORITE,
+    )
+
+    private fun parseImages(images: List<Element>, source: EditorSmileySource): List<EditorSmiley> {
         val seen = HashSet<Pair<String, String>>()
-        return document.select("img")
+        return images
             .mapNotNull { img ->
                 // Prefer `alt` ; some legacy variants only carry `title`. We never invent a
                 // token from the URL : if neither attribute carries a token we drop the row.
@@ -37,7 +46,7 @@ class SmileySearchParser {
                     ?: img.attr("title").takeIf { it.isNotBlank() }
                     ?: return@mapNotNull null
                 val src = img.attr("src").takeIf { it.isNotBlank() } ?: return@mapNotNull null
-                EditorSmiley(token = token, imageUrl = src, source = EditorSmileySource.WIKI)
+                EditorSmiley(token = token, imageUrl = src, source = source)
             }
             .filter { entry -> seen.add(entry.token to entry.imageUrl) }
     }

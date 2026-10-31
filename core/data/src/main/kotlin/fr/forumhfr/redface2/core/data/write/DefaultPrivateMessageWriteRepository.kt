@@ -57,12 +57,14 @@ import okhttp3.FormBody
  * turn `cat=prive` into a number and rewrite the conversation's `numrep`.
  */
 @Singleton
+@Suppress("LongParameterList") // Shared recorder joins the existing parser and network collaborators.
 class DefaultPrivateMessageWriteRepository @Inject constructor(
     private val hfrClient: HfrClient,
     private val replyFormParser: ReplyFormParser,
     private val replyLinkParser: PrivateMessageReplyLinkParser,
     private val replySubmitResponseParser: ReplySubmitResponseParser,
     private val diagnostics: DiagnosticsLog,
+    private val smileyUsageRecorder: SuccessfulSmileyUsageRecorder,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : PrivateMessageWriteRepository {
 
@@ -229,8 +231,14 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
             withContext(ioDispatcher) {
                 // Same endpoint as a topic reply: bddpost.php?config=hfr.inc. All MP routing
                 // (cat=prive, post=threadId, numrep, subcat) travels in the form body.
+                val smileyUsageOwner = smileyUsageRecorder.captureOwner()
                 val responseHtml = hfrClient.submitReply(formBody)
                 val outcome = replySubmitResponseParser.parse(responseHtml)
+                if (outcome is ReplySubmitResult.Success) {
+                    smileyUsageRecorder.record(
+                        smileyUsageOwner, formBody, options.smileyDisabled,
+                    )
+                }
                 when (outcome) {
                     is ReplySubmitResult.Success ->
                         diagnostics.record(DiagnosticsLog.Level.INFO, LOG_TAG, "POST MP reply Success")
@@ -346,8 +354,14 @@ class DefaultPrivateMessageWriteRepository @Inject constructor(
             withContext(ioDispatcher) {
                 // Same bddpost.php endpoint as every other write : the composer's routing
                 // (cat=prive, empty post/numrep, dest, sujet) travels in the form body.
+                val smileyUsageOwner = smileyUsageRecorder.captureOwner()
                 val responseHtml = hfrClient.submitReply(formBody)
                 val outcome = replySubmitResponseParser.parse(responseHtml)
+                if (outcome is ReplySubmitResult.Success) {
+                    smileyUsageRecorder.record(
+                        smileyUsageOwner, formBody, options.smileyDisabled,
+                    )
+                }
                 when (outcome) {
                     is ReplySubmitResult.Success ->
                         diagnostics.record(DiagnosticsLog.Level.INFO, LOG_TAG, "POST MP compose Success")

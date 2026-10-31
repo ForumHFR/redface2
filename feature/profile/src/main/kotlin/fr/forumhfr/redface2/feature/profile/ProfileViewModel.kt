@@ -12,7 +12,10 @@ import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.profile.ProfileRepository
 import fr.forumhfr.redface2.core.model.AuthState
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -64,6 +67,9 @@ class ProfileViewModel @AssistedInject constructor(
      * on Retry spawn N concurrent coroutines whose results race to update [_state].
      */
     private var loadJob: Job? = null
+    private var configurationJob: Job? = null
+    private var isOpen = false
+    private var configurationSession: Any? = null
 
     init {
         loadProfile()
@@ -74,7 +80,46 @@ class ProfileViewModel @AssistedInject constructor(
     fun onIntent(intent: ProfileIntent) {
         when (intent) {
             ProfileIntent.Retry -> loadProfile()
+            ProfileIntent.RequestConfiguration -> onConfigurationRequested()
+            ProfileIntent.DismissConfiguration -> onConfigurationDismissed()
+            ProfileIntent.RetryConfiguration -> onConfigurationRetry()
             ProfileIntent.ToggleBlocked -> toggleBlocked()
+        }
+    }
+
+    /** The Activity can retain this VM; opening the profile never requests configuration.php. */
+    fun onOpened() {
+        isOpen = true
+    }
+
+    fun onClosed() {
+        isOpen = false
+        onConfigurationDismissed()
+    }
+
+    fun onConfigurationRequested() {
+        if (_state.value.configurationSheet != null) return
+        requestConfiguration()
+    }
+
+    /** Invalidate before cancelling, including a repository response that ignores cancellation. */
+    fun onConfigurationDismissed() {
+        configurationSession = null
+        configurationJob?.cancel()
+        configurationJob = null
+        _state.update { it.copy(configurationSheet = null) }
+    }
+
+    fun onConfigurationRetry() {
+        if (_state.value.configurationSheet == null) return
+        requestConfiguration()
+    }
+
+    private fun requestConfiguration() {
+        val profile = (_state.value.mode as? ProfileUiState.Mode.Loaded)?.profile ?: return
+        val usablePseudo = profile.pseudo.isNotBlank() && profile.pseudo != "?"
+        if (isOpen && profile.hasHardwareConfiguration && usablePseudo) {
+            loadConfiguration(profile.pseudo)
         }
     }
 
@@ -157,6 +202,27 @@ class ProfileViewModel @AssistedInject constructor(
                             ),
                         )
                     }
+                },
+            )
+        }
+    }
+
+    private fun loadConfiguration(pseudo: String) {
+        val session = Any()
+        configurationSession = session
+        configurationJob?.cancel()
+        _state.update { it.copy(configurationSheet = ProfileUiState.ConfigurationSheet.Loading) }
+        configurationJob = viewModelScope.launch {
+            val result = profileRepository.getUserConfiguration(pseudo)
+            currentCoroutineContext().ensureActive()
+            if (session !== configurationSession) return@launch
+            result.fold(
+                onSuccess = { lines ->
+                    _state.update { it.copy(configurationSheet = ProfileUiState.ConfigurationSheet.Loaded(lines)) }
+                },
+                onFailure = { error ->
+                    if (error is CancellationException) throw error
+                    _state.update { it.copy(configurationSheet = ProfileUiState.ConfigurationSheet.Error) }
                 },
             )
         }

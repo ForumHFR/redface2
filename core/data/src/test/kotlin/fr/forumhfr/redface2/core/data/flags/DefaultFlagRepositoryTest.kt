@@ -7,7 +7,15 @@ import fr.forumhfr.redface2.core.database.entities.FlagTopicEntity
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshDiagnostics
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagFetchTrace
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshPhase
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallOutcome
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrCallSummary
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrClientRole
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrEndpoint
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
+import fr.forumhfr.redface2.core.domain.flags.FlagRefreshCategory
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
 import fr.forumhfr.redface2.core.model.AuthState
@@ -28,18 +36,25 @@ import java.io.IOException
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -74,6 +89,226 @@ class DefaultFlagRepositoryTest {
     private val capturedParticipatedFixture: String = fixture("rest_cat23_participated.json")
 
     @Test
+    fun `fast refresh records two entries with exact page and transport counters - 984`() = runTest {
+        val diagnostics = DiagnosticsLog()
+        val apiClient = diagnosticApi()
+        val dao = stubFlagDao()
+        val repo = buildRepository(apiClient, stubForumRepository(sampleCategories),
+            flagDao = dao, diagnostics = diagnostics)
+        val result = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        assertNull(result.issue)
+        assertTrue(diagnostics.entries.value.size <= 3)
+        assertEquals(2, diagnostics.entries.value.size)
+        val summary = diagnostics.entries.value.last().message
+        listOf("outcome=success ", "categories=2", "bucketPages=2", "stickyPages=2", "calls=4",
+            "callFailures=0", "reused=4", "bucketsFailures=0", "stickiesFailures=0",
+            "fetches=1 newFetches=1 joined=0").forEach {
+            assertTrue(summary, summary.contains(it))
+        }
+        assertTrue(repo.observe(FlagType.CYAN).first() is FlagsResult.Success)
+        coVerify(exactly = 1) { dao.replaceForType(any(), FlagType.CYAN, any()) }
+    }
+
+    @Test
+    fun `failed sticky supplement publishes fresh rows and its category without freshening Room - 984`() = runTest {
+        val diagnostics = DiagnosticsLog()
+        val apiClient = diagnosticApi(failSticky = true)
+        val dao = stubFlagDao()
+        var persistedRows = emptyList<FlagTopicEntity>()
+        coEvery { dao.replaceForType("xat", FlagType.CYAN, any()) } coAnswers {
+            persistedRows = thirdArg()
+        }
+        val repo = buildRepository(apiClient, stubForumRepository(sampleCategories),
+            flagDao = dao, diagnostics = diagnostics)
+        val result = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        assertEquals(35395, result.flags.single().topicId)
+        assertEquals(listOf(FlagRefreshCategory(13, "Discussions")), result.issue?.stickyCategories)
+        assertEquals(false, result.issue?.paginationTruncated)
+        coVerify(exactly = 1) {
+            dao.replaceForType("xat", FlagType.CYAN, match { rows ->
+                rows.single().topicId == 35395 &&
+                    rows.single().fetchedAt < Instant.parse("2026-05-03T11:59:30Z")
+            })
+        }
+        coEvery { dao.getFlags("xat", FlagType.CYAN) } returns persistedRows
+        coEvery { dao.getLastFetchedAt("xat", FlagType.CYAN) } returns persistedRows.single().fetchedAt
+        val disk = requireNotNull(FlagCacheStore(dao,
+            Clock.fixed(Instant.parse("2026-05-03T12:00:00Z"), ZoneOffset.UTC),
+            UnconfinedTestDispatcher()).load(FlagType.CYAN, "xat"))
+        assertFalse("partial rows cannot delay a later disk retry", disk.isFresh)
+        assertNull("the warning is not persisted", disk.result.issue)
+        val summary = diagnostics.entries.value.last().message
+        assertTrue(summary, summary.contains("outcome=success-incomplete"))
+        assertTrue(summary, summary.contains("reasons=sticky_request"))
+        assertTrue(summary, summary.contains("stickiesFailures=1"))
+        assertTrue(summary, summary.contains("callFailures=1"))
+        assertTrue(summary, summary.contains("calls=4"))
+        assertTrue(repo.observe(FlagType.CYAN).first() is FlagsResult.Success)
+    }
+
+    @Test
+    fun `folded bucket failure is returned and diagnosed as failure - 984`() = runTest {
+        val diagnostics = DiagnosticsLog()
+        val (apiClient, forumRepository) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
+        }
+        coEvery {
+            apiClient.getCategoryFlagTopics(cat = 23, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        } throws IOException("Cookie=SecretCookie hash_check=SecretHash")
+        val repo = buildRepository(apiClient, forumRepository, diagnostics = diagnostics)
+        assertTrue(repo.refresh(FlagType.CYAN) is FlagsResult.Failure)
+        val summary = diagnostics.entries.value.last().message
+        assertTrue(summary, summary.contains("outcome=failure exception=IOException"))
+        assertTrue(summary, summary.contains("bucketsFailures=1"))
+        assertTrue(summary, !summary.contains("SecretCookie"))
+    }
+
+    @Test
+    fun `stale disk refresh publishes an incomplete success after the old rows - 984`() = runTest {
+        val dao = stubFlagDao()
+        val stale = Instant.parse("2026-05-03T11:00:00Z")
+        coEvery { dao.getFlags("xat", FlagType.CYAN) } returns listOf(
+            flagEntity(FlagType.CYAN, 999, "Old row", stale),
+        )
+        coEvery { dao.getLastFetchedAt("xat", FlagType.CYAN) } returns stale
+        val repo = buildRepository(diagnosticApi(failSticky = true), stubForumRepository(sampleCategories),
+            flagDao = dao)
+        repo.observe(FlagType.CYAN).test {
+            assertEquals(999, (awaitItem() as FlagsResult.Success).flags.single().topicId)
+            val fresh = awaitItem() as FlagsResult.Success
+            assertEquals(35395, fresh.flags.single().topicId)
+            assertEquals(listOf(FlagRefreshCategory(13, "Discussions")), fresh.issue?.stickyCategories)
+            cancelAndIgnoreRemainingEvents()
+        }
+        coVerify(exactly = 1) { dao.replaceForType("xat", FlagType.CYAN, any()) }
+    }
+
+    @Test
+    fun `partial refresh replaces old rows rather than retaining the failed category - 984`() = runTest {
+        val (api, forum) = wireDeps {
+            stubFlagsCall(13, HfrRestFlagBucket.FAVORITES, EMPTY_PAGE)
+            stubFlagsCall(23, HfrRestFlagBucket.FAVORITES, capturedParticipatedFixture)
+        }
+        coEvery {
+            api.getTopicList(13, null, 1, any(), true)
+        } returns fixture("rest_cat13_topics_last_sticky_favorite.json")
+        val dao = stubFlagDao()
+        val repo = buildRepository(api, forum, flagDao = dao)
+        val complete = repo.refresh(FlagType.FAVORITE) as FlagsResult.Success
+        assertNull(complete.issue)
+        assertEquals(setOf(100_217, 35395), complete.flags.map { it.topicId }.toSet())
+        coEvery { api.getTopicList(13, null, 1, any(), true) } throws IOException("sticky unavailable")
+        coEvery {
+            api.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.FAVORITES,
+                page = any(), resultsPerPage = any(), useAuth = true,
+            )
+        } returns capturedParticipatedFixture.replace("35395", "35396")
+
+        val partial = repo.refresh(FlagType.FAVORITE) as FlagsResult.Success
+        assertEquals(35396, partial.flags.single().topicId)
+        assertEquals(listOf(FlagRefreshCategory(13, "Discussions")), partial.issue?.stickyCategories)
+        assertEquals(partial, repo.observe(FlagType.FAVORITE).first())
+        coVerify(exactly = 1) {
+            dao.replaceForType("xat", FlagType.FAVORITE, match { it.singleOrNull()?.topicId == 35396 })
+        }
+        coVerify(exactly = 2) { dao.replaceForType("xat", FlagType.FAVORITE, any()) }
+    }
+
+    @Test
+    fun `sticky decode failure carries its category without failing the fresh bucket - 984`() = runTest {
+        val api = diagnosticApi()
+        coEvery { api.getTopicList(13, null, 1, any(), true) } returns "invalid JSON"
+        val diagnostics = DiagnosticsLog()
+        val repo = buildRepository(api, stubForumRepository(sampleCategories), diagnostics = diagnostics)
+        val result = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        assertEquals(35395, result.flags.single().topicId)
+        assertEquals(listOf(FlagRefreshCategory(13, "Discussions")), result.issue?.stickyCategories)
+        val summary = diagnostics.entries.value.last().message
+        assertTrue(summary, summary.contains("outcome=success-incomplete"))
+        assertTrue(summary, summary.contains("reasons=sticky_decode"))
+        assertTrue(summary, summary.contains("stickiesFailures=1"))
+    }
+
+    @Test
+    fun `a favorite mutation preserves the partial snapshot issue and stale freshness - 984`() = runTest {
+        val api = diagnosticApi(failSticky = true)
+        val dao = stubFlagDao()
+        val hfr = mockk<HfrClient>()
+        coEvery { hfr.addFlag(any()) } returns ADD_SUCCESS_HTML
+        val repo = buildRepository(api, stubForumRepository(sampleCategories), flagDao = dao, hfrClient = hfr)
+        val partial = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        assertTrue(repo.addFlag(sampleFlagAddContext()).isSuccess)
+        val updated = repo.observe(FlagType.CYAN).first() as FlagsResult.Success
+        assertTrue(updated.flags.single().isFavorite)
+        assertTrue("a mutation reuses the warning identity", updated.issue === partial.issue)
+        coVerify(exactly = 2) {
+            dao.replaceForType("xat", FlagType.CYAN, match { rows ->
+                rows.single().fetchedAt < Instant.parse("2026-05-03T11:59:30Z")
+            })
+        }
+    }
+
+    @Test
+    fun `page cap publishes a partial list with a pagination issue - 984`() = runTest {
+        val api = diagnosticApi()
+        val page = capturedParticipatedFixture.replace("\"results_count\": 1", "\"results_count\": 101")
+        coEvery {
+            api.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true,
+            )
+        } returns page
+        val diagnostics = DiagnosticsLog()
+        val dao = stubFlagDao()
+        val repo = buildRepository(api, stubForumRepository(sampleCategories),
+            flagDao = dao, diagnostics = diagnostics)
+        val result = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        assertEquals(100, result.flags.size)
+        assertEquals(true, result.issue?.paginationTruncated)
+        assertEquals(emptyList<FlagRefreshCategory>(), result.issue?.stickyCategories)
+        assertTrue(diagnostics.entries.value.last().message.contains("reasons=page_cap"))
+        coVerify(exactly = 100) {
+            api.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true,
+            )
+        }
+        coVerify(exactly = 0) {
+            api.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = 101, resultsPerPage = any(), useAuth = true,
+            )
+        }
+        coVerify(exactly = 1) { dao.replaceForType("xat", FlagType.CYAN, any()) }
+    }
+
+    @Test
+    fun `an early empty page only diagnoses a divergent count without a UI warning - 984`() = runTest {
+        val api = diagnosticApi()
+        coEvery {
+            api.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true,
+            )
+        } returns EMPTY_PAGE.replace("\"results_count\": 0", "\"results_count\": 2")
+        val diagnostics = DiagnosticsLog()
+        val repo = buildRepository(api, stubForumRepository(sampleCategories), diagnostics = diagnostics)
+        val result = repo.refresh(FlagType.CYAN) as FlagsResult.Success
+        assertTrue(result.flags.isEmpty())
+        assertNull(result.issue)
+        assertTrue(diagnostics.entries.value.last().message.contains("reasons=empty_bucket_page"))
+        coVerify(exactly = 1) {
+            api.getCategoryFlagTopics(
+                cat = 23, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = 1, resultsPerPage = any(), useAuth = true,
+            )
+        }
+    }
+
+    @Test
     fun `observe emits Loading then Success on a happy fetch`() = runTest {
         val (apiClient, forumRepository) = wireDeps {
             stubFlagsCall(13, HfrRestFlagBucket.PARTICIPATED, EMPTY_PAGE)
@@ -103,10 +338,9 @@ class DefaultFlagRepositoryTest {
     }
 
     @Test
-    fun `observe and refresh fired together share a single REST fan-out - 501`() = runTest {
-        // #501 (Codex review) — observe()'s initial fetch and a concurrent refresh() for the SAME tab
-        // must collapse into ONE per-category fan-out, not two. The gate keeps the first fetch in
-        // flight while the second caller arrives, so a missing in-flight dedup would call cat 23 twice.
+    fun `concurrent explicit refreshes share a fetch in the same generation - 984`() = runTest {
+        val diagnostics = DiagnosticsLog()
+        // A second pull may join an active pull, but never an initial observation's old generation.
         val gate = CompletableDeferred<Unit>()
         val apiClient = mockk<HfrApiClient>()
         coEvery {
@@ -130,18 +364,25 @@ class DefaultFlagRepositoryTest {
             gate.await()
             capturedParticipatedFixture
         }
-        val repo = buildRepository(apiClient, stubForumRepository(sampleCategories))
+        coEvery {
+            apiClient.getTopicList(cat = any(), subcat = null, page = 1, resultsPerPage = any(), useAuth = true)
+        } returns EMPTY_PAGE
+        val dao = stubFlagDao()
+        val repo = buildRepository(apiClient, stubForumRepository(sampleCategories),
+            flagDao = dao, diagnostics = diagnostics)
 
-        // Sequence the two callers so they genuinely overlap: observe() first reaches the gated fetch
-        // (registering the in-flight Deferred), THEN refresh() runs and must find + await that same
-        // Deferred rather than starting a second fan-out. Only then release the gate.
-        val observeJob = launch { repo.observe(FlagType.CYAN).first { it is FlagsResult.Success } }
+        val firstRefresh = launch { repo.refresh(FlagType.CYAN) }
         runCurrent()
         val refreshJob = launch { repo.refresh(FlagType.CYAN) }
         runCurrent()
         gate.complete(Unit)
-        observeJob.join()
+        firstRefresh.join()
         refreshJob.join()
+        val joined = diagnostics.entries.value.single { it.message.contains("joined=1") }.message
+        assertTrue(joined, joined.contains("fetches=1 newFetches=0 joined=1"))
+        assertTrue(joined, joined.contains("fetchRefreshIds=[1]"))
+        assertTrue(joined, joined.contains("bucketPages=2"))
+        assertTrue(joined, joined.contains("stickyGenerationRefused=0"))
 
         // A single fan-out: the gated category was hit exactly once despite the two concurrent callers.
         coVerify(exactly = 1) {
@@ -152,6 +393,324 @@ class DefaultFlagRepositoryTest {
                 resultsPerPage = any(),
                 useAuth = true,
             )
+        }
+        coVerify(exactly = 1) { dao.replaceForType("xat", FlagType.CYAN, any()) }
+        coVerify(exactly = 2) {
+            apiClient.getTopicList(cat = any(), subcat = null, page = 1, resultsPerPage = any(), useAuth = true)
+        }
+    }
+
+    @Test
+    fun `pull cancels obsolete buckets and publishes only the new generation - 984`() = runTest {
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val replacementRelease = CompletableDeferred<Unit>()
+        val cancelled = CompletableDeferred<Unit>()
+        val sequence = AtomicLong()
+        val oldCategories = mutableSetOf<Int>()
+        var cancelledCalls = 0
+        var calls = 0
+        val api = mockk<HfrApiClient>()
+        coEvery {
+            api.getCategoryFlagTopics(cat = any(), bucket = HfrRestFlagBucket.FAVORITES,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        } coAnswers {
+            val cat = firstArg<Int>()
+            calls++
+            if (oldCategories.add(cat)) {
+                val id = sequence.incrementAndGet()
+                if (oldCategories.size == sampleCategories.size) entered.complete(Unit)
+                try {
+                    release.await()
+                } catch (cancellation: CancellationException) {
+                    recordDiagnosticCall(id, cat, sticky = false, failed = false, cancelled = true)
+                    if (++cancelledCalls == sampleCategories.size) cancelled.complete(Unit)
+                    throw cancellation
+                }
+            } else {
+                replacementRelease.await()
+            }
+            recordDiagnosticCall(sequence.incrementAndGet(), cat, sticky = false, failed = false)
+            EMPTY_PAGE
+        }
+        coEvery {
+            api.getTopicList(cat = any(), subcat = null, page = 1, resultsPerPage = any(), useAuth = true)
+        } coAnswers {
+            val cat = firstArg<Int>()
+            recordDiagnosticCall(sequence.incrementAndGet(), cat, sticky = true, failed = false)
+            if (cat == 13) fixture("rest_cat13_topics_last_sticky_favorite.json") else EMPTY_PAGE
+        }
+        val dao = stubFlagDao()
+        val diagnostics = DiagnosticsLog()
+        val repo = buildRepository(api, stubForumRepository(sampleCategories),
+            flagDao = dao, diagnostics = diagnostics)
+
+        repo.observe(FlagType.FAVORITE).test {
+            try {
+                assertEquals(FlagsResult.Loading, awaitItem())
+                entered.await()
+                val pull = launch { repo.refresh(FlagType.FAVORITE) }
+                runCurrent()
+                cancelled.await()
+                assertTrue("the obsolete request must be cancelled before its barrier is released",
+                    !release.isCompleted)
+                assertEquals(FlagsResult.Loading, awaitItem())
+                replacementRelease.complete(Unit)
+                runCurrent()
+                // Before releasing the old fetch, the pull must finish with the new sweep's sticky.
+                assertTrue("pull must not await the old generation", pull.isCompleted)
+                assertEquals(100_217, (awaitItem() as FlagsResult.Success).flags.single().topicId)
+                release.complete(Unit)
+                runCurrent()
+                // The initial observer may reuse the current success; every late success must be current.
+                assertEquals(100_217, (awaitItem() as FlagsResult.Success).flags.single().topicId)
+                expectNoEvents()
+                cancelAndIgnoreRemainingEvents()
+            } finally {
+                release.complete(Unit)
+                replacementRelease.complete(Unit)
+            }
+        }
+        assertEquals(4, calls)
+        assertEquals(2, cancelledCalls)
+        coVerify(exactly = 2) {
+            api.getTopicList(cat = any(), subcat = null, page = 1, resultsPerPage = any(), useAuth = true)
+        }
+        coVerify(exactly = 1) { dao.replaceForType("xat", FlagType.FAVORITE, any()) }
+        coVerify(exactly = 1) {
+            dao.replaceForType("xat", FlagType.FAVORITE, match { it.single().topicId == 100_217 })
+        }
+        val refreshEntries = diagnostics.entries.value.filter { it.tag == FlagRefreshDiagnostics.TAG }
+        val pullRefresh = refreshEntries.single {
+            it.message.contains("trigger=pull ")
+        }.message.substringBefore(' ')
+        val pullSummary = refreshEntries.single {
+            it.message.startsWith("$pullRefresh ") && it.message.contains("outcome=")
+        }.message
+        // beginRefresh cancels the old fetch before the pull joins the current generation.
+        // Either the observer's retry or the pull can create that same replacement first.
+        // Only its creator/joiner counters vary; cancellation and publication stay exact above.
+        assertTrue(pullSummary, pullSummary.contains("outcome=success exception=-"))
+        assertTrue(pullSummary, pullSummary.contains("fetches=1 "))
+        assertTrue(pullSummary, pullSummary.contains("newFetches=1 joined=0") ||
+            pullSummary.contains("newFetches=0 joined=1"))
+        assertTrue(pullSummary, pullSummary.contains("pendingFetches=0"))
+        assertTrue(pullSummary, pullSummary.contains("stickyGenerationRefused=0"))
+        val initialSummary = refreshEntries.single {
+            it.message.startsWith("refresh=1 ") && it.message.contains("outcome=")
+        }.message
+        assertTrue(initialSummary, initialSummary.contains("outcome=success exception=-"))
+        assertTrue(initialSummary, initialSummary.contains("fetches=2 "))
+        assertTrue(initialSummary, initialSummary.contains("pendingFetches=0"))
+        assertTrue(initialSummary, initialSummary.contains("callFailures=2"))
+        assertTrue("cancelled transport must remain visible despite the successful replacement",
+            diagnostics.entries.value.any { it.tag == "HfrCall" && it.message.contains("outcome=cancelled") })
+    }
+
+    @Test
+    fun `pull cancels an obsolete sticky sweep and publishes the new one - 984`() = runTest {
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val replacementRelease = CompletableDeferred<Unit>()
+        val cancelled = CompletableDeferred<Unit>()
+        var stickyCalls = 0
+        val api = mockk<HfrApiClient>()
+        coEvery {
+            api.getCategoryFlagTopics(cat = 13, bucket = any(), page = any(),
+                resultsPerPage = any(), useAuth = true)
+        } returns EMPTY_PAGE
+        coEvery {
+            api.getTopicList(cat = 13, subcat = null, page = 1, resultsPerPage = any(), useAuth = true)
+        } coAnswers {
+            if (++stickyCalls == 1) {
+                entered.complete(Unit)
+                try {
+                    release.await()
+                } catch (cancellation: CancellationException) {
+                    cancelled.complete(Unit)
+                    throw cancellation
+                }
+            } else {
+                replacementRelease.await()
+            }
+            fixture("rest_cat13_topics_last_sticky_favorite.json")
+        }
+        val dao = stubFlagDao()
+        val repo = buildRepository(api, stubForumRepository(sampleCategories.take(1)), flagDao = dao)
+
+        repo.observe(FlagType.FAVORITE).test {
+            try {
+                assertEquals(FlagsResult.Loading, awaitItem())
+                entered.await()
+                val pull = launch { repo.refresh(FlagType.FAVORITE) }
+                runCurrent()
+                cancelled.await()
+                assertEquals(FlagsResult.Loading, awaitItem())
+                replacementRelease.complete(Unit)
+                pull.join()
+                repeat(2) {
+                    assertEquals(100_217, (awaitItem() as FlagsResult.Success).flags.single().topicId)
+                }
+                expectNoEvents()
+                assertEquals(2, stickyCalls)
+                coVerify(exactly = 1) { dao.replaceForType("xat", FlagType.FAVORITE, any()) }
+                cancelAndIgnoreRemainingEvents()
+            } finally {
+                release.complete(Unit)
+                replacementRelease.complete(Unit)
+            }
+        }
+    }
+
+    @Test
+    fun `cancelling one pull keeps the shared generation alive for the other callers - 984`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        var calls = 0
+        val api = mockk<HfrApiClient>()
+        coEvery {
+            api.getCategoryFlagTopics(cat = 13, bucket = HfrRestFlagBucket.FAVORITES,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        } coAnswers {
+            calls++
+            gate.await()
+            EMPTY_PAGE
+        }
+        coEvery {
+            api.getTopicList(cat = 13, subcat = null, page = 1, resultsPerPage = any(), useAuth = true)
+        } returns fixture("rest_cat13_topics_last_sticky_favorite.json")
+        val dao = stubFlagDao()
+        val repo = buildRepository(api, stubForumRepository(sampleCategories.take(1)), flagDao = dao)
+        val first = launch { repo.refresh(FlagType.FAVORITE) }
+        runCurrent()
+        val second = launch { repo.refresh(FlagType.FAVORITE) }
+        runCurrent()
+        first.cancel()
+        first.join()
+        // A third caller must reuse the barrier still owned by the second caller.
+        val third = launch { repo.refresh(FlagType.FAVORITE) }
+        runCurrent()
+        gate.complete(Unit)
+        second.join()
+        third.join()
+        assertEquals(1, calls)
+        val result = repo.observe(FlagType.FAVORITE).first() as FlagsResult.Success
+        assertEquals(100_217, result.flags.single().topicId)
+        coVerify(exactly = 1) { dao.replaceForType("xat", FlagType.FAVORITE, any()) }
+    }
+
+    @Test
+    fun `cancelling the last pull cancels its unconsumed bucket fetch - 984`() = runTest {
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val cancelled = CompletableDeferred<Unit>()
+        val api = mockk<HfrApiClient>()
+        coEvery {
+            api.getCategoryFlagTopics(cat = 13, bucket = any(), page = any(),
+                resultsPerPage = any(), useAuth = true)
+        } coAnswers {
+            entered.complete(Unit)
+            try {
+                release.await()
+                EMPTY_PAGE
+            } catch (cancellation: CancellationException) {
+                cancelled.complete(Unit)
+                throw cancellation
+            }
+        }
+        val dao = stubFlagDao()
+        val diagnostics = DiagnosticsLog()
+        val repo = buildRepository(api, stubForumRepository(sampleCategories.take(1)),
+            flagDao = dao, diagnostics = diagnostics)
+        val pull = launch { repo.refresh(FlagType.CYAN) }
+        try {
+            entered.await()
+            pull.cancel(CancellationException("last pull closed"))
+            pull.join()
+            cancelled.await()
+            coVerify(exactly = 0) { dao.replaceForType(any(), any(), any()) }
+            coVerify(exactly = 0) {
+                api.getTopicList(cat = any(), subcat = any(), page = any(),
+                    resultsPerPage = any(), useAuth = any())
+            }
+            val summary = diagnostics.entries.value.last().message
+            assertTrue(summary, summary.contains("outcome=failure exception=CancellationException"))
+        } finally {
+            release.complete(Unit)
+            pull.cancel()
+        }
+    }
+
+    @Test
+    fun `bucket cancellation propagates with its diagnostic exception and no cache write - 984`() = runTest {
+        val cancellation = CancellationException("cancel bucket")
+        val api = mockk<HfrApiClient>()
+        coEvery {
+            api.getCategoryFlagTopics(cat = 13, bucket = any(), page = any(),
+                resultsPerPage = any(), useAuth = true)
+        } throws cancellation
+        val dao = stubFlagDao()
+        val diagnostics = DiagnosticsLog()
+        val repo = buildRepository(api, stubForumRepository(sampleCategories.take(1)),
+            flagDao = dao, diagnostics = diagnostics)
+
+        val error = runCatching { repo.refresh(FlagType.CYAN) }.exceptionOrNull()
+        assertCancellation(cancellation, error)
+        coVerify(exactly = 0) { dao.replaceForType(any(), any(), any()) }
+        val summary = diagnostics.entries.value.last().message
+        assertTrue(summary, summary.contains("outcome=failure exception=CancellationException"))
+    }
+
+    @Test
+    fun `sticky REST cancellation propagates for the active session without a cache write - 984`() = runTest {
+        val cancellation = CancellationException("cancel sticky")
+        val api = mockk<HfrApiClient>()
+        coEvery {
+            api.getCategoryFlagTopics(cat = 13, bucket = any(), page = any(),
+                resultsPerPage = any(), useAuth = true)
+        } returns EMPTY_PAGE
+        coEvery {
+            api.getTopicList(cat = 13, subcat = null, page = 1, resultsPerPage = any(), useAuth = true)
+        } throws cancellation
+        val dao = stubFlagDao()
+        val repo = buildRepository(api, stubForumRepository(sampleCategories.take(1)), flagDao = dao)
+        assertCancellation(cancellation, runCatching { repo.refresh(FlagType.CYAN) }.exceptionOrNull())
+        coVerify(exactly = 0) { dao.replaceForType(any(), any(), any()) }
+    }
+
+    @Test
+    fun `Room cancellation propagates instead of publishing a successful refresh - 984`() = runTest {
+        val cancellation = CancellationException("cancel Room")
+        val dao = stubFlagDao()
+        coEvery { dao.replaceForType(any(), any(), any()) } throws cancellation
+        val repo = buildRepository(diagnosticApi(), stubForumRepository(sampleCategories), flagDao = dao)
+        assertCancellation(cancellation, runCatching { repo.refresh(FlagType.CYAN) }.exceptionOrNull())
+    }
+
+    @Test
+    fun `Super refresh order keeps each bucket and re-probes each sweep - 984`() = runTest {
+        val buckets = mutableListOf<HfrRestFlagBucket>()
+        val api = mockk<HfrApiClient>()
+        coEvery {
+            api.getCategoryFlagTopics(cat = 13, bucket = any(), page = any(),
+                resultsPerPage = any(), useAuth = true)
+        } coAnswers {
+            buckets += secondArg<HfrRestFlagBucket>()
+            EMPTY_PAGE
+        }
+        coEvery {
+            api.getTopicList(cat = 13, subcat = null, page = 1, resultsPerPage = any(), useAuth = true)
+        } returns fixture("rest_cat13_topics_last_sticky_favorite.json")
+        val dao = stubFlagDao()
+        val repo = buildRepository(api, stubForumRepository(sampleCategories.take(1)), flagDao = dao)
+        listOf(FlagType.CYAN, FlagType.RED, FlagType.FAVORITE).forEach { repo.refresh(it) }
+        assertEquals(listOf(HfrRestFlagBucket.PARTICIPATED, HfrRestFlagBucket.READ,
+            HfrRestFlagBucket.FAVORITES), buckets)
+        coVerify(exactly = 3) {
+            api.getTopicList(cat = 13, subcat = null, page = 1, resultsPerPage = any(), useAuth = true)
+        }
+        FlagType.entries.forEach { type ->
+            assertTrue(repo.observe(type).first() is FlagsResult.Success)
+            coVerify(exactly = 1) { dao.replaceForType("xat", type, any()) }
         }
     }
 
@@ -198,6 +757,54 @@ class DefaultFlagRepositoryTest {
             assertTrue(awaitItem() is FlagsResult.Success)
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `account switch cancels the previous owner and only the new account is cached - 984`() = runTest {
+        val authState = MutableStateFlow<AuthState>(AuthState.Authenticated("XaT"))
+        val auth = mockk<AuthRepository>()
+        every { auth.observeAuthState() } returns authState
+        val entered = CompletableDeferred<Unit>()
+        val released = CompletableDeferred<Unit>()
+        val cancelled = CompletableDeferred<Unit>()
+        var calls = 0
+        val api = mockk<HfrApiClient>()
+        coEvery {
+            api.getCategoryFlagTopics(cat = 23, bucket = any(), page = any(),
+                resultsPerPage = any(), useAuth = true)
+        } coAnswers {
+            if (++calls == 1) {
+                entered.complete(Unit)
+                try {
+                    released.await()
+                } catch (cancellation: CancellationException) {
+                    cancelled.complete(Unit)
+                    throw cancellation
+                }
+                capturedParticipatedFixture
+            } else {
+                EMPTY_PAGE
+            }
+        }
+        coEvery {
+            api.getTopicList(cat = 23, subcat = null, page = 1, resultsPerPage = any(), useAuth = true)
+        } returns EMPTY_PAGE
+        val dao = stubFlagDao()
+        val repo = buildRepository(api, stubForumRepository(sampleCategories.takeLast(1)),
+            authRepository = auth, flagDao = dao)
+        val previous = async {
+            runCatching { repo.observe(FlagType.CYAN).first { it is FlagsResult.Success } }
+        }
+        entered.await()
+        authState.value = AuthState.Authenticated("SecondUser")
+        repo.clearSessionCache()
+        cancelled.await()
+        repo.refresh(FlagType.CYAN)
+        assertTrue(previous.await().exceptionOrNull() is CancellationException)
+        assertTrue((repo.observe(FlagType.CYAN).first() as FlagsResult.Success).flags.isEmpty())
+        assertEquals(2, calls)
+        coVerify(exactly = 0) { dao.replaceForType("xat", any(), any()) }
+        coVerify(exactly = 1) { dao.replaceForType("seconduser", FlagType.CYAN, any()) }
     }
 
     @Test
@@ -445,11 +1052,8 @@ class DefaultFlagRepositoryTest {
 
     @Test
     fun `an old in-flight fetch never joins the sweep of a newer explicit refresh - 862`() = runTest {
-        // #862 gate Sol r4 counter-case — an observe-triggered fetch is held BEFORE any sweep
-        // exists ; an explicit refresh arrives. refresh() is a strict generation barrier
-        // (unconditional bump) : the old fetch, resuming after the pull, must degrade to a
-        // bucket-only result instead of sharing the pull's fresh sweep (old bucket rows + new
-        // supplement must never mix).
+        // #984 strengthens #862: discard the old snapshot and retry the entire CYAN fetch
+        // under the current generation. Never mix its old bucket with the pull's sweep.
         val catalogue = listOf(
             Category(id = 13, name = "Discussions", forceSubcat = true, subcategoryCount = 15),
         )
@@ -473,7 +1077,8 @@ class DefaultFlagRepositoryTest {
         coEvery {
             apiClient.getTopicList(cat = 13, subcat = null, page = any(), resultsPerPage = any(), useAuth = true)
         } returns fixture("rest_cat13_topics_last_sticky_favorite.json")
-        val repo = buildRepository(apiClient, stubForumRepository(catalogue))
+        val dao = stubFlagDao()
+        val repo = buildRepository(apiClient, stubForumRepository(catalogue), flagDao = dao)
 
         // 1. CYAN starts under generation 0, held in its bucket call — no sweep exists yet.
         var cyanResult: FlagsResult? = null
@@ -483,7 +1088,7 @@ class DefaultFlagRepositoryTest {
         runCurrent()
         // 2. Explicit refresh : new generation, creates THE only sweep of this test.
         repo.refresh(FlagType.FAVORITE)
-        // 3. CYAN resumes with its captured generation → refused, bucket-only.
+        // 3. CYAN resumes: the old result is rejected; a new bucket may share the current sweep.
         cyanGate.complete(Unit)
         cyanJob.join()
 
@@ -495,13 +1100,17 @@ class DefaultFlagRepositoryTest {
         coVerify(exactly = 1) {
             apiClient.getTopicList(cat = 13, subcat = null, page = any(), resultsPerPage = any(), useAuth = true)
         }
+        coVerify(exactly = 2) {
+            apiClient.getCategoryFlagTopics(cat = 13, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        }
+        coVerify(exactly = 1) { dao.replaceForType("xat", FlagType.CYAN, any()) }
     }
 
     @Test
     fun `a fetch that started under an older burst never joins a newer sweep - 862`() = runTest {
-        // #862 gate Sol r3 — generations never mix : a fetch that captured burst N degrades to an
-        // empty supplement once a refresh opened burst N+1, instead of publishing « old bucket
-        // rows + new supplement ».
+        // #984: even when the previous sweep exists, the old result cannot be committed.
+        // Only a complete retry under N+1 may share N+1's supplement.
         val catalogue = listOf(
             Category(id = 13, name = "Discussions", forceSubcat = true, subcategoryCount = 15),
         )
@@ -525,7 +1134,8 @@ class DefaultFlagRepositoryTest {
         coEvery {
             apiClient.getTopicList(cat = 13, subcat = null, page = any(), resultsPerPage = any(), useAuth = true)
         } returns fixture("rest_cat13_topics_last_sticky_favorite.json")
-        val repo = buildRepository(apiClient, stubForumRepository(catalogue))
+        val dao = stubFlagDao()
+        val repo = buildRepository(apiClient, stubForumRepository(catalogue), flagDao = dao)
 
         // 1. FAVORITE completes → burst 0's sweep exists.
         repo.observe(FlagType.FAVORITE).test {
@@ -541,7 +1151,7 @@ class DefaultFlagRepositoryTest {
         runCurrent()
         // 3. An explicit refresh opens burst 1 (burst 0's sweep exists → bump) and completes.
         repo.refresh(FlagType.FAVORITE)
-        // 4. CYAN resumes : its captured burst 0 is stale → refused, bucket-only result.
+        // 4. CYAN resumes: burst 0 is refused; a new bucket fetch runs under burst 1.
         cyanGate.complete(Unit)
         cyanJob.join()
 
@@ -550,10 +1160,15 @@ class DefaultFlagRepositoryTest {
             "the stale-burst CYAN fetch must not pick the newer sweep's sticky",
             cyanFlags.none { it.topicId == 100_217 },
         )
-        // Two sweeps ran (burst 0 by the first FAVORITE, burst 1 by the refresh) ; CYAN created none.
+        // Two sweeps ran; the retried CYAN fetch shares burst 1's sweep.
         coVerify(exactly = 2) {
             apiClient.getTopicList(cat = 13, subcat = null, page = any(), resultsPerPage = any(), useAuth = true)
         }
+        coVerify(exactly = 2) {
+            apiClient.getCategoryFlagTopics(cat = 13, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        }
+        coVerify(exactly = 1) { dao.replaceForType("xat", FlagType.CYAN, any()) }
     }
 
     @Test
@@ -612,6 +1227,9 @@ class DefaultFlagRepositoryTest {
         coEvery {
             apiClient.getTopicList(cat = 32, subcat = null, page = any(), resultsPerPage = any(), useAuth = true)
         } throws RuntimeException("topics/last boom")
+        coEvery {
+            apiClient.getTopicList(cat = 23, subcat = null, page = any(), resultsPerPage = any(), useAuth = true)
+        } returns EMPTY_PAGE
         val repo = buildRepository(apiClient, stubForumRepository(catalogue))
 
         repo.observe(FlagType.CYAN).test {
@@ -621,6 +1239,9 @@ class DefaultFlagRepositoryTest {
                 "the bucket flag from cat 23 survives the supplement failure",
                 success.flags.any { it.cat == 23 },
             )
+            // #984 option (b): keep the best-effort list, but stop treating the missing cat as silent.
+            assertEquals(listOf(FlagRefreshCategory(32, "Intelligence Artificielle")),
+                success.issue?.stickyCategories)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -860,7 +1481,7 @@ class DefaultFlagRepositoryTest {
                     "title": "old in cat 13",
                     "links": {
                       "category": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/"},
-                      "posts": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/topics/100/posts/?page=1&results_per_page=40", "count": 1}
+                      "posts": {"href": "$CATEGORIES_URL/13/topics/100/posts/?page=1&results_per_page=40", "count": 1}
                     },
                     "is_read": false,
                     "flag_owntopic": 1,
@@ -871,7 +1492,7 @@ class DefaultFlagRepositoryTest {
                     "title": "newest in cat 13",
                     "links": {
                       "category": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/"},
-                      "posts": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/topics/200/posts/?page=1&results_per_page=40", "count": 1}
+                      "posts": {"href": "$CATEGORIES_URL/13/topics/200/posts/?page=1&results_per_page=40", "count": 1}
                     },
                     "is_read": false,
                     "flag_owntopic": 1,
@@ -893,7 +1514,7 @@ class DefaultFlagRepositoryTest {
                     "title": "middle in cat 23",
                     "links": {
                       "category": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/"},
-                      "posts": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/23/topics/300/posts/?page=1&results_per_page=40", "count": 1}
+                      "posts": {"href": "$CATEGORIES_URL/23/topics/300/posts/?page=1&results_per_page=40", "count": 1}
                     },
                     "is_read": false,
                     "flag_owntopic": 1,
@@ -939,7 +1560,7 @@ class DefaultFlagRepositoryTest {
                     "title": "Topic A — partial page",
                     "links": {
                       "category": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/"},
-                      "posts": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/topics/300/posts/?page=1&results_per_page=40", "count": 1}
+                      "posts": {"href": "$CATEGORIES_URL/13/topics/300/posts/?page=1&results_per_page=40", "count": 1}
                     },
                     "is_read": false,
                     "flag_owntopic": 1
@@ -960,7 +1581,7 @@ class DefaultFlagRepositoryTest {
                     "title": "Topic B — second page",
                     "links": {
                       "category": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/"},
-                      "posts": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/topics/400/posts/?page=1&results_per_page=40", "count": 1}
+                      "posts": {"href": "$CATEGORIES_URL/13/topics/400/posts/?page=1&results_per_page=40", "count": 1}
                     },
                     "is_read": false,
                     "flag_owntopic": 1
@@ -1024,7 +1645,7 @@ class DefaultFlagRepositoryTest {
                     "title": "Topic A",
                     "links": {
                       "category": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/"},
-                      "posts": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/topics/100/posts/?page=1&results_per_page=40", "count": 1}
+                      "posts": {"href": "$CATEGORIES_URL/13/topics/100/posts/?page=1&results_per_page=40", "count": 1}
                     },
                     "is_read": false,
                     "flag_owntopic": 1
@@ -1045,7 +1666,7 @@ class DefaultFlagRepositoryTest {
                     "title": "Topic B",
                     "links": {
                       "category": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/"},
-                      "posts": {"href": "https://forum.hardware.fr/api/forums/hardwarefr/categories/13/topics/200/posts/?page=2&results_per_page=40", "count": 50}
+                      "posts": {"href": "$CATEGORIES_URL/13/topics/200/posts/?page=2&results_per_page=40", "count": 50}
                     },
                     "is_read": false,
                     "flag_owntopic": 1
@@ -1448,6 +2069,7 @@ class DefaultFlagRepositoryTest {
 
     @Test
     fun `addFlag prevents an older favorite fetch from restoring or exposing stale data - 986`() = runTest {
+        val diagnostics = DiagnosticsLog()
         val gate = CompletableDeferred<Unit>()
         var favoriteCalls = 0
         val apiClient = mockk<HfrApiClient>()
@@ -1480,6 +2102,7 @@ class DefaultFlagRepositoryTest {
             ),
             flagDao = flagDao,
             hfrClient = hfrClient,
+            diagnostics = diagnostics,
         )
 
         var observed: FlagsResult.Success? = null
@@ -1488,11 +2111,24 @@ class DefaultFlagRepositoryTest {
         }
         runCurrent()
         assertTrue(repo.addFlag(sampleFlagAddContext()).isSuccess)
+        // The active observer makes addFlag launch its detached replacement before the old
+        // request resumes. That fetch is new globally, but reused by the initial refresh.
+        assertEquals("addFlag must start the replacement before releasing the old fetch", 2, favoriteCalls)
         gate.complete(Unit)
         observeJob.join()
 
         assertEquals(listOf(35395), observed?.flags?.map { it.topicId })
         assertEquals("the invalidated generation must run a second REST fetch", 2, favoriteCalls)
+        val refreshEntries = diagnostics.entries.value.filter { it.tag == FlagRefreshDiagnostics.TAG }
+        // Identity 2 belongs to the detached fetch, not to a second refresh lifecycle.
+        assertEquals(2, refreshEntries.size)
+        assertTrue(refreshEntries.first().message.startsWith("refresh=1 trigger=initial-observe "))
+        val summary = refreshEntries.single { it.message.contains("outcome=") }.message
+        assertTrue(summary, summary.startsWith("refresh=1 "))
+        assertTrue(summary, summary.contains("outcome=success "))
+        assertTrue(summary, summary.contains("fetches=2 newFetches=1 joined=1"))
+        assertTrue(summary, summary.contains("fetchRefreshIds=[1, 2]"))
+        assertTrue(summary, !summary.contains("cache_generation"))
         coVerify(exactly = 1) {
             flagDao.replaceForType(
                 userId = "xat",
@@ -1783,6 +2419,184 @@ class DefaultFlagRepositoryTest {
     }
 
     @Test
+    fun `removeFlag fences a captured refresh out of Room memory and emissions - 984`() = runTest {
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        var calls = 0
+        var deleted = false
+        var roomRows = emptyList<FlagTopicEntity>()
+        val writesAfterDeletion = mutableListOf<List<FlagTopicEntity>>()
+        val api = mockk<HfrApiClient>()
+        coEvery {
+            api.getCategoryFlagTopics(cat = 23, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        } coAnswers {
+            val snapshot = if (deleted) EMPTY_PAGE else capturedParticipatedFixture
+            if (++calls == 2) {
+                entered.complete(Unit)
+                // Keep the captured response until after deletion, even if F3 cancels its fetch.
+                withContext(NonCancellable) { release.await() }
+            }
+            snapshot
+        }
+        coEvery {
+            api.getTopicList(cat = 23, subcat = null, page = 1, resultsPerPage = any(), useAuth = true)
+        } returns EMPTY_PAGE
+        val dao = stubFlagDao()
+        coEvery { dao.replaceForType("xat", FlagType.CYAN, any()) } coAnswers {
+            roomRows = thirdArg<List<FlagTopicEntity>>()
+            if (deleted) writesAfterDeletion += roomRows
+        }
+        coEvery { dao.deleteFlag("xat", FlagType.CYAN, 23, 35395) } coAnswers {
+            roomRows = roomRows.filterNot { it.cat == 23 && it.topicId == 35395 }
+        }
+        val hfr = mockk<HfrClient>()
+        coEvery {
+            hfr.removeFlag(cat = 23, subcat = any(), topicId = 35395, type = FlagType.CYAN, page = any())
+        } coAnswers {
+            deleted = true
+            DELETE_SUCCESS_HTML
+        }
+        val repo = buildRepository(api, stubForumRepository(sampleCategories.takeLast(1)),
+            flagDao = dao, hfrClient = hfr)
+
+        repo.observe(FlagType.CYAN).test {
+            val pull = launch(start = CoroutineStart.LAZY) { repo.refresh(FlagType.CYAN) }
+            try {
+                assertEquals(FlagsResult.Loading, awaitItem())
+                val flag = (awaitItem() as FlagsResult.Success).flags.single()
+                assertEquals(35395, roomRows.single().topicId)
+                pull.start()
+                entered.await()
+                assertEquals(FlagsResult.Loading, awaitItem())
+                assertTrue(repo.removeFlag(flag).isSuccess)
+                assertTrue((awaitItem() as FlagsResult.Success).flags.isEmpty())
+                assertTrue(roomRows.isEmpty())
+                assertNull(repo.findCachedFlag(23, 35395))
+
+                release.complete(Unit)
+                pull.join()
+                assertTrue((awaitItem() as FlagsResult.Success).flags.isEmpty())
+                expectNoEvents()
+                assertTrue(roomRows.isEmpty())
+                assertNull(repo.findCachedFlag(23, 35395))
+                assertTrue((repo.observe(FlagType.CYAN).first() as FlagsResult.Success).flags.isEmpty())
+                assertEquals(3, calls)
+                assertEquals(1, writesAfterDeletion.size)
+                assertTrue(writesAfterDeletion.single().isEmpty())
+                cancelAndIgnoreRemainingEvents()
+            } finally {
+                release.complete(Unit)
+                pull.cancel()
+            }
+        }
+    }
+
+    @Test
+    fun `removeFlag invalidates a captured fetch even before the cache is warm - 984`() = runTest {
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        var calls = 0
+        val api = mockk<HfrApiClient>()
+        coEvery {
+            api.getCategoryFlagTopics(cat = 23, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        } coAnswers {
+            if (++calls == 1) {
+                entered.complete(Unit)
+                withContext(NonCancellable) { release.await() }
+                capturedParticipatedFixture
+            } else {
+                EMPTY_PAGE
+            }
+        }
+        coEvery {
+            api.getTopicList(cat = 23, subcat = null, page = 1, resultsPerPage = any(), useAuth = true)
+        } returns EMPTY_PAGE
+        val hfr = mockk<HfrClient>()
+        coEvery {
+            hfr.removeFlag(cat = 23, subcat = any(), topicId = 35395, type = FlagType.CYAN, page = any())
+        } returns DELETE_SUCCESS_HTML
+        val dao = stubFlagDao()
+        val repo = buildRepository(api, stubForumRepository(sampleCategories.takeLast(1)),
+            flagDao = dao, hfrClient = hfr)
+
+        repo.observe(FlagType.CYAN).test {
+            try {
+                assertEquals(FlagsResult.Loading, awaitItem())
+                entered.await()
+                assertTrue(repo.removeFlag(sampleFlag()).isSuccess)
+                release.complete(Unit)
+                assertTrue((awaitItem() as FlagsResult.Success).flags.isEmpty())
+                expectNoEvents()
+                assertNull(repo.findCachedFlag(23, 35395))
+                coVerify(exactly = 1) { dao.replaceForType("xat", FlagType.CYAN, match { it.isEmpty() }) }
+                coVerify(exactly = 0) { dao.replaceForType("xat", FlagType.CYAN, match { it.isNotEmpty() }) }
+                assertEquals(2, calls)
+                cancelAndIgnoreRemainingEvents()
+            } finally {
+                release.complete(Unit)
+            }
+        }
+    }
+
+    @Test
+    fun `removeFlag waits for an ongoing Room commit before purging its row - 984`() = runTest {
+        val entered = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        val accepted = CompletableDeferred<Unit>()
+        var deleted = false
+        var roomRows = emptyList<FlagTopicEntity>()
+        val api = mockk<HfrApiClient>()
+        coEvery {
+            api.getCategoryFlagTopics(cat = 23, bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        } coAnswers { if (deleted) EMPTY_PAGE else capturedParticipatedFixture }
+        coEvery {
+            api.getTopicList(cat = 23, subcat = null, page = 1, resultsPerPage = any(), useAuth = true)
+        } returns EMPTY_PAGE
+        val dao = stubFlagDao()
+        coEvery { dao.replaceForType("xat", FlagType.CYAN, any()) } coAnswers {
+            entered.complete(Unit)
+            // Model a write that cannot be interrupted after it has begun committing.
+            withContext(NonCancellable) { release.await() }
+            roomRows = thirdArg<List<FlagTopicEntity>>()
+        }
+        coEvery { dao.deleteFlag("xat", FlagType.CYAN, 23, 35395) } coAnswers {
+            roomRows = roomRows.filterNot { it.topicId == 35395 }
+        }
+        val hfr = mockk<HfrClient>()
+        coEvery {
+            hfr.removeFlag(cat = 23, subcat = any(), topicId = 35395, type = FlagType.CYAN, page = any())
+        } coAnswers {
+            deleted = true
+            accepted.complete(Unit)
+            DELETE_SUCCESS_HTML
+        }
+        val repo = buildRepository(api, stubForumRepository(sampleCategories.takeLast(1)),
+            flagDao = dao, hfrClient = hfr)
+        val initial = async { repo.observe(FlagType.CYAN).first { it is FlagsResult.Success } }
+        entered.await()
+        val removal = async { repo.removeFlag(sampleFlag()) }
+        try {
+            accepted.await()
+            runCurrent()
+            assertTrue("removal must wait for the older Room commit", !removal.isCompleted)
+            coVerify(exactly = 0) { dao.deleteFlag(any(), any(), any(), any()) }
+            release.complete(Unit)
+            assertTrue(removal.await().isSuccess)
+            initial.await()
+            assertTrue(roomRows.isEmpty())
+            assertNull(repo.findCachedFlag(23, 35395))
+            coVerify(exactly = 1) { dao.deleteFlag("xat", FlagType.CYAN, 23, 35395) }
+        } finally {
+            release.complete(Unit)
+            initial.cancel()
+            removal.cancel()
+        }
+    }
+
+    @Test
     fun `removeFlag failure touches no cache and returns failure`() = runTest {
         val (apiClient, forumRepository) = wireDeps {
             stubFlagsCall(13, HfrRestFlagBucket.FAVORITES, EMPTY_PAGE)
@@ -2059,6 +2873,66 @@ class DefaultFlagRepositoryTest {
         }
     }
 
+    /** Mocked clients feed the same safe transport boundary as the EventListener, without real IO. */
+    private fun diagnosticApi(failSticky: Boolean = false): HfrApiClient {
+        val api = mockk<HfrApiClient>()
+        val sequence = AtomicLong()
+        coEvery {
+            api.getCategoryFlagTopics(cat = any(), bucket = HfrRestFlagBucket.PARTICIPATED,
+                page = any(), resultsPerPage = any(), useAuth = true)
+        } coAnswers {
+            val cat = firstArg<Int>()
+            recordDiagnosticCall(sequence.incrementAndGet(), cat, sticky = false, failed = false)
+            if (cat == 23) capturedParticipatedFixture else EMPTY_PAGE
+        }
+        coEvery {
+            api.getTopicList(cat = any(), subcat = null, page = 1, resultsPerPage = any(), useAuth = true)
+        } coAnswers {
+            val cat = firstArg<Int>()
+            val failed = failSticky && cat == 13
+            recordDiagnosticCall(sequence.incrementAndGet(), cat, sticky = true, failed = failed)
+            if (failed) throw IOException("secret cookie")
+            EMPTY_PAGE
+        }
+        return api
+    }
+
+    private fun assertCancellation(expected: CancellationException, actual: Throwable?) {
+        // Coroutine stack recovery may copy the exception across the detached Deferred boundary.
+        assertTrue("CancellationException must propagate, got $actual", actual is CancellationException)
+        assertEquals(expected.message, actual?.message)
+    }
+
+    private suspend fun recordDiagnosticCall(
+        id: Long,
+        cat: Int,
+        sticky: Boolean,
+        failed: Boolean,
+        cancelled: Boolean = false,
+    ) {
+        val trace = requireNotNull(currentCoroutineContext()[FlagFetchTrace])
+        val family = if (sticky) HfrEndpoint.Family.LAST else when (trace.type) {
+            FlagType.CYAN -> HfrEndpoint.Family.PARTICIPATED
+            FlagType.RED -> HfrEndpoint.Family.READ
+            FlagType.FAVORITE -> HfrEndpoint.Family.FAVORITES
+        }
+        trace.call(HfrCallSummary(
+            id = id,
+            endpoint = HfrEndpoint(family, cat, 1),
+            role = HfrClientRole.AUTH, refreshId = trace.refreshId,
+            phase = if (sticky) FlagRefreshPhase.STICKIES else FlagRefreshPhase.BUCKETS,
+            waitMs = 0, dnsMs = 0, connectMs = 0, tlsMs = 0, headersSentToReceivedMs = 10, bodyMs = 0, totalMs = 10,
+            status = if (cancelled) null else if (failed) 503 else 200,
+            protocol = "h2", reusedConnection = true, inFlightAtStart = 1,
+            outcome = when {
+                cancelled -> HfrCallOutcome.CANCELLED
+                failed -> HfrCallOutcome.FAILURE
+                else -> HfrCallOutcome.OK
+            },
+            exceptionClass = if (cancelled) "CancellationException" else if (failed) "IOException" else null,
+        ))
+    }
+
     private fun sampleFlag(type: FlagType = FlagType.CYAN, topicId: Int = 35395): Flag = Flag(
         cat = 23,
         subcat = 550,
@@ -2086,6 +2960,11 @@ class DefaultFlagRepositoryTest {
         configure: ApiStubScope.() -> Unit,
     ): Pair<HfrApiClient, ForumRepository> {
         val apiClient = mockk<HfrApiClient>()
+        // A happy bucket fixture also needs a successful (possibly empty) sticky supplement.
+        // Otherwise an unstubbed call now correctly adds an incomplete-list issue (#984).
+        coEvery {
+            apiClient.getTopicList(cat = any(), subcat = null, page = 1, resultsPerPage = any(), useAuth = true)
+        } returns EMPTY_PAGE
         ApiStubScope(apiClient).configure()
         return apiClient to stubForumRepository(sampleCategories)
     }
@@ -2129,6 +3008,7 @@ class DefaultFlagRepositoryTest {
         ioDispatcher = UnconfinedTestDispatcher(),
         clock = clock,
         diagnostics = diagnostics,
+        refreshDiagnostics = FlagRefreshDiagnostics(diagnostics),
     )
 
     private fun stubAuthRepository(pseudo: String = "XaT"): AuthRepository {
@@ -2185,6 +3065,8 @@ class DefaultFlagRepositoryTest {
     }
 
     private companion object {
+        const val CATEGORIES_URL = "https://forum.hardware.fr/api/forums/hardwarefr/categories"
+
         const val EMPTY_PAGE = """
             {
               "resource": {

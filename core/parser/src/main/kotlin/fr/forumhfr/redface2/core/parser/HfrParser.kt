@@ -48,6 +48,9 @@ class HfrParser(
     fun parseUserProfile(html: String, userId: Int): UserProfile =
         profileParser.parse(html, userId)
 
+    /** #1467 — clean text lines from the separate `configuration.php` page; malformed pages throw. */
+    fun parseUserConfiguration(html: String): List<String> = profileParser.parseConfiguration(html)
+
     /**
      * Rôle HFR (#1112, #221 — PR A) — source **secondaire** : extrait le champ « Statut » d'une
      * page profil (`/hfr/profil-{userId}.htm`) en [AuthorRole]. Retourne `null` quand le statut est

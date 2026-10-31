@@ -20,10 +20,13 @@ package fr.forumhfr.redface2.core.model
  *    spaces and apostrophes all survive verbatim. The token is meant to be wrapped by an
  *    insertion helper that adds spaces around it (cf. HFR's `putSmiley` JS), so it carries
  *    no leading/trailing whitespace itself.
- *  - [imageUrl] is the absolute URL HFR served for the preview image. It is read from the
- *    HTML/JSON HFR actually returned, never reconstructed from the token.
- *  - [source] disambiguates the tab the picker offered : a smiley present in both the
- *    canonical builtin set and the wiki search returns two distinct [EditorSmiley] entries.
+ *  - [imageUrl] is the URL HFR served for the preview image, or the saved local favorite URL.
+ *    Local collections without metadata may reconstruct a canonical perso URL (ADR-019).
+ *    The account management form also preserves broken historical entries: their URL may be
+ *    relative or empty, and their token may be noncanonical. Mutations must round-trip those rows.
+ *  - [source] identifies the image type : builtin or perso (wiki/HFR favorite).
+ *    Local favorites and usage ranking reuse these types independently of their section.
+ *    A smiley can appear in both the account favorites and the wiki search.
  *    Callers that need to merge / dedupe rely on `token` equality, not on identity.
  */
 data class EditorSmiley(
@@ -33,9 +36,8 @@ data class EditorSmiley(
 )
 
 /**
- * Where the smiley entry came from. Drives the picker tab the user sees and, downstream, the
- * caching strategy (builtin is static and shipped with the app ; wiki is a live REST hit per
- * search query).
+ * Image rendering category, independent of the section. Favorites read from HFR keep HFR_FAVORITE;
+ * local perso images reuse WIKI, and local builtins retain BUILTIN (fixed size, no probe).
  */
 enum class EditorSmileySource {
     // Canonical HFR built-in set served from `/icones/smilies/<name>.gif`. ~25 entries that
@@ -45,4 +47,7 @@ enum class EditorSmileySource {
     // HFR wiki search via GET /message-smi-mp-aj.php?config=hfr.inc&user_id=...&findsmilies=...
     // — a live REST hit per query, returns the perso corpus filtered by the search term.
     WIKI,
+
+    // HFR account favorites from `div#dynamic_smilies` or the fresh account management form.
+    HFR_FAVORITE,
 }

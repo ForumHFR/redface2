@@ -55,6 +55,25 @@ class HfrClientTest {
     }
 
     @Test
+    fun `Wiki detail encodes the full token and uses the anonymous client`() = runTest {
+        val html = sharedParserFixture("smiley_wiki_detail-ticento-6.html")
+        server.enqueue(MockResponse().addHeader("Content-Type", "text/html; charset=utf-8").setBody(html))
+
+        assertEquals(html, client.getSmileyWikiDetail("[:ticento:6]"))
+        val request = server.takeRequest()
+        assertEquals("/wikismilies.php?config=hfr.inc&detail=%5B%3Aticento%3A6%5D", request.path)
+        assertEquals("anonymous", request.getHeader("X-RF2-Client"))
+        assertNull(request.getHeader("Cookie"))
+    }
+
+    @Test
+    fun `Wiki detail HTTP failure propagates as a server error`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(503))
+        val error = runCatching { client.getSmileyWikiDetail("[:ticento:6]") }.exceptionOrNull()
+        assertTrue(error is HfrServerException)
+    }
+
+    @Test
     fun `getPrivateMessageListPage throws SessionExpired on login form served as HTTP 200`() = runTest {
         server.enqueue(
             MockResponse()
@@ -770,6 +789,41 @@ class HfrClientTest {
         assertEquals("GET", request.method)
         assertEquals("anonymous", request.headers["X-RF2-Client"])
         assertEquals("/hfr/profil-15461.htm", requireNotNull(request.requestUrl).encodedPath)
+    }
+
+    @Test
+    fun `configuration uses an anonymous GET with an encoded pseudo containing a space`() = runTest {
+        val html = sharedParserFixture("profile/configuration_colonel_anonymous.html")
+        server.enqueue(MockResponse().addHeader("Content-Type", "text/html; charset=utf-8").setBody(html))
+
+        assertEquals(html, client.getUserConfiguration("Colonel MythO"))
+
+        val request = server.takeRequest()
+        assertEquals("GET", request.method)
+        assertEquals("/configuration.php?config=hfr.inc&pseudo=Colonel%20MythO", request.path)
+        assertEquals("anonymous", request.getHeader("X-RF2-Client"))
+        assertNull(request.getHeader("Cookie"))
+    }
+
+    @Test
+    fun `configuration encodes query delimiters as part of the pseudo`() = runTest {
+        server.enqueue(MockResponse().setBody("configuration"))
+
+        client.getUserConfiguration("A&B+é")
+
+        val request = server.takeRequest()
+        assertEquals("A&B+é", requireNotNull(request.requestUrl).queryParameter("pseudo"))
+        assertEquals(2, requireNotNull(request.requestUrl).querySize)
+    }
+
+    @Test
+    fun `configuration HTTP failure propagates as a server error`() = runTest {
+        server.enqueue(MockResponse().setResponseCode(503))
+
+        val error = runCatching { client.getUserConfiguration("XaTriX") }.exceptionOrNull()
+
+        assertTrue(error is HfrServerException)
+        assertEquals(503, (error as HfrServerException).code)
     }
 
     /**

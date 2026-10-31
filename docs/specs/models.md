@@ -29,6 +29,56 @@ Ces autres modèles émergeront du premier prototype de chaque écran. Pas de sp
 
 ---
 
+## Favoris locaux de smileys
+
+Moteur local (#1154, C2), affiché dans l'onglet Favoris par D, distinct des favoris du compte HFR.
+Les deux modèles `:core:model` sont sérialisables avec kotlinx.serialization ; leurs dates
+sont des `Long` en epoch millis, comme celles du document local de blacklist.
+
+```kotlin
+data class LocalFavoriteSmiley(
+    val token: String,            // identité exacte, espaces et variantes conservés
+    val imageUrl: String? = null,
+    val addedAt: Long,
+)
+
+data class LocalFavoriteSmileySnapshot(
+    val version: Int,
+    val favorites: List<LocalFavoriteSmiley>, // l'ordre de la liste fait foi
+    val tombstones: List<Tombstone>,
+    val orderUpdatedAt: Long,
+) {
+    data class Tombstone(val token: String, val removedAt: Long)
+}
+```
+
+Version actuelle : `LocalFavoriteSmileySnapshot.CURRENT_VERSION = 1`. L'instantané exporté
+est le document persisté, sans propriétaire ; le pseudo reste uniquement dans la clé locale.
+Les garanties de conservation, les limites et les décisions de synchronisation différées
+figurent dans l'[ADR-019]({{ site.baseurl }}/adr/019-smileys-favoris-locaux-et-top-usage).
+
+---
+
+## Top d'usage des smileys
+
+Moteur local (#1154, C1), affiché dans « Les plus utilisés » par D. Modèle sérialisable dans `:core:model`,
+indépendant d'`EditorSmiley` : un jeton saisi à la main n'a pas nécessairement d'URL d'image.
+
+```kotlin
+data class SmileyUsageEntry(
+    val token: String,       // identité exacte, espaces et variantes conservés
+    val count: Long,         // compteur positif, saturation à Long.MAX_VALUE
+    val lastUsedAt: Long,    // epoch millis
+)
+```
+
+Le document JSON local v1 contient `version` et `entries: List<SmileyUsageEntry>` ; le
+propriétaire reste dans la clé DataStore, sans contenu de message ni identifiant de conversation.
+Contrat du classement, rétention et comptage dans
+l'[ADR-019]({{ site.baseurl }}/adr/019-smileys-favoris-locaux-et-top-usage).
+
+---
+
 ## Profil utilisateur
 
 Phase 2 finish (#208). Modèle `UserProfile` dans `:core:model`, parser dans `:core:parser/profile/ProfileParser.kt`. Champs fragiles nullables pour tolérance aux variations HFR.
@@ -43,8 +93,13 @@ data class UserProfile(
     val location: String?,      // ville HFR, null si vide ou absent
     val signatureText: String?, // texte plat (Jsoup.text()) — round-trip BBCode hors scope MVP
     val rawFields: Map<String, String> = emptyMap(), // champs non promus (Profession, Loisirs, …)
+    val hasHardwareConfiguration: Boolean = false, // ligne HFR avec lien vers configuration.php (#1467)
 )
 ```
+
+`hasHardwareConfiguration` suit le lien proposé par le profil public HFR, pas la présence de texte
+dans `configuration.php`. Voir le
+[contrat de configuration matérielle]({{ site.baseurl }}/specs/protocol-hfr#configuration-matérielle--configurationphp-1467).
 
 `Post.profileId: Int?` (Phase 2 finish #208) — id numérique HFR extrait depuis `<a href="/hfr/profil-{N}.htm">` dans le toolbar de chaque post. Null pour les posts « Publicité » ou les reads anonymes sans lien profil. Persisté en Room v6 (`MIGRATION_5_6`). Clé canonique pour la navigation vers le profil — `post.author` et `post.avatarUrl` sont des hints d'affichage.
 
@@ -554,6 +609,7 @@ data class ReplyForm(
     val hiddenFields: Map<String, String>,   // password filtré au parse ; pseudo anonyme filtré
     val isAnonymous: Boolean,
     val initialContent: String = "",  // Phase 2C (#146) : reply → "" ; quote → bloc `[quotemsg=…]` prérempli par HFR (verbatim, jamais reconstruit côté app)
+    val favoriteSmileys: List<EditorSmiley> = emptyList(), // #1481 : favoris du compte, ordre du formulaire
 )
 
 data class PollVoteForm(              // #779 : extrait du form action*=vote.php de la page topic
@@ -601,6 +657,7 @@ data class TopicForm(                        // Phase 2D (#148) : forme topic-le
     val msgIcon: String?,                    // icône `checked` (defense-in-depth source-of-truth)
     val poll: TopicPollForm,                 // read-only en Phase 2D #148 ; champs sondage préservés verbatim
     val isAnonymous: Boolean,
+    val favoriteSmileys: List<EditorSmiley> = emptyList(), // #1481 : favoris du compte, ordre du formulaire
 )
 
 data class TopicFormSubcategoryChoice(
@@ -641,6 +698,84 @@ remet `Topic.pollVoteForm` à `null`. Les gardes pré-POST produisent tous les
 `PollVoteFailureReason` sauf `UnexpectedResponse`, réservé au parser de réponse.
 
 Les contrats HFR sous-jacents sont documentés dans [`protocol-hfr.md` § Form fields critiques]({{ site.baseurl }}/specs/protocol-hfr#form-fields-critiques). Les `ReplyFailureReason` mappent un-à-un sur les fixtures `write_*_error.html` / `write_*_response.html` capturées en Phase 2A.
+
+---
+
+## Smileys de l'éditeur et favoris HFR
+
+Modèles dans `:core:model`, distincts du `SmileyKind` de l'AST des posts. La lecture des
+favoris dans les formulaires est livrée par #1481 ; B1 de #1154 ajoute les mutations du compte,
+B2 les branche dans le sélecteur des quatre éditeurs. Les favoris locaux relèvent d'un dépôt séparé.
+
+```kotlin
+data class EditorSmiley(
+    val token: String,
+    val imageUrl: String,
+    val source: EditorSmileySource,
+)
+
+enum class EditorSmileySource { BUILTIN, WIKI, HFR_FAVORITE }
+
+sealed interface HfrFavoriteSmileyMutationResult {
+    data class Success(val favorites: List<EditorSmiley>) : HfrFavoriteSmileyMutationResult
+    data class AlreadyPresent(val favorites: List<EditorSmiley>) : HfrFavoriteSmileyMutationResult
+    data class NotInFavorites(val favorites: List<EditorSmiley>) : HfrFavoriteSmileyMutationResult
+    data class Full(val limit: Int, val favorites: List<EditorSmiley>) : HfrFavoriteSmileyMutationResult
+    data object NotFound : HfrFavoriteSmileyMutationResult
+    data object InvalidToken : HfrFavoriteSmileyMutationResult
+    data class VerificationFailed(val favorites: List<EditorSmiley>) : HfrFavoriteSmileyMutationResult
+    data object NotAuthenticated : HfrFavoriteSmileyMutationResult
+    data object AccountChanged : HfrFavoriteSmileyMutationResult
+    data object UnknownResponse : HfrFavoriteSmileyMutationResult
+    data object TransportFailure : HfrFavoriteSmileyMutationResult
+}
+
+// #1154 lot 2 — mots-clés publics du wiki, lus dans le détail d'un perso (ADR-019).
+// Inconnu du wiki et connu sans mot-clé donnent tous deux `Loaded(emptyList())`.
+sealed interface SmileyWikiKeywordsResult {
+    data class Loaded(val keywords: List<String>) : SmileyWikiKeywordsResult
+    data object Failed : SmileyWikiKeywordsResult
+    data object NotApplicable : SmileyWikiKeywordsResult // builtin, hors wiki
+}
+```
+
+`token` est conservé verbatim (espaces internes et variantes compris) ; `imageUrl` vient du
+HTML HFR ou des métadonnées locales. Pour les collections locales sans URL, le sélecteur utilise
+la table builtin, une autre liste chargée, puis la reconstruction perso documentée dans l'ADR-019.
+`source` décrit le rendu, indépendamment de la section : les builtins restent `BUILTIN`, les persos
+locaux utilisent `WIKI`, les entrées HFR gardent `HFR_FAVORITE`. Le formulaire de gestion conserve les entrées hors format
+pour éviter une perte lors du retrait ; une image cassée peut donc donner un `imageUrl` vide
+ou relatif. Les listes sont en ordre serveur, source `HFR_FAVORITE`, sans déduplication dans
+le formulaire de gestion. Les `favoriteSmileys` de `ReplyForm` et `TopicForm` sont vides par défaut ;
+les éditeurs les lisent depuis `#dynamic_smilies` en réutilisant l'extraction du wiki.
+D'après un signalement non capturé (cf. `protocol-hfr.md`), cette base contient aussi les smileys
+perso du compte, également parsés en `HFR_FAVORITE` ;
+la liste du formulaire de gestion fait seule foi pour les favoris retirables.
+
+Le contrat `SmileyLocalCollections` de `:core:domain` expose `observe()` et les mutations locales
+avec propriétaire capturé. Son `SmileyLocalCollectionSnapshot` contient `owner: String?`,
+`favorites: List<LocalFavoriteSmiley>` et `top: List<SmileyUsageEntry>` ; aucun propriétaire signifie
+des collections vides. `SmileyPickerState.Open` (`:core:ui`) projette ces collections vers
+`localFavoriteSmileys` / `mostUsedSmileys`, garde les jetons exacts dans `localFavoriteTokens` et
+expose `onLocalFavoriteChange`. `initialTab: SmileyPickerTab` (`FAVORITES`, `STANDARD`, `WIKI`)
+est choisi à l'ouverture par le contrôleur, puis la sélection visible reste sauvegardée dans la feuille.
+
+`HfrFavoriteSmileyRepository.add(owner, token)` / `remove(owner, token)` retournent ce résultat sans HTML,
+exception ni secret. `Success.favorites` est la liste confirmée après mutation.
+`NotInFavorites.favorites` est la liste fraîche quand le jeton à retirer est absent ; aucun POST
+n'est envoyé et l'interface signale l'échec du retrait. `AlreadyPresent` et `Full` contiennent
+la liste du GET préalable.
+`Full.limit` reprend le nombre annoncé par HFR, avec repli à 10 ; le pré-contrôle local reste à 10.
+`VerificationFailed` rapporte la liste réelle quand le jeton ajouté est absent après acquittement,
+ou quand le retrait n'a pas laissé les jetons attendus dans leur ordre ; aucune liste optimiste n'est construite ici.
+`InvalidToken` refuse avant réseau tout jeton non canonique perso à l'ajout, et seulement le vide
+au retrait. `NotFound` vient du serveur. `NotAuthenticated` indique une session refusée par HFR ou expirée ;
+`AccountChanged` un compte différent du propriétaire capturé au geste, ou devenu anonyme. `UnknownResponse`
+couvre un formulaire ambigu ou une réponse non reconnue ; `TransportFailure` un échec HTTP/réseau.
+
+`hash_check` et `codehex` du formulaire de gestion restent dans un type technique transitoire
+de `:core:parser` au `toString()` expurgé, sans cache ni persistance. Contrat détaillé et limites :
+[protocol-hfr.md § Smileys favoris du compte]({{ site.baseurl }}/specs/protocol-hfr#smileys-favoris-du-compte).
 
 ---
 

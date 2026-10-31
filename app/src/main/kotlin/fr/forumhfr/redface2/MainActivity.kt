@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.lifecycleScope
 import dagger.hilt.android.AndroidEntryPoint
+import fr.forumhfr.redface2.core.domain.diagnostics.AppForegroundDiagnostics
 import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 import fr.forumhfr.redface2.core.domain.preferences.ThemeBootstrapStore
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
@@ -34,6 +35,7 @@ class MainActivity : ComponentActivity() {
 
     @Inject lateinit var themeBootstrapStore: ThemeBootstrapStore
     @Inject lateinit var launcherIconController: AppLauncherIconController
+    @Inject lateinit var foregroundDiagnostics: AppForegroundDiagnostics
 
     private var latestIntentDelivery by mutableStateOf<IntentDelivery?>(null)
     private var nextIntentDeliveryId = INITIAL_INTENT_DELIVERY_ID
@@ -50,6 +52,9 @@ class MainActivity : ComponentActivity() {
         nextIntentDeliveryId = deliveryId + 1
         latestIntentDelivery = IntentDelivery(intent, deliveryId)
 
+        // Seed the cold-start timestamp before composition can trigger the initial refresh.
+        // Recreated activities keep the existing timestamp until an actual background/resume.
+        foregroundDiagnostics.foregrounded()
         setContent {
             RedfaceApp(intentDelivery = latestIntentDelivery)
         }
@@ -91,6 +96,16 @@ class MainActivity : ComponentActivity() {
                 onFailure()
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        foregroundDiagnostics.foregrounded()
+    }
+
+    override fun onStop() {
+        if (!isChangingConfigurations) foregroundDiagnostics.backgrounded()
+        super.onStop()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {

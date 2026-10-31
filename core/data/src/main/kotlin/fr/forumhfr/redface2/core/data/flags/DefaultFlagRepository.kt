@@ -6,6 +6,13 @@ import fr.forumhfr.redface2.core.data.forum.RestTopic
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagFetchTrace
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshDiagnostics
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshGap
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshPhase
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrace
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshTrigger
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrRequestQueued
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
@@ -103,9 +110,17 @@ class DefaultFlagRepository @Inject constructor(
     // snackbar: every add / remove records its result here (the in-app Diagnostics viewer),
     // mirroring what `DefaultDeletePostRepository` already does for a deletion.
     private val diagnostics: DiagnosticsLog,
+    private val refreshDiagnostics: FlagRefreshDiagnostics,
 ) : FlagRepository {
 
     private val cachedSuccesses: MutableMap<FlagType, FlagsResult.Success> = EnumMap(FlagType::class.java)
+    // Same lifetime and lock as the cache; only the source trace of the returned result determines gaps.
+    private val cachedFetchTraces: MutableMap<FlagType, FlagFetchTrace> = EnumMap(FlagType::class.java)
+    private val cachedFetchKeys: MutableMap<FlagType, FetchKey> = EnumMap(FlagType::class.java)
+
+    // #984 — serialize sweep barriers with commit (including Room) and result publication.
+    // Lock order: per-type cacheWriteMutex, then generationMutex, then short monitor sections.
+    private val generationMutex = Mutex()
 
     /**
      * Per-bucket generation + write lock. A successful mutation can invalidate one bucket while an
@@ -144,31 +159,43 @@ class DefaultFlagRepository @Inject constructor(
         }
 
     /**
-     * #501 (Codex review) — in-flight fetch coordinator, one [Deferred] per [FlagType]. observe()'s
-     * initial fetch (first subscription with no fresh cache) and an explicit refresh() can fire for
-     * the SAME tab at the same instant (the screen's auto-refresh lands as the list first subscribes),
-     * each otherwise running the full per-category REST fan-out. Sharing one in-flight Deferred
-     * collapses concurrent calls into a single fan-out; a completed fetch is cleared, so a LATER
-     * refresh still triggers a fresh one. Launched in an app-scoped CoroutineScope (this is a
-     * @Singleton, so the scope lives for the process) so cancelling one caller — e.g. observe() torn
-     * down by a flatMapLatest tab switch — never cancels the fetch a concurrent refresh still awaits.
+     * #501/#984 — callers of the same type, account and generations share one [Deferred].
+     * An explicit refresh opens a sweep barrier before looking up the fetch, so it never joins
+     * an older observation. Concurrent pulls within that barrier still share one fan-out.
+     * A completed fetch is cleared, so a later refresh triggers a fresh one. Launched in an
+     * app-scoped CoroutineScope (this singleton lives for the process). Cancelling one caller,
+     * e.g. observe() torn down by a tab switch, never cancels a concurrent caller's shared fetch.
+     * The last caller releases unfinished work; a new generation cancels obsolete fetches and
+     * their sweep immediately, since none of their callers can publish those snapshots anymore.
      */
     private val fetchScope = CoroutineScope(SupervisorJob() + ioDispatcher)
 
     /**
-     * Identifies an in-flight fetch by type, user AND cache generation. A post-mutation refresh must
-     * never join a FAVORITE fetch that began before the mutation (#986).
+     * Captured before launching the Deferred; the same key fences its sweep, commit and publication.
      */
     private data class FetchKey(
         val type: FlagType,
         val userId: String,
         val cacheGeneration: Int,
+        val sessionGeneration: Int,
+        val sweepGeneration: Int,
     )
 
-    // Keyed by (type, userId), NOT type alone: a fetch started for one account must never be awaited
-    // by another after a logout / account switch, and [clearSessionCache] cancels stragglers so they
-    // cannot repopulate the singleton success cache with the previous account's data (#501 Codex P1).
-    private val inFlightFetches: MutableMap<FetchKey, Deferred<FlagsResult>> = mutableMapOf()
+    private class ActiveRefresh(val key: FetchKey, var callers: Int = 1) {
+        // Under generationMutex; retained through publication, even after the Deferred completes.
+        var fetch: ObservedFetch? = null
+    }
+    // Accessed under cachedSuccesses; only active explicit pulls may reuse a refresh barrier.
+    private val activeRefreshes = mutableMapOf<FlagType, ActiveRefresh>()
+
+    private class ObservedFetch(val deferred: Deferred<FlagsResult>, val trace: FlagFetchTrace) {
+        // Under inFlightFetches; a caller retains its reference through acceptance/publication.
+        var callers = 0
+    }
+
+    private class SupersededFetchException : CancellationException("Flags fetch generation superseded")
+
+    private val inFlightFetches: MutableMap<FetchKey, ObservedFetch> = mutableMapOf()
 
     /**
      * Short topic-level memo for the menu gate (#986). A cached `true` can only cause one extra
@@ -221,7 +248,11 @@ class DefaultFlagRepository @Inject constructor(
                     val ownsSnapshot = sameUser && synchronized(cachedSuccesses) {
                         val ownsSnapshot = sessionGeneration == diskSessionGeneration &&
                             cacheGenerations.getValue(type) == diskCacheGeneration
-                        if (ownsSnapshot && loaded != null) cachedSuccesses[type] = loaded.result
+                        if (ownsSnapshot && loaded != null) {
+                            cachedSuccesses[type] = loaded.result
+                            cachedFetchTraces.remove(type)
+                            cachedFetchKeys.remove(type)
+                        }
                         ownsSnapshot
                     }
                     loaded to ownsSnapshot
@@ -230,51 +261,69 @@ class DefaultFlagRepository @Inject constructor(
                     // A successful mutation or account switch completed while Room was loading.
                     // Discard that now-stale snapshot and resolve the current generation from REST.
                     send(FlagsResult.Loading)
-                    send(fetchDeduplicated(type = type, userId = userId))
+                    fetchObserved(type, userId) { send(it) }
                 } else if (diskCached != null) {
                     send(diskCached.result)
                     if (!diskCached.isFresh) {
-                        when (val refreshed = fetchDeduplicated(type = type, userId = userId)) {
-                            is FlagsResult.Success -> send(refreshed)
-                            is FlagsResult.Failure -> Log.w(
-                                LOG_TAG,
-                                "Keeping stale flags cache for $type after refresh failure",
-                                refreshed.cause,
-                            )
-                            FlagsResult.Loading -> Unit
+                        fetchObserved(type, userId) { refreshed ->
+                            when (refreshed) {
+                                is FlagsResult.Success -> send(refreshed)
+                                is FlagsResult.Failure -> Log.w(
+                                    LOG_TAG,
+                                    "Keeping stale flags cache for $type after refresh failure",
+                                    refreshed.cause,
+                                )
+                                FlagsResult.Loading -> Unit
+                            }
                         }
                     }
                 } else {
                     send(FlagsResult.Loading)
-                    send(fetchDeduplicated(type = type, userId = userId))
+                    fetchObserved(type, userId) { send(it) }
                 }
             }
         }
         refreshJob.join()
     }
 
-    override suspend fun refresh(type: FlagType) {
-        // #862 — an EXPLICIT refresh is a strict GENERATION BARRIER for the shared topics/last
-        // sweep (a coalescing device, never a temporal cache — gate Sol r2/r4) : it ALWAYS opens a
-        // new generation, so (a) the pull re-probes (a just-flagged sticky shows up), and (b) any
-        // OLDER fetch still in flight — even one that has not reached its sweep yet — is refused
-        // by the generation capture and degrades to a bucket-only result instead of mixing its old
-        // bucket rows with this pull's fresh supplement. Sharing is reserved for the natural burst
-        // that exists in the app today : the per-type observe() fan-in at screen load (no refresh
-        // involved, one generation by construction — the only two refresh call-sites are per-tab,
-        // FlagsViewModel). Multi-type callers must serialize calls; concurrent refresh(type) calls
-        // would still race their generation barriers.
-        synchronized(stickySweeps) { sweepGeneration++ }
-        val refreshesForType = refreshes.getValue(type)
-        refreshesForType.emit(FlagsResult.Loading)
+    override suspend fun refresh(type: FlagType): FlagsResult = diagnoseRefresh(
+        type, FlagRefreshTrigger.PULL,
+    ) { trace ->
         val userId = currentUserId()
-        refreshesForType.emit(
+        val active = beginRefresh(type, userId)
+        try {
+            val flow = refreshes.getValue(type)
+            flow.emit(FlagsResult.Loading)
             if (userId == null) {
-                notAuthenticatedFailure()
+                val failure = notAuthenticatedFailure()
+                trace.failure(failure.cause)
+                flow.emit(failure)
+                failure
             } else {
-                fetchDeduplicated(type = type, userId = userId)
-            },
-        )
+                fetchDeduplicated(type, userId) { result ->
+                    if (result is FlagsResult.Failure) trace.failure(result.cause)
+                    flow.emit(result)
+                    if (result is FlagsResult.Success) trace.published()
+                }
+            }
+        } finally {
+            synchronized(cachedSuccesses) {
+                if (--active.callers == 0 && activeRefreshes[type] === active) activeRefreshes.remove(type)
+            }
+        }
+    }
+
+    private suspend fun beginRefresh(type: FlagType, userId: String?): ActiveRefresh = generationMutex.withLock {
+        val active = synchronized(cachedSuccesses) {
+            val current = fetchKey(type, userId.orEmpty())
+            activeRefreshes[type]?.takeIf { it.key == current }?.also { it.callers++ }
+                ?: run {
+                    sweepGeneration++
+                    ActiveRefresh(fetchKey(type, userId.orEmpty())).also { activeRefreshes[type] = it }
+                }
+        }
+        cancelSupersededFetches()
+        active
     }
 
     override fun observeCacheUpdates(types: Set<FlagType>): Flow<FlagType> {
@@ -288,6 +337,9 @@ class DefaultFlagRepository @Inject constructor(
         // point will see a changed generation and skip its cache write (#501 Codex P1).
         synchronized(cachedSuccesses) {
             cachedSuccesses.clear()
+            cachedFetchTraces.clear()
+            cachedFetchKeys.clear()
+            activeRefreshes.clear()
             sessionGeneration++
             FlagType.entries.forEach { type -> bumpCacheGeneration(type) }
             synchronized(favoriteResolutionMemos) { favoriteResolutionMemos.clear() }
@@ -295,7 +347,7 @@ class DefaultFlagRepository @Inject constructor(
         // Cancel any fetch still in flight from the previous session so it stops early instead of
         // running the full fan-out for an account that just logged out / switched.
         synchronized(inFlightFetches) {
-            inFlightFetches.values.forEach { it.cancel() }
+            inFlightFetches.values.forEach { it.deferred.cancel() }
             inFlightFetches.clear()
         }
         synchronized(inFlightFavoriteResolutions) {
@@ -304,7 +356,7 @@ class DefaultFlagRepository @Inject constructor(
         }
         // #862 — same rule for the shared topics/last sweep : never reused across accounts.
         synchronized(stickySweeps) {
-            stickySweeps.values.forEach { it.cancel() }
+            stickySweeps.values.forEach { it.deferred.cancel() }
             stickySweeps.clear()
         }
         FlagType.entries.forEach(::publishCacheUpdate)
@@ -671,35 +723,37 @@ class DefaultFlagRepository @Inject constructor(
      * success, so it never has to reason about a partial mutation.
      */
     private suspend fun evictFlagFromCaches(userId: String, flag: Flag) {
-        val updated: FlagsResult.Success? = synchronized(cachedSuccesses) {
-            val current = cachedSuccesses[flag.type] ?: return@synchronized null
-            val trimmed = current.flags.filterNot {
-                it.cat == flag.cat && it.topicId == flag.topicId
+        cacheWriteMutexes.getValue(flag.type).withLock {
+            generationMutex.withLock mutation@ {
+                if (currentUserId() != userId) return@mutation
+                val updated = synchronized(cachedSuccesses) { evictCachedFlag(flag) }
+                cancelSupersededFetches()
+                // Best-effort Room eviction, serialized with fetch commit and publication.
+                runCatching {
+                    flagCacheStore.delete(userId, flag.type, flag.cat, flag.topicId)
+                }.onFailure { throwable ->
+                    if (throwable is CancellationException) throw throwable
+                    Log.w(LOG_TAG, "Could not evict deleted flag ${flag.topicId} from Room cache", throwable)
+                }
+                publishCacheUpdate(flag.type)
+                if (updated != null) refreshes.getValue(flag.type).emit(updated)
             }
-            FlagsResult.Success(trimmed).also { cachedSuccesses[flag.type] = it }
         }
+    }
 
-        // Room eviction is best-effort : the network deletion already succeeded, so a Room
-        // hiccup must not turn a successful removal into a user-visible failure. A stale
-        // disk row would be corrected on the next refresh anyway.
-        runCatching {
-            flagCacheStore.delete(
-                userId = userId,
-                type = flag.type,
-                cat = flag.cat,
-                topicId = flag.topicId,
-            )
-        }.onFailure { throwable ->
-            Log.w(LOG_TAG, "Could not evict deleted flag ${flag.topicId} from Room cache", throwable)
+    /** Called under cachedSuccesses, with the mutation holding both write and generation mutexes. */
+    private fun evictCachedFlag(flag: Flag): FlagsResult.Success? {
+        bumpCacheGeneration(flag.type)
+        cachedFetchTraces.remove(flag.type)
+        // topics/last may still contain the deleted flag; never reuse that sweep.
+        sweepGeneration++
+        if (flag.type == FlagType.FAVORITE) {
+            synchronized(favoriteResolutionMemos) { favoriteResolutionMemos.clear() }
         }
-
-        // Re-broadcast outside the lock so observers see the trimmed list immediately
-        // (mirrors the optimistic-free contract : the cache is the source of truth and the
-        // network deletion already confirmed).
-        if (updated != null) {
-            publishCacheUpdate(flag.type)
-            refreshes.getValue(flag.type).emit(updated)
-        }
+        val current = cachedSuccesses[flag.type] ?: return null
+        return current.copy(flags = current.flags.filterNot {
+            it.cat == flag.cat && it.topicId == flag.topicId
+        }).also { cachedSuccesses[flag.type] = it }
     }
 
     /**
@@ -727,12 +781,14 @@ class DefaultFlagRepository @Inject constructor(
                             flag
                         }
                     }
-                    if (changed) FlagsResult.Success(flags).also { cachedSuccesses[type] = it } else null
+                    if (changed) current.copy(flags = flags).also { cachedSuccesses[type] = it } else null
                 }
                 if (success != null) {
                     runCatching {
-                        flagCacheStore.replace(userId = userId, type = type, flags = success.flags)
+                        flagCacheStore.replace(userId = userId, type = type, flags = success.flags,
+                            isComplete = success.issue == null)
                     }.onFailure { throwable ->
+                        if (throwable is CancellationException) throw throwable
                         Log.w(LOG_TAG, "Could not persist added favourite marker for $type", throwable)
                     }
                     updated += type to success
@@ -744,14 +800,16 @@ class DefaultFlagRepository @Inject constructor(
             synchronized(cachedSuccesses) {
                 bumpCacheGeneration(FlagType.FAVORITE)
                 cachedSuccesses.remove(FlagType.FAVORITE)
+                cachedFetchTraces.remove(FlagType.FAVORITE)
                 synchronized(favoriteResolutionMemos) { favoriteResolutionMemos.clear() }
             }
             // A mutation opens a new sticky-sweep generation too: a post-mutation fetch must not
             // join a topics/last sweep captured before addflag.php succeeded.
-            synchronized(stickySweeps) { sweepGeneration++ }
+            generationMutex.withLock { synchronized(cachedSuccesses) { sweepGeneration++ } }
             runCatching {
                 flagCacheStore.invalidate(userId = userId, type = FlagType.FAVORITE)
             }.onFailure { throwable ->
+                if (throwable is CancellationException) throw throwable
                 Log.w(LOG_TAG, "Could not invalidate the favourite Room cache", throwable)
             }
         }
@@ -769,73 +827,215 @@ class DefaultFlagRepository @Inject constructor(
         if (favoriteRefresh.subscriptionCount.value > 0) {
             fetchScope.launch {
                 favoriteRefresh.emit(FlagsResult.Loading)
-                val refreshed = fetchDeduplicated(type = FlagType.FAVORITE, userId = userId)
-                if (currentUserId() == userId) favoriteRefresh.emit(refreshed)
+                fetchDeduplicated(type = FlagType.FAVORITE, userId = userId) { favoriteRefresh.emit(it) }
             }
         }
+        generationMutex.withLock { cancelSupersededFetches() }
     }
 
     /** Must be called under [cachedSuccesses]' monitor. */
     private fun bumpCacheGeneration(type: FlagType) {
         cacheGenerations[type] = cacheGenerations.getValue(type) + 1
+        cachedFetchKeys.remove(type)
     }
 
     private fun publishCacheUpdate(type: FlagType) {
         cacheUpdates.tryEmit(type)
     }
 
-    /**
-     * Runs [fetch] for [type] unless an identical fetch is already in flight, in which case the
-     * concurrent caller awaits the same result instead of launching a second per-category fan-out
-     * (#501, Codex review). [fetch] folds every failure into [FlagsResult.Failure] and never throws,
-     * so the shared [Deferred] always completes with a result (no exception to propagate on await).
-     */
-    private suspend fun fetchDeduplicated(type: FlagType, userId: String): FlagsResult {
-        while (true) {
-            val cacheGeneration = synchronized(cachedSuccesses) { cacheGenerations.getValue(type) }
-            val key = FetchKey(type = type, userId = userId, cacheGeneration = cacheGeneration)
-            val deferred = synchronized(inFlightFetches) {
-                inFlightFetches[key]?.takeIf { it.isActive }
-                    ?: fetchScope.async {
-                        fetch(type = type, userId = userId, startCacheGeneration = cacheGeneration)
-                    }.also { started ->
-                        inFlightFetches[key] = started
-                        started.invokeOnCompletion {
-                            synchronized(inFlightFetches) {
-                                if (inFlightFetches[key] === started) inFlightFetches.remove(key)
-                            }
-                        }
-                    }
+    private suspend fun <T> diagnoseRefresh(
+        type: FlagType,
+        trigger: FlagRefreshTrigger,
+        block: suspend (FlagRefreshTrace) -> T,
+    ): T {
+        val inherited = currentCoroutineContext()[FlagRefreshTrace]
+        if (inherited != null) {
+            return block(inherited)
+        } else {
+            val trace = refreshDiagnostics.begin(trigger, listOf(type))
+            try {
+                return withContext(trace) { block(trace) }
+            } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+                trace.failure(error)
+                throw error
+            } finally {
+                trace.finish()
             }
-            val result = deferred.await()
-            val ownedResult = if (currentUserId() != userId) {
-                FlagsResult.Failure(
-                    IllegalStateException("HFR account changed while fetching flags"),
-                )
-            } else {
-                synchronized(cachedSuccesses) {
-                    if (cacheGenerations.getValue(type) == cacheGeneration) result else cachedSuccesses[type]
-                }
-            }
-            // A mutation invalidated this bucket while the request was running. Do not expose its
-            // pre-mutation snapshot even transiently. Reuse a replacement that a concurrent
-            // post-mutation refresh already committed; otherwise retry under the new generation.
-            if (ownedResult != null) return ownedResult
         }
     }
 
-    private suspend fun fetch(
+    private suspend fun fetchObserved(type: FlagType, userId: String, publish: suspend (FlagsResult) -> Unit) =
+        diagnoseRefresh(type, FlagRefreshTrigger.INITIAL_OBSERVE) { trace ->
+            fetchDeduplicated(type, userId) { result ->
+                if (result is FlagsResult.Failure) trace.failure(result.cause)
+                publish(result)
+                if (result is FlagsResult.Success) trace.published()
+            }
+        }
+
+    private suspend fun <T> measured(phase: FlagRefreshPhase, block: suspend () -> T): T {
+        val trace = currentCoroutineContext()[FlagFetchTrace]
+        val start = System.nanoTime()
+        try {
+            return block()
+        } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+            trace?.fatal(error)
+            throw error
+        } finally {
+            trace?.phase(phase, start)
+        }
+    }
+
+    /**
+     * Runs [fetch] unless an identical fetch is active. Its independent measurement holder survives
+     * the scope switch and retains earlier calls for callers joining halfway through the fetch.
+     * Superseded results are replaced with a current committed success, or a current fetch.
+     */
+    private suspend fun fetchDeduplicated(
         type: FlagType,
         userId: String,
-        startCacheGeneration: Int,
-    ): FlagsResult = withContext(ioDispatcher) {
-        val startGeneration = synchronized(cachedSuccesses) { sessionGeneration }
-        // #862 (gate Sol r3) — capture the SWEEP generation too : a fetch that started under an
-        // older burst must never join a newer burst's sweep (it would publish a mix of old bucket
-        // rows + new supplement, and holes would leak across generations).
-        val startSweepGeneration = synchronized(stickySweeps) { sweepGeneration }
+        publish: (suspend (FlagsResult) -> Unit)? = null,
+    ): FlagsResult {
+        val caller = currentCoroutineContext()[FlagRefreshTrace]
+        while (true) {
+            val (key, observed) = generationMutex.withLock {
+                val key = synchronized(cachedSuccesses) { fetchKey(type, userId) }
+                val observed = joinOrStartFetch(key, caller)
+                key to observed
+            }
+            try {
+                val result = awaitFetchResult(observed, userId)
+                val ownedResult = cacheWriteMutexes.getValue(type).withLock {
+                    acceptFetchedResult(key, result, observed.trace, caller, publish)
+                }
+                if (ownedResult != null) return ownedResult
+            } finally {
+                releaseFetch(key, observed)
+            }
+        }
+    }
+
+    private suspend fun awaitFetchResult(observed: ObservedFetch, userId: String): FlagsResult? = try {
+        observed.deferred.await()
+    } catch (superseded: SupersededFetchException) {
+        // This repository cancelled obsolete work, not the caller's refresh. Its
+        // transport remains cancelled, but only the replacement sets the outcome.
+        currentCoroutineContext().ensureActive()
+        if (currentUserId() != userId) throw superseded
+        null
+    }
+
+    /** Called under generationMutex: a barrier cannot change between key capture and joining. */
+    private fun joinOrStartFetch(key: FetchKey, caller: FlagRefreshTrace?): ObservedFetch {
+        val active = synchronized(cachedSuccesses) { activeRefreshes[key.type]?.takeIf { it.key == key } }
+        var joined = false
+        val observed = synchronized(inFlightFetches) {
+            val shared = (active?.fetch?.takeUnless { it.deferred.isCancelled }
+                ?: inFlightFetches[key]?.takeIf { it.deferred.isActive })?.also { joined = true }
+                ?: run {
+                    val trace = refreshDiagnostics.fetch(key.type, caller?.id).also {
+                        // Register publication before a detached fetch can complete its first call.
+                        caller?.attach(it, wasJoined = false)
+                    }
+                    val deferred = fetchScope.async(trace + HfrRequestQueued(), start = CoroutineStart.LAZY) {
+                        fetch(key)
+                    }
+                    ObservedFetch(deferred, trace)
+                }.also { started ->
+                    inFlightFetches[key] = started
+                    started.deferred.invokeOnCompletion {
+                        started.trace.markFinished()
+                        synchronized(inFlightFetches) {
+                            if (inFlightFetches[key] === started) inFlightFetches.remove(key)
+                        }
+                    }
+                }
+            shared.also { it.callers++ }
+        }
+        active?.fetch = observed
+        caller?.attach(observed.trace, joined)
+        observed.deferred.start()
+        return observed
+    }
+
+    private fun releaseFetch(key: FetchKey, observed: ObservedFetch) = synchronized(inFlightFetches) {
+        if (--observed.callers == 0 && observed.deferred.isActive) {
+            if (inFlightFetches[key] === observed) inFlightFetches.remove(key)
+            observed.deferred.cancel()
+        }
+    }
+
+    /** Called under generationMutex. No caller of an obsolete key can publish it anymore. */
+    private fun cancelSupersededFetches() {
+        val (session, sweep, caches) = synchronized(cachedSuccesses) {
+            Triple(sessionGeneration, sweepGeneration, cacheGenerations.toMap())
+        }
+        synchronized(inFlightFetches) {
+            inFlightFetches.keys.filter { key ->
+                key.sessionGeneration != session || key.sweepGeneration != sweep ||
+                    key.cacheGeneration != caches.getValue(key.type)
+            }.forEach { key ->
+                inFlightFetches.remove(key)?.deferred?.cancel(SupersededFetchException())
+            }
+        }
+        // A sweep is shared across types. Cancel it only when the entire sweep generation
+        // loses publication ownership, never when just one of its callers goes away.
+        synchronized(stickySweeps) {
+            stickySweeps.keys.filter { it.sessionGeneration != session || it.sweepGeneration != sweep }
+                .forEach { key -> stickySweeps.remove(key)?.deferred?.cancel(SupersededFetchException()) }
+        }
+    }
+
+    private suspend fun acceptFetchedResult(
+        key: FetchKey,
+        result: FlagsResult?,
+        trace: FlagFetchTrace,
+        caller: FlagRefreshTrace?,
+        publish: (suspend (FlagsResult) -> Unit)?,
+    ): FlagsResult? = generationMutex.withLock {
+        val type = key.type
+        val userId = key.userId
+        if (currentUserId() != userId) {
+            val failure = FlagsResult.Failure(
+                IllegalStateException("HFR account changed while fetching flags"),
+            )
+            caller?.failure(failure.cause)
+            return@withLock failure
+        }
+        var resultTrace: FlagFetchTrace? = trace
+        val owned = synchronized(cachedSuccesses) {
+            val current = fetchKey(type, userId)
+            when {
+                key == current -> result
+                cachedFetchKeys[type] == current -> {
+                    resultTrace = cachedFetchTraces[type]
+                    cachedSuccesses[type]
+                }
+                else -> null
+            }
+        } ?: return@withLock null
+        caller?.result(type, resultTrace)
+        // Both the per-type mutation lock and sweep barrier cover acceptance + publication.
+        publish?.invoke(owned)
+        owned
+    }
+
+    /** Must be called under [cachedSuccesses]' monitor. */
+    private fun fetchKey(type: FlagType, userId: String): FetchKey = FetchKey(
+        type = type,
+        userId = userId,
+        cacheGeneration = cacheGenerations.getValue(type),
+        sessionGeneration = sessionGeneration,
+        sweepGeneration = sweepGeneration,
+    )
+
+    private suspend fun fetch(key: FetchKey): FlagsResult = withContext(ioDispatcher) {
+        val type = key.type
+        var categories: List<Category> = emptyList()
         val result = runCatching {
-            val cats = loadCategories()
+            val cats = measured(FlagRefreshPhase.CATALOGUE) { loadCategories() }
+            categories = cats
+            currentCoroutineContext()[FlagFetchTrace]?.categoryCount = cats.size
             val bucket = type.toBucket()
             // `coroutineScope` (fail-all) is intentional over `supervisorScope` (best-effort).
             // A flags screen must surface a network failure with the "Réessayer" affordance
@@ -843,9 +1043,11 @@ class DefaultFlagRepository @Inject constructor(
             // are up to date. If one cat REST call throws, all siblings are cancelled and
             // [FlagsResult.Failure] propagates with the original cause.
             coroutineScope {
-                val bucketFlags = cats.map { category ->
-                    async { fetchAllPages(cat = category.id, bucket = bucket, type = type) }
-                }.awaitAll().flatten()
+                val bucketFlags = measured(FlagRefreshPhase.BUCKETS) {
+                    cats.map { category ->
+                        async(HfrRequestQueued()) { fetchAllPages(cat = category.id, bucket = bucket, type = type) }
+                    }.awaitAll().flatten()
+                }
                 // #251/#862 — the per-cat flag buckets DROP flagged STICKY topics in EVERY
                 // category, not just the no-subcategory ones (#251's proof was cat 32 « IA » ;
                 // #862 re-proved it live on cat 13 « Discussions » : a favorite flag on the sticky
@@ -856,26 +1058,32 @@ class DefaultFlagRepository @Inject constructor(
                 // deduplicated, BEFORE the global sort + cache so the sticky survives the next
                 // refresh. A marginal sticky must not fail the whole screen (see
                 // [fetchStickyFlagSupplement]).
-                val stickySupplement = fetchStickyFlagSupplement(
-                    cats = cats,
-                    type = type,
-                    alreadyPresent = bucketFlags,
-                    userId = userId,
-                    sessionGen = startGeneration,
-                    sweepGen = startSweepGeneration,
-                )
-                (bucketFlags + stickySupplement)
+                val stickySupplement = measured(FlagRefreshPhase.STICKIES) {
+                    fetchStickyFlagSupplement(
+                        cats = cats,
+                        type = type,
+                        alreadyPresent = bucketFlags,
+                        userId = key.userId,
+                        sessionGen = key.sessionGeneration,
+                        sweepGen = key.sweepGeneration,
+                    )
+                }
+                measured(FlagRefreshPhase.SORT) {
                     // Per-category fan-out concatenates results in cat-iteration order — without a
                     // global sort the screen would group by cat (Discussions block, then Tech block,
                     // …) instead of showing the most recent activity first. `lastReplyAt` is the REST
                     // string `YYYY-MM-DD HH:mm`, so lexicographic descending == chronological
                     // descending. Empty strings (defensive — should not happen on REST flags) sort
                     // last, which is the right "unknown date goes to the bottom" behaviour.
-                    .sortedByDescending { it.lastReplyAt }
+                    (bucketFlags + stickySupplement).sortedByDescending { it.lastReplyAt }
+                }
             }
         }.fold(
-            onSuccess = { flags -> FlagsResult.Success(flags) },
+            onSuccess = { flags ->
+                FlagsResult.Success(flags, currentCoroutineContext()[FlagFetchTrace]?.listIssue(categories))
+            },
             onFailure = { throwable ->
+                if (throwable is CancellationException) throw throwable
                 Log.w(LOG_TAG, "Flags REST fetch failed for $type", throwable)
                 FlagsResult.Failure(throwable)
             },
@@ -888,56 +1096,56 @@ class DefaultFlagRepository @Inject constructor(
         // clearSessionCache must have bumped the generation since this fetch began (a switch DURING the
         // fetch). The disk cache (persistFlags) is already userId-scoped, so it keeps each account's data.
         if (result is FlagsResult.Success) {
-            commitFetchedSuccess(
-                userId = userId,
-                type = type,
-                result = result,
-                startSessionGeneration = startGeneration,
-                startCacheGeneration = startCacheGeneration,
-            )
+            commitFetchedSuccess(key, result)
         }
         result
     }
 
     /**
-     * Commits one REST result only while both its auth session and per-type cache generation still
-     * own the write. The per-type mutex makes the check + Room replace + memory write atomic with
-     * mutation invalidation (#986), so an older fetch can never repopulate a purged FAVORITE bucket.
+     * Commits only while all captured generations own the write. The per-type mutex serializes
+     * mutations (#986); generationMutex covers the ownership check + Room + memory against pulls.
      */
-    @Suppress("LongParameterList") // the two generations are distinct ownership fences.
-    private suspend fun commitFetchedSuccess(
-        userId: String,
-        type: FlagType,
-        result: FlagsResult.Success,
-        startSessionGeneration: Int,
-        startCacheGeneration: Int,
-    ) {
-        var committed = false
+    private suspend fun commitFetchedSuccess(key: FetchKey, result: FlagsResult.Success) {
+        val type = key.type
+        val trace = currentCoroutineContext()[FlagFetchTrace]
+        val mutexStart = System.nanoTime()
         cacheWriteMutexes.getValue(type).withLock {
-            val ownsWrite = currentUserId() == userId && synchronized(cachedSuccesses) {
-                sessionGeneration == startSessionGeneration &&
-                    cacheGenerations.getValue(type) == startCacheGeneration
-            }
-            if (!ownsWrite) return@withLock
-
-            persistFlags(userId = userId, type = type, flags = result.flags)
-            synchronized(cachedSuccesses) {
-                if (
-                    sessionGeneration == startSessionGeneration &&
-                    cacheGenerations.getValue(type) == startCacheGeneration
-                ) {
-                    cachedSuccesses[type] = result
-                    committed = true
+            generationMutex.withLock {
+                trace?.phase(FlagRefreshPhase.MUTEX, mutexStart)
+                val ownsWrite = currentUserId() == key.userId && synchronized(cachedSuccesses) {
+                    fetchKey(type, key.userId) == key
+                }
+                if (ownsWrite) {
+                    measured(FlagRefreshPhase.ROOM) { persistFlags(key.userId, type, result) }
+                    val committed = synchronized(cachedSuccesses) {
+                        if (fetchKey(type, key.userId) == key) {
+                            cachedSuccesses[type] = result
+                            cachedFetchKeys[type] = key
+                            if (trace != null) cachedFetchTraces[type] = trace else cachedFetchTraces.remove(type)
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    if (committed) publishCacheUpdate(type)
+                } else {
+                    // stickyGenerationRefused counts sweep refusals, not rejected commits.
+                    trace?.gap(FlagRefreshGap.CACHE_GENERATION)
                 }
             }
         }
-        if (committed) publishCacheUpdate(type)
     }
 
-    private suspend fun persistFlags(userId: String, type: FlagType, flags: List<Flag>) {
+    private suspend fun persistFlags(userId: String, type: FlagType, result: FlagsResult.Success) {
+        val trace = currentCoroutineContext()[FlagFetchTrace]
         runCatching {
-            flagCacheStore.replace(userId = userId, type = type, flags = flags)
+            flagCacheStore.replace(
+                userId = userId, type = type, flags = result.flags, isComplete = result.issue == null,
+            )
         }.onFailure { throwable ->
+            if (throwable is CancellationException) throw throwable
+            trace?.gap(FlagRefreshGap.ROOM_WRITE)
+            trace?.failed(FlagRefreshPhase.ROOM, throwable, fatal = false)
             Log.w(LOG_TAG, "Could not persist flags cache for $type", throwable)
         }
     }
@@ -972,7 +1180,14 @@ class DefaultFlagRepository @Inject constructor(
     private suspend fun loadCategories(): List<Category> {
         val all = when (val result = forumRepository.getCategories(forceRefreshIfStale = true)) {
             is ForumResult.Success -> result.value
-            is ForumResult.Failure -> throw result.cause
+            is ForumResult.Failure -> {
+                currentCoroutineContext()[FlagFetchTrace]?.failed(
+                    FlagRefreshPhase.CATALOGUE,
+                    result.cause,
+                    fatal = true,
+                )
+                throw result.cause
+            }
             ForumResult.Loading -> error("getCategories never emits Loading")
         }
         return all.filter { it.id > 0 }
@@ -997,17 +1212,24 @@ class DefaultFlagRepository @Inject constructor(
         failOnTruncation: Boolean = false,
     ): List<Flag> {
         val accumulated = mutableListOf<Flag>()
+        val trace = currentCoroutineContext()[FlagFetchTrace]
         var page = 1
         var lastResultsCount = 0
         while (page <= MAX_PAGES) {
-            val body = apiClient.getCategoryFlagTopics(
-                cat = cat,
-                bucket = bucket,
-                page = page,
-                resultsPerPage = DEFAULT_RESULTS_PER_PAGE,
-                useAuth = true,
-            )
-            val envelope = json.decodeFromString<RestListEnvelope<RestTopic>>(body)
+            trace?.page(sticky = false)
+            val envelope = try {
+                val body = apiClient.getCategoryFlagTopics(
+                    cat = cat,
+                    bucket = bucket,
+                    page = page,
+                    resultsPerPage = DEFAULT_RESULTS_PER_PAGE,
+                    useAuth = true,
+                )
+                json.decodeFromString<RestListEnvelope<RestTopic>>(body)
+            } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
+                trace?.failed(FlagRefreshPhase.BUCKETS, error, fatal = true)
+                throw error
+            }
             val mapped = RestFlagMappers.toFlags(
                 envelope = envelope,
                 type = type,
@@ -1016,6 +1238,7 @@ class DefaultFlagRepository @Inject constructor(
             accumulated += mapped
             lastResultsCount = envelope.resource.resultsCount
             if (mapped.isEmpty() || accumulated.size >= lastResultsCount) {
+                if (accumulated.size < lastResultsCount) trace?.gap(FlagRefreshGap.EMPTY_BUCKET_PAGE)
                 if (failOnTruncation && accumulated.size < lastResultsCount) {
                     error(
                         "Incomplete REST flags pagination for cat=$cat bucket=$bucket: " +
@@ -1026,11 +1249,11 @@ class DefaultFlagRepository @Inject constructor(
             }
             page += 1
         }
-        // Loop exited via the MAX_PAGES cap. Surface the silent truncation in adb logs
-        // so it can be diagnosed before the user complains — defensive cap, but if it
-        // ever fires the listing is incomplete and the symptom would otherwise be
-        // invisible.
+        // Loop exited via the MAX_PAGES cap: record certain truncation for diagnostics and the
+        // transient UI warning, while still publishing the accumulated rows. Unlike a divergent
+        // counter on an empty page, a non-empty walk stopped by our cap has unvisited pages.
         if (accumulated.size < lastResultsCount) {
+            trace?.gap(FlagRefreshGap.PAGE_CAP)
             Log.w(
                 LOG_TAG,
                 "REST flags pagination hit MAX_PAGES=$MAX_PAGES for cat=$cat bucket=$bucket " +
@@ -1058,8 +1281,9 @@ class DefaultFlagRepository @Inject constructor(
      *
      * Best-effort (#251 Codex gate): although it runs in the SAME `coroutineScope` as the bucket
      * fan-out, each cat's `topics/last` call is wrapped in its own `runCatching`, so a network/JSON
-     * failure logs and yields nothing rather than failing the whole refresh — recovering a marginal
-     * sticky is not worth turning the screen into a "Réessayer" error. (A `CancellationException` is
+     * failure logs and yields nothing rather than failing the whole refresh. #984 also records the
+     * category in the existing diagnostic gap so the fresh list carries a retryable warning.
+     * (A `CancellationException` is
      * rethrown, not swallowed, to keep structured concurrency intact.) Page 1 only:
      * stickies always head the listing, so deeper pages would be pure network noise for this fix.
      * #862 widened the scope from no-subcategory cats to ALL cats (~19 parallel GETs per refresh,
@@ -1077,18 +1301,26 @@ class DefaultFlagRepository @Inject constructor(
         // A stale generation (post-clearSessionCache caller, or a fetch that started under an
         // older refresh burst) or an empty catalogue all degrade to « no supplement » — never
         // create a sweep for a logged-out account, never join a newer burst's sweep.
-        val sweep = if (cats.isEmpty()) null else stickySweep(cats, userId, sessionGen, sweepGen)
-        if (sweep == null) return emptyList()
+        val trace = currentCoroutineContext()[FlagFetchTrace]
+        val sweep = if (cats.isEmpty()) null else stickySweep(cats, userId, sessionGen, sweepGen, trace)
+        if (sweep == null) {
+            if (cats.isNotEmpty()) trace?.gap(FlagRefreshGap.STICKY_GENERATION)
+            return emptyList()
+        }
         val present = alreadyPresent.mapTo(mutableSetOf()) { it.cat to it.topicId }
         val bodies = try {
-            sweep.await()
+            sweep.deferred.await()
         } catch (cancellation: CancellationException) {
-            // Distinguish « the sweep was cancelled » (session change — degrade, best-effort)
-            // from « WE were cancelled » (structured concurrency — rethrow).
+            // Only a superseded account's shared sweep may degrade. An active account's REST
+            // cancellation must propagate even when this detached caller itself remains active.
             currentCoroutineContext().ensureActive()
+            val sameSession = synchronized(cachedSuccesses) { sessionGeneration == sessionGen }
+            if (sameSession && currentUserId() == userId) throw cancellation
+            trace?.gap(FlagRefreshGap.STICKY_CANCELLED)
             Log.w(LOG_TAG, "Sticky sweep cancelled (session change) — empty supplement", cancellation)
             emptyMap()
         }
+        sweep.trace?.let { trace?.absorbSticky(it) }
         return cats.flatMap { category ->
             val body = bodies[category.id] ?: return@flatMap emptyList()
             runCatching {
@@ -1096,6 +1328,8 @@ class DefaultFlagRepository @Inject constructor(
                 RestFlagMappers.toStickyFlags(envelope = envelope, type = type, fallbackCat = category.id)
             }.getOrElse { throwable ->
                 if (throwable is CancellationException) throw throwable
+                trace?.gap(FlagRefreshGap.STICKY_DECODE, stickyCategory = category.id)
+                trace?.failed(FlagRefreshPhase.STICKIES, throwable, fatal = false)
                 Log.w(LOG_TAG, "Sticky sweep decode failed for cat=${category.id} (best-effort)", throwable)
                 emptyList()
             }
@@ -1114,32 +1348,40 @@ class DefaultFlagRepository @Inject constructor(
      * for a logged-out account. Runs in [fetchScope] so the caller that LOSES a tab-switch race
      * does not cancel the sweep a sibling type still awaits ; [clearSessionCache] cancels and
      * drops everything. Per-cat failures degrade to a null body (best-effort, #251). Older
-     * generations' entries are pruned WITHOUT cancel (their awaiters finish, the refs are dropped).
+     * generations are cancelled at their barrier: none of their callers can publish those results.
      */
     private fun stickySweep(
         cats: List<Category>,
         userId: String,
         sessionGen: Int,
         sweepGen: Int,
-    ): Deferred<Map<Int, String?>>? = synchronized(stickySweeps) {
-        val currentSessionGen = synchronized(cachedSuccesses) { sessionGeneration }
-        if (sessionGen != currentSessionGen) return@synchronized null
-        // Gate Sol r3 — a fetch that started under an older burst is refused (it degrades to an
-        // empty supplement) exactly like a stale session : generations never mix.
-        if (sweepGen != sweepGeneration) return@synchronized null
+        parentTrace: FlagFetchTrace?,
+    ): ObservedSweep? = synchronized(stickySweeps) {
+        val ownsSweep = synchronized(cachedSuccesses) {
+            sessionGen == sessionGeneration && sweepGen == sweepGeneration
+        }
+        if (!ownsSweep) return@synchronized null
         val key = SweepKey(
             sessionGeneration = sessionGen,
             sweepGeneration = sweepGen,
             userId = userId,
             catIds = cats.map { it.id },
         )
-        stickySweeps[key] ?: run {
-            stickySweeps.keys.filter { it != key }.forEach(stickySweeps::remove)
-            fetchScope.async {
+        val existing = stickySweeps[key]
+        if (existing != null) {
+            parentTrace?.joinedStickySweep()
+            existing.trace?.let { parentTrace?.sticky(it) }
+            existing
+        } else {
+            val trace = parentTrace?.let { parent ->
+                FlagFetchTrace(parent.refreshId, parent.type).also { parent.sticky(it) }
+            }
+            val deferred = fetchScope.async(trace ?: kotlin.coroutines.EmptyCoroutineContext) {
                 coroutineScope {
                     cats.map { category ->
-                        async {
+                        async(HfrRequestQueued()) {
                             category.id to runCatching {
+                                trace?.page(sticky = true)
                                 apiClient.getTopicList(
                                     cat = category.id,
                                     subcat = null,
@@ -1152,6 +1394,8 @@ class DefaultFlagRepository @Inject constructor(
                                 // "miss" — rethrow it so structured concurrency stays intact
                                 // (#251 Codex review). Only network failures degrade to null.
                                 if (throwable is CancellationException) throw throwable
+                                trace?.gap(FlagRefreshGap.STICKY_REQUEST, stickyCategory = category.id)
+                                trace?.failed(FlagRefreshPhase.STICKIES, throwable, fatal = false)
                                 Log.w(
                                     LOG_TAG,
                                     "Sticky sweep failed for cat=${category.id} (best-effort)",
@@ -1162,7 +1406,8 @@ class DefaultFlagRepository @Inject constructor(
                         }
                     }.awaitAll().toMap()
                 }
-            }.also { stickySweeps[key] = it }
+            }
+            ObservedSweep(deferred, trace).also { stickySweeps[key] = it }
         }
     }
 
@@ -1174,10 +1419,12 @@ class DefaultFlagRepository @Inject constructor(
         val catIds: List<Int>,
     )
 
-    private val stickySweeps: MutableMap<SweepKey, Deferred<Map<Int, String?>>> = mutableMapOf()
+    private data class ObservedSweep(val deferred: Deferred<Map<Int, String?>>, val trace: FlagFetchTrace?)
 
-    // #862 — bumped by every explicit [refresh] under the stickySweeps lock : a manual pull is a
-    // NEW generation, never served by the previous burst's sweep.
+    private val stickySweeps: MutableMap<SweepKey, ObservedSweep> = mutableMapOf()
+
+    // #862/#984 — accessed under cachedSuccesses. Bumps also hold generationMutex so a manual
+    // pull fences commit and publication; overlapping pulls of one type may share the barrier.
     private var sweepGeneration = 0
 
     private fun FlagType.toBucket(): HfrRestFlagBucket = when (this) {

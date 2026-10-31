@@ -19,6 +19,11 @@
     <string name="profile_field_signature">Signature</string>
     <string name="profile_field_membership">Membre depuis</string>
     <string name="profile_field_messages_short">Messages</string>
+    <string name="profile_configuration_title">Configuration matérielle</string>
+    <string name="profile_configuration_unavailable">Configuration indisponible</string>
+    <string name="profile_configuration_retry">Réessayer la configuration matérielle</string>
+    <string name="profile_configuration_empty">Aucune configuration renseignée</string>
+    <string name="profile_configuration_loading">Chargement de la configuration matérielle</string>
 
     <!-- Actions -->
     <string name="profile_action_open_full">Voir le profil complet</string>

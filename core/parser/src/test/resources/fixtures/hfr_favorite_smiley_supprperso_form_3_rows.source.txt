@@ -1,0 +1,5 @@
+Fixture : hfr_favorite_smiley_supprperso_form_3_rows.html
+Origine : réponse HTTP 200 de GET /user/supprperso.php?config=hfr.inc (021)
+Capture : live le 2026-10-29, authentifié sous XaTelitte (compte de test de l'agent), #1154, capture de mutation.
+Cas : formulaire de suppression peuplé, 3 lignes tr.s2Topic (smiley0..smiley2 / delete0..delete2) : [:fictif c:10] (nom avec espace + variante), [:fictif_a] (simple), [:fictif b:2] (espaces + variante).
+Sous-arbre assaini : form[name=test] verbatim seul, dans un squelette html/head/body minimal. hash_check -> 0123456789abcdef0123456789abcdef, codehex (attribut action) -> fedcba9876543210fedcba9876543210. Le premier favori (choisi par le mainteneur) est renommé « fictif c » partout (th, img src/alt, input hidden). Ni cookie, ni cryptlink, ni user_id, ni pseudo.

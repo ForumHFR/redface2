@@ -3,6 +3,10 @@ package fr.forumhfr.redface2.core.data.forum
 import android.util.Log
 import fr.forumhfr.redface2.core.data.cache.CachePolicy
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagFetchTrace
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshGap
+import fr.forumhfr.redface2.core.domain.diagnostics.FlagRefreshPhase
+import fr.forumhfr.redface2.core.domain.diagnostics.HfrCatalogueTrace
 import fr.forumhfr.redface2.core.domain.forum.FlagFilterBucket
 import fr.forumhfr.redface2.core.domain.forum.ForumRepository
 import fr.forumhfr.redface2.core.domain.forum.ForumResult
@@ -15,7 +19,9 @@ import java.time.Clock
 import java.time.Instant
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -66,6 +72,7 @@ class DefaultForumRepository @Inject constructor(
     // redundant public REST calls. The mutex serialises the fetch path and the second
     // collector double-checks the now-warm cache instead of re-fetching.
     private val categoriesFetchMutex = Mutex()
+    @Volatile private var activeCategoriesTrace: HfrCatalogueTrace? = null
 
     private val categoriesRefresh: MutableSharedFlow<ForumResult<List<Category>>> =
         MutableSharedFlow(replay = 0, extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
@@ -104,15 +111,7 @@ class DefaultForumRepository @Inject constructor(
             // concurrent observeCategories() cold fetch is not duplicated. This is the #251 fix:
             // the flags fan-out asks with forceRefreshIfStale = true so a category added after the
             // 24h cache was warmed is enumerated and its drapeaux fetched.
-            else -> when (val fetched = fetchCategoriesSingleFlight(now)) {
-                // DEGRADE on a network failure when a stale cache exists: the flags fan-out (#251)
-                // prefers enumerating a slightly-stale catalogue to hard-failing the whole Drapeaux
-                // screen when only the categories endpoint is momentarily down (parity with the old
-                // observeCategories().first behaviour, which served last-known-good). A cold cache has
-                // nothing to fall back to, so its Failure still surfaces.
-                is ForumResult.Failure -> if (cached != null) ForumResult.Success(cached.value) else fetched
-                else -> fetched
-            }
+            else -> fetchCategoriesWithFallback(now, cached)
         }
     }
 
@@ -246,27 +245,62 @@ class DefaultForumRepository @Inject constructor(
      * "always hit HFR" primitive. [refreshCategories] deliberately bypasses this guard — it is an
      * explicit user refresh and must always re-hit HFR regardless of freshness.
      */
-    private suspend fun fetchCategoriesSingleFlight(now: Instant): ForumResult<List<Category>> =
-        categoriesFetchMutex.withLock {
+    private suspend fun fetchCategoriesSingleFlight(now: Instant): ForumResult<List<Category>> {
+        val caller = currentCoroutineContext()[FlagFetchTrace]
+        activeCategoriesTrace?.let { caller?.catalogue(it, wasJoined = true) }
+        return categoriesFetchMutex.withLock {
             val cached = cachedCategories
             if (cached != null && CachePolicy.isFresh(cached.fetchedAt, CachePolicy.categories, now)) {
+                cached.catalogueTrace?.let { caller?.catalogue(it, wasJoined = true) }
                 ForumResult.Success(cached.value)
             } else {
-                fetchCategories()
+                val trace = HfrCatalogueTrace()
+                activeCategoriesTrace = trace
+                try {
+                    fetchCategories(trace)
+                } finally {
+                    activeCategoriesTrace = null
+                }
             }
         }
+    }
 
-    private suspend fun fetchCategories(): ForumResult<List<Category>> = withContext(ioDispatcher) {
+    private suspend fun fetchCategoriesWithFallback(
+        now: Instant,
+        cached: CachedEntry<List<Category>>?,
+    ): ForumResult<List<Category>> = when (val fetched = fetchCategoriesSingleFlight(now)) {
+        // DEGRADE on a network failure when a stale cache exists: the flags fan-out (#251)
+        // prefers enumerating a slightly-stale catalogue to hard-failing the whole Drapeaux
+        // screen when only the categories endpoint is momentarily down (parity with the old
+        // observeCategories().first behaviour, which served last-known-good). A cold cache has
+        // nothing to fall back to, so its Failure still surfaces.
+        is ForumResult.Failure -> if (cached != null) {
+            currentCoroutineContext()[FlagFetchTrace]?.let { trace ->
+                trace.gap(FlagRefreshGap.CATALOGUE_FALLBACK)
+                trace.failed(FlagRefreshPhase.CATALOGUE, fetched.cause, fatal = false)
+            }
+            ForumResult.Success(cached.value)
+        } else {
+            fetched
+        }
+        else -> fetched
+    }
+
+    private suspend fun fetchCategories(
+        trace: HfrCatalogueTrace = HfrCatalogueTrace(),
+    ): ForumResult<List<Category>> = withContext(ioDispatcher + trace) {
+        currentCoroutineContext()[FlagFetchTrace]?.catalogue(trace, wasJoined = false)
         runCatching {
             val body = apiClient.getCategories(useAuth = false)
             val envelope = json.decodeFromString<RestListEnvelope<RestCategory>>(body)
             RestForumMappers.toCategories(envelope)
         }.fold(
             onSuccess = { list ->
-                cachedCategories = CachedEntry(list, clock.instant())
+                cachedCategories = CachedEntry(list, clock.instant(), trace)
                 ForumResult.Success(list)
             },
             onFailure = { throwable ->
+                if (throwable is CancellationException) throw throwable
                 Log.w(LOG_TAG, "Categories fetch failed", throwable)
                 ForumResult.Failure(throwable)
             },
@@ -284,6 +318,7 @@ class DefaultForumRepository @Inject constructor(
                 ForumResult.Success(list)
             },
             onFailure = { throwable ->
+                if (throwable is CancellationException) throw throwable
                 Log.w(LOG_TAG, "Subcategories fetch failed for cat=$cat", throwable)
                 ForumResult.Failure(throwable)
             },
@@ -313,6 +348,7 @@ class DefaultForumRepository @Inject constructor(
         }.fold(
             onSuccess = { ForumResult.Success(it) },
             onFailure = { throwable ->
+                if (throwable is CancellationException) throw throwable
                 Log.w(LOG_TAG, "Topic list fetch failed for cat=$cat subcat=$subcat page=$page", throwable)
                 ForumResult.Failure(throwable)
             },
@@ -346,7 +382,11 @@ class DefaultForumRepository @Inject constructor(
 
     private data class TopicListKey(val cat: Int, val subcat: Int?, val page: Int)
 
-    private data class CachedEntry<T>(val value: T, val fetchedAt: Instant)
+    private data class CachedEntry<T>(
+        val value: T,
+        val fetchedAt: Instant,
+        val catalogueTrace: HfrCatalogueTrace? = null,
+    )
 
     private companion object {
         const val LOG_TAG = "ForumRepository"

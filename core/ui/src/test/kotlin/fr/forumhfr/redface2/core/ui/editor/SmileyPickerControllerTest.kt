@@ -34,6 +34,55 @@ class SmileyPickerControllerTest {
     )
 
     @Test
+    fun `open exposes HFR favorites in server order without a wiki search`() = runTest {
+        val favorites = listOf("[:fictif_z:3]", "[:fictif_a]").map { token ->
+            EditorSmiley(token, "https://example.invalid/$token.gif", EditorSmileySource.HFR_FAVORITE)
+        }
+        val controller = SmileyPickerController(
+            scope = this,
+            searchWiki = { _, _ -> error("Favorites must not trigger a search") },
+            favoriteSources = SmileyPickerFavoriteSources(favoriteSmileys = { favorites }),
+        )
+        controller.open()
+        assertEquals(favorites, (controller.state.value as SmileyPickerState.Open).favoriteSmileys)
+    }
+
+    @Test
+    fun `empty form favorites leave no favorites section in the state`() = runTest {
+        val controller = SmileyPickerController(this, { _, _ -> emptyList() })
+        controller.open()
+        assertTrue((controller.state.value as SmileyPickerState.Open).favoriteSmileys.isEmpty())
+    }
+
+    @Test
+    fun `form refresh updates visible favorites and reopening never restores stale favorites`() = runTest {
+        var favorites = listOf(
+            EditorSmiley("[:fictif_a]", "https://example.invalid/a.gif", EditorSmileySource.HFR_FAVORITE),
+        )
+        val controller = SmileyPickerController(
+            scope = this,
+            searchWiki = { _, _ -> emptyList() },
+            favoriteSources = SmileyPickerFavoriteSources(favoriteSmileys = { favorites }),
+        )
+        controller.open()
+        controller.onQueryChanged("ab")
+        favorites = listOf(
+            EditorSmiley("[:fictif_b:3]", "https://example.invalid/b.gif", EditorSmileySource.HFR_FAVORITE),
+        )
+        controller.refreshFavorites(controller.favoriteFormStamp())
+        val open = controller.state.value as SmileyPickerState.Open
+        assertEquals(favorites, open.favoriteSmileys)
+        assertEquals("ab", open.query)
+        controller.dismiss()
+        favorites = emptyList()
+        controller.refreshFavorites(controller.favoriteFormStamp())
+        assertEquals(SmileyPickerState.Hidden, controller.state.value)
+        controller.open()
+        assertTrue((controller.state.value as SmileyPickerState.Open).favoriteSmileys.isEmpty())
+        assertEquals("ab", (controller.state.value as SmileyPickerState.Open).query)
+    }
+
+    @Test
     fun `open is idempotent and dismiss resets to Hidden`() = runTest {
         val controller = SmileyPickerController(this, { _, _ -> emptyList() })
 
@@ -171,12 +220,15 @@ class SmileyPickerControllerTest {
         advanceUntilIdle()
         assertEquals(1, calls)
 
+        val diagnostics = (controller.state.value as SmileyPickerState.Open).diagnostics
         controller.dismiss() // insertion and swipe-down both land here
         controller.open()
 
         assertEquals(
             "the dismissed search must come back verbatim — no refetch",
-            SmileyPickerState.Open(query = "jap", wiki = WikiSearchState.Results(listOf(smiley))),
+            SmileyPickerState.Open(query = "jap", wiki = WikiSearchState.Results(listOf(smiley)),
+                onDetailChange = controller::onDetailChanged,
+                onWikiKeywordsRetry = controller::retryWikiKeywords, diagnostics = diagnostics),
             controller.state.value,
         )
         advanceUntilIdle()
@@ -198,12 +250,15 @@ class SmileyPickerControllerTest {
             (controller.state.value as SmileyPickerState.Open).wiki,
         )
 
+        val diagnostics = (controller.state.value as SmileyPickerState.Open).diagnostics
         controller.dismiss() // cancels the hanging job
         controller.open()
 
         // A restored Loading would spin forever (its job is dead) : it must normalise to Idle.
         assertEquals(
-            SmileyPickerState.Open(query = "jap", wiki = WikiSearchState.Idle),
+            SmileyPickerState.Open(query = "jap", wiki = WikiSearchState.Idle,
+                onDetailChange = controller::onDetailChanged,
+                onWikiKeywordsRetry = controller::retryWikiKeywords, diagnostics = diagnostics),
             controller.state.value,
         )
     }
@@ -220,11 +275,14 @@ class SmileyPickerControllerTest {
             (controller.state.value as SmileyPickerState.Open).wiki,
         )
 
+        val diagnostics = (controller.state.value as SmileyPickerState.Open).diagnostics
         controller.dismiss()
         controller.open()
 
         assertEquals(
-            SmileyPickerState.Open(query = "jap", wiki = WikiSearchState.Idle),
+            SmileyPickerState.Open(query = "jap", wiki = WikiSearchState.Idle,
+                onDetailChange = controller::onDetailChanged,
+                onWikiKeywordsRetry = controller::retryWikiKeywords, diagnostics = diagnostics),
             controller.state.value,
         )
     }
@@ -236,12 +294,15 @@ class SmileyPickerControllerTest {
 
         controller.open()
         controller.onQueryChanged("ja") // below MIN_WIKI_QUERY_LENGTH → Idle, no search
+        val diagnostics = (controller.state.value as SmileyPickerState.Open).diagnostics
         controller.dismiss()
         controller.open()
         advanceUntilIdle()
 
         assertEquals(
-            SmileyPickerState.Open(query = "ja", wiki = WikiSearchState.Idle),
+            SmileyPickerState.Open(query = "ja", wiki = WikiSearchState.Idle,
+                onDetailChange = controller::onDetailChanged,
+                onWikiKeywordsRetry = controller::retryWikiKeywords, diagnostics = diagnostics),
             controller.state.value,
         )
         assertEquals(0, calls)

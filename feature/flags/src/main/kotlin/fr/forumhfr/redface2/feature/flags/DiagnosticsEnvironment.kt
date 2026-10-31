@@ -1,0 +1,46 @@
+package fr.forumhfr.redface2.feature.flags
+
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.diagnostics.SmileyPickerDiagnostics
+import java.text.SimpleDateFormat
+import java.util.Date
+
+// Six explicitly allowed environment fields; no package name, device ID or account metadata.
+@Suppress("LongParameterList")
+internal data class DiagnosticsEnvironment(
+    val versionName: String,
+    val versionCode: Int,
+    val channel: String,
+    val apiLevel: Int,
+    val manufacturer: String,
+    val model: String,
+)
+
+// Entire messages of these tags are exported. New fields must use closed values/numbers only,
+// including refresh network context and the acquired connection's IP family (never its address).
+// Legacy producers remain visible only in the local viewer.
+private val diagnosticsExportTags = setOf("FlagsRefresh", "HfrCall", "AppForeground", SmileyPickerDiagnostics.TAG)
+
+internal fun formatDiagnosticsExport(
+    entries: List<DiagnosticsLog.Entry>,
+    timeFormat: SimpleDateFormat,
+    environment: DiagnosticsEnvironment,
+): String = buildString {
+    appendLine("Redface 2 version=${environment.versionName.singleLine()} build=${environment.versionCode} " +
+        "channel=${environment.channel.singleLine()}")
+    appendLine("Android API=${environment.apiLevel} manufacturer=${environment.manufacturer.singleLine()} " +
+        "model=${environment.model.singleLine()}")
+    val exported = entries.filter { it.tag in diagnosticsExportTags }
+    exported.forEach { entry ->
+        val level = when (entry.level) {
+            DiagnosticsLog.Level.INFO -> "I"
+            DiagnosticsLog.Level.DEBUG -> "D"
+            DiagnosticsLog.Level.WARN -> "W"
+            DiagnosticsLog.Level.ERROR -> "E"
+        }
+        appendLine("${timeFormat.format(Date(entry.timestampMillis))}  $level  ${entry.tag}  ${entry.message}")
+    }
+    appendLine("${entries.size - exported.size} entrées locales non exportées")
+}.trimEnd()
+
+private fun String.singleLine(): String = replace('\n', ' ').replace('\r', ' ')

@@ -4,11 +4,16 @@ import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.model.EditorSmiley
+import fr.forumhfr.redface2.core.model.SmileyWikiKeywordsResult
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.smiley.SmileySearchParser
+import fr.forumhfr.redface2.core.parser.smiley.SmileyWikiKeywordsParser
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 
 /**
@@ -26,7 +31,36 @@ class DefaultSmileyRepository @Inject constructor(
     private val parser: SmileySearchParser,
     private val diagnostics: DiagnosticsLog,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
+    private val keywordsParser: SmileyWikiKeywordsParser,
 ) : SmileyRepository {
+
+    // Owned by this singleton, not by an editor or an account. Synchronize even reads: accessOrder
+    // mutates the LRU on a hit. No lock spans network IO, so independent details can load in parallel.
+    private val keywordsCache = LinkedHashMap<String, SmileyWikiKeywordsResult.Loaded>(16, 0.75f, true)
+
+    override fun cachedWikiKeywords(token: String): SmileyWikiKeywordsResult.Loaded? =
+        synchronized(keywordsCache) { keywordsCache[token] }
+
+    override suspend fun getWikiKeywords(token: String): SmileyWikiKeywordsResult {
+        if (!token.startsWith("[:") || !token.endsWith("]")) return SmileyWikiKeywordsResult.NotApplicable
+        return cachedWikiKeywords(token) ?: withContext(ioDispatcher) {
+            runCatching {
+                val html = hfrClient.getSmileyWikiDetail(token)
+                val result = SmileyWikiKeywordsResult.Loaded(keywordsParser.parse(html, token))
+                currentCoroutineContext().ensureActive()
+                synchronized(keywordsCache) {
+                    keywordsCache[token] = result
+                    if (keywordsCache.size > MAX_WIKI_KEYWORDS_ENTRIES) {
+                        keywordsCache.remove(keywordsCache.keys.first())
+                    }
+                }
+                result
+            }.getOrElse { error ->
+                if (error is CancellationException) throw error
+                SmileyWikiKeywordsResult.Failed
+            }
+        }
+    }
 
     override suspend fun searchWiki(userId: Int, query: String): List<EditorSmiley> {
         diagnostics.record(
@@ -50,8 +84,9 @@ class DefaultSmileyRepository @Inject constructor(
         }
     }
 
-    private companion object {
+    internal companion object {
         private const val LOG_TAG = "SmileyRepository"
+        const val MAX_WIKI_KEYWORDS_ENTRIES = 256
     }
 }
 

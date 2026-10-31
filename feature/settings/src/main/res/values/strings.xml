@@ -160,7 +160,7 @@
     <!-- §5 Édition et publication -->
     <string name="settings_future_auto_signature">Signature automatique</string>
     <string name="settings_future_auto_drafts">Brouillons automatiques</string>
-    <string name="settings_future_recent_smileys">Smileys récents / favoris</string>
+    <string name="settings_future_recent_smileys">Smileys : effacer les favoris de l\'appareil et le Top d\'usage</string>
     <string name="settings_future_spell_check">Correcteur orthographique</string>
     <string name="settings_future_custom_bbcode_toolbar">Barre d\'outils BBCode personnalisable</string>
     <!-- §6 Images et upload -->

@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.core.model.write
 
+import fr.forumhfr.redface2.core.model.EditorSmiley
+
 /**
  * Parsed view of HFR's topic-level form (Phase 2D #148 edit first post,
  * Phase 2E #149 create topic).
@@ -72,6 +74,8 @@ data class TopicForm(
     val msgIcon: String?,
     val poll: TopicPollForm,
     val isAnonymous: Boolean,
+    /** Read-only HFR account favorites, in server order ; empty when absent or anonymous. */
+    val favoriteSmileys: List<EditorSmiley> = emptyList(),
 )
 
 /**

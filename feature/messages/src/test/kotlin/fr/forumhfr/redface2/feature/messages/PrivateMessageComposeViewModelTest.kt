@@ -1,5 +1,14 @@
 package fr.forumhfr.redface2.feature.messages
 
+import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollectionSnapshot
+import fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS
+import fr.forumhfr.redface2.core.model.SmileyUsageEntry
+
+import fr.forumhfr.redface2.core.model.EditorSmiley
+import fr.forumhfr.redface2.core.model.EditorSmileySource
+import fr.forumhfr.redface2.core.model.HfrFavoriteSmileyMutationResult
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
+
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
@@ -92,6 +101,8 @@ class PrivateMessageComposeViewModelTest {
     )
 
     private val draftStore = FakeEditorDraftStore()
+    private val favoriteRepository = FakeHfrFavoriteSmileyRepository()
+    private val localCollections = FakeSmileyLocalCollections()
 
     @Suppress("LongParameterList") // test factory mirroring the ViewModel's injected dependencies.
     private fun viewModel(
@@ -114,6 +125,8 @@ class PrivateMessageComposeViewModelTest {
         imageUploadReader = imageUploadReader,
         diagnostics = diagnostics,
         smileyRepository = smileyRepository,
+        hfrFavoriteSmileyRepository = favoriteRepository,
+        smileyLocalCollections = localCollections,
         savedStateHandle = savedStateHandle,
     )
 
@@ -247,6 +260,103 @@ class PrivateMessageComposeViewModelTest {
             ),
             diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
         )
+    }
+
+    @Test
+    fun `local collections and gestures use the injected shared component`() = runTest {
+        val smiley = BUILTIN_HFR_SMILEYS.first()
+        localCollections.snapshot.value = SmileyLocalCollectionSnapshot(
+            "alice", top = listOf(SmileyUsageEntry(smiley.token, 2, 1)),
+        )
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val viewModel = viewModel(repository)
+        testScheduler.advanceUntilIdle()
+        viewModel.smileyPicker.open()
+        val open = viewModel.smileyPicker.state.value as SmileyPickerState.Open
+        assertEquals(listOf(smiley), open.mostUsedSmileys)
+        requireNotNull(open.onLocalFavoriteChange)(smiley)
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf(Triple("alice", smiley.token, smiley.imageUrl)), localCollections.added)
+        coVerify(exactly = 1) { repository.fetchComposeForm(any()) }
+    }
+
+    @Test
+    fun `picker invokes the injected HFR add and remove without reloading the form`() = runTest {
+        localCollections.snapshot.value = SmileyLocalCollectionSnapshot("alice")
+        val wiki = EditorSmiley("[:fictif_geste:2]", "https://example.invalid/geste.gif", EditorSmileySource.WIKI)
+        val favorite = wiki.copy(source = EditorSmileySource.HFR_FAVORITE)
+        favoriteRepository.addResult = HfrFavoriteSmileyMutationResult.Success(listOf(favorite))
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val viewModel = viewModel(repository)
+        testScheduler.advanceUntilIdle()
+        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.onFavoriteClicked(wiki)
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf(wiki.token), favoriteRepository.added)
+        assertEquals(listOf(favorite), (viewModel.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys)
+
+        viewModel.smileyPicker.onFavoriteClicked(wiki)
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf(wiki.token), favoriteRepository.removed)
+        assertEquals(listOf("alice", "alice"), favoriteRepository.owners)
+        assertTrue((viewModel.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys.isEmpty())
+        coVerify(exactly = 1) { repository.fetchComposeForm(any()) }
+    }
+
+    @Test
+    fun `late compose form cannot authorize favorites after an account switch`() = runTest {
+        localCollections.snapshot.value = SmileyLocalCollectionSnapshot("alice")
+        val favorite = EditorSmiley("[:alice]", "https://example.invalid/a.gif", EditorSmileySource.HFR_FAVORITE)
+        val gate = CompletableDeferred<ReplyForm>()
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } coAnswers { gate.await() }
+        val viewModel = viewModel(repository)
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.isLoadingForm)
+        localCollections.snapshot.value = SmileyLocalCollectionSnapshot("bob")
+        advanceUntilIdle()
+        gate.complete(composeForm().copy(favoriteSmileys = listOf(favorite)))
+        advanceUntilIdle()
+
+        assertFalse(viewModel.state.value.isLoadingForm)
+        viewModel.smileyPicker.open()
+        val open = viewModel.smileyPicker.state.value as SmileyPickerState.Open
+        assertTrue(open.favoriteSmileys.isEmpty())
+        assertNull(open.onFavoriteChange)
+        viewModel.smileyPicker.onFavoriteClicked(favorite)
+        advanceUntilIdle()
+        assertTrue(favoriteRepository.owners.isEmpty())
+    }
+
+    @Test
+    fun `compose favorites insert the perso token and follow a reloaded form while open`() = runTest {
+        val favorite = EditorSmiley(
+            "[:fictif espace:3]", "https://example.invalid/fictif.gif", EditorSmileySource.HFR_FAVORITE,
+        )
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm().copy(favoriteSmileys = listOf(favorite))
+        val vm = viewModel(repository)
+        vm.smileyPicker.open()
+        val open = vm.smileyPicker.state.value as SmileyPickerState.Open
+        assertEquals(listOf(favorite), open.favoriteSmileys)
+        vm.onContentChanged(TextFieldValue("hello", TextRange(5)))
+        vm.onSmileySelected(open.favoriteSmileys.single().token)
+        assertEquals("hello [:fictif espace:3] ", vm.state.value.draft.text)
+        assertEquals(SmileyPickerState.Hidden, vm.smileyPicker.state.value)
+
+        vm.smileyPicker.open()
+        val replacement = favorite.copy(token = "[:fictif_b]", imageUrl = "https://example.invalid/fictif_b.gif")
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm().copy(favoriteSmileys = listOf(replacement))
+        vm.retryFormLoad()
+        advanceUntilIdle()
+        assertEquals(listOf(replacement), (vm.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys)
+
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        vm.retryFormLoad()
+        advanceUntilIdle()
+        assertTrue((vm.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys.isEmpty())
     }
 
     @Test

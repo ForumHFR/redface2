@@ -213,7 +213,7 @@ interface FlagRepository {
      * reçoivent ensuite chaque [refresh] explicite via le SharedFlow par type.
      */
     fun observe(type: FlagType): Flow<FlagsResult>
-    suspend fun refresh(type: FlagType)
+    suspend fun refresh(type: FlagType): FlagsResult
     fun clearSessionCache()
 }
 

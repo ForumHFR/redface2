@@ -1,12 +1,13 @@
 package fr.forumhfr.redface2.core.domain.smiley
 
 import fr.forumhfr.redface2.core.model.EditorSmiley
+import fr.forumhfr.redface2.core.model.SmileyWikiKeywordsResult
 
 /**
  * Phase 2F-B (#11 partial) — repository surface for the editor smiley picker.
  *
- * The MVP exposes one operation : a live wiki search via HFR's `message-smi-mp-aj.php`
- * endpoint. The Standard tab does not need a repository call because it ships as a
+ * Live search uses HFR's `message-smi-mp-aj.php`; public detail keywords use `wikismilies.php`.
+ * The Standard tab does not need a repository call because it ships as a
  * static constant (`BUILTIN_HFR_SMILEYS`) sourced from the form fixture.
  *
  * Out of scope for #11 partial : favourites, recents, MPStorage sync, perso upload,
@@ -27,4 +28,10 @@ interface SmileyRepository {
      * raise on network / parse errors — the ViewModel translates to a sober UI state.
      */
     suspend fun searchWiki(userId: Int, query: String): List<EditorSmiley>
+
+    /** Synchronous process-cache read, so reopening a detail never flashes Loading on a cache hit. */
+    fun cachedWikiKeywords(token: String): SmileyWikiKeywordsResult.Loaded?
+
+    /** Anonymous, account-independent metadata. Failures are not cached; cancellation propagates. */
+    suspend fun getWikiKeywords(token: String): SmileyWikiKeywordsResult
 }

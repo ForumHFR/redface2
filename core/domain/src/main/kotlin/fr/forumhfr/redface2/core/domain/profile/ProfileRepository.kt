@@ -26,4 +26,11 @@ interface ProfileRepository {
      * propagated defensively).
      */
     suspend fun getProfile(userId: Int): Result<UserProfile>
+
+    /**
+     * Public hardware configuration from `configuration.php`, independently of the profile load.
+     * Lines are decoded and trimmed, with blank lines removed. Empty and unknown users both return
+     * an empty list. Transport errors and unexpected HTML return failure; cancellation propagates.
+     */
+    suspend fun getUserConfiguration(pseudo: String): Result<List<String>>
 }

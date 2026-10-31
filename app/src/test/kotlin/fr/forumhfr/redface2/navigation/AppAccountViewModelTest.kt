@@ -191,9 +191,8 @@ class AppAccountViewModelTest {
         override fun observe(type: FlagType): Flow<FlagsResult> =
             perType.getValue(type).asSharedFlow()
 
-        override suspend fun refresh(type: FlagType) {
-            // Not exercised in these tests — included to satisfy the interface.
-        }
+        override suspend fun refresh(type: FlagType): FlagsResult =
+            error("AppAccountViewModel must not refresh flags")
 
         override fun clearSessionCache() {
             clearSessionCacheCallCount += 1
@@ -228,6 +227,9 @@ class AppAccountViewModelTest {
     private class FakeProfileRepository(
         private val avatarByUserId: Map<Int, String?> = emptyMap(),
     ) : ProfileRepository {
+        override suspend fun getUserConfiguration(pseudo: String): Result<List<String>> =
+            error("AppAccountViewModel must not fetch hardware configurations")
+
         var getProfileCallCount: Int = 0
             private set
 

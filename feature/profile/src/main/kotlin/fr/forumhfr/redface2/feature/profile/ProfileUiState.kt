@@ -37,9 +37,18 @@ data class ProfileUiState(
      * is pointless).
      */
     val isOwnProfile: Boolean = false,
+    /** #1467 — null when closed; the anonymous load starts only on an explicit request. */
+    val configurationSheet: ConfigurationSheet? = null,
 ) {
     /** #509 — the blacklist toggle is shown only on someone else's profile, and gated by its own write. */
     val canToggleBlocked: Boolean get() = !isOwnProfile && !isUpdatingBlocked
+
+    sealed interface ConfigurationSheet {
+        data object Loading : ConfigurationSheet
+        data class Loaded(val lines: List<String>) : ConfigurationSheet
+        data object Error : ConfigurationSheet
+    }
+
     sealed interface Mode {
         data object Loading : Mode
 
@@ -74,6 +83,12 @@ data class ProfileUiState(
 
 sealed interface ProfileIntent {
     data object Retry : ProfileIntent
+
+    data object RetryConfiguration : ProfileIntent
+
+    data object RequestConfiguration : ProfileIntent
+
+    data object DismissConfiguration : ProfileIntent
 
     /** #509 — add or remove this user from the local blacklist (toggles on [ProfileUiState.isBlocked]). */
     data object ToggleBlocked : ProfileIntent
