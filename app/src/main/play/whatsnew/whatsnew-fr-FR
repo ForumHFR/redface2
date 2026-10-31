@@ -1,3 +1,4 @@
-Redface 2 v0.64.9 — dev.
-- Profil : la configuration matérielle s'ouvre par un lien, dans une feuille dédiée.
-- Plus d'affichage en ligne dans la carte ni dans la page profil.
+Redface 2 v0.65.0 — bêta.
+- Smileys : onglet Favoris (favoris HFR, de l'appareil, plus utilisés), gestion des favoris HFR, détail à l'appui long avec les mots-clés du wiki.
+- Profil : lien vers la configuration matérielle du membre.
+- Drapeaux : refresh plus fiable, liste incomplète signalée, mesures dans le diagnostic.

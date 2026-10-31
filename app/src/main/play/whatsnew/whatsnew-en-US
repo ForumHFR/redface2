@@ -1,3 +1,4 @@
-Redface 2 v0.64.9 — dev.
-- Profile: the hardware configuration opens from a link, in its own sheet.
-- No longer shown inline in the card or the profile page.
+Redface 2 v0.65.0 — beta.
+- Smileys: Favorites tab (HFR favorites, device favorites, most used), manage HFR favorites, long-press detail with wiki keywords.
+- Profile: link to the member's hardware configuration.
+- Flags: more reliable refresh, incomplete lists flagged, timings in diagnostics.

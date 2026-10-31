@@ -16,6 +16,21 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.65.0` — `open` (bêta) — 2026-10-31
+
+Promotion bêta du lot développé en dev de `0.63.0` à `0.64.9`, depuis la précédente bêta `0.62.0`. Le détail par version dev figure dans les entrées ci-dessous. Contenu :
+
+- **Smileys** ([#1154](https://github.com/ForumHFR/redface2/issues/1154)) : onglet Favoris du sélecteur (favoris HFR du compte, favoris de l'appareil, « Les plus utilisés »), ajout et retrait des favoris HFR depuis l'app, détail du smiley à l'appui long (code, nombre d'envois, favoris, insertion, copie, mots-clés du wiki HFR).
+- **Profil** ([#1467](https://github.com/ForumHFR/redface2/issues/1467)) : lien « Configuration matérielle » dans la carte et la page profil, qui ouvre la configuration du membre dans une feuille dédiée. Suggestion d'AnthonyD.
+- **Drapeaux** ([#984](https://github.com/ForumHFR/redface2/issues/984)) : refresh plus fiable (plus de liste « réussie » sans les épinglés, requêtes réellement annulées, drapeau supprimé qui ne revient plus, liste incomplète signalée avec « Réessayer »), et mesures détaillées du refresh dans Diagnostic → Copier, avec le contexte réseau, sans pseudo ni sujet ni URL.
+- Compose BOM 2026.09.00 (correctifs).
+
+Review de promotion : double relecture indépendante du diff `main...dev`, Astra (`gpt-6-astra`, xhigh) et Claude Fable 5.1.
+
+Limites connues : les favoris de l'appareil et le Top d'usage restent sur l'appareil, sans synchronisation ; le lien « Configuration matérielle » n'apparaît que si HFR le propose sur la page profil du membre (quelques membres ont une configuration que HFR ne lie pas) ; l'appui long sur un smiley pendant la lecture n'ouvre pas encore son détail ([#1498](https://github.com/ForumHFR/redface2/issues/1498)). Nouvelle permission `ACCESS_NETWORK_STATE` (« voir les connexions réseau », accordée d'office) pour le contexte réseau des diagnostics.
+
+---
+
 ## `0.64.9` — `internal` (dev) — 2026-10-31
 
 Configuration matérielle derrière un lien ([#1467](https://github.com/ForumHFR/redface2/issues/1467), [#1503](https://github.com/ForumHFR/redface2/pull/1503)), retour de XaTriX sur la 0.64.8.
