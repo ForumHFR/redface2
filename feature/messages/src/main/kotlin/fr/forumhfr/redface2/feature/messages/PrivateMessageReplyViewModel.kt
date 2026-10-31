@@ -110,8 +110,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     private var loadedForm: ReplyForm? = null
         set(value) {
             field = value
-            // #1154 — replace favorites on every form result, even while the sheet is open.
-            smileyPicker.refreshFavorites()
+            if (value == null) smileyPicker.refreshFavorites(null)
         }
 
     /**
@@ -345,6 +344,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
 
     private fun loadForm() {
         formJob?.cancel()
+        val favoriteStamp = smileyPicker.favoriteFormStamp()
         _state.update { it.copy(isLoadingForm = true, formError = false) }
         formJob = viewModelScope.launch {
             try {
@@ -368,6 +368,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                     return@launch
                 }
                 loadedForm = form
+                smileyPicker.refreshFavorites(favoriteStamp)
                 loadedSubmitContext = materialized.submitContext
                 _state.update { current ->
                     // #1074 — consume HFR's quote BBCode exactly once. If the user typed while the

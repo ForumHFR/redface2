@@ -128,8 +128,7 @@ class TopicFormViewModel @AssistedInject constructor(
     private var loadedForm: TopicForm? = null
         set(value) {
             field = value
-            // #1154 — replace favorites on every form result, even while the sheet is open.
-            smileyPicker.refreshFavorites()
+            if (value == null) smileyPicker.refreshFavorites(null)
         }
 
     /**
@@ -700,11 +699,13 @@ class TopicFormViewModel @AssistedInject constructor(
             return
         }
         _state.update { it.copy(isLoadingForm = true, submitError = null) }
+        val favoriteStamp = smileyPicker.favoriteFormStamp()
         viewModelScope.launch {
             val outcome = runCatching { topicFormRepository.fetchEditFirstPostForm(context) }
             outcome.fold(
                 onSuccess = { form ->
                     loadedForm = form
+                    smileyPicker.refreshFavorites(favoriteStamp)
                     val snapshot = _state.value
                     // Pre-compute the preview off the state lambda — same
                     // dispatcher rationale as `PostEditorViewModel`. Only matters
@@ -876,11 +877,13 @@ class TopicFormViewModel @AssistedInject constructor(
             return
         }
         _state.update { it.copy(isLoadingForm = true, submitError = null) }
+        val favoriteStamp = smileyPicker.favoriteFormStamp()
         viewModelScope.launch {
             val outcome = runCatching { topicFormRepository.fetchNewTopicForm(context) }
             outcome.fold(
                 onSuccess = { form ->
                     loadedForm = form
+                    smileyPicker.refreshFavorites(favoriteStamp)
                     // The new-topic flow never hydrates subject/draft from the
                     // server (init already locked both flags to `true`), so we
                     // don't need to recompute the preview here. We do still

@@ -53,8 +53,9 @@ import kotlinx.coroutines.launch
  * [userId] feeds HFR's wiki endpoint and falls back to 0 when the session
  * has not resolved an id (proven harmless — same fallback as `PostEditorViewModel`).
  * [SmileyPickerFavoriteSources.favoriteSmileys] reads the latest loaded form ; hosts call
- * [refreshFavorites] when that form changes. Reopening restores the wiki search but always
- * reads the current favorites.
+ * [favoriteFormStamp] before loading it and [refreshFavorites] with that stamp when it changes.
+ * Reopening restores the wiki search; after an owner switch, HFR data and commands stay disabled
+ * until a form started under the current generation arrives.
  * [onSearchFailed] lets a host apply its own failure policy (the `:feature:editor` ViewModels
  * record a diagnostics WARN — class name only, never the query nor the userId — while the MP
  * composers keep the no-op default).
@@ -81,6 +82,9 @@ class SmileyPickerController(
     private var detailGeneration = 0L
 
     private var formGeneration = 0L
+    // The first owner emission establishes the baseline; later switches require a new host form.
+    private var accountObserved = false
+    private var formAccountGeneration: Long? = 0L
     private var confirmedFavorites: FavoriteSnapshot? = null
     private var pendingFavoriteToken: String? = null
     private var optimisticFavorites: List<EditorSmiley>? = null
@@ -90,7 +94,11 @@ class SmileyPickerController(
     private var favoriteFeedbackEmission = 0L
     private var accountGeneration = 0L
     private val favoriteCommand: ((EditorSmiley) -> Unit)? =
-        if (favoriteSources.hfrFavoriteMutations != null) ::onFavoriteClicked else null
+        if (favoriteSources.hfrFavoriteMutations != null && favoriteSources.localCollections != null) {
+            ::onFavoriteClicked
+        } else {
+            null
+        }
     private var localSnapshot = SmileyLocalCollectionSnapshot()
     private val localCommand: (EditorSmiley) -> Unit = ::onLocalFavoriteClicked
 
@@ -98,16 +106,24 @@ class SmileyPickerController(
         // Collect for the whole ViewModel lifetime, including while the sheet is hidden.
         scope.launch {
             favoriteSources.localCollections?.observe()?.collect { snapshot ->
-                val accountChanged = localSnapshot.owner != snapshot.owner
-                if (accountChanged) {
-                    accountGeneration++
-                    favoriteFeedback = null
-                    favoriteFeedbackGeneration++
-                }
+                val accountChanged = accountObserved && localSnapshot.owner != snapshot.owner
+                accountObserved = true
+                if (accountChanged) invalidateAccountFavorites()
                 localSnapshot = snapshot
                 publishFavorites(resetDetail = accountChanged)
             }
         }
+    }
+
+    private fun invalidateAccountFavorites() {
+        accountGeneration++
+        formAccountGeneration = null
+        confirmedFavorites = null
+        optimisticFavorites = null
+        pendingFavoriteToken = null
+        favoriteFeedback = null
+        favoriteFeedbackToken = null
+        favoriteFeedbackGeneration++
     }
 
     private data class FavoriteSnapshot(
@@ -116,10 +132,16 @@ class SmileyPickerController(
         val removedTokens: Set<String>,
     )
 
-    private fun currentFavoriteSnapshot() = confirmedFavorites?.takeIf { it.generation == formGeneration }
+    private fun hasCurrentFavoriteForm() = formAccountGeneration == accountGeneration
 
-    private fun currentFavorites(): List<EditorSmiley> = optimisticFavorites
-        ?: mergedFavorites()
+    private fun currentFavoriteSnapshot() = confirmedFavorites?.takeIf {
+        hasCurrentFavoriteForm() && it.generation == formGeneration
+    }
+
+    private fun currentFavorites(): List<EditorSmiley> = when {
+        !hasCurrentFavoriteForm() -> emptyList()
+        else -> optimisticFavorites ?: mergedFavorites()
+    }
 
     private fun mergedFavorites(): List<EditorSmiley> {
         val base = favoriteSources.favoriteSmileys()
@@ -154,7 +176,7 @@ class SmileyPickerController(
             favoriteFeedbackGeneration = favoriteFeedbackGeneration,
             favoriteFeedbackToken = favoriteFeedbackToken,
             favoriteFeedbackEmission = favoriteFeedbackEmission,
-            onFavoriteChange = favoriteCommand,
+            onFavoriteChange = favoriteCommand.takeIf { hasCurrentFavoriteForm() && localSnapshot.owner != null },
             accountSmileyTokens = accountSmileyTokens(),
             localFavoriteSmileys = local.mapNotNull { resolver.resolve(it.token, it.imageUrl) },
             mostUsedSmileys = top.mapNotNull { resolver.resolve(it.token) },
@@ -327,9 +349,24 @@ class SmileyPickerController(
         favoriteFeedbackEmission++
     }
 
-    /** Hosts notify after a form reload, including when the sheet is already visible. */
-    fun refreshFavorites() {
+    /** Opaque provenance captured by the host before starting a form load, never at completion. */
+    class FavoriteFormStamp internal constructor(
+        internal val accountGeneration: Long,
+        internal val owner: String?,
+    )
+
+    fun favoriteFormStamp(): FavoriteFormStamp = FavoriteFormStamp(accountGeneration, localSnapshot.owner)
+
+    /**
+     * Hosts notify after replacing their form, including while the sheet is visible.
+     * A stale response cannot authorize its data under a new owner. Null clears the form.
+     */
+    fun refreshFavorites(stamp: FavoriteFormStamp?) {
         formGeneration++
+        // Initial forms may arrive before the first owner snapshot; after a switch, stay blocked anonymously.
+        formAccountGeneration = stamp?.accountGeneration?.takeIf {
+            it == accountGeneration && (it == 0L || localSnapshot.owner != null)
+        }
         publishFavorites()
     }
 
@@ -351,8 +388,9 @@ class SmileyPickerController(
     }
 
     fun onFavoriteClicked(smiley: EditorSmiley) {
-        val open = _state.value as? SmileyPickerState.Open ?: return
-        val action = open.favoriteAction(smiley) ?: return
+        val owner = localSnapshot.owner ?: return
+        val action = (_state.value as? SmileyPickerState.Open)
+            ?.takeIf { hasCurrentFavoriteForm() }?.favoriteAction(smiley) ?: return
         val callbacks = requireNotNull(favoriteSources.hfrFavoriteMutations)
         val mutation = when (action) {
             SmileyFavoriteAction.ADD -> callbacks.addHfrFavorite
@@ -369,19 +407,36 @@ class SmileyPickerController(
         favoriteFeedback = null
         favoriteFeedbackGeneration++
         val feedbackGeneration = favoriteFeedbackGeneration
-        val account = accountGeneration
+        val account = FavoriteFormStamp(accountGeneration, owner)
         publishFavorites()
         scope.launch {
-            try {
-                val result = runCatching { mutation(smiley.token) }.getOrElse { error ->
-                    if (error is CancellationException) throw error
-                    HfrFavoriteSmileyMutationResult.TransportFailure
-                }
+            mutateFavorite(mutation, action, smiley.token, feedbackGeneration, account)
+        }
+    }
+
+    private suspend fun mutateFavorite(
+        mutation: suspend (String, String) -> HfrFavoriteSmileyMutationResult,
+        action: SmileyFavoriteAction,
+        token: String,
+        feedbackGeneration: Long,
+        account: FavoriteFormStamp,
+    ) {
+        // A gesture queued before a switch must not start an operation under the next account.
+        if (account.accountGeneration != accountGeneration) return
+        try {
+            val result = runCatching { mutation(requireNotNull(account.owner), token) }.getOrElse { error ->
+                if (error is CancellationException) throw error
+                HfrFavoriteSmileyMutationResult.TransportFailure
+            }
+            if (account.accountGeneration == accountGeneration) {
                 // Only confirmed lists are stamped at completion; reads merge them with the current form base.
                 // Without one, dropping the optimistic layer reveals the current base or still-valid snapshot.
-                confirmFavorites(result, action, smiley.token)
-                updateFavoriteFeedback(result.feedback(action), feedbackGeneration, account, smiley.token)
-            } finally {
+                confirmFavorites(result, action, token)
+                updateFavoriteFeedback(result.feedback(action), feedbackGeneration, account.accountGeneration, token)
+            }
+        } finally {
+            // In particular, do not clear another account's newer optimistic operation.
+            if (account.accountGeneration == accountGeneration) {
                 optimisticFavorites = null
                 pendingFavoriteToken = null
                 publishFavorites()

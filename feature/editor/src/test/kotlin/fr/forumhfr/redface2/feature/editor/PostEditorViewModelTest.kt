@@ -947,6 +947,7 @@ class PostEditorViewModelTest {
 
     @Test
     fun `picker invokes the injected HFR add and remove without reloading the form`() = runTest {
+        localCollections.snapshot.value = SmileyLocalCollectionSnapshot("alice")
         val wiki = EditorSmiley("[:fictif_geste:2]", "https://example.invalid/geste.gif", EditorSmileySource.WIKI)
         val favorite = wiki.copy(source = EditorSmileySource.HFR_FAVORITE)
         favoriteRepository.addResult = HfrFavoriteSmileyMutationResult.Success(listOf(favorite))
@@ -962,8 +963,51 @@ class PostEditorViewModelTest {
         viewModel.smileyPicker.onFavoriteClicked(wiki)
         testScheduler.advanceUntilIdle()
         assertEquals(listOf(wiki.token), favoriteRepository.removed)
+        assertEquals(listOf("alice", "alice"), favoriteRepository.owners)
         assertTrue((viewModel.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys.isEmpty())
         assertEquals(fetches, replyRepository.formFetches)
+    }
+
+    @Test
+    fun `late reply edit and inline quote forms cannot authorize favorites after an account switch`() = runTest {
+        val favorite = EditorSmiley("[:alice]", "https://example.invalid/a.gif", EditorSmileySource.HFR_FAVORITE)
+        val factories = listOf(
+            { newReplyViewModel() },
+            { newEditViewModel() },
+            {
+                newReplyViewModel(
+                    initialQuotes = listOf(card(101)),
+                    userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+                )
+            },
+        )
+        factories.forEach { create ->
+            localCollections.snapshot.value = SmileyLocalCollectionSnapshot("alice")
+            val gate = CompletableDeferred<Unit>()
+            replyRepository.formGate = gate
+            editPostRepository.formGate = gate
+            val form = authenticatedForm(initialContent = "[quotemsg=101,1,9]Quote[/quotemsg]\n")
+                .copy(favoriteSmileys = listOf(favorite))
+            replyRepository.formResult = Result.success(form)
+            editPostRepository.formResult = Result.success(form)
+            val viewModel = create()
+            testScheduler.advanceUntilIdle()
+            assertTrue(viewModel.state.value.isLoadingForm)
+            localCollections.snapshot.value = SmileyLocalCollectionSnapshot("bob")
+            testScheduler.advanceUntilIdle()
+            gate.complete(Unit)
+            testScheduler.advanceUntilIdle()
+
+            assertFalse(viewModel.state.value.isLoadingForm)
+            assertNull(viewModel.state.value.submitError)
+            viewModel.smileyPicker.open()
+            val open = viewModel.smileyPicker.state.value as SmileyPickerState.Open
+            assertTrue(open.favoriteSmileys.isEmpty())
+            assertNull(open.onFavoriteChange)
+            viewModel.smileyPicker.onFavoriteClicked(favorite)
+            testScheduler.advanceUntilIdle()
+            assertTrue(favoriteRepository.owners.isEmpty())
+        }
     }
 
     @Test

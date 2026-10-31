@@ -1066,7 +1066,7 @@ supplémentaire**, aucun stockage local, aucune lecture via l'API REST.
 
 **Protocole d'écriture (B1 de #1154)** :
 
-`HfrFavoriteSmileyRepository` (`:core:domain/smiley`) expose `add(token)` et `remove(token)`.
+`HfrFavoriteSmileyRepository` (`:core:domain/smiley`) expose `add(owner, token)` et `remove(owner, token)`.
 `DefaultHfrFavoriteSmileyRepository` orchestre `HfrFavoriteSmileyClient` et les deux analyseurs dédiés
 `HfrFavoriteSmileyFormParser` / `HfrFavoriteSmileyResponseParser` dans `:core:parser/smiley`.
 Les résultats et listes utilisables par B2 sont décrits dans
@@ -1130,10 +1130,12 @@ ajout extérieur peut être perdu. La relecture détecte un écart à l'état at
 la détection d'un ajout extérieur effacé. Le réordonnancement est possible côté serveur en
 changeant l'ordre des valeurs envoyées, mais **non implémenté** dans l'application.
 
-**Compte et secrets** : lire le compte courant au début, le revérifier immédiatement avant
-chaque POST. Changement de compte ou passage anonyme → `AccountChanged`, sans POST.
-L'identité du compte est le pseudo en minuscules ; la résolution de `userId` ne change pas de compte.
-Les listes relues après mutation sont également rattachées au compte initial.
+**Compte et secrets** : l'appelant capture `owner` au geste. Après acquisition du mutex et passage
+sur IO, le dépôt le compare à la session avant le premier GET, puis immédiatement avant chaque
+POST et GET de confirmation. Changement de compte ou passage anonyme → `AccountChanged`,
+sans requête supplémentaire. L'identité est le pseudo normalisé par `lowercase()`, sans trim,
+comme les collections locales ; la résolution de `userId` ne change pas de compte.
+Les listes relues après mutation restent rattachées au propriétaire du geste.
 `codehex` est distinct de `hash_check` et identique au jeton de déconnexion. Tous deux sont
 des **secrets de compte stables**, observés identiques entre sessions et d'un jour à l'autre :
 une fuite est durable. `codehex` reste uniquement dans un formulaire technique transitoire,

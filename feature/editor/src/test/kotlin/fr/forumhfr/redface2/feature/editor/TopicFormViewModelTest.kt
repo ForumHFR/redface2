@@ -1,4 +1,6 @@
 package fr.forumhfr.redface2.feature.editor
+
+import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollectionSnapshot
 import fr.forumhfr.redface2.core.model.EditorSmileySource
 import fr.forumhfr.redface2.core.model.HfrFavoriteSmileyMutationResult
 import fr.forumhfr.redface2.core.ui.editor.UploadError
@@ -549,6 +551,7 @@ class TopicFormViewModelTest {
 
     @Test
     fun `picker invokes the injected HFR add and remove without reloading the form`() = runTest {
+        localCollections.snapshot.value = SmileyLocalCollectionSnapshot("alice")
         val wiki = EditorSmiley("[:fictif_geste:2]", "https://example.invalid/geste.gif", EditorSmileySource.WIKI)
         val favorite = wiki.copy(source = EditorSmileySource.HFR_FAVORITE)
         favoriteRepository.addResult = HfrFavoriteSmileyMutationResult.Success(listOf(favorite))
@@ -564,8 +567,38 @@ class TopicFormViewModelTest {
         viewModel.smileyPicker.onFavoriteClicked(wiki)
         testScheduler.advanceUntilIdle()
         assertEquals(listOf(wiki.token), favoriteRepository.removed)
+        assertEquals(listOf("alice", "alice"), favoriteRepository.owners)
         assertTrue((viewModel.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys.isEmpty())
         assertEquals(fetches, topicFormRepository.formFetches)
+    }
+
+    @Test
+    fun `late new and edited topic forms cannot authorize favorites after an account switch`() = runTest {
+        val favorite = EditorSmiley("[:alice]", "https://example.invalid/a.gif", EditorSmileySource.HFR_FAVORITE)
+        listOf(false, true).forEach { createTopic ->
+            localCollections.snapshot.value = SmileyLocalCollectionSnapshot("alice")
+            val gate = CompletableDeferred<Unit>()
+            topicFormRepository.formGate = gate
+            topicFormRepository.formResult = topicFormRepository.formResult.copy(favoriteSmileys = listOf(favorite))
+            topicFormRepository.newTopicFormResult =
+                topicFormRepository.newTopicFormResult.copy(favoriteSmileys = listOf(favorite))
+            val viewModel = if (createTopic) newTopicViewModel(SAMPLE_SUBCAT) else newViewModel()
+            testScheduler.advanceUntilIdle()
+            assertTrue(viewModel.state.value.isLoadingForm)
+            localCollections.snapshot.value = SmileyLocalCollectionSnapshot("bob")
+            testScheduler.advanceUntilIdle()
+            gate.complete(Unit)
+            testScheduler.advanceUntilIdle()
+
+            assertFalse(viewModel.state.value.isLoadingForm)
+            viewModel.smileyPicker.open()
+            val open = viewModel.smileyPicker.state.value as SmileyPickerState.Open
+            assertTrue(open.favoriteSmileys.isEmpty())
+            assertNull(open.onFavoriteChange)
+            viewModel.smileyPicker.onFavoriteClicked(favorite)
+            testScheduler.advanceUntilIdle()
+            assertTrue(favoriteRepository.owners.isEmpty())
+        }
     }
 
     @Test

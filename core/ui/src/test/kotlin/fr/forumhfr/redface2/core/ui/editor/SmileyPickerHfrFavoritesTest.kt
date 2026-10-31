@@ -1,11 +1,14 @@
 package fr.forumhfr.redface2.core.ui.editor
 
+import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollectionSnapshot
+import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollections
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.EditorSmileySource
 import fr.forumhfr.redface2.core.model.HfrFavoriteSmileyMutationResult
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -98,7 +101,7 @@ class SmileyPickerHfrFavoritesTest {
         controller.dismiss()
         controller.open()
         assertNull(controller.openState().favoriteAction(accountOne))
-        controller.refreshFavorites()
+        controller.refreshFavorites(controller.favoriteFormStamp())
         assertEquals(base, controller.openState().favoriteSmileys)
         assertEquals(SmileyFavoriteAction.REMOVE, controller.openState().favoriteAction(accountOne))
         assertEquals(SmileyFavoriteAction.REMOVE, controller.openState().favoriteAction(accountTwo))
@@ -129,7 +132,7 @@ class SmileyPickerHfrFavoritesTest {
         advanceUntilIdle()
         assertEquals(listOf(accountOne, favorite, accountTwo), controller.openState().favoriteSmileys)
         assertEquals(SmileyFavoriteAction.REMOVE, controller.openState().favoriteAction(wiki))
-        controller.refreshFavorites()
+        controller.refreshFavorites(controller.favoriteFormStamp())
         assertEquals(base, controller.openState().favoriteSmileys)
         assertEquals(SmileyFavoriteAction.REMOVE, controller.openState().favoriteAction(accountOne))
     }
@@ -147,7 +150,7 @@ class SmileyPickerHfrFavoritesTest {
         assertNull(controller.openState().favoriteAction(favorite))
         assertEquals(SmileyFavoriteAction.REMOVE, controller.openState().favoriteAction(other))
         base = listOf(accountOne, other)
-        controller.refreshFavorites()
+        controller.refreshFavorites(controller.favoriteFormStamp())
         assertEquals(base, controller.openState().favoriteSmileys)
         assertEquals(SmileyFavoriteAction.ADD, controller.openState().favoriteAction(wiki))
     }
@@ -265,7 +268,7 @@ class SmileyPickerHfrFavoritesTest {
         val controller = controller(this, { form }, add = { gate.await() })
         controller.onFavoriteClicked(wiki)
         form = listOf(favorite)
-        controller.refreshFavorites()
+        controller.refreshFavorites(controller.favoriteFormStamp())
         gate.complete(HfrFavoriteSmileyMutationResult.AccountChanged)
         advanceUntilIdle()
         assertEquals(form, controller.openState().favoriteSmileys)
@@ -318,7 +321,7 @@ class SmileyPickerHfrFavoritesTest {
         val controller = controller(this, { form }, add = { gate.await() })
         controller.onFavoriteClicked(wiki)
         form = emptyList()
-        controller.refreshFavorites()
+        controller.refreshFavorites(controller.favoriteFormStamp())
         controller.open()
         assertEquals(listOf(other, favorite), controller.openState().favoriteSmileys)
         gate.complete(HfrFavoriteSmileyMutationResult.Success(listOf(favorite)))
@@ -328,11 +331,11 @@ class SmileyPickerHfrFavoritesTest {
         assertEquals(listOf(favorite), controller.openState().favoriteSmileys)
 
         form = listOf(other)
-        controller.refreshFavorites()
+        controller.refreshFavorites(controller.favoriteFormStamp())
         assertEquals(form, controller.openState().favoriteSmileys)
         controller.dismiss()
         form = emptyList()
-        controller.refreshFavorites()
+        controller.refreshFavorites(controller.favoriteFormStamp())
         controller.open()
         assertTrue(controller.openState().favoriteSmileys.isEmpty())
     }
@@ -351,7 +354,7 @@ class SmileyPickerHfrFavoritesTest {
             advanceUntilIdle()
             controller.onFavoriteClicked(other)
             form = emptyList()
-            controller.refreshFavorites()
+            controller.refreshFavorites(controller.favoriteFormStamp())
             assertEquals(listOf(other, favorite), controller.openState().favoriteSmileys)
             gate.complete(result)
             advanceUntilIdle()
@@ -374,7 +377,7 @@ class SmileyPickerHfrFavoritesTest {
             controller.onFavoriteClicked(other)
             advanceUntilIdle()
             assertEquals(result.toString(), confirmed, controller.openState().favoriteSmileys)
-            controller.refreshFavorites()
+            controller.refreshFavorites(controller.favoriteFormStamp())
             assertEquals(result.toString(), listOf(other), controller.openState().favoriteSmileys)
         }
     }
@@ -454,14 +457,14 @@ class SmileyPickerHfrFavoritesTest {
         controller.onFavoriteClicked(wiki)
         controller.dismiss()
         form = listOf(other)
-        controller.refreshFavorites()
+        controller.refreshFavorites(controller.favoriteFormStamp())
         gate.complete(HfrFavoriteSmileyMutationResult.Success(listOf(favorite)))
         advanceUntilIdle()
         assertEquals(SmileyPickerState.Hidden, controller.state.value)
         controller.open()
         assertEquals(listOf(other, favorite), controller.openState().favoriteSmileys)
         controller.dismiss()
-        controller.refreshFavorites()
+        controller.refreshFavorites(controller.favoriteFormStamp())
         controller.open()
         assertEquals(form, controller.openState().favoriteSmileys)
     }
@@ -535,7 +538,7 @@ class SmileyPickerHfrFavoritesTest {
     )
 
     private fun controller(
-        scope: CoroutineScope,
+        scope: TestScope,
         form: () -> List<EditorSmiley> = { emptyList() },
         add: suspend (String) -> HfrFavoriteSmileyMutationResult = { error("Unexpected add") },
         remove: suspend (String) -> HfrFavoriteSmileyMutationResult = { error("Unexpected removal") },
@@ -544,9 +547,13 @@ class SmileyPickerHfrFavoritesTest {
         searchWiki = { _, _ -> emptyList() },
         favoriteSources = SmileyPickerFavoriteSources(
             favoriteSmileys = form,
-            hfrFavoriteMutations = SmileyFavoriteMutations(add, remove),
+            hfrFavoriteMutations = SmileyFavoriteMutations({ _, token -> add(token) }, { _, token -> remove(token) }),
+            // This suite keeps one owner: a finite observation leaves runTest's scope free of collectors.
+            localCollections = object : SmileyLocalCollections by FakePickerLocalCollections("tester") {
+                override fun observe() = flowOf(SmileyLocalCollectionSnapshot("tester"))
+            },
         ),
-    ).also { it.open() }
+    ).also { scope.runCurrent(); it.open() }
 
     private fun SmileyPickerController.openState() = state.value as SmileyPickerState.Open
 }

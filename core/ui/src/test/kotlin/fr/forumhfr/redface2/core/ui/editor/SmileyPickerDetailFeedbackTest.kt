@@ -40,7 +40,8 @@ class SmileyPickerDetailFeedbackTest {
     private val controller = SmileyPickerController(
         CoroutineScope(dispatcher), { _, _ -> emptyList() },
         favoriteSources = SmileyPickerFavoriteSources(
-            hfrFavoriteMutations = SmileyFavoriteMutations({ gate.await() }, { gate.await() }),
+            hfrFavoriteMutations = SmileyFavoriteMutations({ _, _ -> gate.await() }, { _, _ -> gate.await() }),
+            localCollections = FakePickerLocalCollections("tester"),
         ),
     )
 
@@ -91,6 +92,7 @@ class SmileyPickerDetailFeedbackTest {
     }
 
     private fun startMutation() {
+        dispatcher.scheduler.runCurrent()
         controller.open()
         controller.onFavoriteClicked(perso)
         dispatcher.scheduler.runCurrent()

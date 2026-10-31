@@ -10,6 +10,7 @@ import androidx.compose.ui.platform.AccessibilityManager
 import androidx.compose.ui.platform.LocalAccessibilityManager
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsConfiguration
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -696,7 +697,7 @@ class SmileyPickerHfrGesturesTest {
             context.getString(R.string.editor_smiley_detail_show), semantics[SemanticsActions.OnLongClick].label,
         )
         assertEquals(listOf(context.getString(R.string.editor_smiley_detail_show), label),
-            semantics[SemanticsActions.CustomActions].map { it.label })
+            hfrCustomActionLabels(semantics))
     }
 
     private fun assertNoFavoriteActions(smiley: EditorSmiley) {
@@ -705,7 +706,17 @@ class SmileyPickerHfrGesturesTest {
             context.getString(R.string.editor_smiley_detail_show), semantics[SemanticsActions.OnLongClick].label,
         )
         assertEquals(listOf(context.getString(R.string.editor_smiley_detail_show)),
-            semantics[SemanticsActions.CustomActions].map { it.label })
+            hfrCustomActionLabels(semantics))
+    }
+
+    // HFR commands now require the account observation, so device favorite actions are present too;
+    // they are covered by the local gesture tests.
+    private fun hfrCustomActionLabels(semantics: SemanticsConfiguration): List<String> {
+        val local = setOf(
+            context.getString(R.string.editor_smiley_local_favorite_add),
+            context.getString(R.string.editor_smiley_local_favorite_remove),
+        )
+        return semantics[SemanticsActions.CustomActions].map { it.label }.filterNot { it in local }
     }
 
     private fun backToGrid() {
@@ -735,11 +746,12 @@ class SmileyPickerHfrGesturesTest {
         favoriteSources = SmileyPickerFavoriteSources(
             favoriteSmileys = { favorites },
             hfrFavoriteMutations = SmileyFavoriteMutations(
-                addHfrFavorite = { added += it; add(it) },
-                removeHfrFavorite = { removed += it; remove(it) },
+                addHfrFavorite = { _, token -> added += token; add(token) },
+                removeHfrFavorite = { _, token -> removed += token; remove(token) },
             ),
+            localCollections = FakePickerLocalCollections("tester"),
         ),
-    ).also { it.open() }
+    ).also { dispatcher.scheduler.runCurrent(); it.open() }
 
     private fun description(smiley: EditorSmiley) =
         context.getString(R.string.editor_smiley_insert_description, smiley.token)

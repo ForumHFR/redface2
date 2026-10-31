@@ -134,8 +134,7 @@ class PostEditorViewModel @AssistedInject constructor(
     private var loadedForm: ReplyForm? = null
         set(value) {
             field = value
-            // #1154 — replace favorites on every form result, even while the sheet is open.
-            smileyPicker.refreshFavorites()
+            if (value == null) smileyPicker.refreshFavorites(null)
         }
 
     /**
@@ -319,6 +318,7 @@ class PostEditorViewModel @AssistedInject constructor(
             return
         }
         val quoteContext = context.copy(quotedNumreponse = quotes.first().numreponse, quoteRef = null)
+        val favoriteStamp = smileyPicker.favoriteFormStamp()
         _state.update { it.copy(isLoadingForm = true, submitError = null) }
         viewModelScope.launch {
             val outcome = runCatching {
@@ -331,6 +331,7 @@ class PostEditorViewModel @AssistedInject constructor(
             outcome.fold(
                 onSuccess = { form ->
                     loadedForm = form
+                    smileyPicker.refreshFavorites(favoriteStamp)
                     val prefills = form.initialContent.trimEnd()
                     _state.update { current ->
                         val existing = current.draft.text
@@ -829,12 +830,14 @@ class PostEditorViewModel @AssistedInject constructor(
      * anti-clobber guards on refetch.
      */
     private fun launchFormFetch(fetch: suspend () -> ReplyForm) {
+        val favoriteStamp = smileyPicker.favoriteFormStamp()
         _state.update { it.copy(isLoadingForm = true, submitError = null) }
         viewModelScope.launch {
             val outcome = runCatching { fetch() }
             outcome.fold(
                 onSuccess = { form ->
                     loadedForm = form
+                    smileyPicker.refreshFavorites(favoriteStamp)
                     // Pre-compute the preview AST outside the `_state.update {}`
                     // lambda : the lambda runs synchronously on whichever thread
                     // pumps the StateFlow (in practice the coroutine's dispatcher,

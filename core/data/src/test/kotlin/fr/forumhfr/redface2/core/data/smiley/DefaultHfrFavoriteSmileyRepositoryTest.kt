@@ -18,10 +18,13 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -50,7 +53,7 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
 
         assertEquals(
             HfrFavoriteSmileyMutationResult.Success(favorites("[:tiers]", "[:un]", "[:deux:2]")),
-            repository.add("[:deux:2]"),
+            repository.add("tester", "[:deux:2]"),
         )
         coVerify(exactly = 2) { client.getFavoriteSmileyForm() }
         coVerify(exactly = 1) { client.addFavoriteSmiley(HASH_CHECK, "[:deux:2]") }
@@ -67,24 +70,79 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
     }
 
     @Test
+    fun `queued add and removal keep the gesture owner after waiting for the mutex`() = runTest {
+        listOf(false, true).forEach { removal ->
+            auth.state.value = AuthState.Authenticated("Tester", 1)
+            val releaseRead = CompletableDeferred<Unit>()
+            val requestOwners = mutableListOf<AuthState>()
+            coEvery { client.getFavoriteSmileyForm() } coAnswers {
+                requestOwners += auth.state.value
+                releaseRead.await()
+                form("[:un]")
+            }
+            val first = async(start = CoroutineStart.UNDISPATCHED) { repository.add("tester", "[:deux]") }
+            val queued = async(start = CoroutineStart.UNDISPATCHED) {
+                if (removal) repository.remove("tester", "[:un]") else repository.add("tester", "[:trois]")
+            }
+            assertEquals(listOf(AuthState.Authenticated("Tester", 1)), requestOwners)
+            assertFalse(first.isCompleted)
+            assertFalse(queued.isCompleted)
+            auth.state.value = AuthState.Authenticated("Other", 2)
+            releaseRead.complete(Unit)
+
+            assertEquals(HfrFavoriteSmileyMutationResult.AccountChanged, first.await())
+            assertEquals(HfrFavoriteSmileyMutationResult.AccountChanged, queued.await())
+            assertEquals(listOf(AuthState.Authenticated("Tester", 1)), requestOwners)
+        }
+        coVerify(exactly = 2) { client.getFavoriteSmileyForm() }
+        coVerify(exactly = 0) { client.addFavoriteSmiley(any(), any()) }
+        coVerify(exactly = 0) { client.removeFavoriteSmileys(any(), any(), any(), any()) }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `dispatcher wait cannot rebind either gesture to the next account`() = runTest {
+        val delayedRepository = DefaultHfrFavoriteSmileyRepository(
+            client, HfrFavoriteSmileyFormParser(), HfrFavoriteSmileyResponseParser(),
+            auth, diagnostics, StandardTestDispatcher(testScheduler),
+        )
+        listOf(false, true).forEach { removal ->
+            auth.state.value = AuthState.Authenticated("Tester", 1)
+            val queued = async(start = CoroutineStart.UNDISPATCHED) {
+                if (removal) delayedRepository.remove("tester", "[:un]")
+                else delayedRepository.add("tester", "[:deux]")
+            }
+            assertFalse(queued.isCompleted)
+            auth.state.value = AuthState.Authenticated("Other", 2)
+            runCurrent()
+            assertEquals(HfrFavoriteSmileyMutationResult.AccountChanged, queued.await())
+        }
+        coVerify(exactly = 0) { client.getFavoriteSmileyForm() }
+        coVerify(exactly = 0) { client.addFavoriteSmiley(any(), any()) }
+        coVerify(exactly = 0) { client.removeFavoriteSmileys(any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `duplicate and full are short circuited and duplicate uses exact token even when full`() = runTest {
         val tokens = (0 until 10).map { "[:nom:$it]" }.toTypedArray()
         coEvery { client.getFavoriteSmileyForm() } returns form(*tokens)
 
         assertEquals(
             HfrFavoriteSmileyMutationResult.AlreadyPresent(favorites(*tokens)),
-            repository.add(tokens[0]),
+            repository.add("tester", tokens[0]),
         )
-        assertEquals(HfrFavoriteSmileyMutationResult.Full(10, favorites(*tokens)), repository.add("[:nouveau]"))
+        assertEquals(
+            HfrFavoriteSmileyMutationResult.Full(10, favorites(*tokens)), repository.add("tester", "[:nouveau]"),
+        )
         coVerify(exactly = 0) { client.addFavoriteSmiley(any(), any()) }
     }
 
     @Test
     fun `invalid add tokens and empty removal never access auth or network`() = runTest {
         listOf("", "aaa", ":o", ":pt1cable:", "[:]", "[: ]", "[:un]\n", "[:un\ndeux]", "[:[un]]").forEach { token ->
-            assertEquals(HfrFavoriteSmileyMutationResult.InvalidToken, repository.add(token))
+            assertEquals(HfrFavoriteSmileyMutationResult.InvalidToken, repository.add("tester", token))
         }
-        assertEquals(HfrFavoriteSmileyMutationResult.InvalidToken, repository.remove(""))
+        assertEquals(HfrFavoriteSmileyMutationResult.InvalidToken, repository.remove("tester", ""))
         assertEquals(0, auth.reads)
         coVerify(exactly = 0) { client.getFavoriteSmileyForm() }
     }
@@ -96,7 +154,7 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
         coEvery { client.addFavoriteSmiley(HASH_CHECK, token) } returns hop(
             "Le smiley correspondant à ce code n'existe pas",
         )
-        assertEquals(HfrFavoriteSmileyMutationResult.NotFound, repository.add(token))
+        assertEquals(HfrFavoriteSmileyMutationResult.NotFound, repository.add("tester", token))
         coVerify(exactly = 1) { client.addFavoriteSmiley(HASH_CHECK, token) }
     }
 
@@ -106,12 +164,12 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
         coEvery { client.addFavoriteSmiley(any(), any()) } returns hop("Ce smilie est déjà dans votre liste !")
         assertEquals(
             HfrFavoriteSmileyMutationResult.AlreadyPresent(favorites("[:un]")),
-            repository.add("[:deux]"),
+            repository.add("tester", "[:deux]"),
         )
         coEvery { client.addFavoriteSmiley(any(), any()) } returns hop(
             "Désolé, vous ne pouvez rajouter plus de 25 smilies",
         )
-        assertEquals(HfrFavoriteSmileyMutationResult.Full(25, favorites("[:un]")), repository.add("[:deux]"))
+        assertEquals(HfrFavoriteSmileyMutationResult.Full(25, favorites("[:un]")), repository.add("tester", "[:deux]"))
     }
 
     @Test
@@ -127,7 +185,7 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
 
         assertEquals(
             HfrFavoriteSmileyMutationResult.Success(favorites("[:trois]", "aaa", "[:un]")),
-            repository.remove("[:cible:2]"),
+            repository.remove("tester", "[:cible:2]"),
         )
         coVerify(exactly = 1) {
             client.removeFavoriteSmileys(HASH_CHECK, CODEHEX, listOf("[:trois]", "[:cible:2]", "aaa", "[:un]"), 1)
@@ -140,7 +198,7 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
         coEvery { client.getFavoriteSmileyForm() } returns form("[:nom:2]")
         assertEquals(
             HfrFavoriteSmileyMutationResult.NotInFavorites(favorites("[:nom:2]")),
-            repository.remove("[:nom]"),
+            repository.remove("tester", "[:nom]"),
         )
         coVerify(exactly = 1) { client.getFavoriteSmileyForm() }
         coVerify(exactly = 0) { client.removeFavoriteSmileys(any(), any(), any(), any()) }
@@ -156,7 +214,9 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
             "Suppression effectuée avec succès !",
         )
 
-        assertEquals(HfrFavoriteSmileyMutationResult.Success(favorites("[:aaa]", "AAA")), repository.remove("aaa"))
+        assertEquals(
+            HfrFavoriteSmileyMutationResult.Success(favorites("[:aaa]", "AAA")), repository.remove("tester", "aaa"),
+        )
         coVerify(exactly = 1) {
             client.removeFavoriteSmileys(HASH_CHECK, CODEHEX, listOf("[:aaa]", "aaa", "AAA"), 1)
         }
@@ -169,7 +229,7 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
         listOf("AAA", " aaa", "aaa ", ":o", " ").forEach { token ->
             assertEquals(
                 HfrFavoriteSmileyMutationResult.NotInFavorites(favorites("[:aaa]", "aaa")),
-                repository.remove(token),
+                repository.remove("tester", token),
             )
         }
         coVerify(exactly = 5) { client.getFavoriteSmileyForm() }
@@ -187,7 +247,7 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
             )
             assertEquals(
                 HfrFavoriteSmileyMutationResult.VerificationFailed(favorites(*real)),
-                repository.remove("[:cible]"),
+                repository.remove("tester", "[:cible]"),
             )
         }
     }
@@ -196,7 +256,9 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
     fun `removal is confirmed by the actual list even when the acknowledgement text is unknown`() = runTest {
         coEvery { client.getFavoriteSmileyForm() } returnsMany listOf(form("[:un]", "[:cible]"), form("[:un]"))
         coEvery { client.removeFavoriteSmileys(any(), any(), any(), any()) } returns hop("Texte inconnu $CODEHEX")
-        assertEquals(HfrFavoriteSmileyMutationResult.Success(favorites("[:un]")), repository.remove("[:cible]"))
+        assertEquals(
+            HfrFavoriteSmileyMutationResult.Success(favorites("[:un]")), repository.remove("tester", "[:cible]"),
+        )
         assertSafeDiagnostics()
     }
 
@@ -206,7 +268,7 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
         coEvery { client.addFavoriteSmiley(any(), any()) } returns hop("Ajout effectué avec succès !")
         assertEquals(
             HfrFavoriteSmileyMutationResult.VerificationFailed(favorites("[:tiers]", "[:un]")),
-            repository.add("[:deux]"),
+            repository.add("tester", "[:deux]"),
         )
         coVerify(exactly = 2) { client.getFavoriteSmileyForm() }
     }
@@ -215,8 +277,8 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
     fun `malformed form prevents both mutations instead of sending a partial list`() = runTest {
         coEvery { client.getFavoriteSmileyForm() } returns form("[:un]", "[:deux]")
             .replace("name=\"smiley1\"", "name=\"smiley2\"")
-        assertEquals(HfrFavoriteSmileyMutationResult.UnknownResponse, repository.remove("[:un]"))
-        assertEquals(HfrFavoriteSmileyMutationResult.UnknownResponse, repository.add("[:trois]"))
+        assertEquals(HfrFavoriteSmileyMutationResult.UnknownResponse, repository.remove("tester", "[:un]"))
+        assertEquals(HfrFavoriteSmileyMutationResult.UnknownResponse, repository.add("tester", "[:trois]"))
         coVerify(exactly = 0) { client.addFavoriteSmiley(any(), any()) }
         coVerify(exactly = 0) { client.removeFavoriteSmileys(any(), any(), any(), any()) }
     }
@@ -234,7 +296,7 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
             outsideFormVariants("<table>${moved.joinToString("\n")}</table>").forEach { outside ->
                 // A POST would erase the outside rows, and an empty confirmation would wrongly match.
                 coEvery { client.getFavoriteSmileyForm() } returnsMany listOf(partial + outside, form())
-                assertEquals(HfrFavoriteSmileyMutationResult.UnknownResponse, repository.remove("[:un]"))
+                assertEquals(HfrFavoriteSmileyMutationResult.UnknownResponse, repository.remove("tester", "[:un]"))
             }
         }
         coVerify(exactly = 6) { client.getFavoriteSmileyForm() }
@@ -252,7 +314,7 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
         ).forEach { extra ->
             outsideFormVariants(extra).forEach { outside ->
                 coEvery { client.getFavoriteSmileyForm() } returns form("[:un]") + outside
-                assertEquals(HfrFavoriteSmileyMutationResult.UnknownResponse, repository.remove("[:un]"))
+                assertEquals(HfrFavoriteSmileyMutationResult.UnknownResponse, repository.remove("tester", "[:un]"))
             }
         }
         coVerify(exactly = 15) { client.getFavoriteSmileyForm() }
@@ -282,7 +344,7 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
         malformedForms.forEach { malformed ->
             // An unsafe POST followed by an empty form could otherwise look like a confirmed removal.
             coEvery { client.getFavoriteSmileyForm() } returnsMany listOf(malformed, form())
-            assertEquals(HfrFavoriteSmileyMutationResult.UnknownResponse, repository.remove("[:un]"))
+            assertEquals(HfrFavoriteSmileyMutationResult.UnknownResponse, repository.remove("tester", "[:un]"))
         }
         coVerify(exactly = malformedForms.size) { client.getFavoriteSmileyForm() }
         coVerify(exactly = 0) { client.removeFavoriteSmileys(any(), any(), any(), any()) }
@@ -304,7 +366,7 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
             "Suppression effectuée avec succès !",
         )
 
-        assertEquals(HfrFavoriteSmileyMutationResult.Success(emptyList()), repository.remove("[:un]"))
+        assertEquals(HfrFavoriteSmileyMutationResult.Success(emptyList()), repository.remove("tester", "[:un]"))
         coVerify(exactly = 2) { client.getFavoriteSmileyForm() }
         coVerify(exactly = 1) { client.removeFavoriteSmileys(HASH_CHECK, CODEHEX, listOf("[:un]"), 0) }
     }
@@ -324,7 +386,7 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
                 "Suppression effectuée avec succès !",
             )
 
-            val result = if (removal) repository.remove("[:un]") else repository.add("[:deux]")
+            val result = if (removal) repository.remove("tEsTeR", "[:un]") else repository.add("TESTER", "[:deux]")
             assertEquals(HfrFavoriteSmileyMutationResult.Success(favorites(*confirmed)), result)
         }
         coVerify(exactly = 4) { client.getFavoriteSmileyForm() }
@@ -341,7 +403,7 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
                     auth.state.value = next
                     form("[:un]")
                 }
-                val result = if (removal) repository.remove("[:un]") else repository.add("[:deux]")
+                val result = if (removal) repository.remove("tester", "[:un]") else repository.add("tester", "[:deux]")
                 assertEquals(HfrFavoriteSmileyMutationResult.AccountChanged, result)
             }
         }
@@ -350,23 +412,34 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
     }
 
     @Test
-    fun `anonymous account is rejected before any GET`() = runTest {
+    fun `owner comparison does not trim distinct pseudos or accept blank owners`() = runTest {
+        listOf(" tester", "tester ", "", " ").forEach { owner ->
+            assertEquals(HfrFavoriteSmileyMutationResult.AccountChanged, repository.add(owner, "[:un]"))
+            assertEquals(HfrFavoriteSmileyMutationResult.AccountChanged, repository.remove(owner, "[:un]"))
+        }
+        coVerify(exactly = 0) { client.getFavoriteSmileyForm() }
+        coVerify(exactly = 0) { client.addFavoriteSmiley(any(), any()) }
+        coVerify(exactly = 0) { client.removeFavoriteSmileys(any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `gesture owner is rejected silently before any GET when the session is anonymous`() = runTest {
         auth.state.value = AuthState.Anonymous
-        assertEquals(HfrFavoriteSmileyMutationResult.NotAuthenticated, repository.add("[:un]"))
-        assertEquals(HfrFavoriteSmileyMutationResult.NotAuthenticated, repository.remove("[:un]"))
+        assertEquals(HfrFavoriteSmileyMutationResult.AccountChanged, repository.add("tester", "[:un]"))
+        assertEquals(HfrFavoriteSmileyMutationResult.AccountChanged, repository.remove("tester", "[:un]"))
         coVerify(exactly = 0) { client.getFavoriteSmileyForm() }
     }
 
     @Test
     fun `expired sessions in GET POST or confirmation are reported without secrets`() = runTest {
         coEvery { client.getFavoriteSmileyForm() } throws SessionExpiredException("secret-$CODEHEX")
-        assertEquals(HfrFavoriteSmileyMutationResult.NotAuthenticated, repository.add("[:un]"))
+        assertEquals(HfrFavoriteSmileyMutationResult.NotAuthenticated, repository.add("tester", "[:un]"))
         coEvery { client.getFavoriteSmileyForm() } returns form("[:un]")
         coEvery { client.removeFavoriteSmileys(any(), any(), any(), any()) } throws SessionExpiredException(CODEHEX)
-        assertEquals(HfrFavoriteSmileyMutationResult.NotAuthenticated, repository.remove("[:un]"))
+        assertEquals(HfrFavoriteSmileyMutationResult.NotAuthenticated, repository.remove("tester", "[:un]"))
         coEvery { client.addFavoriteSmiley(any(), any()) } returns hop("Ajout effectué avec succès !")
         coEvery { client.getFavoriteSmileyForm() } returns form() andThenThrows SessionExpiredException(CODEHEX)
-        assertEquals(HfrFavoriteSmileyMutationResult.NotAuthenticated, repository.add("[:un]"))
+        assertEquals(HfrFavoriteSmileyMutationResult.NotAuthenticated, repository.add("tester", "[:un]"))
         assertSafeDiagnostics()
     }
 
@@ -374,17 +447,17 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
     fun `transport and unknown responses keep raw payloads out of results and diagnostics`() = runTest {
         coEvery { client.getFavoriteSmileyForm() } returns form("[:un]")
         coEvery { client.addFavoriteSmiley(any(), any()) } throws IOException("codehex=$CODEHEX hash=$HASH_CHECK")
-        val transport = repository.add("[:deux]")
+        val transport = repository.add("tester", "[:deux]")
         assertEquals(HfrFavoriteSmileyMutationResult.TransportFailure, transport)
         assertFalse(transport.toString().contains(CODEHEX))
         coEvery { client.addFavoriteSmiley(any(), any()) } returns hop("unknown $CODEHEX")
-        val unknown = repository.add("[:deux]")
+        val unknown = repository.add("tester", "[:deux]")
         assertEquals(HfrFavoriteSmileyMutationResult.UnknownResponse, unknown)
         assertFalse(unknown.toString().contains(CODEHEX))
         coEvery { client.getFavoriteSmileyForm() } returns """
             <form action='login_validation.php'><input name=pseudo><input name=password></form>
         """.trimIndent()
-        assertEquals(HfrFavoriteSmileyMutationResult.NotAuthenticated, repository.remove("[:un]"))
+        assertEquals(HfrFavoriteSmileyMutationResult.NotAuthenticated, repository.remove("tester", "[:un]"))
         assertSafeDiagnostics()
     }
 
@@ -395,8 +468,8 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
         coEvery { client.addFavoriteSmiley(any(), any()) } throws failure
         coEvery { client.removeFavoriteSmileys(any(), any(), any(), any()) } throws failure
 
-        assertEquals(HfrFavoriteSmileyMutationResult.UnknownResponse, repository.add("[:deux]"))
-        assertEquals(HfrFavoriteSmileyMutationResult.UnknownResponse, repository.remove("[:un]"))
+        assertEquals(HfrFavoriteSmileyMutationResult.UnknownResponse, repository.add("tester", "[:deux]"))
+        assertEquals(HfrFavoriteSmileyMutationResult.UnknownResponse, repository.remove("tester", "[:un]"))
         assertEquals(
             listOf("add UnknownResponse", "remove UnknownResponse"),
             diagnostics.entries.value.map { it.message },
@@ -407,7 +480,7 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
     @Test
     fun `cancellation propagates without logging the exception message`() = runTest {
         coEvery { client.getFavoriteSmileyForm() } throws CancellationException(CODEHEX)
-        assertTrue(runCatching { repository.add("[:un]") }.exceptionOrNull() is CancellationException)
+        assertTrue(runCatching { repository.add("tester", "[:un]") }.exceptionOrNull() is CancellationException)
         assertSafeDiagnostics()
     }
 
@@ -443,10 +516,10 @@ class DefaultHfrFavoriteSmileyRepositoryTest {
             hop("Suppression effectuée avec succès !")
         }
         val first = async(start = CoroutineStart.UNDISPATCHED) {
-            if (removalFirst) repository.remove("[:cible]") else repository.add("[:nouveau]")
+            if (removalFirst) repository.remove("tester", "[:cible]") else repository.add("tester", "[:nouveau]")
         }
         val second = async(start = CoroutineStart.UNDISPATCHED) {
-            if (removalFirst) repository.add("[:nouveau]") else repository.remove("[:cible]")
+            if (removalFirst) repository.add("tester", "[:nouveau]") else repository.remove("tester", "[:cible]")
         }
         assertEquals(listOf("GET"), events)
         assertFalse(second.isCompleted)

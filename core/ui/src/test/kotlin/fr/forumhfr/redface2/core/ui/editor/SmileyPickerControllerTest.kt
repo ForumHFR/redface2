@@ -69,13 +69,13 @@ class SmileyPickerControllerTest {
         favorites = listOf(
             EditorSmiley("[:fictif_b:3]", "https://example.invalid/b.gif", EditorSmileySource.HFR_FAVORITE),
         )
-        controller.refreshFavorites()
+        controller.refreshFavorites(controller.favoriteFormStamp())
         val open = controller.state.value as SmileyPickerState.Open
         assertEquals(favorites, open.favoriteSmileys)
         assertEquals("ab", open.query)
         controller.dismiss()
         favorites = emptyList()
-        controller.refreshFavorites()
+        controller.refreshFavorites(controller.favoriteFormStamp())
         assertEquals(SmileyPickerState.Hidden, controller.state.value)
         controller.open()
         assertTrue((controller.state.value as SmileyPickerState.Open).favoriteSmileys.isEmpty())

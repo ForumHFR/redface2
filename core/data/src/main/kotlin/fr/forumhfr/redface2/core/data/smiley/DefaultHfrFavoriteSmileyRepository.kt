@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.data.smiley
 
+import fr.forumhfr.redface2.core.data.preferences.normalizeLocalAccountOwner
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
@@ -34,7 +35,9 @@ class DefaultHfrFavoriteSmileyRepository @Inject constructor(
 ) : HfrFavoriteSmileyRepository {
     private val mutationMutex = Mutex()
 
-    override suspend fun add(token: String): HfrFavoriteSmileyMutationResult = mutate("add", token) { account ->
+    override suspend fun add(owner: String, token: String): HfrFavoriteSmileyMutationResult = mutate(
+        "add", owner, token,
+    ) { account ->
         val form = readForm()
         when {
             !isCurrentAccount(account) -> HfrFavoriteSmileyMutationResult.AccountChanged
@@ -47,21 +50,13 @@ class DefaultHfrFavoriteSmileyRepository @Inject constructor(
     }
 
     private suspend fun addToForm(
-        account: AuthState.Authenticated,
+        account: String,
         form: HfrFavoriteSmileyForm,
         token: String,
     ): HfrFavoriteSmileyMutationResult {
         if (!isCurrentAccount(account)) return HfrFavoriteSmileyMutationResult.AccountChanged
         return when (val response = responseParser.parse(hfrClient.addFavoriteSmiley(form.hashCheck, token))) {
-            HfrFavoriteSmileyResponse.Added -> {
-                val confirmed = readForm()
-                when {
-                    !isCurrentAccount(account) -> HfrFavoriteSmileyMutationResult.AccountChanged
-                    confirmed.favorites.none { it.token == token } ->
-                        HfrFavoriteSmileyMutationResult.VerificationFailed(confirmed.favorites)
-                    else -> HfrFavoriteSmileyMutationResult.Success(confirmed.favorites)
-                }
-            }
+            HfrFavoriteSmileyResponse.Added -> confirmAddition(account, token)
             HfrFavoriteSmileyResponse.AlreadyPresent -> HfrFavoriteSmileyMutationResult.AlreadyPresent(form.favorites)
             is HfrFavoriteSmileyResponse.Full -> HfrFavoriteSmileyMutationResult.Full(response.limit, form.favorites)
             HfrFavoriteSmileyResponse.NotFound -> HfrFavoriteSmileyMutationResult.NotFound
@@ -70,7 +65,19 @@ class DefaultHfrFavoriteSmileyRepository @Inject constructor(
         }
     }
 
-    override suspend fun remove(token: String): HfrFavoriteSmileyMutationResult = mutate("remove", token) { account ->
+    private suspend fun confirmAddition(account: String, token: String): HfrFavoriteSmileyMutationResult {
+        val confirmed = readFormIfCurrent(account) ?: return HfrFavoriteSmileyMutationResult.AccountChanged
+        return when {
+            !isCurrentAccount(account) -> HfrFavoriteSmileyMutationResult.AccountChanged
+            confirmed.favorites.none { it.token == token } ->
+                HfrFavoriteSmileyMutationResult.VerificationFailed(confirmed.favorites)
+            else -> HfrFavoriteSmileyMutationResult.Success(confirmed.favorites)
+        }
+    }
+
+    override suspend fun remove(owner: String, token: String): HfrFavoriteSmileyMutationResult = mutate(
+        "remove", owner, token,
+    ) { account ->
         val form = readForm()
         val index = form.favorites.indexOfFirst { it.token == token }
         if (!isCurrentAccount(account)) return@mutate HfrFavoriteSmileyMutationResult.AccountChanged
@@ -84,7 +91,7 @@ class DefaultHfrFavoriteSmileyRepository @Inject constructor(
             return@mutate HfrFavoriteSmileyMutationResult.NotAuthenticated
         }
         // Even an unrecognized acknowledgement cannot replace the mandatory state verification.
-        val confirmed = readForm()
+        val confirmed = readFormIfCurrent(account) ?: return@mutate HfrFavoriteSmileyMutationResult.AccountChanged
         when {
             !isCurrentAccount(account) -> HfrFavoriteSmileyMutationResult.AccountChanged
             confirmed.favorites.map { it.token } != expected ->
@@ -101,24 +108,31 @@ class DefaultHfrFavoriteSmileyRepository @Inject constructor(
         return formParser.parse(html) ?: throw UnrecognizedFormException()
     }
 
-    private suspend fun isCurrentAccount(account: AuthState.Authenticated): Boolean =
-        (authRepository.observeAuthState().first() as? AuthState.Authenticated)?.pseudo?.lowercase() ==
-            account.pseudo.lowercase()
+    private suspend fun readFormIfCurrent(account: String): HfrFavoriteSmileyForm? =
+        if (isCurrentAccount(account)) readForm() else null
+
+    private suspend fun currentOwner(): String? =
+        (authRepository.observeAuthState().first() as? AuthState.Authenticated)?.pseudo
+            ?.takeUnless { it.isBlank() }?.let(::normalizeLocalAccountOwner)
+
+    private suspend fun isCurrentAccount(account: String): Boolean = currentOwner() == account
 
     @Suppress("SwallowedException") // Results and diagnostics deliberately carry no raw transport details.
     private suspend fun mutate(
         operation: String,
+        owner: String,
         token: String,
-        action: suspend (AuthState.Authenticated) -> HfrFavoriteSmileyMutationResult,
+        action: suspend (String) -> HfrFavoriteSmileyMutationResult,
     ): HfrFavoriteSmileyMutationResult = mutationMutex.withLock {
         val result = try {
             withContext(ioDispatcher) {
                 if (token.isEmpty() || (operation == "add" && !isCanonicalPersoToken(token))) {
                     return@withContext HfrFavoriteSmileyMutationResult.InvalidToken
                 }
-                val account = authRepository.observeAuthState().first() as? AuthState.Authenticated
-                    ?: return@withContext HfrFavoriteSmileyMutationResult.NotAuthenticated
-                action(account)
+                // The gesture owner crosses both waits unchanged; never adopt the account found here.
+                val account = normalizeLocalAccountOwner(owner)
+                if (isCurrentAccount(account)) action(account)
+                else HfrFavoriteSmileyMutationResult.AccountChanged
             }
         } catch (cancel: CancellationException) {
             throw cancel
