@@ -1,3 +1,3 @@
-Redface 2 v0.64.8 — dev.
-- Profile card: the member's hardware configuration, folded with "Show all".
-- Selectable text, also on the full profile page.
+Redface 2 v0.64.9 — dev.
+- Profile: the hardware configuration opens from a link, in its own sheet.
+- No longer shown inline in the card or the profile page.

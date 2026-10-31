@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.64.9` — `internal` (dev) — 2026-10-31
+
+Configuration matérielle derrière un lien ([#1467](https://github.com/ForumHFR/redface2/issues/1467), [#1503](https://github.com/ForumHFR/redface2/pull/1503)), retour de XaTriX sur la 0.64.8.
+
+- **La carte et la page profil n'affichent plus la configuration en ligne** : un lien « Configuration matérielle » ouvre une feuille dédiée, avec le texte complet et sélectionnable.
+- Le lien n'apparaît que si HFR le propose sur la page profil du membre. La configuration n'est lue qu'au toucher.
+- Retour, toucher à côté ou glisser vers le bas ferment la feuille et laissent la carte ouverte.
+
+---
+
 ## `0.64.8` — `internal` (dev) — 2026-10-30
 
 Configuration matérielle dans la carte profil ([#1467](https://github.com/ForumHFR/redface2/issues/1467), [#1501](https://github.com/ForumHFR/redface2/pull/1501)), suggestion d'AnthonyD.
