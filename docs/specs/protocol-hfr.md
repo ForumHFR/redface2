@@ -308,15 +308,17 @@ absent, vide ou non reconnu → `null`. La **source primaire** du badge est l'an
 
 ### Configuration matérielle — `configuration.php` (#1467)
 
-Contrat issu des **captures publiques anonymes du 30/10/2026** fournies pour #1467 :
+Contrat issu des **captures publiques anonymes des 30 et 31/10/2026** fournies pour #1467 :
 
 ```text
 GET https://forum.hardware.fr/configuration.php?config=hfr.inc&pseudo={pseudo_encodé}
 ```
 
 - La page profil ne contient **pas le texte de la configuration**. Sa ligne facultative
-  « Configuration matérielle » contient un lien `a.cLink` vers cette page ; le texte du lien
-  peut rester dans `UserProfile.rawFields` et ne doit pas être affiché comme du matériel.
+  « Configuration matérielle » (`td.profilCase2`) contient, dans sa `td.profilCase3`, un lien
+  `a.cLink` vers cette page (URL relative ou absolue). `UserProfile.hasHardwareConfiguration`
+  vaut `true` uniquement si cette ligne contient un `a[href]` ciblant `configuration.php`.
+  Le texte du lien reste dans `UserProfile.rawFields` et ne doit pas être affiché comme du matériel.
 - La requête se construit depuis le pseudo, encodé comme valeur de query par `HttpUrl` :
   `Colonel MythO` devient `pseudo=Colonel%20MythO`. La navigation profil reste indexée par `userId`.
 - `HfrClient.getUserConfiguration(pseudo)` utilise exclusivement **`@AnonymousClient`**, sans cookies,
@@ -339,24 +341,51 @@ vide : on ne peut pas distinguer « configuration vide » et « utilisateur inco
 En revanche, l'absence du titre, de la table, du libellé ou de la cellule attendue est une **erreur
 de parsing**, jamais un résultat vide. Les échecs HTTP/réseau restent également des erreurs.
 
-`ProfileRepository.getUserConfiguration` porte ce résultat séparément de `UserProfile` et effectue
-le parsing sur le dispatcher IO. Le ViewModel lance la lecture depuis le pseudo connu à l'ouverture,
-indépendamment du chargement du profil ; il corrige le pseudo depuis le profil chargé si nécessaire.
-Un réessai de configuration ne recharge pas le profil. Aucune requête n'est déclenchée par une
-recomposition ; la configuration est liée à l'ouverture de la carte ou de la page, annulée à la
-fermeture et rechargée à chaque ouverture.
+**Écart observé le 31/10/2026, en anonyme sans cookies** : la présence du lien sur le profil
+ne permet pas de déduire le contenu de `configuration.php`, et réciproquement.
 
-La carte profil masque la section vide et la place après ses actions, avec quatre lignes visuelles
-au maximum avant « Tout afficher ». L'ensemble de la carte défile dans la feuille extensible.
-Le titre est un `heading`, le texte est sélectionnable et complet après dépliage. La page profil
-complète utilise la même section sans repli. Le chargement ne réserve aucun espace ; une erreur
-affiche « Réessayer » uniquement pour cette section.
+| Profil | Ligne-lien sur le profil | Lignes de configuration |
+|---|---|---|
+| Ernestor (15461) | présente | 28 |
+| adn (1000) | présente | 13 |
+| bernardt (5000) | présente | 4 |
+| XaTriX (54596) | présente | 12 |
+| gragra (20000), nahabet (60000), ezzz (15867) | absente | 0 |
+| FLo (1) | absente | 11 |
+| - janfy - (100) | absente | 14 |
+| pifpaflechien (40000) | absente | 1 |
+
+**Décision #1467** : suivre la page web HFR. Sans cette ligne-lien, l'application n'affiche aucun
+accès à la configuration, même si l'endpoint séparé pourrait renvoyer du texte. Elle ne sonde pas
+`configuration.php` pour découvrir cette présence. Un lien peut aussi aboutir à une liste vide.
+
+`ProfileRepository.getUserConfiguration` porte ce résultat séparément de `UserProfile` et effectue
+le parsing sur le dispatcher IO. Le ViewModel ne charge aucune configuration à l'ouverture de la
+carte ou de la page profil. Un toucher sur « Configuration matérielle », proposé après chargement du profil
+si `hasHardwareConfiguration` vaut `true`, ouvre une feuille dédiée et lance la lecture anonyme
+depuis le pseudo canonique chargé. Un réessai ne recharge que la configuration. Fermer la feuille
+annule la requête et ignore toute réponse tardive ; la rouvrir recharge. Fermer la carte ferme
+aussi la feuille et annule la lecture. Aucune requête n'est déclenchée par une recomposition.
+
+La carte place son unique lien après les actions pour préserver leur position et leur visibilité ;
+la page complète le place après la signature, comme HFR. Aucun texte matériel n'est affiché en ligne.
+La feuille commune présente le titre en `heading`, le pseudo, un indicateur discret au chargement
+et toutes les lignes sélectionnables dans une zone défilable, sans repli. Une liste vide affiche
+« Aucune configuration renseignée » ; une erreur affiche « Configuration indisponible » et
+« Réessayer », avec le nom accessible « Réessayer la configuration matérielle ».
+
+Depuis la carte, la feuille de configuration s'empile sur sa propre fenêtre et s'ouvre directement
+déployée : Retour, le voile ou un glissement vers le bas depuis la poignée M3 ferment d'abord
+cette feuille et conservent la carte. La poignée et les gestes de fermeture sont ceux des autres
+feuilles de l'application ; un appui long suivi d'un glissement dans le texte sélectionnable ne
+ferme ni ne déplace les feuilles.
 
 **Fixtures réduites et provenance** dans `core/parser/src/test/resources/fixtures/profile/`
 (chaque HTML a un `.source.txt`) :
 
 | Fixture | Cas capturé |
 |---|---|
+| `profile_xatrix_anonymous.html` | Profil anonyme, ligne-lien relative présente (31/10) |
 | `configuration_xatrix_anonymous.html` | XaTriX, 12 lignes, NBSP final |
 | `configuration_colonel_anonymous.html` | Colonel MythO, pseudo avec espace, 12 lignes dans la capture |
 | `configuration_ezzz_anonymous.html` | Membre existant, cellule vide |

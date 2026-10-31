@@ -93,8 +93,13 @@ data class UserProfile(
     val location: String?,      // ville HFR, null si vide ou absent
     val signatureText: String?, // texte plat (Jsoup.text()) — round-trip BBCode hors scope MVP
     val rawFields: Map<String, String> = emptyMap(), // champs non promus (Profession, Loisirs, …)
+    val hasHardwareConfiguration: Boolean = false, // ligne HFR avec lien vers configuration.php (#1467)
 )
 ```
+
+`hasHardwareConfiguration` suit le lien proposé par le profil public HFR, pas la présence de texte
+dans `configuration.php`. Voir le
+[contrat de configuration matérielle]({{ site.baseurl }}/specs/protocol-hfr#configuration-matérielle--configurationphp-1467).
 
 `Post.profileId: Int?` (Phase 2 finish #208) — id numérique HFR extrait depuis `<a href="/hfr/profil-{N}.htm">` dans le toolbar de chaque post. Null pour les posts « Publicité » ou les reads anonymes sans lien profil. Persisté en Room v6 (`MIGRATION_5_6`). Clé canonique pour la navigation vers le profil — `post.author` et `post.avatarUrl` sont des hints d'affichage.
 

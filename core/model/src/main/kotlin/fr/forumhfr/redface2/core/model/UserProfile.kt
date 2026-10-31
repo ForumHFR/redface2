@@ -6,7 +6,7 @@ package fr.forumhfr.redface2.core.model
  * Navigation key is always [userId] — [pseudo] and [avatarUrl] are display hints that
  * can be pre-populated from the topic page before the profile is fully loaded.
  *
- * All fields beyond [userId] and [pseudo] are nullable because HFR's profile page is
+ * Optional text fields beyond [userId] and [pseudo] are nullable because HFR's profile page is
  * fragile: optional sections (location, signature, birthdate) can be absent, and the
  * exact HTML structure has changed over the years. Tolerant nullability avoids crashes
  * on edge cases and partial renders.
@@ -69,4 +69,6 @@ data class UserProfile(
      * `"Loisirs"`). Values are the trimmed text content of `td.profilCase3`.
      */
     val rawFields: Map<String, String> = emptyMap(),
+    /** Whether the profile offers a link to `configuration.php`, regardless of its eventual content. */
+    val hasHardwareConfiguration: Boolean = false,
 )

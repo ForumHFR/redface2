@@ -26,6 +26,7 @@ import org.jsoup.nodes.TextNode
  * account types.
  *
  * Known verified fixtures:
+ * - `profile_xatrix_anonymous.html` (userId=54596, anonymous configuration link)
  * - `profile_xatrix_authenticated.html` (userId=54596, authenticated)
  * - `profile_ezzz_anonymous.html` (userId=15867, anonymous)
  *
@@ -89,8 +90,20 @@ class ProfileParser {
             location = location,
             signatureText = signatureText,
             rawFields = rawFields,
+            hasHardwareConfiguration = hasHardwareConfiguration(document),
         )
     }
+
+    private fun hasHardwareConfiguration(document: Element): Boolean =
+        document.select("tr.profil").any { row ->
+            val isConfiguration = row.selectFirst("td.profilCase2")?.text()?.trimLabel() == KEY_CONFIGURATION
+            val links = row.select("td.profilCase3 a[href]")
+            isConfiguration && links.any { link ->
+                // Accept both relative HFR links and absolute URLs; match the target path, not a query value.
+                val path = link.attr("href").substringBefore('?').substringBefore('#')
+                path == "configuration.php" || path.endsWith("/configuration.php")
+            }
+        }
 
     /**
      * #1467 — parses the separate, anonymous `configuration.php` page.
@@ -248,6 +261,7 @@ class ProfileParser {
         private const val KEY_LOCATION = "Ville"
         private const val KEY_SIGNATURE = "Signature des messages"
         private const val KEY_STATUS = "Statut"
+        private const val KEY_CONFIGURATION = "Configuration matérielle"
 
         private val PROMOTED_KEYS = setOf(
             KEY_PSEUDO,
