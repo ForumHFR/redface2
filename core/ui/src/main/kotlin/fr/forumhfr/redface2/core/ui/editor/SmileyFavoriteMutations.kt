@@ -4,10 +4,10 @@ import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.HfrFavoriteSmileyMutationResult
 import fr.forumhfr.redface2.core.domain.smiley.LocalFavoriteSmileyMutationResult
 
-/** Host-supplied operations; the picker reconciles the returned list without reloading the editor form. */
+/** Host operations receive the owner captured at the gesture, before any coroutine or repository wait. */
 data class SmileyFavoriteMutations(
-    val addHfrFavorite: suspend (String) -> HfrFavoriteSmileyMutationResult,
-    val removeHfrFavorite: suspend (String) -> HfrFavoriteSmileyMutationResult,
+    val addHfrFavorite: suspend (owner: String, token: String) -> HfrFavoriteSmileyMutationResult,
+    val removeHfrFavorite: suspend (owner: String, token: String) -> HfrFavoriteSmileyMutationResult,
 )
 
 internal fun HfrFavoriteSmileyMutationResult.confirmedList(): List<EditorSmiley>? = when (this) {

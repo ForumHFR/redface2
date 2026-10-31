@@ -7,8 +7,8 @@ import fr.forumhfr.redface2.core.model.LocalFavoriteSmiley
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 
-internal class FakePickerLocalCollections : SmileyLocalCollections {
-    val snapshot = MutableStateFlow(SmileyLocalCollectionSnapshot())
+internal class FakePickerLocalCollections(owner: String? = null) : SmileyLocalCollections {
+    val snapshot = MutableStateFlow(SmileyLocalCollectionSnapshot(owner))
     val calls = mutableListOf<Triple<String, String, String?>>()
     var addResult: suspend () -> LocalFavoriteSmileyMutationResult = { LocalFavoriteSmileyMutationResult.Added }
     var removeResult: suspend () -> LocalFavoriteSmileyMutationResult = { LocalFavoriteSmileyMutationResult.Updated }

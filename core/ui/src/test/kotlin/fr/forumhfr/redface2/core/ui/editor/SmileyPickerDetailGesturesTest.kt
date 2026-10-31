@@ -424,8 +424,8 @@ class SmileyPickerDetailGesturesTest {
             favoriteSources = SmileyPickerFavoriteSources(
                 favoriteSmileys = { listOf(smiley) }, localCollections = locals,
                 hfrFavoriteMutations = SmileyFavoriteMutations(
-                    { HfrFavoriteSmileyMutationResult.Success(listOf(smiley)) },
-                    { HfrFavoriteSmileyMutationResult.Success(emptyList()) },
+                    { _, _ -> HfrFavoriteSmileyMutationResult.Success(listOf(smiley)) },
+                    { _, _ -> HfrFavoriteSmileyMutationResult.Success(emptyList()) },
                 ),
             ),
             wikiKeywords = SmileyWikiKeywordsSource(load = {
@@ -513,8 +513,8 @@ class SmileyPickerDetailGesturesTest {
             favoriteSources = SmileyPickerFavoriteSources(
                 favoriteSmileys = { listOf(target) }, localCollections = locals,
                 hfrFavoriteMutations = SmileyFavoriteMutations(
-                    { HfrFavoriteSmileyMutationResult.Success(listOf(target)) },
-                    { HfrFavoriteSmileyMutationResult.Success(emptyList()) },
+                    { _, _ -> HfrFavoriteSmileyMutationResult.Success(listOf(target)) },
+                    { _, _ -> HfrFavoriteSmileyMutationResult.Success(emptyList()) },
                 ),
             ),
         )
@@ -659,8 +659,8 @@ class SmileyPickerDetailGesturesTest {
         favoriteSources = SmileyPickerFavoriteSources(
             localCollections = locals,
             hfrFavoriteMutations = SmileyFavoriteMutations(
-                { HfrFavoriteSmileyMutationResult.Success(listOf(wiki[0])) },
-                { HfrFavoriteSmileyMutationResult.Success(emptyList()) },
+                { _, _ -> HfrFavoriteSmileyMutationResult.Success(listOf(wiki[0])) },
+                { _, _ -> HfrFavoriteSmileyMutationResult.Success(emptyList()) },
             ),
         ),
     ).also { dispatcher.scheduler.runCurrent(); it.open() }

@@ -760,7 +760,7 @@ des collections vides. `SmileyPickerState.Open` (`:core:ui`) projette ces collec
 expose `onLocalFavoriteChange`. `initialTab: SmileyPickerTab` (`FAVORITES`, `STANDARD`, `WIKI`)
 est choisi à l'ouverture par le contrôleur, puis la sélection visible reste sauvegardée dans la feuille.
 
-`HfrFavoriteSmileyRepository.add(token)` / `remove(token)` retournent ce résultat sans HTML,
+`HfrFavoriteSmileyRepository.add(owner, token)` / `remove(owner, token)` retournent ce résultat sans HTML,
 exception ni secret. `Success.favorites` est la liste confirmée après mutation.
 `NotInFavorites.favorites` est la liste fraîche quand le jeton à retirer est absent ; aucun POST
 n'est envoyé et l'interface signale l'échec du retrait. `AlreadyPresent` et `Full` contiennent
@@ -769,8 +769,8 @@ la liste du GET préalable.
 `VerificationFailed` rapporte la liste réelle quand le jeton ajouté est absent après acquittement,
 ou quand le retrait n'a pas laissé les jetons attendus dans leur ordre ; aucune liste optimiste n'est construite ici.
 `InvalidToken` refuse avant réseau tout jeton non canonique perso à l'ajout, et seulement le vide
-au retrait. `NotFound` vient du serveur. `NotAuthenticated` indique un compte anonyme ou une session expirée ;
-`AccountChanged` un compte différent de celui du début de l'opération. `UnknownResponse`
+au retrait. `NotFound` vient du serveur. `NotAuthenticated` indique une session refusée par HFR ou expirée ;
+`AccountChanged` un compte différent du propriétaire capturé au geste, ou devenu anonyme. `UnknownResponse`
 couvre un formulaire ambigu ou une réponse non reconnue ; `TransportFailure` un échec HTTP/réseau.
 
 `hash_check` et `codehex` du formulaire de gestion restent dans un type technique transitoire

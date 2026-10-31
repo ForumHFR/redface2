@@ -283,6 +283,7 @@ class PrivateMessageComposeViewModelTest {
 
     @Test
     fun `picker invokes the injected HFR add and remove without reloading the form`() = runTest {
+        localCollections.snapshot.value = SmileyLocalCollectionSnapshot("alice")
         val wiki = EditorSmiley("[:fictif_geste:2]", "https://example.invalid/geste.gif", EditorSmileySource.WIKI)
         val favorite = wiki.copy(source = EditorSmileySource.HFR_FAVORITE)
         favoriteRepository.addResult = HfrFavoriteSmileyMutationResult.Success(listOf(favorite))
@@ -299,8 +300,34 @@ class PrivateMessageComposeViewModelTest {
         viewModel.smileyPicker.onFavoriteClicked(wiki)
         testScheduler.advanceUntilIdle()
         assertEquals(listOf(wiki.token), favoriteRepository.removed)
+        assertEquals(listOf("alice", "alice"), favoriteRepository.owners)
         assertTrue((viewModel.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys.isEmpty())
         coVerify(exactly = 1) { repository.fetchComposeForm(any()) }
+    }
+
+    @Test
+    fun `late compose form cannot authorize favorites after an account switch`() = runTest {
+        localCollections.snapshot.value = SmileyLocalCollectionSnapshot("alice")
+        val favorite = EditorSmiley("[:alice]", "https://example.invalid/a.gif", EditorSmileySource.HFR_FAVORITE)
+        val gate = CompletableDeferred<ReplyForm>()
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } coAnswers { gate.await() }
+        val viewModel = viewModel(repository)
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.isLoadingForm)
+        localCollections.snapshot.value = SmileyLocalCollectionSnapshot("bob")
+        advanceUntilIdle()
+        gate.complete(composeForm().copy(favoriteSmileys = listOf(favorite)))
+        advanceUntilIdle()
+
+        assertFalse(viewModel.state.value.isLoadingForm)
+        viewModel.smileyPicker.open()
+        val open = viewModel.smileyPicker.state.value as SmileyPickerState.Open
+        assertTrue(open.favoriteSmileys.isEmpty())
+        assertNull(open.onFavoriteChange)
+        viewModel.smileyPicker.onFavoriteClicked(favorite)
+        advanceUntilIdle()
+        assertTrue(favoriteRepository.owners.isEmpty())
     }
 
     @Test

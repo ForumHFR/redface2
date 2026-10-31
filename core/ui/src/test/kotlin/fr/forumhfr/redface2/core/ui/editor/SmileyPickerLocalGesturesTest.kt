@@ -275,7 +275,7 @@ class SmileyPickerLocalGesturesTest {
             )
             dispatcher.scheduler.runCurrent()
             controller.open()
-            controller.refreshFavorites()
+            controller.refreshFavorites(controller.favoriteFormStamp())
         }
         tab(R.string.editor_smiley_tab_standard).assertIsSelected()
     }
@@ -298,8 +298,8 @@ class SmileyPickerLocalGesturesTest {
         favoriteSources = SmileyPickerFavoriteSources(
             favoriteSmileys = { hfr },
             hfrFavoriteMutations = SmileyFavoriteMutations(
-                { HfrFavoriteSmileyMutationResult.Success(listOf(wiki)) },
-                { HfrFavoriteSmileyMutationResult.Success(emptyList()) },
+                { _, _ -> HfrFavoriteSmileyMutationResult.Success(listOf(wiki)) },
+                { _, _ -> HfrFavoriteSmileyMutationResult.Success(emptyList()) },
             ),
             localCollections = locals,
         ),

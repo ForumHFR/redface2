@@ -187,7 +187,7 @@ class SmileyPickerLocalCollectionsTest {
         val controller = SmileyPickerController(
             backgroundScope, { _, _ -> emptyList() },
             favoriteSources = SmileyPickerFavoriteSources(
-                hfrFavoriteMutations = SmileyFavoriteMutations({ gate.await() }, { gate.await() }),
+                hfrFavoriteMutations = SmileyFavoriteMutations({ _, _ -> gate.await() }, { _, _ -> gate.await() }),
                 localCollections = locals,
             ),
         )
@@ -214,7 +214,7 @@ class SmileyPickerLocalCollectionsTest {
             val controller = SmileyPickerController(
                 backgroundScope, { _, _ -> emptyList() },
                 favoriteSources = SmileyPickerFavoriteSources(
-                    hfrFavoriteMutations = SmileyFavoriteMutations({ gate.await() }, { gate.await() }),
+                    hfrFavoriteMutations = SmileyFavoriteMutations({ _, _ -> gate.await() }, { _, _ -> gate.await() }),
                     localCollections = locals,
                 ),
             )
@@ -250,8 +250,8 @@ class SmileyPickerLocalCollectionsTest {
                 backgroundScope, { _, _ -> emptyList() },
                 favoriteSources = SmileyPickerFavoriteSources(
                     hfrFavoriteMutations = SmileyFavoriteMutations(
-                        { HfrFavoriteSmileyMutationResult.Success(listOf(perso)) },
-                        { HfrFavoriteSmileyMutationResult.Success(emptyList()) },
+                        { _, _ -> HfrFavoriteSmileyMutationResult.Success(listOf(perso)) },
+                        { _, _ -> HfrFavoriteSmileyMutationResult.Success(emptyList()) },
                     ),
                     localCollections = locals,
                 ),
@@ -284,7 +284,9 @@ class SmileyPickerLocalCollectionsTest {
                 val controller = SmileyPickerController(
                     backgroundScope, { _, _ -> emptyList() },
                     favoriteSources = SmileyPickerFavoriteSources(
-                        hfrFavoriteMutations = SmileyFavoriteMutations({ gate.await() }, { gate.await() }),
+                        hfrFavoriteMutations = SmileyFavoriteMutations(
+                            { _, _ -> gate.await() }, { _, _ -> gate.await() },
+                        ),
                         localCollections = locals,
                     ),
                 )
@@ -322,8 +324,8 @@ class SmileyPickerLocalCollectionsTest {
                     backgroundScope, { _, _ -> emptyList() },
                     favoriteSources = SmileyPickerFavoriteSources(
                         hfrFavoriteMutations = SmileyFavoriteMutations(
-                            { HfrFavoriteSmileyMutationResult.Success(listOf(perso)) },
-                            { HfrFavoriteSmileyMutationResult.Success(emptyList()) },
+                            { _, _ -> HfrFavoriteSmileyMutationResult.Success(listOf(perso)) },
+                            { _, _ -> HfrFavoriteSmileyMutationResult.Success(emptyList()) },
                         ),
                         localCollections = locals,
                     ),
@@ -336,6 +338,7 @@ class SmileyPickerLocalCollectionsTest {
                 runCurrent()
                 locals.snapshot.value = SmileyLocalCollectionSnapshot(completionOwner)
                 runCurrent()
+                controller.refreshFavorites(controller.favoriteFormStamp())
                 controller.onFavoriteClicked(perso)
                 runCurrent()
                 val generation = controller.openState().favoriteFeedbackGeneration
@@ -390,8 +393,8 @@ class SmileyPickerLocalCollectionsTest {
             backgroundScope, { _, _ -> emptyList() },
             favoriteSources = SmileyPickerFavoriteSources(
                 hfrFavoriteMutations = SmileyFavoriteMutations(
-                    { token -> hfrCalls += token; HfrFavoriteSmileyMutationResult.Success(listOf(perso)) },
-                    { HfrFavoriteSmileyMutationResult.Success(emptyList()) },
+                    { _, token -> hfrCalls += token; HfrFavoriteSmileyMutationResult.Success(listOf(perso)) },
+                    { _, _ -> HfrFavoriteSmileyMutationResult.Success(emptyList()) },
                 ),
                 localCollections = locals,
             ),

@@ -126,8 +126,8 @@ class SmileyPickerDetailTest {
         favoriteSources = SmileyPickerFavoriteSources(
             favoriteSmileys = { listOf(perso) },
             hfrFavoriteMutations = SmileyFavoriteMutations(
-                { HfrFavoriteSmileyMutationResult.Success(listOf(perso)) },
-                { HfrFavoriteSmileyMutationResult.Success(emptyList()) },
+                { _, _ -> HfrFavoriteSmileyMutationResult.Success(listOf(perso)) },
+                { _, _ -> HfrFavoriteSmileyMutationResult.Success(emptyList()) },
             ),
             localCollections = locals,
         ),

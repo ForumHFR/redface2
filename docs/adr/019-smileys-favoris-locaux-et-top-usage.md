@@ -118,6 +118,21 @@ Le lot D de #1154 branche les moteurs dans les quatre éditeurs, sans synchronis
   (`:core:data`), observe le pseudo normalisé et bascule les deux observations ensemble.
   Anonyme ou pseudo blanc : aucune collection ni action locale. Les quatre ViewModels injectent
   ce seul composant, sans logique de propriétaire dupliquée. Le propriétaire est capturé au geste.
+- À chaque changement de propriétaire, y compris via l'anonymat, le sélecteur invalide les
+  données, mutations en attente et retours HFR de l'ancienne génération ; liste et commandes HFR
+  restent absentes jusqu'au retour d'un formulaire démarré sous la génération courante.
+  Chacun des quatre hôtes capture `favoriteFormStamp()` **avant** de lancer son chargement,
+  puis transmet ce jeton à `refreshFavorites(stamp)` après remplacement du formulaire. Un retour
+  d'une ancienne génération reste masqué, même après un aller-retour vers le même compte ;
+  `refreshFavorites(null)` invalide les favoris quand l'hôte efface son formulaire. Le premier
+  propriétaire observé établit la référence, sans invalider un formulaire initial reçu avant lui.
+- Les commandes HFR nécessitent `SmileyLocalCollections` et un propriétaire observé non nul.
+  Le pseudo capturé **au geste** traverse le callback jusqu'au dépôt, qui le compare à la session
+  **après l'attente du mutex et le passage sur IO**, avant tout GET/POST. La normalisation des
+  deux côtés est celle des collections locales : `lowercase()`, sans trim, sans dépendre du
+  `userId` numérique qui peut être résolu tardivement. Un compte différent ou anonyme renvoie
+  `AccountChanged`, sans requête ni retour utilisateur du sélecteur. Les contrôles précédant les
+  POST et les lectures de confirmation restent liés à ce même propriétaire.
 - Un favori local utilise son URL enregistrée à l'ajout. Sinon, un builtin reprend la table
   `BUILTIN_HFR_SMILEYS` ; un perso utilise une URL connue des listes chargées avant reconstruction :
   `[:nom]` → `https://forum-images.hardware.fr/images/perso/nom.gif`,
