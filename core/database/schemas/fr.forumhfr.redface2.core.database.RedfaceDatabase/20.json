@@ -2,7 +2,7 @@
   "formatVersion": 1,
   "database": {
     "version": 20,
-    "identityHash": "00000000000000000000000000000000",
+    "identityHash": "132523d6628424a183a60638bb6d8c67",
     "entities": [
       {
         "tableName": "topic_pages",
@@ -806,7 +806,7 @@
     ],
     "setupQueries": [
       "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
-      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '00000000000000000000000000000000')"
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '132523d6628424a183a60638bb6d8c67')"
     ]
   }
 }
