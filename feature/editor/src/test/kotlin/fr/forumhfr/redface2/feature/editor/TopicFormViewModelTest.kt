@@ -9,11 +9,15 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.viewModelScope
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionAdapter
+import fr.forumhfr.redface2.core.domain.editor.SubmissionBodyMutation
+import fr.forumhfr.redface2.core.domain.editor.SubmissionProbe
 import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
@@ -67,11 +71,14 @@ import fr.forumhfr.redface2.core.model.write.TopicPollForm
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -1618,6 +1625,88 @@ class TopicFormViewModelTest {
         assertEquals("no POST may slip through mid-upload", 0, topicFormRepository.newTopicSubmitCalls)
     }
 
+    /** #1301-ST — les deux modes partagent le repository et le stockage déjà exercés ici. */
+    internal fun submissionAdapter(
+        creating: Boolean,
+        scope: TestScope,
+        preferences: Flow<Boolean>,
+    ): EditorSubmissionAdapter {
+        val postGate = CompletableDeferred<Unit>()
+        val uploadCompletion = CompletableDeferred<Unit>()
+        val uploads = FakeUploadRepository().apply { uploadGate = uploadCompletion }
+        topicFormRepository.submitGate = postGate
+        val key = if (creating) {
+            EditorDraftKey.newTopic(SAMPLE_CAT)
+        } else {
+            EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE)
+        }
+        draftStore.preload(key, EditorDraftStore.Draft(body = "stored draft", subject = "stored title"))
+        val userPreferences = object : UserPreferencesRepository by FakeUserPreferencesRepository() {
+            override fun observeConfirmBeforePosting(): Flow<Boolean> = preferences
+        }
+        val viewModel = if (creating) {
+            newTopicViewModel(
+                entrySubcat = SAMPLE_SUBCAT,
+                userPreferencesRepository = userPreferences,
+                uploadRepository = uploads,
+            )
+        } else {
+            newViewModel(userPreferencesRepository = userPreferences, uploadRepository = uploads)
+        }
+        val effects = mutableListOf<TopicFormEffect>()
+        scope.backgroundScope.launch(UnconfinedTestDispatcher(scope.testScheduler)) {
+            viewModel.effects.collect { effects += it }
+        }
+        return object : EditorSubmissionAdapter {
+            override val unsupportedMutations = mapOf(
+                SubmissionBodyMutation.SHARED_RESTORE to "aucune entrée resumeSharedDraft pour un sujet",
+            )
+            override val uploadUnsupportedReason: String? = null
+            override val postCalls get() = topicFormRepository.submitCalls + topicFormRepository.newTopicSubmitCalls
+            override val uploadCalls get() = uploads.uploadCalls
+            override val draftSaves get() = draftStore.saveCount
+            override val draftWrites get() = draftSaves + draftStore.deletedKeys.size
+            override val successEffects get() = effects.count {
+                it is TopicFormEffect.SubmitSucceeded || it is TopicFormEffect.NewTopicCreated
+            }
+            override val closeEffects get() = effects.count { it is TopicFormEffect.CloseCommitted }
+
+            override fun editBody(body: String) {
+                viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Contract title")))
+                viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue(body, TextRange(body.length))))
+            }
+
+            override fun clickSubmit() = viewModel.submit(TopicFormIntent.SubmitClicked)
+            override fun confirm() = viewModel.submit(TopicFormIntent.SubmitConfirmed)
+            override fun dismissConfirmation() = viewModel.submit(TopicFormIntent.SubmitConfirmationDismissed)
+            override fun close() = viewModel.submit(TopicFormIntent.CloseRequested)
+            override fun completePost() { postGate.complete(Unit) }
+            override fun completeUpload() { uploadCompletion.complete(Unit) }
+            override fun dispose() = viewModel.viewModelScope.cancel()
+            override fun startUpload() = viewModel.submit(TopicFormIntent.ImagesPicked(listOf("content://pick/1")))
+
+            override fun snapshot(): SubmissionProbe = viewModel.state.value.let {
+                SubmissionProbe(it.draft.text, it.canSubmit, it.isSubmitting, it.isUploading, it.showSubmitConfirmation)
+            }
+
+            override fun mutateBody(mutation: SubmissionBodyMutation) {
+                when (mutation) {
+                    SubmissionBodyMutation.TYPING -> editBody("changed during POST")
+                    SubmissionBodyMutation.SMILEY -> viewModel.submit(TopicFormIntent.SmileySelected(":jap:"))
+                    SubmissionBodyMutation.FORMAT ->
+                        viewModel.submit(TopicFormIntent.ToolbarActionClicked(BbcodeAction.Bold))
+                    SubmissionBodyMutation.IMAGE_URL ->
+                        viewModel.submit(TopicFormIntent.ImageUrlInserted("https://example.test/image.png"))
+                    SubmissionBodyMutation.RESTORE -> {
+                        checkNotNull(viewModel.state.value.restorableDraft) { "l'offre #1415 doit être présente" }
+                        viewModel.submit(TopicFormIntent.DraftRestoreRequested)
+                    }
+                    SubmissionBodyMutation.SHARED_RESTORE -> error("cas explicitement désactivé")
+                }
+            }
+        }
+    }
+
     @Suppress("LongParameterList") // test factory mirroring the ViewModel's injected dependencies.
     private fun newTopicViewModel(
         entrySubcat: Int?,
@@ -1665,6 +1754,7 @@ class TopicFormViewModelTest {
     private fun newViewModel(
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
         userPreferencesRepository: UserPreferencesRepository = FakeUserPreferencesRepository(),
+        uploadRepository: UploadRepository = FakeUploadRepository(),
     ): TopicFormViewModel = TopicFormViewModel(
         request = TopicFormRequest(
             mode = TopicFormMode.EditFirstPost,
@@ -1683,7 +1773,7 @@ class TopicFormViewModelTest {
         draftStore = draftStore,
         diagnostics = diagnostics,
         authRepository = FakeAuthRepository(),
-        uploadRepository = FakeUploadRepository(),
+        uploadRepository = uploadRepository,
         imageUploadReader = FakeImageUploadReader(),
     )
 

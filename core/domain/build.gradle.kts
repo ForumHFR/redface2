@@ -1,5 +1,6 @@
 plugins {
     id("redface.kotlin.jvm.library")
+    `java-test-fixtures`
 }
 
 dependencies {
@@ -8,4 +9,7 @@ dependencies {
     api(libs.kotlinx.coroutines.core)
 
     testImplementation(libs.junit4)
+
+    testFixturesApi(libs.junit4)
+    testFixturesApi(libs.kotlinx.coroutines.test)
 }

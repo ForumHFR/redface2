@@ -13,12 +13,16 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.viewModelScope
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionAdapter
+import fr.forumhfr.redface2.core.domain.editor.SubmissionBodyMutation
+import fr.forumhfr.redface2.core.domain.editor.SubmissionProbe
 import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
@@ -71,11 +75,14 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -876,6 +883,100 @@ class PostEditorViewModelTest {
                 settled.preview,
             )
             cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    /** #1301-ST — adaptateur des trois parcours, réutilisant les harnais et fakes de cette suite. */
+    internal fun submissionAdapter(
+        variant: String,
+        scope: TestScope,
+        preferences: Flow<Boolean>,
+        delayedSharedRestore: Boolean,
+    ): EditorSubmissionAdapter {
+        val postGate = CompletableDeferred<Unit>()
+        val uploadGate = CompletableDeferred<Unit>()
+        val restoreGate = CompletableDeferred<Unit>()
+        val editing = variant == "edit"
+        val key = if (editing) {
+            EditorDraftKey.editPost(SAMPLE_CAT, SAMPLE_EDITED_NUMREPONSE)
+        } else {
+            EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        }
+        draftStore.preload(key, EditorDraftStore.Draft(body = "stored draft"))
+        if (delayedSharedRestore && !editing) draftStore.loadGate = restoreGate
+        replyRepository.submitGate = postGate
+        replyRepository.submitResult = ReplySubmitResult.Success(targetPage = 20, refreshUrl = null)
+        if (variant == "quote") {
+            replyRepository.formResultsByNumrep = mapOf(
+                101 to Result.success(authenticatedForm("[quotemsg=101,35395,1]quoted body[/quotemsg]")),
+            )
+        }
+        editPostRepository.submitGate = postGate
+        editPostRepository.submitResult = ReplySubmitResult.Success(targetPage = 20, refreshUrl = null)
+        uploadRepository.uploadGate = uploadGate
+        val defaults = FakeUserPreferencesRepository(quoteCardsEnabled = true)
+        val userPreferences = object : UserPreferencesRepository by defaults {
+            override fun observeConfirmBeforePosting(): Flow<Boolean> = preferences
+        }
+        val viewModel = if (editing) {
+            newEditViewModel(userPreferencesRepository = userPreferences)
+        } else {
+            newReplyViewModel(
+                initialQuotes = if (variant == "quote") listOf(card(101)) else emptyList(),
+                resumeSharedDraft = delayedSharedRestore,
+                userPreferencesRepository = userPreferences,
+            )
+        }
+        val effects = mutableListOf<PostEditorEffect>()
+        scope.backgroundScope.launch(UnconfinedTestDispatcher(scope.testScheduler)) {
+            viewModel.effects.collect { effects += it }
+        }
+        return object : EditorSubmissionAdapter {
+            override val unsupportedMutations = if (editing) {
+                mapOf(SubmissionBodyMutation.SHARED_RESTORE to "resumeSharedDraft réservé aux réponses/citations")
+            } else {
+                emptyMap()
+            }
+            override val uploadUnsupportedReason: String? = null
+            override val postCalls get() = replyRepository.submitCalls + editPostRepository.submitCalls
+            override val uploadCalls get() = uploadRepository.uploadCalls
+            override val draftSaves get() = draftStore.saveCount
+            override val draftWrites get() = draftSaves + draftStore.deletedKeys.size
+            override val successEffects get() = effects.count { it is PostEditorEffect.SubmitSucceeded }
+            override val closeEffects get() = effects.count { it is PostEditorEffect.CloseCommitted }
+
+            override fun editBody(body: String) {
+                viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue(body, TextRange(body.length))))
+            }
+
+            override fun clickSubmit() = viewModel.submit(PostEditorIntent.SubmitClicked)
+            override fun confirm() = viewModel.submit(PostEditorIntent.SubmitConfirmed)
+            override fun dismissConfirmation() = viewModel.submit(PostEditorIntent.SubmitConfirmationDismissed)
+            override fun close() = viewModel.submit(PostEditorIntent.CloseRequested)
+            override fun completePost() { postGate.complete(Unit) }
+            override fun completeUpload() { uploadGate.complete(Unit) }
+            override fun dispose() = viewModel.viewModelScope.cancel()
+            override fun startUpload() = viewModel.submit(PostEditorIntent.ImagesPicked(listOf("content://pick/1")))
+
+            override fun snapshot(): SubmissionProbe = viewModel.state.value.let {
+                SubmissionProbe(it.draft.text, it.canSubmit, it.isSubmitting, it.isUploading, it.showSubmitConfirmation)
+            }
+
+            override fun mutateBody(mutation: SubmissionBodyMutation) {
+                when (mutation) {
+                    SubmissionBodyMutation.TYPING -> editBody("changed during POST")
+                    SubmissionBodyMutation.SMILEY -> viewModel.submit(PostEditorIntent.SmileySelected(":jap:"))
+                    SubmissionBodyMutation.FORMAT ->
+                        viewModel.submit(PostEditorIntent.ToolbarActionClicked(BbcodeAction.Bold))
+                    SubmissionBodyMutation.IMAGE_URL ->
+                        viewModel.submit(PostEditorIntent.ImageUrlInserted("https://example.test/image.png"))
+                    SubmissionBodyMutation.RESTORE -> {
+                        checkNotNull(viewModel.state.value.restorableDraft) { "l'offre #1415 doit être présente" }
+                        viewModel.submit(PostEditorIntent.DraftRestoreRequested)
+                    }
+                    SubmissionBodyMutation.SHARED_RESTORE -> restoreGate.complete(Unit)
+                }
+            }
         }
     }
 
@@ -2747,6 +2848,7 @@ class PostEditorViewModelTest {
         )
         var submitResult: ReplySubmitResult? = null
         var submitException: Throwable? = null
+        var submitGate: CompletableDeferred<Unit>? = null
         var formException: Throwable? = null
         var formGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
 
@@ -2783,6 +2885,7 @@ class PostEditorViewModelTest {
             lastSubmittedContext = context
             lastSubmittedBbcode = bbcodeContent
             lastSubmittedOptions = options
+            submitGate?.await()
             submitException?.let { throw it }
             return submitResult ?: error("submitResult not set")
         }

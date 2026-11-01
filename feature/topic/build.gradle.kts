@@ -50,6 +50,7 @@ dependencies {
     implementation(libs.androidx.tracing)
 
     testImplementation(libs.junit4)
+    testImplementation(testFixtures(project(":core:domain")))
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)
     // #436 — Robolectric hosts `createComposeRule()` on the JVM so TopicPostCardMultiQuoteTest

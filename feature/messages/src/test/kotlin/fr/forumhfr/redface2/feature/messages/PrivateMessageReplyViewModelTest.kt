@@ -9,6 +9,7 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.viewModelScope
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
@@ -18,6 +19,10 @@ import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionAdapter
+import fr.forumhfr.redface2.core.domain.editor.SubmissionBodyMutation
+import fr.forumhfr.redface2.core.domain.editor.SubmissionProbe
+import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
@@ -39,9 +44,13 @@ import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -1462,10 +1471,96 @@ class PrivateMessageReplyViewModelTest {
         assertEquals("alice, bob, stitch+", RecipientCsv.join(listOf("alice", "bob", "stitch+")))
     }
 
+    /** #1301-ST — adaptateur utilisant les mêmes mocks de formulaire et fakes de brouillon/upload. */
+    internal fun submissionAdapter(scope: TestScope, preferences: Flow<Boolean>): EditorSubmissionAdapter {
+        val postGate = CompletableDeferred<Unit>()
+        val uploadCompletion = CompletableDeferred<Unit>()
+        val uploads = FakeUploadRepository().apply { uploadGate = uploadCompletion }
+        draftStore.preload(
+            EditorDraftKey.mpReply(request.threadId),
+            EditorDraftStore.Draft(body = "stored draft"),
+        )
+        var submissionCalls = 0
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } coAnswers {
+            submissionCalls += 1
+            postGate.await()
+            ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        }
+        val userPreferences = object : UserPreferencesRepository by userPreferences() {
+            override fun observeConfirmBeforePosting(): Flow<Boolean> = preferences
+        }
+        val viewModel = PrivateMessageReplyViewModel(
+            request = request,
+            repository = repository,
+            previewParser = previewParser,
+            userPreferencesRepository = userPreferences,
+            draftStore = draftStore,
+            authRepository = FakeAuthRepository(),
+            uploadRepository = uploads,
+            imageUploadReader = FakeImageUploadReader(),
+            diagnostics = DiagnosticsLog(),
+            smileyRepository = smileyRepository(),
+            hfrFavoriteSmileyRepository = favoriteRepository,
+            smileyLocalCollections = localCollections,
+        )
+        val effects = mutableListOf<PrivateMessageReplyEffect>()
+        scope.backgroundScope.launch(UnconfinedTestDispatcher(scope.testScheduler)) {
+            viewModel.effects.collect { effects += it }
+        }
+        return object : EditorSubmissionAdapter {
+            override val unsupportedMutations = mapOf(
+                SubmissionBodyMutation.IMAGE_URL to "aucune entrée URL d'image dans cet éditeur MP",
+                SubmissionBodyMutation.SHARED_RESTORE to "aucune entrée resumeSharedDraft pour les MP",
+            )
+            override val uploadUnsupportedReason: String? = null
+            override val postCalls get() = submissionCalls
+            override val uploadCalls get() = uploads.uploadCalls
+            override val draftSaves get() = draftStore.saveCount
+            override val draftWrites get() = draftSaves + draftStore.deletedKeys.size
+            override val successEffects get() = effects.count { it is PrivateMessageReplyEffect.SubmitSucceeded }
+            override val closeEffects get() = effects.count { it is PrivateMessageReplyEffect.CloseCommitted }
+
+            override fun editBody(body: String) {
+                viewModel.onContentChanged(TextFieldValue(body, TextRange(body.length)))
+            }
+
+            override fun clickSubmit() = viewModel.onSubmit()
+            override fun confirm() = viewModel.onSubmitConfirmed()
+            override fun dismissConfirmation() = viewModel.onSubmitConfirmationDismissed()
+            override fun close() = viewModel.onCloseRequested()
+            override fun completePost() { postGate.complete(Unit) }
+            override fun completeUpload() { uploadCompletion.complete(Unit) }
+            override fun dispose() = viewModel.viewModelScope.cancel()
+            override fun startUpload() = viewModel.onImagesPicked(listOf("content://pick/1"))
+
+            override fun snapshot(): SubmissionProbe = viewModel.state.value.let {
+                SubmissionProbe(it.draft.text, it.canSubmit, it.isSubmitting, it.isUploading, it.showSubmitConfirmation)
+            }
+
+            override fun mutateBody(mutation: SubmissionBodyMutation) {
+                when (mutation) {
+                    SubmissionBodyMutation.TYPING -> editBody("changed during POST")
+                    SubmissionBodyMutation.SMILEY -> viewModel.onSmileySelected(":jap:")
+                    SubmissionBodyMutation.FORMAT -> viewModel.onToolbarAction(BbcodeAction.Bold)
+                    SubmissionBodyMutation.RESTORE -> {
+                        checkNotNull(viewModel.state.value.restorableDraft) { "l'offre #1415 doit être présente" }
+                        viewModel.onDraftRestoreRequested()
+                    }
+                    SubmissionBodyMutation.IMAGE_URL, SubmissionBodyMutation.SHARED_RESTORE ->
+                        error("cas explicitement désactivé")
+                }
+            }
+        }
+    }
+
     /** #405 — in-memory fake [EditorDraftStore], same shape as the one in `PostEditorViewModelTest`. */
     private class FakeEditorDraftStore : EditorDraftStore {
         val saved: MutableMap<String, EditorDraftStore.Draft> = mutableMapOf()
         val deletedKeys: MutableList<String> = mutableListOf()
+        var saveCount: Int = 0
+            private set
         var lastSavedOwner: String? = null
             private set
 
@@ -1478,6 +1573,7 @@ class PrivateMessageReplyViewModelTest {
         override suspend fun load(owner: String?, key: String): EditorDraftStore.Draft? = saved[key]
 
         override suspend fun save(owner: String?, key: String, draft: EditorDraftStore.Draft) {
+            saveCount += 1
             lastSavedOwner = owner
             saved[key] = draft
         }

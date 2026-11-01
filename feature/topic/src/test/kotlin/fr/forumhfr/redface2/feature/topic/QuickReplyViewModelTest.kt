@@ -2,8 +2,13 @@ package fr.forumhfr.redface2.feature.topic
 
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.viewModelScope
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionAdapter
+import fr.forumhfr.redface2.core.domain.editor.SubmissionBodyMutation
+import fr.forumhfr.redface2.core.domain.editor.SubmissionProbe
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.domain.write.truncateQuote
@@ -18,9 +23,12 @@ import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -668,6 +676,66 @@ class QuickReplyViewModelTest {
 
     private fun longQuoteBody(): String = (1..120).joinToString(separator = " ") { "mot" }
 
+    /** #1301-ST — la feuille utilise le même faux repository et sa vraie ligne partagée de brouillon. */
+    internal fun submissionAdapter(scope: TestScope, preferences: Flow<Boolean>): EditorSubmissionAdapter {
+        val postGate = CompletableDeferred<Unit>()
+        val repository = FakeQuickReplyRepository().apply { submitGate = postGate }
+        val store = FakeQuickReplyDraftStore(initialBody = "stored draft")
+        val userPreferences = object : UserPreferencesRepository by FakeUserPreferencesRepository() {
+            override fun observeConfirmBeforePosting(): Flow<Boolean> = preferences
+        }
+        val viewModel = QuickReplyViewModel(
+            request = QuickReplyRequest(cat = 23, subcat = 401, topicId = 35421, page = 3),
+            savedStateHandle = SavedStateHandle(),
+            replyRepository = repository,
+            quoteMaterializer = TopicReplyQuoteMaterializer(repository),
+            draftStore = store,
+            userPreferencesRepository = userPreferences,
+        )
+        viewModel.onSheetOpened()
+        val effects = mutableListOf<QuickReplyEffect>()
+        scope.backgroundScope.launch(UnconfinedTestDispatcher(scope.testScheduler)) {
+            viewModel.effects.collect { effects += it }
+        }
+        return object : EditorSubmissionAdapter {
+            override val unsupportedMutations = mapOf(
+                SubmissionBodyMutation.SMILEY to "la feuille n'a pas de picker smiley",
+                SubmissionBodyMutation.FORMAT to "la feuille n'a pas de barre de formatage",
+                SubmissionBodyMutation.IMAGE_URL to "la feuille n'a pas d'insertion d'image",
+                SubmissionBodyMutation.SHARED_RESTORE to "pas de route resumeSharedDraft, relecture via RESTORE",
+            )
+            override val uploadUnsupportedReason = "la feuille n'expose aucune entrée d'upload"
+            override val postCalls get() = repository.submitCalls
+            override val uploadCalls: Int = 0
+            override val draftSaves get() = store.savedBodies.size
+            override val draftWrites get() = draftSaves + store.deleteCount
+            override val successEffects get() = effects.count { it is QuickReplyEffect.SubmitSucceeded }
+            override val closeEffects: Int = 0 // onDismissed n'émet pas d'effet de navigation.
+
+            override fun editBody(body: String) = viewModel.onTextChanged(TextFieldValue(body))
+            override fun clickSubmit() = viewModel.onSubmitClicked()
+            override fun confirm() = viewModel.onSubmitConfirmed()
+            override fun dismissConfirmation() = viewModel.onSubmitConfirmDismissed()
+            override fun close() = viewModel.onDismissed()
+            override fun completePost() { postGate.complete(Unit) }
+            override fun dispose() = viewModel.viewModelScope.cancel()
+            override fun startUpload(): Unit = error("cas explicitement désactivé")
+            override fun completeUpload(): Unit = error("cas explicitement désactivé")
+
+            override fun snapshot(): SubmissionProbe = viewModel.state.value.let {
+                SubmissionProbe(it.text.text, it.canSubmit, it.isSubmitting, false, it.confirmVisible)
+            }
+
+            override fun mutateBody(mutation: SubmissionBodyMutation) {
+                when (mutation) {
+                    SubmissionBodyMutation.TYPING -> editBody("changed during POST")
+                    SubmissionBodyMutation.RESTORE -> viewModel.onSheetOpened()
+                    else -> error("cas explicitement désactivé : $mutation")
+                }
+            }
+        }
+    }
+
     private fun quickReplyViewModel(
         replyRepository: ReplyRepository = FakeQuickReplyRepository(),
         draftStore: EditorDraftStore = FakeQuickReplyDraftStore(),
@@ -702,6 +770,8 @@ private class FakeQuickReplyDraftStore(
     /** One row per owner (single topic here), like the real store's `"<owner>|<key>"` keys. */
     private val bodies = mutableMapOf<String, String>()
     val savedBodies = mutableListOf<String>()
+    var deleteCount: Int = 0
+        private set
 
     init {
         val owner = activeOwner
@@ -741,6 +811,7 @@ private class FakeQuickReplyDraftStore(
 
     override suspend fun delete(owner: String?, key: String) {
         if (owner == null || owner != activeOwner) return
+        deleteCount += 1
         bodies.remove(owner)
     }
 }
@@ -783,6 +854,7 @@ private class FakeQuickReplyRepository(
 ) : ReplyRepository {
     var fetchCalls = 0
     var submitCalls = 0
+    var submitGate: CompletableDeferred<Unit>? = null
     val submittedBodies = mutableListOf<String>()
     val submittedPages = mutableListOf<Int>()
     val fetchedPages = mutableListOf<Int>()
@@ -813,6 +885,7 @@ private class FakeQuickReplyRepository(
         submitCalls++
         submittedBodies += bbcodeContent
         submittedPages += context.page
+        submitGate?.await()
         return results.removeFirstOrNull() ?: ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
     }
 }
