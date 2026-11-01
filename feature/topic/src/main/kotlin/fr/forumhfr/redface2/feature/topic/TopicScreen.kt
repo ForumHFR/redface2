@@ -60,6 +60,7 @@ import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
 import androidx.compose.material3.pulltorefresh.pullToRefresh
 import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -2041,7 +2042,11 @@ internal fun TopicTopBar(
     // sheet anchored to the top-bar pill. #1299 replaces redundant adjacent shortcuts here with
     // first/last; the Error path keeps adjacent recovery navigation inline and outside the sheet.
     if (pagePickerOpen && loaded != null) {
-        ModalBottomSheet(onDismissRequest = { pagePickerOpen = false }) {
+        val sheetState = rememberModalBottomSheetState(
+            skipPartiallyExpanded = false,
+            confirmValueChange = { true },
+        )
+        ModalBottomSheet(onDismissRequest = { pagePickerOpen = false }, sheetState = sheetState) {
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
