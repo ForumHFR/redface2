@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.editor
 import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollectionSnapshot
 import fr.forumhfr.redface2.core.model.EditorSmileySource
 import fr.forumhfr.redface2.core.model.HfrFavoriteSmileyMutationResult
+import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.UploadError
 
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
