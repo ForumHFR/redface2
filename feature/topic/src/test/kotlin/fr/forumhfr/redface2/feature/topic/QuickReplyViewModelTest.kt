@@ -30,8 +30,6 @@ import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
-import io.mockk.every
-import io.mockk.mockk
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -966,6 +964,11 @@ private class FakeQuickReplyRepository(
     }
 }
 
-internal fun quickReplyAuthRepository(): AuthRepository = mockk {
-    every { observeAuthState() } returns flowOf(AuthState.Authenticated("tester"))
+internal fun quickReplyAuthRepository(): AuthRepository = object : AuthRepository {
+    override fun observeAuthState(): Flow<AuthState> = flowOf(AuthState.Authenticated("tester"))
+
+    override suspend fun login(pseudo: String, password: String): Result<AuthState.Authenticated> =
+        error("login is not exercised by quick-reply tests")
+
+    override suspend fun logout(): Unit = error("logout is not exercised by quick-reply tests")
 }

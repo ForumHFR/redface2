@@ -129,6 +129,7 @@ class PrivateMessageComposeViewModelTest {
         uploadRepository: UploadRepository = FakeUploadRepository(),
         imageUploadReader: ImageUploadReader = FakeImageUploadReader(),
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
+        clock: DiagnosticsClock = submissionClock,
         savedStateHandle: SavedStateHandle = SavedStateHandle(),
     ): PrivateMessageComposeViewModel = PrivateMessageComposeViewModel(
         initialRecipient = initialRecipient,
@@ -140,7 +141,7 @@ class PrivateMessageComposeViewModelTest {
         uploadRepository = uploadRepository,
         imageUploadReader = imageUploadReader,
         diagnostics = diagnostics,
-        clock = submissionClock,
+        clock = clock,
         smileyRepository = smileyRepository,
         hfrFavoriteSmileyRepository = favoriteRepository,
         smileyLocalCollections = localCollections,
@@ -561,7 +562,9 @@ class PrivateMessageComposeViewModelTest {
         vm.onSubjectChanged("Sujet")
         vm.onContentChanged(TextFieldValue("Bonjour."))
         vm.onSubmit() // stale hash → silent refetch returns dest=bozoleclown again
+        runCurrent() // Assert after the deferred refetch, not before it starts.
 
+        coVerify(exactly = 2) { repository.fetchComposeForm(any()) }
         assertEquals(
             "the hydration guard must protect the user's recipients edit",
             "quelqu'un d'autre",

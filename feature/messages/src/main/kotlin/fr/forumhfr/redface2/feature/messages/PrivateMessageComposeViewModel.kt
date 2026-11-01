@@ -384,51 +384,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                 }
                 loadedForm = form
                 smileyPicker.refreshFavorites(favoriteStamp)
-                _state.update { current ->
-                    // Hydrate ONLY on the first successful load — a silent refetch after an
-                    // expired hash_check must not clobber toggles (or a recipient edit) the user
-                    // changed in between. Mirror of the reply editor's guard.
-                    if (submission.blocksMutation) return@update current.copy(isLoadingForm = false)
-                    val hydrate = !current.optionsHydratedFromForm
-                    val nextRecipients = if (hydrate && current.recipients.isBlank() &&
-                        current.submission !is EditorSubmissionState.Uncertain) {
-                        form.hiddenFields["dest"].orEmpty()
-                    } else {
-                        current.recipients
-                    }
-                    val keepRestoreOffer = current.restoreOfferDiffersFrom(nextRecipients)
-                    current.copy(
-                        isLoadingForm = false,
-                        formAvailable = true,
-                        formError = false,
-                        // The composer's `dest` text input comes back through hiddenFields ; a
-                        // server-side prefill (dest= in the GET) seeds the local field once.
-                        recipients = nextRecipients,
-                        recipientsHydratedContent = current.hydratedRecipientsContent(
-                            nextRecipients = nextRecipients,
-                            hydrate = hydrate,
-                        ),
-                        restorableDraft = current.restorableDraft.takeIf { keepRestoreOffer },
-                        restorableSubject = current.restorableSubject.takeIf { keepRestoreOffer },
-                        restorableRecipients = current.restorableRecipients.takeIf { keepRestoreOffer },
-                        signatureEnabled = if (hydrate) {
-                            form.options.signatureEnabled || form.hiddenFields["signature"] == "1"
-                        } else {
-                            current.signatureEnabled
-                        },
-                        smileyDisabled = if (hydrate) {
-                            form.options.smileyDisabled || form.hiddenFields["smiley"] == "1"
-                        } else {
-                            current.smileyDisabled
-                        },
-                        emailNotificationEnabled = if (hydrate) {
-                            form.options.emailNotificationEnabled || form.hiddenFields["emaill"] == "1"
-                        } else {
-                            current.emailNotificationEnabled
-                        },
-                        optionsHydratedFromForm = true,
-                    )
-                }
+                _state.update { it.withLoadedForm(form) }
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (_: IOException) {
@@ -439,6 +395,52 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                 formLoadFailed()
             }
         }
+    }
+
+    private fun PrivateMessageComposeUiState.withLoadedForm(form: ReplyForm): PrivateMessageComposeUiState {
+        // Hydrate ONLY on the first successful load — a silent refetch after an expired
+        // hash_check must not clobber toggles (or a recipient edit) the user changed in between.
+        // Mirror of the reply editor's guard.
+        if (this@PrivateMessageComposeViewModel.submission.blocksMutation) return copy(isLoadingForm = false)
+        val hydrate = !optionsHydratedFromForm
+        val nextRecipients = if (hydrate && recipients.isBlank() &&
+            submission !is EditorSubmissionState.Uncertain) {
+            form.hiddenFields["dest"].orEmpty()
+        } else {
+            recipients
+        }
+        val keepRestoreOffer = restoreOfferDiffersFrom(nextRecipients)
+        return copy(
+            isLoadingForm = false,
+            formAvailable = true,
+            formError = false,
+            // The composer's `dest` text input comes back through hiddenFields ; a
+            // server-side prefill (dest= in the GET) seeds the local field once.
+            recipients = nextRecipients,
+            recipientsHydratedContent = hydratedRecipientsContent(
+                nextRecipients = nextRecipients,
+                hydrate = hydrate,
+            ),
+            restorableDraft = restorableDraft.takeIf { keepRestoreOffer },
+            restorableSubject = restorableSubject.takeIf { keepRestoreOffer },
+            restorableRecipients = restorableRecipients.takeIf { keepRestoreOffer },
+            signatureEnabled = if (hydrate) {
+                form.options.signatureEnabled || form.hiddenFields["signature"] == "1"
+            } else {
+                signatureEnabled
+            },
+            smileyDisabled = if (hydrate) {
+                form.options.smileyDisabled || form.hiddenFields["smiley"] == "1"
+            } else {
+                smileyDisabled
+            },
+            emailNotificationEnabled = if (hydrate) {
+                form.options.emailNotificationEnabled || form.hiddenFields["emaill"] == "1"
+            } else {
+                emailNotificationEnabled
+            },
+            optionsHydratedFromForm = true,
+        )
     }
 
     private fun PrivateMessageComposeUiState.restoreOfferDiffersFrom(nextRecipients: String): Boolean =

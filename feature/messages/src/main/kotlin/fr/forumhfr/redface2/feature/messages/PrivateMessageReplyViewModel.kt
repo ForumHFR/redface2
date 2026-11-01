@@ -365,60 +365,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                 loadedForm = form
                 smileyPicker.refreshFavorites(favoriteStamp)
                 loadedSubmitContext = materialized.submitContext
-                _state.update { current ->
-                    // #1074 — consume HFR's quote BBCode exactly once. If the user typed while the
-                    // GET was in flight, keep that text below the verbatim server prefill. A silent
-                    // InvalidHashCheck refetch sees draftHydratedFromForm=true and cannot duplicate
-                    // the block or clobber later edits.
-                    if (submission.blocksMutation) return@update current.copy(isLoadingForm = false)
-                    val hydrated = current.withFormInitialContent(form)
-                    // HFR's private "quick reply" form carries the per-post options as plain hidden
-                    // inputs (e.g. `signature=1`), not checkboxes — so `ReplyForm.options` (read from
-                    // `checked` attributes) is all-false here. Hydrate from the hidden fields too,
-                    // OR'ing with the checkbox view, so the user keeps HFR's default (signature on).
-                    //
-                    // Hydrate ONLY on the first successful load: a silent refetch after an expired
-                    // `hash_check` (InvalidHashCheck) must not reset a toggle the user changed in
-                    // between — mirror the post editor's `optionsHydratedFromForm` guard.
-                    val hydrateOptions = !hydrated.optionsHydratedFromForm
-                    hydrated.copy(
-                        isLoadingForm = false,
-                        formAvailable = true,
-                        formError = false,
-                        signatureEnabled = if (hydrateOptions) {
-                            form.options.signatureEnabled || form.hiddenFields["signature"] == "1"
-                        } else {
-                            hydrated.signatureEnabled
-                        },
-                        smileyDisabled = if (hydrateOptions) {
-                            form.options.smileyDisabled || form.hiddenFields["smiley"] == "1"
-                        } else {
-                            hydrated.smileyDisabled
-                        },
-                        emailNotificationEnabled = if (hydrateOptions) {
-                            form.options.emailNotificationEnabled || form.hiddenFields["emaill"] == "1"
-                        } else {
-                            hydrated.emailNotificationEnabled
-                        },
-                        optionsHydratedFromForm = true,
-                        // #606 — owner-only member editor. Hydrate the working list from HFR's
-                        // `newdest` CSV on the FIRST load only : a silent refetch after an expired
-                        // hash_check (InvalidHashCheck) must not clobber a member the user added /
-                        // removed in between — same `hydrateOptions` guard as the option toggles.
-                        canManageRecipients = form.canManageRecipients,
-                        // Re-hydrate from the freshly-parsed `newdest` on the first load AND on any
-                        // silent refetch where the user has NOT edited the list : that way a
-                        // concurrent membership change made elsewhere is picked up, and — since a
-                        // non-dirty submit sends `recipientsOverride = null` — the original `newdest`
-                        // is still forwarded verbatim. Only an in-progress edit (`recipientsDirty`)
-                        // is preserved across the refetch.
-                        recipients = if (hydrateOptions || !hydrated.recipientsDirty) {
-                            RecipientCsv.parse(form.manageableRecipients)
-                        } else {
-                            hydrated.recipients
-                        },
-                    )
-                }
+                _state.update { it.withLoadedForm(form) }
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (_: IOException) {
@@ -429,6 +376,61 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                 formLoadFailed()
             }
         }
+    }
+
+    private fun PrivateMessageReplyUiState.withLoadedForm(form: ReplyForm): PrivateMessageReplyUiState {
+        // #1074 — consume HFR's quote BBCode exactly once. If the user typed while the
+        // GET was in flight, keep that text below the verbatim server prefill. A silent
+        // InvalidHashCheck refetch sees draftHydratedFromForm=true and cannot duplicate
+        // the block or clobber later edits.
+        if (this@PrivateMessageReplyViewModel.submission.blocksMutation) return copy(isLoadingForm = false)
+        val hydrated = withFormInitialContent(form)
+        // HFR's private "quick reply" form carries the per-post options as plain hidden
+        // inputs (e.g. `signature=1`), not checkboxes — so `ReplyForm.options` (read from
+        // `checked` attributes) is all-false here. Hydrate from the hidden fields too,
+        // OR'ing with the checkbox view, so the user keeps HFR's default (signature on).
+        //
+        // Hydrate ONLY on the first successful load: a silent refetch after an expired
+        // `hash_check` (InvalidHashCheck) must not reset a toggle the user changed in
+        // between — mirror the post editor's `optionsHydratedFromForm` guard.
+        val hydrateOptions = !hydrated.optionsHydratedFromForm
+        return hydrated.copy(
+            isLoadingForm = false,
+            formAvailable = true,
+            formError = false,
+            signatureEnabled = if (hydrateOptions) {
+                form.options.signatureEnabled || form.hiddenFields["signature"] == "1"
+            } else {
+                hydrated.signatureEnabled
+            },
+            smileyDisabled = if (hydrateOptions) {
+                form.options.smileyDisabled || form.hiddenFields["smiley"] == "1"
+            } else {
+                hydrated.smileyDisabled
+            },
+            emailNotificationEnabled = if (hydrateOptions) {
+                form.options.emailNotificationEnabled || form.hiddenFields["emaill"] == "1"
+            } else {
+                hydrated.emailNotificationEnabled
+            },
+            optionsHydratedFromForm = true,
+            // #606 — owner-only member editor. Hydrate the working list from HFR's
+            // `newdest` CSV on the FIRST load only : a silent refetch after an expired
+            // hash_check (InvalidHashCheck) must not clobber a member the user added /
+            // removed in between — same `hydrateOptions` guard as the option toggles.
+            canManageRecipients = form.canManageRecipients,
+            // Re-hydrate from the freshly-parsed `newdest` on the first load AND on any
+            // silent refetch where the user has NOT edited the list : that way a
+            // concurrent membership change made elsewhere is picked up, and — since a
+            // non-dirty submit sends `recipientsOverride = null` — the original `newdest`
+            // is still forwarded verbatim. Only an in-progress edit (`recipientsDirty`)
+            // is preserved across the refetch.
+            recipients = if (hydrateOptions || !hydrated.recipientsDirty) {
+                RecipientCsv.parse(form.manageableRecipients)
+            } else {
+                hydrated.recipients
+            },
+        )
     }
 
     private fun formLoadFailed() {

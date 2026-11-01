@@ -164,25 +164,7 @@ internal fun QuickReplySheet(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = stringResource(R.string.quick_reply_title),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.weight(1f),
-                    )
-                    IconButton(
-                        onClick = viewModel::onEscalateRequested,
-                        // Gate #788 — no escalation while a POST is in flight (submit vs navigation
-                        // race) ; #805 — nor while a [quotemsg] insert is being fetched.
-                        enabled = !state.isSubmitting && !state.isPreparingQuotes,
-                        modifier = Modifier.semantics { contentDescription = fullScreenLabel },
-                    ) {
-                        RedfaceVectorIcon(
-                            resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_ms_open_in_new,
-                        )
-                    }
-                }
+                QuickReplyHeader(state, fullScreenLabel, onEscalate = viewModel::onEscalateRequested)
                 // #604 lot 4a — shared column : cards + live-region announcements + post-removal
                 // focus (always composed ; renders nothing visible without cards).
                 // #808 — the cards block is CAPPED and scrolls internally so a heavy selection can
@@ -219,55 +201,90 @@ internal fun QuickReplySheet(
                         .fillMaxWidth()
                         .focusRequester(focusRequester),
                 )
-                // #805 cards OFF — the [quotemsg] fetch runs at opening : typing stays enabled (the
-                // insert concatenates onto the live field), only send/escalate wait for it.
-                if (state.isPreparingQuotes) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.padding(end = 8.dp).size(16.dp),
-                            strokeWidth = 2.dp,
-                        )
-                        Text(
-                            text = stringResource(R.string.quick_reply_preparing_quote),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                state.submitError?.let { error ->
-                    QuickReplyErrorBanner(error)
-                }
+                QuickReplyStatus(state)
             }
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (state.isSubmitting) {
-                    CircularProgressIndicator(modifier = Modifier.padding(end = 12.dp))
-                }
-                TextButton(
-                    onClick = { viewModel.onSubmitClicked(timeoutMillis) },
-                    enabled = state.canSubmit,
-                ) {
-                    Text(stringResource(R.string.quick_reply_send))
-                }
-            }
+            QuickReplyActions(state, onSubmit = { viewModel.onSubmitClicked(timeoutMillis) })
         }
     }
     // The field grabs the focus once per sheet opening — the IME rises with the sheet.
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
-    if (state.confirmVisible) {
+    QuickReplyConfirmationDialog(
+        visible = state.confirmVisible,
+        onConfirm = { viewModel.onSubmitConfirmed(armToken) },
+        onDismiss = viewModel::onSubmitConfirmDismissed,
+    )
+}
+
+@Composable
+private fun QuickReplyHeader(state: QuickReplyUiState, fullScreenLabel: String, onEscalate: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = stringResource(R.string.quick_reply_title),
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+        IconButton(
+            onClick = onEscalate,
+            // Gate #788 — no escalation while a POST is in flight (submit vs navigation
+            // race) ; #805 — nor while a [quotemsg] insert is being fetched.
+            enabled = !state.isSubmitting && !state.isPreparingQuotes,
+            modifier = Modifier.semantics { contentDescription = fullScreenLabel },
+        ) {
+            RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_ms_open_in_new)
+        }
+    }
+}
+
+@Composable
+private fun QuickReplyStatus(state: QuickReplyUiState) {
+    // #805 cards OFF — the [quotemsg] fetch runs at opening : typing stays enabled (the
+    // insert concatenates onto the live field), only send/escalate wait for it.
+    if (state.isPreparingQuotes) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(
+                modifier = Modifier.padding(end = 8.dp).size(16.dp),
+                strokeWidth = 2.dp,
+            )
+            Text(
+                text = stringResource(R.string.quick_reply_preparing_quote),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    state.submitError?.let { error -> QuickReplyErrorBanner(error) }
+}
+
+@Composable
+private fun QuickReplyActions(state: QuickReplyUiState, onSubmit: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (state.isSubmitting) {
+            CircularProgressIndicator(modifier = Modifier.padding(end = 12.dp))
+        }
+        TextButton(onClick = onSubmit, enabled = state.canSubmit) {
+            Text(stringResource(R.string.quick_reply_send))
+        }
+    }
+}
+
+@Composable
+private fun QuickReplyConfirmationDialog(visible: Boolean, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    if (visible) {
         AlertDialog(
-            onDismissRequest = viewModel::onSubmitConfirmDismissed,
+            onDismissRequest = onDismiss,
             title = { Text(stringResource(R.string.quick_reply_confirm_title)) },
             confirmButton = {
-                TextButton(onClick = { viewModel.onSubmitConfirmed(armToken) }) {
+                TextButton(onClick = onConfirm) {
                     Text(stringResource(R.string.quick_reply_confirm_action))
                 }
             },
             dismissButton = {
-                TextButton(onClick = viewModel::onSubmitConfirmDismissed) {
+                TextButton(onClick = onDismiss) {
                     Text(stringResource(R.string.quick_reply_confirm_cancel))
                 }
             },
