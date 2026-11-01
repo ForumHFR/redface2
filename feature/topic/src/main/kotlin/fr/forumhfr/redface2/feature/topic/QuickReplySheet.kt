@@ -235,17 +235,7 @@ internal fun QuickReplySheet(
                     }
                 }
                 state.submitError?.let { error ->
-                    val summary = when (error) {
-                        QuickReplySubmitError.Uncertain -> EditorSubmissionSummaryKind.Uncertain
-                        QuickReplySubmitError.DraftWriteFailed -> EditorSubmissionSummaryKind.DraftWriteFailed
-                        else -> null
-                    }
-                    if (summary != null) EditorSubmissionSummary(summary)
-                    if (error != QuickReplySubmitError.DraftWriteFailed) Text(
-                        text = stringResource(error.messageRes()),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
+                    QuickReplyErrorBanner(error)
                 }
             }
             Row(
@@ -283,6 +273,22 @@ internal fun QuickReplySheet(
             },
         )
     }
+}
+
+/** The sheet's submission summary and verification detail, in the existing fields column. */
+@Composable
+internal fun QuickReplyErrorBanner(error: QuickReplySubmitError) {
+    val summary = when (error) {
+        QuickReplySubmitError.Uncertain -> EditorSubmissionSummaryKind.Uncertain
+        QuickReplySubmitError.DraftWriteFailed -> EditorSubmissionSummaryKind.DraftWriteFailed
+        else -> null
+    }
+    if (summary != null) EditorSubmissionSummary(summary)
+    if (error != QuickReplySubmitError.DraftWriteFailed) Text(
+        text = stringResource(error.messageRes()),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.error,
+    )
 }
 
 /** The same wording as the full editor's error banner, module-local copies (feature/topic res). */

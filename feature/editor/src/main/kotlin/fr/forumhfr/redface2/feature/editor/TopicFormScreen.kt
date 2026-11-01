@@ -347,7 +347,7 @@ private fun TopicFormControlsZone(
  * `UploadProgressLabel`).
  */
 @Composable
-private fun TopicFormErrorBanners(
+internal fun TopicFormErrorBanners(
     state: TopicFormState,
     onIntent: (TopicFormIntent) -> Unit,
 ) {

@@ -381,7 +381,7 @@ private fun PostEditorControlsZone(
 }
 
 @Composable
-private fun PostEditorAlertBanners(
+internal fun PostEditorAlertBanners(
     state: PostEditorState,
     onIntent: (PostEditorIntent) -> Unit,
 ) {
