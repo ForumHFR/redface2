@@ -910,7 +910,7 @@ class PostEditorViewModel @AssistedInject constructor(
         form: ReplyForm,
         nextPreview: PostContent,
     ): PostEditorState {
-        if (submission.blocksMutation) return copy(isLoadingForm = false)
+        if (this@PostEditorViewModel.submission.blocksMutation) return copy(isLoadingForm = false)
         val shouldHydrate = shouldHydrateFrom(form)
         val nextDraft = resolveHydratedDraft(form, shouldHydrate)
         val hydrateOptions = !optionsHydratedFromForm

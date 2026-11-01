@@ -914,7 +914,7 @@ class TopicFormViewModel @AssistedInject constructor(
         form: TopicForm,
         nextPreview: PostContent,
     ): TopicFormState {
-        if (submission.blocksMutation) return copy(isLoadingForm = false)
+        if (this@TopicFormViewModel.submission.blocksMutation) return copy(isLoadingForm = false)
         // Hydrate each field independently : a slow fetch that lands after the
         // user started typing in only one of the two fields must still hydrate
         // the other one without clobbering the user's edit.
