@@ -21,6 +21,7 @@ import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionAdapter
+import fr.forumhfr.redface2.core.domain.editor.LegacyEditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.SubmissionBodyMutation
 import fr.forumhfr.redface2.core.domain.editor.SubmissionProbe
 import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
@@ -3172,7 +3173,7 @@ class PostEditorViewModelTest {
      * preloaded drafts for the restore-on-init tests. `updatedAt` is irrelevant to the ViewModel
      * (the store stamps it in production), so it is left at 0.
      */
-    private class FakeEditorDraftStore : EditorDraftStore {
+    private class FakeEditorDraftStore : LegacyEditorDraftStore() {
         val saved: MutableMap<String, EditorDraftStore.Draft> = mutableMapOf()
         val deletedKeys: MutableList<String> = mutableListOf()
         var saveCount: Int = 0

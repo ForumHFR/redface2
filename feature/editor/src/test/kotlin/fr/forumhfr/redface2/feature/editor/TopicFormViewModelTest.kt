@@ -17,6 +17,7 @@ import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionAdapter
+import fr.forumhfr.redface2.core.domain.editor.LegacyEditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.SubmissionBodyMutation
 import fr.forumhfr.redface2.core.domain.editor.SubmissionProbe
 import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
@@ -2243,7 +2244,7 @@ class TopicFormViewModelTest {
     }
 
     /** #405 — in-memory fake [EditorDraftStore], same shape as the one in `PostEditorViewModelTest`. */
-    private class FakeEditorDraftStore : EditorDraftStore {
+    private class FakeEditorDraftStore : LegacyEditorDraftStore() {
         val saved: MutableMap<String, EditorDraftStore.Draft> = mutableMapOf()
         val deletedKeys: MutableList<String> = mutableListOf()
         var saveCount: Int = 0

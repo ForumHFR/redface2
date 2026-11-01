@@ -35,6 +35,13 @@ class HfrClient @Inject constructor(
     @param:HfrBaseUrl private val baseUrl: HttpUrl,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
+    // ED-168: editor writes share cookies/diagnostics, but never follow or replay a POST.
+    private val editorWrite = mutation.newBuilder()
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .retryOnConnectionFailure(false)
+        .build()
+
     suspend fun getTopicPage(
         cat: Int,
         post: Int,
@@ -333,16 +340,16 @@ class HfrClient @Inject constructor(
      * classification.
      *
      * `hash_check` is **never** logged, including on transport errors. Reply and quote submissions
-     * are non-idempotent: the [mutation] client enforces no transport replay with
-     * `retryOnConnectionFailure(false)`.
+     * are non-idempotent: [editorWrite] disables redirects and retries, and
+     * [OneShotFormBody] blocks HTTP follow-up replays (ED-168).
      */
     suspend fun submitReply(formBody: FormBody): String {
         val url = baseUrl.newBuilder()
             .addPathSegment("bddpost.php")
             .addQueryParameter("config", "hfr.inc")
             .build()
-        val request = Request.Builder().url(url).post(formBody).build()
-        return mutation.newDiagnosticCall(request).executeAuthenticatedHtml()
+        val request = Request.Builder().url(url).post(OneShotFormBody(formBody)).build()
+        return editorWrite.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -517,8 +524,8 @@ class HfrClient @Inject constructor(
             .addPathSegment("bdd.php")
             .addQueryParameter("config", "hfr.inc")
             .build()
-        val request = Request.Builder().url(url).post(formBody).build()
-        return mutation.newDiagnosticCall(request).executeAuthenticatedHtml()
+        val request = Request.Builder().url(url).post(OneShotFormBody(formBody)).build()
+        return editorWrite.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /**
@@ -588,8 +595,8 @@ class HfrClient @Inject constructor(
             .addPathSegment("bddpost.php")
             .addQueryParameter("config", "hfr.inc")
             .build()
-        val request = Request.Builder().url(url).post(formBody).build()
-        return mutation.newDiagnosticCall(request).executeAuthenticatedHtml()
+        val request = Request.Builder().url(url).post(OneShotFormBody(formBody)).build()
+        return editorWrite.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /**

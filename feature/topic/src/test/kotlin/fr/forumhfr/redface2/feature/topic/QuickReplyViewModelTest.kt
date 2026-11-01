@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionAdapter
+import fr.forumhfr.redface2.core.domain.editor.LegacyEditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.SubmissionBodyMutation
 import fr.forumhfr.redface2.core.domain.editor.SubmissionProbe
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
@@ -766,7 +767,7 @@ private class FakeQuickReplyDraftStore(
     initialBody: String? = null,
     /** ACTIVE account — mutable so a test can switch accounts between two openings (#953 F2). */
     var activeOwner: String? = "xaat",
-) : EditorDraftStore {
+) : LegacyEditorDraftStore() {
     /** One row per owner (single topic here), like the real store's `"<owner>|<key>"` keys. */
     private val bodies = mutableMapOf<String, String>()
     val savedBodies = mutableListOf<String>()

@@ -16,6 +16,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.LegacyEditorDraftStore
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
@@ -284,7 +285,7 @@ private class CountingQuoteRepository : ReplyRepository {
     ): ReplySubmitResult = error("submitReply not used by restoration test")
 }
 
-private class InMemoryDraftStore : EditorDraftStore {
+private class InMemoryDraftStore : LegacyEditorDraftStore() {
     private var storedBody: String? = null
 
     override suspend fun currentOwner(): String? = "xaat"

@@ -84,6 +84,20 @@ class HfrClientWriteReplayTest(private val path: WritePath) {
         server.shutdown()
     }
 
+    /** ED-168: even redirects that would turn POST into GET remain ambiguous responses. */
+    @Test
+    fun redirects301302303AreNotFollowed() = runTest {
+        for (code in listOf(301, 302, 303)) {
+            server.enqueue(MockResponse().setResponseCode(code).setHeader("Location", "/login.php"))
+            val baseline = server.requestCount
+            val error = runCatching { path.submit(client, formBody()) }.exceptionOrNull()
+            assertTrue("$code remains a non-2xx write outcome, including a login Location", error is HfrServerException)
+            assertEquals(code, (error as HfrServerException).code)
+            assertEquals(1, server.requestCount - baseline)
+            assertEquals("POST", server.takeRequest().method)
+        }
+    }
+
     /** ED-168 — rouge à e5226a65 : 307 conserve le POST et son corps rejouable. */
     @Test
     fun redirect307DoesNotReplayPost() = runTest {

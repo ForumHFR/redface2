@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.database.entities
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -31,4 +32,11 @@ data class EditorDraftEntity(
     val updatedAt: Long,
     /** True for MP drafts (`mpreply`/`mpnew`): wiped on logout/account switch. */
     val isPrivate: Boolean,
+    /** ED-170: CAS generation; incremented by each content write, including explicit new sessions. */
+    @ColumnInfo(defaultValue = "0") val contentVersion: Long = 0,
+    /** ED-170: nullable for ordinary drafts written before or after a certain failure. */
+    val attemptId: String? = null,
+    val attemptVersion: Long? = null,
+    /** ED-170: IN_PROGRESS, PUBLISHED or UNCERTAIN; no content is encoded in this marker. */
+    val attemptState: String? = null,
 )
