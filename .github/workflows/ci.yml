@@ -31,7 +31,7 @@ jobs:
       - name: Detect non-documentation changes
         id: filter
         if: github.event_name == 'pull_request'
-        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         # A version bump touches app/build.gradle.kts, so it deliberately remains a code PR.
         with:
           predicate-quantifier: every
@@ -51,7 +51,7 @@ jobs:
       - name: Detect runtime documentation changes
         id: runtime_docs
         if: github.event_name == 'pull_request'
-        uses: dorny/paths-filter@0e4a8c6effa4802afeda77dc8d303f8176d7dfad # v3.0.4
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         with:
           predicate-quantifier: some
           filters: |
