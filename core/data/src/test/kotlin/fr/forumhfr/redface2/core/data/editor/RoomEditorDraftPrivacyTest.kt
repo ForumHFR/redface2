@@ -21,18 +21,21 @@ import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -61,8 +64,8 @@ class RoomEditorDraftPrivacyTest {
         val repository = mockk<AuthRepository> {
             every { observeAuthState() } answers {
                 auth.onCompletion {
-                    // first() has consumed A. Delay returning that captured authorization until
-                    // after B's purge, before the store can enter its transaction exclusion.
+                    // first() has consumed the active account. Delay returning that authorization
+                    // until after a purge, before the store can enter its transaction exclusion.
                     val gate = ownerReadGate
                     ownerReadGate = null
                     gate?.pause()
@@ -88,6 +91,62 @@ class RoomEditorDraftPrivacyTest {
     @Test
     fun `stale unresolved autosave is rejected even after the original account reconnects`() = runTest {
         assertStaleAutosaveRejected(reconnectBeforeResume = true)
+    }
+
+    /** Regression for 1306c177: purging A must not invalidate B's pending content flush. */
+    @Test
+    fun `another account purge cannot reject the active editor flush`() = runTest {
+        store.saveIfVersion("alice", key, snapshot, 0)
+        auth.value = AuthState.Authenticated("Bob")
+        val session = EditorDraftSession(store, key)
+        assertNull(session.load())
+        val edited = snapshot.copy(body = "Bob's last edit", subject = "Bob's subject", recipients = "charlie")
+        val gate = Gate().also { ownerReadGate = it }
+        val write = async { session.save(edited) }
+        gate.entered.await()
+
+        try {
+            store.purgePrivateForUser("alice")
+            assertNull(dao.get("alice|$key"))
+        } finally {
+            gate.resume.complete(Unit)
+        }
+
+        assertEquals(StoreWriteResult.Written(1), write.await())
+        assertEquals(edited.copy(updatedAt = 1234), store.loadEntry("bob", key)?.draft)
+    }
+
+    /** Regression for 1306c177: metadata-only certainty must survive a purge before its lock. */
+    @Test
+    fun `certain failure resolves after an intervening purge without restoring private content`() = runTest {
+        val dispatcher = StandardTestDispatcher(testScheduler, name = "draft-io")
+        val dispatchedStore = RoomEditorDraftStore(
+            mockk<AuthRepository> { every { observeAuthState() } returns auth },
+            dao, Clock.fixed(Instant.ofEpochMilli(1234), ZoneOffset.UTC), dispatcher,
+        )
+        val token = (dispatchedStore.beginAttempt("alice", key, snapshot, 0) as BeginAttemptResult.Started).token
+        auth.value = AuthState.Authenticated("Bob")
+        val finish = async(start = CoroutineStart.UNDISPATCHED) {
+            dispatchedStore.finishAttempt(token, AttemptOutcome.CERTAIN_FAILURE)
+        }
+        assertFalse(finish.isCompleted)
+        // Enter the same IO context without dispatching: purge advances the generation first.
+        val purge = async(dispatcher, start = CoroutineStart.UNDISPATCHED) {
+            dispatchedStore.purgePrivateForUser("alice")
+        }
+        assertTrue(dao.purgeEntered.isCompleted)
+        purge.await()
+
+        assertEquals(StoreWriteResult.Written(token.version), finish.await())
+        val row = checkNotNull(dao.get("alice|$key"))
+        assertNull(row.attemptId)
+        assertNull(row.attemptVersion)
+        assertNull(row.attemptState)
+        assertEquals(token.version, row.contentVersion)
+        assertEquals("", row.body)
+        assertNull(row.subject)
+        assertNull(row.recipients)
+        assertEquals(StoreWriteResult.Conflict, dispatchedStore.finishAttempt(token, AttemptOutcome.CERTAIN_FAILURE))
     }
 
     private suspend fun assertStaleAutosaveRejected(reconnectBeforeResume: Boolean) = coroutineScope {

@@ -41,7 +41,8 @@ class RoomEditorDraftStore @Inject constructor(
     // Lock order: EditorDraftSession -> contentWrites -> Room. Purge takes only contentWrites;
     // nothing under this lock calls a session or performs a network request.
     private val contentWrites = Mutex()
-    @Volatile private var purgeGeneration = 0L
+    // Immutable snapshots allow capture before dispatch; increments stay under contentWrites.
+    @Volatile private var purgeGenerations: Map<String, Long> = emptyMap()
 
     override suspend fun currentOwner(): String? = withContext(ioDispatcher) { activeOwnerId() }
 
@@ -69,9 +70,10 @@ class RoomEditorDraftStore @Inject constructor(
 
     /** Account-switch cleanup shares the writers' exclusion, including absent-row inserts. */
     suspend fun purgePrivateForUser(owner: String) = withContext(ioDispatcher) {
+        val normalizedOwner = owner.lowercase()
         contentWrites.withLock {
-            purgeGeneration++
-            editorDraftDao.deletePrivateForUser(owner)
+            purgeGenerations = purgeGenerations + (normalizedOwner to (purgeGeneration(normalizedOwner) + 1))
+            editorDraftDao.deletePrivateForUser(normalizedOwner)
         }
     }
 
@@ -144,7 +146,11 @@ class RoomEditorDraftStore @Inject constructor(
     }
 
     override suspend fun finishAttempt(token: AttemptToken, outcome: AttemptOutcome): StoreWriteResult =
-        write(token.owner, requireActiveOwner = outcome != AttemptOutcome.CERTAIN_FAILURE) {
+        write(
+            token.owner,
+            requireActiveOwner = outcome != AttemptOutcome.CERTAIN_FAILURE,
+            writesContent = false,
+        ) {
             val status = when (outcome) {
                 AttemptOutcome.CERTAIN_FAILURE -> null
                 AttemptOutcome.PUBLISHED -> AttemptStatus.PUBLISHED.name
@@ -154,17 +160,19 @@ class RoomEditorDraftStore @Inject constructor(
                 ?.let { StoreWriteResult.Written(it) } ?: StoreWriteResult.Conflict
         }
 
-    override suspend fun erasePublishedContent(token: AttemptToken): StoreWriteResult = write(token.owner) {
-        (editorDraftDao.erasePublishedContent(rowKey(token.owner, token.key), token.id, token.version) == 1)
-            .result(token.version)
-    }
+    override suspend fun erasePublishedContent(token: AttemptToken): StoreWriteResult =
+        write(token.owner, writesContent = false) {
+            (editorDraftDao.erasePublishedContent(rowKey(token.owner, token.key), token.id, token.version) == 1)
+                .result(token.version)
+        }
 
     private suspend fun write(
         owner: String?,
         requireActiveOwner: Boolean = true,
+        writesContent: Boolean = true,
         operation: suspend () -> StoreWriteResult,
     ): StoreWriteResult = try {
-        ownedWrite(owner, StoreWriteResult.OwnerChanged, requireActiveOwner, operation)
+        ownedWrite(owner, StoreWriteResult.OwnerChanged, requireActiveOwner, writesContent, operation)
     } catch (error: SQLiteException) {
         StoreWriteResult.Failed(IOException("Editor draft write failed", error))
     } catch (error: IOException) {
@@ -175,19 +183,24 @@ class RoomEditorDraftStore @Inject constructor(
         owner: String?,
         rejected: T,
         requireActiveOwner: Boolean = true,
+        writesContent: Boolean = true,
         operation: suspend () -> T,
     ): T {
         // Capture before dispatch or the first owner read: A may leave and reconnect while either waits.
-        val authorizedGeneration = purgeGeneration
+        val authorizedGeneration = owner?.let(::purgeGeneration)
         return withContext(ioDispatcher) {
             if (owner == null || (requireActiveOwner && owner != activeOwnerId())) return@withContext rejected
             contentWrites.withLock {
                 val ownerMatches = !requireActiveOwner || owner == activeOwnerId()
                 // A matching pseudo alone cannot authorize content captured before a purge.
-                if (authorizedGeneration != purgeGeneration || !ownerMatches) rejected else operation()
+                // Metadata resolution and erasure cannot reintroduce any purged content.
+                val generationMatches = !writesContent || authorizedGeneration == purgeGeneration(owner)
+                if (generationMatches && ownerMatches) operation() else rejected
             }
         }
     }
+
+    private fun purgeGeneration(owner: String): Long = purgeGenerations[owner.lowercase()] ?: 0L
 
     private fun Boolean.result(version: Long): StoreWriteResult =
         if (this) StoreWriteResult.Written(version) else StoreWriteResult.Conflict
