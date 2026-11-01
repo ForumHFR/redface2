@@ -17,7 +17,7 @@ class TopicFormSubmissionContractTest(private val mode: TopicFormMode) : EditorS
         preferences: Flow<Boolean>,
         delayedSharedRestore: Boolean,
     ): EditorSubmissionAdapter = TopicFormViewModelTest().submissionAdapter(
-        mode == TopicFormMode.New, scope, preferences,
+        mode == TopicFormMode.New, scope, preferences, submissionScenario,
     )
 
     companion object {

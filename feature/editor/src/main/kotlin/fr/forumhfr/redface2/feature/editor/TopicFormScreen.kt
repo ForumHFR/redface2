@@ -30,6 +30,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummary
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -192,7 +193,7 @@ internal fun TopicFormContent(
                         modifier = Modifier.weight(1f),
                         // #459 — lock editing during a batch so the caret cannot move between two
                         // programmatic [img] insertions (keeps them in pick order).
-                        readOnly = state.isUploading,
+                        readOnly = state.isUploading || state.submission.blocksBodyMutation,
                     )
                 }
             }
@@ -205,10 +206,12 @@ internal fun TopicFormContent(
                     isSubmitting = state.isSubmitting,
                     isLoadingForm = state.isLoadingForm,
                     confirmArmed = state.showSubmitConfirmation,
+                    armToken = state.armToken,
+                    controlsEnabled = !state.submission.blocksBodyMutation,
                 ),
                 actions = EditorSubmitActions(
-                    onSubmit = { onIntent(TopicFormIntent.SubmitClicked) },
-                    onConfirmSubmit = { onIntent(TopicFormIntent.SubmitConfirmed) },
+                    onSubmit = { timeout -> onIntent(TopicFormIntent.SubmitClicked(timeout)) },
+                    onConfirmSubmit = { onIntent(TopicFormIntent.SubmitConfirmed(state.armToken)) },
                     onDisarmConfirm = { onIntent(TopicFormIntent.SubmitConfirmationDismissed) },
                     onOpenOptions = { optionsSheetOpen = true },
                     onOpenSmileys = onOpenSmileys,
@@ -225,7 +228,7 @@ internal fun TopicFormContent(
                 smileyDisabled = state.smileyDisabled,
                 emailNotificationEnabled = state.emailNotificationEnabled,
                 msgIcon = state.msgIcon,
-                enabled = !state.isSubmitting && !state.isLoadingForm,
+                enabled = !state.submission.blocksBodyMutation && !state.isLoadingForm,
                 onSignatureChanged = { onIntent(TopicFormIntent.ToggleSignature(it)) },
                 onSmileyDisabledChanged = { onIntent(TopicFormIntent.ToggleSmileyDisabled(it)) },
                 onEmailNotificationChanged = { onIntent(TopicFormIntent.ToggleEmailNotification(it)) },
@@ -286,7 +289,7 @@ private fun TopicFormControlsZone(
             onValueChange = { onIntent(TopicFormIntent.SubjectChanged(it)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
-            enabled = !state.isSubmitting,
+            enabled = !state.submission.blocksBodyMutation,
             label = { Text(stringResource(R.string.editor_topic_subject_label)) },
             // #237 — sentence capitalization (parité RF1) like the body field.
             keyboardOptions = KeyboardOptions(
@@ -298,7 +301,7 @@ private fun TopicFormControlsZone(
             SubcategoryDropdown(
                 choices = state.subcategoryChoices,
                 selectedSubcat = state.selectedSubcat,
-                enabled = !state.isSubmitting && !state.isLoadingForm,
+                enabled = !state.submission.blocksBodyMutation && !state.isLoadingForm,
                 onSelect = { id -> onIntent(TopicFormIntent.SubcatSelected(id)) },
             )
         }
@@ -349,11 +352,16 @@ private fun TopicFormErrorBanners(
     onIntent: (TopicFormIntent) -> Unit,
 ) {
     state.submitError?.let { error ->
-        Text(
-            text = stringResource(error.bannerResId),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.error,
-        )
+        val summary = error.summaryKind
+        if (summary != null) {
+            EditorSubmissionSummary(summary)
+        } else {
+            Text(
+                text = stringResource(error.bannerResId),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
         TextButton(onClick = { onIntent(TopicFormIntent.ErrorDismissed) }) {
             Text(text = stringResource(R.string.editor_error_dismiss))
         }
@@ -514,6 +522,8 @@ private val SubmitError.bannerResId: Int
             ReplyFailureReason.LoginRequired -> R.string.editor_error_login_required
             ReplyFailureReason.Unknown -> R.string.editor_error_unknown
         }
+        SubmitError.Uncertain -> fr.forumhfr.redface2.core.ui.R.string.editor_submission_uncertain
+        SubmitError.DraftWriteFailed -> fr.forumhfr.redface2.core.ui.R.string.editor_submission_draft_write_failed
         SubmitError.Network -> R.string.editor_error_network
         SubmitError.SessionExpired -> R.string.editor_error_session_expired
         SubmitError.MissingSubcat -> R.string.editor_error_missing_subcat

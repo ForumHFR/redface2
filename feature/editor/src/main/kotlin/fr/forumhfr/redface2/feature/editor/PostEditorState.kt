@@ -3,6 +3,8 @@ import fr.forumhfr.redface2.core.ui.editor.UploadError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
 import androidx.compose.ui.text.input.TextFieldValue
+import fr.forumhfr.redface2.core.domain.editor.ArmToken
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.editor.validateBbcodeDraft
 import fr.forumhfr.redface2.core.model.PostContent
@@ -42,6 +44,8 @@ data class PostEditorState(
     val isLoadingForm: Boolean = false,
     /** True while we POST `bddpost.php` (reply / quote) or `bdd.php` (edit). Guards against double submit. */
     val isSubmitting: Boolean = false,
+    /** ED-161/169: terminal success and in-flight reservation are state, never a replayed effect. */
+    val submission: EditorSubmissionState = EditorSubmissionState.Ready,
     /** Surfaces an HFR-classified failure to the UI. Null means "no error to show". */
     val submitError: SubmitError? = null,
     /**
@@ -85,12 +89,7 @@ data class PostEditorState(
      * form is anonymous or unparseable — the controller falls back to `user_id=0`.
      */
     val userId: Int? = null,
-    /**
-     * #312 — `true` while the « Confirmation avant publication » dialog is shown. Only ever set
-     * when the persisted preference is on AND the submit already passed every validation gate
-     * (we never ask to confirm a form that could not be submitted). Confirm / dismiss go through
-     * [PostEditorIntent.SubmitConfirmed] / [PostEditorIntent.SubmitConfirmationDismissed].
-     */
+    /** ED-164: UI projection of submission.Armed; the token carries identity and deadline. */
     val showSubmitConfirmation: Boolean = false,
     /**
      * #405 — the body of a previously-cached draft for this editor's key, surfaced on init when a
@@ -128,6 +127,8 @@ data class PostEditorState(
      * identify which post HFR should rewrite. The [isUploading] guard (#459) stops a tap on
      * « Envoyer » from racing an in-flight upload and posting before the image markup is inserted.
      */
+    val armToken: ArmToken? get() = (submission as? EditorSubmissionState.Armed)?.token
+
     val canSubmit: Boolean
         get() = (mode == PostEditorMode.Reply || (mode == PostEditorMode.Edit && numreponse != null)) &&
             page != null &&
@@ -141,6 +142,7 @@ data class PostEditorState(
             // requiring a non-blank body — its cards list is always empty.
             (draft.text.isNotBlank() || (mode == PostEditorMode.Reply && quotes.isNotEmpty())) &&
             !isSubmitting &&
+            !submission.blocksBodyMutation &&
             !isLoadingForm &&
             !isUploading
 
@@ -155,6 +157,12 @@ data class PostEditorState(
 sealed interface SubmitError {
     /** A classified failure surfaced verbatim by HFR (see fixtures). */
     data class Hfr(val reason: ReplyFailureReason) : SubmitError
+
+    /** ED-168/170: HFR may have accepted the write; never invite an automatic retry. */
+    data object Uncertain : SubmitError
+
+    /** ED-170: the durable attempt could not be written; no write repository was entered. */
+    data object DraftWriteFailed : SubmitError
 
     /** Network / IO error. The draft is preserved ; the user can retry. */
     data object Network : SubmitError
@@ -180,7 +188,7 @@ internal fun PostEditorState.withDraft(updated: TextFieldValue): PostEditorState
         // Clear an error as soon as the user mutates the draft — they have implicitly
         // accepted that we will try again. Keep it on toolbar-only mutations though
         // (caller resets `submitError` directly when needed).
-        submitError = if (updated.text != draft.text) null else submitError,
+        submitError = if (submitError != SubmitError.Uncertain && updated.text != draft.text) null else submitError,
         // #459 PR2 — same rule for the image-upload error : a fresh text edit dismisses the stale
         // banner. A successful upload INSERTS text via this path, which also clears any prior error.
         uploadError = if (updated.text != draft.text) null else uploadError,

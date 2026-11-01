@@ -3,6 +3,8 @@ import fr.forumhfr.redface2.core.ui.editor.UploadError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
 import androidx.compose.ui.text.input.TextFieldValue
+import fr.forumhfr.redface2.core.domain.editor.ArmToken
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.editor.validateBbcodeDraft
@@ -53,6 +55,8 @@ data class TopicFormState(
     val msgIcon: Int = DEFAULT_MSG_ICON,
     val isLoadingForm: Boolean = false,
     val isSubmitting: Boolean = false,
+    /** ED-161/169: terminal success and in-flight reservation are state, never a replayed effect. */
+    val submission: EditorSubmissionState = EditorSubmissionState.Ready,
     val submitError: SubmitError? = null,
     /**
      * True once we have hydrated `subject` from the parsed form. Kept independent
@@ -86,11 +90,7 @@ data class TopicFormState(
      * must never erase a previously known id.
      */
     val userId: Int? = null,
-    /**
-     * #312 — `true` while the « Confirmation avant publication » dialog is shown. Mirrors
-     * [PostEditorState.showSubmitConfirmation]: only raised when the preference is on AND
-     * [canSubmit] already validated the form (we never confirm an unsendable form).
-     */
+    /** ED-164: UI projection of submission.Armed; the token carries identity and deadline. */
     val showSubmitConfirmation: Boolean = false,
     /**
      * #405 — the body of a previously-cached draft for this form's key, surfaced on init when a
@@ -134,6 +134,8 @@ data class TopicFormState(
      * select — relaxing it here would contradict that invariant. Treat cat-0-subcat
      * for EditFirstPost as a separate follow-up under #213, once that form is captured.
      */
+    val armToken: ArmToken? get() = (submission as? EditorSubmissionState.Armed)?.token
+
     val canSubmit: Boolean
         get() = when (mode) {
             TopicFormMode.EditFirstPost ->
@@ -147,6 +149,7 @@ data class TopicFormState(
                     draft.text.isNotBlank() &&
                     !isLoadingForm &&
                     !isSubmitting &&
+                    !submission.blocksBodyMutation &&
                     !isUploading &&
                     !isAnonymous
             TopicFormMode.New ->
@@ -156,6 +159,7 @@ data class TopicFormState(
                     draft.text.isNotBlank() &&
                     !isLoadingForm &&
                     !isSubmitting &&
+                    !submission.blocksBodyMutation &&
                     !isUploading &&
                     !isAnonymous
         }
@@ -180,13 +184,12 @@ sealed interface TopicFormIntent {
     data class ContentChanged(val value: TextFieldValue) : TopicFormIntent
     data class ToolbarActionClicked(val action: BbcodeAction) : TopicFormIntent
     data object TogglePreview : TopicFormIntent
-    data object SubmitClicked : TopicFormIntent
+    data class SubmitClicked(val timeoutMillis: Long = 4_000L) : TopicFormIntent
 
     /**
-     * #312 — user confirmed the « Confirmation avant publication » dialog. Executes the real
-     * submission directly, BYPASSING the preference re-check (otherwise the dialog would loop).
+     * ED-164/166: confirms only this exact arm, after 400 ms and before its monotonic deadline.
      */
-    data object SubmitConfirmed : TopicFormIntent
+    data class SubmitConfirmed(val token: ArmToken?) : TopicFormIntent
 
     /** #312 — user dismissed the confirmation dialog. No submission happens; the draft stays. */
     data object SubmitConfirmationDismissed : TopicFormIntent
@@ -281,5 +284,5 @@ internal fun TopicFormState.withDraft(updated: TextFieldValue): TopicFormState =
     copy(
         draft = updated,
         validation = validateBbcodeDraft(updated.text),
-        submitError = if (updated.text != draft.text) null else submitError,
+        submitError = if (submitError != SubmitError.Uncertain && updated.text != draft.text) null else submitError,
     )

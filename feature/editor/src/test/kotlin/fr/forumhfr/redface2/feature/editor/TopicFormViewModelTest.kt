@@ -16,8 +16,12 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionScenario
+import fr.forumhfr.redface2.core.domain.editor.SubmissionErrorProbe
+import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionAdapter
-import fr.forumhfr.redface2.core.domain.editor.LegacyEditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.editor.SubmissionBodyMutation
 import fr.forumhfr.redface2.core.domain.editor.SubmissionProbe
 import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
@@ -102,13 +106,15 @@ class TopicFormViewModelTest {
     private val previewParser = FakePreviewParser()
     private val topicFormRepository = FakeTopicFormRepository()
     private val smileyRepository = FakeSmileyRepository()
-    private val draftStore = FakeEditorDraftStore()
+    private var draftStore: VersionedEditorDraftStore = FakeEditorDraftStore()
+    private val dispatcher = UnconfinedTestDispatcher()
+    private var submissionClock = DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L }
     private val favoriteRepository = FakeHfrFavoriteSmileyRepository()
     private val localCollections = FakeSmileyLocalCollections()
 
     @Before
     fun setUp() {
-        Dispatchers.setMain(UnconfinedTestDispatcher())
+        Dispatchers.setMain(dispatcher)
     }
 
     @After
@@ -157,7 +163,7 @@ class TopicFormViewModelTest {
             viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("user override", TextRange(13))))
             viewModel.submit(TopicFormIntent.MsgIconSelected(6))
             // Submit triggers InvalidHashCheck → silent refetch with the same fake form.
-            viewModel.submit(TopicFormIntent.SubmitClicked)
+            viewModel.submit(TopicFormIntent.SubmitClicked())
             val finalState = expectMostRecentItem()
             assertEquals("User-overridden subject", finalState.subject.text)
             assertEquals("user override", finalState.draft.text)
@@ -189,7 +195,7 @@ class TopicFormViewModelTest {
             viewModel.submit(TopicFormIntent.ToggleSignature(enabled = false))
             viewModel.submit(TopicFormIntent.ToggleSmileyDisabled(disabled = true))
             viewModel.submit(TopicFormIntent.ToggleEmailNotification(enabled = true))
-            viewModel.submit(TopicFormIntent.SubmitClicked)
+            viewModel.submit(TopicFormIntent.SubmitClicked())
             cancelAndIgnoreRemainingEvents()
         }
         assertEquals(1, topicFormRepository.submitCalls)
@@ -211,7 +217,7 @@ class TopicFormViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
         viewModel.effects.test {
-            viewModel.submit(TopicFormIntent.SubmitClicked)
+            viewModel.submit(TopicFormIntent.SubmitClicked())
             val effect = awaitItem() as TopicFormEffect.SubmitSucceeded
             assertEquals(1, effect.targetPage)
             assertEquals(SAMPLE_NUMREPONSE, effect.scrollTo)
@@ -277,7 +283,7 @@ class TopicFormViewModelTest {
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("user subject after hydrate")))
             viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("user draft after hydrate", TextRange(24))))
             // Submit → InvalidHashCheck → silent refetch.
-            viewModel.submit(TopicFormIntent.SubmitClicked)
+            viewModel.submit(TopicFormIntent.SubmitClicked())
             val finalState = expectMostRecentItem()
             assertEquals("user subject after hydrate", finalState.subject.text)
             assertEquals("user draft after hydrate", finalState.draft.text)
@@ -339,7 +345,7 @@ class TopicFormViewModelTest {
         }
         viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
         viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
-        viewModel.submit(TopicFormIntent.SubmitClicked)
+        viewModel.submit(TopicFormIntent.SubmitClicked())
         // No POST happened because canSubmit returned false.
         assertEquals(0, topicFormRepository.newTopicSubmitCalls)
     }
@@ -384,7 +390,7 @@ class TopicFormViewModelTest {
             // canSubmit must be true WITHOUT any SubcatSelected.
             val ready = expectMostRecentItem()
             assertTrue("cat-without-subcat must enable submit with subcat=0", ready.canSubmit)
-            viewModel.submit(TopicFormIntent.SubmitClicked)
+            viewModel.submit(TopicFormIntent.SubmitClicked())
             cancelAndIgnoreRemainingEvents()
         }
         assertEquals(1, topicFormRepository.newTopicSubmitCalls)
@@ -412,7 +418,7 @@ class TopicFormViewModelTest {
             assertFalse("missing subcat selection must keep submit disabled", blocked.canSubmit)
             cancelAndIgnoreRemainingEvents()
         }
-        viewModel.submit(TopicFormIntent.SubmitClicked)
+        viewModel.submit(TopicFormIntent.SubmitClicked())
         assertEquals(0, topicFormRepository.newTopicSubmitCalls)
     }
 
@@ -434,7 +440,7 @@ class TopicFormViewModelTest {
             viewModel.submit(TopicFormIntent.SubcatSelected(SAMPLE_OTHER_SUBCAT))
             viewModel.submit(TopicFormIntent.ToggleSignature(enabled = true))
             viewModel.submit(TopicFormIntent.MsgIconSelected(6))
-            viewModel.submit(TopicFormIntent.SubmitClicked)
+            viewModel.submit(TopicFormIntent.SubmitClicked())
             cancelAndIgnoreRemainingEvents()
         }
         assertEquals(1, topicFormRepository.newTopicSubmitCalls)
@@ -464,7 +470,7 @@ class TopicFormViewModelTest {
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
             viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
             viewModel.submit(TopicFormIntent.SubcatSelected(SAMPLE_OTHER_SUBCAT))
-            viewModel.submit(TopicFormIntent.SubmitClicked)
+            viewModel.submit(TopicFormIntent.SubmitClicked())
             val effect = awaitItem() as TopicFormEffect.NewTopicCreated
             assertEquals(SAMPLE_CAT, effect.cat)
             assertEquals(SAMPLE_OTHER_SUBCAT, effect.subcat)
@@ -495,7 +501,7 @@ class TopicFormViewModelTest {
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Mon nouveau sujet")))
             viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
             viewModel.submit(TopicFormIntent.SubcatSelected(SAMPLE_OTHER_SUBCAT))
-            viewModel.submit(TopicFormIntent.SubmitClicked)
+            viewModel.submit(TopicFormIntent.SubmitClicked())
             val effect = awaitItem() as TopicFormEffect.NewTopicCreated
             assertNull(effect.newTopicId)
             assertEquals("Mon nouveau sujet", effect.subject)
@@ -512,7 +518,7 @@ class TopicFormViewModelTest {
             expectMostRecentItem() // drain initial hydration
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("user subject after hydrate")))
             viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("user draft after hydrate", TextRange(24))))
-            viewModel.submit(TopicFormIntent.SubmitClicked)
+            viewModel.submit(TopicFormIntent.SubmitClicked())
             val finalState = expectMostRecentItem()
             assertEquals("user subject after hydrate", finalState.subject.text)
             assertEquals("user draft after hydrate", finalState.draft.text)
@@ -547,7 +553,7 @@ class TopicFormViewModelTest {
         viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
         viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
         viewModel.submit(TopicFormIntent.SubcatSelected(SAMPLE_SUBCAT))
-        viewModel.submit(TopicFormIntent.SubmitClicked)
+        viewModel.submit(TopicFormIntent.SubmitClicked())
         assertEquals(0, topicFormRepository.newTopicSubmitCalls)
     }
 
@@ -645,14 +651,14 @@ class TopicFormViewModelTest {
         assertEquals(listOf(favoriteA), (viewModel.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys)
 
         topicFormRepository.formResult = topicFormRepository.formResult.copy(favoriteSmileys = listOf(favoriteB))
-        viewModel.submit(TopicFormIntent.SubmitClicked)
+        viewModel.submit(TopicFormIntent.SubmitClicked())
         testScheduler.advanceUntilIdle()
 
         assertEquals(2, topicFormRepository.formFetches)
         assertEquals(listOf(favoriteB), (viewModel.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys)
 
         topicFormRepository.formResult = topicFormRepository.formResult.copy(favoriteSmileys = emptyList())
-        viewModel.submit(TopicFormIntent.SubmitClicked)
+        viewModel.submit(TopicFormIntent.SubmitClicked())
         testScheduler.advanceUntilIdle()
 
         assertEquals(3, topicFormRepository.formFetches)
@@ -826,7 +832,7 @@ class TopicFormViewModelTest {
         val viewModel = newViewModel() // default fake → preference OFF
         viewModel.state.test {
             awaitHydratedState()
-            viewModel.submit(TopicFormIntent.SubmitClicked)
+            viewModel.submit(TopicFormIntent.SubmitClicked())
             cancelAndIgnoreRemainingEvents()
         }
         assertEquals("OFF must POST directly, no dialog detour", 1, topicFormRepository.submitCalls)
@@ -841,7 +847,7 @@ class TopicFormViewModelTest {
         )
         viewModel.state.test {
             awaitHydratedState()
-            viewModel.submit(TopicFormIntent.SubmitClicked)
+            viewModel.submit(TopicFormIntent.SubmitClicked())
             val parked = expectMostRecentItem()
             assertTrue("the confirmation dialog must be armed", parked.showSubmitConfirmation)
             assertFalse("nothing is in flight while the dialog is up", parked.isSubmitting)
@@ -860,11 +866,12 @@ class TopicFormViewModelTest {
             awaitHydratedState()
             cancelAndIgnoreRemainingEvents()
         }
-        viewModel.submit(TopicFormIntent.SubmitClicked)
+        viewModel.submit(TopicFormIntent.SubmitClicked())
         assertEquals(0, topicFormRepository.submitCalls)
 
         viewModel.effects.test {
-            viewModel.submit(TopicFormIntent.SubmitConfirmed)
+            testScheduler.advanceTimeBy(400L)
+            viewModel.submit(TopicFormIntent.SubmitConfirmed(viewModel.state.value.armToken))
             val effect = awaitItem() as TopicFormEffect.SubmitSucceeded
             assertEquals(1, effect.targetPage)
             cancelAndIgnoreRemainingEvents()
@@ -890,7 +897,7 @@ class TopicFormViewModelTest {
             expectMostRecentItem() // drain hydration
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
             viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
-            viewModel.submit(TopicFormIntent.SubmitClicked)
+            viewModel.submit(TopicFormIntent.SubmitClicked())
             cancelAndIgnoreRemainingEvents()
         }
         assertEquals("OFF must POST directly, no dialog detour", 1, topicFormRepository.newTopicSubmitCalls)
@@ -914,14 +921,15 @@ class TopicFormViewModelTest {
             expectMostRecentItem() // drain hydration
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
             viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
-            viewModel.submit(TopicFormIntent.SubmitClicked)
+            viewModel.submit(TopicFormIntent.SubmitClicked())
             val parked = expectMostRecentItem()
             assertTrue("the confirmation dialog must be armed", parked.showSubmitConfirmation)
             cancelAndIgnoreRemainingEvents()
         }
         assertEquals("no POST before the user confirms", 0, topicFormRepository.newTopicSubmitCalls)
 
-        viewModel.submit(TopicFormIntent.SubmitConfirmed)
+        testScheduler.advanceTimeBy(400L)
+        viewModel.submit(TopicFormIntent.SubmitConfirmed(viewModel.state.value.armToken))
 
         assertEquals(1, topicFormRepository.newTopicSubmitCalls)
         assertFalse(viewModel.state.value.showSubmitConfirmation)
@@ -937,7 +945,7 @@ class TopicFormViewModelTest {
             expectMostRecentItem() // drain hydration
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
             viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
-            viewModel.submit(TopicFormIntent.SubmitClicked)
+            viewModel.submit(TopicFormIntent.SubmitClicked())
             viewModel.submit(TopicFormIntent.SubmitConfirmationDismissed)
             val finalState = expectMostRecentItem()
             assertFalse(finalState.showSubmitConfirmation)
@@ -961,7 +969,7 @@ class TopicFormViewModelTest {
             expectMostRecentItem() // drain hydration
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
             viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
-            viewModel.submit(TopicFormIntent.SubmitClicked)
+            viewModel.submit(TopicFormIntent.SubmitClicked())
             val finalState = expectMostRecentItem()
             assertFalse("invalid form must not raise the dialog", finalState.showSubmitConfirmation)
             cancelAndIgnoreRemainingEvents()
@@ -979,7 +987,7 @@ class TopicFormViewModelTest {
             expectMostRecentItem() // drain hydration
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
             viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
-            viewModel.submit(TopicFormIntent.SubmitClicked)
+            viewModel.submit(TopicFormIntent.SubmitClicked())
             val parked = expectMostRecentItem()
             assertTrue("the confirmation dialog must be armed", parked.showSubmitConfirmation)
             cancelAndIgnoreRemainingEvents()
@@ -987,7 +995,7 @@ class TopicFormViewModelTest {
 
         // Second tap while the dialog is up (double-tap race) : idempotent — re-raising
         // `showSubmitConfirmation = true` is a no-op, and no POST may slip through.
-        viewModel.submit(TopicFormIntent.SubmitClicked)
+        viewModel.submit(TopicFormIntent.SubmitClicked())
 
         assertTrue("the dialog must stay armed", viewModel.state.value.showSubmitConfirmation)
         assertFalse("nothing is in flight while the dialog is up", viewModel.state.value.isSubmitting)
@@ -1018,14 +1026,15 @@ class TopicFormViewModelTest {
             expectMostRecentItem() // drain hydration
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
             viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
-            viewModel.submit(TopicFormIntent.SubmitClicked)
+            viewModel.submit(TopicFormIntent.SubmitClicked())
             val parked = expectMostRecentItem()
             assertTrue("the confirmation dialog must be armed", parked.showSubmitConfirmation)
             cancelAndIgnoreRemainingEvents()
         }
 
-        viewModel.submit(TopicFormIntent.SubmitConfirmed) // launches the POST ; suspends on gate
-        viewModel.submit(TopicFormIntent.SubmitConfirmed) // must be a no-op (canSubmit / submitJob guards)
+        testScheduler.advanceTimeBy(400L)
+        viewModel.submit(TopicFormIntent.SubmitConfirmed(viewModel.state.value.armToken))
+        viewModel.submit(TopicFormIntent.SubmitConfirmed(viewModel.state.value.armToken))
 
         gate.complete(Unit)
 
@@ -1251,7 +1260,7 @@ class TopicFormViewModelTest {
         viewModel.submit(TopicFormIntent.DraftDiscardRequested)
         testScheduler.advanceUntilIdle()
 
-        assertTrue(draftStore.deletedKeys.contains(key))
+        assertEquals("", draftStore.saved[key]?.body)
         assertNull(viewModel.state.value.restorableDraft)
         assertTrue(savedStateHandle.get<String>("draft_restore_offer_fingerprint") != null)
 
@@ -1270,14 +1279,16 @@ class TopicFormViewModelTest {
         viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("My title")))
         viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("My body")))
 
-        viewModel.submit(TopicFormIntent.SubmitClicked)
+        viewModel.submit(TopicFormIntent.SubmitClicked())
         testScheduler.advanceUntilIdle()
 
         assertEquals("submit must have happened", 1, topicFormRepository.newTopicSubmitCalls)
         assertTrue(
             "a created topic must drop its draft",
-            draftStore.deletedKeys.contains(EditorDraftKey.newTopic(SAMPLE_CAT)),
+            draftStore.entries[EditorDraftKey.newTopic(SAMPLE_CAT)]?.attempt?.status ==
+                EditorDraftStore.AttemptStatus.PUBLISHED,
         )
+        assertEquals("", draftStore.saved[EditorDraftKey.newTopic(SAMPLE_CAT)]?.body)
     }
 
     @Test
@@ -1292,10 +1303,11 @@ class TopicFormViewModelTest {
         val key = EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE)
         assertEquals("rewritten FP body", draftStore.saved[key]?.body)
 
-        viewModel.submit(TopicFormIntent.SubmitClicked)
+        viewModel.submit(TopicFormIntent.SubmitClicked())
         testScheduler.advanceUntilIdle()
         assertEquals(1, topicFormRepository.submitCalls)
-        assertTrue("a saved FP must drop its draft", draftStore.deletedKeys.contains(key))
+        assertEquals("", draftStore.saved[key]?.body)
+        assertEquals(EditorDraftStore.AttemptStatus.PUBLISHED, draftStore.entries[key]?.attempt?.status)
     }
 
     // ──────────────────────────────────────────────────────────────────────
@@ -1357,8 +1369,7 @@ class TopicFormViewModelTest {
         viewModel.submit(TopicFormIntent.CloseRequested)
 
         assertEquals(TopicFormEffect.CloseCommitted, viewModel.effects.first())
-        assertTrue("an emptied form must not leave a stale row", draftStore.deletedKeys.contains(key))
-        assertNull(draftStore.saved[key])
+        assertEquals("", draftStore.saved[key]?.body)
     }
 
     @Test
@@ -1387,7 +1398,7 @@ class TopicFormViewModelTest {
         viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Mon titre")))
         viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Mon corps")))
 
-        viewModel.submit(TopicFormIntent.SubmitClicked)
+        viewModel.submit(TopicFormIntent.SubmitClicked())
         // Back pressed while the POST is in flight — must be inert (gate #803: popping would
         // cancel the submit with the viewModelScope and leave the server state unknown).
         viewModel.submit(TopicFormIntent.CloseRequested)
@@ -1620,7 +1631,7 @@ class TopicFormViewModelTest {
         viewModel.submit(TopicFormIntent.ImagesPicked(listOf("content://pick/1")))
         assertTrue("sanity: the upload must be in flight", viewModel.state.value.isUploading)
 
-        viewModel.submit(TopicFormIntent.SubmitClicked)
+        viewModel.submit(TopicFormIntent.SubmitClicked())
         gate.complete(Unit)
         testScheduler.advanceUntilIdle()
 
@@ -1632,10 +1643,18 @@ class TopicFormViewModelTest {
         creating: Boolean,
         scope: TestScope,
         preferences: Flow<Boolean>,
+        scenario: EditorSubmissionScenario,
     ): EditorSubmissionAdapter {
+        submissionClock = DiagnosticsClock { scope.testScheduler.currentTime * 1_000_000L }
+        draftStore = scenario.store
+        val auth = MutableStateFlow<AuthState>(AuthState.Authenticated("tester"))
+        val authRepository = object : AuthRepository by FakeAuthRepository() {
+            override fun observeAuthState(): Flow<AuthState> = auth
+        }
         val postGate = CompletableDeferred<Unit>()
         val uploadCompletion = CompletableDeferred<Unit>()
         val uploads = FakeUploadRepository().apply { uploadGate = uploadCompletion }
+        topicFormRepository.submitException = scenario.postFailure
         topicFormRepository.submitGate = postGate
         val key = if (creating) {
             EditorDraftKey.newTopic(SAMPLE_CAT)
@@ -1646,19 +1665,36 @@ class TopicFormViewModelTest {
         val userPreferences = object : UserPreferencesRepository by FakeUserPreferencesRepository() {
             override fun observeConfirmBeforePosting(): Flow<Boolean> = preferences
         }
-        val viewModel = if (creating) {
+        fun createViewModel() = if (creating) {
             newTopicViewModel(
                 entrySubcat = SAMPLE_SUBCAT,
                 userPreferencesRepository = userPreferences,
                 uploadRepository = uploads,
+                authRepository = authRepository,
             )
         } else {
-            newViewModel(userPreferencesRepository = userPreferences, uploadRepository = uploads)
+            newViewModel(
+                userPreferencesRepository = userPreferences,
+                uploadRepository = uploads, authRepository = authRepository,
+            )
         }
+        var viewModel = createViewModel()
         val effects = mutableListOf<TopicFormEffect>()
-        scope.backgroundScope.launch(UnconfinedTestDispatcher(scope.testScheduler)) {
+        fun collectEffects() = scope.backgroundScope.launch(UnconfinedTestDispatcher(scope.testScheduler)) {
             viewModel.effects.collect { effects += it }
         }
+        var collector = collectEffects()
+        scenario.recreate = {
+            collector.cancel()
+            viewModel.viewModelScope.cancel()
+            viewModel = createViewModel()
+            collector = collectEffects()
+        }
+        scenario.replaceCollector = {
+            collector.cancel()
+            collector = collectEffects()
+        }
+        val arms = mutableMapOf<Long, ArmToken>()
         return object : EditorSubmissionAdapter {
             override val unsupportedMutations = mapOf(
                 SubmissionBodyMutation.SHARED_RESTORE to "aucune entrée resumeSharedDraft pour un sujet",
@@ -1667,7 +1703,7 @@ class TopicFormViewModelTest {
             override val postCalls get() = topicFormRepository.submitCalls + topicFormRepository.newTopicSubmitCalls
             override val uploadCalls get() = uploads.uploadCalls
             override val draftSaves get() = draftStore.saveCount
-            override val draftWrites get() = draftSaves + draftStore.deletedKeys.size
+            override val draftWrites get() = draftStore.writes
             override val successEffects get() = effects.count {
                 it is TopicFormEffect.SubmitSucceeded || it is TopicFormEffect.NewTopicCreated
             }
@@ -1678,17 +1714,37 @@ class TopicFormViewModelTest {
                 viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue(body, TextRange(body.length))))
             }
 
-            override fun clickSubmit() = viewModel.submit(TopicFormIntent.SubmitClicked)
-            override fun confirm() = viewModel.submit(TopicFormIntent.SubmitConfirmed)
+            override fun clickSubmit() = viewModel.submit(TopicFormIntent.SubmitClicked())
+            override fun confirm() = viewModel.submit(TopicFormIntent.SubmitConfirmed(viewModel.state.value.armToken))
+            override fun confirmIdentity(id: Long?) = viewModel.submit(TopicFormIntent.SubmitConfirmed(arms[id]))
             override fun dismissConfirmation() = viewModel.submit(TopicFormIntent.SubmitConfirmationDismissed)
             override fun close() = viewModel.submit(TopicFormIntent.CloseRequested)
             override fun completePost() { postGate.complete(Unit) }
             override fun completeUpload() { uploadCompletion.complete(Unit) }
+            // Reflection exercises the actual final callback guard even when upload launch is refused.
+            override fun deliverLateUploadCallback() {
+                val insert = TopicFormViewModel::class.java.getDeclaredMethod(
+                    "insertImageBbcodeAtCaret", String::class.java, Boolean::class.javaPrimitiveType,
+                )
+                insert.isAccessible = true
+                insert.invoke(viewModel, "[img]https://example.test/late.png[/img]", false)
+            }
+
             override fun dispose() = viewModel.viewModelScope.cancel()
             override fun startUpload() = viewModel.submit(TopicFormIntent.ImagesPicked(listOf("content://pick/1")))
 
             override fun snapshot(): SubmissionProbe = viewModel.state.value.let {
-                SubmissionProbe(it.draft.text, it.canSubmit, it.isSubmitting, it.isUploading, it.showSubmitConfirmation)
+                it.armToken?.let { token -> arms[token.id] = token }
+                SubmissionProbe(
+                    it.draft.text, it.canSubmit, it.isSubmitting, it.isUploading, it.showSubmitConfirmation,
+                    armId = it.armToken?.id,
+                    error = when (it.submitError) {
+                        SubmitError.Uncertain -> SubmissionErrorProbe.UNCERTAIN
+                        SubmitError.DraftWriteFailed -> SubmissionErrorProbe.DRAFT_WRITE_FAILED
+                        else -> null
+                    },
+                    restoreOffered = it.restorableDraft != null,
+                )
             }
 
             override fun mutateBody(mutation: SubmissionBodyMutation) {
@@ -1729,6 +1785,7 @@ class TopicFormViewModelTest {
             numreponse = null,
         ),
         previewParser = previewParser,
+        clock = submissionClock,
         topicFormRepository = topicFormRepository,
         smileyRepository = smileyRepository,
         hfrFavoriteSmileyRepository = favoriteRepository,
@@ -1754,6 +1811,7 @@ class TopicFormViewModelTest {
     }
 
     private fun newViewModel(
+        authRepository: AuthRepository = FakeAuthRepository(),
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
         userPreferencesRepository: UserPreferencesRepository = FakeUserPreferencesRepository(),
         uploadRepository: UploadRepository = FakeUploadRepository(),
@@ -1767,6 +1825,7 @@ class TopicFormViewModelTest {
             numreponse = SAMPLE_NUMREPONSE,
         ),
         previewParser = previewParser,
+        clock = submissionClock,
         topicFormRepository = topicFormRepository,
         smileyRepository = smileyRepository,
         hfrFavoriteSmileyRepository = favoriteRepository,
@@ -1774,7 +1833,7 @@ class TopicFormViewModelTest {
         userPreferencesRepository = userPreferencesRepository,
         draftStore = draftStore,
         diagnostics = diagnostics,
-        authRepository = FakeAuthRepository(),
+        authRepository = authRepository,
         uploadRepository = uploadRepository,
         imageUploadReader = FakeImageUploadReader(),
     )
@@ -1899,6 +1958,7 @@ class TopicFormViewModelTest {
         // #312 — holds an in-flight submit (both Edit FP and New) until the test releases it,
         // mirroring `FakeReplyRepository.submitGate` in `PostEditorViewModelTest`.
         var submitGate: CompletableDeferred<Unit>? = null
+        var submitException: java.io.IOException? = null
 
         var formFetches: Int = 0
             private set
@@ -1948,6 +2008,7 @@ class TopicFormViewModelTest {
             lastSubmittedOptions = options
             lastSubmittedForm = form
             submitGate?.await()
+            submitException?.let { throw it }
             return submitResult ?: error("submitResult not set")
         }
 
@@ -1974,6 +2035,7 @@ class TopicFormViewModelTest {
             lastSubmittedOptions = options
             lastSubmittedForm = form
             submitGate?.await()
+            submitException?.let { throw it }
             return newTopicSubmitResult ?: error("newTopicSubmitResult not set")
         }
     }
@@ -2244,33 +2306,7 @@ class TopicFormViewModelTest {
     }
 
     /** #405 — in-memory fake [EditorDraftStore], same shape as the one in `PostEditorViewModelTest`. */
-    private class FakeEditorDraftStore : LegacyEditorDraftStore() {
-        val saved: MutableMap<String, EditorDraftStore.Draft> = mutableMapOf()
-        val deletedKeys: MutableList<String> = mutableListOf()
-        var saveCount: Int = 0
-            private set
-        var lastSavedOwner: String? = null
-            private set
-
-        fun preload(key: String, draft: EditorDraftStore.Draft) {
-            saved[key] = draft
-        }
-
-        override suspend fun currentOwner(): String? = "tester"
-
-        override suspend fun load(owner: String?, key: String): EditorDraftStore.Draft? = saved[key]
-
-        override suspend fun save(owner: String?, key: String, draft: EditorDraftStore.Draft) {
-            saveCount += 1
-            lastSavedOwner = owner
-            saved[key] = draft
-        }
-
-        override suspend fun delete(owner: String?, key: String) {
-            deletedKeys += key
-            saved.remove(key)
-        }
-    }
+    private class FakeEditorDraftStore : VersionedEditorDraftStore()
 
     private companion object {
         const val SAMPLE_CAT = 23

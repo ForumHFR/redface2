@@ -17,7 +17,7 @@ class PostEditorSubmissionContractTest(private val variant: String) : EditorSubm
         preferences: Flow<Boolean>,
         delayedSharedRestore: Boolean,
     ): EditorSubmissionAdapter = PostEditorViewModelTest().submissionAdapter(
-        variant, scope, preferences, delayedSharedRestore,
+        variant, scope, preferences, delayedSharedRestore, submissionScenario,
     )
 
     companion object {
