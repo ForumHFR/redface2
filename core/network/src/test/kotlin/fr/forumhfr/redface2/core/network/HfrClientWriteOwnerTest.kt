@@ -18,6 +18,7 @@ import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
 import fr.forumhfr.redface2.core.network.cookie.CookieStore
 import fr.forumhfr.redface2.core.network.cookie.PersistentCookieJar
 import fr.forumhfr.redface2.core.network.di.NetworkModule
+import java.net.InetAddress
 import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -153,6 +154,27 @@ class HfrClientWriteOwnerTest(private val path: WritePath) {
         assertEquals(1, server.requestCount)
         assertTrue(server.takeRequest().getHeader("Cookie").orEmpty().contains("md_user=Alice"))
         assertEquals("body", original.value(0)) // Still readable by #1154.
+    }
+
+    @Test
+    fun identicalCookiesFromParentAndHostDomainsAllowEmission() = runTest {
+        val url = server.url("/").newBuilder().host("forum.hardware.test").build()
+        cookies.saveFromResponse(
+            url,
+            listOf("hardware.test", "forum.hardware.test").map { domain ->
+                Cookie.Builder().name("md_user").value("Alice").domain(domain).build()
+            },
+        )
+        val domainTransport = mutation.newBuilder()
+            .dns { listOf(InetAddress.getByName("127.0.0.1")) }.build()
+        val domainClient = HfrClient(domainTransport, domainTransport, domainTransport, url, Dispatchers.IO)
+        server.enqueue(MockResponse().setBody("accepted"))
+
+        assertEquals("accepted", path.submit(domainClient, body()))
+
+        assertEquals(1, server.requestCount)
+        val selected = server.takeRequest().getHeader("Cookie").orEmpty().split(';').map(String::trim)
+        assertEquals(listOf("md_user=Alice", "md_user=Alice"), selected)
     }
 
     @Test

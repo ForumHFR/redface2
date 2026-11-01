@@ -44,4 +44,16 @@ class VersionedEditorDraftStoreTest {
         assertEquals(StoreWriteResult.Conflict, store.erasePublishedContent(token))
         assertEquals("edited", store.entries["key"]?.draft?.body)
     }
+
+    @Test
+    fun `certain failure with missing owner or draft conflicts without creating entries`() = runTest {
+        val store = VersionedEditorDraftStore()
+        val token = (store.beginAttempt("tester", "key", Draft("body"), 0) as BeginAttemptResult.Started).token
+        val original = store.entries.toMap()
+
+        for (missing in listOf(token.copy(owner = "absent"), token.copy(key = "absent"))) {
+            assertEquals(StoreWriteResult.Conflict, store.finishAttempt(missing, AttemptOutcome.CERTAIN_FAILURE))
+            assertEquals(original, store.entries)
+        }
+    }
 }

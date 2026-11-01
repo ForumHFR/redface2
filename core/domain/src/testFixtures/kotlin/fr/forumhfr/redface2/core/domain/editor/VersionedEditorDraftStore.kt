@@ -135,9 +135,11 @@ open class VersionedEditorDraftStore : EditorDraftStore {
     }
 
     private fun finishOwnedAttempt(token: AttemptToken, outcome: AttemptOutcome): StoreWriteResult {
-        val owned = ownerEntries[token.owner] ?: return StoreWriteResult.Conflict
-        val entry = owned[token.key]
-        if (entry == null || entry.attempt?.token != token || entry.attempt.status == AttemptStatus.PUBLISHED) {
+        val owned = ownerEntries[token.owner]
+        val entry = owned?.get(token.key)
+        if (owned == null || entry == null || entry.attempt?.token != token ||
+            entry.attempt.status == AttemptStatus.PUBLISHED
+        ) {
             return StoreWriteResult.Conflict
         }
         val status = when (outcome) {

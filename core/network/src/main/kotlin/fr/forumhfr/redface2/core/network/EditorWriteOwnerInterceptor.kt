@@ -27,8 +27,11 @@ internal class EditorWriteOwnerInterceptor : Interceptor {
     }
 }
 
-/** Same form-urlencoding and lowercase convention as the account/draft stores; duplicates fail closed. */
-internal fun editorCookieOwner(values: List<String>): String? = values.singleOrNull()?.let { raw ->
-    runCatching { URLDecoder.decode(raw, Charsets.UTF_8.name()) }
-        .getOrDefault(raw.replace('+', ' ')).lowercase().takeIf(String::isNotBlank)
+/** Same form-urlencoding and lowercase convention as the account/draft stores, for every cookie. */
+internal fun editorCookieOwner(values: List<String>): String? {
+    val identities = values.map { raw ->
+        runCatching { URLDecoder.decode(raw, Charsets.UTF_8.name()) }
+            .getOrDefault(raw.replace('+', ' ')).lowercase()
+    }.distinct()
+    return identities.singleOrNull()?.takeIf(String::isNotBlank)
 }

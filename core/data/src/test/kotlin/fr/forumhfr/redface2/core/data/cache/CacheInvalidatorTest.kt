@@ -1,8 +1,8 @@
 package fr.forumhfr.redface2.core.data.cache
 
+import fr.forumhfr.redface2.core.data.editor.RoomEditorDraftStore
 import fr.forumhfr.redface2.core.data.messages.PrivateMessageThreadSessionCache
 import fr.forumhfr.redface2.core.data.messages.PrivateMessageContentCacheMaintenance
-import fr.forumhfr.redface2.core.database.dao.EditorDraftDao
 import fr.forumhfr.redface2.core.database.dao.FlagDao
 import fr.forumhfr.redface2.core.database.dao.MpReadPositionDao
 import fr.forumhfr.redface2.core.database.dao.MpStorageLocationDao
@@ -38,7 +38,7 @@ class CacheInvalidatorTest {
 
         coVerify(exactly = 0) { fixture.flagDao.deleteAllForUser(any()) }
         coVerify(exactly = 0) { fixture.mpReadPositionDao.deleteAllForUser(any()) }
-        coVerify(exactly = 0) { fixture.editorDraftDao.deletePrivateForUser(any()) }
+        coVerify(exactly = 0) { fixture.editorDraftStore.purgePrivateForUser(any()) }
         coVerify(exactly = 0) { fixture.uploadedImageDao.deleteAllForUser(any()) }
         coVerify(exactly = 0) { fixture.mpStorageLocationDao.deleteAllForUser(any()) }
         coVerify(exactly = 0) { fixture.imageCacheMaintenance.clearImageCache() }
@@ -63,7 +63,7 @@ class CacheInvalidatorTest {
                 fixture.imageCacheMaintenance.clearImageCache()
                 fixture.flagDao.deleteAllForUser("alice")
                 fixture.mpReadPositionDao.deleteAllForUser("alice")
-                fixture.editorDraftDao.deletePrivateForUser("alice")
+                fixture.editorDraftStore.purgePrivateForUser("alice")
                 fixture.uploadedImageDao.deleteAllForUser("alice")
                 fixture.mpStorageLocationDao.deleteAllForUser("alice")
                 fixture.privateMessageContentCacheMaintenance.purgeForUser("alice")
@@ -108,7 +108,7 @@ class CacheInvalidatorTest {
         coVerify(exactly = 1) { fixture.imageCacheMaintenance.clearImageCache() }
         coVerify(exactly = 1) { fixture.flagDao.deleteAllForUser("alice") }
         coVerify(exactly = 1) { fixture.mpReadPositionDao.deleteAllForUser("alice") }
-        coVerify(exactly = 1) { fixture.editorDraftDao.deletePrivateForUser("alice") }
+        coVerify(exactly = 1) { fixture.editorDraftStore.purgePrivateForUser("alice") }
         coVerify(exactly = 1) { fixture.uploadedImageDao.deleteAllForUser("alice") }
         coVerify(exactly = 1) { fixture.mpStorageLocationDao.deleteAllForUser("alice") }
         coVerify(exactly = 1) { fixture.privateMessageContentCacheMaintenance.purgeForUser("alice") }
@@ -127,14 +127,14 @@ class CacheInvalidatorTest {
         // HFR is case-insensitive on pseudo display but cookies sometimes mix case.
         coVerify { fixture.flagDao.deleteAllForUser("alice") }
         coVerify { fixture.mpReadPositionDao.deleteAllForUser("alice") }
-        coVerify { fixture.editorDraftDao.deletePrivateForUser("alice") }
+        coVerify { fixture.editorDraftStore.purgePrivateForUser("alice") }
         coVerify { fixture.uploadedImageDao.deleteAllForUser("alice") }
         coVerify { fixture.mpStorageLocationDao.deleteAllForUser("alice") }
         coVerify { fixture.privateMessageContentCacheMaintenance.purgeForUser("alice") }
         coVerify { fixture.imageCacheMaintenance.clearImageCache() }
         coVerify(exactly = 0) { fixture.flagDao.deleteAllForUser("bob") }
         coVerify(exactly = 0) { fixture.mpReadPositionDao.deleteAllForUser("bob") }
-        coVerify(exactly = 0) { fixture.editorDraftDao.deletePrivateForUser("bob") }
+        coVerify(exactly = 0) { fixture.editorDraftStore.purgePrivateForUser("bob") }
         coVerify(exactly = 0) { fixture.uploadedImageDao.deleteAllForUser("bob") }
         coVerify(exactly = 0) { fixture.mpStorageLocationDao.deleteAllForUser("bob") }
         coVerify(exactly = 0) { fixture.privateMessageContentCacheMaintenance.purgeForUser("bob") }
@@ -154,7 +154,7 @@ class CacheInvalidatorTest {
 
         coVerify(exactly = 0) { fixture.flagDao.deleteAllForUser(any()) }
         coVerify(exactly = 0) { fixture.mpReadPositionDao.deleteAllForUser(any()) }
-        coVerify(exactly = 0) { fixture.editorDraftDao.deletePrivateForUser(any()) }
+        coVerify(exactly = 0) { fixture.editorDraftStore.purgePrivateForUser(any()) }
         coVerify(exactly = 0) { fixture.uploadedImageDao.deleteAllForUser(any()) }
         coVerify(exactly = 0) { fixture.mpStorageLocationDao.deleteAllForUser(any()) }
         coVerify(exactly = 0) { fixture.imageCacheMaintenance.clearImageCache() }
@@ -167,7 +167,7 @@ class CacheInvalidatorTest {
         val invalidator: CacheInvalidator,
         val flagDao: FlagDao,
         val mpReadPositionDao: MpReadPositionDao,
-        val editorDraftDao: EditorDraftDao,
+        val editorDraftStore: RoomEditorDraftStore,
         val uploadedImageDao: UploadedImageDao,
         val mpStorageLocationDao: MpStorageLocationDao,
         val threadSessionCache: PrivateMessageThreadSessionCache,
@@ -182,7 +182,7 @@ class CacheInvalidatorTest {
         }
         val flagDao = mockk<FlagDao>(relaxed = true)
         val mpReadPositionDao = mockk<MpReadPositionDao>(relaxed = true)
-        val editorDraftDao = mockk<EditorDraftDao>(relaxed = true)
+        val editorDraftStore = mockk<RoomEditorDraftStore>(relaxed = true)
         val uploadedImageDao = mockk<UploadedImageDao>(relaxed = true)
         val mpStorageLocationDao = mockk<MpStorageLocationDao>(relaxed = true)
         val threadSessionCache = mockk<PrivateMessageThreadSessionCache>(relaxed = true)
@@ -194,7 +194,7 @@ class CacheInvalidatorTest {
             authRepository = authRepository,
             flagDao = flagDao,
             mpReadPositionDao = mpReadPositionDao,
-            editorDraftDao = editorDraftDao,
+            editorDraftStore = editorDraftStore,
             uploadedImageDao = uploadedImageDao,
             mpStorageLocationDao = mpStorageLocationDao,
             flagRepository = flagRepository,
@@ -207,7 +207,7 @@ class CacheInvalidatorTest {
             invalidator,
             flagDao,
             mpReadPositionDao,
-            editorDraftDao,
+            editorDraftStore,
             uploadedImageDao,
             mpStorageLocationDao,
             threadSessionCache,

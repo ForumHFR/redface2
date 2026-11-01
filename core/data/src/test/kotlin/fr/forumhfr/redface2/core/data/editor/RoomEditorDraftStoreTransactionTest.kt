@@ -163,7 +163,7 @@ class RoomEditorDraftStoreTransactionTest {
                 store.finishAttempt(token, AttemptOutcome.valueOf(status.name))
             }
             auth.value = AuthState.Authenticated("bob")
-            database.editorDraftDao().deletePrivateForUser("alice")
+            store.purgePrivateForUser("alice")
             assertNull(store.loadEntry("alice", contextKey))
             auth.value = AuthState.Authenticated("alice")
             var submitError: String? = null

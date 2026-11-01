@@ -15,6 +15,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -221,18 +222,24 @@ class EditorSubmissionBinding<E, F>(
     } catch (cancelled: CancellationException) {
         throw cancelled
     } catch (error: EditorPreparationException) {
-        EditorDelivery(error = when (error.reason) {
+        failedDelivery(error, when (error.reason) {
             EditorPreparationException.Reason.NETWORK -> errors.network
             EditorPreparationException.Reason.SESSION_EXPIRED -> errors.sessionExpired
         })
-    } catch (_: EditorAccountChangedBeforeSendException) {
-        EditorDelivery(error = errors.sessionExpired)
-    } catch (_: SessionExpiredException) {
-        EditorDelivery(error = errors.sessionExpiredAfterEntry)
-    } catch (_: IOException) {
-        EditorDelivery(error = errors.uncertain)
-    } catch (_: IllegalStateException) {
-        EditorDelivery(error = errors.unknown)
+    } catch (error: SessionExpiredException) {
+        failedDelivery(error, errors.sessionExpiredAfterEntry)
+    } catch (error: IOException) {
+        failedDelivery(error, errors.uncertain)
+    } catch (error: IllegalStateException) {
+        failedDelivery(error, errors.unknown)
+    }
+
+    private suspend fun failedDelivery(error: Exception, fallback: F): EditorDelivery<E, F> {
+        // RealCall's callTimeout can replace the guard exception with an InterruptedIOException,
+        // even without retaining its cause. The transport witness still proves non-emission.
+        val rejected = currentCoroutineContext()[EditorWriteOwner]?.rejectedBeforeEmission == true ||
+            generateSequence<Throwable>(error) { it.cause }.any { it is EditorAccountChangedBeforeSendException }
+        return EditorDelivery(error = if (rejected) errors.sessionExpired else fallback)
     }
 
     private fun ports(

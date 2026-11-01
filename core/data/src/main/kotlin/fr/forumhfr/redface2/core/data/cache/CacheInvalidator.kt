@@ -1,9 +1,9 @@
 package fr.forumhfr.redface2.core.data.cache
 
 import android.util.Log
+import fr.forumhfr.redface2.core.data.editor.RoomEditorDraftStore
 import fr.forumhfr.redface2.core.data.messages.PrivateMessageThreadSessionCache
 import fr.forumhfr.redface2.core.data.messages.PrivateMessageContentCacheMaintenance
-import fr.forumhfr.redface2.core.database.dao.EditorDraftDao
 import fr.forumhfr.redface2.core.database.dao.FlagDao
 import fr.forumhfr.redface2.core.database.dao.MpReadPositionDao
 import fr.forumhfr.redface2.core.database.dao.MpStorageLocationDao
@@ -91,7 +91,7 @@ class CacheInvalidator @Inject internal constructor(
     private val authRepository: AuthRepository,
     private val flagDao: FlagDao,
     private val mpReadPositionDao: MpReadPositionDao,
-    private val editorDraftDao: EditorDraftDao,
+    private val editorDraftStore: RoomEditorDraftStore,
     private val uploadedImageDao: UploadedImageDao,
     private val mpStorageLocationDao: MpStorageLocationDao,
     private val flagRepository: FlagRepository,
@@ -134,8 +134,8 @@ class CacheInvalidator @Inject internal constructor(
                         .onFailure { Log.w(LOG_TAG, "Failed to purge flag cache for $previousPseudo", it) }
                     runCatching { mpReadPositionDao.deleteAllForUser(previousPseudo) }
                         .onFailure { Log.w(LOG_TAG, "Failed to purge MP positions for $previousPseudo", it) }
-                    runCatching { editorDraftDao.deletePrivateForUser(previousPseudo) }
-                        .onFailure { Log.w(LOG_TAG, "Failed to purge MP drafts for $previousPseudo", it) }
+                    runCatching { editorDraftStore.purgePrivateForUser(previousPseudo) }
+                        .onFailure { Log.w(LOG_TAG, "Failed to purge MP drafts") }
                     runCatching { uploadedImageDao.deleteAllForUser(previousPseudo) }
                         .onFailure { Log.w(LOG_TAG, "Failed to purge uploaded images for $previousPseudo", it) }
                     runCatching { mpStorageLocationDao.deleteAllForUser(previousPseudo) }
