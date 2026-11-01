@@ -91,9 +91,27 @@ interface EditorDraftDao {
     )
     suspend fun erasePublishedContent(draftKey: String, attemptId: String, version: Long): Int
 
-    /** Logout / account-switch purge of MP drafts owned by [ownerId] (CacheInvalidator). */
-    @Query("DELETE FROM editor_drafts WHERE ownerId = :ownerId AND isPrivate = 1")
-    suspend fun deletePrivateForUser(ownerId: String)
+    /**
+     * Logout/account switch: erase every private content field for this owner. Keep only durable
+     * attempt metadata (including PUBLISHED), never readable as another account's draft (#1080).
+     * Ordinary private drafts are deleted; retention remains responsible for the surviving markers.
+     */
+    @Transaction
+    suspend fun deletePrivateForUser(ownerId: String) {
+        deletePrivateWithoutAttempt(ownerId)
+        erasePrivateAttemptContent(ownerId)
+    }
+
+    @Query("DELETE FROM editor_drafts WHERE ownerId = :ownerId AND isPrivate = 1 AND attemptState IS NULL")
+    suspend fun deletePrivateWithoutAttempt(ownerId: String)
+
+    @Query(
+        """
+        UPDATE editor_drafts SET body = '', subject = NULL, recipients = NULL
+        WHERE ownerId = :ownerId AND isPrivate = 1 AND attemptState IN ('IN_PROGRESS', 'UNCERTAIN', 'PUBLISHED')
+        """,
+    )
+    suspend fun erasePrivateAttemptContent(ownerId: String)
 
     /** Retention purge run on app start: drops drafts last touched before [cutoffMillis]. */
     @Query("DELETE FROM editor_drafts WHERE updatedAt < :cutoffMillis")

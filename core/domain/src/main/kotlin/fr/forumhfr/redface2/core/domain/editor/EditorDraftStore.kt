@@ -15,8 +15,9 @@ import java.security.MessageDigest
  *
  * [load]/[save]/[delete] take a stable, content-free context [key] built by [EditorDraftKey]; it
  * never embeds message bodies, subjects or recipients. MP drafts ([Draft.isPrivate] == true) are
- * wiped on logout/account switch (CacheInvalidator); all drafts older than the retention TTL are
- * pruned on app start. No draft content is ever logged or surfaced in diagnostics.
+ * stripped of content on logout/account switch (CacheInvalidator), retaining only durable attempts;
+ * all drafts older than the retention TTL are pruned on app start. No draft content is ever logged
+ * or surfaced in diagnostics.
  */
 interface EditorDraftStore {
 
@@ -59,7 +60,10 @@ interface EditorDraftStore {
     /** ED-170: atomically store the complete snapshot and IN_PROGRESS before issuing any POST. */
     suspend fun beginAttempt(owner: String?, key: String, snapshot: Draft, expectedVersion: Long): BeginAttemptResult
 
-    /** ED-170: compare identity/version; certain failure clears the attempt, never the content. */
+    /**
+     * ED-170: compare identity/version; certain failure clears only the attempt, even after an account
+     * switch. This metadata-only resolution never exposes the old owner's content to the new account.
+     */
     suspend fun finishAttempt(token: AttemptToken, outcome: AttemptOutcome): StoreWriteResult
 
     /** ED-161: erase only a matching published attempt's content, preserving the durable marker. */

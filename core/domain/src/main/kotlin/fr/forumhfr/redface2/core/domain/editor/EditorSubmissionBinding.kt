@@ -13,11 +13,13 @@ import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class EditorSubmissionEnvironment(
     val scope: CoroutineScope,
@@ -223,6 +225,8 @@ class EditorSubmissionBinding<E, F>(
             EditorPreparationException.Reason.NETWORK -> errors.network
             EditorPreparationException.Reason.SESSION_EXPIRED -> errors.sessionExpired
         })
+    } catch (_: EditorAccountChangedBeforeSendException) {
+        EditorDelivery(error = errors.sessionExpired)
     } catch (_: SessionExpiredException) {
         EditorDelivery(error = errors.sessionExpiredAfterEntry)
     } catch (_: IOException) {
@@ -251,7 +255,8 @@ class EditorSubmissionBinding<E, F>(
                     accountChanged()
                     return EditorSendOutcome.CERTAIN_FAILURE
                 }
-                return send().also { trace.result(EditorSubmissionTrace.Result.valueOf(it.name)) }
+                return sendOwned(attempt, trace, send)
+                    .also { trace.result(EditorSubmissionTrace.Result.valueOf(it.name)) }
             }
             override suspend fun stopDraftWrites() {
                 // ED-161: lock success before the first suspension of the marker path.
@@ -260,7 +265,11 @@ class EditorSubmissionBinding<E, F>(
             }
             override suspend fun finishAttempt(attempt: AttemptToken, outcome: AttemptOutcome): StoreWriteResult {
                 if (controller.session == opening) publish()
-                return drafts.finish(attempt, outcome)
+                return if (outcome == AttemptOutcome.CERTAIN_FAILURE) {
+                    withContext(NonCancellable) { drafts.finish(attempt, outcome) }
+                } else {
+                    drafts.finish(attempt, outcome)
+                }
             }
             override suspend fun erasePublishedContent(attempt: AttemptToken) = drafts.erase(attempt)
             override fun recordFailure(stage: EditorSubmissionFailure, result: StoreWriteResult) {
@@ -272,6 +281,25 @@ class EditorSubmissionBinding<E, F>(
                     callbacks.error(errors.draftWriteFailed)
                 }
             }
+        }
+    }
+
+    private suspend fun sendOwned(
+        attempt: AttemptToken,
+        trace: EditorSubmissionTrace,
+        send: suspend () -> EditorSendOutcome,
+    ): EditorSendOutcome {
+        val owner = EditorWriteOwner(attempt.owner)
+        return try {
+            withContext(owner) { send() }
+        } catch (cancelled: CancellationException) {
+            // The guard ran without emitting HTTP bytes, but accountChanged may have cancelled the
+            // continuation first. Resolve this known refusal without reviving the invalidated UI.
+            if (owner.rejectedBeforeEmission) {
+                val result = withContext(NonCancellable) { drafts.finish(attempt, AttemptOutcome.CERTAIN_FAILURE) }
+                if (result !is StoreWriteResult.Written) trace.storageFailure(EditorSubmissionFailure.OUTCOME, result)
+            }
+            throw cancelled
         }
     }
 

@@ -53,6 +53,7 @@ abstract class EditorSubmissionRecoveryContract {
             adapter.completePost()
             runCurrent()
             adapter.editBody("edited after uncertainty")
+            assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
             adapter.close()
             runCurrent()
             assertEquals("edited after uncertainty", scenario.store.entries.values.single().draft.body)
@@ -92,6 +93,21 @@ abstract class EditorSubmissionRecoveryContract {
         runCurrent()
         assertEquals(0, adapter.postCalls)
         assertEquals(0, adapter.successEffects)
+    }
+
+    @Test
+    fun rejectedAccountAtTransportIsCertainAndResolvesTheAttempt() {
+        val scenario = EditorSubmissionScenario().apply { postFailure = EditorAccountChangedBeforeSendException() }
+        withReadyAdapter(scenario = scenario) { adapter ->
+            startSending(adapter)
+            adapter.completePost()
+            runCurrent()
+            assertFalse(adapter.snapshot().isSending)
+            assertTrue(adapter.snapshot().canSubmit)
+            assertTrue(adapter.snapshot().error != SubmissionErrorProbe.UNCERTAIN)
+            assertTrue(scenario.store.entries.values.single().attempt == null)
+            assertEquals(0, adapter.successEffects)
+        }
     }
 
     @Test

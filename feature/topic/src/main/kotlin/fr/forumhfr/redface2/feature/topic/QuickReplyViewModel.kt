@@ -423,7 +423,11 @@ class QuickReplyViewModel @AssistedInject constructor(
     fun onTextChanged(value: TextFieldValue) {
         if (submission.blocksMutation) return
         submission.disarm()
-        _state.update { it.copy(text = value, submitError = null) }
+        _state.update {
+            it.copy(
+                text = value, submitError = it.submitError.takeIf { error -> error == QuickReplySubmitError.Uncertain },
+            )
+        }
         scheduleAutosave()
     }
 

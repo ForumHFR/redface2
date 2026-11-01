@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.topic
 
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
@@ -327,7 +328,11 @@ class QuickReplyViewModelTest {
         viewModel.onSubmitClicked()
         runCurrent()
         val attempt = store.entries.values.single().attempt?.token
+        assertEquals(QuickReplySubmitError.Uncertain, viewModel.state.value.submitError)
+        viewModel.onTextChanged(viewModel.state.value.text.copy(selection = TextRange(0)))
+        assertEquals(QuickReplySubmitError.Uncertain, viewModel.state.value.submitError)
         viewModel.onTextChanged(TextFieldValue("edited uncertainty"))
+        assertEquals(QuickReplySubmitError.Uncertain, viewModel.state.value.submitError)
         viewModel.effects.test {
             viewModel.onEscalateRequested()
             assertEquals(QuickReplyEffect.EscalateToFullEditor(emptyList()), awaitItem())

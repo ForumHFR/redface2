@@ -10,6 +10,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
 import okhttp3.Call
 import okhttp3.Connection
+import okhttp3.Cookie
 import okhttp3.CookieJar
 import okhttp3.Dns
 import okhttp3.EventListener
@@ -73,7 +74,12 @@ class HfrClientWriteReplayTest(private val path: WritePath) {
             .callTimeout(5, TimeUnit.SECONDS)
             .build()
         // La même configuration que l'injection réelle, pas de verrou ajouté par le test.
-        mutation = NetworkModule.provideMutationClient(base, CookieJar.NO_COOKIES)
+        val cookies = object : CookieJar {
+            override fun loadForRequest(url: HttpUrl): List<Cookie> =
+                listOf(Cookie.Builder().name("md_user").value("tester").domain(url.host).build())
+            override fun saveFromResponse(url: HttpUrl, cookies: List<Cookie>) = Unit
+        }
+        mutation = NetworkModule.provideMutationClient(base, cookies)
         client = hfrClient(mutation)
     }
 

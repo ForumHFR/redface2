@@ -12,7 +12,8 @@ import androidx.room.PrimaryKey
  *
  * Privacy: [ownerId] (HFR pseudo, lowercase) lets the logout/account-switch purge wipe a single
  * account's drafts exactly (CacheInvalidator), without a LIKE-prefix scan. [isPrivate] rows are
- * MP drafts — wiped on the same transition (an MP draft reveals a recipient + message). Public
+ * MP drafts — their content is wiped on the same transition (an MP draft reveals a recipient +
+ * message); only durable attempt metadata survives, still bound to its owner. Public
  * post drafts survive logout but are bounded by the 30-day retention purge run on app start.
  * Stored content is never logged or sent to diagnostics (#405).
  */

@@ -131,7 +131,7 @@ class RoomEditorDraftStore @Inject constructor(
     }
 
     override suspend fun finishAttempt(token: AttemptToken, outcome: AttemptOutcome): StoreWriteResult =
-        write(token.owner) {
+        write(token.owner, requireActiveOwner = outcome != AttemptOutcome.CERTAIN_FAILURE) {
             val status = when (outcome) {
                 AttemptOutcome.CERTAIN_FAILURE -> null
                 AttemptOutcome.PUBLISHED -> AttemptStatus.PUBLISHED.name
@@ -146,10 +146,18 @@ class RoomEditorDraftStore @Inject constructor(
             .result(token.version)
     }
 
-    private suspend fun write(owner: String?, operation: suspend () -> StoreWriteResult): StoreWriteResult =
+    private suspend fun write(
+        owner: String?,
+        requireActiveOwner: Boolean = true,
+        operation: suspend () -> StoreWriteResult,
+    ): StoreWriteResult =
         withContext(ioDispatcher) {
             try {
-                if (owner == null || owner != activeOwnerId()) StoreWriteResult.OwnerChanged else operation()
+                if (owner == null || (requireActiveOwner && owner != activeOwnerId())) {
+                    StoreWriteResult.OwnerChanged
+                } else {
+                    operation()
+                }
             } catch (error: SQLiteException) {
                 StoreWriteResult.Failed(IOException("Editor draft write failed", error))
             } catch (error: IOException) {

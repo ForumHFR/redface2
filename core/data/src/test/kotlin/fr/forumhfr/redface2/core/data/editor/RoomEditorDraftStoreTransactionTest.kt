@@ -5,6 +5,14 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import fr.forumhfr.redface2.core.database.RedfaceDatabase
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionBinding
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionCallbacks
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionEnvironment
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionErrors
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptOutcome
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptStatus
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptToken
@@ -132,6 +140,52 @@ class RoomEditorDraftStoreTransactionTest {
         assertNull(store.loadEntry("alice", key))
         auth.value = AuthState.Authenticated("alice")
         assertEquals(AttemptStatus.IN_PROGRESS, store.loadEntry("alice", key)?.attempt?.status)
+    }
+
+    @Test
+    fun `certain non-emission can clear an inactive owner's attempt without exposing content`() = runTest {
+        val token = begin()
+        auth.value = AuthState.Authenticated("bob")
+        assertEquals(StoreWriteResult.Written(1), store.finishAttempt(token, AttemptOutcome.CERTAIN_FAILURE))
+        assertNull(store.loadEntry("alice", key))
+        assertEquals(StoreWriteResult.Conflict, store.finishAttempt(token, AttemptOutcome.CERTAIN_FAILURE))
+        auth.value = AuthState.Authenticated("alice")
+        assertNull(store.loadEntry("alice", key)?.attempt)
+        assertEquals("body", store.loadEntry("alice", key)?.draft?.body)
+    }
+
+    @Test
+    fun `private purge restores only empty uncertainty and never published content`() = runTest {
+        for (status in AttemptStatus.entries) {
+            val contextKey = "mpreply:${status.name}"
+            val token = (store.beginAttempt("alice", contextKey, snapshot, 0) as BeginAttemptResult.Started).token
+            if (status != AttemptStatus.IN_PROGRESS) {
+                store.finishAttempt(token, AttemptOutcome.valueOf(status.name))
+            }
+            auth.value = AuthState.Authenticated("bob")
+            database.editorDraftDao().deletePrivateForUser("alice")
+            assertNull(store.loadEntry("alice", contextKey))
+            auth.value = AuthState.Authenticated("alice")
+            var submitError: String? = null
+            val binding = EditorSubmissionBinding<Unit, String>(
+                EditorSubmissionEnvironment(this, DiagnosticsClock { 0L }, DiagnosticsLog()),
+                EditorDraftSession(store, contextKey),
+                EditorSubmissionCallbacks(state = {}, error = { submitError = it }, success = {}),
+                EditorSubmissionErrors("uncertain", "draft", "session", "unknown"),
+            )
+            val restored = binding.restore(contextKey)
+            if (status == AttemptStatus.PUBLISHED) {
+                assertNull(restored)
+                assertNull(store.load("alice", contextKey))
+                assertNull(submitError)
+            } else {
+                assertEquals(EditorSubmissionState.Uncertain(token), binding.state)
+                assertEquals("uncertain", submitError)
+                assertEquals(
+                    snapshot.copy(body = "", subject = null, recipients = null, updatedAt = 1234), restored?.draft,
+                )
+            }
+        }
     }
 
     @Test
