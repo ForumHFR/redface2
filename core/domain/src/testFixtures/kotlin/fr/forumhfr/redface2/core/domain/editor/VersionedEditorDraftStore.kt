@@ -70,8 +70,7 @@ open class VersionedEditorDraftStore : EditorDraftStore {
         val result = when {
             saveFailure != null -> StoreWriteResult.Failed(checkNotNull(saveFailure))
             token.owner != activeOwner -> StoreWriteResult.OwnerChanged
-            entry == null || entry.version != expectedVersion || entry.attempt?.token != token ||
-                entry.attempt.status == AttemptStatus.PUBLISHED -> StoreWriteResult.Conflict
+            entry?.version != expectedVersion || !entry.hasUnresolvedAttempt(token) -> StoreWriteResult.Conflict
             else -> {
                 entries[token.key] = DraftEntry(draft, expectedVersion + 1, Attempt(token, AttemptStatus.UNCERTAIN))
                 saveCount++
@@ -137,9 +136,7 @@ open class VersionedEditorDraftStore : EditorDraftStore {
     private fun finishOwnedAttempt(token: AttemptToken, outcome: AttemptOutcome): StoreWriteResult {
         val owned = ownerEntries[token.owner]
         val entry = owned?.get(token.key)
-        if (owned == null || entry == null || entry.attempt?.token != token ||
-            entry.attempt.status == AttemptStatus.PUBLISHED
-        ) {
+        if (owned == null || entry == null || !entry.hasUnresolvedAttempt(token)) {
             return StoreWriteResult.Conflict
         }
         val status = when (outcome) {
@@ -151,6 +148,9 @@ open class VersionedEditorDraftStore : EditorDraftStore {
         writes++
         return StoreWriteResult.Written(entry.version)
     }
+
+    private fun DraftEntry?.hasUnresolvedAttempt(token: AttemptToken): Boolean =
+        this?.attempt?.let { it.token == token && it.status != AttemptStatus.PUBLISHED } == true
 
     override suspend fun erasePublishedContent(token: AttemptToken): StoreWriteResult {
         cleanupGate?.await()

@@ -41,6 +41,7 @@ class RoomEditorDraftStore @Inject constructor(
     // Lock order: EditorDraftSession -> contentWrites -> Room. Purge takes only contentWrites;
     // nothing under this lock calls a session or performs a network request.
     private val contentWrites = Mutex()
+    @Volatile private var purgeGeneration = 0L
 
     override suspend fun currentOwner(): String? = withContext(ioDispatcher) { activeOwnerId() }
 
@@ -61,16 +62,17 @@ class RoomEditorDraftStore @Inject constructor(
     }
 
     override suspend fun save(owner: String?, key: String, draft: Draft) {
-        withContext(ioDispatcher) {
-            ownedWrite(owner, Unit) {
-                editorDraftDao.saveLegacy(draft.toEntity(checkNotNull(owner), key))
-            }
+        ownedWrite(owner, Unit) {
+            editorDraftDao.saveLegacy(draft.toEntity(checkNotNull(owner), key))
         }
     }
 
     /** Account-switch cleanup shares the writers' exclusion, including absent-row inserts. */
     suspend fun purgePrivateForUser(owner: String) = withContext(ioDispatcher) {
-        contentWrites.withLock { editorDraftDao.deletePrivateForUser(owner) }
+        contentWrites.withLock {
+            purgeGeneration++
+            editorDraftDao.deletePrivateForUser(owner)
+        }
     }
 
     override suspend fun delete(owner: String?, key: String) {
@@ -161,29 +163,29 @@ class RoomEditorDraftStore @Inject constructor(
         owner: String?,
         requireActiveOwner: Boolean = true,
         operation: suspend () -> StoreWriteResult,
-    ): StoreWriteResult =
-        withContext(ioDispatcher) {
-            try {
-                ownedWrite(owner, StoreWriteResult.OwnerChanged, requireActiveOwner, operation)
-            } catch (error: SQLiteException) {
-                StoreWriteResult.Failed(IOException("Editor draft write failed", error))
-            } catch (error: IOException) {
-                StoreWriteResult.Failed(error)
-            }
-        }
+    ): StoreWriteResult = try {
+        ownedWrite(owner, StoreWriteResult.OwnerChanged, requireActiveOwner, operation)
+    } catch (error: SQLiteException) {
+        StoreWriteResult.Failed(IOException("Editor draft write failed", error))
+    } catch (error: IOException) {
+        StoreWriteResult.Failed(error)
+    }
 
     private suspend fun <T> ownedWrite(
         owner: String?,
         rejected: T,
         requireActiveOwner: Boolean = true,
         operation: suspend () -> T,
-    ): T = if (owner == null || (requireActiveOwner && owner != activeOwnerId())) {
-        rejected
-    } else {
-        contentWrites.withLock {
-            // Authorization before waiting is insufficient: a purge may have completed meanwhile.
-            // Re-read AuthState inside the same exclusion as the complete DAO transaction.
-            if (requireActiveOwner && owner != activeOwnerId()) rejected else operation()
+    ): T {
+        // Capture before dispatch or the first owner read: A may leave and reconnect while either waits.
+        val authorizedGeneration = purgeGeneration
+        return withContext(ioDispatcher) {
+            if (owner == null || (requireActiveOwner && owner != activeOwnerId())) return@withContext rejected
+            contentWrites.withLock {
+                val ownerMatches = !requireActiveOwner || owner == activeOwnerId()
+                // A matching pseudo alone cannot authorize content captured before a purge.
+                if (authorizedGeneration != purgeGeneration || !ownerMatches) rejected else operation()
+            }
         }
     }
 

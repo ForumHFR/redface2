@@ -24,6 +24,7 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.test.runCurrent
@@ -80,6 +81,16 @@ class RoomEditorDraftPrivacyTest {
 
     @Test
     fun `stale unresolved autosave cannot refill private fields after purge`() = runTest {
+        assertStaleAutosaveRejected(reconnectBeforeResume = false)
+    }
+
+    /** Regression for f1a753e2: reconnecting the same pseudo must not revive a pre-purge autosave. */
+    @Test
+    fun `stale unresolved autosave is rejected even after the original account reconnects`() = runTest {
+        assertStaleAutosaveRejected(reconnectBeforeResume = true)
+    }
+
+    private suspend fun assertStaleAutosaveRejected(reconnectBeforeResume: Boolean) = coroutineScope {
         val token = (store.beginAttempt("alice", key, snapshot, 0) as BeginAttemptResult.Started).token
         store.finishAttempt(token, AttemptOutcome.UNCERTAIN)
         val session = EditorDraftSession(store, key)
@@ -90,8 +101,10 @@ class RoomEditorDraftPrivacyTest {
 
         try {
             auth.value = AuthState.Authenticated("Bob")
+            session.invalidate()
             store.purgePrivateForUser("alice")
             assertEmptyMarker(token)
+            if (reconnectBeforeResume) auth.value = AuthState.Authenticated("Alice")
         } finally {
             gate.resume.complete(Unit)
         }
@@ -99,7 +112,12 @@ class RoomEditorDraftPrivacyTest {
         assertEquals(StoreWriteResult.OwnerChanged, write.await())
         assertEmptyMarker(token)
         auth.value = AuthState.Authenticated("Alice")
-        assertEquals("", session.load()?.draft?.body)
+        val restored = checkNotNull(EditorDraftSession(store, key).load())
+        assertEquals("", restored.draft.body)
+        assertNull(restored.draft.subject)
+        assertNull(restored.draft.recipients)
+        assertEquals(token, restored.attempt?.token)
+        assertEquals(AttemptStatus.UNCERTAIN, restored.attempt?.status)
     }
 
     @Test
