@@ -1,6 +1,8 @@
 package fr.forumhfr.redface2.feature.messages
 
 import androidx.compose.ui.text.input.TextFieldValue
+import fr.forumhfr.redface2.core.domain.editor.ArmToken
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.ui.editor.UploadError
@@ -35,13 +37,14 @@ data class PrivateMessageComposeUiState(
     val smileyDisabled: Boolean = false,
     val emailNotificationEnabled: Boolean = false,
     val optionsHydratedFromForm: Boolean = false,
+    val submission: EditorSubmissionState = EditorSubmissionState.Ready,
     val isSubmitting: Boolean = false,
     val submitError: PrivateMessageReplyError? = null,
     val showSubmitConfirmation: Boolean = false,
     /**
      * #405 — body of a previously-cached new-conversation draft, surfaced on init when a non-empty
      * draft was found. [restorableSubject] / [restorableRecipients] carry the cached routing fields.
-     * « Restaurer » pre-fills the composer ; « Ignorer » deletes the cached row. Never silently lost.
+     * « Restaurer » pre-fills the composer ; « Ignorer » clears the cached content. Never silently lost.
      */
     val restorableDraft: String? = null,
     val restorableSubject: String? = null,
@@ -59,8 +62,10 @@ data class PrivateMessageComposeUiState(
     val imagePickerMode: ImagePickerMode = ImagePickerMode.DEFAULT,
 ) {
     /** All three user-typed fields are required — HFR's « remplir tous les champs » rule. */
+    val armToken: ArmToken? get() = (submission as? EditorSubmissionState.Armed)?.token
+
     val canSubmit: Boolean
-        get() = formAvailable && !isLoadingForm && !isSubmitting &&
+        get() = formAvailable && !isLoadingForm && !isSubmitting && !isUploading && !submission.blocksBodyMutation &&
             recipients.isNotBlank() && subject.isNotBlank() && draft.text.isNotBlank()
 
     companion object {

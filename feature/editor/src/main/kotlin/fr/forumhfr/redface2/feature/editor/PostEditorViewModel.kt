@@ -13,14 +13,17 @@ import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
-import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
-import fr.forumhfr.redface2.core.domain.editor.SubmissionRequest
 import fr.forumhfr.redface2.core.domain.diagnostics.SmileyPickerCloseCause
 import fr.forumhfr.redface2.core.domain.diagnostics.recordImagePickerEvent
 import fr.forumhfr.redface2.core.domain.diagnostics.recordImagesPicked
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorPreparationException
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionErrors
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
+import fr.forumhfr.redface2.core.domain.editor.SubmissionRequest
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.HfrFavoriteSmileyRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollections
@@ -30,8 +33,8 @@ import fr.forumhfr.redface2.core.domain.upload.UploadException
 import fr.forumhfr.redface2.core.domain.upload.UploadFailureDiagnostics
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.write.EditPostRepository
-import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.QuotedNumreponses
+import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.PostContent
@@ -197,6 +200,11 @@ class PostEditorViewModel @AssistedInject constructor(
     private val submission = EditorSubmissionBinding(
         environment = EditorSubmissionEnvironment(viewModelScope, clock, diagnostics),
         drafts = EditorDraftSession(draftStore, draftKey),
+        errors = EditorSubmissionErrors(
+            uncertain = SubmitError.Uncertain, draftWriteFailed = SubmitError.DraftWriteFailed,
+            sessionExpired = SubmitError.SessionExpired, unknown = SubmitError.Hfr(ReplyFailureReason.Unknown),
+            network = SubmitError.Network, sessionExpiredAfterEntry = SubmitError.Uncertain,
+        ),
         callbacks = EditorSubmissionCallbacks<PostEditorEffect>(
             state = { value ->
                 _state.update {
@@ -1094,9 +1102,9 @@ class PostEditorViewModel @AssistedInject constructor(
                 truncate = quotes.any { it.truncate },
             )
         } catch (_: SessionExpiredException) {
-            throw EditorPreparationException(SubmitError.SessionExpired)
+            throw EditorPreparationException(EditorPreparationException.Reason.SESSION_EXPIRED)
         } catch (_: IOException) {
-            throw EditorPreparationException(SubmitError.Network)
+            throw EditorPreparationException(EditorPreparationException.Reason.NETWORK)
         }
         val body = snapshot.draft.text
         return replyRepository.submitReply(
@@ -1171,10 +1179,5 @@ class PostEditorViewModel @AssistedInject constructor(
         private const val LOG_TAG_VM = "PostEditorVM"
         private const val DRAFT_RESTORE_OFFER_FINGERPRINT_KEY = "draft_restore_offer_fingerprint"
         private const val SHARED_DRAFT_RESUMED_KEY = "shared_draft_resumed"
-
-        // #405 — idle window after the last edit before the draft is persisted. Long enough to
-        // coalesce a burst of keystrokes into a single Room write, short enough that an accidental
-        // navigation / process death right after typing still keeps the content.
-        private const val AUTOSAVE_DEBOUNCE_MS = 750L
     }
 }

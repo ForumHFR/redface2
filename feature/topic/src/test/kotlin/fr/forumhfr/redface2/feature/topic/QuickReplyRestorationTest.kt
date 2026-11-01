@@ -6,6 +6,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -15,8 +17,11 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
-import fr.forumhfr.redface2.core.domain.editor.LegacyEditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorSessionResources
+import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
@@ -55,7 +60,7 @@ import org.robolectric.annotation.GraphicsMode
  * The host below is the [QuickReplySheet] mount contract reduced to its moving parts (the real
  * sheet resolves its ViewModel through `hiltViewModel`, unavailable in a JVM test): the
  * [rememberQuickReplyLaunch] production state + the sheet analog whose `LaunchedEffect(viewModel)`
- * calls `onSheetOpened` then collects the effects — the exact collector lifecycle of
+ * calls `onSheetAttached` then collects the effects — the exact collector lifecycle of
  * QuickReplySheet.kt. [StateRestorationTester.emulateSavedInstanceStateRestore] plays the
  * recreation: composition destroyed and rebuilt from saved state, while the test-held ViewModel
  * survives like its nav-entry-scoped production counterpart.
@@ -87,8 +92,12 @@ class QuickReplyRestorationTest {
                     // the mount, plus the effect collector keyed on the VM ALONE (pinned contract,
                     // QuickReplySheet.kt), torn down with the composition like the real sheet.
                     Box(modifier = Modifier.testTag(SHEET_TAG))
+                    var openingDelivered by rememberSaveable { mutableStateOf(false) }
                     LaunchedEffect(viewModel) {
-                        viewModel.onSheetOpened(currentPage = launch.request.page, initialQuotes = launch.initialQuotes)
+                        viewModel.onSheetAttached(
+                            launch.request.page, launch.initialQuotes, restored = openingDelivered,
+                        )
+                        openingDelivered = true
                         viewModel.effects.collect { effect ->
                             when (effect) {
                                 is QuickReplyEffect.SubmitSucceeded -> {
@@ -223,8 +232,10 @@ class QuickReplyRestorationTest {
             savedStateHandle = savedStateHandle,
             replyRepository = repository,
             quoteMaterializer = TopicReplyQuoteMaterializer(repository),
-            draftStore = draftStore,
-            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = quoteCardsEnabled),
+            sessionResources = EditorSessionResources(
+                draftStore, FakeUserPreferencesRepository(quoteCardsEnabled = quoteCardsEnabled),
+                quickReplyAuthRepository(), DiagnosticsClock(System::nanoTime), DiagnosticsLog(),
+            ),
         )
 
     private companion object {
@@ -285,19 +296,4 @@ private class CountingQuoteRepository : ReplyRepository {
     ): ReplySubmitResult = error("submitReply not used by restoration test")
 }
 
-private class InMemoryDraftStore : LegacyEditorDraftStore() {
-    private var storedBody: String? = null
-
-    override suspend fun currentOwner(): String? = "xaat"
-
-    override suspend fun load(owner: String?, key: String): EditorDraftStore.Draft? =
-        storedBody?.let { EditorDraftStore.Draft(body = it) }
-
-    override suspend fun save(owner: String?, key: String, draft: EditorDraftStore.Draft) {
-        storedBody = draft.body
-    }
-
-    override suspend fun delete(owner: String?, key: String) {
-        storedBody = null
-    }
-}
+private class InMemoryDraftStore : VersionedEditorDraftStore()

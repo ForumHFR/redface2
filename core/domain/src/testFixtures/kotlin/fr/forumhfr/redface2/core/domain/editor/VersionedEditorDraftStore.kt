@@ -13,7 +13,9 @@ import kotlinx.coroutines.CompletableDeferred
 
 /** ED-170: in-memory CAS fake, with observable durable boundaries; no feature or Room dependency. */
 open class VersionedEditorDraftStore : EditorDraftStore {
-    val entries = mutableMapOf<String, DraftEntry>()
+    var activeOwner: String? = "tester"
+    private val ownerEntries = mutableMapOf<String?, MutableMap<String, DraftEntry>>()
+    val entries: MutableMap<String, DraftEntry> get() = ownerEntries.getOrPut(activeOwner) { mutableMapOf() }
     val saved: Map<String, Draft> get() = entries.mapValues { it.value.draft }
     val deletedKeys = mutableListOf<String>()
     var saveCount = 0
@@ -31,12 +33,12 @@ open class VersionedEditorDraftStore : EditorDraftStore {
     private var sequence = 0
 
     fun preload(key: String, draft: Draft) { entries[key] = DraftEntry(draft, 0) }
-    override suspend fun currentOwner(): String = "tester"
+    override suspend fun currentOwner(): String? = activeOwner
     override suspend fun load(owner: String?, key: String): Draft? =
         loadEntry(owner, key)?.takeUnless { it.attempt?.status == AttemptStatus.PUBLISHED }?.draft
     override suspend fun loadEntry(owner: String?, key: String): DraftEntry? {
         loadGate?.await()
-        return entries[key]
+        return entries[key].takeIf { owner != null && owner == activeOwner }
     }
     override suspend fun save(owner: String?, key: String, draft: Draft) {
         saveIfVersion(owner, key, draft, entries[key]?.version ?: 0)
@@ -58,7 +60,7 @@ open class VersionedEditorDraftStore : EditorDraftStore {
         val attempt = entry?.attempt
         val writable = attempt == null || newComposition && attempt.status == AttemptStatus.PUBLISHED
         return when {
-            owner != "tester" -> StoreWriteResult.OwnerChanged
+            owner == null || owner != activeOwner -> StoreWriteResult.OwnerChanged
             (entry?.version ?: 0) != expected || !writable -> StoreWriteResult.Conflict
             else -> {
                 entries[key] = DraftEntry(draft, expected + 1)
@@ -78,7 +80,7 @@ open class VersionedEditorDraftStore : EditorDraftStore {
         val failure = beginFailure
         val rejection = when {
             failure != null -> StoreWriteResult.Failed(failure)
-            owner != "tester" -> StoreWriteResult.OwnerChanged
+            owner == null || owner != activeOwner -> StoreWriteResult.OwnerChanged
             (entries[key]?.version ?: 0) != expectedVersion -> StoreWriteResult.Conflict
             entries[key]?.attempt != null -> StoreWriteResult.Conflict
             else -> null
@@ -90,7 +92,10 @@ open class VersionedEditorDraftStore : EditorDraftStore {
         return BeginAttemptResult.Started(token)
     }
 
-    override suspend fun finishAttempt(token: AttemptToken, outcome: AttemptOutcome): StoreWriteResult {
+    override suspend fun finishAttempt(token: AttemptToken, outcome: AttemptOutcome): StoreWriteResult =
+        if (token.owner != activeOwner) StoreWriteResult.OwnerChanged else finishOwnedAttempt(token, outcome)
+
+    private fun finishOwnedAttempt(token: AttemptToken, outcome: AttemptOutcome): StoreWriteResult {
         val entry = entries[token.key]
         if (entry == null || entry.attempt?.token != token) return StoreWriteResult.Conflict
         val status = when (outcome) {
@@ -104,6 +109,7 @@ open class VersionedEditorDraftStore : EditorDraftStore {
     }
 
     override suspend fun erasePublishedContent(token: AttemptToken): StoreWriteResult {
+        if (token.owner != activeOwner) return StoreWriteResult.OwnerChanged
         val entry = entries[token.key]
         val failure = cleanupFailure
         return when {

@@ -13,5 +13,5 @@ class QuickReplySubmissionContractTest : EditorSubmissionContract() {
         scope: TestScope,
         preferences: Flow<Boolean>,
         delayedSharedRestore: Boolean,
-    ): EditorSubmissionAdapter = QuickReplyViewModelTest().submissionAdapter(scope, preferences)
+    ): EditorSubmissionAdapter = QuickReplyViewModelTest().submissionAdapter(scope, preferences, submissionScenario)
 }

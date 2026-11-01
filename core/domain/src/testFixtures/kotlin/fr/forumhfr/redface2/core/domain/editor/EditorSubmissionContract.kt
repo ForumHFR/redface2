@@ -1,7 +1,7 @@
 package fr.forumhfr.redface2.core.domain.editor
 
-import java.io.IOException
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
+import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -348,6 +348,8 @@ abstract class EditorSubmissionContract {
         scenario.store.cleanupFailure = IOException("cleanup failed")
         withReadyAdapter(scenario = scenario) { adapter ->
             succeed(adapter)
+            assertEquals("An accepted send must retain exactly one durable PUBLISHED row",
+                1, scenario.store.entries.size)
             assertEquals(
                 EditorDraftStore.AttemptStatus.PUBLISHED, scenario.store.entries.values.single().attempt?.status,
             )
@@ -527,9 +529,7 @@ interface EditorSubmissionAdapter {
     fun mutateBody(mutation: SubmissionBodyMutation)
     fun startUpload()
     fun completeUpload()
-    fun deliverLateUploadCallback() {
-        error("Adapter must deliver the real final upload callback (3b for MP)")
-    }
+    fun deliverLateUploadCallback()
     fun completePost()
     fun dispose()
 }

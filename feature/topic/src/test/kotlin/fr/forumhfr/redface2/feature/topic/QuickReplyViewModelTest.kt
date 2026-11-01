@@ -4,22 +4,34 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.editor.ArmToken
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorSessionResources
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionAdapter
-import fr.forumhfr.redface2.core.domain.editor.LegacyEditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionScenario
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionBodyMutation
+import fr.forumhfr.redface2.core.domain.editor.SubmissionErrorProbe
 import fr.forumhfr.redface2.core.domain.editor.SubmissionProbe
+import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.domain.write.truncateQuote
+import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.write.QuoteLocator
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
-import fr.forumhfr.redface2.core.model.write.QuoteLocator
-import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
+import io.mockk.every
+import io.mockk.mockk
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -27,9 +39,10 @@ import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
@@ -52,9 +65,11 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class QuickReplyViewModelTest {
 
+    private val mainDispatcher = UnconfinedTestDispatcher()
+
     @Before
     fun setUp() {
-        Dispatchers.setMain(UnconfinedTestDispatcher())
+        Dispatchers.setMain(mainDispatcher)
     }
 
     @After
@@ -96,7 +111,7 @@ class QuickReplyViewModelTest {
         // #953 F2 — the VM is nav-entry-scoped and OUTLIVES the sheet : alice opens (her draft
         // seeds the field), closes, the account switches to bob, bob reopens the SAME VM. The
         // opening must re-snapshot the owner : bob gets HIS row, never alice's private draft.
-        val store = FakeQuickReplyDraftStore(initialBody = "brouillon privé d'alice", activeOwner = "alice")
+        val store = FakeQuickReplyDraftStore(initialBody = "brouillon privé d'alice", initialOwner = "alice")
         val viewModel = quickReplyViewModel(draftStore = store)
         viewModel.onSheetOpened()
         advanceUntilIdle()
@@ -121,7 +136,7 @@ class QuickReplyViewModelTest {
         // Gate Sol #953 F2 — the state SEQUENCE across a reopen must never show alice's text to
         // bob, not even transiently while the new owner's row is still loading (the owner
         // snapshot is gated to hold the load in flight).
-        val store = FakeQuickReplyDraftStore(initialBody = "brouillon privé d'alice", activeOwner = "alice")
+        val store = FakeQuickReplyDraftStore(initialBody = "brouillon privé d'alice", initialOwner = "alice")
         val viewModel = quickReplyViewModel(draftStore = store)
         viewModel.onSheetOpened()
         advanceUntilIdle()
@@ -150,7 +165,7 @@ class QuickReplyViewModelTest {
         // Gate Sol #953 F2 — currentOwner() resolving LATE (after an account switch + reopen)
         // must not let the dead session's deferred writes ride the NEW owner : alice's flushed
         // text must never land under bob's row, and alice's own row stays untouched.
-        val store = FakeQuickReplyDraftStore(initialBody = "brouillon d'alice", activeOwner = "alice")
+        val store = FakeQuickReplyDraftStore(initialBody = "brouillon d'alice", initialOwner = "alice")
         val ownerGate = CompletableDeferred<Unit>()
         store.ownerGate = ownerGate
         val viewModel = quickReplyViewModel(draftStore = store)
@@ -197,7 +212,8 @@ class QuickReplyViewModelTest {
         val effect = viewModel.effects.first()
         assertEquals(QuickReplyEffect.SubmitSucceeded(targetPage = 12, scrollTo = 345), effect)
         assertEquals("", viewModel.state.value.text.text)
-        assertNull(store.storedBody)
+        assertEquals("", store.storedBody)
+        assertEquals(EditorDraftStore.AttemptStatus.PUBLISHED, store.entries.values.single().attempt?.status)
         assertEquals(listOf("hop"), repository.submittedBodies)
     }
 
@@ -314,7 +330,9 @@ class QuickReplyViewModelTest {
         assertTrue(viewModel.state.value.confirmVisible)
         assertEquals(0, repository.submitCalls)
 
-        viewModel.onSubmitConfirmed()
+        val armToken = (viewModel.state.value.submission as EditorSubmissionState.Armed).token
+        advanceTimeBy(400) // ED-166
+        viewModel.onSubmitConfirmed(armToken)
         advanceUntilIdle()
         assertEquals(1, repository.submitCalls)
     }
@@ -664,6 +682,42 @@ class QuickReplyViewModelTest {
         )
     }
 
+    @Test
+    fun `a new explicit opening after terminal success permits one new send`() = runTest {
+        val repository = FakeQuickReplyRepository()
+        val viewModel = quickReplyViewModel(replyRepository = repository)
+        viewModel.onSheetOpened()
+        viewModel.onTextChanged(TextFieldValue("first"))
+        viewModel.onSubmitClicked()
+        advanceUntilIdle()
+        assertFalse(viewModel.state.value.canSubmit)
+        viewModel.onTextChanged(TextFieldValue("ignored after success"))
+        viewModel.onSubmitClicked()
+        assertEquals(1, repository.submitCalls)
+
+        viewModel.onSheetOpened()
+        viewModel.onTextChanged(TextFieldValue("second"))
+        viewModel.onSubmitClicked()
+        advanceUntilIdle()
+        assertEquals(listOf("first", "second"), repository.submittedBodies)
+    }
+
+    @Test
+    fun `rotation retains the dialog token and its accessible deadline`() = runTest {
+        val repository = FakeQuickReplyRepository()
+        val viewModel = quickReplyViewModel(replyRepository = repository, confirmBeforePosting = true)
+        viewModel.onSheetAttached(3, emptyList(), restored = false)
+        viewModel.onTextChanged(TextFieldValue("reply"))
+        viewModel.onSubmitClicked(timeoutMillis = 8_000)
+        val arm = (viewModel.state.value.submission as EditorSubmissionState.Armed).token
+        advanceTimeBy(4_500)
+        viewModel.onSheetAttached(3, emptyList(), restored = true)
+        assertEquals(arm, (viewModel.state.value.submission as EditorSubmissionState.Armed).token)
+        viewModel.onSubmitConfirmed(arm)
+        advanceUntilIdle()
+        assertEquals(1, repository.submitCalls)
+    }
+
     private fun preview(
         numreponse: Int,
         author: String,
@@ -678,26 +732,46 @@ class QuickReplyViewModelTest {
     private fun longQuoteBody(): String = (1..120).joinToString(separator = " ") { "mot" }
 
     /** #1301-ST — la feuille utilise le même faux repository et sa vraie ligne partagée de brouillon. */
-    internal fun submissionAdapter(scope: TestScope, preferences: Flow<Boolean>): EditorSubmissionAdapter {
+    internal fun submissionAdapter(
+        scope: TestScope,
+        preferences: Flow<Boolean>,
+        scenario: EditorSubmissionScenario,
+    ): EditorSubmissionAdapter {
         val postGate = CompletableDeferred<Unit>()
         val repository = FakeQuickReplyRepository().apply { submitGate = postGate }
-        val store = FakeQuickReplyDraftStore(initialBody = "stored draft")
+        val store = scenario.store
+        store.preload(EditorDraftKey.reply(23, 35421), EditorDraftStore.Draft(body = "stored draft"))
+        repository.submitException = scenario.postFailure
         val userPreferences = object : UserPreferencesRepository by FakeUserPreferencesRepository() {
             override fun observeConfirmBeforePosting(): Flow<Boolean> = preferences
         }
-        val viewModel = QuickReplyViewModel(
+        fun createViewModel() = QuickReplyViewModel(
             request = QuickReplyRequest(cat = 23, subcat = 401, topicId = 35421, page = 3),
             savedStateHandle = SavedStateHandle(),
             replyRepository = repository,
             quoteMaterializer = TopicReplyQuoteMaterializer(repository),
-            draftStore = store,
-            userPreferencesRepository = userPreferences,
-        )
-        viewModel.onSheetOpened()
+            sessionResources = EditorSessionResources(
+                store, userPreferences, quickReplyAuthRepository(),
+                DiagnosticsClock { scope.testScheduler.currentTime * 1_000_000L }, DiagnosticsLog(),
+            ),
+        ).also { it.onSheetOpened() }
+        var viewModel = createViewModel()
         val effects = mutableListOf<QuickReplyEffect>()
-        scope.backgroundScope.launch(UnconfinedTestDispatcher(scope.testScheduler)) {
+        fun collectEffects() = scope.backgroundScope.launch(UnconfinedTestDispatcher(scope.testScheduler)) {
             viewModel.effects.collect { effects += it }
         }
+        var collector = collectEffects()
+        scenario.recreate = {
+            collector.cancel()
+            viewModel.viewModelScope.cancel()
+            viewModel = createViewModel()
+            collector = collectEffects()
+        }
+        scenario.replaceCollector = {
+            collector.cancel()
+            collector = collectEffects()
+        }
+        val arms = mutableMapOf<Long, ArmToken>()
         return object : EditorSubmissionAdapter {
             override val unsupportedMutations = mapOf(
                 SubmissionBodyMutation.SMILEY to "la feuille n'a pas de picker smiley",
@@ -708,23 +782,37 @@ class QuickReplyViewModelTest {
             override val uploadUnsupportedReason = "la feuille n'expose aucune entrée d'upload"
             override val postCalls get() = repository.submitCalls
             override val uploadCalls: Int = 0
-            override val draftSaves get() = store.savedBodies.size
-            override val draftWrites get() = draftSaves + store.deleteCount
+            override val draftSaves get() = store.saveCount
+            override val draftWrites get() = store.writes
             override val successEffects get() = effects.count { it is QuickReplyEffect.SubmitSucceeded }
             override val closeEffects: Int = 0 // onDismissed n'émet pas d'effet de navigation.
 
             override fun editBody(body: String) = viewModel.onTextChanged(TextFieldValue(body))
             override fun clickSubmit() = viewModel.onSubmitClicked()
-            override fun confirm() = viewModel.onSubmitConfirmed()
+            override fun confirm() = viewModel.onSubmitConfirmed(
+                (viewModel.state.value.submission as? EditorSubmissionState.Armed)?.token,
+            )
+            override fun confirmIdentity(id: Long?) = viewModel.onSubmitConfirmed(arms[id])
             override fun dismissConfirmation() = viewModel.onSubmitConfirmDismissed()
             override fun close() = viewModel.onDismissed()
             override fun completePost() { postGate.complete(Unit) }
             override fun dispose() = viewModel.viewModelScope.cancel()
             override fun startUpload(): Unit = error("cas explicitement désactivé")
             override fun completeUpload(): Unit = error("cas explicitement désactivé")
+            override fun deliverLateUploadCallback(): Unit = error(uploadUnsupportedReason)
 
             override fun snapshot(): SubmissionProbe = viewModel.state.value.let {
-                SubmissionProbe(it.text.text, it.canSubmit, it.isSubmitting, false, it.confirmVisible)
+                val token = (it.submission as? EditorSubmissionState.Armed)?.token
+                token?.let { arms[it.id] = it }
+                SubmissionProbe(
+                    it.text.text, it.canSubmit, it.isSubmitting, false, it.confirmVisible,
+                    armId = token?.id,
+                    error = when (it.submitError) {
+                        QuickReplySubmitError.Uncertain -> SubmissionErrorProbe.UNCERTAIN
+                        QuickReplySubmitError.DraftWriteFailed -> SubmissionErrorProbe.DRAFT_WRITE_FAILED
+                        else -> null
+                    },
+                )
             }
 
             override fun mutateBody(mutation: SubmissionBodyMutation) {
@@ -750,10 +838,13 @@ class QuickReplyViewModelTest {
         savedStateHandle = savedStateHandle,
         replyRepository = replyRepository,
         quoteMaterializer = TopicReplyQuoteMaterializer(replyRepository),
-        draftStore = draftStore,
-        userPreferencesRepository = FakeUserPreferencesRepository(
-            confirmBeforePosting = confirmBeforePosting,
-            quoteCardsEnabled = quoteCardsEnabled,
+        sessionResources = EditorSessionResources(
+            draftStore,
+            FakeUserPreferencesRepository(
+                confirmBeforePosting = confirmBeforePosting, quoteCardsEnabled = quoteCardsEnabled,
+            ),
+            quickReplyAuthRepository(),
+            DiagnosticsClock { mainDispatcher.scheduler.currentTime * 1_000_000L }, DiagnosticsLog(),
         ),
     )
 
@@ -765,55 +856,37 @@ class QuickReplyViewModelTest {
 
 private class FakeQuickReplyDraftStore(
     initialBody: String? = null,
-    /** ACTIVE account — mutable so a test can switch accounts between two openings (#953 F2). */
-    var activeOwner: String? = "xaat",
-) : LegacyEditorDraftStore() {
-    /** One row per owner (single topic here), like the real store's `"<owner>|<key>"` keys. */
-    private val bodies = mutableMapOf<String, String>()
+    initialOwner: String? = "xaat",
+) : VersionedEditorDraftStore() {
     val savedBodies = mutableListOf<String>()
-    var deleteCount: Int = 0
-        private set
+    private val key = EditorDraftKey.reply(23, 35421)
+    var storedBody: String?
+        get() = entries[key]?.draft?.body
+        set(value) {
+            if (value == null) entries.remove(key) else preload(key, EditorDraftStore.Draft(body = value))
+        }
+    var ownerGate: CompletableDeferred<Unit>? = null
 
     init {
-        val owner = activeOwner
-        if (initialBody != null && owner != null) bodies[owner] = initialBody
+        activeOwner = initialOwner
+        if (initialBody != null) storedBody = initialBody
     }
-
-    /** The ACTIVE account's row — the single-account accessor the historical tests use. */
-    var storedBody: String?
-        get() = activeOwner?.let(bodies::get)
-        set(value) {
-            val owner = activeOwner ?: return
-            if (value == null) bodies.remove(owner) else bodies[owner] = value
-        }
-
-    /** When set, [currentOwner] suspends until the test releases it (late-resolution races, gate Sol). */
-    var ownerGate: CompletableDeferred<Unit>? = null
 
     override suspend fun currentOwner(): String? {
         ownerGate?.await()
         return activeOwner
     }
 
-    // Same owner guards as RoomEditorDraftStore (#953 F2) : a session whose captured owner is
-    // no longer the active account reads nothing, writes nothing and deletes nothing.
-    override suspend fun load(owner: String?, key: String): EditorDraftStore.Draft? =
-        if (owner == null || owner != activeOwner) {
-            null
-        } else {
-            bodies[owner]?.let { EditorDraftStore.Draft(body = it) }
-        }
-
-    override suspend fun save(owner: String?, key: String, draft: EditorDraftStore.Draft) {
-        if (owner == null || owner != activeOwner) return
-        bodies[owner] = draft.body
-        savedBodies += draft.body
+    override suspend fun saveIfVersion(
+        owner: String?, key: String, draft: EditorDraftStore.Draft, expectedVersion: Long,
+    ): EditorDraftStore.StoreWriteResult = super.saveIfVersion(owner, key, draft, expectedVersion).also {
+        if (it is EditorDraftStore.StoreWriteResult.Written) savedBodies += draft.body
     }
 
-    override suspend fun delete(owner: String?, key: String) {
-        if (owner == null || owner != activeOwner) return
-        deleteCount += 1
-        bodies.remove(owner)
+    override suspend fun startNewComposition(
+        owner: String?, key: String, draft: EditorDraftStore.Draft, expectedVersion: Long,
+    ): EditorDraftStore.StoreWriteResult = super.startNewComposition(owner, key, draft, expectedVersion).also {
+        if (it is EditorDraftStore.StoreWriteResult.Written) savedBodies += draft.body
     }
 }
 
@@ -856,6 +929,7 @@ private class FakeQuickReplyRepository(
     var fetchCalls = 0
     var submitCalls = 0
     var submitGate: CompletableDeferred<Unit>? = null
+    var submitException: IOException? = null
     val submittedBodies = mutableListOf<String>()
     val submittedPages = mutableListOf<Int>()
     val fetchedPages = mutableListOf<Int>()
@@ -887,6 +961,11 @@ private class FakeQuickReplyRepository(
         submittedBodies += bbcodeContent
         submittedPages += context.page
         submitGate?.await()
+        submitException?.let { throw it }
         return results.removeFirstOrNull() ?: ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
     }
+}
+
+internal fun quickReplyAuthRepository(): AuthRepository = mockk {
+    every { observeAuthState() } returns flowOf(AuthState.Authenticated("tester"))
 }

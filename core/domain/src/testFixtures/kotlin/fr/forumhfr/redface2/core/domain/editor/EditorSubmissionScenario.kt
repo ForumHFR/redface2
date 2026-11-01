@@ -9,6 +9,6 @@ class EditorSubmissionScenario {
     var recreate: (() -> Unit)? = null
     var replaceCollector: (() -> Unit)? = null
 
-    fun recreateEditor() = checkNotNull(recreate) { "Adapter must implement recreation (3b for MP/sheet)" }.invoke()
-    fun rotateEditor() = checkNotNull(replaceCollector) { "Adapter must retain its VM on rotation (3b)" }.invoke()
+    fun recreateEditor() = checkNotNull(recreate) { "Adapter must implement recreation" }.invoke()
+    fun rotateEditor() = checkNotNull(replaceCollector) { "Adapter must retain its VM on rotation" }.invoke()
 }

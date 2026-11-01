@@ -1,6 +1,5 @@
-package fr.forumhfr.redface2.feature.editor
+package fr.forumhfr.redface2.core.domain.editor
 
-import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptOutcome
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptStatus
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptToken
@@ -13,7 +12,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
 /** ED-161/170: serialize autosaves and attempts; a stale writer never replaces a durable attempt. */
-internal class EditorDraftSession(private val store: EditorDraftStore, private val key: String?) {
+class EditorDraftSession(private val store: EditorDraftStore, private val key: String?) {
     private val writes = Mutex()
     var owner: String? = null
         private set

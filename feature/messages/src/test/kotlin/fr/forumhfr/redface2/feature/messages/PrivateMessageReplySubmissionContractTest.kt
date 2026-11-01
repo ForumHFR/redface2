@@ -13,5 +13,6 @@ class PrivateMessageReplySubmissionContractTest : EditorSubmissionContract() {
         scope: TestScope,
         preferences: Flow<Boolean>,
         delayedSharedRestore: Boolean,
-    ): EditorSubmissionAdapter = PrivateMessageReplyViewModelTest().submissionAdapter(scope, preferences)
+    ): EditorSubmissionAdapter =
+        PrivateMessageReplyViewModelTest().submissionAdapter(scope, preferences, submissionScenario)
 }

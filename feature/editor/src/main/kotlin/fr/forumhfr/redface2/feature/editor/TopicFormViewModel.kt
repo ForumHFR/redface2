@@ -13,14 +13,16 @@ import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
-import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
-import fr.forumhfr.redface2.core.domain.editor.SubmissionRequest
 import fr.forumhfr.redface2.core.domain.diagnostics.SmileyPickerCloseCause
 import fr.forumhfr.redface2.core.domain.diagnostics.recordImagePickerEvent
 import fr.forumhfr.redface2.core.domain.diagnostics.recordImagesPicked
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionErrors
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
+import fr.forumhfr.redface2.core.domain.editor.SubmissionRequest
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.HfrFavoriteSmileyRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollections
@@ -195,6 +197,11 @@ class TopicFormViewModel @AssistedInject constructor(
     private val submission = EditorSubmissionBinding(
         environment = EditorSubmissionEnvironment(viewModelScope, clock, diagnostics),
         drafts = EditorDraftSession(draftStore, draftKey),
+        errors = EditorSubmissionErrors(
+            uncertain = SubmitError.Uncertain, draftWriteFailed = SubmitError.DraftWriteFailed,
+            sessionExpired = SubmitError.SessionExpired, unknown = SubmitError.Hfr(ReplyFailureReason.Unknown),
+            network = SubmitError.Network, sessionExpiredAfterEntry = SubmitError.Uncertain,
+        ),
         callbacks = EditorSubmissionCallbacks<TopicFormEffect>(
             state = { value ->
                 _state.update {
@@ -990,8 +997,5 @@ class TopicFormViewModel @AssistedInject constructor(
     private companion object {
         private const val LOG_TAG_VM = "TopicFormVM"
         private const val DRAFT_RESTORE_OFFER_FINGERPRINT_KEY = "draft_restore_offer_fingerprint"
-
-        // #405 — idle window after the last edit before the draft is persisted (cf. PostEditorViewModel).
-        private const val AUTOSAVE_DEBOUNCE_MS = 750L
     }
 }

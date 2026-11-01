@@ -28,12 +28,16 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalAccessibilityManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -44,8 +48,11 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
+import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummary
+import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummaryKind
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsCallbacks
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsColumn
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
@@ -82,11 +89,13 @@ internal fun QuickReplySheet(
     // every `quickReplyFor` setter in TopicScreen (FAB, « Citer », « Citer N ») sits behind this
     // modal's scrim, so a new launch can only happen after a dismiss nulled the previous one
     // (gate Codex, finding 2). Re-assigning the launch over an OPEN sheet would break delivery.
+    var openingDelivered by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(viewModel) {
         // Re-seed the field from the #405 row at EACH opening — the VM outlives the sheet and
         // its cached text can be stale after a full-screen edit of the same draft (gate #788).
         // The VM outlives the sheet (topic-scoped) : hand it the page of THIS opening (#1243 suite).
-        viewModel.onSheetOpened(currentPage = request.page, initialQuotes = initialQuotes)
+        viewModel.onSheetAttached(request.page, initialQuotes, restored = openingDelivered)
+        openingDelivered = true
         viewModel.effects.collect { effect ->
             when (effect) {
                 is QuickReplyEffect.SubmitSucceeded ->
@@ -95,6 +104,10 @@ internal fun QuickReplySheet(
             }
         }
     }
+    val timeoutMillis = LocalAccessibilityManager.current?.calculateRecommendedTimeoutMillis(
+        4_000L, containsIcons = false, containsText = true, containsControls = true,
+    ) ?: 4_000L
+    val armToken = (state.submission as? EditorSubmissionState.Armed)?.token
     val fullScreenLabel = stringResource(R.string.quick_reply_fullscreen)
     val focusRequester = remember { FocusRequester() }
     // Gate #788 — the sheet must not dismiss while a POST is in flight: the effect collector
@@ -195,7 +208,7 @@ internal fun QuickReplySheet(
                 OutlinedTextField(
                     value = state.text,
                     onValueChange = viewModel::onTextChanged,
-                    enabled = !state.isSubmitting,
+                    readOnly = state.submission.blocksBodyMutation,
                     // #807 — same #237 contract as BbcodeTextField : Compose capitalises NOTHING by
                     // default, the IME needs the explicit autoCap hint (surface regression, v220).
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
@@ -222,7 +235,13 @@ internal fun QuickReplySheet(
                     }
                 }
                 state.submitError?.let { error ->
-                    Text(
+                    val summary = when (error) {
+                        QuickReplySubmitError.Uncertain -> EditorSubmissionSummaryKind.Uncertain
+                        QuickReplySubmitError.DraftWriteFailed -> EditorSubmissionSummaryKind.DraftWriteFailed
+                        else -> null
+                    }
+                    if (summary != null) EditorSubmissionSummary(summary)
+                    if (error != QuickReplySubmitError.DraftWriteFailed) Text(
                         text = stringResource(error.messageRes()),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
@@ -238,7 +257,7 @@ internal fun QuickReplySheet(
                     CircularProgressIndicator(modifier = Modifier.padding(end = 12.dp))
                 }
                 TextButton(
-                    onClick = viewModel::onSubmitClicked,
+                    onClick = { viewModel.onSubmitClicked(timeoutMillis) },
                     enabled = state.canSubmit,
                 ) {
                     Text(stringResource(R.string.quick_reply_send))
@@ -253,7 +272,7 @@ internal fun QuickReplySheet(
             onDismissRequest = viewModel::onSubmitConfirmDismissed,
             title = { Text(stringResource(R.string.quick_reply_confirm_title)) },
             confirmButton = {
-                TextButton(onClick = viewModel::onSubmitConfirmed) {
+                TextButton(onClick = { viewModel.onSubmitConfirmed(armToken) }) {
                     Text(stringResource(R.string.quick_reply_confirm_action))
                 }
             },
@@ -268,6 +287,9 @@ internal fun QuickReplySheet(
 
 /** The same wording as the full editor's error banner, module-local copies (feature/topic res). */
 internal fun QuickReplySubmitError.messageRes(): Int = when (this) {
+    QuickReplySubmitError.Uncertain -> R.string.quick_reply_error_uncertain
+    QuickReplySubmitError.DraftWriteFailed ->
+        fr.forumhfr.redface2.core.ui.R.string.editor_submission_draft_write_failed
     QuickReplySubmitError.Network -> R.string.quick_reply_error_network
     QuickReplySubmitError.SessionExpired -> R.string.quick_reply_error_session_expired
     QuickReplySubmitError.QuoteFetchFailed -> R.string.quick_reply_error_quote_fetch
