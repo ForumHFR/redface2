@@ -110,11 +110,11 @@ internal fun QuickReplySheet(
     val armToken = (state.submission as? EditorSubmissionState.Armed)?.token
     val fullScreenLabel = stringResource(R.string.quick_reply_fullscreen)
     val focusRequester = remember { FocusRequester() }
-    // Gate #788 — the sheet must not dismiss while a POST is in flight: the effect collector
-    // lives here, so tearing the sheet down mid-submit would drop SubmitSucceeded (no topic
-    // refresh) or replay it at the next opening. `submitting` is read through
+    // ED-161 / gate #788 — retain the sheet through the POST and accepted-success cleanup:
+    // its effect collector must survive until SubmitSucceeded, without replay at the next opening.
+    // `submitting` is read through
     // rememberUpdatedState because both guards below are remembered once.
-    val submitting = rememberUpdatedState(state.isSubmitting)
+    val submitting = rememberUpdatedState(state.submission.blocksBodyMutation)
     // #854 — no half-height stop : this is a TYPING surface (autofocused field, IME quasi
     // permanent), the M3 PartiallyExpanded state only ever appears when a short display makes
     // the content taller than half the screen — and then a back/swipe must dismiss in ONE step,

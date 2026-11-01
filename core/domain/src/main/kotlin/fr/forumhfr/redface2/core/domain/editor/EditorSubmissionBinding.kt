@@ -32,7 +32,11 @@ data class EditorSubmissionCallbacks<E, F>(
 )
 
 /** ED-88: the feature supplies its existing navigation effect, after terminal state and cleanup. */
-data class EditorDelivery<E, F>(val effect: E? = null, val error: F? = null)
+data class EditorDelivery<E, F>(
+    val effect: E? = null,
+    val error: F? = null,
+    val afterSettled: (() -> Unit)? = null,
+)
 
 /** ED-161/164/166/170/171: shared bridge; the controller owns every submission permit. */
 class EditorSubmissionBinding<E, F>(
@@ -44,6 +48,7 @@ class EditorSubmissionBinding<E, F>(
     private val controller = EditorSubmissionController(environment.clock, session(null, "unloaded"))
     private var armExpiry: Job? = null
     private var autosave: Job? = null
+    private var execution: Job? = null
     private var preference: Boolean? = null
     private var initialized = false
     var isExecuting = false
@@ -81,7 +86,12 @@ class EditorSubmissionBinding<E, F>(
     fun accountChanged() {
         drafts.invalidate()
         autosave?.cancel()
-        disarm()
+        armExpiry?.cancel()
+        initialized = false
+        isExecuting = false
+        controller.openSession(session(null, controller.session.key))
+        execution?.cancel()
+        publish()
         callbacks.error(null)
     }
 
@@ -107,12 +117,15 @@ class EditorSubmissionBinding<E, F>(
         if (controller.state !is EditorSubmissionState.Uncertain) {
             callbacks.error(null)
         } else {
+            val opening = controller.session
             environment.scope.launch {
                 val ports = ports(EditorDraftStore.Draft(body = "")) { EditorSendOutcome.CERTAIN_FAILURE }
                 val acknowledged = controller.acknowledgeUncertain(ports)
-                publish()
-                callbacks.error(if (acknowledged) null else errors.uncertain)
-                if (acknowledged) onAcknowledged()
+                if (controller.session == opening) {
+                    publish()
+                    callbacks.error(if (acknowledged) null else errors.uncertain)
+                    if (acknowledged) onAcknowledged()
+                }
             }
         }
     }
@@ -140,13 +153,17 @@ class EditorSubmissionBinding<E, F>(
         }
     }
 
-    suspend fun persist(draft: EditorDraftStore.Draft?) {
-        if (draft != null && initialized && !blocksClose) drafts.save(draft)
+    suspend fun persist(draft: EditorDraftStore.Draft?): StoreWriteResult? {
+        val result = if (draft != null && initialized && !blocksClose) drafts.save(draft) else null
+        if (result != null && result !is StoreWriteResult.Written && !drafts.invalidated) {
+            callbacks.error(errors.draftWriteFailed)
+        }
+        return result
     }
 
-    suspend fun flush(draft: EditorDraftStore.Draft?) {
+    suspend fun flush(draft: EditorDraftStore.Draft?): StoreWriteResult? {
         autosave?.cancelAndJoin()
-        persist(draft)
+        return persist(draft)
     }
 
     fun launch(
@@ -156,8 +173,9 @@ class EditorSubmissionBinding<E, F>(
     ) {
         callbacks.error(null)
         isExecuting = true
+        val opening = controller.session
         val trace = EditorSubmissionTrace(environment.diagnostics)
-        environment.scope.launch(trace) {
+        execution = environment.scope.launch(trace) {
             var delivery: EditorDelivery<E, F>? = null
             val ports = ports(draft, trace) {
                 delivery = deliver(send)
@@ -165,16 +183,21 @@ class EditorSubmissionBinding<E, F>(
             }
             try {
                 controller.execute(permit.token, ports)
-                publish()
-                complete(delivery)
+                if (controller.session == opening) {
+                    publish()
+                    complete(delivery)
+                }
             } finally {
-                isExecuting = false
-                publish()
+                if (controller.session == opening) {
+                    isExecuting = false
+                    publish()
+                }
             }
         }
     }
 
     private fun complete(delivery: EditorDelivery<E, F>?) {
+        if (!blocksMutation) delivery?.afterSettled?.invoke()
         val current = controller.state
         val attempt = when (current) {
             is EditorSubmissionState.Succeeded -> current.attempt
@@ -212,8 +235,9 @@ class EditorSubmissionBinding<E, F>(
         draft: EditorDraftStore.Draft,
         trace: EditorSubmissionTrace = EditorSubmissionTrace(environment.diagnostics),
         send: suspend () -> EditorSendOutcome,
-    ): EditorSubmissionPorts =
-        object : EditorSubmissionPorts {
+    ): EditorSubmissionPorts {
+        val opening = controller.session
+        return object : EditorSubmissionPorts {
             override suspend fun beginAttempt(): EditorDraftStore.BeginAttemptResult {
                 val started = environment.clock.elapsedRealtimeNanos()
                 val result = drafts.begin(draft)
@@ -222,15 +246,20 @@ class EditorSubmissionBinding<E, F>(
                 }
                 return result
             }
-            override suspend fun send(attempt: AttemptToken): EditorSendOutcome = send().also {
-                trace.result(EditorSubmissionTrace.Result.valueOf(it.name))
+            override suspend fun send(attempt: AttemptToken): EditorSendOutcome {
+                if (!drafts.ownsCurrentAccount()) {
+                    accountChanged()
+                    return EditorSendOutcome.CERTAIN_FAILURE
+                }
+                return send().also { trace.result(EditorSubmissionTrace.Result.valueOf(it.name)) }
             }
             override suspend fun stopDraftWrites() {
-                publish() // ED-161: lock success before the first suspension of the marker path.
+                // ED-161: lock success before the first suspension of the marker path.
+                if (controller.session == opening) publish()
                 autosave?.cancelAndJoin()
             }
             override suspend fun finishAttempt(attempt: AttemptToken, outcome: AttemptOutcome): StoreWriteResult {
-                publish()
+                if (controller.session == opening) publish()
                 return drafts.finish(attempt, outcome)
             }
             override suspend fun erasePublishedContent(attempt: AttemptToken) = drafts.erase(attempt)
@@ -239,9 +268,12 @@ class EditorSubmissionBinding<E, F>(
                 if (stage == EditorSubmissionFailure.ATTEMPT) trace.result(
                     EditorSubmissionTrace.Result.DRAFT_WRITE_FAILED,
                 )
-                if (stage == EditorSubmissionFailure.ATTEMPT) callbacks.error(errors.draftWriteFailed)
+                if (stage == EditorSubmissionFailure.ATTEMPT && controller.session == opening) {
+                    callbacks.error(errors.draftWriteFailed)
+                }
             }
         }
+    }
 
     private fun publish() = callbacks.state(controller.state)
     private fun session(owner: String?, key: String) = EditorSession(UUID.randomUUID().toString(), owner, key)

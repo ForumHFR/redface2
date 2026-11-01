@@ -5,6 +5,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
@@ -24,6 +25,7 @@ import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS
+import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.EditorSmileySource
 import fr.forumhfr.redface2.core.model.HfrFavoriteSmileyMutationResult
@@ -1039,7 +1041,15 @@ class PrivateMessageComposeViewModelTest {
         scenario: EditorSubmissionScenario,
     ): EditorSubmissionAdapter {
         draftStore = scenario.store
+        val auth = MutableStateFlow<AuthState>(AuthState.Authenticated("tester"))
+        val authRepository = object : AuthRepository by FakeAuthRepository() {
+            override fun observeAuthState(): Flow<AuthState> = auth
+        }
         submissionClock = DiagnosticsClock { scope.testScheduler.currentTime * 1_000_000L }
+        scenario.changeAccount = {
+            scenario.store.activeOwner = "other"
+            auth.value = AuthState.Authenticated("other")
+        }
         val postGate = CompletableDeferred<Unit>()
         val uploadCompletion = CompletableDeferred<Unit>()
         val uploads = FakeUploadRepository().apply { uploadGate = uploadCompletion }
@@ -1047,14 +1057,19 @@ class PrivateMessageComposeViewModelTest {
             EditorDraftKey.mpCompose(),
             EditorDraftStore.Draft(body = "stored draft", subject = "stored title", recipients = "alice"),
         )
+        var formFetches = 0
         var submissionCalls = 0
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        coEvery { repository.fetchComposeForm(any()) } coAnswers {
+            formFetches++
+            composeForm()
+        }
         coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } coAnswers {
             submissionCalls += 1
-            postGate.await()
+            scenario.awaitPost(postGate)
             scenario.postFailure?.let { throw it }
-            ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+            scenario.postRejection?.let { ReplySubmitResult.Failure(it) }
+                ?: ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
         }
         val userPreferences = object : UserPreferencesRepository by userPreferences() {
             override fun observeConfirmBeforePosting(): Flow<Boolean> = preferences
@@ -1065,7 +1080,7 @@ class PrivateMessageComposeViewModelTest {
             previewParser = previewParser,
             userPreferencesRepository = userPreferences,
             draftStore = draftStore,
-            authRepository = FakeAuthRepository(),
+            authRepository = authRepository,
             uploadRepository = uploads,
             imageUploadReader = FakeImageUploadReader(),
             diagnostics = DiagnosticsLog(),
@@ -1098,6 +1113,7 @@ class PrivateMessageComposeViewModelTest {
             )
             override val uploadUnsupportedReason: String? = null
             override val postCalls get() = submissionCalls
+            override val formFetchCalls get() = formFetches
             override val uploadCalls get() = uploads.uploadCalls
             override val draftSaves get() = draftStore.saveCount
             override val draftWrites get() = draftStore.writes
@@ -1138,6 +1154,7 @@ class PrivateMessageComposeViewModelTest {
                         else -> null
                     },
                     restoreOffered = it.restorableDraft != null,
+                    blocksClose = it.submission.blocksBodyMutation,
                 )
             }
 

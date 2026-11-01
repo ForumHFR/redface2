@@ -130,7 +130,11 @@ class EditorSubmissionBannerLayoutTest {
         assertEquals("$message: text budget after gutters and icon", 308f, available, 0.5f)
         assertTrue("$message: intrinsic width exceeds budget", intrinsic <= available)
         assertEquals("$message: one line", 1, layout.lineCount)
-        assertFalse("$message: visual overflow", layout.hasVisualOverflow)
+        // Text may measure to its content while MultiParagraph retains the full constraint.
+        // hasVisualOverflow compares those different widths and is not a clipping oracle here.
+        val lineRight = layout.getLineRight(0) / density
+        assertTrue("$message: lineRight=${lineRight}dp", lineRight <= available)
+        assertFalse("$message: max lines exceeded", layout.multiParagraph.didExceedMaxLines)
         assertFalse("$message: ellipsis", layout.isLineEllipsized(0))
         assertEquals("$message: all characters laid out", label.length, layout.getLineEnd(0))
     }

@@ -5,6 +5,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
@@ -21,6 +22,7 @@ import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollectionSnapshot
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
+import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.EditorSmileySource
 import fr.forumhfr.redface2.core.model.HfrFavoriteSmileyMutationResult
@@ -1504,6 +1506,8 @@ class PrivateMessageReplyViewModelTest {
 
     @Test
     fun `an unedited list re-hydrates from a fresher form on a silent refetch`() = runTest {
+        val outcomeGate = CompletableDeferred<Unit>()
+        draftStore.finishGate = outcomeGate
         val repository = mockk<PrivateMessageWriteRepository>()
         // 1st load: alice, bob. The silent refetch after InvalidHashCheck returns a fresher form
         // where a member changed elsewhere (charlie added). With no local edit (recipientsDirty
@@ -1523,7 +1527,12 @@ class PrivateMessageReplyViewModelTest {
         )
         viewModel.onContentChanged(TextFieldValue("hello")) // no member edit
         viewModel.onSubmit()
-        runCurrent() // Wait for the form refresh after the certain failure.
+        runCurrent()
+        // The GET must not adopt a new form while the durable outcome still holds the body lock.
+        coVerify(exactly = 1) { repository.fetchReplyForm(any(), any()) }
+        assertEquals(listOf("alice", "bob"), viewModel.state.value.recipients)
+        outcomeGate.complete(Unit)
+        runCurrent()
 
         assertEquals(listOf("alice", "bob", "charlie"), viewModel.state.value.recipients)
     }
@@ -1552,7 +1561,15 @@ class PrivateMessageReplyViewModelTest {
         scenario: EditorSubmissionScenario,
     ): EditorSubmissionAdapter {
         draftStore = scenario.store
+        val auth = MutableStateFlow<AuthState>(AuthState.Authenticated("tester"))
+        val authRepository = object : AuthRepository by FakeAuthRepository() {
+            override fun observeAuthState(): Flow<AuthState> = auth
+        }
         submissionClock = DiagnosticsClock { scope.testScheduler.currentTime * 1_000_000L }
+        scenario.changeAccount = {
+            scenario.store.activeOwner = "other"
+            auth.value = AuthState.Authenticated("other")
+        }
         val postGate = CompletableDeferred<Unit>()
         val uploadCompletion = CompletableDeferred<Unit>()
         val uploads = FakeUploadRepository().apply { uploadGate = uploadCompletion }
@@ -1560,14 +1577,19 @@ class PrivateMessageReplyViewModelTest {
             EditorDraftKey.mpReply(request.threadId),
             EditorDraftStore.Draft(body = "stored draft"),
         )
+        var formFetches = 0
         var submissionCalls = 0
         val repository = mockk<PrivateMessageWriteRepository>()
-        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        coEvery { repository.fetchReplyForm(any(), any()) } coAnswers {
+            formFetches++
+            form()
+        }
         coEvery { repository.submitReply(any(), any(), any(), any(), any()) } coAnswers {
             submissionCalls += 1
-            postGate.await()
+            scenario.awaitPost(postGate)
             scenario.postFailure?.let { throw it }
-            ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+            scenario.postRejection?.let { ReplySubmitResult.Failure(it) }
+                ?: ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
         }
         val userPreferences = object : UserPreferencesRepository by userPreferences() {
             override fun observeConfirmBeforePosting(): Flow<Boolean> = preferences
@@ -1578,7 +1600,7 @@ class PrivateMessageReplyViewModelTest {
             previewParser = previewParser,
             userPreferencesRepository = userPreferences,
             draftStore = draftStore,
-            authRepository = FakeAuthRepository(),
+            authRepository = authRepository,
             uploadRepository = uploads,
             imageUploadReader = FakeImageUploadReader(),
             diagnostics = DiagnosticsLog(),
@@ -1611,6 +1633,7 @@ class PrivateMessageReplyViewModelTest {
             )
             override val uploadUnsupportedReason: String? = null
             override val postCalls get() = submissionCalls
+            override val formFetchCalls get() = formFetches
             override val uploadCalls get() = uploads.uploadCalls
             override val draftSaves get() = draftStore.saveCount
             override val draftWrites get() = draftStore.writes
@@ -1649,6 +1672,7 @@ class PrivateMessageReplyViewModelTest {
                         else -> null
                     },
                     restoreOffered = it.restorableDraft != null,
+                    blocksClose = it.submission.blocksBodyMutation,
                 )
             }
 

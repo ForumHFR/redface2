@@ -1045,14 +1045,18 @@ class PostEditorViewModel @AssistedInject constructor(
             ),
         )
         is ReplySubmitResult.Failure -> {
-            if (result.reason == ReplyFailureReason.InvalidHashCheck) {
-                loadedForm = null
-                when (snapshot.mode) {
-                    PostEditorMode.Reply -> loadReplyFormIfPossible()
-                    PostEditorMode.Edit -> loadEditFormIfPossible()
-                }
-            }
-            EditorDelivery(error = SubmitError.Hfr(result.reason))
+            EditorDelivery(
+                error = SubmitError.Hfr(result.reason),
+                afterSettled = if (result.reason == ReplyFailureReason.InvalidHashCheck) {
+                    {
+                        loadedForm = null
+                        when (snapshot.mode) {
+                            PostEditorMode.Reply -> loadReplyFormIfPossible()
+                            PostEditorMode.Edit -> loadEditFormIfPossible()
+                        }
+                    }
+                } else { null },
+            )
         }
     }
 

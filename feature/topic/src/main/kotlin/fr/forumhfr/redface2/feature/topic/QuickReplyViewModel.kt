@@ -191,8 +191,7 @@ class QuickReplyViewModel @AssistedInject constructor(
                 _state.update {
                     it.copy(
                         submission = value,
-                        isSubmitting = value is EditorSubmissionState.PersistingAttempt ||
-                            value is EditorSubmissionState.Sending,
+                        isSubmitting = value.blocksBodyMutation,
                         confirmVisible = value is EditorSubmissionState.Armed,
                     )
                 }
@@ -459,8 +458,10 @@ class QuickReplyViewModel @AssistedInject constructor(
         val quotes = _state.value.quotes
         viewModelScope.launch {
             ready.await()
-            session.flush(EditorDraftStore.Draft(body = body))
-            _effects.send(QuickReplyEffect.EscalateToFullEditor(quotes))
+            val result = session.flush(EditorDraftStore.Draft(body = body))
+            if (result is EditorDraftStore.StoreWriteResult.Written) {
+                _effects.send(QuickReplyEffect.EscalateToFullEditor(quotes))
+            }
         }
     }
 
@@ -549,16 +550,20 @@ class QuickReplyViewModel @AssistedInject constructor(
                 effect = QuickReplyEffect.SubmitSucceeded(result.targetPage, result.numreponse, quoted),
             )
             is ReplySubmitResult.Failure -> {
-                if (result.reason == ReplyFailureReason.InvalidHashCheck) {
-                    loadedForm = null
-                    prefetchForm()
-                }
                 val error = if (result.reason == ReplyFailureReason.Unknown) {
                     QuickReplySubmitError.Uncertain
                 } else {
                     QuickReplySubmitError.Hfr(result.reason)
                 }
-                EditorDelivery(error = error)
+                EditorDelivery(
+                    error = error,
+                    afterSettled = if (result.reason == ReplyFailureReason.InvalidHashCheck) {
+                        {
+                            loadedForm = null
+                            prefetchForm()
+                        }
+                    } else { null },
+                )
             }
         }
     }

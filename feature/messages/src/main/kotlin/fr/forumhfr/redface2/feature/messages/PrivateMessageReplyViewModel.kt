@@ -67,7 +67,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.yield
 
 /**
  * ED-88/161/169/170/172: private reply with the existing success relay and a durable frozen snapshot.
@@ -616,14 +615,15 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                 ),
             )
             is ReplySubmitResult.Failure -> {
-                if (result.reason == ReplyFailureReason.InvalidHashCheck) {
-                    loadedForm = null
-                    viewModelScope.launch {
-                        yield()
-                        loadForm()
-                    }
-                }
-                EditorDelivery(error = result.reason.toReplyError())
+                EditorDelivery(
+                    error = result.reason.toReplyError(),
+                    afterSettled = if (result.reason == ReplyFailureReason.InvalidHashCheck) {
+                        {
+                            loadedForm = null
+                            loadForm()
+                        }
+                    } else { null },
+                )
             }
         }
 

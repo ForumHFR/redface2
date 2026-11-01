@@ -907,6 +907,10 @@ class PostEditorViewModelTest {
         val authRepository = object : AuthRepository by FakeAuthRepository() {
             override fun observeAuthState(): Flow<AuthState> = auth
         }
+        scenario.changeAccount = {
+            scenario.store.activeOwner = "other"
+            auth.value = AuthState.Authenticated("other")
+        }
         val postGate = CompletableDeferred<Unit>()
         val uploadGate = CompletableDeferred<Unit>()
         val restoreGate = CompletableDeferred<Unit>()
@@ -921,6 +925,7 @@ class PostEditorViewModelTest {
         replyRepository.submitException = scenario.postFailure
         editPostRepository.submitException = scenario.postFailure
         replyRepository.submitGate = postGate
+        replyRepository.submitScenario = scenario
         replyRepository.submitResult = ReplySubmitResult.Success(targetPage = 20, refreshUrl = null)
         if (variant == "quote") {
             replyRepository.formResultsByNumrep = mapOf(
@@ -928,7 +933,12 @@ class PostEditorViewModelTest {
             )
         }
         editPostRepository.submitGate = postGate
+        editPostRepository.submitScenario = scenario
         editPostRepository.submitResult = ReplySubmitResult.Success(targetPage = 20, refreshUrl = null)
+        scenario.postRejection?.let {
+            replyRepository.submitResult = ReplySubmitResult.Failure(it)
+            editPostRepository.submitResult = ReplySubmitResult.Failure(it)
+        }
         uploadRepository.uploadGate = uploadGate
         val defaults = FakeUserPreferencesRepository(quoteCardsEnabled = true)
         val userPreferences = object : UserPreferencesRepository by defaults {
@@ -969,6 +979,7 @@ class PostEditorViewModelTest {
             }
             override val uploadUnsupportedReason: String? = null
             override val postCalls get() = replyRepository.submitCalls + editPostRepository.submitCalls
+            override val formFetchCalls get() = replyRepository.formFetches + editPostRepository.formFetches
             override val uploadCalls get() = uploadRepository.uploadCalls
             override val draftSaves get() = draftStore.saveCount
             override val draftWrites get() = draftStore.writes
@@ -1009,6 +1020,7 @@ class PostEditorViewModelTest {
                         else -> null
                     },
                     restoreOffered = it.restorableDraft != null,
+                    blocksClose = it.submission.blocksBodyMutation,
                 )
             }
 
@@ -2835,6 +2847,7 @@ class PostEditorViewModelTest {
         var submitResult: ReplySubmitResult? = null
         var submitException: Throwable? = null
         var submitGate: CompletableDeferred<Unit>? = null
+        var submitScenario: EditorSubmissionScenario? = null
         var formGate: CompletableDeferred<Unit>? = null
         var formException: Throwable? = null
 
@@ -2880,7 +2893,7 @@ class PostEditorViewModelTest {
             lastSubmittedBbcode = bbcodeContent
             lastSubmittedForm = form
             lastSubmittedOptions = options
-            submitGate?.await()
+            submitGate?.let { gate -> submitScenario?.awaitPost(gate) ?: gate.await() }
             submitException?.let { throw it }
             return submitResult ?: error("submitResult not set")
         }
@@ -2905,6 +2918,7 @@ class PostEditorViewModelTest {
         var submitResult: ReplySubmitResult? = null
         var submitException: Throwable? = null
         var submitGate: CompletableDeferred<Unit>? = null
+        var submitScenario: EditorSubmissionScenario? = null
         var formException: Throwable? = null
         var formGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
 
@@ -2941,7 +2955,7 @@ class PostEditorViewModelTest {
             lastSubmittedContext = context
             lastSubmittedBbcode = bbcodeContent
             lastSubmittedOptions = options
-            submitGate?.await()
+            submitGate?.let { gate -> submitScenario?.awaitPost(gate) ?: gate.await() }
             submitException?.let { throw it }
             return submitResult ?: error("submitResult not set")
         }

@@ -126,6 +126,7 @@ class RoomEditorDraftStoreTransactionTest {
     fun `owner switch after begin cannot finish or erase the previous account row`() = runTest {
         val token = begin()
         auth.value = AuthState.Authenticated("bob")
+        assertEquals(StoreWriteResult.OwnerChanged, store.saveUnresolved(token, Draft("wrong owner"), 1))
         assertEquals(StoreWriteResult.OwnerChanged, store.finishAttempt(token, AttemptOutcome.PUBLISHED))
         assertEquals(StoreWriteResult.OwnerChanged, store.erasePublishedContent(token))
         assertNull(store.loadEntry("alice", key))
@@ -163,10 +164,46 @@ class RoomEditorDraftStoreTransactionTest {
         assertEquals(AttemptStatus.UNCERTAIN, entry.attempt?.status)
         assertEquals("body", entry.draft.body)
         assertEquals(StoreWriteResult.Conflict, store.saveIfVersion("alice", key, Draft("late"), 1))
+        assertEquals(
+            BeginAttemptResult.Rejected(StoreWriteResult.Conflict),
+            store.beginAttempt("alice", key, Draft("unacknowledged retry"), entry.version),
+        )
+        assertEquals(StoreWriteResult.Written(1), store.finishAttempt(token, AttemptOutcome.CERTAIN_FAILURE))
         val retry = store.beginAttempt("alice", key, Draft("retry body"), entry.version)
         assertTrue(retry is BeginAttemptResult.Started)
         assertFalse(token.id == (retry as BeginAttemptResult.Started).token.id)
         assertEquals(StoreWriteResult.Conflict, store.finishAttempt(token, AttemptOutcome.PUBLISHED))
+    }
+
+    @Test
+    fun `editing recovered in progress preserves uncertainty and independent attempt version`() = runTest {
+        val token = begin()
+        assertEquals(StoreWriteResult.Written(2), store.saveUnresolved(token, Draft("edited"), 1))
+        val entry = checkNotNull(store.loadEntry("alice", key))
+        assertEquals("edited", entry.draft.body)
+        assertEquals(2L, entry.version)
+        assertEquals(token, entry.attempt?.token)
+        assertEquals(AttemptStatus.UNCERTAIN, entry.attempt?.status)
+        assertEquals(StoreWriteResult.Conflict, store.saveUnresolved(token, Draft("stale"), 1))
+        assertEquals(StoreWriteResult.Written(2), store.finishAttempt(token, AttemptOutcome.CERTAIN_FAILURE))
+        assertEquals("edited", store.loadEntry("alice", key)?.draft?.body)
+        val retry = store.beginAttempt("alice", key, Draft("edited"), 2) as BeginAttemptResult.Started
+        assertEquals(3L, retry.token.version)
+        assertEquals(StoreWriteResult.Conflict, store.saveUnresolved(token, Draft("old callback"), 3))
+    }
+
+    @Test
+    fun `editing uncertain content keeps headers and cannot overwrite published content`() = runTest {
+        val token = begin()
+        store.finishAttempt(token, AttemptOutcome.UNCERTAIN)
+        val edited = snapshot.copy(body = "new text", subject = "new subject", recipients = "charlie")
+        assertEquals(StoreWriteResult.Written(2), store.saveUnresolved(token, edited, 1))
+        assertEquals(edited.copy(updatedAt = 1234), store.loadEntry("alice", key)?.draft)
+        assertEquals(AttemptStatus.UNCERTAIN, store.loadEntry("alice", key)?.attempt?.status)
+        store.finishAttempt(token, AttemptOutcome.CERTAIN_FAILURE)
+        val retry = store.beginAttempt("alice", key, edited, 2) as BeginAttemptResult.Started
+        store.finishAttempt(retry.token, AttemptOutcome.PUBLISHED)
+        assertEquals(StoreWriteResult.Conflict, store.saveUnresolved(retry.token, Draft("late"), 3))
     }
 
     @Test

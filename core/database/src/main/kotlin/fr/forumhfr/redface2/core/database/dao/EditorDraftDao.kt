@@ -42,13 +42,24 @@ interface EditorDraftDao {
         return versionMatches && writable
     }
 
+    /** ED-170: content has its own revision; editing never turns uncertainty into an ordinary draft. */
+    @Transaction
+    suspend fun saveUnresolved(draft: EditorDraftEntity, expectedVersion: Long): Boolean {
+        val previous = get(draft.draftKey)
+        val matches = previous != null && previous.contentVersion == expectedVersion &&
+            previous.attemptId == draft.attemptId && previous.attemptVersion == draft.attemptVersion &&
+            previous.attemptState in listOf("IN_PROGRESS", "UNCERTAIN")
+        if (matches) upsert(draft.copy(attemptState = "UNCERTAIN"))
+        return matches
+    }
+
     /** ED-170: snapshot plus attempt are committed together; unresolved live sends are exclusive. */
     @Transaction
     suspend fun beginAttempt(draft: EditorDraftEntity, expectedVersion: Long): Boolean {
         val previous = get(draft.draftKey)
         val versionMatches = (previous?.contentVersion ?: 0L) == expectedVersion
         val attemptState = previous?.attemptState
-        val writable = attemptState == null || attemptState == "UNCERTAIN"
+        val writable = attemptState == null
         if (versionMatches && writable) upsert(draft)
         return versionMatches && writable
     }
@@ -59,11 +70,16 @@ interface EditorDraftDao {
         UPDATE editor_drafts SET attemptState = :outcome,
             attemptId = CASE WHEN :outcome IS NULL THEN NULL ELSE attemptId END,
             attemptVersion = CASE WHEN :outcome IS NULL THEN NULL ELSE attemptVersion END
-        WHERE draftKey = :draftKey AND contentVersion = :version AND attemptVersion = :version
+        WHERE draftKey = :draftKey AND attemptVersion = :version
             AND attemptId = :attemptId AND attemptState IN ('IN_PROGRESS', 'UNCERTAIN')
         """,
     )
     suspend fun finishAttempt(draftKey: String, attemptId: String, version: Long, outcome: String?): Int
+
+    /** Outcome acknowledges the attempt, while returning the latest edited content revision atomically. */
+    @Transaction
+    suspend fun finishVersioned(draftKey: String, attemptId: String, version: Long, outcome: String?): Long? =
+        if (finishAttempt(draftKey, attemptId, version, outcome) == 1) get(draftKey)?.contentVersion else null
 
     /** ED-161: keep the published row so old autosaves cannot resurrect its body. */
     @Query(

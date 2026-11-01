@@ -96,6 +96,17 @@ class RoomEditorDraftStore @Inject constructor(
         editorDraftDao.saveVersioned(next, expectedVersion, newComposition = true).result(next.contentVersion)
     }
 
+    override suspend fun saveUnresolved(token: AttemptToken, draft: Draft, expectedVersion: Long): StoreWriteResult =
+        write(token.owner) {
+            val next = draft.toEntity(token.owner, token.key).copy(
+                contentVersion = expectedVersion + 1,
+                attemptId = token.id,
+                attemptVersion = token.version,
+                attemptState = AttemptStatus.UNCERTAIN.name,
+            )
+            editorDraftDao.saveUnresolved(next, expectedVersion).result(next.contentVersion)
+        }
+
     override suspend fun beginAttempt(
         owner: String?,
         key: String,
@@ -126,8 +137,8 @@ class RoomEditorDraftStore @Inject constructor(
                 AttemptOutcome.PUBLISHED -> AttemptStatus.PUBLISHED.name
                 AttemptOutcome.UNCERTAIN -> AttemptStatus.UNCERTAIN.name
             }
-            (editorDraftDao.finishAttempt(rowKey(token.owner, token.key), token.id, token.version, status) == 1)
-                .result(token.version)
+            editorDraftDao.finishVersioned(rowKey(token.owner, token.key), token.id, token.version, status)
+                ?.let { StoreWriteResult.Written(it) } ?: StoreWriteResult.Conflict
         }
 
     override suspend fun erasePublishedContent(token: AttemptToken): StoreWriteResult = write(token.owner) {

@@ -36,6 +36,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
@@ -44,6 +45,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
@@ -301,6 +303,39 @@ class QuickReplyViewModelTest {
         // The effect is only emitted once the row is written — the full editor restores it.
         assertEquals(QuickReplyEffect.EscalateToFullEditor(emptyList()), effect)
         assertEquals("à finir en plein écran", store.storedBody)
+    }
+
+    @Test
+    fun `escalation never announces a refused draft write`() = runTest {
+        val store = FakeQuickReplyDraftStore().apply { saveFailure = IOException("disk full") }
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.onTextChanged(TextFieldValue("unsaved text"))
+        viewModel.effects.test {
+            viewModel.onEscalateRequested()
+            runCurrent()
+            expectNoEvents()
+            assertEquals(QuickReplySubmitError.DraftWriteFailed, viewModel.state.value.submitError)
+        }
+    }
+
+    @Test
+    fun `escalation retains edited text and unresolved attempt`() = runTest {
+        val repository = FakeQuickReplyRepository().apply { submitException = IOException("response lost") }
+        val store = FakeQuickReplyDraftStore()
+        val viewModel = quickReplyViewModel(replyRepository = repository, draftStore = store)
+        viewModel.onTextChanged(TextFieldValue("attempt text"))
+        viewModel.onSubmitClicked()
+        runCurrent()
+        val attempt = store.entries.values.single().attempt?.token
+        viewModel.onTextChanged(TextFieldValue("edited uncertainty"))
+        viewModel.effects.test {
+            viewModel.onEscalateRequested()
+            assertEquals(QuickReplyEffect.EscalateToFullEditor(emptyList()), awaitItem())
+        }
+        val entry = store.entries.values.single()
+        assertEquals("edited uncertainty", entry.draft.body)
+        assertEquals(attempt, entry.attempt?.token)
+        assertEquals(EditorDraftStore.AttemptStatus.UNCERTAIN, entry.attempt?.status)
     }
 
     @Test
@@ -736,8 +771,21 @@ class QuickReplyViewModelTest {
         scenario: EditorSubmissionScenario,
     ): EditorSubmissionAdapter {
         val postGate = CompletableDeferred<Unit>()
-        val repository = FakeQuickReplyRepository().apply { submitGate = postGate }
+        val results = mutableListOf<ReplySubmitResult>()
+        scenario.postRejection?.let { results += ReplySubmitResult.Failure(it) }
+        val repository = FakeQuickReplyRepository(results).apply {
+            submitGate = postGate
+            submitScenario = scenario
+        }
         val store = scenario.store
+        val auth = MutableStateFlow<AuthState>(AuthState.Authenticated("tester"))
+        val authRepository = object : AuthRepository by quickReplyAuthRepository() {
+            override fun observeAuthState(): Flow<AuthState> = auth
+        }
+        scenario.changeAccount = {
+            store.activeOwner = "other"
+            auth.value = AuthState.Authenticated("other")
+        }
         store.preload(EditorDraftKey.reply(23, 35421), EditorDraftStore.Draft(body = "stored draft"))
         repository.submitException = scenario.postFailure
         val userPreferences = object : UserPreferencesRepository by FakeUserPreferencesRepository() {
@@ -749,7 +797,7 @@ class QuickReplyViewModelTest {
             replyRepository = repository,
             quoteMaterializer = TopicReplyQuoteMaterializer(repository),
             sessionResources = EditorSessionResources(
-                store, userPreferences, quickReplyAuthRepository(),
+                store, userPreferences, authRepository,
                 DiagnosticsClock { scope.testScheduler.currentTime * 1_000_000L }, DiagnosticsLog(),
             ),
         ).also { it.onSheetOpened() }
@@ -779,6 +827,7 @@ class QuickReplyViewModelTest {
             )
             override val uploadUnsupportedReason = "la feuille n'expose aucune entrée d'upload"
             override val postCalls get() = repository.submitCalls
+            override val formFetchCalls get() = repository.fetchCalls
             override val uploadCalls: Int = 0
             override val draftSaves get() = store.saveCount
             override val draftWrites get() = store.writes
@@ -805,6 +854,7 @@ class QuickReplyViewModelTest {
                 SubmissionProbe(
                     it.text.text, it.canSubmit, it.isSubmitting, false, it.confirmVisible,
                     armId = token?.id,
+                    blocksClose = it.isSubmitting,
                     error = when (it.submitError) {
                         QuickReplySubmitError.Uncertain -> SubmissionErrorProbe.UNCERTAIN
                         QuickReplySubmitError.DraftWriteFailed -> SubmissionErrorProbe.DRAFT_WRITE_FAILED
@@ -927,6 +977,7 @@ private class FakeQuickReplyRepository(
     var fetchCalls = 0
     var submitCalls = 0
     var submitGate: CompletableDeferred<Unit>? = null
+    var submitScenario: EditorSubmissionScenario? = null
     var submitException: IOException? = null
     val submittedBodies = mutableListOf<String>()
     val submittedPages = mutableListOf<Int>()
@@ -958,7 +1009,7 @@ private class FakeQuickReplyRepository(
         submitCalls++
         submittedBodies += bbcodeContent
         submittedPages += context.page
-        submitGate?.await()
+        submitGate?.let { gate -> submitScenario?.awaitPost(gate) ?: gate.await() }
         submitException?.let { throw it }
         return results.removeFirstOrNull() ?: ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
     }

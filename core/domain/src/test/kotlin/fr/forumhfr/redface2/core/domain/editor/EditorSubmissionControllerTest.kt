@@ -474,6 +474,41 @@ class EditorSubmissionControllerTest {
         assertFalse(controller.blocksBodyMutation)
     }
 
+    @Test
+    fun `restored attempt survives arming and is acknowledged before confirmed retry`() = runTest {
+        controller.openSession(session.copy(id = "restored"), Attempt(attempt, AttemptStatus.IN_PROGRESS))
+        val confirmation = arm()
+        nanos = 400_000_000
+        val accepted = controller.confirm(confirmation) as SubmissionRequest.Accepted
+        controller.execute(accepted.token, ports)
+        assertEquals(listOf("CERTAIN_FAILURE", "begin", "send", "stop", "PUBLISHED", "erase"), ports.events)
+    }
+
+    @Test
+    fun `disarming a restored attempt keeps uncertainty and allows acknowledgement`() = runTest {
+        controller.openSession(session.copy(id = "restored"), Attempt(attempt, AttemptStatus.IN_PROGRESS))
+        arm()
+        assertTrue(controller.disarm())
+        assertEquals(EditorSubmissionState.Uncertain(attempt), controller.state)
+        assertTrue(controller.acknowledgeUncertain(ports))
+        assertEquals(listOf("CERTAIN_FAILURE"), ports.events)
+    }
+
+    @Test
+    fun `arm expiration keeps restored identity for the next confirmed retry`() = runTest {
+        controller.openSession(session.copy(id = "restored"), Attempt(attempt, AttemptStatus.IN_PROGRESS))
+        val expired = arm()
+        nanos = 4_000_000_000
+        controller.expireArm()
+        assertEquals(EditorSubmissionState.Uncertain(attempt), controller.state)
+        assertEquals(SubmissionRequest.Ignored, controller.confirm(expired))
+        val next = arm()
+        nanos += 400_000_000
+        controller.execute((controller.confirm(next) as SubmissionRequest.Accepted).token, ports)
+        assertEquals("CERTAIN_FAILURE", ports.events.first())
+        assertEquals(1, ports.events.count { it == "send" })
+    }
+
     private fun arm(timeout: Long = 4_000): ArmToken =
         (controller.requestSubmit(timeout) as SubmissionRequest.Armed).token
     private fun reserve(): SubmissionToken =

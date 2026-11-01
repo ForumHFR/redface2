@@ -6,7 +6,6 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.awaitCancellation
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -31,13 +30,7 @@ import org.junit.Test
  * Les POST et uploads restent suspendus jusqu'à leur libération explicite, sans temps réel.
  */
 @OptIn(ExperimentalCoroutinesApi::class)
-abstract class EditorSubmissionContract {
-    protected var submissionScenario = EditorSubmissionScenario()
-    protected abstract fun createAdapter(
-        scope: TestScope,
-        preferences: Flow<Boolean>,
-        delayedSharedRestore: Boolean,
-    ): EditorSubmissionAdapter
+abstract class EditorSubmissionContract : EditorSubmissionRecoveryContract() {
 
     @Before
     fun setSubmissionMainDispatcher() {
@@ -473,38 +466,11 @@ abstract class EditorSubmissionContract {
         assumeTrue("upload sans objet : ${adapter.uploadUnsupportedReason}", adapter.uploadUnsupportedReason == null)
     }
 
-    private fun TestScope.startSending(adapter: EditorSubmissionAdapter) {
-        adapter.clickSubmit()
-        runCurrent()
-        assertEquals("le POST doit avoir atteint le repository suspendu", 1, adapter.postCalls)
-        assertTrue(adapter.snapshot().isSending)
-    }
-
     private fun TestScope.succeed(adapter: EditorSubmissionAdapter) {
         startSending(adapter)
         adapter.completePost()
         runCurrent()
         assertEquals("succès réellement consommé avant le geste suivant", 1, adapter.successEffects)
-    }
-
-    private fun withReadyAdapter(
-        preferences: Flow<Boolean> = flowOf(false),
-        delayedSharedRestore: Boolean = false,
-        scenario: EditorSubmissionScenario = EditorSubmissionScenario(),
-        block: suspend TestScope.(EditorSubmissionAdapter) -> Unit,
-    ) = runTest {
-        submissionScenario = scenario
-        val adapter = createAdapter(this, preferences, delayedSharedRestore)
-        try {
-            runCurrent()
-            adapter.editBody("contract body")
-            runCurrent()
-            assertTrue("formulaire valide avant l'exercice du contrat", adapter.snapshot().canSubmit)
-            block(adapter)
-        } finally {
-            adapter.dispose()
-            runCurrent()
-        }
     }
 }
 
@@ -513,6 +479,7 @@ interface EditorSubmissionAdapter {
     val unsupportedMutations: Map<SubmissionBodyMutation, String>
     val uploadUnsupportedReason: String?
     val postCalls: Int
+    val formFetchCalls: Int
     val uploadCalls: Int
     val draftSaves: Int
     val draftWrites: Int
@@ -543,6 +510,7 @@ data class SubmissionProbe(
     val armId: Long? = null,
     val error: SubmissionErrorProbe? = null,
     val restoreOffered: Boolean = false,
+    val blocksClose: Boolean = isSending,
 )
 
 enum class SubmissionErrorProbe { UNCERTAIN, DRAFT_WRITE_FAILED }

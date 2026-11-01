@@ -50,6 +50,9 @@ interface EditorDraftStore {
     /** ED-161/170: CAS autosave; unresolved or published attempts reject ordinary saves. */
     suspend fun saveIfVersion(owner: String?, key: String, draft: Draft, expectedVersion: Long): StoreWriteResult
 
+    /** ED-170: edit unresolved content by CAS without acknowledging or replacing its attempt identity. */
+    suspend fun saveUnresolved(token: AttemptToken, draft: Draft, expectedVersion: Long): StoreWriteResult
+
     /** ED-161: explicitly start a new composition after publication, never by a late autosave. */
     suspend fun startNewComposition(owner: String?, key: String, draft: Draft, expectedVersion: Long): StoreWriteResult
 
@@ -65,7 +68,7 @@ interface EditorDraftStore {
     /** ED-170: migrated drafts start at version 0, also used for absent rows when writing. */
     data class DraftEntry(val draft: Draft, val version: Long, val attempt: Attempt? = null)
 
-    /** ED-170: opaque identity bound to one account, editor context and content version. */
+    /** ED-170: identity bound to an account, context and initial revision; later edits keep this version. */
     data class AttemptToken(val owner: String, val key: String, val id: String, val version: Long)
 
     /** ED-170: one durable attempt and the outcome currently known for it. */

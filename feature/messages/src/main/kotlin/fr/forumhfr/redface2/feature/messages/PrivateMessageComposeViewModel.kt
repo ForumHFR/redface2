@@ -65,7 +65,6 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.yield
 
 /**
  * ED-87/88/161/170/172: new MP with frozen recipients, subject and body before durable submission.
@@ -630,14 +629,15 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                 effect = PrivateMessageComposeEffect.SubmitSucceeded,
             )
             is ReplySubmitResult.Failure -> {
-                if (result.reason == ReplyFailureReason.InvalidHashCheck) {
-                    loadedForm = null
-                    viewModelScope.launch {
-                        yield()
-                        loadForm()
-                    }
-                }
-                EditorDelivery(error = result.reason.toComposeError())
+                EditorDelivery(
+                    error = result.reason.toComposeError(),
+                    afterSettled = if (result.reason == ReplyFailureReason.InvalidHashCheck) {
+                        {
+                            loadedForm = null
+                            loadForm()
+                        }
+                    } else { null },
+                )
             }
         }
 

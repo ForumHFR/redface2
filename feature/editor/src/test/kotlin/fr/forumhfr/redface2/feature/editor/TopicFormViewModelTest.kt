@@ -1651,11 +1651,20 @@ class TopicFormViewModelTest {
         val authRepository = object : AuthRepository by FakeAuthRepository() {
             override fun observeAuthState(): Flow<AuthState> = auth
         }
+        scenario.changeAccount = {
+            scenario.store.activeOwner = "other"
+            auth.value = AuthState.Authenticated("other")
+        }
         val postGate = CompletableDeferred<Unit>()
         val uploadCompletion = CompletableDeferred<Unit>()
         val uploads = FakeUploadRepository().apply { uploadGate = uploadCompletion }
         topicFormRepository.submitException = scenario.postFailure
         topicFormRepository.submitGate = postGate
+        topicFormRepository.submitScenario = scenario
+        scenario.postRejection?.let {
+            topicFormRepository.submitResult = ReplySubmitResult.Failure(it)
+            topicFormRepository.newTopicSubmitResult = NewTopicSubmitResult.Failure(it)
+        }
         val key = if (creating) {
             EditorDraftKey.newTopic(SAMPLE_CAT)
         } else {
@@ -1701,6 +1710,8 @@ class TopicFormViewModelTest {
             )
             override val uploadUnsupportedReason: String? = null
             override val postCalls get() = topicFormRepository.submitCalls + topicFormRepository.newTopicSubmitCalls
+            override val formFetchCalls get() =
+                topicFormRepository.formFetches + topicFormRepository.newTopicFormFetches
             override val uploadCalls get() = uploads.uploadCalls
             override val draftSaves get() = draftStore.saveCount
             override val draftWrites get() = draftStore.writes
@@ -1744,6 +1755,7 @@ class TopicFormViewModelTest {
                         else -> null
                     },
                     restoreOffered = it.restorableDraft != null,
+                    blocksClose = it.submission.blocksBodyMutation,
                 )
             }
 
@@ -1958,6 +1970,7 @@ class TopicFormViewModelTest {
         // #312 — holds an in-flight submit (both Edit FP and New) until the test releases it,
         // mirroring `FakeReplyRepository.submitGate` in `PostEditorViewModelTest`.
         var submitGate: CompletableDeferred<Unit>? = null
+        var submitScenario: EditorSubmissionScenario? = null
         var submitException: java.io.IOException? = null
 
         var formFetches: Int = 0
@@ -2007,7 +2020,7 @@ class TopicFormViewModelTest {
             lastSubmittedSubcat = selectedSubcat
             lastSubmittedOptions = options
             lastSubmittedForm = form
-            submitGate?.await()
+            submitGate?.let { gate -> submitScenario?.awaitPost(gate) ?: gate.await() }
             submitException?.let { throw it }
             return submitResult ?: error("submitResult not set")
         }
@@ -2034,7 +2047,7 @@ class TopicFormViewModelTest {
             lastSubmittedSubcat = selectedSubcat
             lastSubmittedOptions = options
             lastSubmittedForm = form
-            submitGate?.await()
+            submitGate?.let { gate -> submitScenario?.awaitPost(gate) ?: gate.await() }
             submitException?.let { throw it }
             return newTopicSubmitResult ?: error("newTopicSubmitResult not set")
         }

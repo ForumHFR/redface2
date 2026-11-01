@@ -23,6 +23,7 @@ class EditorSubmissionController(private val clock: DiagnosticsClock, initialSes
     private var executing: SubmissionToken? = null
     private var activeSubmission: SubmissionToken? = null
     private var retryAttempt: AttemptToken? = null
+    private var unresolvedAttempt: AttemptToken? = null
     private var successAvailable: AttemptToken? = null
     private var publishedAttempt: AttemptToken? = null
 
@@ -40,6 +41,7 @@ class EditorSubmissionController(private val clock: DiagnosticsClock, initialSes
         successAvailable = null
         publishedAttempt = null
         state = restoredState(next, restored)
+        unresolvedAttempt = (state as? EditorSubmissionState.Uncertain)?.attempt
     }
 
     fun requestSubmit(
@@ -76,7 +78,7 @@ class EditorSubmissionController(private val clock: DiagnosticsClock, initialSes
     /** Typing and back disarm. The caller must reject its mutation/close when this returns false. */
     fun disarm(): Boolean {
         if (blocksBodyMutation) return false
-        if (state is EditorSubmissionState.Armed) state = EditorSubmissionState.Ready
+        if (state is EditorSubmissionState.Armed) state = editableState()
         return true
     }
 
@@ -103,6 +105,7 @@ class EditorSubmissionController(private val clock: DiagnosticsClock, initialSes
             executeReserved(token, ports)
         } catch (cancelled: CancellationException) {
             if (isCurrent(token) && publishedAttempt == null) {
+                unresolvedAttempt = currentAttempt()
                 state = EditorSubmissionState.Uncertain(currentAttempt(), state is EditorSubmissionState.Succeeded)
             }
             throw cancelled
@@ -139,6 +142,7 @@ class EditorSubmissionController(private val clock: DiagnosticsClock, initialSes
             val result = finishOutcome(attempt, AttemptOutcome.CERTAIN_FAILURE, ports)
             if (result !is StoreWriteResult.Written) ports.recordFailure(EditorSubmissionFailure.OUTCOME, result)
             val acknowledged = result is StoreWriteResult.Written && isCurrent(token)
+            if (acknowledged) unresolvedAttempt = null
             if (isCurrent(token)) state = if (acknowledged) EditorSubmissionState.Ready else uncertain
             acknowledged
         } catch (cancelled: CancellationException) {
@@ -161,7 +165,7 @@ class EditorSubmissionController(private val clock: DiagnosticsClock, initialSes
     private fun reserve(): SubmissionRequest.Accepted {
         val token = SubmissionToken(++sequence, session)
         activeSubmission = token
-        retryAttempt = (state as? EditorSubmissionState.Uncertain)?.attempt
+        retryAttempt = unresolvedAttempt
         state = EditorSubmissionState.PersistingAttempt(token)
         return SubmissionRequest.Accepted(token)
     }
@@ -181,6 +185,7 @@ class EditorSubmissionController(private val clock: DiagnosticsClock, initialSes
             is BeginAttemptResult.Started -> {
                 val attempt = result.token
                 if (isCurrent(token) && matches(token, attempt)) {
+                    unresolvedAttempt = attempt
                     state = EditorSubmissionState.Sending(attempt)
                     send(token, attempt, ports)
                 } else if (isCurrent(token)) {
@@ -198,6 +203,9 @@ class EditorSubmissionController(private val clock: DiagnosticsClock, initialSes
         if (!cleared) {
             ports.recordFailure(EditorSubmissionFailure.OUTCOME, result)
             if (isCurrent(token)) state = EditorSubmissionState.Uncertain(previous)
+        } else if (isCurrent(token)) {
+            unresolvedAttempt = null
+            retryAttempt = null
         }
         return cleared
     }
@@ -219,6 +227,9 @@ class EditorSubmissionController(private val clock: DiagnosticsClock, initialSes
             val result = finishOutcome(attempt, durable, ports)
             if (result !is StoreWriteResult.Written) ports.recordFailure(EditorSubmissionFailure.OUTCOME, result)
             if (isCurrent(token)) {
+                unresolvedAttempt = attempt.takeUnless {
+                    durable == AttemptOutcome.CERTAIN_FAILURE && result is StoreWriteResult.Written
+                }
                 state = if (durable == AttemptOutcome.CERTAIN_FAILURE && result is StoreWriteResult.Written) {
                     EditorSubmissionState.Ready
                 } else {
@@ -281,6 +292,9 @@ class EditorSubmissionController(private val clock: DiagnosticsClock, initialSes
 
     private fun isCurrent(token: SubmissionToken): Boolean =
         session == token.session && activeSubmission == token
+
+    private fun editableState(): EditorSubmissionState =
+        unresolvedAttempt?.let { EditorSubmissionState.Uncertain(it) } ?: EditorSubmissionState.Ready
 
     private fun matches(token: SubmissionToken, attempt: AttemptToken): Boolean =
         token.session.owner == attempt.owner && token.session.key == attempt.key

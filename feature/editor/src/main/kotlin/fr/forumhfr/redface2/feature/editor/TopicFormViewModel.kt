@@ -849,14 +849,18 @@ class TopicFormViewModel @AssistedInject constructor(
     }
 
     private fun failureDelivery(reason: ReplyFailureReason): EditorDelivery<TopicFormEffect> {
-        if (reason == ReplyFailureReason.InvalidHashCheck) {
-            loadedForm = null
-            when (request.mode) {
-                TopicFormMode.New -> loadNewTopicFormIfPossible()
-                TopicFormMode.EditFirstPost -> loadEditFirstPostFormIfPossible()
-            }
-        }
-        return EditorDelivery(error = SubmitError.Hfr(reason))
+        return EditorDelivery(
+            error = SubmitError.Hfr(reason),
+            afterSettled = if (reason == ReplyFailureReason.InvalidHashCheck) {
+                {
+                    loadedForm = null
+                    when (request.mode) {
+                        TopicFormMode.New -> loadNewTopicFormIfPossible()
+                        TopicFormMode.EditFirstPost -> loadEditFirstPostFormIfPossible()
+                    }
+                }
+            } else { null },
+        )
     }
 
     /**
