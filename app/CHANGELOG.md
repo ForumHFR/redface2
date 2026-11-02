@@ -16,6 +16,19 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.67.0` — `internal` (dev) — 2026-11-02
+
+Accusés d'envoi dans la vue Topic ([#1437](https://github.com/ForumHFR/redface2/issues/1437), [#1446](https://github.com/ForumHFR/redface2/issues/1446), volet Topic de [#1301](https://github.com/ForumHFR/redface2/issues/1301) ; [#1525](https://github.com/ForumHFR/redface2/pull/1525)) : une seule confirmation par envoi, qui ne disparaît plus en un éclair.
+
+- **« Message publié »** après une réponse ou une citation, **« Message modifié »** après une édition (premier message compris). Aussi depuis les drapeaux.
+- Durée fixe : 4 s, ou 10 s quand un bouton est proposé, allongée selon les réglages d'accessibilité. La fin du rafraîchissement ne la coupe plus.
+- **« Message supprimé »** s'affiche de la même façon (plus de bulle système).
+- Après une citation d'une page ancienne : « Message publié » avec le bouton **« Dernière page »**, au lieu d'un numéro de page deviné. Le bouton va à la vraie dernière page au moment du toucher.
+- Si la page tarde à se rafraîchir, la confirmation arrive au bout d'1 s au plus, une seule fois ; un échec du rafraîchissement est signalé à part.
+- L'offre « Dernière page » survit à une rotation ou au retour dans l'app, et disparaît au changement de compte.
+
+---
+
 ## `0.66.0` — `internal` (dev) — 2026-11-02
 
 Envoi des messages plus sûr ([#1301](https://github.com/ForumHFR/redface2/issues/1301), [#1522](https://github.com/ForumHFR/redface2/pull/1522)), premier lot de la refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)) : un envoi confirmé part au plus une fois, et un message publié n'est plus reproposé comme brouillon. Concerne la réponse et la citation, le nouveau sujet, la réponse et la composition de MP, et la réponse rapide.
