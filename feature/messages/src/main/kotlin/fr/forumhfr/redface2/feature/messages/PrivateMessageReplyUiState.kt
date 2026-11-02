@@ -1,6 +1,8 @@
 package fr.forumhfr.redface2.feature.messages
 
 import androidx.compose.ui.text.input.TextFieldValue
+import fr.forumhfr.redface2.core.domain.editor.ArmToken
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.ui.editor.UploadError
@@ -41,11 +43,12 @@ data class PrivateMessageReplyUiState(
      * (and thus clobber) a toggle the user changed in between.
      */
     val optionsHydratedFromForm: Boolean = false,
+    val submission: EditorSubmissionState = EditorSubmissionState.Ready,
     val isSubmitting: Boolean = false,
     val submitError: PrivateMessageReplyError? = null,
     /**
      * #312 — `true` while the « Confirmation avant publication » dialog is shown. Only raised when
-     * the persisted preference is on AND the submit already passed every validation gate (mirrors
+     * the preference is active/unknown AND the submit already passed every validation gate (mirrors
      * the post editor's `showSubmitConfirmation`). Confirm / dismiss go through
      * [PrivateMessageReplyViewModel.onSubmitConfirmed] / [PrivateMessageReplyViewModel.onSubmitConfirmationDismissed].
      */
@@ -53,7 +56,7 @@ data class PrivateMessageReplyUiState(
     /**
      * #405 — body of a previously-cached private-reply draft for this thread, surfaced on init when
      * a non-empty draft was found. Non-null means « propose a restore » : « Restaurer » pre-fills
-     * the editor, « Ignorer » deletes the cached row. Never silently applied nor lost.
+     * the editor, « Ignorer » clears the cached content. Never silently applied nor lost.
      */
     val restorableDraft: String? = null,
     /**
@@ -88,8 +91,11 @@ data class PrivateMessageReplyUiState(
     /** #1128 — observed continuously so the next image pick uses the current preference. */
     val imagePickerMode: ImagePickerMode = ImagePickerMode.DEFAULT,
 ) {
+    val armToken: ArmToken? get() = (submission as? EditorSubmissionState.Armed)?.token
+
     val canSubmit: Boolean
-        get() = formAvailable && !isLoadingForm && !isSubmitting && draft.text.isNotBlank()
+        get() = formAvailable && !isLoadingForm && !isSubmitting && !isUploading &&
+            !submission.blocksBodyMutation && draft.text.isNotBlank()
 }
 
 /**
@@ -107,5 +113,7 @@ sealed interface PrivateMessageReplyError {
     data object LoginRequired : PrivateMessageReplyError
     data object Network : PrivateMessageReplyError
     data object SessionExpired : PrivateMessageReplyError
+    data object Uncertain : PrivateMessageReplyError
+    data object DraftWriteFailed : PrivateMessageReplyError
     data object Unexpected : PrivateMessageReplyError
 }

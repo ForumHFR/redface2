@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <string name="editor_submission_uncertain">Envoi incertain</string>
+    <string name="editor_submission_draft_write_failed">Brouillon non écrit</string>
     <string name="post_mood_icon_description">Ton du message</string>
     <!-- #1040 lot 6 — primitive de sélection de page partagée, sans politique de feature. -->
     <string name="pager_previous">Précédent</string>

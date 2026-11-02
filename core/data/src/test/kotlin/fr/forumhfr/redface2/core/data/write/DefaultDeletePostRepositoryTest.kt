@@ -57,6 +57,7 @@ class DefaultDeletePostRepositoryTest {
         server.shutdown()
     }
 
+    /** ED-168 — vert : submitEditPost sert aussi à supprimer, son succès HTML doit rester reconnu. */
     @Test
     fun `delete posts to bdd_php with delete=1 and the edit fields, returns a normal-post Success`() = runTest {
         server.enqueue(MockResponse().setBody(fixture("write_delete_post_form.html")))
@@ -92,6 +93,7 @@ class DefaultDeletePostRepositoryTest {
         assertEquals("35395", body["post"])
         assertEquals("20", body["page"])
         assertFalse("password must never be transmitted", body.containsKey("password"))
+        assertEquals("un GET de préparation et un seul POST de suppression", 2, server.requestCount)
     }
 
     @Test

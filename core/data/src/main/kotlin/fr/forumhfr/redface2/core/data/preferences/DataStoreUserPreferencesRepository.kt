@@ -411,7 +411,8 @@ class DataStoreUserPreferencesRepository @Inject constructor(
             // Default `false`: publishing stays one-tap unless the user opts into the #312 guard.
             .map { prefs -> prefs[KEY_CONFIRM_BEFORE_POSTING] ?: false }
             .distinctUntilChanged()
-            .catch { emit(false) }
+            // ED-171: a failed read never establishes that confirmation was disabled.
+            .catch { emit(true) }
 
     override suspend fun setConfirmBeforePosting(enabled: Boolean) {
         persist {

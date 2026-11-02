@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.domain.editor
 
+import java.io.IOException
 import java.security.MessageDigest
 
 /**
@@ -14,8 +15,9 @@ import java.security.MessageDigest
  *
  * [load]/[save]/[delete] take a stable, content-free context [key] built by [EditorDraftKey]; it
  * never embeds message bodies, subjects or recipients. MP drafts ([Draft.isPrivate] == true) are
- * wiped on logout/account switch (CacheInvalidator); all drafts older than the retention TTL are
- * pruned on app start. No draft content is ever logged or surfaced in diagnostics.
+ * stripped of content on logout/account switch (CacheInvalidator), retaining only durable attempts;
+ * all drafts older than the retention TTL are pruned on app start. No draft content is ever logged
+ * or surfaced in diagnostics.
  */
 interface EditorDraftStore {
 
@@ -30,7 +32,8 @@ interface EditorDraftStore {
     suspend fun load(owner: String?, key: String): Draft?
 
     /**
-     * Upserts [draft] under [key] for [owner], stamping `updatedAt` from the clock. No-op when
+     * Legacy autosave: upserts ordinary drafts, but cannot overwrite any durable attempt.
+     * Stamps `updatedAt` from the clock. No-op when
      * [owner] is null (anonymous session) OR when [owner] is no longer the active account: the
      * draft belongs to a session whose account has switched or logged out, so persisting it would
      * either leak it to the new account or revive a row the logout purge already swept.
@@ -39,13 +42,61 @@ interface EditorDraftStore {
      */
     suspend fun save(owner: String?, key: String, draft: Draft)
 
-    /**
-     * Deletes [owner]'s draft under [key] (called on a successful POST). No-op when [owner] is null.
-     * Best-effort: it is awaited on the post-success path, so it MUST NOT throw on a local DB
-     * failure — a surviving row only costs a spurious restore prompt and must never abort a
-     * successful post. (Genuine coroutine cancellation still propagates.)
-     */
+    /** Legacy best-effort deletion. New sends must use [erasePublishedContent], which reports failures. */
     suspend fun delete(owner: String?, key: String)
+
+    /** ED-170: read content and its durable outcome together, before any restoration. */
+    suspend fun loadEntry(owner: String?, key: String): DraftEntry?
+
+    /** ED-161/170: CAS autosave; unresolved or published attempts reject ordinary saves. */
+    suspend fun saveIfVersion(owner: String?, key: String, draft: Draft, expectedVersion: Long): StoreWriteResult
+
+    /** ED-170: edit unresolved content by CAS without acknowledging or replacing its attempt identity. */
+    suspend fun saveUnresolved(token: AttemptToken, draft: Draft, expectedVersion: Long): StoreWriteResult
+
+    /** ED-161: explicitly start a new composition after publication, never by a late autosave. */
+    suspend fun startNewComposition(owner: String?, key: String, draft: Draft, expectedVersion: Long): StoreWriteResult
+
+    /** ED-170: atomically store the complete snapshot and IN_PROGRESS before issuing any POST. */
+    suspend fun beginAttempt(owner: String?, key: String, snapshot: Draft, expectedVersion: Long): BeginAttemptResult
+
+    /**
+     * ED-170: compare identity/version; certain failure clears only the attempt, even after an account
+     * switch. This metadata-only resolution never exposes the old owner's content to the new account.
+     */
+    suspend fun finishAttempt(token: AttemptToken, outcome: AttemptOutcome): StoreWriteResult
+
+    /** ED-161: erase only a matching published attempt's content, preserving the durable marker. */
+    suspend fun erasePublishedContent(token: AttemptToken): StoreWriteResult
+
+    /** ED-170: migrated drafts start at version 0, also used for absent rows when writing. */
+    data class DraftEntry(val draft: Draft, val version: Long, val attempt: Attempt? = null)
+
+    /** ED-170: identity bound to an account, context and initial revision; later edits keep this version. */
+    data class AttemptToken(val owner: String, val key: String, val id: String, val version: Long)
+
+    /** ED-170: one durable attempt and the outcome currently known for it. */
+    data class Attempt(val token: AttemptToken, val status: AttemptStatus)
+
+    /** ED-170: nullable attempt is the only ordinary-draft representation. */
+    enum class AttemptStatus { IN_PROGRESS, PUBLISHED, UNCERTAIN }
+
+    /** ED-161/170: certain failure clears metadata; publication retains a tombstone. */
+    enum class AttemptOutcome { PUBLISHED, CERTAIN_FAILURE, UNCERTAIN }
+
+    /** ED-170: no-op and failed writes can never authorize a POST. */
+    sealed interface StoreWriteResult {
+        data class Written(val version: Long) : StoreWriteResult
+        data object OwnerChanged : StoreWriteResult
+        data object Conflict : StoreWriteResult
+        data class Failed(val cause: IOException) : StoreWriteResult
+    }
+
+    /** ED-170: only Started carries permission to continue to the network pipeline. */
+    sealed interface BeginAttemptResult {
+        data class Started(val token: AttemptToken) : BeginAttemptResult
+        data class Rejected(val reason: StoreWriteResult) : BeginAttemptResult
+    }
 
     data class Draft(
         val body: String,

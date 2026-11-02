@@ -28,12 +28,16 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.LocalAccessibilityManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -44,8 +48,11 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
+import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummary
+import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummaryKind
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsCallbacks
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsColumn
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
@@ -82,11 +89,13 @@ internal fun QuickReplySheet(
     // every `quickReplyFor` setter in TopicScreen (FAB, « Citer », « Citer N ») sits behind this
     // modal's scrim, so a new launch can only happen after a dismiss nulled the previous one
     // (gate Codex, finding 2). Re-assigning the launch over an OPEN sheet would break delivery.
+    var openingDelivered by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(viewModel) {
         // Re-seed the field from the #405 row at EACH opening — the VM outlives the sheet and
         // its cached text can be stale after a full-screen edit of the same draft (gate #788).
         // The VM outlives the sheet (topic-scoped) : hand it the page of THIS opening (#1243 suite).
-        viewModel.onSheetOpened(currentPage = request.page, initialQuotes = initialQuotes)
+        viewModel.onSheetAttached(request.page, initialQuotes, restored = openingDelivered)
+        openingDelivered = true
         viewModel.effects.collect { effect ->
             when (effect) {
                 is QuickReplyEffect.SubmitSucceeded ->
@@ -95,13 +104,17 @@ internal fun QuickReplySheet(
             }
         }
     }
+    val timeoutMillis = LocalAccessibilityManager.current?.calculateRecommendedTimeoutMillis(
+        4_000L, containsIcons = false, containsText = true, containsControls = true,
+    ) ?: 4_000L
+    val armToken = (state.submission as? EditorSubmissionState.Armed)?.token
     val fullScreenLabel = stringResource(R.string.quick_reply_fullscreen)
     val focusRequester = remember { FocusRequester() }
-    // Gate #788 — the sheet must not dismiss while a POST is in flight: the effect collector
-    // lives here, so tearing the sheet down mid-submit would drop SubmitSucceeded (no topic
-    // refresh) or replay it at the next opening. `submitting` is read through
+    // ED-161 / gate #788 — retain the sheet through the POST and accepted-success cleanup:
+    // its effect collector must survive until SubmitSucceeded, without replay at the next opening.
+    // `submitting` is read through
     // rememberUpdatedState because both guards below are remembered once.
-    val submitting = rememberUpdatedState(state.isSubmitting)
+    val submitting = rememberUpdatedState(state.submission.blocksBodyMutation)
     // #854 — no half-height stop : this is a TYPING surface (autofocused field, IME quasi
     // permanent), the M3 PartiallyExpanded state only ever appears when a short display makes
     // the content taller than half the screen — and then a back/swipe must dismiss in ONE step,
@@ -151,25 +164,7 @@ internal fun QuickReplySheet(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        text = stringResource(R.string.quick_reply_title),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.weight(1f),
-                    )
-                    IconButton(
-                        onClick = viewModel::onEscalateRequested,
-                        // Gate #788 — no escalation while a POST is in flight (submit vs navigation
-                        // race) ; #805 — nor while a [quotemsg] insert is being fetched.
-                        enabled = !state.isSubmitting && !state.isPreparingQuotes,
-                        modifier = Modifier.semantics { contentDescription = fullScreenLabel },
-                    ) {
-                        RedfaceVectorIcon(
-                            resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_ms_open_in_new,
-                        )
-                    }
-                }
+                QuickReplyHeader(state, fullScreenLabel, onEscalate = viewModel::onEscalateRequested)
                 // #604 lot 4a — shared column : cards + live-region announcements + post-removal
                 // focus (always composed ; renders nothing visible without cards).
                 // #808 — the cards block is CAPPED and scrolls internally so a heavy selection can
@@ -195,7 +190,7 @@ internal fun QuickReplySheet(
                 OutlinedTextField(
                     value = state.text,
                     onValueChange = viewModel::onTextChanged,
-                    enabled = !state.isSubmitting,
+                    readOnly = state.submission.blocksBodyMutation,
                     // #807 — same #237 contract as BbcodeTextField : Compose capitalises NOTHING by
                     // default, the IME needs the explicit autoCap hint (surface regression, v220).
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
@@ -206,59 +201,90 @@ internal fun QuickReplySheet(
                         .fillMaxWidth()
                         .focusRequester(focusRequester),
                 )
-                // #805 cards OFF — the [quotemsg] fetch runs at opening : typing stays enabled (the
-                // insert concatenates onto the live field), only send/escalate wait for it.
-                if (state.isPreparingQuotes) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        CircularProgressIndicator(
-                            modifier = Modifier.padding(end = 8.dp).size(16.dp),
-                            strokeWidth = 2.dp,
-                        )
-                        Text(
-                            text = stringResource(R.string.quick_reply_preparing_quote),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-                state.submitError?.let { error ->
-                    Text(
-                        text = stringResource(error.messageRes()),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.error,
-                    )
-                }
+                QuickReplyStatus(state)
             }
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
-                horizontalArrangement = Arrangement.End,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                if (state.isSubmitting) {
-                    CircularProgressIndicator(modifier = Modifier.padding(end = 12.dp))
-                }
-                TextButton(
-                    onClick = viewModel::onSubmitClicked,
-                    enabled = state.canSubmit,
-                ) {
-                    Text(stringResource(R.string.quick_reply_send))
-                }
-            }
+            QuickReplyActions(state, onSubmit = { viewModel.onSubmitClicked(timeoutMillis) })
         }
     }
     // The field grabs the focus once per sheet opening — the IME rises with the sheet.
     LaunchedEffect(Unit) { focusRequester.requestFocus() }
-    if (state.confirmVisible) {
+    QuickReplyConfirmationDialog(
+        visible = state.confirmVisible,
+        onConfirm = { viewModel.onSubmitConfirmed(armToken) },
+        onDismiss = viewModel::onSubmitConfirmDismissed,
+    )
+}
+
+@Composable
+private fun QuickReplyHeader(state: QuickReplyUiState, fullScreenLabel: String, onEscalate: () -> Unit) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            text = stringResource(R.string.quick_reply_title),
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.weight(1f),
+        )
+        IconButton(
+            onClick = onEscalate,
+            // Gate #788 — no escalation while a POST is in flight (submit vs navigation
+            // race) ; #805 — nor while a [quotemsg] insert is being fetched.
+            enabled = !state.isSubmitting && !state.isPreparingQuotes,
+            modifier = Modifier.semantics { contentDescription = fullScreenLabel },
+        ) {
+            RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_ms_open_in_new)
+        }
+    }
+}
+
+@Composable
+private fun QuickReplyStatus(state: QuickReplyUiState) {
+    // #805 cards OFF — the [quotemsg] fetch runs at opening : typing stays enabled (the
+    // insert concatenates onto the live field), only send/escalate wait for it.
+    if (state.isPreparingQuotes) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            CircularProgressIndicator(
+                modifier = Modifier.padding(end = 8.dp).size(16.dp),
+                strokeWidth = 2.dp,
+            )
+            Text(
+                text = stringResource(R.string.quick_reply_preparing_quote),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    state.submitError?.let { error -> QuickReplyErrorBanner(error) }
+}
+
+@Composable
+private fun QuickReplyActions(state: QuickReplyUiState, onSubmit: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (state.isSubmitting) {
+            CircularProgressIndicator(modifier = Modifier.padding(end = 12.dp))
+        }
+        TextButton(onClick = onSubmit, enabled = state.canSubmit) {
+            Text(stringResource(R.string.quick_reply_send))
+        }
+    }
+}
+
+@Composable
+private fun QuickReplyConfirmationDialog(visible: Boolean, onConfirm: () -> Unit, onDismiss: () -> Unit) {
+    if (visible) {
         AlertDialog(
-            onDismissRequest = viewModel::onSubmitConfirmDismissed,
+            onDismissRequest = onDismiss,
             title = { Text(stringResource(R.string.quick_reply_confirm_title)) },
             confirmButton = {
-                TextButton(onClick = viewModel::onSubmitConfirmed) {
+                TextButton(onClick = onConfirm) {
                     Text(stringResource(R.string.quick_reply_confirm_action))
                 }
             },
             dismissButton = {
-                TextButton(onClick = viewModel::onSubmitConfirmDismissed) {
+                TextButton(onClick = onDismiss) {
                     Text(stringResource(R.string.quick_reply_confirm_cancel))
                 }
             },
@@ -266,8 +292,27 @@ internal fun QuickReplySheet(
     }
 }
 
+/** The sheet's submission summary and verification detail, in the existing fields column. */
+@Composable
+internal fun QuickReplyErrorBanner(error: QuickReplySubmitError) {
+    val summary = when (error) {
+        QuickReplySubmitError.Uncertain -> EditorSubmissionSummaryKind.Uncertain
+        QuickReplySubmitError.DraftWriteFailed -> EditorSubmissionSummaryKind.DraftWriteFailed
+        else -> null
+    }
+    if (summary != null) EditorSubmissionSummary(summary)
+    if (error != QuickReplySubmitError.DraftWriteFailed) Text(
+        text = stringResource(error.messageRes()),
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.error,
+    )
+}
+
 /** The same wording as the full editor's error banner, module-local copies (feature/topic res). */
 internal fun QuickReplySubmitError.messageRes(): Int = when (this) {
+    QuickReplySubmitError.Uncertain -> R.string.quick_reply_error_uncertain
+    QuickReplySubmitError.DraftWriteFailed ->
+        fr.forumhfr.redface2.core.ui.R.string.editor_submission_draft_write_failed
     QuickReplySubmitError.Network -> R.string.quick_reply_error_network
     QuickReplySubmitError.SessionExpired -> R.string.quick_reply_error_session_expired
     QuickReplySubmitError.QuoteFetchFailed -> R.string.quick_reply_error_quote_fetch

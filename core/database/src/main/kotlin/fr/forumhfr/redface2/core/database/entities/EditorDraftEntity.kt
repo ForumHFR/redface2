@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.database.entities
 
+import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
@@ -11,7 +12,8 @@ import androidx.room.PrimaryKey
  *
  * Privacy: [ownerId] (HFR pseudo, lowercase) lets the logout/account-switch purge wipe a single
  * account's drafts exactly (CacheInvalidator), without a LIKE-prefix scan. [isPrivate] rows are
- * MP drafts — wiped on the same transition (an MP draft reveals a recipient + message). Public
+ * MP drafts — their content is wiped on the same transition (an MP draft reveals a recipient +
+ * message); only durable attempt metadata survives, still bound to its owner. Public
  * post drafts survive logout but are bounded by the 30-day retention purge run on app start.
  * Stored content is never logged or sent to diagnostics (#405).
  */
@@ -31,4 +33,11 @@ data class EditorDraftEntity(
     val updatedAt: Long,
     /** True for MP drafts (`mpreply`/`mpnew`): wiped on logout/account switch. */
     val isPrivate: Boolean,
+    /** ED-170: CAS generation; incremented by each content write, including explicit new sessions. */
+    @ColumnInfo(defaultValue = "0") val contentVersion: Long = 0,
+    /** ED-170: nullable for ordinary drafts written before or after a certain failure. */
+    val attemptId: String? = null,
+    val attemptVersion: Long? = null,
+    /** ED-170: IN_PROGRESS, PUBLISHED or UNCERTAIN; no content is encoded in this marker. */
+    val attemptState: String? = null,
 )

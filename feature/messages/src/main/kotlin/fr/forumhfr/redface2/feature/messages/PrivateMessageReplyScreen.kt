@@ -31,10 +31,8 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
-import fr.forumhfr.redface2.core.ui.editor.rememberEditorImagePicker
-import fr.forumhfr.redface2.core.ui.editor.UploadProgressLabel
-import fr.forumhfr.redface2.core.ui.editor.bannerText
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
@@ -44,7 +42,10 @@ import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
+import fr.forumhfr.redface2.core.ui.editor.UploadProgressLabel
+import fr.forumhfr.redface2.core.ui.editor.bannerText
 import fr.forumhfr.redface2.core.ui.editor.editorControlsMaxHeight
+import fr.forumhfr.redface2.core.ui.editor.rememberEditorImagePicker
 import fr.forumhfr.redface2.core.ui.post.PostMediaDiskCachePolicy
 
 /**
@@ -124,8 +125,8 @@ private fun PrivateMessageReplyContent(
     onToggleSmileyDisabled: (Boolean) -> Unit,
     onToggleEmailNotification: (Boolean) -> Unit,
     onErrorDismissed: () -> Unit,
-    onSubmit: () -> Unit,
-    onSubmitConfirmed: () -> Unit,
+    onSubmit: (Long) -> Unit,
+    onSubmitConfirmed: (ArmToken?) -> Unit,
     onSubmitConfirmationDismissed: () -> Unit,
     onRetryFormLoad: () -> Unit,
     onDraftRestore: () -> Unit,
@@ -178,8 +179,9 @@ private fun PrivateMessageReplyContent(
                         canSubmit = state.canSubmit,
                         isSubmitting = state.isSubmitting,
                         confirmArmed = state.showSubmitConfirmation,
+                        armToken = state.armToken,
                         onSubmit = onSubmit,
-                        onConfirmSubmit = onSubmitConfirmed,
+                        onConfirmSubmit = { onSubmitConfirmed(state.armToken) },
                         onDisarmConfirm = onSubmitConfirmationDismissed,
                         onOpenOptions = { optionsSheetOpen = true },
                         onOpenSmileys = smileyPicker::open,
@@ -195,7 +197,7 @@ private fun PrivateMessageReplyContent(
                     signatureEnabled = state.signatureEnabled,
                     smileyDisabled = state.smileyDisabled,
                     emailNotificationEnabled = state.emailNotificationEnabled,
-                    enabled = !state.isSubmitting && !state.isLoadingForm,
+                    enabled = !state.submission.blocksBodyMutation && !state.isLoadingForm,
                     onSignatureChanged = onToggleSignature,
                     onSmileyDisabledChanged = onToggleSmileyDisabled,
                     onEmailNotificationChanged = onToggleEmailNotification,
@@ -207,7 +209,7 @@ private fun PrivateMessageReplyContent(
         if (recipientManagerOpen && state.canManageRecipients) {
             RecipientManagerSheet(
                 recipients = state.recipients,
-                enabled = !state.isSubmitting,
+                enabled = !state.submission.blocksBodyMutation,
                 onAddRecipient = onAddRecipient,
                 onRemoveRecipient = onRemoveRecipient,
                 onDismiss = { recipientManagerOpen = false },
@@ -274,11 +276,7 @@ internal fun ReplyEditorBody(
                 }
 
                 state.submitError?.let { error ->
-                    Text(
-                        text = stringResource(error.bannerResId),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.error,
-                    )
+                    MessageSubmissionError(error, composing = false)
                     TextButton(onClick = onErrorDismissed) {
                         Text(text = stringResource(R.string.messages_reply_error_dismiss))
                     }
@@ -349,7 +347,7 @@ internal fun ReplyEditorBody(
                 placeholder = stringResource(R.string.messages_reply_field_placeholder),
                 modifier = Modifier.weight(1f),
                 // #459 — lock editing during a batch (caret must not move between two insertions).
-                readOnly = state.isUploading,
+                readOnly = state.isUploading || state.submission.blocksBodyMutation,
             )
         }
     }

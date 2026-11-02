@@ -30,6 +30,11 @@ class DiagnosticsLog @Inject constructor() {
     private val sequence = AtomicLong()
     val entries: StateFlow<List<Entry>> = _entries.asStateFlow()
 
+    @Volatile private var submissionTraceSink: ((String) -> Unit)? = null
+
+    /** Installed only by debug/dev app startup; prod/beta release keeps the volatile buffer. */
+    fun exportSubmissionTraces(sink: (String) -> Unit) { submissionTraceSink = sink }
+
     fun record(level: Level, tag: String, message: String) {
         val entry = Entry(
             id = sequence.incrementAndGet(),
@@ -38,6 +43,7 @@ class DiagnosticsLog @Inject constructor() {
             message = message,
             timestampMillis = System.currentTimeMillis(),
         )
+        if (tag == EditorSubmissionTrace.TAG) submissionTraceSink?.invoke(message)
         _entries.update { current ->
             (current + entry).takeLast(CAPACITY)
         }

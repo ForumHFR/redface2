@@ -516,3 +516,13 @@ val MIGRATION_18_19: Migration = object : Migration(18, 19) {
         db.execSQL("ALTER TABLE posts ADD COLUMN msgIcon INTEGER")
     }
 }
+
+/** v19 → v20: durable editor attempts, with ordinary drafts preserved (ED-161/170). */
+val MIGRATION_19_20: Migration = object : Migration(19, 20) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE editor_drafts ADD COLUMN contentVersion INTEGER NOT NULL DEFAULT 0")
+        db.execSQL("ALTER TABLE editor_drafts ADD COLUMN attemptId TEXT")
+        db.execSQL("ALTER TABLE editor_drafts ADD COLUMN attemptVersion INTEGER")
+        db.execSQL("ALTER TABLE editor_drafts ADD COLUMN attemptState TEXT")
+    }
+}

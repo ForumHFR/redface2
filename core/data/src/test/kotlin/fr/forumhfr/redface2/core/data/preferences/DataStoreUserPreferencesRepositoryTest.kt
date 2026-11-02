@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.core.preferencesOf
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
 import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
@@ -48,6 +49,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -2139,6 +2141,39 @@ class DataStoreUserPreferencesRepositoryTest {
         finish.complete(Unit)
         assertTrue(repo.observeForumCategoryMenusCollapsed().first())
         assertTrue(repo.observeForumCategoryStickyTopicsCollapsed().first())
+    }
+
+    /** ED-171 — rouge à e5226a65 : IOException ne doit jamais produire une désactivation. */
+    @Test
+    fun unreadableConfirmationNeverDisablesGuard() = runTest(dispatcher) {
+        val unreadable = object : DataStore<Preferences> by dataStore {
+            override val data = flow<Preferences> { throw IOException("read failure") }
+        }
+
+        assertTrue(repositoryWith(unreadable).observeConfirmBeforePosting().first())
+    }
+
+    /** ED-171 — rouge à e5226a65 : même après une valeur active l'erreur ne peut émettre false. */
+    @Test
+    fun failedReadAfterEnabledNeverEmitsFalse() = runTest(dispatcher) {
+        val unreadable = object : DataStore<Preferences> by dataStore {
+            override val data = flow {
+                emit(preferencesOf(booleanPreferencesKey("confirm_before_posting") to true))
+                throw IOException("read failure after enabled")
+            }
+        }
+
+        val values = repositoryWith(unreadable).observeConfirmBeforePosting().toList()
+
+        assertTrue("la préférence active a effectivement été lue", values.isNotEmpty())
+        assertFalse("une erreur n'est pas une désactivation", values.contains(false))
+    }
+
+    /** ED-171 / P4 — vert : une clé absente effectivement lue conserve le défaut désactivé. */
+    @Test
+    fun absentConfirmationKeyReadDefaultsToFalse() = runTest(dispatcher) {
+        assertEquals(null, dataStore.data.first()[booleanPreferencesKey("confirm_before_posting")])
+        assertFalse(repository.observeConfirmBeforePosting().first())
     }
 
     private fun repositoryWith(store: DataStore<Preferences>): DataStoreUserPreferencesRepository =

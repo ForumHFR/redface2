@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.network
 import androidx.tracing.trace
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.domain.editor.EditorWriteOwner
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.search.SearchTextScope
@@ -35,6 +36,13 @@ class HfrClient @Inject constructor(
     @param:HfrBaseUrl private val baseUrl: HttpUrl,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) {
+    // ED-168: editor writes share cookies/diagnostics, but never follow or replay a POST.
+    private val editorWrite = mutation.newBuilder()
+        .followRedirects(false)
+        .followSslRedirects(false)
+        .retryOnConnectionFailure(false)
+        .build()
+
     suspend fun getTopicPage(
         cat: Int,
         post: Int,
@@ -333,16 +341,15 @@ class HfrClient @Inject constructor(
      * classification.
      *
      * `hash_check` is **never** logged, including on transport errors. Reply and quote submissions
-     * are non-idempotent: the [mutation] client enforces no transport replay with
-     * `retryOnConnectionFailure(false)`.
+     * are non-idempotent: [editorWrite] disables redirects and retries, and
+     * [OneShotFormBody] blocks HTTP follow-up replays (ED-168).
      */
     suspend fun submitReply(formBody: FormBody): String {
         val url = baseUrl.newBuilder()
             .addPathSegment("bddpost.php")
             .addQueryParameter("config", "hfr.inc")
             .build()
-        val request = Request.Builder().url(url).post(formBody).build()
-        return mutation.newDiagnosticCall(request).executeAuthenticatedHtml()
+        return postEditorForm(url, formBody)
     }
 
     /**
@@ -517,8 +524,7 @@ class HfrClient @Inject constructor(
             .addPathSegment("bdd.php")
             .addQueryParameter("config", "hfr.inc")
             .build()
-        val request = Request.Builder().url(url).post(formBody).build()
-        return mutation.newDiagnosticCall(request).executeAuthenticatedHtml()
+        return postEditorForm(url, formBody)
     }
 
     /**
@@ -588,8 +594,23 @@ class HfrClient @Inject constructor(
             .addPathSegment("bddpost.php")
             .addQueryParameter("config", "hfr.inc")
             .build()
-        val request = Request.Builder().url(url).post(formBody).build()
-        return mutation.newDiagnosticCall(request).executeAuthenticatedHtml()
+        return postEditorForm(url, formBody)
+    }
+
+    /**
+     * The durable owner takes precedence over any later cookie/account observation. Direct callers
+     * (including deletion) snapshot the jar here instead; the network guard checks the actual Cookie
+     * header after OkHttp's later jar read. Neither path can substitute a different sending account.
+     */
+    private suspend fun postEditorForm(url: HttpUrl, formBody: FormBody): String = withContext(ioDispatcher) {
+        val owner = currentCoroutineContext()[EditorWriteOwner] ?: EditorWriteOwner(
+            editorCookieOwner(
+                editorWrite.cookieJar.loadForRequest(url).filter { it.name == "md_user" }.map { it.value },
+            ),
+        )
+        val request = Request.Builder().url(url).post(OneShotFormBody(formBody))
+            .tag(EditorWriteOwner::class.java, owner).build()
+        editorWrite.newDiagnosticCall(request).executeAuthenticatedHtml()
     }
 
     /**
