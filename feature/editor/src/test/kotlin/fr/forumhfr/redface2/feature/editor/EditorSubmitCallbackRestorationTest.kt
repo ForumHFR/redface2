@@ -1,9 +1,12 @@
 package fr.forumhfr.redface2.feature.editor
 
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
@@ -41,7 +44,7 @@ class EditorSubmitCallbackRestorationTest {
         every { model.effects } returns effects.receiveAsFlow()
         val received = mutableListOf<PostEditorEffect.SubmitSucceeded>()
         restoration.setContent {
-            val owner = rememberSaveable { account.value }
+            val owner = rememberSubmitAccount(account.value)
             val currentAccount = account.value
             val scope = rememberCoroutineScope()
             val picker = remember { SmileyPickerController(scope, searchWiki = { _, _ -> emptyList() }) }
@@ -51,7 +54,7 @@ class EditorSubmitCallbackRestorationTest {
                     request = PostEditorRequest(PostEditorMode.Reply, 23, 35421, null, 2, 401),
                     viewModel = model,
                     onSubmitSucceeded = { page, post, quotes, operation ->
-                        if (owner == currentAccount) {
+                        if (owner != null && owner == currentAccount) {
                             received += PostEditorEffect.SubmitSucceeded(page, post, quotes, operation)
                         }
                     },
@@ -82,7 +85,7 @@ class EditorSubmitCallbackRestorationTest {
         every { model.effects } returns effects.receiveAsFlow()
         val received = mutableListOf<TopicFormEffect.SubmitSucceeded>()
         restoration.setContent {
-            val owner = rememberSaveable { account.value }
+            val owner = rememberSubmitAccount(account.value)
             val currentAccount = account.value
             val scope = rememberCoroutineScope()
             val picker = remember { SmileyPickerController(scope, searchWiki = { _, _ -> emptyList() }) }
@@ -92,7 +95,9 @@ class EditorSubmitCallbackRestorationTest {
                     request = TopicFormRequest(TopicFormMode.EditFirstPost, 23, 401, 35421, 1, 640),
                     viewModel = model,
                     onSubmitSucceeded = { page, post, operation ->
-                        if (owner == currentAccount) received += TopicFormEffect.SubmitSucceeded(page, post, operation)
+                        if (owner != null && owner == currentAccount) {
+                            received += TopicFormEffect.SubmitSucceeded(page, post, operation)
+                        }
                     },
                     onNewTopicCreated = { _, _, _, _, _ -> error("unexpected topic creation") },
                 )
@@ -109,4 +114,12 @@ class EditorSubmitCallbackRestorationTest {
         compose.waitForIdle()
         assertEquals(listOf(success), received)
     }
+}
+
+// Mirrors :app's rememberSubmitAccount; :feature:editor cannot depend on the navigation host.
+@Composable
+private fun rememberSubmitAccount(account: String?): String? {
+    var owner by rememberSaveable { mutableStateOf(account) }
+    if (owner == null && account != null) owner = account
+    return owner
 }

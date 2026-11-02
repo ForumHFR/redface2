@@ -6753,33 +6753,6 @@ class TopicViewModelTest {
         assertEquals(222, flagRepo.lastAddContext?.numreponse)
     }
 
-    @Suppress("LongParameterList") // test builder mirroring the Topic model's fields, all defaulted.
-    private fun fakeTopic(
-        page: Int,
-        totalPages: Int,
-        title: String = "fake",
-        posts: List<Post> = emptyList(),
-        subcat: Int = SAMPLE_SUBCAT,
-        searchForm: TopicSearchForm? = null,
-        poll: Poll? = null,
-        pollVoteForm: PollVoteForm? = null,
-    ): Topic = Topic(
-        cat = SAMPLE_CAT,
-        post = SAMPLE_POST,
-        subcat = subcat,
-        title = title,
-        posts = posts,
-        page = page,
-        totalPages = totalPages,
-        isFirstPostOwner = false,
-        // Postable by default: the #292 delete gate requires it, and no VM test exercises a
-        // read-only topic (the previous default was the Topic model's `false`, never asserted here).
-        canReply = true,
-        poll = poll,
-        pollVoteForm = pollVoteForm,
-        searchForm = searchForm,
-    )
-
     private fun fakePollVoteForm(
         multipleChoice: Boolean = false,
         maxSelections: Int? = if (multipleChoice) 2 else 1,
@@ -6869,9 +6842,6 @@ class TopicViewModelTest {
     }
 
     companion object {
-        private const val SAMPLE_CAT = 13
-        private const val SAMPLE_POST = 84_540
-        private const val SAMPLE_SUBCAT = 432
         private const val CANCEL_TIMEOUT_MS = 2_000L
 
         // #293 — HFR's own sentences, as the parser hands them over.
@@ -6885,6 +6855,38 @@ class TopicViewModelTest {
             "Une demande de modération sur ce message a été traitée le 2026-09-05 17:27:28"
     }
 }
+
+private const val SAMPLE_CAT = 13
+private const val SAMPLE_POST = 84_540
+private const val SAMPLE_SUBCAT = 432
+
+/** Share the complete Topic builder with the submit-feedback integration tests. */
+@Suppress("LongParameterList") // test builder mirroring the Topic model's optional fields.
+internal fun fakeTopic(
+    page: Int,
+    totalPages: Int,
+    title: String = "fake",
+    posts: List<Post> = emptyList(),
+    subcat: Int = SAMPLE_SUBCAT,
+    searchForm: TopicSearchForm? = null,
+    poll: Poll? = null,
+    pollVoteForm: PollVoteForm? = null,
+): Topic = Topic(
+    cat = SAMPLE_CAT,
+    post = SAMPLE_POST,
+    subcat = subcat,
+    title = title,
+    posts = posts,
+    page = page,
+    totalPages = totalPages,
+    isFirstPostOwner = false,
+    // Postable by default: the #292 delete gate requires it, and no VM test exercises a
+    // read-only topic (the previous default was the Topic model's `false`, never asserted here).
+    canReply = true,
+    poll = poll,
+    pollVoteForm = pollVoteForm,
+    searchForm = searchForm,
+)
 
 /** Share the existing domain fakes with Compose tests of the real ViewModel-to-presenter path. */
 internal fun submitFeedbackTestViewModel(repository: TopicRepository): TopicViewModel = TopicViewModel(

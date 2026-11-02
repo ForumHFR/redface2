@@ -69,7 +69,7 @@ class TopicSubmitFeedbackIntegrationTest {
         val host = SnackbarHostState()
         val repository = FeedbackTopicRepository()
         val jump = CompletableDeferred<Topic>()
-        repository.responses.add(CompletableDeferred(feedbackTopic(2, 5)))
+        repository.responses.add(CompletableDeferred(fakeTopic(2, 5)))
         repository.responses.add(jump)
         val model = submitFeedbackTestViewModel(repository).also { models += it }
         val presentations = mutableListOf<SnackbarVisuals>()
@@ -85,7 +85,7 @@ class TopicSubmitFeedbackIntegrationTest {
         restoration.emulateSavedInstanceStateRestore()
         compose.waitForIdle()
         assertNull(host.currentSnackbarData)
-        compose.runOnIdle { jump.complete(feedbackTopic(5, 5)) }
+        compose.runOnIdle { jump.complete(fakeTopic(5, 5)) }
         compose.mainClock.advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS + 1)
         compose.waitForIdle()
         assertEquals(TopicRefreshKind.None, model.state.value.refreshKind)
@@ -93,7 +93,7 @@ class TopicSubmitFeedbackIntegrationTest {
         assertNull(host.currentSnackbarData)
         assertEquals(1, presentations.size)
         compose.runOnIdle {
-            repository.responses.add(CompletableDeferred(feedbackTopic(5, 5)))
+            repository.responses.add(CompletableDeferred(fakeTopic(5, 5)))
             model.applySubmitResult(5, 777, operation = PostSubmitOperation.Edit)
         }
         compose.waitUntil { presentations.size == 2 }
@@ -124,7 +124,7 @@ class TopicSubmitFeedbackIntegrationTest {
         assertEquals(SnackbarDuration.Short, displayed.visuals.duration)
         assertEquals(TopicRefreshKind.PostSubmit, model.state.value.refreshKind)
         compose.mainClock.advanceTimeBy(3_000)
-        compose.runOnIdle { refresh.complete(feedbackTopic(2, 2)) }
+        compose.runOnIdle { refresh.complete(fakeTopic(2, 2)) }
         compose.mainClock.advanceTimeByFrame()
         assertEquals(TopicRefreshKind.None, model.state.value.refreshKind)
         assertSame(displayed, host.currentSnackbarData)
@@ -204,7 +204,7 @@ private class FeedbackTopicRepository : TopicRepository {
     val refreshes = mutableListOf<Int>()
 
     override fun observeTopicPage(cat: Int, post: Int, page: Int, forceRefresh: Boolean) =
-        flowOf(TopicPageEmission(feedbackTopic(page, 5), provisional = false))
+        flowOf(TopicPageEmission(fakeTopic(page, 5), provisional = false))
 
     override suspend fun refreshTopicPage(cat: Int, post: Int, page: Int): Topic {
         refreshes += page
@@ -216,8 +216,3 @@ private class FeedbackTopicRepository : TopicRepository {
 
     override suspend fun prefetch(cat: Int, post: Int, page: Int) = Unit
 }
-
-private fun feedbackTopic(page: Int, totalPages: Int) = Topic(
-    cat = 13, post = 84_540, subcat = 432, title = "Topic", posts = emptyList(),
-    page = page, totalPages = totalPages, isFirstPostOwner = false, canReply = true,
-)
