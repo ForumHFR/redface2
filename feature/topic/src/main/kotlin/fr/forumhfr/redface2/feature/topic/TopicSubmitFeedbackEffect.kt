@@ -9,7 +9,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.platform.LocalAccessibilityManager
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
@@ -27,7 +27,7 @@ internal fun TopicSubmitFeedbackEffect(
     account: String?,
     openPage: (Int) -> Unit,
 ) {
-    val resources = LocalContext.current.resources
+    val resources by rememberUpdatedState(LocalResources.current)
     val accessibility = LocalAccessibilityManager.current
     val currentOpenPage by rememberUpdatedState(openPage)
     val invalidation by acknowledgements.invalidations.collectAsState()
@@ -41,7 +41,8 @@ internal fun TopicSubmitFeedbackEffect(
             acknowledgements.feedback.collect { ack ->
                 if (ack != null && ack.id != lastId && ack.account.equals(account, ignoreCase = true)) {
                     lastId = ack.id
-                    feedback.present(this, error = ack.refreshFailed || ack.kind == TopicAcknowledgement.Kind.RefreshWarning) {
+                    val isError = ack.refreshFailed || ack.kind == TopicAcknowledgement.Kind.RefreshWarning
+                    feedback.present(this, error = isError) {
                         val latest = acknowledgements.forPresentation(ack.id) ?: return@present
                         val timeout = accessibility?.calculateRecommendedTimeoutMillis(
                             if (latest.lastPage == null) 4_000L else 10_000L,

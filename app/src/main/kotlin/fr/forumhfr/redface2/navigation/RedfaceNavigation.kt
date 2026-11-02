@@ -1536,7 +1536,9 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                                 },
                                 onPublish = { cat, post, targetPage, scrollTo, quotes, operation, owner ->
                                     if (owner != null && owner == authenticatedCanonicalPseudo) {
-                                        topicSubmitRelay.publish(cat, post, targetPage, scrollTo, quotes, operation, owner)
+                                        topicSubmitRelay.publish(
+                                            cat, post, targetPage, scrollTo, quotes, operation, owner,
+                                        )
                                     }
                                 },
                                 onConsumed = topicSubmitRelay::consume,
@@ -3190,7 +3192,9 @@ private fun RedfaceNavHost(
                                     submitAccount,
                                 )
                             }
-                            SubmitHandoff.FlagsAcknowledgement -> flagsSubmitAckNavState.onPublish(operation, submitAccount)
+                            SubmitHandoff.FlagsAcknowledgement -> flagsSubmitAckNavState.onPublish(
+                                operation, submitAccount,
+                            )
                             SubmitHandoff.None -> Unit
                         }
                         // #868/#869 — the selection's intent is consumed by the SUCCESSFUL submit

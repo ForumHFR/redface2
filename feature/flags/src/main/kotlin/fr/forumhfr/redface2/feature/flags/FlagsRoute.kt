@@ -384,14 +384,10 @@ fun FlagsRoute(
         }
     }
 
-    val submitAcknowledgementMessage = stringResource(
-        if (submitOperation == PostSubmitOperation.Edit) R.string.flags_post_edit_confirmed
-        else R.string.flags_post_submit_confirmed,
-    )
     FlagsSubmitAcknowledgementEffect(
         request = submitAcknowledgement,
         host = snackbarHostState,
-        message = submitAcknowledgementMessage,
+        message = flagsSubmitAcknowledgementMessage(submitOperation),
         sessionKey = authSessionKey,
         onConsumed = onSubmitAcknowledged,
     )
@@ -660,6 +656,14 @@ fun FlagsRoute(
         )
     }
 }
+
+@Composable
+private fun flagsSubmitAcknowledgementMessage(operation: PostSubmitOperation): String = stringResource(
+    when (operation) {
+        PostSubmitOperation.Publish -> R.string.flags_post_submit_confirmed
+        PostSubmitOperation.Edit -> R.string.flags_post_edit_confirmed
+    },
+)
 
 /**
  * M3 confirmation dialog shown before the delflag network call (#99). Spells out the topic

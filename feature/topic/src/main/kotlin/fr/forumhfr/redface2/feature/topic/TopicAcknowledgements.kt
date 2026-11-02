@@ -91,11 +91,12 @@ internal class TopicAcknowledgements(
 
     fun forPresentation(id: Long): TopicAcknowledgement? {
         val ack = feedback.value?.takeIf { it.id == id } ?: return null
-        if (ack.expiresAtMillis?.let { it <= now() } == true) {
+        return if (ack.expiresAtMillis?.let { it <= now() } == true) {
             dismiss(id)
-            return null
+            null
+        } else {
+            ack
         }
-        return ack
     }
 
     /** Called only when this event actually owns the host mutex. Consuming never cancels display. */
@@ -167,16 +168,19 @@ internal class TopicAcknowledgements(
 
     private fun restore(): TopicAcknowledgement? {
         val record = saved.get<ArrayList<String>>(KEY_OFFER) ?: return null
-        val id = record.getOrNull(0)?.toLongOrNull() ?: return null
-        val account = record.getOrNull(1) ?: return null
-        val page = record.getOrNull(2)?.toIntOrNull()?.takeIf { it > 0 } ?: return null
+        val id = record.getOrNull(0)?.toLongOrNull()
+        val account = record.getOrNull(1)
+        val page = record.getOrNull(2)?.toIntOrNull()?.takeIf { it > 0 }
         val deadline = record.getOrNull(3)?.toLongOrNull()
-        val kind = TopicAcknowledgement.Kind.entries.firstOrNull { it.name == record.getOrNull(4) } ?: return null
-        if (deadline != null && deadline <= now()) {
-            saved.remove<ArrayList<String>>(KEY_OFFER)
-            return null
+        val kind = TopicAcknowledgement.Kind.entries.firstOrNull { it.name == record.getOrNull(4) }
+        return when {
+            id == null || account == null || page == null || kind == null -> null
+            deadline != null && deadline <= now() -> {
+                saved.remove<ArrayList<String>>(KEY_OFFER)
+                null
+            }
+            else -> TopicAcknowledgement(id, account, kind, page, expiresAtMillis = deadline)
         }
-        return TopicAcknowledgement(id, account, kind, page, expiresAtMillis = deadline)
     }
 
     private companion object {

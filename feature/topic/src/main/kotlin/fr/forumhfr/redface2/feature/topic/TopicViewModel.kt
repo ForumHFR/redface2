@@ -2118,18 +2118,24 @@ class TopicViewModel @AssistedInject constructor(
                     // back to the cache-aside path with a Retry affordance.
                     android.util.Log.w(LOG_TAG, "Submit-result refresh failed", refreshError)
                     if (generation != ownerGeneration) return@launch
-                    _state.update { it.copy(refreshKind = TopicRefreshKind.None) }
-                    if (acknowledgementId != null) {
-                        submitAcknowledgements.refreshFailed(acknowledgementId)
-                    } else {
-                        submitAcknowledgements.refreshWarning(_state.value.connectedPseudo?.let(::canonicalizePseudo).orEmpty())
-                    }
-                    resolvePendingLandingWithoutScroll()
-                    startPageLoad(showLoading = _state.value.mode !is TopicUiState.Mode.Loaded)
+                    handleSubmitRefreshFailure(acknowledgementId)
                 }
                 return@launch
             }
         }
+    }
+
+    private fun handleSubmitRefreshFailure(acknowledgementId: Long?) {
+        _state.update { it.copy(refreshKind = TopicRefreshKind.None) }
+        if (acknowledgementId != null) {
+            submitAcknowledgements.refreshFailed(acknowledgementId)
+        } else {
+            submitAcknowledgements.refreshWarning(
+                _state.value.connectedPseudo?.let(::canonicalizePseudo).orEmpty(),
+            )
+        }
+        resolvePendingLandingWithoutScroll()
+        startPageLoad(showLoading = _state.value.mode !is TopicUiState.Mode.Loaded)
     }
 
     /**

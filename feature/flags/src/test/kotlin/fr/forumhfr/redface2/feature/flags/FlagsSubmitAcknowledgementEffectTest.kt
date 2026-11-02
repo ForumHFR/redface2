@@ -3,9 +3,12 @@ package fr.forumhfr.redface2.feature.flags
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.lifecycle.Lifecycle
@@ -13,6 +16,7 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Rule
 import org.junit.Test
@@ -54,15 +58,18 @@ class FlagsSubmitAcknowledgementEffectTest {
     }
     @Test
     fun `remount does not replay but a later distinct success still presents`() {
-        val host = SnackbarHostState()
+        lateinit var host: SnackbarHostState
         val request = mutableLongStateOf(1L)
         val mounted = mutableStateOf(true)
         val consumed = mutableListOf<Long>()
         compose.setContent {
             if (mounted.value) {
+                // Match FlagsRoute: the host belongs to the screen, not its navigation parent.
+                val screenHost = remember { SnackbarHostState() }
+                SideEffect { host = screenHost }
                 FlagsSubmitAcknowledgementEffect(
                     request = request.longValue,
-                    host = host,
+                    host = screenHost,
                     message = "Message publié",
                     onConsumed = {
                         consumed += it
@@ -72,12 +79,25 @@ class FlagsSubmitAcknowledgementEffectTest {
             }
         }
         compose.waitUntil { consumed == listOf(1L) }
-        compose.runOnIdle { mounted.value = false }
-        compose.waitUntil { host.currentSnackbarData == null }
-        compose.runOnIdle { mounted.value = true }
+        val firstHost = host
+        compose.runOnIdle {
+            mounted.value = false
+            Snapshot.sendApplyNotifications()
+        }
         compose.waitForIdle()
+        compose.runOnIdle {
+            mounted.value = true
+            Snapshot.sendApplyNotifications()
+        }
+        compose.waitForIdle()
+        assertNotSame(firstHost, host)
+        assertNull(host.currentSnackbarData)
+        // Consumption records effective presentations, so a replay would add a second 1L.
         assertEquals(listOf(1L), consumed)
-        compose.runOnIdle { request.longValue = 2L }
+        compose.runOnIdle {
+            request.longValue = 2L
+            Snapshot.sendApplyNotifications()
+        }
         compose.waitUntil { consumed == listOf(1L, 2L) }
         assertEquals("Message publié", host.currentSnackbarData?.visuals?.message)
     }
