@@ -100,6 +100,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil3.compose.AsyncImage
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
@@ -197,7 +198,8 @@ fun FlagsRoute(
     // submitted successfully. The list has no topic entry to apply the #895 post-submit outcome to,
     // so without this the reader came back with nothing telling them the message went through.
     submitAcknowledgement: Long = 0L,
-    // #1301 — clear only the id whose snackbar completed, preserving a newer pending handoff.
+    submitOperation: PostSubmitOperation = PostSubmitOperation.Publish,
+    // #1301 — clear only the id whose snackbar was presented, preserving a newer pending handoff.
     onSubmitAcknowledged: (Long) -> Unit = { _ -> },
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
@@ -382,13 +384,13 @@ fun FlagsRoute(
         }
     }
 
-    // #1301 — bounded acknowledgement for a message sent from the editor opened on this list. The
-    // id remains pending through recreation until the snackbar has actually completed its display.
-    val submitAcknowledgementMessage = stringResource(R.string.flags_post_submit_confirmed)
     FlagsSubmitAcknowledgementEffect(
         request = submitAcknowledgement,
+        host = snackbarHostState,
+        message = flagsSubmitAcknowledgementMessage(submitOperation),
+        sessionKey = authSessionKey,
         onConsumed = onSubmitAcknowledged,
-    ) { snackbarHostState.showSubmitAcknowledgement(submitAcknowledgementMessage) }
+    )
 
     // #603 PR2 — client-side search over the loaded flags + the app-bar tab picker. The query is
     // hoisted here (the app bar edits it, the body filters with it) and reset on a tab change so a
@@ -654,6 +656,14 @@ fun FlagsRoute(
         )
     }
 }
+
+@Composable
+private fun flagsSubmitAcknowledgementMessage(operation: PostSubmitOperation): String = stringResource(
+    when (operation) {
+        PostSubmitOperation.Publish -> R.string.flags_post_submit_confirmed
+        PostSubmitOperation.Edit -> R.string.flags_post_edit_confirmed
+    },
+)
 
 /**
  * M3 confirmation dialog shown before the delflag network call (#99). Spells out the topic

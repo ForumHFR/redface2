@@ -5,9 +5,9 @@ package fr.forumhfr.redface2.feature.topic
  *
  * [TopicRefreshKind.Manual] drives the Material 3 pull-to-refresh spinner.
  * [TopicRefreshKind.PostSubmit] keeps the dedicated under-bar progress feedback visible from the
- * submit acknowledgement until the refreshed content, redirect included, reaches a terminal state.
- * [TopicRefreshKind.PostSubmitJump] keeps that progress feedback for the explicit « Y aller »
- * refresh without replaying the acknowledgement of the submit that preceded it.
+ * accepted submit until the refreshed content, redirect included, reaches a terminal state.
+ * [TopicRefreshKind.PostSubmitJump] keeps that progress feedback for the explicit last-page action.
+ * Neither kind owns success presentation; [TopicAcknowledgements] survives progress completion.
  */
 enum class TopicRefreshKind {
     None,

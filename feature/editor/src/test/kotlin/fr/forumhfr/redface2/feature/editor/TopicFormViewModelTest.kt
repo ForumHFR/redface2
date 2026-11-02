@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.editor
 
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollectionSnapshot
 import fr.forumhfr.redface2.core.model.EditorSmileySource
 import fr.forumhfr.redface2.core.model.HfrFavoriteSmileyMutationResult
@@ -221,6 +222,7 @@ class TopicFormViewModelTest {
             val effect = awaitItem() as TopicFormEffect.SubmitSucceeded
             assertEquals(1, effect.targetPage)
             assertEquals(SAMPLE_NUMREPONSE, effect.scrollTo)
+            assertEquals(PostSubmitOperation.Edit, effect.operation)
             cancelAndIgnoreRemainingEvents()
         }
     }
