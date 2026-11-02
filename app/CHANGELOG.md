@@ -16,6 +16,19 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.66.0` — `internal` (dev) — 2026-11-02
+
+Envoi des messages plus sûr ([#1301](https://github.com/ForumHFR/redface2/issues/1301), [#1522](https://github.com/ForumHFR/redface2/pull/1522)), premier lot de la refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)) : un envoi confirmé part au plus une fois, et un message publié n'est plus reproposé comme brouillon. Concerne la réponse et la citation, le nouveau sujet, la réponse et la composition de MP, et la réponse rapide.
+
+- **Après la publication**, plus de second envoi possible, et le texte publié n'est plus réenregistré en brouillon au retour.
+- **« Envoi incertain »** : si la connexion se coupe après l'émission, l'éditeur le dit au lieu de proposer de renvoyer. Le texte reste modifiable et revient dans cet état à la réouverture : vérifier le sujet avant de renvoyer.
+- **« Brouillon non écrit »** : si le brouillon ne peut pas être enregistré avant l'envoi, rien ne part.
+- Bouton de confirmation : un second toucher trop rapproché (moins de 400 ms) ne publie pas ; le délai de confirmation suit l'horloge, aussi avec « Supprimer les animations », et s'allonge selon les réglages d'accessibilité. Préférence illisible = confirmation demandée.
+- Aucun envoi n'est relancé ni redirigé automatiquement. Un envoi demandé sous un compte n'est jamais émis sous un autre.
+- Journal de diagnostic : étapes et durées des envois, sans texte ni identifiant d'éditeur.
+
+---
+
 ## `0.65.0` — `open` (bêta) — 2026-10-31
 
 Promotion bêta du lot développé en dev de `0.63.0` à `0.64.9`, depuis la précédente bêta `0.62.0`. Le détail par version dev figure dans les entrées ci-dessous. Contenu :
