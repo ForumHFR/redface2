@@ -4,8 +4,6 @@ import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -20,7 +18,6 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.lifecycle.SavedStateHandle
 import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
-import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Rule
@@ -35,55 +32,6 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class TopicSubmitFeedbackEffectTest {
     @get:Rule val compose = createComposeRule()
-
-    @Test
-    fun `activity recreation during the submitted-post jump does not replay confirmation`() {
-        val restoration = StateRestorationTester(compose)
-        val host = SnackbarHostState()
-        var retained: TopicAcknowledgements? = null
-        val refreshKind = MutableStateFlow(TopicRefreshKind.PostSubmitJump)
-        restoration.setContent {
-            val progress by refreshKind.collectAsState()
-            assertEquals(TopicRefreshKind.PostSubmitJump, progress)
-            val scope = rememberCoroutineScope()
-            val store = retained ?: TopicAcknowledgements(SavedStateHandle(), scope).also { retained = it }
-            TopicSubmitFeedbackEffect(store, host, active = true, account = "xaat", openPage = {})
-        }
-        compose.waitForIdle()
-        assertNull(host.currentSnackbarData)
-        restoration.emulateSavedInstanceStateRestore()
-        compose.waitForIdle()
-        assertNull("navigation alone must never acknowledge a submit", host.currentSnackbarData)
-        compose.runOnIdle {
-            val id = retained!!.accept("xaat", PostSubmitOperation.Publish)
-            retained!!.refreshed(id, lastPage = null)
-        }
-        compose.waitUntil { host.currentSnackbarData != null }
-        assertEquals("Message publié", host.currentSnackbarData?.visuals?.message)
-    }
-
-    @Test
-    fun `fast refresh confirms once and network completion never dismisses it`() {
-        val host = SnackbarHostState()
-        lateinit var store: TopicAcknowledgements
-        compose.setContent {
-            val scope = rememberCoroutineScope()
-            store = remember { TopicAcknowledgements(SavedStateHandle(), scope) }
-            TopicSubmitFeedbackEffect(store, host, active = true, account = "xaat", openPage = {})
-        }
-        compose.runOnIdle {
-            val id = store.accept("xaat", PostSubmitOperation.Edit)
-            store.refreshed(id, lastPage = null)
-        }
-        compose.waitUntil { host.currentSnackbarData != null }
-        compose.runOnIdle {
-            assertEquals("Message modifié", host.currentSnackbarData!!.visuals.message)
-            assertEquals(SnackbarDuration.Short, host.currentSnackbarData!!.visuals.duration)
-            assertNull(store.feedback.value)
-        }
-        compose.waitForIdle()
-        assertEquals("Message modifié", host.currentSnackbarData?.visuals?.message)
-    }
 
     @Test
     fun `rotation restores the same offer and action is taken once`() {

@@ -37,10 +37,13 @@ internal fun TopicSubmitFeedbackEffect(
         if (!active || !foreground || account == null) return@LaunchedEffect
         coroutineScope {
             val feedback = TopicSubmitFeedback()
-            var lastId: Long? = null
+            var lastContent: Pair<Long, Boolean>? = null
             acknowledgements.feedback.collect { ack ->
-                if (ack != null && ack.id != lastId && ack.account.equals(account, ignoreCase = true)) {
-                    lastId = ack.id
+                val content = ack?.let { it.id to it.refreshFailed }
+                if (ack != null && content != lastContent && ack.account.equals(account, ignoreCase = true)) {
+                    // A failure can replace this id while showSnackbar is waiting for the host.
+                    // Expiry-only changes after presentation must not enqueue another success.
+                    lastContent = content
                     val isError = ack.refreshFailed || ack.kind == TopicAcknowledgement.Kind.RefreshWarning
                     feedback.present(this, error = isError) {
                         val latest = acknowledgements.forPresentation(ack.id) ?: return@present
@@ -68,7 +71,6 @@ private suspend fun SnackbarHostState.presentTopicAcknowledgement(
     openPage: (Int) -> Unit,
 ) = coroutineScope {
     var expiry: kotlinx.coroutines.Job? = null
-    currentSnackbarData?.dismiss()
     try {
         val result = showAcknowledgement(
             message = acknowledgementMessage(resources, ack),

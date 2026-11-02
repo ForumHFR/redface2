@@ -3151,6 +3151,42 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `consumed handoff restores its pending acknowledgement while the refresh was suspended`() = runTest {
+        val saved = SavedStateHandle()
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeTopicRepository(listOf(flowOf(fakeTopic(2, 2)))).apply {
+            refreshHook = { _, _, _ -> gate.await() }
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(2), topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")), savedStateHandle = saved,
+        )
+        val result = TopicSubmitResult(42, 2, 777, operation = PostSubmitOperation.Edit, account = "xaat")
+        viewModel.applySubmitResult(result)
+        assertNull(viewModel.submitAcknowledgements.feedback.value)
+        val restoredHandle = SavedStateHandle(saved.keys().associateWith { saved.get<Any?>(it) })
+        destroyViewModel(viewModel)
+        val restoredRepository = FakeTopicRepository(listOf(flowOf(fakeTopic(2, 2))))
+        val restored = topicViewModel(
+            request = topicRequest(2), topicRepository = restoredRepository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")), savedStateHandle = restoredHandle,
+        )
+        restored.applySubmitResult(result)
+        assertTrue("a consumed relay must not start another submit refresh", restoredRepository.refreshCalls.isEmpty())
+        advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
+        runCurrent()
+        val ack = requireNotNull(restored.submitAcknowledgements.feedback.value)
+        assertEquals(TopicAcknowledgement.Kind.Edited, ack.kind)
+        assertEquals("xaat", ack.account)
+        restored.submitAcknowledgements.presented(ack.id, 4_000)
+        destroyViewModel(restored)
+        val afterPresentation = TopicAcknowledgements(
+            SavedStateHandle(restoredHandle.keys().associateWith { restoredHandle.get<Any?>(it) }), backgroundScope,
+        )
+        assertNull(afterPresentation.feedback.value)
+    }
+
+    @Test
     fun `slow refresh acknowledges at the bound and late completion cannot confirm again`() = runTest {
         val gate = CompletableDeferred<Unit>()
         val repository = FakeTopicRepository(
@@ -3428,6 +3464,42 @@ class TopicViewModelTest {
             listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)),
             repository.calls,
         )
+    }
+
+    @Test
+    fun `last-page action resolves tail growth once without chasing subsequent growth`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flowOf(fakeTopic(2, 5, posts = listOf(fakePost(640))))),
+            refreshTopicsToReturn = listOf(
+                fakeTopic(2, 5, posts = listOf(fakePost(640))), fakeTopic(5, 6), fakeTopic(6, 7),
+            ),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(2), topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        viewModel.effects.test {
+            viewModel.applySubmitResult(2, 640, listOf(640))
+            runCurrent()
+            val offer = requireNotNull(viewModel.submitAcknowledgements.feedback.value)
+            assertEquals(5, offer.lastPage)
+            assertEquals(2, viewModel.state.value.request.page)
+            assertEquals(listOf(2), repository.refreshCalls.map { it.third })
+            val citedLanding = awaitItem()
+            assertEquals(TopicEffect.ScrollToPost(640), citedLanding)
+            viewModel.onLandingApplied(citedLanding)
+            expectNoEvents()
+            viewModel.submitAcknowledgements.presented(offer.id, 10_000)
+            val page = requireNotNull(viewModel.submitAcknowledgements.takeOffer(offer.id, "xaat"))
+            viewModel.openSubmittedPostPage(page)
+            assertEquals(TopicEffect.ScrollToEndOfPage(6), awaitItem())
+            assertEquals(6, viewModel.state.value.request.page)
+            assertEquals(listOf(2, 5, 6), repository.refreshCalls.map { it.third })
+            assertEquals(TopicRefreshKind.None, viewModel.state.value.refreshKind)
+            assertNull(viewModel.submitAcknowledgements.feedback.value)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
     }
 
     @Test
@@ -6813,6 +6885,24 @@ class TopicViewModelTest {
             "Une demande de modération sur ce message a été traitée le 2026-09-05 17:27:28"
     }
 }
+
+/** Share the existing domain fakes with Compose tests of the real ViewModel-to-presenter path. */
+internal fun submitFeedbackTestViewModel(repository: TopicRepository): TopicViewModel = TopicViewModel(
+    request = TopicRequest(cat = 13, post = 84_540, page = 2, scrollTo = null),
+    savedStateHandle = SavedStateHandle(),
+    topicRepository = repository,
+    authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+    userPreferencesRepository = FakeUserPreferencesRepository(),
+    deletePostRepository = FakeDeletePostRepository(),
+    moderationRepository = FakeModerationRepository(),
+    pollVoteRepository = FakePollVoteRepository(),
+    blacklistRepository = FakeBlacklistRepository(),
+    authorRoleRepository = FakeAuthorRoleRepository(),
+    topicSearchRepository = FakeTopicSearchRepository(),
+    searchRepository = FakeSearchRepository(),
+    flagRepository = FakeFlagRepository(),
+    externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
+)
 
 /**
  * #750 — canned page-resolution probe. [pageToResolve] null simulates a failed probe (network

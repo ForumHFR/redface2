@@ -58,6 +58,63 @@ class TopicAcknowledgementsTest {
     }
 
     @Test
+    fun `restoration between acceptance and refresh keeps the identity and original wait bound`() = runTest {
+        val saved = SavedStateHandle()
+        val store = TopicAcknowledgements(saved, backgroundScope) { testScheduler.currentTime }
+        val id = store.accept("xaat", PostSubmitOperation.Edit)
+        advanceTimeBy(600)
+        runCurrent()
+        val restored = TopicAcknowledgements(copyHandle(saved), backgroundScope) { testScheduler.currentTime }
+        restored.accountChanged("xaat")
+        assertNull(restored.feedback.value)
+        advanceTimeBy(399)
+        runCurrent()
+        assertNull(restored.feedback.value)
+        advanceTimeBy(1)
+        runCurrent()
+        assertEquals(id, restored.feedback.value?.id)
+        assertEquals(TopicAcknowledgement.Kind.Edited, restored.feedback.value?.kind)
+        restored.presented(id, 4_000)
+        assertNull(restored.feedback.value)
+    }
+
+    @Test
+    fun `ready success without an offer also survives death before presentation`() = runTest {
+        val saved = SavedStateHandle()
+        val store = TopicAcknowledgements(saved, backgroundScope) { testScheduler.currentTime }
+        val id = store.accept("xaat", PostSubmitOperation.Publish)
+        store.refreshed(id, lastPage = null)
+        val restoredHandle = copyHandle(saved)
+        val restored = TopicAcknowledgements(restoredHandle, backgroundScope) { testScheduler.currentTime }
+        assertEquals(id, restored.feedback.value?.id)
+        restored.presented(id, 4_000)
+        assertNull(TopicAcknowledgements(copyHandle(restoredHandle), backgroundScope).feedback.value)
+    }
+
+    @Test
+    fun `failure queued before presentation survives restoration with the same success identity`() = runTest {
+        val saved = SavedStateHandle()
+        val store = TopicAcknowledgements(saved, backgroundScope) { testScheduler.currentTime }
+        val id = store.accept("xaat", PostSubmitOperation.Edit)
+        store.refreshFailed(id)
+        val restored = TopicAcknowledgements(copyHandle(saved), backgroundScope) { testScheduler.currentTime }
+        assertEquals(id, restored.feedback.value?.id)
+        assertEquals(TopicAcknowledgement.Kind.Edited, restored.feedback.value?.kind)
+        assertTrue(requireNotNull(restored.feedback.value).refreshFailed)
+    }
+
+    @Test
+    fun `restoration after the original wait bound presents immediately without renewing it`() = runTest {
+        val saved = SavedStateHandle()
+        val store = TopicAcknowledgements(saved, backgroundScope) { 0L }
+        val id = store.accept("xaat", PostSubmitOperation.Publish)
+        val restored = TopicAcknowledgements(copyHandle(saved), backgroundScope) { 1_500L }
+        runCurrent()
+        assertEquals(id, restored.feedback.value?.id)
+        assertEquals(TopicAcknowledgement.Kind.Published, restored.feedback.value?.kind)
+    }
+
+    @Test
     fun `saved offer retains its accessible deadline and can be taken only once`() = runTest {
         val saved = SavedStateHandle()
         val store = TopicAcknowledgements(saved, backgroundScope) { testScheduler.currentTime }

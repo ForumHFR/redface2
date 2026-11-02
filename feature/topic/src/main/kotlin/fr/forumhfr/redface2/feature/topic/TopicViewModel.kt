@@ -288,15 +288,6 @@ class TopicViewModel @AssistedInject constructor(
     )
 
     /**
-     * #226 anti-chase as an internal budget (Sol point 3) : [applySubmitResult] arms ONE redirect
-     * only for a plain reply whose source page was the known tail before the submit (#1243). The
-     * overflow detection consumes it BEFORE switching to the freshly-created last page, and that
-     * landing is terminal — a concurrent post bumping `totalPages` during the refresh can never
-     * start a moving-tail chase.
-     */
-    private var postSubmitRedirectBudget: Int = 0
-
-    /**
      * Chantier B (#546) — client-side cursor history for next/previous result navigation in
      * NON-FILTERED mode. HFR's `transsearch` is forward-only (it has no « previous » endpoint), so we
      * record the `numreponse` of every visited match in order and replay the list to go back.
@@ -335,11 +326,13 @@ class TopicViewModel @AssistedInject constructor(
         data object Top : PendingLanding
     }
 
+    /** Each refresh gets at most one redirect: plain-reply overflow or an explicit last-page click. */
     private data class SubmitRefreshPlan(
         val initialTarget: Int,
         val landing: PendingLanding?,
         val overflowRedirectAllowed: Boolean,
         val submittedElsewhereNotificationAllowed: Boolean,
+        val lastPageRedirectAllowed: Boolean = false,
     )
 
     /** #782 — one frame of the quote-jump return stack : the departure page + tap-time anchor. */
@@ -1879,8 +1872,9 @@ class TopicViewModel @AssistedInject constructor(
         val account = _state.value.connectedPseudo?.let(::canonicalizePseudo)
         if (account == null || !account.equals(result.account, ignoreCase = true)) return
         if (savedStateHandle.get<Long>(KEY_SUBMIT_CONSUMED_ID) == result.eventId) return
-        savedStateHandle[KEY_SUBMIT_CONSUMED_ID] = result.eventId
         applySubmitResult(result.targetPage, result.scrollTo, result.quotedNumreponses, result.operation)
+        // Acceptance, identity and wait deadline are saved before marking or removing the relay.
+        savedStateHandle[KEY_SUBMIT_CONSUMED_ID] = result.eventId
     }
 
     /**
@@ -1911,7 +1905,6 @@ class TopicViewModel @AssistedInject constructor(
             scrollTo = scrollTo,
             quotedNumreponse = quotedNumreponses.maxOrNull(),
         )
-        postSubmitRedirectBudget = if (plan.overflowRedirectAllowed) 1 else 0
         // F2 — the submitted-to page is dirty : its snapshot must never serve again as terminal.
         pageSnapshots.remove(target)
         jumpStack.clear()
@@ -1922,12 +1915,11 @@ class TopicViewModel @AssistedInject constructor(
         performSubmitRefresh(plan, TopicRefreshKind.PostSubmit, acknowledgementId)
     }
 
-    /** Explicit last-page action; the refreshed page count does not locate the submitted post. */
+    /** Resolve a possibly stale last-page offer with its own single redirect, only after the click. */
     fun openSubmittedPostPage(page: Int, departureAnchor: TopicScrollAnchor? = null) {
         if (page < 1) return
         submitAcknowledgements.clear()
         departureAnchor?.let { pageAnchors[request.page] = it }
-        postSubmitRedirectBudget = 0
         pageSnapshots.remove(page)
         jumpStack.clear()
         syncJumpAvailability()
@@ -1937,6 +1929,7 @@ class TopicViewModel @AssistedInject constructor(
                 landing = PendingLanding.Bottom,
                 overflowRedirectAllowed = false,
                 submittedElsewhereNotificationAllowed = false,
+                lastPageRedirectAllowed = true,
             ),
             submitRefreshKind = TopicRefreshKind.PostSubmitJump,
         )
@@ -2071,13 +2064,12 @@ class TopicViewModel @AssistedInject constructor(
             // this job under the SAME ownership — no self-cancelling re-own mid-coroutine.
             var target = plan.initialTarget
             var redirected = false
+            var redirectAvailable = plan.overflowRedirectAllowed || plan.lastPageRedirectAllowed
             while (true) {
                 try {
                     val topic = topicRepository.refreshTopicPage(request.cat, request.post, target)
                     if (generation != ownerGeneration) return@launch
-                    val shouldRedirect = plan.overflowRedirectAllowed &&
-                        topic.totalPages > target &&
-                        postSubmitRedirectBudget > 0
+                    val shouldRedirect = redirectAvailable && topic.totalPages > target
                     _state.update {
                         it.copy(
                             mode = loadedMode(topic),
@@ -2091,12 +2083,11 @@ class TopicViewModel @AssistedInject constructor(
                             },
                         )
                     }
-                    // #226 — plain-reply overflow : the reply created a page past the target.
-                    // Consume the single redirect budget and land on the real last page ; that
-                    // landing can never redirect again (anti-chase), whatever a concurrent
-                    // poster does.
+                    // Plain-reply overflow and the explicit last-page action each get one
+                    // redirect per refresh. Quote submissions still stay on the cited page.
+                    // Consume before switching: a moving tail can never make this loop chase it.
                     if (shouldRedirect) {
-                        postSubmitRedirectBudget = 0
+                        redirectAvailable = false
                         redirected = true
                         pageSnapshots.remove(target)
                         pageSnapshots.remove(topic.totalPages)

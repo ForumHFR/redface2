@@ -47,6 +47,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -96,11 +97,14 @@ fun PostEditorScreen(
     ),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val currentOnSubmitSucceeded by rememberUpdatedState(onSubmitSucceeded)
     LaunchedEffect(viewModel) {
         viewModel.effects.collect { effect ->
             when (effect) {
                 is PostEditorEffect.SubmitSucceeded ->
-                    onSubmitSucceeded(effect.targetPage, effect.scrollTo, effect.quotedNumreponses, effect.operation)
+                    currentOnSubmitSucceeded(
+                        effect.targetPage, effect.scrollTo, effect.quotedNumreponses, effect.operation,
+                    )
                 PostEditorEffect.CloseCommitted -> onClose?.invoke()
             }
         }

@@ -22,7 +22,7 @@ internal data class TopicAcknowledgement(
     enum class Kind { Published, Edited, Deleted, RefreshWarning }
 }
 
-/** ViewModel-owned acceptance and saved offer. Progress and snackbar lifetimes are independent. */
+/** Save acceptance before consuming the relay, then keep it until presentation (or offer expiry). */
 internal class TopicAcknowledgements(
     private val saved: SavedStateHandle,
     private val scope: CoroutineScope,
@@ -31,12 +31,17 @@ internal class TopicAcknowledgements(
     private var sequence = saved.get<Long>(KEY_SEQUENCE) ?: 0L
     private var accepted: TopicAcknowledgement? = null
     private var wasPresented = false
-    private var settled = false
+    private var settled = true
+    private var waitUntilMillis: Long? = null
     private var deadlineJob: Job? = null
-    private val mutableFeedback = MutableStateFlow<TopicAcknowledgement?>(restore())
+    private val mutableFeedback = MutableStateFlow<TopicAcknowledgement?>(null)
     val feedback = mutableFeedback.asStateFlow()
     private val mutableInvalidations = MutableStateFlow(0)
     val invalidations = mutableInvalidations.asStateFlow()
+
+    init {
+        restore()
+    }
 
     fun accept(account: String, operation: PostSubmitOperation): Long {
         reset()
@@ -48,11 +53,18 @@ internal class TopicAcknowledgements(
         accepted = ack
         wasPresented = false
         settled = false
-        deadlineJob = scope.launch {
-            delay(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
-            settle(ack.id, null)
-        }
+        waitUntilMillis = now() + TOPIC_SUBMIT_ACK_WAIT_MILLIS
+        saveAcknowledgement()
+        awaitDeadline(ack.id)
         return ack.id
+    }
+
+    private fun awaitDeadline(id: Long) {
+        val deadline = waitUntilMillis ?: now()
+        deadlineJob = scope.launch {
+            delay((deadline - now()).coerceAtLeast(0))
+            settle(id, null)
+        }
     }
 
     fun refreshed(id: Long, lastPage: Int?) = settle(id, lastPage)
@@ -64,7 +76,7 @@ internal class TopicAcknowledgements(
         mutableFeedback.value = ack.copy(
             lastPage = lastPage.takeIf { ack.kind == TopicAcknowledgement.Kind.Published },
         )
-        saveOffer()
+        saveAcknowledgement()
     }
 
     fun refreshFailed(id: Long) {
@@ -76,17 +88,18 @@ internal class TopicAcknowledgements(
         } else {
             ack.copy(refreshFailed = true)
         }
-        saveOffer()
+        saveAcknowledgement()
     }
 
     fun deleted(account: String) {
         reset()
         mutableFeedback.value = TopicAcknowledgement(nextId(), account, TopicAcknowledgement.Kind.Deleted)
+        saveAcknowledgement()
     }
 
     fun refreshWarning(account: String) {
         mutableFeedback.value = TopicAcknowledgement(nextId(), account, TopicAcknowledgement.Kind.RefreshWarning)
-        saveOffer()
+        saveAcknowledgement()
     }
 
     fun forPresentation(id: Long): TopicAcknowledgement? {
@@ -115,7 +128,7 @@ internal class TopicAcknowledgements(
                 dismiss(id)
             }
         }
-        saveOffer()
+        saveAcknowledgement()
     }
 
     fun remainingMillis(id: Long): Long? = feedback.value
@@ -133,7 +146,7 @@ internal class TopicAcknowledgements(
     fun dismiss(id: Long) {
         if (feedback.value?.id != id) return
         mutableFeedback.value = null
-        saveOffer()
+        saveAcknowledgement()
     }
 
     fun accountChanged(account: String?) {
@@ -150,36 +163,57 @@ internal class TopicAcknowledgements(
     private fun reset() {
         deadlineJob?.cancel()
         accepted = null
+        wasPresented = false
+        settled = true
+        waitUntilMillis = null
         mutableFeedback.value = null
         saved.remove<ArrayList<String>>(KEY_OFFER)
     }
 
     private fun nextId(): Long = (++sequence).also { saved[KEY_SEQUENCE] = it }
 
-    private fun saveOffer() {
-        val offer = feedback.value?.takeIf { it.lastPage != null }
-        saved[KEY_OFFER] = offer?.let {
+    private fun saveAcknowledgement() {
+        val pending = feedback.value ?: accepted?.takeIf { !settled && !wasPresented }
+        saved[KEY_OFFER] = pending?.let {
             arrayListOf(
-                it.id.toString(), it.account, it.lastPage.toString(),
+                it.id.toString(), it.account, it.lastPage?.toString().orEmpty(),
                 it.expiresAtMillis?.toString().orEmpty(), it.kind.name,
+                it.refreshFailed.toString(), waitUntilMillis?.toString().orEmpty(),
+                settled.toString(), wasPresented.toString(),
             )
         }
     }
 
-    private fun restore(): TopicAcknowledgement? {
-        val record = saved.get<ArrayList<String>>(KEY_OFFER) ?: return null
+    private fun restore() {
+        val record = saved.get<ArrayList<String>>(KEY_OFFER) ?: return
+        val ack = restoreAcknowledgement(record)
+        if (ack == null) {
+            saved.remove<ArrayList<String>>(KEY_OFFER)
+            return
+        }
+        accepted = ack.takeIf {
+            it.kind == TopicAcknowledgement.Kind.Published || it.kind == TopicAcknowledgement.Kind.Edited
+        }
+        waitUntilMillis = record.getOrNull(6)?.toLongOrNull()
+        settled = record.getOrNull(7)?.toBooleanStrictOrNull() ?: true
+        wasPresented = record.getOrNull(8)?.toBooleanStrictOrNull() ?: (ack.expiresAtMillis != null)
+        if (settled) mutableFeedback.value = ack else awaitDeadline(ack.id)
+    }
+
+    private fun restoreAcknowledgement(record: ArrayList<String>): TopicAcknowledgement? {
         val id = record.getOrNull(0)?.toLongOrNull()
         val account = record.getOrNull(1)
         val page = record.getOrNull(2)?.toIntOrNull()?.takeIf { it > 0 }
         val deadline = record.getOrNull(3)?.toLongOrNull()
         val kind = TopicAcknowledgement.Kind.entries.firstOrNull { it.name == record.getOrNull(4) }
         return when {
-            id == null || account == null || page == null || kind == null -> null
-            deadline != null && deadline <= now() -> {
-                saved.remove<ArrayList<String>>(KEY_OFFER)
-                null
-            }
-            else -> TopicAcknowledgement(id, account, kind, page, expiresAtMillis = deadline)
+            id == null || account == null || kind == null -> null
+            deadline != null && deadline <= now() -> null
+            else -> TopicAcknowledgement(
+                id, account, kind, page,
+                refreshFailed = record.getOrNull(5)?.toBooleanStrictOrNull() ?: false,
+                expiresAtMillis = deadline,
+            )
         }
     }
 

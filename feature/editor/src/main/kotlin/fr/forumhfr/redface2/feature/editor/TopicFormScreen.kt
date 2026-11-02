@@ -38,6 +38,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -86,6 +87,7 @@ fun TopicFormScreen(
     ),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val currentOnSubmitSucceeded by rememberUpdatedState(onSubmitSucceeded)
     val context = LocalContext.current
     val newTopicCreatedFallback = stringResource(R.string.editor_new_topic_created)
 
@@ -93,7 +95,7 @@ fun TopicFormScreen(
         viewModel.effects.collect { effect ->
             when (effect) {
                 is TopicFormEffect.SubmitSucceeded ->
-                    onSubmitSucceeded(effect.targetPage, effect.scrollTo, effect.operation)
+                    currentOnSubmitSucceeded(effect.targetPage, effect.scrollTo, effect.operation)
                 is TopicFormEffect.NewTopicCreated -> {
                     if (effect.newTopicId == null) {
                         // Fallback path (#206, the only real path): the create succeeded but
