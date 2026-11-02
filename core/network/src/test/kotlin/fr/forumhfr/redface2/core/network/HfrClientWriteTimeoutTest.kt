@@ -119,7 +119,8 @@ class HfrClientWriteTimeoutTest {
         assertTimeout(refused = false)
         assertEquals(1, server.requestCount)
         assertTrue(binding.state is EditorSubmissionState.Uncertain)
-        assertTrue(binding.blocksMutation)
+        // ED-170: Uncertain without accepted success stays editable; saveUnresolved preserves the attempt.
+        assertFalse(binding.blocksMutation)
         assertEquals(AttemptStatus.UNCERTAIN, drafts.entries["key"]?.attempt?.status)
         assertEquals("body", drafts.entries["key"]?.draft?.body)
     }
