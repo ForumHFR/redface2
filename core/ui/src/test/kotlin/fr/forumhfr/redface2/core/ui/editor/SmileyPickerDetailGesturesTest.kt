@@ -248,9 +248,10 @@ class SmileyPickerDetailGesturesTest {
         }
         val progressed = tab.fetchSemanticsNode().boundsInRoot
         assertTrue("M3 must scale the grid during predictive back", progressed.width < before.width)
-        // API 34+ animates progress back to zero before dispatching cancellation.
-        // M3 1.5.0-beta02 no longer restores scale on raw cancellation (#1509), leaving
-        // a 1-3 dp residue on a short release.
+        // Replays a cancellation by moving back to the edge, as observed on an Android 14
+        // emulator: the platform returns progress to zero before dispatching cancellation.
+        // This does not prove that a raw cancellation restores the scale: M3 1.5.0-beta02 no
+        // longer does (#1509); a short release left 1-3 dp on that emulator.
         listOf(0.5f, 0.3f, 0.1f, 0f).forEach { progress ->
             compose.runOnIdle {
                 dialog.onBackPressedDispatcher.dispatchOnBackProgressed(backEvent(progress))
