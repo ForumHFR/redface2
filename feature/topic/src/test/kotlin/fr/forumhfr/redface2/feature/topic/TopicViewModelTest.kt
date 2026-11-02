@@ -58,6 +58,7 @@ import fr.forumhfr.redface2.core.model.blacklist.BlacklistEntry
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.write.EditPostContext
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostContent
@@ -3111,6 +3112,103 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `tail growth offers a destination without claiming the published page`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(2, 5)) }),
+            refreshTopicsToReturn = listOf(fakeTopic(2, 6, posts = listOf(fakePost(640)))),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        viewModel.applySubmitResult(2, 640, listOf(640))
+        runCurrent()
+        val ack = viewModel.submitAcknowledgements.feedback.value!!
+        assertEquals(TopicAcknowledgement.Kind.Published, ack.kind)
+        assertEquals(6, ack.lastPage)
+        assertEquals(2, viewModel.state.value.request.page)
+        assertEquals(listOf(2), repository.refreshCalls.map { it.third })
+    }
+
+    @Test
+    fun `duplicate full editor handoff refreshes and acknowledges only once`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(2, 2)) }),
+            refreshTopicsToReturn = listOf(fakeTopic(2, 2)),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        val result = TopicSubmitResult(42, 2, null, account = "xaat")
+        viewModel.applySubmitResult(result)
+        viewModel.applySubmitResult(result)
+        runCurrent()
+        assertEquals(1, repository.refreshCalls.size)
+        assertEquals(TopicAcknowledgement.Kind.Published, viewModel.submitAcknowledgements.feedback.value?.kind)
+    }
+
+    @Test
+    fun `slow refresh acknowledges at the bound and late completion cannot confirm again`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(2, 2)) }),
+            refreshTopicsToReturn = listOf(fakeTopic(2, 2, posts = listOf(fakePost(777)))),
+        ).apply { refreshHook = { _, _, _ -> gate.await() } }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        viewModel.applySubmitResult(2, 777, operation = PostSubmitOperation.Edit)
+        advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
+        runCurrent()
+        val ack = viewModel.submitAcknowledgements.feedback.value!!
+        assertEquals(TopicAcknowledgement.Kind.Edited, ack.kind)
+        assertEquals(TopicRefreshKind.PostSubmit, viewModel.state.value.refreshKind)
+        viewModel.submitAcknowledgements.presented(ack.id, 4_000)
+        gate.complete(Unit)
+        runCurrent()
+        assertEquals(TopicRefreshKind.None, viewModel.state.value.refreshKind)
+        assertNull(viewModel.submitAcknowledgements.feedback.value)
+    }
+
+    @Test
+    fun `a handoff owned by another account never refreshes or acknowledges`() = runTest {
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flow { emit(fakeTopic(2, 2)) }))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("other")),
+        )
+        viewModel.applySubmitResult(TopicSubmitResult(42, 2, null, account = "xaat"))
+        assertTrue(repository.refreshCalls.isEmpty())
+        assertNull(viewModel.submitAcknowledgements.feedback.value)
+    }
+
+    @Test
+    fun `leaving the offered page clears the saved action before a late click`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flow { emit(fakeTopic(2, 5)) }, flow { emit(fakeTopic(3, 5)) }),
+            refreshTopicsToReturn = listOf(fakeTopic(2, 5)),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        viewModel.applySubmitResult(2, null)
+        runCurrent()
+        val id = viewModel.submitAcknowledgements.feedback.value!!.id
+        viewModel.submitAcknowledgements.presented(id, 10_000)
+        viewModel.switchToPage(3)
+        assertNull(viewModel.submitAcknowledgements.feedback.value)
+        assertNull(viewModel.submitAcknowledgements.takeOffer(id, "xaat"))
+    }
+
+    @Test
     fun `applySubmitResult falls back on the canonical page and lands at the bottom (#895)`() = runTest {
         val repository = FakeTopicRepository(
             flowsToReturn = listOf(
@@ -3269,7 +3367,8 @@ class TopicViewModelTest {
 
         viewModel.effects.test {
             viewModel.applySubmitResult(targetPage = 2, scrollTo = null)
-            assertEquals(TopicEffect.PostSubmittedElsewhere(page = 5), awaitItem())
+            runCurrent()
+            assertEquals(5, viewModel.submitAcknowledgements.feedback.value?.lastPage)
             expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
@@ -3303,7 +3402,8 @@ class TopicViewModelTest {
 
         viewModel.effects.test {
             viewModel.applySubmitResult(targetPage = 2, scrollTo = null)
-            assertEquals(TopicEffect.PostSubmittedElsewhere(page = 5), awaitItem())
+            runCurrent()
+            assertEquals(5, viewModel.submitAcknowledgements.feedback.value?.lastPage)
 
             repository.refreshHook = { _, _, page ->
                 if (page == 5) actionRefreshGate.await()
@@ -3357,7 +3457,8 @@ class TopicViewModelTest {
 
         viewModel.effects.test {
             viewModel.applySubmitResult(targetPage = 2, scrollTo = null)
-            assertEquals(TopicEffect.PostSubmittedElsewhere(page = 5), awaitItem())
+            runCurrent()
+            assertEquals(5, viewModel.submitAcknowledgements.feedback.value?.lastPage)
 
             viewModel.openSubmittedPostPage(page = 5)
             assertEquals(TopicEffect.ScrollToEndOfPage(5), awaitItem())
@@ -3392,7 +3493,8 @@ class TopicViewModelTest {
 
         viewModel.effects.test {
             viewModel.applySubmitResult(targetPage = 2, scrollTo = null)
-            assertEquals(TopicEffect.PostSubmittedElsewhere(page = 5), awaitItem())
+            runCurrent()
+            assertEquals(5, viewModel.submitAcknowledgements.feedback.value?.lastPage)
             expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
@@ -3444,7 +3546,8 @@ class TopicViewModelTest {
 
         viewModel.effects.test {
             viewModel.applySubmitResult(targetPage = 3, scrollTo = null)
-            assertEquals(TopicEffect.PostSubmittedElsewhere(page = 7), awaitItem())
+            runCurrent()
+            assertEquals(7, viewModel.submitAcknowledgements.feedback.value?.lastPage)
             expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
@@ -3544,7 +3647,8 @@ class TopicViewModelTest {
         viewModel.effects.test {
             viewModel.applySubmitResult(targetPage = 2, scrollTo = null, quotedNumreponses = listOf(640))
             assertEquals(TopicEffect.ScrollToPost(640), awaitItem())
-            assertEquals(TopicEffect.PostSubmittedElsewhere(page = 3), awaitItem())
+            runCurrent()
+            assertEquals(3, viewModel.submitAcknowledgements.feedback.value?.lastPage)
             expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
@@ -6112,7 +6216,7 @@ class TopicViewModelTest {
     @Test
     fun `applySubmitResult refresh failure falls back to the cache-aside path`() = runTest {
         // Resilience: a transient network blip on the post-submit force refresh must not strand
-        // the user on an error screen. The ViewModel emits PostSubmitRefreshFailed (Toast : HFR
+        // the user on an error screen. The ViewModel retains a failed-refresh acknowledgement (HFR
         // DID accept the post) then falls back to observeTopicPage so the cached page is shown
         // (without the new post — but with a Retry affordance) and must NOT re-emit a bottom
         // landing on that stale cache (post 100 is the pre-submit last post).
@@ -6138,7 +6242,8 @@ class TopicViewModelTest {
             assertEquals(TopicRefreshKind.PostSubmit, viewModel.state.value.refreshKind)
 
             refreshGate.complete(Unit)
-            assertEquals(TopicEffect.PostSubmitRefreshFailed, awaitItem())
+            runCurrent()
+            assertTrue(viewModel.submitAcknowledgements.feedback.value!!.refreshFailed)
             assertEquals(TopicRefreshKind.None, viewModel.state.value.refreshKind)
             // A bottom landing on the stale cache would surface here — nothing must.
             expectNoEvents()

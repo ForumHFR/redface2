@@ -41,6 +41,7 @@ import fr.forumhfr.redface2.core.model.write.PollVoteChoice
 import fr.forumhfr.redface2.core.model.write.PollVoteFailureReason
 import fr.forumhfr.redface2.core.model.write.PollVoteForm
 import fr.forumhfr.redface2.core.model.write.PollVoteResult
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -118,6 +119,8 @@ class TopicViewModel @AssistedInject constructor(
 
     private val _state = MutableStateFlow(TopicUiState.initial(request))
     val state: StateFlow<TopicUiState> = _state.asStateFlow()
+
+    internal val submitAcknowledgements = TopicAcknowledgements(savedStateHandle, viewModelScope)
 
     /**
      * #509 — latest set of blacklisted canonical pseudos. Kept fresh by the independent
@@ -415,6 +418,7 @@ class TopicViewModel @AssistedInject constructor(
         authRepository.observeAuthState()
             .onEach { authState ->
                 val connectedPseudo = (authState as? AuthState.Authenticated)?.pseudo
+                submitAcknowledgements.accountChanged(connectedPseudo?.let(::canonicalizePseudo))
                 val nextPollVoteAccount = connectedPseudo?.trim()?.lowercase()
                 val pollVoteAccountChanged = hasObservedPollVoteAccount &&
                     pollVoteAccount != nextPollVoteAccount
@@ -1578,6 +1582,7 @@ class TopicViewModel @AssistedInject constructor(
 
     /** #1296 — a retained nav-entry VM starts a fresh visit when its route is left. */
     fun onTopicRouteLeft() {
+        submitAcknowledgements.clear()
         clearPollVisit()
     }
 
@@ -1868,6 +1873,16 @@ class TopicViewModel @AssistedInject constructor(
         return true
     }
 
+    /** Apply a full-editor event once, after the initial account verdict is available. */
+    suspend fun applySubmitResult(result: TopicSubmitResult) {
+        initialAuthObserved.await()
+        val account = _state.value.connectedPseudo?.let(::canonicalizePseudo)
+        if (account == null || !account.equals(result.account, ignoreCase = true)) return
+        if (savedStateHandle.get<Long>(KEY_SUBMIT_CONSUMED_ID) == result.eventId) return
+        savedStateHandle[KEY_SUBMIT_CONSUMED_ID] = result.eventId
+        applySubmitResult(result.targetPage, result.scrollTo, result.quotedNumreponses, result.operation)
+    }
+
     /**
      * Post-submit result delivered to THIS retained ViewModel (Sol GO, option A) : the editor /
      * quick-reply sheet publishes `{targetPage, scrollTo, quotedNumreponses}` after a successful
@@ -1882,10 +1897,14 @@ class TopicViewModel @AssistedInject constructor(
      * - bottom (`#bas`, plain reply) only from the known tail; otherwise the current reading
      *   position is left untouched and a Snackbar offers the tail as an explicit action.
      *
-     * @param quotedNumreponses the `numreponse` of every post the submit cited (appearance order,
-     *   inline `[quotemsg]` tags and cards alike), empty for a plain reply or an edit.
+     * Sheet submissions publish; the full editor supplies its explicit operation through the relay.
      */
-    fun applySubmitResult(targetPage: Int?, scrollTo: Int?, quotedNumreponses: List<Int> = emptyList()) {
+    fun applySubmitResult(
+        targetPage: Int?,
+        scrollTo: Int?,
+        quotedNumreponses: List<Int> = emptyList(),
+        operation: PostSubmitOperation = PostSubmitOperation.Publish,
+    ) {
         val target = targetPage ?: request.page
         val plan = submitRefreshPlan(
             target = target,
@@ -1897,15 +1916,16 @@ class TopicViewModel @AssistedInject constructor(
         pageSnapshots.remove(target)
         jumpStack.clear()
         syncJumpAvailability()
-        performSubmitRefresh(plan, TopicRefreshKind.PostSubmit)
+        val acknowledgementId = submitAcknowledgements.accept(
+            _state.value.connectedPseudo?.let(::canonicalizePseudo).orEmpty(), operation,
+        )
+        performSubmitRefresh(plan, TopicRefreshKind.PostSubmit, acknowledgementId)
     }
 
-    /**
-     * #1243 — explicit Snackbar action after the refreshed submit page reports a later published
-     * page. This is now a user gesture, so opening the post page may advance HFR's read flag.
-     */
+    /** Explicit last-page action; the refreshed page count does not locate the submitted post. */
     fun openSubmittedPostPage(page: Int, departureAnchor: TopicScrollAnchor? = null) {
         if (page < 1) return
+        submitAcknowledgements.clear()
         departureAnchor?.let { pageAnchors[request.page] = it }
         postSubmitRedirectBudget = 0
         pageSnapshots.remove(page)
@@ -1927,10 +1947,10 @@ class TopicViewModel @AssistedInject constructor(
      * genuinely stable :
      * - the #226 overflow redirect is allowed only for a plain reply from the known tail. A quote
      *   submit never chases the new tail, because the user is resuming from the cited post ;
-     * - the "published on page N" Snackbar is decided after the refresh, when the refreshed
+     * - the last-page offer is decided after the refresh, when the refreshed
      *   [Topic.totalPages] is known and no redirect has already happened. This keeps stale-origin,
      *   unknown-count and quote-overflow submits on their source page while still offering an
-     *   explicit jump to the published message.
+     *   explicit jump to the end of the topic; totalPages does not locate the submitted post.
      */
     private fun submitRefreshPlan(target: Int, scrollTo: Int?, quotedNumreponse: Int?): SubmitRefreshPlan {
         val loadedMode = _state.value.mode as? TopicUiState.Mode.Loaded
@@ -1966,6 +1986,7 @@ class TopicViewModel @AssistedInject constructor(
         landing: PendingLanding?,
         bottomLandingEligible: Boolean = false,
     ) {
+        submitAcknowledgements.clear()
         // F4 step 1 — save the departure anchor before anything else.
         departureAnchor?.let { pageAnchors[request.page] = it }
         // Steps 2-3 — new owner : generation bump + cancel search / form fetch / load / prefetch.
@@ -2034,7 +2055,11 @@ class TopicViewModel @AssistedInject constructor(
      * submit result ; ownership taken via [becomePageOwner] (which cancels the anonymous warmup),
      * never an anonymous prefetch escalating to authenticated.
      */
-    private fun performSubmitRefresh(plan: SubmitRefreshPlan, submitRefreshKind: TopicRefreshKind) {
+    private fun performSubmitRefresh(
+        plan: SubmitRefreshPlan,
+        submitRefreshKind: TopicRefreshKind,
+        acknowledgementId: Long? = null,
+    ) {
         becomePageOwner()
         // #1301 — expose the durable cause synchronously, before any adoption or network wait.
         _state.update { it.copy(refreshKind = submitRefreshKind) }
@@ -2081,13 +2106,10 @@ class TopicViewModel @AssistedInject constructor(
                     }
                     recordSnapshot(topic)
                     dispatchPendingLanding(topic, terminal = true)
-                    if (
-                        plan.submittedElsewhereNotificationAllowed &&
-                        !redirected &&
-                        topic.totalPages > target
-                    ) {
-                        _effects.trySend(TopicEffect.PostSubmittedElsewhere(page = topic.totalPages))
+                    val offeredLastPage = topic.totalPages.takeIf {
+                        plan.submittedElsewhereNotificationAllowed && !redirected && it > target
                     }
+                    acknowledgementId?.let { submitAcknowledgements.refreshed(it, offeredLastPage) }
                 } catch (cancellation: CancellationException) {
                     throw cancellation
                 } catch (@Suppress("TooGenericExceptionCaught") refreshError: Exception) {
@@ -2096,9 +2118,12 @@ class TopicViewModel @AssistedInject constructor(
                     // back to the cache-aside path with a Retry affordance.
                     android.util.Log.w(LOG_TAG, "Submit-result refresh failed", refreshError)
                     if (generation != ownerGeneration) return@launch
-                    // #1301 — dismiss the success confirmation before the existing error effect.
                     _state.update { it.copy(refreshKind = TopicRefreshKind.None) }
-                    _effects.trySend(TopicEffect.PostSubmitRefreshFailed)
+                    if (acknowledgementId != null) {
+                        submitAcknowledgements.refreshFailed(acknowledgementId)
+                    } else {
+                        submitAcknowledgements.refreshWarning(_state.value.connectedPseudo?.let(::canonicalizePseudo).orEmpty())
+                    }
                     resolvePendingLandingWithoutScroll()
                     startPageLoad(showLoading = _state.value.mode !is TopicUiState.Mode.Loaded)
                 }
@@ -2212,6 +2237,7 @@ class TopicViewModel @AssistedInject constructor(
     }
 
     private fun runDeletion(numreponse: Int, subcat: Int) {
+        val submittingAccount = _state.value.connectedPseudo?.let(::canonicalizePseudo)
         val context = EditPostContext(
             cat = request.cat,
             subcat = subcat,
@@ -2229,6 +2255,9 @@ class TopicViewModel @AssistedInject constructor(
             _state.update { it.copy(deletingNumreponse = null) }
             when (result) {
                 is DeletePostResult.Success -> {
+                    if (submittingAccount != null &&
+                        submittingAccount == _state.value.connectedPseudo?.let(::canonicalizePseudo)
+                    ) submitAcknowledgements.deleted(submittingAccount)
                     _effects.trySend(TopicEffect.PostDeleted)
                     // A normal-post delete keeps the topic alive → refresh so the post vanishes. A
                     // whole-topic delete (first post) would 404 on reload, so we skip the refetch and
@@ -3275,6 +3304,7 @@ class TopicViewModel @AssistedInject constructor(
         private const val SWITCH_GRACE_MS = 250L
 
         // SavedStateHandle keys (F1/F3 + Sol points 4-5) — primitives only, never a Kotlin map.
+        const val KEY_SUBMIT_CONSUMED_ID = "topic_submit_consumed_id"
         private const val KEY_CURRENT_PAGE = "topic.currentPage"
         private const val KEY_RESOLVED_PAGE = "topic.resolvedPage"
         private const val KEY_ANCHOR_INDEX = "topic.anchorIndex"

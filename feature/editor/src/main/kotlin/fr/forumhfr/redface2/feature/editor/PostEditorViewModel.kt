@@ -9,6 +9,7 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
@@ -1042,6 +1043,11 @@ class PostEditorViewModel @AssistedInject constructor(
                 targetPage = result.targetPage,
                 scrollTo = result.numreponse ?: snapshot.numreponse.takeIf { snapshot.mode == PostEditorMode.Edit },
                 quotedNumreponses = quotedNumreponsesFor(snapshot),
+                operation = if (snapshot.mode == PostEditorMode.Edit) {
+                    PostSubmitOperation.Edit
+                } else {
+                    PostSubmitOperation.Publish
+                },
             ),
         )
         is ReplySubmitResult.Failure -> {

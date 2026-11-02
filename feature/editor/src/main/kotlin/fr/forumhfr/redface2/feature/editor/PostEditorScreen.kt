@@ -1,4 +1,6 @@
 package fr.forumhfr.redface2.feature.editor
+
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.ui.editor.rememberEditorImagePicker
 import fr.forumhfr.redface2.core.ui.editor.UploadProgressLabel
 import fr.forumhfr.redface2.core.ui.editor.bannerText
@@ -82,7 +84,9 @@ import fr.forumhfr.redface2.core.ui.editor.editorControlsMaxHeight
 @Composable
 fun PostEditorScreen(
     request: PostEditorRequest,
-    onSubmitSucceeded: (targetPage: Int?, scrollTo: Int?, quotedNumreponses: List<Int>) -> Unit,
+    onSubmitSucceeded: (
+        targetPage: Int?, scrollTo: Int?, quotedNumreponses: List<Int>, operation: PostSubmitOperation,
+    ) -> Unit,
     // #604 lot 4a — pops this editor AFTER the ViewModel flushed the draft (CloseCommitted).
     // Default keeps callers without the wiring on the platform back (no flush) — `:app` wires it.
     onClose: (() -> Unit)? = null,
@@ -96,7 +100,7 @@ fun PostEditorScreen(
         viewModel.effects.collect { effect ->
             when (effect) {
                 is PostEditorEffect.SubmitSucceeded ->
-                    onSubmitSucceeded(effect.targetPage, effect.scrollTo, effect.quotedNumreponses)
+                    onSubmitSucceeded(effect.targetPage, effect.scrollTo, effect.quotedNumreponses, effect.operation)
                 PostEditorEffect.CloseCommitted -> onClose?.invoke()
             }
         }

@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.editor
 
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollectionSnapshot
 import fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS
 import fr.forumhfr.redface2.core.model.SmileyUsageEntry
@@ -792,6 +793,7 @@ class PostEditorViewModelTest {
                     targetPage = 20,
                     scrollTo = 101,
                     quotedNumreponses = listOf(101, 303),
+                    operation = PostSubmitOperation.Publish,
                 ),
                 awaitItem(),
             )
@@ -819,6 +821,7 @@ class PostEditorViewModelTest {
             viewModel.submit(PostEditorIntent.SubmitClicked())
             val effect = awaitItem() as PostEditorEffect.SubmitSucceeded
             assertEquals(20, effect.targetPage)
+            assertEquals(PostSubmitOperation.Edit, effect.operation)
             assertEquals(
                 "parser numreponse must win over the locally-known edit numreponse",
                 parserExtracted,
@@ -2618,6 +2621,7 @@ class PostEditorViewModelTest {
                     targetPage = 20,
                     scrollTo = 101,
                     quotedNumreponses = listOf(101, 303),
+                    operation = PostSubmitOperation.Publish,
                 ),
                 awaitItem(),
             )
