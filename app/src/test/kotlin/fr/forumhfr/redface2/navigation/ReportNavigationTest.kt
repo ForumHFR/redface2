@@ -60,8 +60,10 @@ class ReportNavigationTest {
     fun messageCheckOpensTheInboxWithoutDuplicatingItsNavKey() {
         val stack = mutableListOf<NavKey>(MessagesRoute, ReportContentRoute())
         var selected = TopLevelDestination.Settings
-        openMessagesForReport(stack) { selected = it }
+        var refreshes = 0
+        openMessagesForReport(stack, requestInboxRefresh = { refreshes++ }) { selected = it }
         assertEquals(TopLevelDestination.Messages, selected)
         assertEquals(listOf(MessagesRoute), stack)
+        assertEquals(1, refreshes)
     }
 }

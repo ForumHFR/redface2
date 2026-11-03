@@ -8,7 +8,7 @@ import org.jsoup.Jsoup
  * Parses the response HFR returns after a POST to `bddpost.php` (reply / quote)
  * or `bdd.php` (edit post — Phase 2D #147).
  *
- * Success and failure are surfaced by a literal French sentence in the body, plus
+ * Success and failure are surfaced by a literal French sentence in `div.hop`, plus
  * a `<meta http-equiv="Refresh" content="N; url=…">` header on success that
  * carries the URL HFR wants the client to land on. We match on substrings because
  * HFR wraps the message in styled `<div class="hop">` markup that varies between
@@ -36,9 +36,14 @@ class ReplySubmitResponseParser {
 
         // Other paths land on a full HFR-styled HTML page — let Jsoup normalise it.
         val document = Jsoup.parse(html)
-        val body = document.body().text()
+        // Only the server's response box is a verdict. A topic or a re-rendered form can quote
+        // these sentences in user content without proving either success or refusal.
+        val body = document.selectFirst("div.hop")?.text().orEmpty()
 
         return when {
+            // HFR echoes the rejected pseudo after this prefix; it may itself contain a marker.
+            isUnknownRecipient(body) -> ReplySubmitResult.Failure(ReplyFailureReason.UnknownRecipient)
+
             INVALID_TOKEN_PATTERNS.any { body.contains(it, ignoreCase = true) } ->
                 ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
 
@@ -47,9 +52,6 @@ class ReplySubmitResponseParser {
 
             ANTI_FLOOD_MARKERS.any { body.contains(it, ignoreCase = true) } ->
                 ReplySubmitResult.Failure(ReplyFailureReason.AntiFlood)
-
-            body.contains(UNKNOWN_RECIPIENT_MARKER, ignoreCase = true) ->
-                ReplySubmitResult.Failure(ReplyFailureReason.UnknownRecipient)
 
             body.contains(TOPIC_LOCKED_MARKER, ignoreCase = true) ->
                 ReplySubmitResult.Failure(ReplyFailureReason.TopicLocked)
@@ -82,6 +84,10 @@ class ReplySubmitResponseParser {
             else -> ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
         }
     }
+
+    private fun isUnknownRecipient(message: String): Boolean =
+        message.startsWith(UNKNOWN_RECIPIENT_MARKER, ignoreCase = true) ||
+            message.startsWith("désolé, $UNKNOWN_RECIPIENT_MARKER", ignoreCase = true)
 
     private fun parseSuccess(html: String): ReplySubmitResult.Success {
         // Use the raw HTML rather than Jsoup so we keep the literal `1; url=…`

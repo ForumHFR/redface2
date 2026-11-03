@@ -19,6 +19,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionBinding
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionCallbacks
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionEnvironment
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionErrors
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionRequest
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
@@ -180,7 +181,16 @@ class ReportContentViewModel @AssistedInject constructor(
             sessionExpired()
         } else {
             loadedForm = form
-            _state.update { it.copy(isLoadingForm = false, formAvailable = true) }
+            _state.update {
+                it.copy(
+                    isLoadingForm = false, formAvailable = true,
+                    error = when {
+                        it.error != ReportError.SESSION_EXPIRED -> it.error
+                        it.submission is EditorSubmissionState.Uncertain -> ReportError.UNCERTAIN
+                        else -> null
+                    },
+                )
+            }
         }
     }
 
@@ -214,7 +224,7 @@ class ReportContentViewModel @AssistedInject constructor(
     private fun login() {
         val current = _state.value
         val loginRequired = current.session == ReportSession.ANONYMOUS || current.error == ReportError.SESSION_EXPIRED
-        if (loginRequired && !submission.blocksClose) _effects.trySend(ReportContentEffect.Login)
+        if (loginRequired && !submission.blocksClose && !closeRequested) _effects.trySend(ReportContentEffect.Login)
     }
 
     private fun email() {
@@ -236,7 +246,7 @@ class ReportContentViewModel @AssistedInject constructor(
         _state.value.takeIf { it.draftReady }?.draft?.let(ReportDraftCodec::encode)
 
     private fun retryForm() {
-        if (_state.value.session != ReportSession.AUTHENTICATED || submission.blocksMutation) return
+        if (closeRequested || _state.value.session != ReportSession.AUTHENTICATED || submission.blocksMutation) return
         val opening = generation
         formJob?.cancel()
         loadedForm = null
@@ -280,12 +290,20 @@ class ReportContentViewModel @AssistedInject constructor(
     }
 
     private fun checkMessages() {
+        if (submission.blocksClose || closeRequested) return
+        submission.disarm()
+        closeRequested = true
         val opening = generation
         val binding = submission
-        if (!submission.blocksClose) viewModelScope.launch {
-            val result = binding.flush(draftSnapshot())
-            if (opening == generation && result is EditorDraftStore.StoreWriteResult.Written) {
-                _effects.send(ReportContentEffect.CheckMessages)
+        val snapshot = draftSnapshot()
+        viewModelScope.launch {
+            val result = binding.flush(snapshot)
+            if (opening == generation) {
+                if (result is EditorDraftStore.StoreWriteResult.Written && !binding.blocksClose) {
+                    _effects.send(ReportContentEffect.CheckMessages)
+                } else {
+                    closeRequested = false
+                }
             }
         }
     }

@@ -1180,10 +1180,8 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
         // Anonymous) — keeping a positive value here would then silently swallow the next session's
         // first reconcile.
         var lastReconciledGeneration by remember { mutableStateOf(0) }
-        // #301 follow-up — bumped when the new-conversation composer pops back after a successful
-        // send. The MP list collects the signal and refreshes itself so the created conversation
-        // appears at the top (its thread id is unknown — the bddpost success response of a new MP
-        // is not topic-shaped). In-memory only, like the other private-message hints above.
+        // Requests page 1 after a successful new conversation or an explicit report message check.
+        // A refresh request carries no delivery verdict. In-memory only, like the hints above.
         var privateMessageSentSignal by remember { mutableStateOf<Long?>(null) }
         // #1040 lot 6 — successful reply outcome owed to the RETAINED conversation ViewModel.
         // Keyed by canonical account + thread, never serialized; the event counter prevents replay.
@@ -1417,7 +1415,15 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                             onReportContent = {
                                 openReportFromSettings(activeBackStack)
                             },
-                            onCheckReportMessages = { openMessagesForReport(messagesBackStack, switchTab) },
+                            onCheckReportMessages = {
+                                openMessagesForReport(
+                                    messagesBackStack,
+                                    requestInboxRefresh = {
+                                        privateMessageSentSignal = (privateMessageSentSignal ?: 0L) + 1L
+                                    },
+                                    switchTab = switchTab,
+                                )
+                            },
                             privateMessageNavState = PrivateMessageNavState(
                                 // #531 — the screen only needs membership, so it gets the marked thread ids;
                                 // the dates stay nav-internal, consumed by reconcileReadMarks below.
@@ -1480,7 +1486,7 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                                 },
                                 sentSignal = privateMessageSentSignal,
                                 onConversationSent = {
-                                    privateMessageSentSignal = System.currentTimeMillis()
+                                    privateMessageSentSignal = (privateMessageSentSignal ?: 0L) + 1L
                                 },
                             ),
                             privateMessageSubmitNavState = PrivateMessageSubmitNavState(
@@ -1748,7 +1754,7 @@ private data class PrivateMessageNavState(
     val onThreadOpenedAt: (threadId: Int, date: Instant) -> Unit = { _, _ -> },
     val onReconcileReadMarks: (generation: Int, conversations: List<PrivateMessageSummary>) -> Unit =
         { _, _ -> },
-    /** #301 follow-up — last successful new-conversation send ; the MP list refreshes on change. */
+    /** Inbox refresh request after a new conversation or an explicit report message check. */
     val sentSignal: Long? = null,
     /** #301 follow-up — bumps [sentSignal] when the composer reports a successful send. */
     val onConversationSent: () -> Unit = {},

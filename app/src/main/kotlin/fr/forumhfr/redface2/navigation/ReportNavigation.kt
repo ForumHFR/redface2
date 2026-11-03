@@ -56,10 +56,12 @@ internal fun finishLogin(backStack: MutableList<NavKey>) {
 /** The report flushes its draft before this handoff, including when opened in Messages itself. */
 internal fun openMessagesForReport(
     messagesBackStack: MutableList<NavKey>,
+    requestInboxRefresh: () -> Unit,
     switchTab: (TopLevelDestination) -> Unit,
 ) {
     messagesBackStack.clear()
     messagesBackStack.add(MessagesRoute)
+    requestInboxRefresh()
     switchTab(TopLevelDestination.Messages)
 }
 
@@ -83,7 +85,10 @@ internal fun ReportContentEntry(
                 ReportContentEffect.Login -> backStack.add(LoginRoute)
                 ReportContentEffect.Email -> startReportEmail(context, emailSubject, noEmailClient)
                 ReportContentEffect.CloseCommitted -> popReport(backStack, route)
-                ReportContentEffect.CheckMessages -> onCheckMessages()
+                ReportContentEffect.CheckMessages -> {
+                    popReport(backStack, route)
+                    onCheckMessages()
+                }
                 ReportContentEffect.SubmitSucceeded -> {
                     popReport(backStack, route)
                     onConversationSent()

@@ -121,6 +121,74 @@ class ReportContentViewModelTest {
     }
 
     @Test
+    fun authenticatedFormAfterSameAccountLoginClearsOnlyTheSessionError() = runTest {
+        coEvery { repository.fetchComposeForm(any()) } returns reportComposeForm().copy(isAnonymous = true)
+        val vm = create()
+        runCurrent()
+        fill(vm)
+        val before = vm.state.value.draft
+        assertEquals(ReportError.SESSION_EXPIRED, vm.state.value.error)
+        vm.effects.test {
+            vm.onIntent(ReportContentIntent.Login)
+            assertEquals(ReportContentEffect.Login, awaitItem())
+            // Même compte : le StateFlow ne réémet pas, ON_RESUME demande RetryForm.
+            auth.value = AuthState.Authenticated("tester")
+            coEvery { repository.fetchComposeForm(any()) } returns reportComposeForm()
+            vm.onIntent(ReportContentIntent.RetryForm)
+            runCurrent()
+            expectNoEvents()
+        }
+        assertEquals(null, vm.state.value.error)
+        assertEquals(before, vm.state.value.draft)
+        assertTrue(vm.state.value.canSubmit)
+    }
+
+    @Test
+    fun authenticatedFormReloadPreservesUncertainty() = runTest {
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        val vm = create()
+        runCurrent()
+        fill(vm)
+        vm.onIntent(ReportContentIntent.Submit)
+        runCurrent()
+        val before = vm.state.value.draft
+
+        vm.onIntent(ReportContentIntent.RetryForm)
+        runCurrent()
+
+        assertTrue(vm.state.value.formAvailable)
+        assertEquals(ReportError.UNCERTAIN, vm.state.value.error)
+        assertEquals(before, vm.state.value.draft)
+        coVerify(exactly = 1) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun sessionRecoveryRestoresTheWarningForAnUnresolvedAttempt() = runTest {
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        val vm = create()
+        runCurrent()
+        fill(vm)
+        vm.onIntent(ReportContentIntent.Submit)
+        runCurrent()
+        val before = vm.state.value.draft
+        coEvery { repository.fetchComposeForm(any()) } returns reportComposeForm().copy(isAnonymous = true)
+        vm.onIntent(ReportContentIntent.RetryForm)
+        runCurrent()
+        assertEquals(ReportError.SESSION_EXPIRED, vm.state.value.error)
+
+        coEvery { repository.fetchComposeForm(any()) } returns reportComposeForm()
+        vm.onIntent(ReportContentIntent.RetryForm)
+        runCurrent()
+
+        assertTrue(vm.state.value.formAvailable)
+        assertEquals(ReportError.UNCERTAIN, vm.state.value.error)
+        assertEquals(before, vm.state.value.draft)
+        coVerify(exactly = 1) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun submitUsesFixedRecipientAndOptions() = runTest {
         val vm = create()
         runCurrent()
@@ -238,6 +306,106 @@ class ReportContentViewModelTest {
     }
 
     @Test
+    fun messageCheckReservesBeforeFlushAndBlocksEditsRetryAndDuplicateNavigation() = runTest {
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        val vm = create()
+        runCurrent()
+        fill(vm)
+        vm.onIntent(ReportContentIntent.Submit)
+        runCurrent()
+        val before = vm.state.value.draft
+        val gate = CompletableDeferred<Unit>()
+        store.saveReturnGate = gate
+        vm.effects.test {
+            vm.onIntent(ReportContentIntent.CheckMessages)
+            // Aucun dispatch entre la réservation et ces actions concurrentes.
+            fillWithLateEdits(vm)
+            vm.onIntent(ReportContentIntent.Submit)
+            runCurrent()
+            vm.onIntent(ReportContentIntent.CheckMessages)
+            vm.onIntent(ReportContentIntent.Close)
+            fillWithLateEdits(vm)
+            vm.onIntent(ReportContentIntent.Submit)
+            runCurrent()
+            assertEquals(before, vm.state.value.draft)
+            expectNoEvents()
+            coVerify(exactly = 1) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+            gate.complete(Unit)
+            runCurrent()
+            assertEquals(ReportContentEffect.CheckMessages, awaitItem())
+            expectNoEvents()
+        }
+        assertEquals(before, ReportDraftCodec.decode(store.entries.values.single().draft))
+        assertEquals(ReportError.UNCERTAIN, vm.state.value.error)
+    }
+
+    @Test
+    fun failedMessageCheckKeepsTheFormOpenAndReleasesTheReservation() = runTest {
+        val vm = create()
+        runCurrent()
+        fill(vm)
+        store.saveFailure = IOException("storage unavailable")
+        vm.effects.test {
+            vm.onIntent(ReportContentIntent.CheckMessages)
+            runCurrent()
+            expectNoEvents()
+            assertEquals(ReportError.DRAFT_WRITE_FAILED, vm.state.value.error)
+            store.saveFailure = null
+            vm.onIntent(ReportContentIntent.DescriptionChanged("Updated after failed save"))
+            assertEquals("Updated after failed save", vm.state.value.draft.description)
+            vm.onIntent(ReportContentIntent.CheckMessages)
+            runCurrent()
+            assertEquals(ReportContentEffect.CheckMessages, awaitItem())
+            expectNoEvents()
+        }
+    }
+
+    @Test
+    fun accountChangeWhileMessageCheckFlushesDoesNotNavigate() = runTest {
+        val vm = create()
+        runCurrent()
+        fill(vm)
+        val gate = CompletableDeferred<Unit>()
+        store.saveReturnGate = gate
+        vm.effects.test {
+            vm.onIntent(ReportContentIntent.CheckMessages)
+            runCurrent()
+            store.activeOwner = "other"
+            auth.value = AuthState.Authenticated("other")
+            runCurrent()
+            gate.complete(Unit)
+            runCurrent()
+            expectNoEvents()
+        }
+        assertEquals(ReportDraft(), vm.state.value.draft)
+        assertTrue(vm.state.value.formAvailable)
+    }
+
+    @Test
+    fun messageCheckDuringPostDoesNotNavigate() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } coAnswers {
+            gate.await()
+            ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        }
+        val vm = create()
+        runCurrent()
+        fill(vm)
+        vm.effects.test {
+            vm.onIntent(ReportContentIntent.Submit)
+            runCurrent()
+            vm.onIntent(ReportContentIntent.CheckMessages)
+            runCurrent()
+            expectNoEvents()
+            gate.complete(Unit)
+            runCurrent()
+            expectNoEvents()
+        }
+        assertEquals(ReportError.UNCERTAIN, vm.state.value.error)
+    }
+
+    @Test
     fun processLossRestoresAllFieldsAsUncertainWithoutResending() = runTest {
         val gate = CompletableDeferred<Unit>()
         coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } coAnswers {
@@ -310,6 +478,12 @@ class ReportContentViewModelTest {
         vm.onIntent(ReportContentIntent.ReasonChanged(ReportReason.CHILD_SAFETY))
         vm.onIntent(ReportContentIntent.DescriptionChanged("Description privée"))
         vm.onIntent(ReportContentIntent.LinkChanged("https://forum.hardware.fr/"))
+    }
+
+    private fun fillWithLateEdits(vm: ReportContentViewModel) {
+        vm.onIntent(ReportContentIntent.ReasonChanged(ReportReason.OTHER))
+        vm.onIntent(ReportContentIntent.DescriptionChanged("Late description"))
+        vm.onIntent(ReportContentIntent.LinkChanged("https://example.org/late"))
     }
 }
 
