@@ -66,6 +66,7 @@
     <string name="messages_reply_error_dismiss">Ignorer</string>
     <string name="messages_reply_form_error">Impossible d\'ouvrir le formulaire de réponse. Réessayez.</string>
     <string name="messages_reply_error_empty">Le message est vide. Écrivez quelque chose avant d\'envoyer.</string>
+    <string name="messages_reply_error_refused">Envoi refusé par HFR. Votre réponse n’a pas été envoyée.</string>
     <string name="messages_reply_error_invalid_hash">La session a expiré. Le formulaire a été rechargé : renvoyez votre message.</string>
     <string name="messages_reply_error_anti_flood">Trop de messages envoyés coup sur coup. Patientez quelques minutes.</string>
     <string name="messages_reply_error_login_required">Vous devez être connecté pour répondre.</string>
@@ -143,4 +144,5 @@
          libellé que le topic (topic_post_ego_state_description), possédé par chaque feature. -->
     <string name="messages_post_ego_state_description">Votre message</string>
     <string name="messages_post_moderation_state_description">Message de la modération</string>
+    <string name="messages_compose_error_unknown_recipient">Envoi refusé : un pseudo du champ Destinataires n’existe pas. Vérifiez ce champ.</string>
 </resources>

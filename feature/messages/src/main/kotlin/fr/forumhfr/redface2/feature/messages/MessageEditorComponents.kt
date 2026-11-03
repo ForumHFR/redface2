@@ -3,6 +3,8 @@ package fr.forumhfr.redface2.feature.messages
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
@@ -20,8 +22,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.layout.FlowRow
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -53,10 +53,13 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitActions
 import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitButton
 import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitLabels
 import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitState
+import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummary
+import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummaryKind
 
 /**
  * Building blocks shared by the two private-message editors — the conversation reply
@@ -268,11 +271,12 @@ internal fun MessageSubmitBar(
     canSubmit: Boolean,
     isSubmitting: Boolean,
     confirmArmed: Boolean,
-    onSubmit: () -> Unit,
+    onSubmit: (Long) -> Unit,
     onConfirmSubmit: () -> Unit,
     onDisarmConfirm: () -> Unit,
     onOpenOptions: () -> Unit,
     onOpenSmileys: () -> Unit,
+    armToken: ArmToken? = null,
 ) {
     Surface(color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 3.dp) {
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -309,13 +313,14 @@ internal fun MessageSubmitBar(
                     Spacer(modifier = Modifier.width(12.dp))
                 }
                 ArmedSubmitButton(
-                    state = ArmedSubmitState(armed = confirmArmed, enabled = canSubmit),
+                    state = ArmedSubmitState(armed = confirmArmed, enabled = canSubmit, armToken = armToken),
                     labels = ArmedSubmitLabels(
                         submit = stringResource(R.string.messages_reply_submit),
                         confirm = stringResource(R.string.messages_reply_submit_confirm),
                     ),
                     actions = ArmedSubmitActions(
-                        onSubmit = onSubmit,
+                        onSubmit = { onSubmit(4_000L) },
+                        onSubmitWithTimeout = onSubmit,
                         onConfirmSubmit = onConfirmSubmit,
                         onDisarm = onDisarmConfirm,
                     ),
@@ -454,10 +459,38 @@ private const val ADMIN_PSEUDO = "Administration"
 internal val PrivateMessageReplyError.bannerResId: Int
     get() = when (this) {
         PrivateMessageReplyError.Empty -> R.string.messages_reply_error_empty
+        PrivateMessageReplyError.UnknownRecipient -> R.string.messages_compose_error_unknown_recipient
+        PrivateMessageReplyError.Refused -> R.string.messages_reply_error_refused
         PrivateMessageReplyError.InvalidHashCheck -> R.string.messages_reply_error_invalid_hash
         PrivateMessageReplyError.AntiFlood -> R.string.messages_reply_error_anti_flood
         PrivateMessageReplyError.LoginRequired -> R.string.messages_reply_error_login_required
         PrivateMessageReplyError.Network -> R.string.messages_reply_error_network
         PrivateMessageReplyError.SessionExpired -> R.string.messages_reply_error_session_expired
-        PrivateMessageReplyError.Unexpected -> R.string.messages_reply_error_unexpected
+        PrivateMessageReplyError.Uncertain, PrivateMessageReplyError.Unexpected ->
+            R.string.messages_reply_error_unexpected
+        PrivateMessageReplyError.DraftWriteFailed ->
+            fr.forumhfr.redface2.core.ui.R.string.editor_submission_draft_write_failed
     }
+
+/** ED-112/170: shared cause, existing MP-specific verification detail; no retry invitation. */
+@Composable
+internal fun MessageSubmissionError(error: PrivateMessageReplyError, composing: Boolean) {
+    val summary = when (error) {
+        PrivateMessageReplyError.Uncertain -> EditorSubmissionSummaryKind.Uncertain
+        PrivateMessageReplyError.DraftWriteFailed -> EditorSubmissionSummaryKind.DraftWriteFailed
+        else -> null
+    }
+    if (summary != null) EditorSubmissionSummary(summary)
+    if (error != PrivateMessageReplyError.DraftWriteFailed) {
+        val resource = if (composing &&
+            (error == PrivateMessageReplyError.Uncertain || error == PrivateMessageReplyError.Unexpected)) {
+            R.string.messages_compose_error_unexpected
+        } else {
+            error.bannerResId
+        }
+        Text(
+            text = stringResource(resource), style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.error,
+        )
+    }
+}

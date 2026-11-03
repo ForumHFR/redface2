@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.editor
 
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollectionSnapshot
 import fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS
 import fr.forumhfr.redface2.core.model.SmileyUsageEntry
@@ -13,12 +14,21 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.viewModelScope
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionScenario
+import fr.forumhfr.redface2.core.domain.editor.SubmissionErrorProbe
+import fr.forumhfr.redface2.core.domain.editor.ArmToken
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionAdapter
+import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
+import fr.forumhfr.redface2.core.domain.editor.SubmissionBodyMutation
+import fr.forumhfr.redface2.core.domain.editor.SubmissionProbe
 import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
@@ -71,11 +81,14 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -99,7 +112,9 @@ class PostEditorViewModelTest {
     private val replyRepository = FakeReplyRepository()
     private val editPostRepository = FakeEditPostRepository()
     private val smileyRepository = FakeSmileyRepository()
-    private val draftStore = FakeEditorDraftStore()
+    private var draftStore: VersionedEditorDraftStore = FakeEditorDraftStore()
+    private val dispatcher = UnconfinedTestDispatcher()
+    private var submissionClock = DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L }
     private val favoriteRepository = FakeHfrFavoriteSmileyRepository()
     private val localCollections = FakeSmileyLocalCollections()
     private val uploadRepository = FakeUploadRepository()
@@ -107,7 +122,7 @@ class PostEditorViewModelTest {
 
     @Before
     fun setUp() {
-        Dispatchers.setMain(UnconfinedTestDispatcher())
+        Dispatchers.setMain(dispatcher)
     }
 
     @After
@@ -211,7 +226,7 @@ class PostEditorViewModelTest {
     fun `submit blank content does not POST`() = runTest {
         replyRepository.formResult = Result.success(authenticatedForm())
         val viewModel = newReplyViewModel()
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
         assertEquals(0, replyRepository.submitCalls)
     }
 
@@ -225,7 +240,7 @@ class PostEditorViewModelTest {
         val viewModel = newReplyViewModel()
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Hello!", TextRange(6))))
         viewModel.effects.test {
-            viewModel.submit(PostEditorIntent.SubmitClicked)
+            viewModel.submit(PostEditorIntent.SubmitClicked())
             val effect = awaitItem()
             assertEquals(PostEditorEffect.SubmitSucceeded(targetPage = 20), effect)
             cancelAndIgnoreRemainingEvents()
@@ -239,7 +254,7 @@ class PostEditorViewModelTest {
         replyRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.AntiFlood)
         val viewModel = newReplyViewModel()
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Hello!", TextRange(6))))
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
         viewModel.state.test {
             val settled = expectMostRecentItem()
             assertFalse(settled.isSubmitting)
@@ -254,16 +269,16 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `submit network error keeps the draft and surfaces Network error`() = runTest {
+    fun `submit network error keeps the draft and surfaces uncertainty`() = runTest {
         replyRepository.formResult = Result.success(authenticatedForm())
         replyRepository.submitException = IOException("disconnected")
         val viewModel = newReplyViewModel()
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Hello!", TextRange(6))))
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
         viewModel.state.test {
             val settled = expectMostRecentItem()
             assertFalse(settled.isSubmitting)
-            assertEquals(SubmitError.Network, settled.submitError)
+            assertEquals(SubmitError.Uncertain, settled.submitError)
             assertEquals("Hello!", settled.draft.text)
             cancelAndIgnoreRemainingEvents()
         }
@@ -283,8 +298,8 @@ class PostEditorViewModelTest {
         val viewModel = newReplyViewModel()
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Hello!", TextRange(6))))
 
-        viewModel.submit(PostEditorIntent.SubmitClicked) // launches the first submit; suspends on gate
-        viewModel.submit(PostEditorIntent.SubmitClicked) // must be a no-op (job already active)
+        viewModel.submit(PostEditorIntent.SubmitClicked()) // launches the first submit; suspends on gate
+        viewModel.submit(PostEditorIntent.SubmitClicked()) // must be a no-op (job already active)
 
         gate.complete(Unit)
         assertEquals(1, replyRepository.submitCalls)
@@ -421,7 +436,7 @@ class PostEditorViewModelTest {
         assertEquals("open-time fetch is the plain form only", 1, replyRepository.formFetches)
 
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Reply")))
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
         testScheduler.advanceUntilIdle()
 
         assertEquals("plain open fetch + one quote fetch per card", 4, replyRepository.formFetches)
@@ -454,7 +469,7 @@ class PostEditorViewModelTest {
         val viewModel = newReplyViewModel(initialQuotes = listOf(card(101), card(303)))
         testScheduler.advanceUntilIdle()
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Reply")))
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
         testScheduler.advanceUntilIdle()
 
         assertEquals("nothing must reach HFR on a failed materialisation", 0, replyRepository.submitCalls)
@@ -469,7 +484,7 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `submit fails whole when a card's prefill comes back blank (#291)`() = runTest {
+    fun `submit keeps draft and uncertainty when a card's prefill comes back blank (#291)`() = runTest {
         // A 200-OK form whose textarea prefill is EMPTY would otherwise silently drop a quote
         // the user explicitly selected — same contract as a failed fetch: fail globally.
         replyRepository.formResult = Result.success(authenticatedForm())
@@ -481,14 +496,14 @@ class PostEditorViewModelTest {
         val viewModel = newReplyViewModel(initialQuotes = listOf(card(101), card(303)))
         testScheduler.advanceUntilIdle()
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Reply")))
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
         testScheduler.advanceUntilIdle()
 
         assertEquals("nothing must reach HFR", 0, replyRepository.submitCalls)
         viewModel.state.test {
             val settled = expectMostRecentItem()
             assertFalse(settled.isSubmitting)
-            assertEquals(SubmitError.Hfr(ReplyFailureReason.Unknown), settled.submitError)
+            assertEquals(SubmitError.Uncertain, settled.submitError)
             assertEquals("cards intact", listOf(101, 303), settled.quotes.map { it.numreponse })
             assertEquals("body intact", "Reply", settled.draft.text)
             cancelAndIgnoreRemainingEvents()
@@ -586,7 +601,7 @@ class PostEditorViewModelTest {
         viewModel.submit(PostEditorIntent.MsgIconSelected(6))
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("hi")))
         assertEquals(6, viewModel.state.value.msgIcon)
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
         testScheduler.advanceUntilIdle()
 
         assertEquals("6", replyRepository.lastSubmittedForm?.msgIcon)
@@ -601,7 +616,7 @@ class PostEditorViewModelTest {
 
         viewModel.submit(PostEditorIntent.MsgIconSelected(6))
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("hi")))
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
         testScheduler.advanceUntilIdle()
 
         assertEquals("refetch happened", 2, replyRepository.formFetches)
@@ -620,7 +635,7 @@ class PostEditorViewModelTest {
         testScheduler.advanceUntilIdle()
         viewModel.submit(PostEditorIntent.ToggleSignature(true))
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("hi")))
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
         testScheduler.advanceUntilIdle()
 
         assertEquals("refetch happened", 2, replyRepository.formFetches)
@@ -665,7 +680,7 @@ class PostEditorViewModelTest {
         testScheduler.advanceUntilIdle()
 
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("rewritten body")))
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
         testScheduler.advanceUntilIdle()
 
         assertEquals(1, editPostRepository.submitCalls)
@@ -688,7 +703,7 @@ class PostEditorViewModelTest {
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("rewritten body")))
 
         viewModel.effects.test {
-            viewModel.submit(PostEditorIntent.SubmitClicked)
+            viewModel.submit(PostEditorIntent.SubmitClicked())
             val effect = awaitItem()
             assertTrue("must be a SubmitSucceeded — got $effect", effect is PostEditorEffect.SubmitSucceeded)
             val success = effect as PostEditorEffect.SubmitSucceeded
@@ -714,7 +729,7 @@ class PostEditorViewModelTest {
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("new reply")))
 
         viewModel.effects.test {
-            viewModel.submit(PostEditorIntent.SubmitClicked)
+            viewModel.submit(PostEditorIntent.SubmitClicked())
             val effect = awaitItem() as PostEditorEffect.SubmitSucceeded
             assertEquals(20, effect.targetPage)
             assertNull("Reply must keep scrollTo null — anchor is #bas", effect.scrollTo)
@@ -741,7 +756,7 @@ class PostEditorViewModelTest {
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("citing")))
 
         viewModel.effects.test {
-            viewModel.submit(PostEditorIntent.SubmitClicked)
+            viewModel.submit(PostEditorIntent.SubmitClicked())
             val effect = awaitItem() as PostEditorEffect.SubmitSucceeded
             assertEquals(1, effect.targetPage)
             assertEquals(
@@ -772,12 +787,13 @@ class PostEditorViewModelTest {
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Reply")))
 
         viewModel.effects.test {
-            viewModel.submit(PostEditorIntent.SubmitClicked)
+            viewModel.submit(PostEditorIntent.SubmitClicked())
             assertEquals(
                 PostEditorEffect.SubmitSucceeded(
                     targetPage = 20,
                     scrollTo = 101,
                     quotedNumreponses = listOf(101, 303),
+                    operation = PostSubmitOperation.Publish,
                 ),
                 awaitItem(),
             )
@@ -802,9 +818,10 @@ class PostEditorViewModelTest {
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("rewritten body")))
 
         viewModel.effects.test {
-            viewModel.submit(PostEditorIntent.SubmitClicked)
+            viewModel.submit(PostEditorIntent.SubmitClicked())
             val effect = awaitItem() as PostEditorEffect.SubmitSucceeded
             assertEquals(20, effect.targetPage)
+            assertEquals(PostSubmitOperation.Edit, effect.operation)
             assertEquals(
                 "parser numreponse must win over the locally-known edit numreponse",
                 parserExtracted,
@@ -833,7 +850,7 @@ class PostEditorViewModelTest {
         assertEquals("initial plain form fetch", 1, replyRepository.formFetches)
 
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Reply")))
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
         testScheduler.advanceUntilIdle()
 
         // Open (plain) + the card's quote-form materialisation + the silent plain refetch.
@@ -879,6 +896,155 @@ class PostEditorViewModelTest {
         }
     }
 
+    /** #1301-ST — adaptateur des trois parcours, réutilisant les harnais et fakes de cette suite. */
+    internal fun submissionAdapter(
+        variant: String,
+        scope: TestScope,
+        preferences: Flow<Boolean>,
+        delayedSharedRestore: Boolean,
+        scenario: EditorSubmissionScenario,
+    ): EditorSubmissionAdapter {
+        submissionClock = DiagnosticsClock { scope.testScheduler.currentTime * 1_000_000L }
+        draftStore = scenario.store
+        val auth = MutableStateFlow<AuthState>(AuthState.Authenticated("tester"))
+        val authRepository = object : AuthRepository by FakeAuthRepository() {
+            override fun observeAuthState(): Flow<AuthState> = auth
+        }
+        scenario.changeAccount = {
+            scenario.store.activeOwner = "other"
+            auth.value = AuthState.Authenticated("other")
+        }
+        val postGate = CompletableDeferred<Unit>()
+        val uploadGate = CompletableDeferred<Unit>()
+        val restoreGate = CompletableDeferred<Unit>()
+        val editing = variant == "edit"
+        val key = if (editing) {
+            EditorDraftKey.editPost(SAMPLE_CAT, SAMPLE_EDITED_NUMREPONSE)
+        } else {
+            EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        }
+        draftStore.preload(key, EditorDraftStore.Draft(body = "stored draft"))
+        if (delayedSharedRestore && !editing) draftStore.loadGate = restoreGate
+        replyRepository.submitException = scenario.postFailure
+        editPostRepository.submitException = scenario.postFailure
+        replyRepository.submitGate = postGate
+        replyRepository.submitScenario = scenario
+        replyRepository.submitResult = ReplySubmitResult.Success(targetPage = 20, refreshUrl = null)
+        if (variant == "quote") {
+            replyRepository.formResultsByNumrep = mapOf(
+                101 to Result.success(authenticatedForm("[quotemsg=101,35395,1]quoted body[/quotemsg]")),
+            )
+        }
+        editPostRepository.submitGate = postGate
+        editPostRepository.submitScenario = scenario
+        editPostRepository.submitResult = ReplySubmitResult.Success(targetPage = 20, refreshUrl = null)
+        scenario.postRejection?.let {
+            replyRepository.submitResult = ReplySubmitResult.Failure(it)
+            editPostRepository.submitResult = ReplySubmitResult.Failure(it)
+        }
+        uploadRepository.uploadGate = uploadGate
+        val defaults = FakeUserPreferencesRepository(quoteCardsEnabled = true)
+        val userPreferences = object : UserPreferencesRepository by defaults {
+            override fun observeConfirmBeforePosting(): Flow<Boolean> = preferences
+        }
+        fun createViewModel() = if (editing) {
+            newEditViewModel(userPreferencesRepository = userPreferences, authRepository = authRepository)
+        } else {
+            newReplyViewModel(
+                initialQuotes = if (variant == "quote") listOf(card(101)) else emptyList(),
+                resumeSharedDraft = delayedSharedRestore,
+                authRepository = authRepository,
+                userPreferencesRepository = userPreferences,
+            )
+        }
+        var viewModel = createViewModel()
+        val effects = mutableListOf<PostEditorEffect>()
+        fun collectEffects() = scope.backgroundScope.launch(UnconfinedTestDispatcher(scope.testScheduler)) {
+            viewModel.effects.collect { effects += it }
+        }
+        var collector = collectEffects()
+        scenario.recreate = {
+            collector.cancel()
+            viewModel.viewModelScope.cancel()
+            viewModel = createViewModel()
+            collector = collectEffects()
+        }
+        scenario.replaceCollector = {
+            collector.cancel()
+            collector = collectEffects()
+        }
+        val arms = mutableMapOf<Long, ArmToken>()
+        return object : EditorSubmissionAdapter {
+            override val unsupportedMutations = if (editing) {
+                mapOf(SubmissionBodyMutation.SHARED_RESTORE to "resumeSharedDraft réservé aux réponses/citations")
+            } else {
+                emptyMap()
+            }
+            override val uploadUnsupportedReason: String? = null
+            override val postCalls get() = replyRepository.submitCalls + editPostRepository.submitCalls
+            override val formFetchCalls get() = replyRepository.formFetches + editPostRepository.formFetches
+            override val uploadCalls get() = uploadRepository.uploadCalls
+            override val draftSaves get() = draftStore.saveCount
+            override val draftWrites get() = draftStore.writes
+            override val successEffects get() = effects.count { it is PostEditorEffect.SubmitSucceeded }
+            override val closeEffects get() = effects.count { it is PostEditorEffect.CloseCommitted }
+
+            override fun editBody(body: String) {
+                viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue(body, TextRange(body.length))))
+            }
+
+            override fun clickSubmit() = viewModel.submit(PostEditorIntent.SubmitClicked())
+            override fun confirm() = viewModel.submit(PostEditorIntent.SubmitConfirmed(viewModel.state.value.armToken))
+            override fun confirmIdentity(id: Long?) = viewModel.submit(PostEditorIntent.SubmitConfirmed(arms[id]))
+            override fun dismissConfirmation() = viewModel.submit(PostEditorIntent.SubmitConfirmationDismissed)
+            override fun close() = viewModel.submit(PostEditorIntent.CloseRequested)
+            override fun completePost() { postGate.complete(Unit) }
+            override fun completeUpload() { uploadGate.complete(Unit) }
+            // Reflection exercises the actual final callback guard even when upload launch is refused.
+            override fun deliverLateUploadCallback() {
+                val insert = PostEditorViewModel::class.java.getDeclaredMethod(
+                    "insertImageBbcodeAtCaret", String::class.java, Boolean::class.javaPrimitiveType,
+                )
+                insert.isAccessible = true
+                insert.invoke(viewModel, "[img]https://example.test/late.png[/img]", false)
+            }
+
+            override fun dispose() = viewModel.viewModelScope.cancel()
+            override fun startUpload() = viewModel.submit(PostEditorIntent.ImagesPicked(listOf("content://pick/1")))
+
+            override fun snapshot(): SubmissionProbe = viewModel.state.value.let {
+                it.armToken?.let { token -> arms[token.id] = token }
+                SubmissionProbe(
+                    it.draft.text, it.canSubmit, it.isSubmitting, it.isUploading, it.showSubmitConfirmation,
+                    armId = it.armToken?.id,
+                    error = when (it.submitError) {
+                        SubmitError.Uncertain -> SubmissionErrorProbe.UNCERTAIN
+                        SubmitError.DraftWriteFailed -> SubmissionErrorProbe.DRAFT_WRITE_FAILED
+                        else -> null
+                    },
+                    restoreOffered = it.restorableDraft != null,
+                    blocksClose = it.submission.blocksBodyMutation,
+                )
+            }
+
+            override fun mutateBody(mutation: SubmissionBodyMutation) {
+                when (mutation) {
+                    SubmissionBodyMutation.TYPING -> editBody("changed during POST")
+                    SubmissionBodyMutation.SMILEY -> viewModel.submit(PostEditorIntent.SmileySelected(":jap:"))
+                    SubmissionBodyMutation.FORMAT ->
+                        viewModel.submit(PostEditorIntent.ToolbarActionClicked(BbcodeAction.Bold))
+                    SubmissionBodyMutation.IMAGE_URL ->
+                        viewModel.submit(PostEditorIntent.ImageUrlInserted("https://example.test/image.png"))
+                    SubmissionBodyMutation.RESTORE -> {
+                        checkNotNull(viewModel.state.value.restorableDraft) { "l'offre #1415 doit être présente" }
+                        viewModel.submit(PostEditorIntent.DraftRestoreRequested)
+                    }
+                    SubmissionBodyMutation.SHARED_RESTORE -> restoreGate.complete(Unit)
+                }
+            }
+        }
+    }
+
     @Suppress("LongParameterList") // test helper: every param is an optional, defaulted scenario knob.
     private fun newReplyViewModel(
         subcat: Int? = SAMPLE_SUBCAT,
@@ -905,6 +1071,7 @@ class PostEditorViewModelTest {
                 resumeSharedDraft = resumeSharedDraft,
             ),
             previewParser = previewParser,
+            clock = submissionClock,
             replyRepository = replyRepository,
             editPostRepository = editPostRepository,
             smileyRepository = smileyRepository,
@@ -1046,14 +1213,14 @@ class PostEditorViewModelTest {
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Reply")))
 
         replyRepository.formResult = Result.success(authenticatedForm().copy(favoriteSmileys = listOf(favoriteB)))
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
         testScheduler.advanceUntilIdle()
 
         assertEquals(2, replyRepository.formFetches)
         assertEquals(listOf(favoriteB), (viewModel.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys)
 
         replyRepository.formResult = Result.success(authenticatedForm())
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
         testScheduler.advanceUntilIdle()
 
         assertEquals(3, replyRepository.formFetches)
@@ -1677,6 +1844,7 @@ class PostEditorViewModelTest {
                 subcat = subcat,
             ),
             previewParser = previewParser,
+            clock = submissionClock,
             replyRepository = replyRepository,
             editPostRepository = editPostRepository,
             smileyRepository = smileyRepository,
@@ -1716,7 +1884,7 @@ class PostEditorViewModelTest {
         testScheduler.advanceUntilIdle()
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Hello!", TextRange(6))))
 
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
 
         assertEquals("OFF must POST directly, no dialog detour", 1, replyRepository.submitCalls)
         assertFalse(viewModel.state.value.showSubmitConfirmation)
@@ -1732,7 +1900,7 @@ class PostEditorViewModelTest {
         testScheduler.advanceUntilIdle()
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Hello!", TextRange(6))))
 
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
 
         assertTrue("the confirmation dialog must be armed", viewModel.state.value.showSubmitConfirmation)
         assertEquals("no POST before the user confirms", 0, replyRepository.submitCalls)
@@ -1751,11 +1919,12 @@ class PostEditorViewModelTest {
         )
         testScheduler.advanceUntilIdle()
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Hello!", TextRange(6))))
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
         assertEquals(0, replyRepository.submitCalls)
 
         viewModel.effects.test {
-            viewModel.submit(PostEditorIntent.SubmitConfirmed)
+            testScheduler.advanceTimeBy(400L)
+            viewModel.submit(PostEditorIntent.SubmitConfirmed(viewModel.state.value.armToken))
             val effect = awaitItem()
             assertEquals(PostEditorEffect.SubmitSucceeded(targetPage = 20), effect)
             cancelAndIgnoreRemainingEvents()
@@ -1775,7 +1944,7 @@ class PostEditorViewModelTest {
         )
         testScheduler.advanceUntilIdle()
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Hello!", TextRange(6))))
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
 
         viewModel.submit(PostEditorIntent.SubmitConfirmationDismissed)
 
@@ -1795,7 +1964,7 @@ class PostEditorViewModelTest {
         )
         testScheduler.advanceUntilIdle()
 
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
 
         assertFalse("invalid form must not raise the dialog", viewModel.state.value.showSubmitConfirmation)
         assertEquals(0, replyRepository.submitCalls)
@@ -1813,11 +1982,12 @@ class PostEditorViewModelTest {
         testScheduler.advanceUntilIdle()
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("rewritten body")))
 
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
         assertTrue(viewModel.state.value.showSubmitConfirmation)
         assertEquals("no edit POST before the user confirms", 0, editPostRepository.submitCalls)
 
-        viewModel.submit(PostEditorIntent.SubmitConfirmed)
+        testScheduler.advanceTimeBy(400L)
+        viewModel.submit(PostEditorIntent.SubmitConfirmed(viewModel.state.value.armToken))
         testScheduler.advanceUntilIdle()
 
         assertEquals(1, editPostRepository.submitCalls)
@@ -1832,12 +2002,12 @@ class PostEditorViewModelTest {
         )
         testScheduler.advanceUntilIdle()
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Hello!", TextRange(6))))
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
         assertTrue("the confirmation dialog must be armed", viewModel.state.value.showSubmitConfirmation)
 
         // Second tap while the dialog is up (double-tap race) : idempotent — re-raising
         // `showSubmitConfirmation = true` is a no-op, and no POST may slip through.
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
 
         assertTrue("the dialog must stay armed", viewModel.state.value.showSubmitConfirmation)
         assertFalse("nothing is in flight while the dialog is up", viewModel.state.value.isSubmitting)
@@ -1858,11 +2028,12 @@ class PostEditorViewModelTest {
         )
         testScheduler.advanceUntilIdle()
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Hello!", TextRange(6))))
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
         assertTrue("the confirmation dialog must be armed", viewModel.state.value.showSubmitConfirmation)
 
-        viewModel.submit(PostEditorIntent.SubmitConfirmed) // launches the POST ; suspends on gate
-        viewModel.submit(PostEditorIntent.SubmitConfirmed) // must be a no-op (canSubmit / submitJob guards)
+        testScheduler.advanceTimeBy(400L)
+        viewModel.submit(PostEditorIntent.SubmitConfirmed(viewModel.state.value.armToken))
+        viewModel.submit(PostEditorIntent.SubmitConfirmed(viewModel.state.value.armToken))
 
         gate.complete(Unit)
 
@@ -1925,7 +2096,7 @@ class PostEditorViewModelTest {
         testScheduler.runCurrent()
 
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
-        assertTrue("blank draft must delete the row", draftStore.deletedKeys.contains(key))
+        assertEquals("", draftStore.saved[key]?.body)
     }
 
     @Test
@@ -2141,7 +2312,7 @@ class PostEditorViewModelTest {
         viewModel.submit(PostEditorIntent.DraftDiscardRequested)
         testScheduler.advanceUntilIdle()
 
-        assertTrue("discard deletes the row", draftStore.deletedKeys.contains(key))
+        assertEquals("", draftStore.saved[key]?.body)
         assertNull("the banner is cleared after discarding", viewModel.state.value.restorableDraft)
         assertTrue(savedStateHandle.get<String>("draft_restore_offer_fingerprint") != null)
 
@@ -2162,9 +2333,8 @@ class PostEditorViewModelTest {
         viewModel.submit(PostEditorIntent.DraftDiscardRequested)
         testScheduler.advanceUntilIdle()
 
-        assertEquals("the cancelled debounce must not save after Ignore", 0, draftStore.saveCount)
-        assertTrue(draftStore.deletedKeys.contains(key))
-        assertNull(draftStore.saved[key])
+        assertEquals("Ignore clears the content once by CAS, without a late autosave", 1, draftStore.saveCount)
+        assertEquals("", draftStore.saved[key]?.body)
     }
 
     @Test
@@ -2175,11 +2345,12 @@ class PostEditorViewModelTest {
         testScheduler.advanceUntilIdle()
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Hello!", TextRange(6))))
 
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
         testScheduler.advanceUntilIdle()
 
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
-        assertTrue("a sent reply must drop its draft", draftStore.deletedKeys.contains(key))
+        assertEquals("", draftStore.saved[key]?.body)
+        assertEquals(EditorDraftStore.AttemptStatus.PUBLISHED, draftStore.entries[key]?.attempt?.status)
     }
 
     @Test
@@ -2197,9 +2368,10 @@ class PostEditorViewModelTest {
         val key = EditorDraftKey.editPost(SAMPLE_CAT, SAMPLE_EDITED_NUMREPONSE)
         assertEquals("rewritten body", draftStore.saved[key]?.body)
 
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
         testScheduler.advanceUntilIdle()
-        assertTrue("a saved edit must drop its draft", draftStore.deletedKeys.contains(key))
+        assertEquals("", draftStore.saved[key]?.body)
+        assertEquals(EditorDraftStore.AttemptStatus.PUBLISHED, draftStore.entries[key]?.attempt?.status)
     }
 
     // ----- #790 : resumeSharedDraft (escalade de la réponse rapide) ----------
@@ -2404,7 +2576,7 @@ class PostEditorViewModelTest {
         viewModel.submit(
             PostEditorIntent.ContentChanged(TextFieldValue("[quotemsg=101,1,9]a[/quotemsg]\n\nma réponse")),
         )
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
         testScheduler.advanceUntilIdle()
 
         assertEquals("no re-materialisation at submit", openFetches, replyRepository.formFetches)
@@ -2443,12 +2615,13 @@ class PostEditorViewModelTest {
         )
 
         viewModel.effects.test {
-            viewModel.submit(PostEditorIntent.SubmitClicked)
+            viewModel.submit(PostEditorIntent.SubmitClicked())
             assertEquals(
                 PostEditorEffect.SubmitSucceeded(
                     targetPage = 20,
                     scrollTo = 101,
                     quotedNumreponses = listOf(101, 303),
+                    operation = PostSubmitOperation.Publish,
                 ),
                 awaitItem(),
             )
@@ -2514,7 +2687,7 @@ class PostEditorViewModelTest {
         testScheduler.advanceUntilIdle()
 
         assertTrue("cards alone must arm the submit (blank body)", viewModel.state.value.canSubmit)
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
         testScheduler.advanceUntilIdle()
 
         assertEquals(
@@ -2535,7 +2708,7 @@ class PostEditorViewModelTest {
         testScheduler.advanceUntilIdle()
 
         viewModel.submit(PostEditorIntent.ToggleSignature(true))
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
         testScheduler.advanceUntilIdle()
 
         assertTrue(
@@ -2593,7 +2766,7 @@ class PostEditorViewModelTest {
         testScheduler.advanceUntilIdle()
 
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("en vol")))
-        viewModel.submit(PostEditorIntent.SubmitClicked)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
         // Back pressed while the POST is in flight — must be inert (parity with the sheet, #788).
         viewModel.submit(PostEditorIntent.CloseRequested)
         submitGate.complete(Unit)
@@ -2678,6 +2851,7 @@ class PostEditorViewModelTest {
         var submitResult: ReplySubmitResult? = null
         var submitException: Throwable? = null
         var submitGate: CompletableDeferred<Unit>? = null
+        var submitScenario: EditorSubmissionScenario? = null
         var formGate: CompletableDeferred<Unit>? = null
         var formException: Throwable? = null
 
@@ -2723,7 +2897,7 @@ class PostEditorViewModelTest {
             lastSubmittedBbcode = bbcodeContent
             lastSubmittedForm = form
             lastSubmittedOptions = options
-            submitGate?.await()
+            submitGate?.let { gate -> submitScenario?.awaitPost(gate) ?: gate.await() }
             submitException?.let { throw it }
             return submitResult ?: error("submitResult not set")
         }
@@ -2747,6 +2921,8 @@ class PostEditorViewModelTest {
         )
         var submitResult: ReplySubmitResult? = null
         var submitException: Throwable? = null
+        var submitGate: CompletableDeferred<Unit>? = null
+        var submitScenario: EditorSubmissionScenario? = null
         var formException: Throwable? = null
         var formGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
 
@@ -2783,6 +2959,7 @@ class PostEditorViewModelTest {
             lastSubmittedContext = context
             lastSubmittedBbcode = bbcodeContent
             lastSubmittedOptions = options
+            submitGate?.let { gate -> submitScenario?.awaitPost(gate) ?: gate.await() }
             submitException?.let { throw it }
             return submitResult ?: error("submitResult not set")
         }
@@ -3069,38 +3246,7 @@ class PostEditorViewModelTest {
      * preloaded drafts for the restore-on-init tests. `updatedAt` is irrelevant to the ViewModel
      * (the store stamps it in production), so it is left at 0.
      */
-    private class FakeEditorDraftStore : EditorDraftStore {
-        val saved: MutableMap<String, EditorDraftStore.Draft> = mutableMapOf()
-        val deletedKeys: MutableList<String> = mutableListOf()
-        var saveCount: Int = 0
-            private set
-        var lastSavedOwner: String? = null
-            private set
-        var loadGate: CompletableDeferred<Unit>? = null
-
-        /** Preload a draft so a VM created afterwards restores it on init. */
-        fun preload(key: String, draft: EditorDraftStore.Draft) {
-            saved[key] = draft
-        }
-
-        override suspend fun currentOwner(): String? = "tester"
-
-        override suspend fun load(owner: String?, key: String): EditorDraftStore.Draft? {
-            loadGate?.await()
-            return saved[key]
-        }
-
-        override suspend fun save(owner: String?, key: String, draft: EditorDraftStore.Draft) {
-            saveCount += 1
-            lastSavedOwner = owner
-            saved[key] = draft
-        }
-
-        override suspend fun delete(owner: String?, key: String) {
-            deletedKeys += key
-            saved.remove(key)
-        }
-    }
+    private class FakeEditorDraftStore : VersionedEditorDraftStore()
 
     private fun uploadedImage(imageUrl: String, resizedUrl: String? = null): UploadedImage = UploadedImage(
         provider = UploadProviderId.DIBERIE,

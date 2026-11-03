@@ -1,9 +1,9 @@
 package fr.forumhfr.redface2.core.data.cache
 
 import android.util.Log
+import fr.forumhfr.redface2.core.data.editor.RoomEditorDraftStore
 import fr.forumhfr.redface2.core.data.messages.PrivateMessageThreadSessionCache
 import fr.forumhfr.redface2.core.data.messages.PrivateMessageContentCacheMaintenance
-import fr.forumhfr.redface2.core.database.dao.EditorDraftDao
 import fr.forumhfr.redface2.core.database.dao.FlagDao
 import fr.forumhfr.redface2.core.database.dao.MpReadPositionDao
 import fr.forumhfr.redface2.core.database.dao.MpStorageLocationDao
@@ -43,9 +43,12 @@ import kotlinx.coroutines.plus
  * but they reveal which conversations exist for the previous account, so they are wiped on the
  * same transition.
  *
- * MP editor drafts (`editor_drafts` rows with `isPrivate = 1`, #405) are wiped on the same
- * transition too: an unsent MP draft reveals a recipient and a private message. Public post
- * drafts (`isPrivate = 0`) are NOT purged here — they survive logout and are bounded only by the
+ * MP editor content (`editor_drafts` rows with `isPrivate = 1`, #405) is wiped on the same
+ * transition too: an unsent MP draft reveals a recipient and a private message. Ordinary rows are
+ * deleted; durable IN_PROGRESS/UNCERTAIN/PUBLISHED markers retain only owner, key, versions and
+ * attempt metadata, with body, subject and recipients erased. No private content from A may remain
+ * readable or reach B's UI (#1080); returning to A can restore only empty uncertainty, never a
+ * published draft. Public post drafts (`isPrivate = 0`) survive logout and are bounded only by the
  * app-start retention sweep (cf. `DraftRetentionPurger`).
  *
  * Uploaded-image traces (`uploaded_images`, #459) are wiped on the same transition: the rows hold
@@ -88,7 +91,7 @@ class CacheInvalidator @Inject internal constructor(
     private val authRepository: AuthRepository,
     private val flagDao: FlagDao,
     private val mpReadPositionDao: MpReadPositionDao,
-    private val editorDraftDao: EditorDraftDao,
+    private val editorDraftStore: RoomEditorDraftStore,
     private val uploadedImageDao: UploadedImageDao,
     private val mpStorageLocationDao: MpStorageLocationDao,
     private val flagRepository: FlagRepository,
@@ -131,8 +134,8 @@ class CacheInvalidator @Inject internal constructor(
                         .onFailure { Log.w(LOG_TAG, "Failed to purge flag cache for $previousPseudo", it) }
                     runCatching { mpReadPositionDao.deleteAllForUser(previousPseudo) }
                         .onFailure { Log.w(LOG_TAG, "Failed to purge MP positions for $previousPseudo", it) }
-                    runCatching { editorDraftDao.deletePrivateForUser(previousPseudo) }
-                        .onFailure { Log.w(LOG_TAG, "Failed to purge MP drafts for $previousPseudo", it) }
+                    runCatching { editorDraftStore.purgePrivateForUser(previousPseudo) }
+                        .onFailure { Log.w(LOG_TAG, "Failed to purge MP drafts") }
                     runCatching { uploadedImageDao.deleteAllForUser(previousPseudo) }
                         .onFailure { Log.w(LOG_TAG, "Failed to purge uploaded images for $previousPseudo", it) }
                     runCatching { mpStorageLocationDao.deleteAllForUser(previousPseudo) }

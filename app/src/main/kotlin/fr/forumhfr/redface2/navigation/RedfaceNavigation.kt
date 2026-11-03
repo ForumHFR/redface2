@@ -1,7 +1,6 @@
 package fr.forumhfr.redface2.navigation
 
 import android.app.Activity
-import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
@@ -154,7 +153,7 @@ import fr.forumhfr.redface2.feature.topic.TopicRequest
 import fr.forumhfr.redface2.feature.topic.PostImageActionsViewModel
 import fr.forumhfr.redface2.feature.topic.TopicScreen
 import fr.forumhfr.redface2.feature.topic.TopicScrollAnchor
-import fr.forumhfr.redface2.feature.topic.TopicSubmitResult
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.feature.topic.R as TopicR
 import java.time.Instant
 import kotlinx.serialization.Serializable
@@ -258,7 +257,7 @@ data class PrivateMessageComposeRoute(
  */
 private fun NavKey?.hidesNavigationSuite(): Boolean =
     this is PostEditorRoute || this is TopicFormRoute || this is PrivateMessageReplyRoute ||
-        this is PrivateMessageComposeRoute || this is ImageViewerRoute
+        this is PrivateMessageComposeRoute || this is ImageViewerRoute || this is ReportContentRoute
 
 /**
  * #494 — type de barre de navigation à passer au [NavigationSuiteScaffoldLayout]. Sur téléphone l'adaptatif
@@ -1070,6 +1069,9 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
         // pending id is saveable so a recreation between the editor handoff and the snackbar cannot
         // erase that acknowledgement; the effect clears only the exact id it actually handled.
         var flagsSubmitAckRequest by rememberSaveable { mutableStateOf(0L) }
+        var flagsSubmitAckSequence by rememberSaveable { mutableStateOf(0L) }
+        var flagsSubmitAckOperation by rememberSaveable { mutableStateOf(PostSubmitOperation.Publish) }
+        var flagsSubmitAckAccount by rememberSaveable { mutableStateOf<String?>(null) }
 
         // Phase 2 finish (#208) — profile bottom sheet state, hoisted to `:app` so that
         // `:feature:topic` never depends on `:feature:profile`. The sheet is opened from
@@ -1145,8 +1147,6 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
         LifecycleEventEffect(Lifecycle.Event.ON_START) {
             mpBadgeViewModel.onAppForegrounded()
         }
-        val reportEmailSubject = stringResource(fr.forumhfr.redface2.core.ui.R.string.account_menu_report_email_subject)
-        val reportNoEmailClient = stringResource(fr.forumhfr.redface2.core.ui.R.string.account_menu_no_email_client)
         // #531 — optimistic « read » marks of the inbox, now keyed by the conversation DATE seen at
         // open-time (was a bare Set<Int>). Storing the date lets a fresh page-1 network result RECONCILE
         // the mark: HFR re-flagging a thread unread is only honoured when its server date is STRICTLY
@@ -1180,10 +1180,8 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
         // Anonymous) — keeping a positive value here would then silently swallow the next session's
         // first reconcile.
         var lastReconciledGeneration by remember { mutableStateOf(0) }
-        // #301 follow-up — bumped when the new-conversation composer pops back after a successful
-        // send. The MP list collects the signal and refreshes itself so the created conversation
-        // appears at the top (its thread id is unknown — the bddpost success response of a new MP
-        // is not topic-shaped). In-memory only, like the other private-message hints above.
+        // Requests page 1 after a successful new conversation or an explicit report message check.
+        // A refresh request carries no delivery verdict. In-memory only, like the hints above.
         var privateMessageSentSignal by remember { mutableStateOf<Long?>(null) }
         // #1040 lot 6 — successful reply outcome owed to the RETAINED conversation ViewModel.
         // Keyed by canonical account + thread, never serialized; the event counter prevents replay.
@@ -1207,14 +1205,8 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
         // resolveTopicScrollRestoration). Serves cross-entry restores only since #895 étape 4 —
         // in-topic page changes stay inside the retained ViewModel. RAM/session only, like titles.
         var topicScrollAnchorCache by remember { mutableStateOf(emptyMap<TopicScrollKey, TopicScrollAnchor>()) }
-        // #895 étape 4 (PR 2) — pending full-editor submit outcome, published BEFORE the editor
-        // pop and consumed exactly once by the topic entry below (→ TopicViewModel.applySubmitResult).
-        // Keyed (cat, post) so another topic's entry can never consume it ; eventId is a strictly
-        // monotonic counter so two rapid submits with identical payloads both apply. Plain remember
-        // on purpose: process death drops it — the POST already reached HFR, the restored topic
-        // shows the cached page until a manual refresh (same stance as the other transient slots).
-        var topicPendingSubmit by remember { mutableStateOf<TopicPendingSubmit?>(null) }
-        var topicSubmitEventId by remember { mutableStateOf(0L) }
+        // The relay survives recreation between publication and consumption by the retained topic.
+        val topicSubmitRelay = rememberSaveable(saver = TopicSubmitRelay.Saver) { TopicSubmitRelay() }
         // #291/#1074 — multi-quote basket: selections retained in tap order, keyed by a typed
         // scope so the selection survives the editor round-trip and re-entering the topic
         // (and, pre-#895 étape 4, the per-page entry swap — the original trigger for hoisting it
@@ -1269,8 +1261,10 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
             multiQuoteBasket = null
             pendingEditorQuotes = null
             // #895 étape 4 — same rule for a submit outcome armed under another session.
-            topicPendingSubmit = null
-            resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
+            topicSubmitRelay.clear()
+            flagsSubmitAckRequest = 0L
+            flagsSubmitAckAccount = null
+            resetMessagesPreservingReport(messagesBackStack)
         }
 
         // #624 — the post/topic editor pins an « Envoyer » bar above the keyboard. Inside the bottom-nav
@@ -1381,7 +1375,7 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                             onLogout = accountViewModel::logout,
                             onOpenDiagnostics = { activeBackStack.add(DiagnosticsRoute) },
                             onReportContent = {
-                                startReportEmail(context, reportEmailSubject, reportNoEmailClient)
+                                openReportFromAccount(activeBackStack)
                             },
                             avatarUrl = accountAvatarUrl,
                             avatarAppearance = accountAvatarAppearance,
@@ -1400,8 +1394,18 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                             // (return from a category/topic) does not replay the sheet open (Codex review).
                             onFlagsQuickConfigConsumed = { flagsQuickConfigRequest = 0 },
                             flagsSubmitAckNavState = FlagsSubmitAckNavState(
-                                request = flagsSubmitAckRequest,
-                                onPublish = { flagsSubmitAckRequest += 1L },
+                                request = flagsSubmitAckRequest.takeIf {
+                                    flagsSubmitAckAccount == authenticatedCanonicalPseudo
+                                } ?: 0L,
+                                operation = flagsSubmitAckOperation,
+                                onPublish = { operation, owner ->
+                                    if (owner != null && owner == authenticatedCanonicalPseudo) {
+                                        flagsSubmitAckSequence += 1L
+                                        flagsSubmitAckRequest = flagsSubmitAckSequence
+                                        flagsSubmitAckOperation = operation
+                                        flagsSubmitAckAccount = owner
+                                    }
+                                },
                                 onConsumed = { consumedId ->
                                     if (flagsSubmitAckRequest == consumedId) {
                                         flagsSubmitAckRequest = 0L
@@ -1409,7 +1413,16 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                                 },
                             ),
                             onReportContent = {
-                                startReportEmail(context, reportEmailSubject, reportNoEmailClient)
+                                openReportFromSettings(activeBackStack)
+                            },
+                            onCheckReportMessages = {
+                                openMessagesForReport(
+                                    messagesBackStack,
+                                    requestInboxRefresh = {
+                                        privateMessageSentSignal = (privateMessageSentSignal ?: 0L) + 1L
+                                    },
+                                    switchTab = switchTab,
+                                )
                             },
                             privateMessageNavState = PrivateMessageNavState(
                                 // #531 — the screen only needs membership, so it gets the marked thread ids;
@@ -1473,7 +1486,7 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                                 },
                                 sentSignal = privateMessageSentSignal,
                                 onConversationSent = {
-                                    privateMessageSentSignal = System.currentTimeMillis()
+                                    privateMessageSentSignal = (privateMessageSentSignal ?: 0L) + 1L
                                 },
                             ),
                             privateMessageSubmitNavState = PrivateMessageSubmitNavState(
@@ -1521,21 +1534,18 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                                 },
                             ),
                             topicSubmitNavState = TopicSubmitNavState(
-                                pending = topicPendingSubmit,
-                                onPublish = { cat, post, targetPage, scrollTo, quotedNumreponses ->
-                                    topicSubmitEventId += 1
-                                    topicPendingSubmit = TopicPendingSubmit(
-                                        cat = cat,
-                                        post = post,
-                                        result = TopicSubmitResult(
-                                            eventId = topicSubmitEventId,
-                                            targetPage = targetPage,
-                                            scrollTo = scrollTo,
-                                            quotedNumreponses = quotedNumreponses,
-                                        ),
-                                    )
+                                account = authenticatedCanonicalPseudo,
+                                pending = topicSubmitRelay.pending?.takeIf {
+                                    it.result.account == authenticatedCanonicalPseudo
                                 },
-                                onConsumed = { topicPendingSubmit = null },
+                                onPublish = { cat, post, targetPage, scrollTo, quotes, operation, owner ->
+                                    if (owner != null && owner == authenticatedCanonicalPseudo) {
+                                        topicSubmitRelay.publish(
+                                            cat, post, targetPage, scrollTo, quotes, operation, owner,
+                                        )
+                                    }
+                                },
+                                onConsumed = topicSubmitRelay::consume,
                             ),
                             multiQuoteNavState = MultiQuoteNavState(
                                 basket = multiQuoteBasket,
@@ -1709,30 +1719,6 @@ private fun ImmersiveBackButton(
     }
 }
 
-/**
- * Issue #198 — fires the « Signaler un contenu » mailto intent. Falls back to a Toast when no
- * mail client is installed (rooted devices, emulators). Subject string lives in `:core:ui` so
- * `:feature:messages` no longer owns the global "report content" affordance.
- */
-private fun startReportEmail(
-    context: Context,
-    subject: String,
-    noEmailClientMessage: String,
-) {
-    val intent = Intent(Intent.ACTION_SENDTO).apply {
-        data = "mailto:$REPORT_EMAIL".toUri()
-        putExtra(Intent.EXTRA_EMAIL, arrayOf(REPORT_EMAIL))
-        putExtra(Intent.EXTRA_SUBJECT, subject)
-    }
-    try {
-        context.startActivity(intent)
-    } catch (_: ActivityNotFoundException) {
-        Toast.makeText(context, noEmailClientMessage, Toast.LENGTH_LONG).show()
-    }
-}
-
-private const val REPORT_EMAIL: String = "xat@azora.fr"
-
 // #445 — the `channel` product flavor whose BuildConfig.FLAVOR gates the debug bounds overlay. Matches
 // the `dev` flavor name in app/build.gradle.kts; prod/beta never expose the overlay.
 private const val DEV_CHANNEL: String = "dev"
@@ -1768,7 +1754,7 @@ private data class PrivateMessageNavState(
     val onThreadOpenedAt: (threadId: Int, date: Instant) -> Unit = { _, _ -> },
     val onReconcileReadMarks: (generation: Int, conversations: List<PrivateMessageSummary>) -> Unit =
         { _, _ -> },
-    /** #301 follow-up — last successful new-conversation send ; the MP list refreshes on change. */
+    /** Inbox refresh request after a new conversation or an explicit report message check. */
     val sentSignal: Long? = null,
     /** #301 follow-up — bumps [sentSignal] when the composer reports a successful send. */
     val onConversationSent: () -> Unit = {},
@@ -1929,20 +1915,6 @@ private data class TopicScrollNavState(
 )
 
 /**
- * #895 étape 4 (PR 2) — the one pending full-editor submit outcome, keyed to its topic. Published
- * by the editor entries BEFORE their pop (cf. [TopicSubmitNavState.onPublish]) and consumed exactly
- * once by the topic entry below, which forwards [TopicPendingSubmit.result] to
- * `TopicViewModel.applySubmitResult`.
- */
-private data class TopicPendingSubmit(
-    val cat: Int,
-    val post: Int,
-    val result: TopicSubmitResult,
-) {
-    fun matches(cat: Int, post: Int): Boolean = this.cat == cat && this.post == post
-}
-
-/**
  * #895 étape 4 (PR 2) — whether [below] (the nav entry under the editor being popped) is the
  * topic a successful submit targeted. Publishing without this guard would arm an outcome that a
  * LATER unrelated open of the same topic would consume — e.g. an editor opened straight from the
@@ -1965,24 +1937,26 @@ internal fun isTopicEntryFor(below: Any?, cat: Int, topicId: Int): Boolean {
  * @property onConsumed clears the slot once the topic screen applied the result.
  */
 private data class TopicSubmitNavState(
+    val account: String?,
     val pending: TopicPendingSubmit?,
-    val onPublish: (cat: Int, post: Int, targetPage: Int?, scrollTo: Int?, quotedNumreponses: List<Int>) -> Unit,
-    val onConsumed: () -> Unit,
+    val onPublish: (Int, Int, Int?, Int?, List<Int>, PostSubmitOperation, String?) -> Unit,
+    val onConsumed: (Long) -> Unit,
 )
 
 /**
  * #1301 — the bounded « message published » acknowledgement owed to the FLAGS list, twin of
  * [TopicSubmitNavState] for the one screen that can host an editor without being the target topic
- * (cf. [SubmitHandoff]). Deliberately carries no domain payload: the list refreshes nothing and
- * navigates nowhere, so a pending acknowledgement id is all the identity the handshake needs.
+ * (cf. [SubmitHandoff]). The list refreshes nothing and navigates nowhere; the operation selects
+ * its success label and the host purges the pending id on session transitions.
  *
  * @property request raised by the editor entry BEFORE its pop; `0` means nothing is owed.
  * @property onPublish arms the acknowledgement.
- * @property onConsumed clears this exact id after the snackbar was actually handled.
+ * @property onConsumed clears this exact id as soon as the snackbar is actually presented.
  */
 private data class FlagsSubmitAckNavState(
     val request: Long,
-    val onPublish: () -> Unit,
+    val operation: PostSubmitOperation,
+    val onPublish: (PostSubmitOperation, String?) -> Unit,
     val onConsumed: (Long) -> Unit,
 )
 
@@ -2258,9 +2232,9 @@ private fun RedfaceNavHost(
     onFlagsQuickConfigConsumed: () -> Unit,
     // #1301 — bounded acknowledgement owed to the flags list when an editor opened there submits.
     flagsSubmitAckNavState: FlagsSubmitAckNavState,
-    // #494 — the « Signaler un contenu » row of the settings Account/About sub-page reuses the same
-    // report-email flow as the account menu (which owns `context` + the report strings).
+    // Account/About opens the report without a topic prefill; the account menu uses its current route.
     onReportContent: () -> Unit,
+    onCheckReportMessages: () -> Unit,
     privateMessageNavState: PrivateMessageNavState,
     // #1040 lot 6 — successful reply handoff to the retained conversation ViewModel.
     privateMessageSubmitNavState: PrivateMessageSubmitNavState,
@@ -2422,6 +2396,7 @@ private fun RedfaceNavHost(
                     // #1301 — « Poster un message » sends from here; the list is what the editor pop
                     // reveals, so it is the screen that owes the reader the confirmation.
                     submitAcknowledgement = flagsSubmitAckNavState.request,
+                    submitOperation = flagsSubmitAckNavState.operation,
                     onSubmitAcknowledged = flagsSubmitAckNavState.onConsumed,
                     topBarActions = accountMenu,
                 )
@@ -2441,16 +2416,10 @@ private fun RedfaceNavHost(
             entry<LoginRoute> {
                 LoginScreen(
                     onAuthenticated = {
-                        // Pop the login screen — FlagsRoute reactively re-renders
-                        // to "Connecté en tant que <pseudo>" through observeAuthState().
-                        if (backStack.size > 1) {
-                            backStack.removeAt(backStack.lastIndex)
-                        }
+                        finishLogin(backStack)
                     },
                     onCancel = {
-                        if (backStack.size > 1) {
-                            backStack.removeAt(backStack.lastIndex)
-                        }
+                        finishLogin(backStack)
                     },
                 )
             }
@@ -2798,6 +2767,13 @@ private fun RedfaceNavHost(
                     topBarActions = accountMenu,
                 )
             }
+            entry<ReportContentRoute> {
+                ReportContentEntry(
+                    backStack = backStack,
+                    onCheckMessages = onCheckReportMessages,
+                    onConversationSent = privateMessageNavState.onConversationSent,
+                )
+            }
             entry<SettingsAccountAboutRoute> {
                 SettingsAccountAboutScreen(
                     onBack = {
@@ -3129,6 +3105,7 @@ private fun RedfaceNavHost(
                 )
             }
             entry<PostEditorRoute> { route ->
+                val submitAccount = rememberSubmitAccount(topicSubmitNavState.account)
                 // #604/#1074 — consume the quote handoff ONCE: only selections whose typed scope
                 // matches this editor reach the ViewModel
                 // through the assisted request (used only at first creation — a recomposition or
@@ -3165,7 +3142,7 @@ private fun RedfaceNavHost(
                             backStack.removeAt(backStack.lastIndex)
                         }
                     },
-                    onSubmitSucceeded = { targetPage, scrollTo, quotedNumreponses ->
+                    onSubmitSucceeded = { targetPage, scrollTo, quotedNumreponses, operation ->
                         // #895 étape 4 (PR 2) — publish the outcome BEFORE the pop, so the revealed
                         // topic entry finds it on first recomposition and hands it to its RETAINED
                         // ViewModel (in-place force refresh + landing, #200/#226 — the historical
@@ -3192,9 +3169,13 @@ private fun RedfaceNavHost(
                                     targetPage,
                                     scrollTo,
                                     quotedNumreponses,
+                                    operation,
+                                    submitAccount,
                                 )
                             }
-                            SubmitHandoff.FlagsAcknowledgement -> flagsSubmitAckNavState.onPublish()
+                            SubmitHandoff.FlagsAcknowledgement -> flagsSubmitAckNavState.onPublish(
+                                operation, submitAccount,
+                            )
                             SubmitHandoff.None -> Unit
                         }
                         // #868/#869 — the selection's intent is consumed by the SUCCESSFUL submit
@@ -3218,6 +3199,7 @@ private fun RedfaceNavHost(
                 )
             }
             entry<TopicFormRoute> { route ->
+                val submitAccount = rememberSubmitAccount(topicSubmitNavState.account)
                 TopicFormScreen(
                     request = TopicFormRequest(
                         mode = route.mode,
@@ -3235,7 +3217,7 @@ private fun RedfaceNavHost(
                             backStack.removeAt(backStack.lastIndex)
                         }
                     },
-                    onSubmitSucceeded = { targetPage, scrollTo ->
+                    onSubmitSucceeded = { targetPage, scrollTo, operation ->
                         // Phase 2D (#148) / #895 étape 4 (PR 2) — publish the FP-edit outcome
                         // BEFORE the pop (same handoff as `PostEditorRoute.onSubmitSucceeded`) :
                         // the revealed topic entry hands it to its retained ViewModel, which
@@ -3247,7 +3229,9 @@ private fun RedfaceNavHost(
                         val below = backStack.getOrNull(backStack.lastIndex - 1)
                         if (cat != null && topicId != null && isTopicEntryFor(below, cat, topicId)) {
                             // An FP edit never cites anything : no #974 quote landing to forward.
-                            topicSubmitNavState.onPublish(cat, topicId, targetPage, scrollTo, emptyList())
+                            topicSubmitNavState.onPublish(
+                                cat, topicId, targetPage, scrollTo, emptyList(), operation, submitAccount,
+                            )
                         }
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)

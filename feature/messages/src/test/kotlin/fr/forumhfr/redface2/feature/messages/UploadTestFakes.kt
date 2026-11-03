@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadedImage
 import fr.forumhfr.redface2.core.domain.upload.UploadedImageRecord
 import fr.forumhfr.redface2.core.model.AuthState
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 
@@ -41,11 +42,13 @@ internal class FakeImageUploadReader : ImageUploadReader {
 /** Fake [UploadRepository] ; only [uploadWithCurrentProvider] matters to the composers. */
 internal class FakeUploadRepository : UploadRepository {
     var uploadException: Throwable? = null
+    var uploadGate: CompletableDeferred<Unit>? = null
     var uploadCalls: Int = 0
         private set
 
     override suspend fun uploadWithCurrentProvider(image: ImageUpload, userId: String): UploadedImage {
         uploadCalls += 1
+        uploadGate?.await()
         uploadException?.let { throw it }
         return UploadedImage(
             provider = UploadProviderId.DIBERIE,

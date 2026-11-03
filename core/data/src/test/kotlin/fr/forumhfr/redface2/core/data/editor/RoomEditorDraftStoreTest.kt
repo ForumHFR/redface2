@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.data.editor
 
+import android.database.sqlite.SQLiteException
 import fr.forumhfr.redface2.core.database.dao.EditorDraftDao
 import fr.forumhfr.redface2.core.database.entities.EditorDraftEntity
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
@@ -50,7 +51,7 @@ class RoomEditorDraftStoreTest {
         store.delete(owner = null, key = "reply:29:123456")
 
         coVerify(exactly = 0) { dao.get(any()) }
-        coVerify(exactly = 0) { dao.upsert(any()) }
+        coVerify(exactly = 0) { dao.saveLegacy(any()) }
         coVerify(exactly = 0) { dao.deleteByKey(any()) }
     }
 
@@ -65,7 +66,7 @@ class RoomEditorDraftStoreTest {
         )
 
         coVerify {
-            dao.upsert(
+            dao.saveLegacy(
                 EditorDraftEntity(
                     draftKey = "xatrix|reply:29:123456",
                     ownerId = "xatrix",
@@ -88,7 +89,7 @@ class RoomEditorDraftStoreTest {
 
         store.save(owner = "alice", key = "mpnew", draft = Draft(body = "alice private body", isPrivate = true))
 
-        coVerify(exactly = 0) { dao.upsert(any()) }
+        coVerify(exactly = 0) { dao.saveLegacy(any()) }
     }
 
     @Test
@@ -188,11 +189,10 @@ class RoomEditorDraftStoreTest {
     }
 
     @Test
-    fun `delete swallows a DAO failure so a successful post is never aborted`() = runTest {
-        // delete is awaited on the post-success path (before the nav pop), so a local DB failure
-        // must NOT propagate and abort the success flow on a message HFR already accepted.
+    fun `legacy delete still swallows a storage failure until ViewModels are migrated`() = runTest {
+        // ED-161: new sends use erasePublishedContent, whose failures reach the controller.
         val store = store(AuthState.Authenticated("xatrix"))
-        coEvery { dao.deleteByKey(any()) } throws RuntimeException("db locked")
+        coEvery { dao.deleteByKey(any()) } throws SQLiteException("db locked")
 
         store.delete(owner = "xatrix", key = "reply:29:123456")
 

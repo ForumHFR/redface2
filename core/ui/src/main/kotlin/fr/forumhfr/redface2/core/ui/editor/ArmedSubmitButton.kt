@@ -1,8 +1,7 @@
 package fr.forumhfr.redface2.core.ui.editor
 
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.tween
+import android.os.SystemClock
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -11,19 +10,30 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.platform.LocalAccessibilityManager
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.domain.editor.ArmToken
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 /** Display state of [ArmedSubmitButton]. [showProgress] swaps the label for a spinner. */
 data class ArmedSubmitState(
     val armed: Boolean,
     val enabled: Boolean,
     val showProgress: Boolean = false,
+    val armToken: ArmToken? = null,
 )
 
 /** Bare resolved strings — callers own their string resources. */
@@ -37,6 +47,7 @@ data class ArmedSubmitActions(
     val onSubmit: () -> Unit,
     val onConfirmSubmit: () -> Unit,
     val onDisarm: () -> Unit,
+    val onSubmitWithTimeout: ((Long) -> Unit)? = null,
 )
 
 /** How long the armed state survives without the confirming second tap (#312 v2). */
@@ -50,14 +61,8 @@ const val CONFIRM_DISARM_DELAY_MS = 4_000L
 private const val ELAPSED_SCRIM_ALPHA = 0.16f
 
 /**
- * Submit button with the « confirmation avant publication » (#312 v2) armed behaviour,
- * shared by the post/topic editor bar and the MP reply bar.
- *
- * First tap arms the button (label flips to [ArmedSubmitLabels.confirm], tertiary
- * colors) ; the second tap performs the real submit. While armed, the background
- * visibly drains left-to-right over [CONFIRM_DISARM_DELAY_MS] — a state-layer scrim
- * sweeps the elapsed portion — then [ArmedSubmitActions.onDisarm] restores the normal
- * state. Material 3 has no built-in timed button, so the countdown is drawn here.
+ * ED-164/166: renders the controller's monotonic arm interval; drawing never expires a token.
+ * Accessibility timeout is captured by the first submit intent. Animator duration scale is irrelevant.
  */
 @Composable
 fun ArmedSubmitButton(
@@ -65,27 +70,22 @@ fun ArmedSubmitButton(
     labels: ArmedSubmitLabels,
     actions: ArmedSubmitActions,
 ) {
-    // remaining fraction of the countdown : 1f (just armed) → 0f (expired). The single
-    // Animatable both paces the scrim and times the disarm, so they can never drift.
-    val remaining = remember { Animatable(1f) }
-    LaunchedEffect(state.armed) {
-        if (state.armed) {
-            remaining.snapTo(1f)
-            remaining.animateTo(
-                targetValue = 0f,
-                animationSpec = tween(
-                    durationMillis = CONFIRM_DISARM_DELAY_MS.toInt(),
-                    easing = LinearEasing,
-                ),
-            )
-            actions.onDisarm()
-        }
-    }
+    val timeoutMillis = LocalAccessibilityManager.current?.calculateRecommendedTimeoutMillis(
+        CONFIRM_DISARM_DELAY_MS, containsIcons = false, containsText = true, containsControls = true,
+    ) ?: CONFIRM_DISARM_DELAY_MS
+    val elapsedFraction = rememberArmElapsedFraction(state, timeoutMillis, actions.onDisarm)
     val scrim = MaterialTheme.colorScheme.onTertiary.copy(alpha = ELAPSED_SCRIM_ALPHA)
     val shape = ButtonDefaults.shape
     Button(
         enabled = state.enabled,
-        onClick = if (state.armed) actions.onConfirmSubmit else actions.onSubmit,
+        onClick = {
+            if (state.armed) {
+                actions.onConfirmSubmit()
+            } else {
+                val submitWithTimeout = actions.onSubmitWithTimeout
+                if (submitWithTimeout == null) actions.onSubmit() else submitWithTimeout(timeoutMillis)
+            }
+        },
         colors = if (state.armed) {
             // Distinct (but not destructive) palette : the second tap is a deliberate
             // confirmation, not a warning.
@@ -101,7 +101,7 @@ fun ArmedSubmitButton(
             .drawWithContent {
                 drawContent()
                 if (state.armed) {
-                    val liveWidth = size.width * remaining.value
+                    val liveWidth = size.width * (1f - elapsedFraction)
                     drawRect(
                         color = scrim,
                         topLeft = Offset(liveWidth, 0f),
@@ -110,16 +110,45 @@ fun ArmedSubmitButton(
                 }
             },
     ) {
-        if (state.showProgress) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(18.dp),
-                color = MaterialTheme.colorScheme.onPrimary,
-            )
-        } else {
-            Text(
-                text = if (state.armed) labels.confirm else labels.submit,
-                maxLines = 1,
-            )
+        Box(contentAlignment = Alignment.Center) {
+            // ED-34: both labels reserve their natural width, keeping the same right edge on arming.
+            Text(labels.submit, Modifier.alpha(0f).clearAndSetSemantics {}, maxLines = 1)
+            Text(labels.confirm, Modifier.alpha(0f).clearAndSetSemantics {}, maxLines = 1)
+            if (state.showProgress) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    color = MaterialTheme.colorScheme.onPrimary,
+                )
+            } else {
+                Text(text = if (state.armed) labels.confirm else labels.submit, maxLines = 1)
+            }
         }
     }
+}
+
+/** Decorative sampling only; a controller token is expired exclusively by its ViewModel. */
+@Composable
+private fun rememberArmElapsedFraction(
+    state: ArmedSubmitState,
+    timeoutMillis: Long,
+    onLegacyDisarm: () -> Unit,
+): Float {
+    val token = state.armToken
+    // Legacy MP callers retain a local timer until their controller migration (3b).
+    val startedAt = remember(state.armed, token) { token?.armedAtNanos ?: SystemClock.elapsedRealtimeNanos() }
+    val duration = token?.timeoutMillis ?: timeoutMillis
+    var elapsedFraction by remember(token, state.armed) { mutableFloatStateOf(0f) }
+    LaunchedEffect(state.armed, token) {
+        while (isActive && state.armed) {
+            val elapsed = (SystemClock.elapsedRealtimeNanos() - startedAt) / 1_000_000f
+            elapsedFraction = (elapsed / duration).coerceIn(0f, 1f)
+            if (elapsed >= duration) {
+                // A controller token expires in the ViewModel, never from an animation callback.
+                if (token == null) onLegacyDisarm()
+                break
+            }
+            delay(16L)
+        }
+    }
+    return elapsedFraction
 }

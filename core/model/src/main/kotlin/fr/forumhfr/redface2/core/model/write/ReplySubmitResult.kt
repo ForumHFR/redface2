@@ -55,8 +55,11 @@ sealed interface ReplyFailureReason {
     /** « Une erreur est survenue lors de l'envoi des données » */
     data object InvalidHashCheck : ReplyFailureReason
 
-    /** « vous ne pouvez poster plus de 3 réponses consécutives… » */
+    /** Replies or new topics (including new private conversations) refused by HFR's flood guard. */
     data object AntiFlood : ReplyFailureReason
+
+    /** « le pseudo suivant n'existe pas » — certain refusal, never retain the echoed recipient. */
+    data object UnknownRecipient : ReplyFailureReason
 
     /** « Désolé ce sujet a été fermé » */
     data object TopicLocked : ReplyFailureReason

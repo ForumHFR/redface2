@@ -1,4 +1,6 @@
 package fr.forumhfr.redface2.feature.editor
+
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.ui.editor.rememberEditorImagePicker
 import fr.forumhfr.redface2.core.ui.editor.UploadProgressLabel
 import fr.forumhfr.redface2.core.ui.editor.bannerText
@@ -30,11 +32,13 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummary
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -69,7 +73,7 @@ import fr.forumhfr.redface2.core.ui.editor.editorControlsMaxHeight
 @Suppress("LongParameterList") // One callback per navigation outcome — each wired to a distinct :app pop.
 fun TopicFormScreen(
     request: TopicFormRequest,
-    onSubmitSucceeded: (targetPage: Int?, scrollTo: Int?) -> Unit,
+    onSubmitSucceeded: (targetPage: Int?, scrollTo: Int?, operation: PostSubmitOperation) -> Unit,
     // #206 workaround — `subject` is the exact posted title, forwarded to the category
     // listing so it can highlight the freshly-created row (HFR never returns the new id).
     onNewTopicCreated: (cat: Int, subcat: Int, newTopicId: Int?, newNumreponse: Int?, subject: String) -> Unit,
@@ -83,6 +87,7 @@ fun TopicFormScreen(
     ),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val currentOnSubmitSucceeded by rememberUpdatedState(onSubmitSucceeded)
     val context = LocalContext.current
     val newTopicCreatedFallback = stringResource(R.string.editor_new_topic_created)
 
@@ -90,7 +95,7 @@ fun TopicFormScreen(
         viewModel.effects.collect { effect ->
             when (effect) {
                 is TopicFormEffect.SubmitSucceeded ->
-                    onSubmitSucceeded(effect.targetPage, effect.scrollTo)
+                    currentOnSubmitSucceeded(effect.targetPage, effect.scrollTo, effect.operation)
                 is TopicFormEffect.NewTopicCreated -> {
                     if (effect.newTopicId == null) {
                         // Fallback path (#206, the only real path): the create succeeded but
@@ -192,7 +197,7 @@ internal fun TopicFormContent(
                         modifier = Modifier.weight(1f),
                         // #459 — lock editing during a batch so the caret cannot move between two
                         // programmatic [img] insertions (keeps them in pick order).
-                        readOnly = state.isUploading,
+                        readOnly = state.isUploading || state.submission.blocksBodyMutation,
                     )
                 }
             }
@@ -205,10 +210,12 @@ internal fun TopicFormContent(
                     isSubmitting = state.isSubmitting,
                     isLoadingForm = state.isLoadingForm,
                     confirmArmed = state.showSubmitConfirmation,
+                    armToken = state.armToken,
+                    controlsEnabled = !state.submission.blocksBodyMutation,
                 ),
                 actions = EditorSubmitActions(
-                    onSubmit = { onIntent(TopicFormIntent.SubmitClicked) },
-                    onConfirmSubmit = { onIntent(TopicFormIntent.SubmitConfirmed) },
+                    onSubmit = { timeout -> onIntent(TopicFormIntent.SubmitClicked(timeout)) },
+                    onConfirmSubmit = { onIntent(TopicFormIntent.SubmitConfirmed(state.armToken)) },
                     onDisarmConfirm = { onIntent(TopicFormIntent.SubmitConfirmationDismissed) },
                     onOpenOptions = { optionsSheetOpen = true },
                     onOpenSmileys = onOpenSmileys,
@@ -225,7 +232,7 @@ internal fun TopicFormContent(
                 smileyDisabled = state.smileyDisabled,
                 emailNotificationEnabled = state.emailNotificationEnabled,
                 msgIcon = state.msgIcon,
-                enabled = !state.isSubmitting && !state.isLoadingForm,
+                enabled = !state.submission.blocksBodyMutation && !state.isLoadingForm,
                 onSignatureChanged = { onIntent(TopicFormIntent.ToggleSignature(it)) },
                 onSmileyDisabledChanged = { onIntent(TopicFormIntent.ToggleSmileyDisabled(it)) },
                 onEmailNotificationChanged = { onIntent(TopicFormIntent.ToggleEmailNotification(it)) },
@@ -286,7 +293,7 @@ private fun TopicFormControlsZone(
             onValueChange = { onIntent(TopicFormIntent.SubjectChanged(it)) },
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
-            enabled = !state.isSubmitting,
+            enabled = !state.submission.blocksBodyMutation,
             label = { Text(stringResource(R.string.editor_topic_subject_label)) },
             // #237 — sentence capitalization (parité RF1) like the body field.
             keyboardOptions = KeyboardOptions(
@@ -298,7 +305,7 @@ private fun TopicFormControlsZone(
             SubcategoryDropdown(
                 choices = state.subcategoryChoices,
                 selectedSubcat = state.selectedSubcat,
-                enabled = !state.isSubmitting && !state.isLoadingForm,
+                enabled = !state.submission.blocksBodyMutation && !state.isLoadingForm,
                 onSelect = { id -> onIntent(TopicFormIntent.SubcatSelected(id)) },
             )
         }
@@ -344,16 +351,21 @@ private fun TopicFormControlsZone(
  * `UploadProgressLabel`).
  */
 @Composable
-private fun TopicFormErrorBanners(
+internal fun TopicFormErrorBanners(
     state: TopicFormState,
     onIntent: (TopicFormIntent) -> Unit,
 ) {
     state.submitError?.let { error ->
-        Text(
-            text = stringResource(error.bannerResId),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.error,
-        )
+        val summary = error.summaryKind
+        if (summary != null) {
+            EditorSubmissionSummary(summary)
+        } else {
+            Text(
+                text = stringResource(error.bannerResId),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
         TextButton(onClick = { onIntent(TopicFormIntent.ErrorDismissed) }) {
             Text(text = stringResource(R.string.editor_error_dismiss))
         }
@@ -513,7 +525,10 @@ private val SubmitError.bannerResId: Int
             ReplyFailureReason.TopicLocked -> R.string.editor_error_topic_locked
             ReplyFailureReason.LoginRequired -> R.string.editor_error_login_required
             ReplyFailureReason.Unknown -> R.string.editor_error_unknown
+            ReplyFailureReason.UnknownRecipient -> R.string.editor_error_unknown
         }
+        SubmitError.Uncertain -> fr.forumhfr.redface2.core.ui.R.string.editor_submission_uncertain
+        SubmitError.DraftWriteFailed -> fr.forumhfr.redface2.core.ui.R.string.editor_submission_draft_write_failed
         SubmitError.Network -> R.string.editor_error_network
         SubmitError.SessionExpired -> R.string.editor_error_session_expired
         SubmitError.MissingSubcat -> R.string.editor_error_missing_subcat

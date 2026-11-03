@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.feature.topic
 
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
+
 /**
  * #895 étape 4 (PR 2) — outcome of a successful FULL-EDITOR submit (reply / quote / edit /
  * edit-FP), published by `:app` BEFORE popping the editor and consumed exactly once by the topic
@@ -20,10 +22,14 @@ package fr.forumhfr.redface2.feature.topic
  *   order ; inline `[quotemsg]` tags and cards alike), empty for a plain reply or an edit. The
  *   ViewModel lands on the highest one when it is on the landing page (the reading resumes
  *   there), at the bottom otherwise.
+ * @property operation explicitly stamped by the editor's accepted snapshot.
+ * @property account canonical pseudo of the editor entry's owner; another session cannot consume it.
  */
 data class TopicSubmitResult(
     val eventId: Long,
     val targetPage: Int?,
     val scrollTo: Int?,
     val quotedNumreponses: List<Int> = emptyList(),
+    val operation: PostSubmitOperation = PostSubmitOperation.Publish,
+    val account: String = "",
 )

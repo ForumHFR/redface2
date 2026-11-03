@@ -141,6 +141,7 @@ class MigrationTest {
                 MIGRATION_16_17,
                 MIGRATION_17_18,
                 MIGRATION_18_19,
+                MIGRATION_19_20,
             )
             .build()
 
@@ -290,6 +291,7 @@ class MigrationTest {
                 MIGRATION_16_17,
                 MIGRATION_17_18,
                 MIGRATION_18_19,
+                MIGRATION_19_20,
             )
             .build()
 
@@ -399,6 +401,7 @@ class MigrationTest {
                 MIGRATION_16_17,
                 MIGRATION_17_18,
                 MIGRATION_18_19,
+                MIGRATION_19_20,
             )
             .build()
 
@@ -480,6 +483,7 @@ class MigrationTest {
                 MIGRATION_16_17,
                 MIGRATION_17_18,
                 MIGRATION_18_19,
+                MIGRATION_19_20,
             )
             .build()
 
@@ -557,6 +561,7 @@ class MigrationTest {
                 MIGRATION_16_17,
                 MIGRATION_17_18,
                 MIGRATION_18_19,
+                MIGRATION_19_20,
             )
             .build()
 
@@ -625,6 +630,7 @@ class MigrationTest {
                 MIGRATION_16_17,
                 MIGRATION_17_18,
                 MIGRATION_18_19,
+                MIGRATION_19_20,
             )
             .build()
 
@@ -707,6 +713,7 @@ class MigrationTest {
                 MIGRATION_16_17,
                 MIGRATION_17_18,
                 MIGRATION_18_19,
+                MIGRATION_19_20,
             )
             .build()
 
@@ -776,6 +783,7 @@ class MigrationTest {
                 MIGRATION_16_17,
                 MIGRATION_17_18,
                 MIGRATION_18_19,
+                MIGRATION_19_20,
             )
             .build()
 
@@ -835,6 +843,7 @@ class MigrationTest {
                 MIGRATION_16_17,
                 MIGRATION_17_18,
                 MIGRATION_18_19,
+                MIGRATION_19_20,
             )
             .build()
 
@@ -898,6 +907,7 @@ class MigrationTest {
                 MIGRATION_16_17,
                 MIGRATION_17_18,
                 MIGRATION_18_19,
+                MIGRATION_19_20,
             )
             .build()
 
@@ -966,6 +976,7 @@ class MigrationTest {
                 MIGRATION_16_17,
                 MIGRATION_17_18,
                 MIGRATION_18_19,
+                MIGRATION_19_20,
             )
             .build()
 
@@ -1034,6 +1045,7 @@ class MigrationTest {
                 MIGRATION_16_17,
                 MIGRATION_17_18,
                 MIGRATION_18_19,
+                MIGRATION_19_20,
             )
             .build()
 
@@ -1112,6 +1124,7 @@ class MigrationTest {
                 MIGRATION_16_17,
                 MIGRATION_17_18,
                 MIGRATION_18_19,
+                MIGRATION_19_20,
             )
             .build()
 
@@ -1187,6 +1200,7 @@ class MigrationTest {
                 MIGRATION_16_17,
                 MIGRATION_17_18,
                 MIGRATION_18_19,
+                MIGRATION_19_20,
             )
             .build()
 
@@ -1257,6 +1271,7 @@ class MigrationTest {
                 MIGRATION_16_17,
                 MIGRATION_17_18,
                 MIGRATION_18_19,
+                MIGRATION_19_20,
             )
             .build()
 
@@ -1384,6 +1399,7 @@ class MigrationTest {
                 MIGRATION_16_17,
                 MIGRATION_17_18,
                 MIGRATION_18_19,
+                MIGRATION_19_20,
             )
             .build()
 
@@ -1518,6 +1534,35 @@ class MigrationTest {
             ).use { cursor ->
                 assertTrue("the pre-v19 topic post must survive", cursor.moveToFirst())
                 assertTrue("the new column must backfill to NULL", cursor.isNull(0))
+            }
+        }
+    }
+
+    /** ED-170: upgrading preserves content and never fabricates an unresolved attempt. */
+    @Test
+    fun migrate_19_to_20_preserves_drafts_without_attempts() {
+        val dbName = "migration_19_20_test"
+        helper.createDatabase(dbName, 19).use { v19 ->
+            v19.execSQL(
+                """
+                INSERT INTO editor_drafts (draftKey, ownerId, body, subject, recipients, updatedAt, isPrivate)
+                VALUES ('alice|mpnew', 'alice', 'private body', 'subject', 'bob', 1234, 1)
+                """.trimIndent(),
+            )
+        }
+        helper.runMigrationsAndValidate(dbName, 20, true, MIGRATION_19_20).use { v20 ->
+            v20.query("SELECT * FROM editor_drafts WHERE draftKey = 'alice|mpnew'").use { cursor ->
+                assertTrue(cursor.moveToFirst())
+                assertEquals("private body", cursor.getString(cursor.getColumnIndexOrThrow("body")))
+                assertEquals("subject", cursor.getString(cursor.getColumnIndexOrThrow("subject")))
+                assertEquals("bob", cursor.getString(cursor.getColumnIndexOrThrow("recipients")))
+                assertEquals("alice", cursor.getString(cursor.getColumnIndexOrThrow("ownerId")))
+                assertEquals(1234L, cursor.getLong(cursor.getColumnIndexOrThrow("updatedAt")))
+                assertEquals(1, cursor.getInt(cursor.getColumnIndexOrThrow("isPrivate")))
+                assertEquals(0L, cursor.getLong(cursor.getColumnIndexOrThrow("contentVersion")))
+                listOf("attemptId", "attemptVersion", "attemptState").forEach { column ->
+                    assertTrue(column, cursor.isNull(cursor.getColumnIndexOrThrow(column)))
+                }
             }
         }
     }

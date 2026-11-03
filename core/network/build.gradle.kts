@@ -38,4 +38,5 @@ dependencies {
     testImplementation(libs.turbine)
     testImplementation(libs.okhttp.mockwebserver)
     testImplementation(libs.okhttp.tls)
+    testImplementation(testFixtures(project(":core:domain")))
 }

@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2
 
 import android.app.Application
+import android.util.Log
 import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
@@ -10,6 +11,8 @@ import coil3.svg.SvgDecoder
 import dagger.hilt.android.HiltAndroidApp
 import fr.forumhfr.redface2.core.data.cache.CacheInvalidator
 import fr.forumhfr.redface2.core.data.editor.DraftRetentionPurger
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.diagnostics.EditorSubmissionTrace
 import fr.forumhfr.redface2.core.network.qualifiers.ImageClient
 import javax.inject.Inject
 import okhttp3.OkHttpClient
@@ -33,6 +36,8 @@ import okhttp3.OkHttpClient
  */
 @HiltAndroidApp
 class RedfaceApplication : Application(), SingletonImageLoader.Factory {
+
+    @Inject lateinit var diagnostics: DiagnosticsLog
 
     @Inject lateinit var cacheInvalidator: CacheInvalidator
 
@@ -61,6 +66,9 @@ class RedfaceApplication : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        if (BuildConfig.DEBUG || BuildConfig.FLAVOR == "dev") {
+            diagnostics.exportSubmissionTraces { Log.i(EditorSubmissionTrace.TAG, it) }
+        }
         // Wires the startup owner of private-content purge reconciliation and the auth-state
         // listener that wipes per-user caches on logout/account switch (cf. [CacheInvalidator]).
         // Started here so both jobs live for the full process lifetime.

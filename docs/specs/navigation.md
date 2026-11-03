@@ -253,10 +253,42 @@ Issue #198 — chaque écran principal (Drapeaux, Forum, Recherche, Messages) ac
 
 - état compte (« Anonyme » / « Connecté en tant que X » / « Compte en cours de vérification… » pendant le warmup DataStore) ;
 - action `Se connecter` ou `Se déconnecter` selon `AuthState` ;
-- `Paramètres alpha`, `Diagnostics alpha`, `Signaler un contenu` (mailto `xat@azora.fr`) ;
+- `Diagnostics`, `Signaler un contenu` (formulaire intégré `ReportContentRoute`) ;
 - footer version `v{name} (build {code})`.
 
 Le badge est un carré à coins arrondis (8dp), **pas un cercle**, cohérent avec [`RedfaceUserAvatar`]({{ site.baseurl }}/specs/models#post). L'anti-flicker auth est préservé : tant que `authState == null`, le badge montre `…` plutôt que `?` pour ne pas surfacer transitoirement un état « Anonyme ». La déconnexion (`AppAccountViewModel.logout`) vide d'abord `FlagRepository.clearSessionCache()` avant `AuthRepository.logout()` ; cet ordering est verrouillé par `AppAccountViewModelTest` côté `:app`.
+
+#### Signalement au projet
+
+Le menu compte (« Ouvrir le menu compte » → « Signaler un contenu ») et « Réglages » → « Compte HFR »
+(écran « Compte HFR et à propos ») → « Signaler un contenu ou un problème » ouvrent `ReportContentRoute`,
+sans paramètres, un écran plein écran de `:feature:settings` qui masque la navigation inférieure. Les deux entrées
+ouvrent un formulaire au lien vide, sauf restauration d'un brouillon du compte. Le lien facultatif
+est saisi manuellement. Aucun texte ni contexte privé n'est sérialisé dans la route ou le `SavedStateHandle`.
+
+Le formulaire permet de choisir un motif (sécurité des enfants, contenu illicite, harcèlement,
+problème de l'application, autre), de décrire le problème et d'ajouter un lien HTTP(S) facultatif.
+Après vérification de la session, il utilise `PrivateMessageWriteRepository` pour envoyer un MP
+au compte fixe du projet **XaTriX**, sujet « Redface 2 — Signalement ». Un pré-contrôle bloque le
+chargement du formulaire HFR et l'envoi si le pseudo connecté, après trim et sans distinction de casse,
+est celui du destinataire ; un message explicatif remplace le formulaire. Le pseudo de l'expéditeur
+est visible du destinataire ; signature, smileys et notification email sont désactivés. Les seules
+informations ajoutées automatiquement sont la version, le code et le canal fournis par `:app`.
+
+Sans connexion, le bouton principal ouvre `LoginRoute`, puis revient au formulaire. Lors de la
+réinitialisation de la pile Messages à la transition d'authentification, la route de signalement
+est conservée ; le callback de connexion ne dépile que `LoginRoute`, quel que soit l'ordre de ces
+deux opérations. « Écrire par email », avec la mention « Ouvre l'application mail », reste un
+second moyen pour les utilisateurs non connectés ou connectés avec le compte destinataire, vers `xat@azora.fr`.
+
+Le brouillon est privé, lié au compte et stocké sous `EditorDraftKey.report()`, distinct de `mpnew`.
+`EditorSubmissionBinding` et `EditorDraftSession` figent l'envoi, persistent la tentative avant POST,
+appliquent la préférence de confirmation et empêchent les doubles envois. Un succès reconnu nettoie
+le brouillon ; une réponse ambiguë, une erreur réseau après émission ou une tentative interrompue
+restaurée conserve la saisie et affiche « Envoi non confirmé », avec accès aux Messages. Aucun renvoi
+automatique. Un refus anti-flood conserve le brouillon, un formulaire expiré est rechargé sans
+écraser les champs, et un changement de compte invalide la session d'envoi et purge la saisie visible.
+L'action « Alerter » destinée aux modérateurs HFR reste distincte.
 
 Depuis le MVP Phase 3 (#298), l'onglet `Messages` affiche l'inbox des MP (MP classiques et
 MultiMP confondus, cf. § Messages ci-dessous) et ouvre une conversation ; la lecture seule

@@ -7,6 +7,7 @@ import dagger.hilt.components.SingletonComponent
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.diagnostics.HfrClientRole
 import fr.forumhfr.redface2.core.network.HfrConstants
+import fr.forumhfr.redface2.core.network.EditorWriteOwnerInterceptor
 import fr.forumhfr.redface2.core.network.diagnostics.HfrEventListenerFactory
 import fr.forumhfr.redface2.core.network.diagnostics.HfrNetworkDiagnostics
 import fr.forumhfr.redface2.core.network.qualifiers.AnonymousClient
@@ -68,6 +69,7 @@ object NetworkModule {
     ): OkHttpClient = baseClient.newBuilder()
         .diagnosticsRole(baseClient, HfrClientRole.MUTATION)
         .cookieJar(cookieJar)
+        .addNetworkInterceptor(EditorWriteOwnerInterceptor())
         .followSslRedirects(false)
         .retryOnConnectionFailure(false)
         .build()

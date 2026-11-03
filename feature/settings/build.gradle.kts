@@ -42,6 +42,7 @@ dependencies {
     implementation(libs.coil.compose)
 
     testImplementation(libs.junit4)
+    testImplementation(testFixtures(project(":core:domain")))
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.mockk)
     testImplementation(libs.turbine)

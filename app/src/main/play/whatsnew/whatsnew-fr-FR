@@ -1,4 +1,5 @@
-Redface 2 v0.65.0 — bêta.
-- Smileys : onglet Favoris (favoris HFR, de l'appareil, plus utilisés), gestion des favoris HFR, détail à l'appui long avec les mots-clés du wiki.
-- Profil : lien vers la configuration matérielle du membre.
-- Drapeaux : refresh plus fiable, liste incomplète signalée, mesures dans le diagnostic.
+Redface 2 v0.68.0 — bêta.
+- Signalement intégré : Réglages → Compte HFR ou menu compte, par MP HFR au projet.
+- Envoi : confirmations « Message publié » / « Message modifié » et bouton « Dernière page » ; doubles envois évités, envoi incertain signalé avec vérification demandée.
+- Citations : saut débloqué si le message manque sur la page.
+- TalkBack : Première/Dernière page annoncées une seule fois.

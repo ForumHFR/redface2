@@ -191,6 +191,50 @@ class MessagesViewModelTest {
     }
 
     @Test
+    fun `showFreshInbox replaces an already loaded first page`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery { repository.getPrivateMessageList(page = 1) } returnsMany listOf(
+            PrivateMessageListPage(page = 1, totalPages = 2, items = listOf(summary(1))),
+            PrivateMessageListPage(page = 1, totalPages = 2, items = listOf(summary(3), summary(1))),
+        )
+        val viewModel = viewModel(repository, FakeAuthRepository())
+        assertEquals(1, viewModel.state.value.networkLoadGeneration)
+
+        viewModel.showFreshInbox()
+        advanceUntilIdle()
+
+        val state = viewModel.state.value
+        assertEquals(1, state.page)
+        assertEquals(3, (state.mode as MessagesUiState.Mode.Content).conversations.first().threadId)
+        assertEquals(2, state.networkLoadGeneration)
+        coVerify(exactly = 2) { repository.getPrivateMessageList(page = 1) }
+    }
+
+    @Test
+    fun `showFreshInbox leaves an already loaded second page for a fresh first page`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery { repository.getPrivateMessageList(page = 1) } returnsMany listOf(
+            PrivateMessageListPage(page = 1, totalPages = 2, items = listOf(summary(1))),
+            PrivateMessageListPage(page = 1, totalPages = 2, items = listOf(summary(3), summary(1))),
+        )
+        coEvery { repository.getPrivateMessageList(page = 2) } returns
+            PrivateMessageListPage(page = 2, totalPages = 2, items = listOf(summary(2)))
+        val viewModel = viewModel(repository, FakeAuthRepository())
+        viewModel.selectPage(2)
+        advanceUntilIdle()
+        assertEquals(2, viewModel.state.value.page)
+
+        viewModel.showFreshInbox()
+        advanceUntilIdle()
+
+        val state = viewModel.state.value
+        assertEquals(1, state.page)
+        assertEquals(3, (state.mode as MessagesUiState.Mode.Content).conversations.first().threadId)
+        coVerify(exactly = 2) { repository.getPrivateMessageList(page = 1) }
+        coVerify(exactly = 1) { repository.getPrivateMessageList(page = 2) }
+    }
+
+    @Test
     fun `inbox never prefetches conversations during loads or authentication transitions`() = runTest {
         val repository = mockk<MessagesRepository>()
         coEvery { repository.getPrivateMessageList(page = 1) } returns

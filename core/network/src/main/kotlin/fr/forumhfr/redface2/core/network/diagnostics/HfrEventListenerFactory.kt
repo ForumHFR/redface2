@@ -207,6 +207,11 @@ private class HfrTimingListener(
     @Synchronized
     override fun requestHeadersEnd(call: Call, request: Request) { headersStart = nanoTime() }
     @Synchronized
+    override fun requestBodyEnd(call: Call, byteCount: Long) {
+        // Only write bodies: preparatory GETs may inherit the same coroutine trace.
+        if (call.request().method == "POST") tag?.editorSubmission?.requestBodyEnd()
+    }
+    @Synchronized
     override fun responseHeadersEnd(call: Call, response: Response) {
         headersMs += headersStart?.let { elapsedDiagnosticMs(it, nanoTime()) } ?: 0L
         headersStart = null

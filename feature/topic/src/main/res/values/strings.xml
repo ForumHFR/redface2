@@ -170,9 +170,10 @@
     <string name="topic_post_edit">Modifier</string>
     <string name="topic_edit_first_post">Modifier le premier message</string>
     <string name="topic_post_submit_confirmed">Message publié</string>
-    <string name="topic_post_submit_refresh_failed">Message envoyé, mais le rafraîchissement de la page a échoué. Tirez pour réessayer.</string>
-    <string name="topic_post_submitted_elsewhere">Message publié en page %1$d</string>
-    <string name="topic_post_submitted_elsewhere_action">Y aller</string>
+    <string name="topic_post_edit_confirmed">Message modifié</string>
+    <string name="topic_post_submit_refresh_failed">%1$s, mais actualisation impossible. Tirez pour réessayer.</string>
+    <string name="topic_post_submitted_elsewhere">Message publié</string>
+    <string name="topic_post_submitted_elsewhere_action">Dernière page</string>
     <string name="topic_refresh_failed">Le rafraîchissement a échoué. Réessayez.</string>
     <string name="topic_open_profile_action">Voir le profil</string>
 
@@ -261,4 +262,5 @@
     <string name="topic_alert_link_view_post">Voir le message</string>
     <string name="topic_alert_link_topic_page">%1$s, page %2$d</string>
     <string name="topic_alert_link_post_fallback">Message n° %1$d du sujet %2$d, page %3$d</string>
+    <string name="quick_reply_error_uncertain">Votre message a peut-être été envoyé : vérifiez le sujet.</string>
 </resources>

@@ -10,14 +10,23 @@ import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
-import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.SmileyPickerCloseCause
 import fr.forumhfr.redface2.core.domain.diagnostics.recordImagePickerEvent
 import fr.forumhfr.redface2.core.domain.diagnostics.recordImagesPicked
+import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
+import fr.forumhfr.redface2.core.domain.editor.EditorDelivery
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionBinding
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionCallbacks
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionEnvironment
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionErrors
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
+import fr.forumhfr.redface2.core.domain.editor.SubmissionRequest
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.HfrFavoriteSmileyRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollections
@@ -48,9 +57,7 @@ import fr.forumhfr.redface2.core.ui.editor.pickedImagesForUpload
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -60,18 +67,8 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 /**
- * ViewModel for composing a NEW private conversation (#301 follow-up). Same pipeline as
- * [PrivateMessageReplyViewModel] — fetch the `bddpost.php` form (fresh `hash_check`), compose with
- * the shared toolbar/preview, submit, classify — with the standalone composer's two extra
- * user-typed routing fields (`dest` recipients + `sujet` subject) and no conversation context.
- *
- * [initialRecipient] supports future « envoyer un MP à ce membre » entry points : it rides the
- * composer GET (`dest=` query) so HFR pre-fills the field server-side, AND seeds [recipients]
- * locally on the first load. The MP-list entry point passes `null`.
- *
- * The POST response of a new conversation was deliberately never exercised live (no test send to a
- * third party) : an unrecognised response maps to [PrivateMessageReplyError.Unexpected] and keeps
- * every field intact — the banner invites the user to check their messages list instead.
+ * ED-87/88/161/170/172: new MP with frozen recipients, subject and body before durable submission.
+ * [initialRecipient] seeds routing once; uncertainty retains every field and the list check (ED-112).
  */
 @HiltViewModel(assistedFactory = PrivateMessageComposeViewModel.Factory::class)
 @Suppress("LongParameterList") // Hilt ctor — one dependency per collaborator (#459 added the upload trio).
@@ -86,6 +83,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     private val uploadRepository: UploadRepository,
     private val imageUploadReader: ImageUploadReader,
     private val diagnostics: DiagnosticsLog,
+    private val clock: DiagnosticsClock,
     smileyRepository: SmileyRepository,
     hfrFavoriteSmileyRepository: HfrFavoriteSmileyRepository,
     smileyLocalCollections: SmileyLocalCollections,
@@ -138,13 +136,35 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     )
 
     private var formJob: Job? = null
-    private var submitJob: Job? = null
 
     /** #405 — single content-free key for the new-conversation composer (private → wiped on logout). */
     private val draftKey: String = EditorDraftKey.mpCompose()
 
     /** #405 — debounced autosave coroutine ; relaunched (cancelling the previous) on each edit. */
-    private var autosaveJob: Job? = null
+    private val submission = EditorSubmissionBinding(
+        environment = EditorSubmissionEnvironment(viewModelScope, clock, diagnostics),
+        drafts = EditorDraftSession(draftStore, draftKey),
+        callbacks = EditorSubmissionCallbacks<PrivateMessageComposeEffect, PrivateMessageReplyError>(
+            state = { value ->
+                _state.update {
+                    it.copy(
+                        submission = value,
+                        isSubmitting = value is EditorSubmissionState.PersistingAttempt ||
+                            value is EditorSubmissionState.Sending,
+                        showSubmitConfirmation = value is EditorSubmissionState.Armed,
+                    )
+                }
+            },
+            error = { value -> _state.update { it.copy(submitError = value) } },
+            success = { value -> _effects.trySend(value) },
+        ),
+        errors = EditorSubmissionErrors(
+            uncertain = PrivateMessageReplyError.Uncertain,
+            draftWriteFailed = PrivateMessageReplyError.DraftWriteFailed,
+            sessionExpired = PrivateMessageReplyError.SessionExpired,
+            unknown = PrivateMessageReplyError.Uncertain,
+        ),
+    )
 
     /**
      * #459 — lowercased pseudo of the authenticated session, or null when anonymous. The upload
@@ -163,22 +183,8 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
      */
     private var imageInsertMode: EditorImageInsert = EditorImageInsert.REDUCED
 
-    /**
-     * #405 — account that owned this MP composer when it opened, snapshotted from [draftStore] so a
-     * mid-edit account switch can't write this session's PRIVATE draft (recipients + body) under
-     * another account (Codex beta review). Captured in [restoreDraftIfAny]; null until then.
-     */
-    private var draftOwner: String? = null
-
-    /** #312 — mirror of the persisted « Confirmation avant publication » preference. */
-    private var confirmBeforePosting: Boolean = false
-
     init {
-        viewModelScope.launch {
-            userPreferencesRepository.observeConfirmBeforePosting().collect { enabled ->
-                confirmBeforePosting = enabled
-            }
-        }
+        submission.observePreference(userPreferencesRepository.observeConfirmBeforePosting())
         viewModelScope.launch {
             userPreferencesRepository.observeEditorImageInsert().collect { mode ->
                 imageInsertMode = mode
@@ -200,14 +206,16 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                 // attributed to the new account (same Codex-reviewed rule as PostEditorViewModel).
                 if (activeUserId != null && newUserId != activeUserId) {
                     uploadJob?.cancel()
-                    autosaveJob?.cancel()
+                    submission.accountChanged()
                     _state.update { it.copy(isUploading = false, uploadProgress = null) }
                 }
                 activeUserId = newUserId
             }
         }
-        restoreDraftIfAny()
-        loadForm()
+        viewModelScope.launch {
+            restoreDraftIfAny()
+            loadForm()
+        }
     }
 
     fun retryFormLoad() = loadForm()
@@ -217,28 +225,31 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
      * routing or server-side `dest` prefill remains eligible while untouched; a real edit suppresses
      * the initial offer. The fingerprint is recorded only after Ignore, so a restored row remains
      * recoverable if process death loses the live editor state before autosave.
+     * ED-81/170: durable status wins over every offer and server prefill.
      */
-    private fun restoreDraftIfAny() {
-        viewModelScope.launch {
-            draftOwner = draftStore.currentOwner()
-            val draft = draftStore.load(draftOwner, draftKey) ?: return@launch
+    private suspend fun restoreDraftIfAny() {
+        val entry = submission.restore(draftKey) ?: return
+        if (submission.blocksMutation) return
+        val draft = entry.draft
+        if (entry.attempt != null) {
+            _state.update {
+                it.withDraftPreview(TextFieldValue(draft.body, TextRange(draft.body.length))).copy(
+                    subject = draft.subject.orEmpty(), recipients = draft.recipients.orEmpty(),
+                    restorableSubject = null, restorableRecipients = null,
+                    restorableDraft = null, submitError = PrivateMessageReplyError.Uncertain,
+                )
+            }
+        } else {
             val hasContent = draft.body.isNotBlank() ||
-                !draft.subject.isNullOrBlank() ||
-                !draft.recipients.isNullOrBlank()
-            if (hasContent) {
-                val fingerprint = draft.restoreOfferFingerprint()
-                if (savedStateHandle.get<String>(DRAFT_RESTORE_OFFER_FINGERPRINT_KEY) == fingerprint) {
-                    return@launch
-                }
-                val canOffer = _state.value.canOfferDraftRestore(draft)
-                if (canOffer) {
-                    _state.update { current ->
-                        current.copy(
-                            restorableDraft = draft.body,
-                            restorableSubject = draft.subject,
-                            restorableRecipients = draft.recipients,
-                        )
-                    }
+                !draft.subject.isNullOrBlank() || !draft.recipients.isNullOrBlank()
+            val fingerprint = draft.restoreOfferFingerprint()
+            val ignored = savedStateHandle.get<String>(DRAFT_RESTORE_OFFER_FINGERPRINT_KEY) == fingerprint
+            if (hasContent && !ignored && _state.value.canOfferDraftRestore(draft)) {
+                _state.update {
+                    it.copy(
+                        restorableDraft = draft.body, restorableSubject = draft.subject,
+                        restorableRecipients = draft.recipients,
+                    )
                 }
             }
         }
@@ -259,41 +270,17 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
 
     /**
      * #405 — debounced autosave of recipients + subject + body, flagged `isPrivate = true` so the
-     * logout purge wipes it. Empty across all three fields → delete the row. No-op without a session.
+     * logout purge wipes it. ED-170: empty content is cleared through CAS, never a blind delete.
      */
-    private fun scheduleAutosave() {
-        autosaveJob?.cancel()
-        autosaveJob = viewModelScope.launch {
-            delay(AUTOSAVE_DEBOUNCE_MS)
-            persistDraftNow()
-        }
-    }
+    private fun scheduleAutosave() = submission.autosave(::draftSnapshot)
 
-    /**
-     * Immediate write of the current recipients + subject + body. A blank body with a pending offer
-     * is a no-op; otherwise all fields blank delete the row (cf. [scheduleAutosave]). Reads [_state]
-     * AFTER the debounce delay so the #803 dirty-close flush cannot re-persist a stale snapshot.
-     */
-    private suspend fun persistDraftNow() {
+    private fun draftSnapshot(): EditorDraftStore.Draft? {
         val snapshot = _state.value
-        if (snapshot.draft.text.isBlank() && snapshot.restorableDraft != null) return
-        val body = snapshot.draft.text
-        val subject = snapshot.subject
-        val recipients = snapshot.recipients
-        if (body.isBlank() && subject.isBlank() && recipients.isBlank()) {
-            draftStore.delete(draftOwner, draftKey)
-        } else {
-            draftStore.save(
-                draftOwner,
-                draftKey,
-                EditorDraftStore.Draft(
-                    body = body,
-                    subject = subject.ifBlank { null },
-                    recipients = recipients.ifBlank { null },
-                    isPrivate = true,
-                ),
-            )
-        }
+        if (snapshot.draft.text.isBlank() && snapshot.restorableDraft != null) return null
+        return EditorDraftStore.Draft(
+            body = snapshot.draft.text, subject = snapshot.subject.ifBlank { null },
+            recipients = snapshot.recipients.ifBlank { null }, isPrivate = true,
+        )
     }
 
     /** #803 pattern — one-shot latch : a committed close is never re-emitted. */
@@ -314,9 +301,9 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
      *   (the pop is blind : a second one would remove the screen BELOW).
      */
     fun onCloseRequested() {
-        if (_state.value.isSubmitting || closeRequested) return
+        if (submission.blocksClose || closeRequested) return
+        submission.disarm()
         closeRequested = true
-        autosaveJob?.cancel()
         viewModelScope.launch {
             // The close must NEVER stay blocked on a failing flush (Room is not contractually
             // non-throwing — disk full, corrupted store) : the one-shot latch is already set, so
@@ -324,10 +311,10 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
             // autosave already persisted the rest) while a rethrow would leave the screen
             // unclosable. CancellationException still propagates (scope teardown is not an error).
             try {
-                persistDraftNow()
+                submission.flush(draftSnapshot())
             } catch (e: CancellationException) {
                 throw e
-            } catch (_: Exception) {
+            } catch (_: IOException) {
                 // Best effort — the previous debounced write is what remains.
             }
             _effects.send(PrivateMessageComposeEffect.CloseCommitted)
@@ -336,6 +323,8 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
 
     /** #405 — append the cached body, fill only blank routing fields, and clear the banner. */
     fun onDraftRestoreRequested() {
+        if (submission.blocksMutation) return
+        submission.disarm()
         val offeredBody = _state.value.restorableDraft ?: return
         _state.update { current ->
             val body = if (current.draft.text.isBlank() || current.draft.text == offeredBody) {
@@ -355,8 +344,10 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         scheduleAutosave()
     }
 
-    /** #405 — discard the cached draft : delete the row and clear the banner. */
+    /** ED-170: clear the offered content through CAS, preserving a newer generation. */
     fun onDraftDiscardRequested() {
+        if (submission.blocksMutation) return
+        submission.disarm()
         val snapshot = _state.value
         val body = snapshot.restorableDraft ?: return
         markDraftRestoreOfferIgnored(
@@ -370,12 +361,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         _state.update {
             it.copy(restorableDraft = null, restorableSubject = null, restorableRecipients = null)
         }
-        val pendingAutosave = autosaveJob
-        autosaveJob = null
-        viewModelScope.launch {
-            pendingAutosave?.cancelAndJoin()
-            draftStore.delete(draftOwner, draftKey)
-        }
+        viewModelScope.launch { submission.flush(EditorDraftStore.Draft(body = "", isPrivate = true)) }
     }
 
     private fun markDraftRestoreOfferIgnored(draft: EditorDraftStore.Draft) {
@@ -383,6 +369,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     }
 
     private fun loadForm() {
+        if (!submission.isInitialized) return
         formJob?.cancel()
         val favoriteStamp = smileyPicker.favoriteFormStamp()
         _state.update { it.copy(isLoadingForm = true, formError = false) }
@@ -396,59 +383,63 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                 }
                 loadedForm = form
                 smileyPicker.refreshFavorites(favoriteStamp)
-                _state.update { current ->
-                    // Hydrate ONLY on the first successful load — a silent refetch after an
-                    // expired hash_check must not clobber toggles (or a recipient edit) the user
-                    // changed in between. Mirror of the reply editor's guard.
-                    val hydrate = !current.optionsHydratedFromForm
-                    val nextRecipients = if (hydrate && current.recipients.isBlank()) {
-                        form.hiddenFields["dest"].orEmpty()
-                    } else {
-                        current.recipients
-                    }
-                    val keepRestoreOffer = current.restoreOfferDiffersFrom(nextRecipients)
-                    current.copy(
-                        isLoadingForm = false,
-                        formAvailable = true,
-                        formError = false,
-                        // The composer's `dest` text input comes back through hiddenFields ; a
-                        // server-side prefill (dest= in the GET) seeds the local field once.
-                        recipients = nextRecipients,
-                        recipientsHydratedContent = current.hydratedRecipientsContent(
-                            nextRecipients = nextRecipients,
-                            hydrate = hydrate,
-                        ),
-                        restorableDraft = current.restorableDraft.takeIf { keepRestoreOffer },
-                        restorableSubject = current.restorableSubject.takeIf { keepRestoreOffer },
-                        restorableRecipients = current.restorableRecipients.takeIf { keepRestoreOffer },
-                        signatureEnabled = if (hydrate) {
-                            form.options.signatureEnabled || form.hiddenFields["signature"] == "1"
-                        } else {
-                            current.signatureEnabled
-                        },
-                        smileyDisabled = if (hydrate) {
-                            form.options.smileyDisabled || form.hiddenFields["smiley"] == "1"
-                        } else {
-                            current.smileyDisabled
-                        },
-                        emailNotificationEnabled = if (hydrate) {
-                            form.options.emailNotificationEnabled || form.hiddenFields["emaill"] == "1"
-                        } else {
-                            current.emailNotificationEnabled
-                        },
-                        optionsHydratedFromForm = true,
-                    )
-                }
+                _state.update { it.withLoadedForm(form) }
             } catch (cancellation: CancellationException) {
                 throw cancellation
-            } catch (
-                @Suppress("TooGenericExceptionCaught", "SwallowedException") error: Exception,
-            ) {
-                // No raw message reaches the UI (#316) : the GET URL can embed a recipient pseudo.
-                loadedForm = null
-                _state.update { it.copy(isLoadingForm = false, formAvailable = false, formError = true) }
+            } catch (_: IOException) {
+                formLoadFailed()
+            } catch (_: IllegalStateException) {
+                formLoadFailed()
+            } catch (_: IllegalArgumentException) {
+                formLoadFailed()
             }
         }
+    }
+
+    private fun PrivateMessageComposeUiState.withLoadedForm(form: ReplyForm): PrivateMessageComposeUiState {
+        // Hydrate ONLY on the first successful load — a silent refetch after an expired
+        // hash_check must not clobber toggles (or a recipient edit) the user changed in between.
+        // Mirror of the reply editor's guard.
+        if (this@PrivateMessageComposeViewModel.submission.blocksMutation) return copy(isLoadingForm = false)
+        val hydrate = !optionsHydratedFromForm
+        val nextRecipients = if (hydrate && recipients.isBlank() &&
+            submission !is EditorSubmissionState.Uncertain) {
+            form.hiddenFields["dest"].orEmpty()
+        } else {
+            recipients
+        }
+        val keepRestoreOffer = restoreOfferDiffersFrom(nextRecipients)
+        return copy(
+            isLoadingForm = false,
+            formAvailable = true,
+            formError = false,
+            // The composer's `dest` text input comes back through hiddenFields ; a
+            // server-side prefill (dest= in the GET) seeds the local field once.
+            recipients = nextRecipients,
+            recipientsHydratedContent = hydratedRecipientsContent(
+                nextRecipients = nextRecipients,
+                hydrate = hydrate,
+            ),
+            restorableDraft = restorableDraft.takeIf { keepRestoreOffer },
+            restorableSubject = restorableSubject.takeIf { keepRestoreOffer },
+            restorableRecipients = restorableRecipients.takeIf { keepRestoreOffer },
+            signatureEnabled = if (hydrate) {
+                form.options.signatureEnabled || form.hiddenFields["signature"] == "1"
+            } else {
+                signatureEnabled
+            },
+            smileyDisabled = if (hydrate) {
+                form.options.smileyDisabled || form.hiddenFields["smiley"] == "1"
+            } else {
+                smileyDisabled
+            },
+            emailNotificationEnabled = if (hydrate) {
+                form.options.emailNotificationEnabled || form.hiddenFields["emaill"] == "1"
+            } else {
+                emailNotificationEnabled
+            },
+            optionsHydratedFromForm = true,
+        )
     }
 
     private fun PrivateMessageComposeUiState.restoreOfferDiffersFrom(nextRecipients: String): Boolean =
@@ -469,6 +460,8 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     }
 
     fun onRecipientsChanged(value: String) {
+        if (submission.blocksMutation) return
+        submission.disarm()
         _state.update {
             it.copy(
                 recipients = value,
@@ -483,6 +476,8 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     }
 
     fun onSubjectChanged(value: String) {
+        if (submission.blocksMutation) return
+        submission.disarm()
         _state.update {
             // HFR's maxlength=70 — truncate instead of erroring so pasted text just clips.
             val subject = value.take(PrivateMessageComposeUiState.SUBJECT_MAX_LENGTH)
@@ -498,13 +493,22 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         scheduleAutosave()
     }
 
+    private fun formLoadFailed() {
+        loadedForm = null
+        _state.update { it.copy(isLoadingForm = false, formAvailable = false, formError = true) }
+    }
+
     fun onContentChanged(value: TextFieldValue) {
+        if (submission.blocksMutation) return
+        submission.disarm()
         val textChanged = value.text != _state.value.draft.text
         _state.update { it.withDraftPreview(value) }
         if (textChanged) scheduleAutosave()
     }
 
     fun onToolbarAction(action: BbcodeAction) {
+        if (submission.blocksMutation) return
+        submission.disarm()
         _state.update { current ->
             val outcome = applyBbcodeAction(
                 action = action,
@@ -523,6 +527,8 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     }
 
     fun onSmileySelected(token: String) {
+        if (submission.blocksMutation) return
+        submission.disarm()
         _state.update { current ->
             val outcome = insertBbcodeToken(
                 token = token,
@@ -551,109 +557,99 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         }
     }
 
-    fun onToggleSignature(enabled: Boolean) = _state.update { it.copy(signatureEnabled = enabled) }
-
-    fun onToggleSmileyDisabled(disabled: Boolean) = _state.update { it.copy(smileyDisabled = disabled) }
-
-    fun onToggleEmailNotification(enabled: Boolean) =
-        _state.update { it.copy(emailNotificationEnabled = enabled) }
-
-    fun onErrorDismissed() = _state.update { it.copy(submitError = null) }
-
-    fun onSubmitConfirmed() {
-        _state.update { it.copy(showSubmitConfirmation = false) }
-        onSubmit(bypassConfirmation = true)
+    fun onToggleSignature(enabled: Boolean) {
+        if (submission.blocksMutation) return
+        submission.disarm()
+        _state.update { it.copy(signatureEnabled = enabled) }
     }
 
-    fun onSubmitConfirmationDismissed() = _state.update { it.copy(showSubmitConfirmation = false) }
+    fun onToggleSmileyDisabled(disabled: Boolean) {
+        if (submission.blocksMutation) return
+        submission.disarm()
+        _state.update { it.copy(smileyDisabled = disabled) }
+    }
 
-    fun onSubmit() = onSubmit(bypassConfirmation = false)
+    fun onToggleEmailNotification(enabled: Boolean) {
+        if (submission.blocksMutation) return
+        submission.disarm()
+        _state.update { it.copy(emailNotificationEnabled = enabled) }
+    }
 
-    @Suppress("ReturnCount") // Guard clauses are the natural shape of the submit dispatcher.
-    private fun onSubmit(bypassConfirmation: Boolean) {
+    fun onErrorDismissed() = submission.acknowledge(::scheduleAutosave)
+
+    /** ED-164/166: callbacks carry the identity displayed by the current composition. */
+    fun onSubmitConfirmed(token: ArmToken?) {
         val snapshot = _state.value
-        if (!snapshot.canSubmit) return
-        val form = loadedForm ?: run {
-            loadForm()
-            return
-        }
+        val form = loadedForm ?: return
+        if (!snapshot.canSubmit || closeRequested) return
+        val permit = submission.confirm(token)
+        if (permit is SubmissionRequest.Accepted) launchSubmission(permit, snapshot, form)
+    }
+
+    fun onSubmitConfirmationDismissed() = submission.disarm()
+
+    fun onSubmit(timeoutMillis: Long = 4_000L) {
+        val snapshot = _state.value
+        val form = loadedForm ?: return
+        if (!snapshot.canSubmit || closeRequested) return
         if (form.isAnonymous) {
             _state.update { it.copy(submitError = PrivateMessageReplyError.LoginRequired) }
-            return
+        } else {
+            val permit = submission.request(timeoutMillis, snapshot.canSubmit)
+            if (permit is SubmissionRequest.Accepted) launchSubmission(permit, snapshot, form)
         }
-        if (submitJob?.isActive == true) return
-        if (!bypassConfirmation && confirmBeforePosting) {
-            _state.update { it.copy(showSubmitConfirmation = true) }
-            return
-        }
+    }
 
-        val options = ReplyFormOptions(
-            signatureEnabled = snapshot.signatureEnabled,
-            smileyDisabled = snapshot.smileyDisabled,
-            emailNotificationEnabled = snapshot.emailNotificationEnabled,
-        )
-        _state.update { it.copy(isSubmitting = true, submitError = null) }
-        submitJob = viewModelScope.launch {
-            val outcome = runCatching {
-                repository.submitNewMessage(
-                    form = form,
-                    recipients = snapshot.recipients.trim(),
-                    subject = snapshot.subject.trim(),
-                    bbcodeContent = snapshot.draft.text,
-                    options = options,
+    /** ED-88/161/169/170/172: frozen headers/body, awaited attempt, existing effect exactly once. */
+    private fun launchSubmission(
+        permit: SubmissionRequest.Accepted,
+        snapshot: PrivateMessageComposeUiState,
+        form: ReplyForm,
+    ) {
+        submission.launch(permit, EditorDraftStore.Draft(
+            body = snapshot.draft.text, subject = snapshot.subject, recipients = snapshot.recipients, isPrivate = true,
+        )) {
+            val options = ReplyFormOptions(
+                signatureEnabled = snapshot.signatureEnabled, smileyDisabled = snapshot.smileyDisabled,
+                emailNotificationEnabled = snapshot.emailNotificationEnabled,
+            )
+            val result = repository.submitNewMessage(
+                form = form, recipients = snapshot.recipients.trim(), subject = snapshot.subject.trim(),
+                bbcodeContent = snapshot.draft.text, options = options,
+            )
+            submissionDelivery(result)
+        }
+    }
+
+    private fun submissionDelivery(
+        result: ReplySubmitResult,
+    ): EditorDelivery<PrivateMessageComposeEffect, PrivateMessageReplyError> =
+        when (result) {
+            is ReplySubmitResult.Success -> EditorDelivery(
+                effect = PrivateMessageComposeEffect.SubmitSucceeded,
+            )
+            is ReplySubmitResult.Failure -> {
+                EditorDelivery(
+                    error = result.reason.toComposeError(),
+                    afterSettled = if (result.reason == ReplyFailureReason.InvalidHashCheck) {
+                        {
+                            loadedForm = null
+                            loadForm()
+                        }
+                    } else { null },
                 )
             }
-            outcome.fold(
-                onSuccess = { handleSubmitOutcome(it) },
-                onFailure = ::handleSubmitFailure,
-            )
         }
-    }
-
-    private suspend fun handleSubmitOutcome(result: ReplySubmitResult) {
-        when (result) {
-            is ReplySubmitResult.Success -> {
-                // #405 — the conversation reached HFR ; the cached draft is now obsolete. Cancel any
-                // pending autosave first so a debounced save can't resurrect the row after delete.
-                // AWAITED (not launched) so the nav pop on SubmitSucceeded can't cancel it (Codex).
-                autosaveJob?.cancel()
-                draftStore.delete(draftOwner, draftKey)
-                _state.update { it.copy(isSubmitting = false, submitError = null) }
-                // The success response of a NEW conversation is not topic-shaped, so the created
-                // threadId is unknown — the host pops back to the MP list and refreshes it.
-                _effects.trySend(PrivateMessageComposeEffect.SubmitSucceeded)
-            }
-            is ReplySubmitResult.Failure -> {
-                if (result.reason == ReplyFailureReason.InvalidHashCheck) {
-                    loadedForm = null
-                    loadForm()
-                }
-                _state.update { it.copy(isSubmitting = false, submitError = result.reason.toComposeError()) }
-            }
-        }
-    }
-
-    private fun handleSubmitFailure(error: Throwable) {
-        if (error is CancellationException) {
-            _state.update { it.copy(isSubmitting = false) }
-            throw error
-        }
-        val mapped = when (error) {
-            is SessionExpiredException -> PrivateMessageReplyError.SessionExpired
-            is IOException -> PrivateMessageReplyError.Network
-            else -> PrivateMessageReplyError.Unexpected
-        }
-        _state.update { it.copy(isSubmitting = false, submitError = mapped) }
-    }
 
     private fun ReplyFailureReason.toComposeError(): PrivateMessageReplyError = when (this) {
         ReplyFailureReason.EmptyMessage -> PrivateMessageReplyError.Empty
         ReplyFailureReason.InvalidHashCheck -> PrivateMessageReplyError.InvalidHashCheck
         ReplyFailureReason.AntiFlood -> PrivateMessageReplyError.AntiFlood
         ReplyFailureReason.LoginRequired -> PrivateMessageReplyError.LoginRequired
-        // Unknown covers every unpinned server answer — including a rejected recipient — and
-        // must stay non-destructive (cf. class KDoc). TopicLocked has no composer analogue.
-        ReplyFailureReason.TopicLocked, ReplyFailureReason.Unknown -> PrivateMessageReplyError.Unexpected
+        ReplyFailureReason.UnknownRecipient -> PrivateMessageReplyError.UnknownRecipient
+        // Unrecognised answers remain uncertain. TopicLocked has no composer analogue.
+        ReplyFailureReason.TopicLocked -> PrivateMessageReplyError.Unexpected
+        ReplyFailureReason.Unknown -> PrivateMessageReplyError.Uncertain
     }
 
     private fun PrivateMessageComposeUiState.withDraftPreview(
@@ -669,6 +665,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
 
     /** #988/#1420 — records the picker boundary and surfaces a callback without images. */
     fun onImagePickerEvent(event: ImagePickerEvent) {
+        if (submission.blocksMutation) return
         diagnostics.recordImagePickerEvent(event)
         if (event is ImagePickerEvent.Result) {
             val pickedImages = pickedImagesForUpload(event.contract, event.uris)
@@ -687,12 +684,16 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
      * at the first failure with the typed [UploadError] surfaced. A blank list, an anonymous
      * session or an upload already in flight are ignored.
      */
+    private fun canStartUpload(userId: String?, targets: List<String>): Boolean =
+        !submission.blocksMutation && uploadJob?.isActive != true && userId != null && targets.isNotEmpty()
+
     fun onImagesPicked(uris: List<String>) {
         diagnostics.recordImagesPicked(uris.size)
         val userId = activeUserId
         val targets = uris.filter { it.isNotBlank() }
         // One guard (ReturnCount): nothing in flight already, an authenticated owner, a non-empty pick.
-        if (uploadJob?.isActive == true || userId == null || targets.isEmpty()) return
+        if (!canStartUpload(userId, targets)) return
+        submission.disarm()
         val multiple = targets.size > 1
         _state.update {
             it.copy(
@@ -709,12 +710,13 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
             for (uri in targets) {
                 val outcome = runCatching {
                     val image = imageUploadReader.read(uri)
-                    uploadRepository.uploadWithCurrentProvider(image, userId)
+                    uploadRepository.uploadWithCurrentProvider(image, checkNotNull(userId))
                 }
                 val uploaded = outcome.getOrElse { error ->
                     handleUploadFailure(error)
                     return@launch
                 }
+                if (submission.blocksMutation || activeUserId != userId) break
                 val bbcode = imageInsertBbcodeOrNull(
                     fullUrl = uploaded.imageUrl,
                     displayUrl = uploaded.resizedUrl ?: uploaded.imageUrl,
@@ -747,6 +749,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
      * `PostEditorViewModel.insertImageBbcodeAtCaret`.
      */
     private fun insertImageBbcodeAtCaret(bbcode: String, leadingNewline: Boolean) {
+        if (submission.blocksMutation) return
         _state.update { current ->
             val draft = current.draft
             val selection = draft.selection
@@ -808,8 +811,6 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     private companion object {
         private const val DRAFT_RESTORE_OFFER_FINGERPRINT_KEY = "draft_restore_offer_fingerprint"
 
-        // #405 — idle window after the last edit before the draft is persisted (cf. PostEditorViewModel).
-        private const val AUTOSAVE_DEBOUNCE_MS = 750L
 
         // #459 — diagnostics tag of the upload failures (shared shape with the topic-side editors).
         private const val LOG_TAG_UPLOAD = "MpComposeVM"

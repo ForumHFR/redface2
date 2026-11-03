@@ -85,6 +85,30 @@ class EditorDraftDaoTest {
     }
 
     @Test
+    fun `private purge erases content but preserves every durable attempt state`() = runTest {
+        for (state in listOf("IN_PROGRESS", "UNCERTAIN", "PUBLISHED")) {
+            val original = draft(
+                "alice|$state", "alice", body = "private body", subject = "private subject",
+                recipients = "recipient", isPrivate = true,
+            ).copy(contentVersion = 7, attemptId = "attempt", attemptVersion = 4, attemptState = state)
+            dao.upsert(original)
+            val otherOwner = original.copy(draftKey = "bob|$state", ownerId = "bob")
+            val publicDraft = original.copy(draftKey = "alice|public:$state", isPrivate = false)
+            dao.upsert(otherOwner)
+            dao.upsert(publicDraft)
+
+            dao.deletePrivateForUser("alice")
+
+            assertEquals(original.copy(body = "", subject = null, recipients = null), dao.get(original.draftKey))
+            assertEquals(otherOwner, dao.get(otherOwner.draftKey))
+            assertEquals(publicDraft, dao.get(publicDraft.draftKey))
+            // The transaction remains safe and idempotent on a repeated auth emission.
+            dao.deletePrivateForUser("alice")
+            assertEquals(original.copy(body = "", subject = null, recipients = null), dao.get(original.draftKey))
+        }
+    }
+
+    @Test
     fun `deleteOlderThan is a strict less-than at the cutoff boundary`() = runTest {
         val cutoff = 1_700_000_000_000L
         dao.upsert(draft("alice|old", ownerId = "alice", updatedAt = cutoff - 1))

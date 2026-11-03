@@ -1,4 +1,6 @@
 package fr.forumhfr.redface2.feature.editor
+
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.ui.editor.rememberEditorImagePicker
 import fr.forumhfr.redface2.core.ui.editor.UploadProgressLabel
 import fr.forumhfr.redface2.core.ui.editor.bannerText
@@ -38,11 +40,14 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummary
+import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -80,7 +85,9 @@ import fr.forumhfr.redface2.core.ui.editor.editorControlsMaxHeight
 @Composable
 fun PostEditorScreen(
     request: PostEditorRequest,
-    onSubmitSucceeded: (targetPage: Int?, scrollTo: Int?, quotedNumreponses: List<Int>) -> Unit,
+    onSubmitSucceeded: (
+        targetPage: Int?, scrollTo: Int?, quotedNumreponses: List<Int>, operation: PostSubmitOperation,
+    ) -> Unit,
     // #604 lot 4a — pops this editor AFTER the ViewModel flushed the draft (CloseCommitted).
     // Default keeps callers without the wiring on the platform back (no flush) — `:app` wires it.
     onClose: (() -> Unit)? = null,
@@ -90,11 +97,14 @@ fun PostEditorScreen(
     ),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val currentOnSubmitSucceeded by rememberUpdatedState(onSubmitSucceeded)
     LaunchedEffect(viewModel) {
         viewModel.effects.collect { effect ->
             when (effect) {
                 is PostEditorEffect.SubmitSucceeded ->
-                    onSubmitSucceeded(effect.targetPage, effect.scrollTo, effect.quotedNumreponses)
+                    currentOnSubmitSucceeded(
+                        effect.targetPage, effect.scrollTo, effect.quotedNumreponses, effect.operation,
+                    )
                 PostEditorEffect.CloseCommitted -> onClose?.invoke()
             }
         }
@@ -171,7 +181,7 @@ internal fun PostEditorContent(
                         modifier = Modifier.weight(1f),
                         // #275/#410/#447 — BTF2 owns handle scrolling and caret following in
                         // this bounded viewport. Lock while a batch upload inserts its images.
-                        readOnly = state.isUploading,
+                        readOnly = state.isUploading || state.submission.blocksBodyMutation,
                         // #555 — the editor opens ready to type, including hydrated edit drafts.
                         autoFocus = true,
                     )
@@ -188,10 +198,12 @@ internal fun PostEditorContent(
                         isSubmitting = state.isSubmitting,
                         isLoadingForm = state.isLoadingForm,
                         confirmArmed = state.showSubmitConfirmation,
+                        armToken = state.armToken,
+                        controlsEnabled = !state.submission.blocksBodyMutation,
                     ),
                     actions = EditorSubmitActions(
-                        onSubmit = { onIntent(PostEditorIntent.SubmitClicked) },
-                        onConfirmSubmit = { onIntent(PostEditorIntent.SubmitConfirmed) },
+                        onSubmit = { timeout -> onIntent(PostEditorIntent.SubmitClicked(timeout)) },
+                        onConfirmSubmit = { onIntent(PostEditorIntent.SubmitConfirmed(state.armToken)) },
                         onDisarmConfirm = { onIntent(PostEditorIntent.SubmitConfirmationDismissed) },
                         onOpenOptions = { optionsSheetOpen = true },
                         onOpenSmileys = smileyPicker::open,
@@ -232,7 +244,7 @@ internal fun PostEditorContent(
                     smileyDisabled = state.smileyDisabled,
                     emailNotificationEnabled = state.emailNotificationEnabled,
                     msgIcon = state.msgIcon,
-                    enabled = !state.isSubmitting && !state.isLoadingForm,
+                    enabled = !state.submission.blocksBodyMutation && !state.isLoadingForm,
                     onSignatureChanged = { onIntent(PostEditorIntent.ToggleSignature(it)) },
                     onSmileyDisabledChanged = { onIntent(PostEditorIntent.ToggleSmileyDisabled(it)) },
                     onEmailNotificationChanged = { onIntent(PostEditorIntent.ToggleEmailNotification(it)) },
@@ -340,7 +352,7 @@ private fun PostEditorControlsZone(
         if (state.quotes.isNotEmpty()) {
             EditorQuoteCards(
                 quotes = state.quotes,
-                enabled = !state.isSubmitting,
+                enabled = !state.submission.blocksBodyMutation,
                 onIntent = onIntent,
             )
         }
@@ -377,7 +389,7 @@ private fun PostEditorControlsZone(
 }
 
 @Composable
-private fun PostEditorAlertBanners(
+internal fun PostEditorAlertBanners(
     state: PostEditorState,
     onIntent: (PostEditorIntent) -> Unit,
 ) {
@@ -388,11 +400,16 @@ private fun PostEditorAlertBanners(
         )
     }
     state.submitError?.let { error ->
-        Text(
-            text = stringResource(error.bannerResId),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.error,
-        )
+        val summary = error.summaryKind
+        if (summary != null) {
+            EditorSubmissionSummary(summary)
+        } else {
+            Text(
+                text = stringResource(error.bannerResId),
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
         TextButton(onClick = { onIntent(PostEditorIntent.ErrorDismissed) }) {
             Text(text = stringResource(R.string.editor_error_dismiss))
         }
@@ -459,6 +476,8 @@ internal data class EditorSubmitState(
     val isSubmitting: Boolean,
     val isLoadingForm: Boolean,
     val confirmArmed: Boolean,
+    val armToken: ArmToken? = null,
+    val controlsEnabled: Boolean = true,
 )
 
 /**
@@ -466,7 +485,7 @@ internal data class EditorSubmitState(
  * picker (the MP reply editor, for now) simply don't render the button.
  */
 internal data class EditorSubmitActions(
-    val onSubmit: () -> Unit,
+    val onSubmit: (Long) -> Unit,
     val onConfirmSubmit: () -> Unit,
     val onDisarmConfirm: () -> Unit,
     val onOpenOptions: () -> Unit,
@@ -522,12 +541,12 @@ internal fun EditorSubmitBar(
                 // the armed label never wraps (the tonal pills ate the Row slack and
                 // line-broke « Confirmer ? » — dogfooding v108).
                 if (!state.confirmArmed) {
-                    FilledTonalButton(onClick = actions.onOpenOptions) {
+                    FilledTonalButton(enabled = state.controlsEnabled, onClick = actions.onOpenOptions) {
                         Text(text = stringResource(R.string.editor_actions_options))
                     }
                     actions.onOpenSmileys?.let { openSmileys ->
                         Spacer(modifier = Modifier.width(8.dp))
-                        FilledTonalButton(onClick = openSmileys) {
+                        FilledTonalButton(enabled = state.controlsEnabled, onClick = openSmileys) {
                             Text(text = stringResource(R.string.editor_smiley_open))
                         }
                     }
@@ -540,6 +559,7 @@ internal fun EditorSubmitBar(
                 ArmedSubmitButton(
                     state = ArmedSubmitState(
                         armed = state.confirmArmed,
+                        armToken = state.armToken,
                         enabled = state.canSubmit,
                         showProgress = state.isSubmitting,
                     ),
@@ -548,7 +568,8 @@ internal fun EditorSubmitBar(
                         confirm = stringResource(R.string.editor_submit_confirm),
                     ),
                     actions = ArmedSubmitActions(
-                        onSubmit = actions.onSubmit,
+                        onSubmit = {},
+                        onSubmitWithTimeout = actions.onSubmit,
                         onConfirmSubmit = actions.onConfirmSubmit,
                         onDisarm = actions.onDisarmConfirm,
                     ),
@@ -643,7 +664,10 @@ private val SubmitError.bannerResId: Int
             ReplyFailureReason.TopicLocked -> R.string.editor_error_topic_locked
             ReplyFailureReason.LoginRequired -> R.string.editor_error_login_required
             ReplyFailureReason.Unknown -> R.string.editor_error_unknown
+            ReplyFailureReason.UnknownRecipient -> R.string.editor_error_unknown
         }
+        SubmitError.Uncertain -> fr.forumhfr.redface2.core.ui.R.string.editor_submission_uncertain
+        SubmitError.DraftWriteFailed -> fr.forumhfr.redface2.core.ui.R.string.editor_submission_draft_write_failed
         SubmitError.Network -> R.string.editor_error_network
         SubmitError.SessionExpired -> R.string.editor_error_session_expired
         SubmitError.MissingSubcat -> R.string.editor_error_missing_subcat

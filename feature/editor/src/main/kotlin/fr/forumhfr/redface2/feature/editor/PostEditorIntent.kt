@@ -1,8 +1,11 @@
 package fr.forumhfr.redface2.feature.editor
+
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.ui.editor.UploadError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
 import androidx.compose.ui.text.input.TextFieldValue
+import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 
@@ -16,13 +19,12 @@ sealed interface PostEditorIntent {
     data object TogglePreview : PostEditorIntent
 
     /** User asked to send the reply to HFR (Phase 2C, [PostEditorMode.Reply] only). */
-    data object SubmitClicked : PostEditorIntent
+    data class SubmitClicked(val timeoutMillis: Long = 4_000L) : PostEditorIntent
 
     /**
-     * #312 — user confirmed the « Confirmation avant publication » dialog. Executes the real
-     * submission directly, BYPASSING the preference re-check (otherwise the dialog would loop).
+     * ED-164/166: confirms only this exact arm, after 400 ms and before its monotonic deadline.
      */
-    data object SubmitConfirmed : PostEditorIntent
+    data class SubmitConfirmed(val token: ArmToken?) : PostEditorIntent
 
     /** #312 — user dismissed the confirmation dialog. No submission happens; the draft stays. */
     data object SubmitConfirmationDismissed : PostEditorIntent
@@ -124,6 +126,7 @@ sealed interface PostEditorEffect {
          * bottom otherwise (never on the fresh post when an older one was quoted).
          */
         val quotedNumreponses: List<Int> = emptyList(),
+        val operation: PostSubmitOperation = PostSubmitOperation.Publish,
     ) : PostEditorEffect
 
     /**

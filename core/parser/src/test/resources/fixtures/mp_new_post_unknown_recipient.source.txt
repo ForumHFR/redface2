@@ -1,0 +1,7 @@
+Source: forum.hardware.fr (capture authentifiee live, compte XaTelitte). 2026-11-03 09:50 (Paris)
+Captured page: reponse HTTP 200 au POST bddpost.php?config=hfr.inc d'un NOUVEAU MP vers un pseudo inexistant
+  (dest=RF2-inexistant-zz9, verifie en 404 avant l'envoi), corps navigateur fidele (tous les champs du form).
+Methode: curl authentifie, redirections non suivies. Aucun MP cree.
+Notes: « Désolé, le pseudo suivant n'existe pas : rf2-inexistant-zz9 » (HFR repete le pseudo en minuscules)
+  + lien « Retour a la page precedente ».
+Privacy: scrubbe (aucun hash_check, userId ni email dans la page).
