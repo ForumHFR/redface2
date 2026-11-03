@@ -2,41 +2,23 @@ package fr.forumhfr.redface2.navigation
 
 import androidx.navigation3.runtime.NavKey
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Test
 
 class ReportNavigationTest {
     @Test
-    fun bothEntryPointsOpenReport() {
+    fun bothEntryPointsOpenTheSameReportWithoutContext() {
         val account = mutableListOf<NavKey>(ForumRoute)
         openReportFromAccount(account)
-        assertEquals(ReportContentRoute(), account.last())
+        assertSame(ReportContentRoute, account.last())
         val settings = mutableListOf<NavKey>(SettingsRoute, SettingsAccountAboutRoute)
         openReportFromSettings(settings)
-        assertEquals(ReportContentRoute(), settings.last())
-    }
-
-    @Test
-    fun topicContextPrefillsOnlyTopicLink() {
-        val stack = mutableListOf<NavKey>(ForumRoute, TopicRoute(cat = 23, post = 35421, page = 9, scrollTo = 123))
-        openReportFromAccount(stack)
-        val route = stack.last() as ReportContentRoute
-        assertEquals(ReportContentRoute(cat = 23, post = 35421), route)
-        assertEquals("https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=23&post=35421", route.topicLink())
-        assertFalse(route.topicLink().contains("page="))
-        assertFalse(route.topicLink().contains("#t"))
-    }
-
-    @Test
-    fun privateMessageContextDoesNotPrefillLink() {
-        val stack = mutableListOf<NavKey>(MessagesRoute, PrivateMessageThreadRoute(42))
-        openReportFromAccount(stack)
-        assertEquals("", (stack.last() as ReportContentRoute).topicLink())
+        assertSame(ReportContentRoute, settings.last())
     }
 
     @Test
     fun loginFromMessagesReturnsToReportRegardlessOfCallbackOrder() {
-        val route = ReportContentRoute(23, 35421)
+        val route = ReportContentRoute
         val resetFirst = mutableListOf<NavKey>(MessagesRoute, route, LoginRoute)
         resetMessagesPreservingReport(resetFirst)
         finishLogin(resetFirst)
@@ -58,7 +40,7 @@ class ReportNavigationTest {
 
     @Test
     fun messageCheckOpensTheInboxWithoutDuplicatingItsNavKey() {
-        val stack = mutableListOf<NavKey>(MessagesRoute, ReportContentRoute())
+        val stack = mutableListOf<NavKey>(MessagesRoute, ReportContentRoute)
         var selected = TopLevelDestination.Settings
         var refreshes = 0
         openMessagesForReport(stack, requestInboxRefresh = { refreshes++ }) { selected = it }

@@ -4,11 +4,11 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.consumeWindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
@@ -46,12 +46,12 @@ import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitState
 
 @Composable
 fun ReportContentScreen(
-    initial: ReportInitialContent,
+    build: ReportBuildInfo,
     onEffect: (ReportContentEffect) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val viewModel = hiltViewModel<ReportContentViewModel, ReportContentViewModel.Factory>(
-        creationCallback = { it.create(initial) },
+        creationCallback = { it.create(build) },
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
     LaunchedEffect(viewModel) { viewModel.effects.collect(onEffect) }
@@ -71,19 +71,23 @@ internal fun ReportContent(
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
-        modifier = modifier.fillMaxSize().imePadding(),
+        modifier = modifier.fillMaxSize(),
         topBar = {
             SettingsSubPageTopBar(
                 title = stringResource(R.string.settings_about_report),
                 onBack = { onIntent(ReportContentIntent.Close) },
             )
         },
-        bottomBar = {
-            if (state.session == ReportSession.AUTHENTICATED) ReportSubmitBar(state, onIntent)
-        },
     ) { padding ->
+        // Keep the send action in the scroll so it cannot squeeze the focused field above the IME.
         Column(
-            modifier = Modifier.fillMaxSize().padding(padding).verticalScroll(rememberScrollState()).padding(16.dp),
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .consumeWindowInsets(padding)
+                .imePadding()
+                .verticalScroll(rememberScrollState())
+                .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
             Text(stringResource(R.string.report_delivery), style = MaterialTheme.typography.bodyLarge)
@@ -93,7 +97,10 @@ internal fun ReportContent(
                     CircularProgressIndicator()
                 }
                 ReportSession.ANONYMOUS -> ReportAnonymousActions(onIntent)
-                ReportSession.AUTHENTICATED -> ReportForm(state, onIntent)
+                ReportSession.AUTHENTICATED -> {
+                    ReportForm(state, onIntent)
+                    ReportSubmitButton(state, onIntent)
+                }
             }
         }
     }
@@ -103,8 +110,12 @@ internal fun ReportContent(
 private fun ReportAnonymousActions(onIntent: (ReportContentIntent) -> Unit) {
     Text(stringResource(R.string.report_login_explanation))
     Button(onClick = { onIntent(ReportContentIntent.Login) }) { Text(stringResource(R.string.report_login)) }
-    TextButton(onClick = { onIntent(ReportContentIntent.Email) }) { Text(stringResource(R.string.report_email)) }
-    Text(stringResource(R.string.report_email_external), style = MaterialTheme.typography.bodyMedium)
+    TextButton(onClick = { onIntent(ReportContentIntent.Email) }) {
+        Column {
+            Text(stringResource(R.string.report_email))
+            Text(stringResource(R.string.report_email_external), style = MaterialTheme.typography.bodyMedium)
+        }
+    }
 }
 
 @Composable
@@ -186,22 +197,20 @@ private fun ReportReasons(state: ReportContentUiState, onIntent: (ReportContentI
 }
 
 @Composable
-private fun ReportSubmitBar(state: ReportContentUiState, onIntent: (ReportContentIntent) -> Unit) {
-    Column(Modifier.fillMaxWidth().navigationBarsPadding().padding(16.dp)) {
-        ArmedSubmitButton(
-            state = ArmedSubmitState(
-                armed = state.armToken != null, enabled = state.canSubmit,
-                showProgress = state.isSending, armToken = state.armToken,
-            ),
-            labels = ArmedSubmitLabels(stringResource(R.string.report_send), stringResource(R.string.report_confirm)),
-            actions = ArmedSubmitActions(
-                onSubmit = { onIntent(ReportContentIntent.Submit) },
-                onConfirmSubmit = { onIntent(ReportContentIntent.Confirm(state.armToken)) },
-                onDisarm = { onIntent(ReportContentIntent.DismissConfirmation) },
-                onSubmitWithTimeout = { onIntent(ReportContentIntent.SubmitWithTimeout(it)) },
-            ),
-        )
-    }
+private fun ReportSubmitButton(state: ReportContentUiState, onIntent: (ReportContentIntent) -> Unit) {
+    ArmedSubmitButton(
+        state = ArmedSubmitState(
+            armed = state.armToken != null, enabled = state.canSubmit,
+            showProgress = state.isSending, armToken = state.armToken,
+        ),
+        labels = ArmedSubmitLabels(stringResource(R.string.report_send), stringResource(R.string.report_confirm)),
+        actions = ArmedSubmitActions(
+            onSubmit = { onIntent(ReportContentIntent.Submit) },
+            onConfirmSubmit = { onIntent(ReportContentIntent.Confirm(state.armToken)) },
+            onDisarm = { onIntent(ReportContentIntent.DismissConfirmation) },
+            onSubmitWithTimeout = { onIntent(ReportContentIntent.SubmitWithTimeout(it)) },
+        ),
+    )
 }
 
 private val ReportReason.labelRes: Int

@@ -93,7 +93,7 @@ private class ReportSubmissionAdapter(
     }
 
     private fun createViewModel() = ReportContentViewModel(
-        ReportInitialContent(ReportBuildInfo("0.65.0", 123, "prod")), dependencies,
+        ReportBuildInfo("0.65.0", 123, "prod"), dependencies,
     )
 
     private fun collectEffects() = scope.backgroundScope.launch(UnconfinedTestDispatcher(scope.testScheduler)) {

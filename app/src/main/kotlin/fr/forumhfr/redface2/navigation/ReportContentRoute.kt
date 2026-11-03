@@ -13,35 +13,27 @@ import fr.forumhfr.redface2.BuildConfig
 import fr.forumhfr.redface2.feature.settings.ReportBuildInfo
 import fr.forumhfr.redface2.feature.settings.ReportContentEffect
 import fr.forumhfr.redface2.feature.settings.ReportContentScreen
-import fr.forumhfr.redface2.feature.settings.ReportInitialContent
 import kotlinx.serialization.Serializable
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
 import fr.forumhfr.redface2.feature.settings.R as SettingsR
 
-/** Only public topic identity is serialized; no body, reason, recipient or private-message context. */
+/** Both entry points open the same form without serializing any report context. */
 @Serializable
-data class ReportContentRoute(val cat: Int? = null, val post: Int? = null) : RedfaceNavKey
-
-internal fun ReportContentRoute.topicLink(): String = if (cat != null && post != null) {
-    "https://forum.hardware.fr/forum2.php?config=hfr.inc&cat=$cat&post=$post"
-} else {
-    ""
-}
+data object ReportContentRoute : RedfaceNavKey
 
 internal fun openReportFromAccount(backStack: MutableList<NavKey>) {
-    val topic = backStack.lastOrNull() as? TopicRoute
-    backStack.add(ReportContentRoute(topic?.cat, topic?.post))
+    backStack.add(ReportContentRoute)
 }
 
 internal fun openReportFromSettings(backStack: MutableList<NavKey>) {
-    backStack.add(ReportContentRoute())
+    backStack.add(ReportContentRoute)
 }
 
 /** Handles either ordering of the login callback and the global auth-transition effect. */
 internal fun resetMessagesPreservingReport(backStack: MutableList<NavKey>) {
     val report = when (backStack.lastOrNull()) {
         LoginRoute -> backStack.getOrNull(backStack.lastIndex - 1) as? ReportContentRoute
-        is ReportContentRoute -> backStack.last() as ReportContentRoute
+        ReportContentRoute -> ReportContentRoute
         else -> null
     }
     backStack.clear()
@@ -67,7 +59,6 @@ internal fun openMessagesForReport(
 
 @Composable
 internal fun ReportContentEntry(
-    route: ReportContentRoute,
     backStack: MutableList<NavKey>,
     onCheckMessages: () -> Unit,
     onConversationSent: () -> Unit,
@@ -77,20 +68,18 @@ internal fun ReportContentEntry(
     val noEmailClient = stringResource(CoreUiR.string.account_menu_no_email_client)
     val sent = stringResource(SettingsR.string.report_sent)
     ReportContentScreen(
-        initial = ReportInitialContent(
-            ReportBuildInfo(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE, BuildConfig.FLAVOR), route.topicLink(),
-        ),
+        build = ReportBuildInfo(BuildConfig.VERSION_NAME, BuildConfig.VERSION_CODE, BuildConfig.FLAVOR),
         onEffect = { effect ->
             when (effect) {
                 ReportContentEffect.Login -> backStack.add(LoginRoute)
                 ReportContentEffect.Email -> startReportEmail(context, emailSubject, noEmailClient)
-                ReportContentEffect.CloseCommitted -> popReport(backStack, route)
+                ReportContentEffect.CloseCommitted -> popReport(backStack)
                 ReportContentEffect.CheckMessages -> {
-                    popReport(backStack, route)
+                    popReport(backStack)
                     onCheckMessages()
                 }
                 ReportContentEffect.SubmitSucceeded -> {
-                    popReport(backStack, route)
+                    popReport(backStack)
                     onConversationSent()
                     Toast.makeText(context, sent, Toast.LENGTH_LONG).show()
                 }
@@ -99,8 +88,8 @@ internal fun ReportContentEntry(
     )
 }
 
-private fun popReport(backStack: MutableList<NavKey>, route: ReportContentRoute) {
-    if (backStack.lastOrNull() == route && backStack.size > 1) backStack.removeAt(backStack.lastIndex)
+private fun popReport(backStack: MutableList<NavKey>) {
+    if (backStack.lastOrNull() == ReportContentRoute && backStack.size > 1) backStack.removeAt(backStack.lastIndex)
 }
 
 /** Anonymous fallback only. The in-app form is the main reporting mechanism. */

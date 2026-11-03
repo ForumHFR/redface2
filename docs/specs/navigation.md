@@ -260,12 +260,10 @@ Le badge est un carré à coins arrondis (8dp), **pas un cercle**, cohérent ave
 
 #### Signalement au projet
 
-Le menu compte et Réglages → Compte & à propos ouvrent `ReportContentRoute(cat?, post?)`,
-un écran plein écran de `:feature:settings` qui masque la navigation inférieure. Depuis le menu
-compte sur un `TopicRoute`, seuls les identifiants publics catégorie/topic préremplissent un lien
-modifiable vers le topic, sans page ni ancre déduite de la route. Les autres contextes, notamment
-les MP et Compte & à propos, ouvrent un lien vide. Aucun texte ni contexte privé n'est sérialisé
-dans la route ou le `SavedStateHandle`.
+Le menu compte et Réglages → Compte & à propos ouvrent `ReportContentRoute`, sans paramètres,
+un écran plein écran de `:feature:settings` qui masque la navigation inférieure. Les deux entrées
+ouvrent un formulaire au lien vide, sauf restauration d'un brouillon du compte. Le lien facultatif
+est saisi manuellement. Aucun texte ni contexte privé n'est sérialisé dans la route ou le `SavedStateHandle`.
 
 Le formulaire permet de choisir un motif (sécurité des enfants, contenu illicite, harcèlement,
 problème de l'application, autre), de décrire le problème et d'ajouter un lien HTTP(S) facultatif.

@@ -52,10 +52,10 @@ class ReportDependencies @Inject constructor(
 
 @HiltViewModel(assistedFactory = ReportContentViewModel.Factory::class)
 class ReportContentViewModel @AssistedInject constructor(
-    @Assisted private val initial: ReportInitialContent,
+    @Assisted private val build: ReportBuildInfo,
     private val dependencies: ReportDependencies,
 ) : ViewModel() {
-    private val _state = MutableStateFlow(ReportContentUiState(draft = ReportDraft(link = initial.topicLink)))
+    private val _state = MutableStateFlow(ReportContentUiState())
     val state = _state.asStateFlow()
     private val _effects = Channel<ReportContentEffect>(Channel.BUFFERED)
     val effects = _effects.receiveAsFlow()
@@ -98,7 +98,6 @@ class ReportContentViewModel @AssistedInject constructor(
     private fun authChanged(auth: AuthState) {
         val owner = (auth as? AuthState.Authenticated)?.pseudo?.lowercase()
         if (authObserved && owner == activeOwner) return
-        val topicLink = if (activeOwner == null) _state.value.draft.link else ""
         authObserved = true
         activeOwner = owner
         generation++
@@ -108,7 +107,6 @@ class ReportContentViewModel @AssistedInject constructor(
         loadedForm = null
         _state.value = ReportContentUiState(
             session = if (owner == null) ReportSession.ANONYMOUS else ReportSession.AUTHENTICATED,
-            draft = ReportDraft(link = topicLink),
         )
         if (owner != null) {
             submission = newSubmission()
@@ -293,7 +291,7 @@ class ReportContentViewModel @AssistedInject constructor(
         return try {
             delivery(dependencies.repository.submitNewMessage(
                 form = form, recipients = REPORT_RECIPIENT, subject = REPORT_SUBJECT,
-                bbcodeContent = ReportMessageFormatter.format(draft, initial.build),
+                bbcodeContent = ReportMessageFormatter.format(draft, build),
                 options = ReplyFormOptions(
                     signatureEnabled = false, smileyDisabled = true, emailNotificationEnabled = false,
                 ),
@@ -351,7 +349,7 @@ class ReportContentViewModel @AssistedInject constructor(
 
     @AssistedFactory
     interface Factory {
-        fun create(initial: ReportInitialContent): ReportContentViewModel
+        fun create(build: ReportBuildInfo): ReportContentViewModel
     }
 }
 

@@ -2767,9 +2767,8 @@ private fun RedfaceNavHost(
                     topBarActions = accountMenu,
                 )
             }
-            entry<ReportContentRoute> { route ->
+            entry<ReportContentRoute> {
                 ReportContentEntry(
-                    route = route,
                     backStack = backStack,
                     onCheckMessages = onCheckReportMessages,
                     onConversationSent = privateMessageNavState.onConversationSent,

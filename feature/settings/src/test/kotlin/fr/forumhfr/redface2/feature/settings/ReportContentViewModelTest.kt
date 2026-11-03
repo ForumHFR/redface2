@@ -69,6 +69,16 @@ class ReportContentViewModelTest {
     }
 
     @Test
+    fun newReportStartsWithAnEmptyLinkAndAcceptsAManualLink() = runTest {
+        val vm = create()
+        assertEquals("", vm.state.value.draft.link)
+        runCurrent()
+        assertEquals("", vm.state.value.draft.link)
+        vm.onIntent(ReportContentIntent.LinkChanged("https://forum.hardware.fr/"))
+        assertEquals("https://forum.hardware.fr/", vm.state.value.draft.link)
+    }
+
+    @Test
     fun anonymousSessionNeverFetchesOrSubmits() = runTest {
         auth.value = AuthState.Anonymous
         val vm = create()
@@ -76,11 +86,13 @@ class ReportContentViewModelTest {
         vm.onIntent(ReportContentIntent.Submit)
         runCurrent()
         assertEquals(ReportSession.ANONYMOUS, vm.state.value.session)
+        assertEquals("", vm.state.value.draft.link)
         coVerify(exactly = 0) { repository.fetchComposeForm(any()) }
         coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
         auth.value = AuthState.Authenticated("tester")
         runCurrent()
         assertTrue(vm.state.value.formAvailable)
+        assertEquals("", vm.state.value.draft.link)
     }
 
     @Test
@@ -605,7 +617,7 @@ class ReportContentViewModelTest {
         val preferences = mockk<UserPreferencesRepository>()
         every { preferences.observeConfirmBeforePosting() } returns flowOf(false)
         return ReportContentViewModel(
-            ReportInitialContent(ReportBuildInfo("0.65.0", 123, "beta")),
+            ReportBuildInfo("0.65.0", 123, "beta"),
             ReportDependencies(repository, authRepository, preferences, store, DiagnosticsLog(),
                 DiagnosticsClock { testScheduler.currentTime * 1_000_000L }),
         ).also { viewModels += it }
