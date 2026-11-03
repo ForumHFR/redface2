@@ -106,9 +106,8 @@ data class TopicUiState(
     /**
      * #1301 — refresh lifecycle and cause. [TopicRefreshKind.Manual] belongs to the pull gesture;
      * [TopicRefreshKind.PostSubmit] and [TopicRefreshKind.PostSubmitJump] survive page redirects
-     * and drive the separate submit progress feedback. Only [TopicRefreshKind.PostSubmit] also
-     * acknowledges publication. A single source of truth prevents the indicators from disagreeing
-     * during ownership changes.
+     * and drive submit progress only. Accepted-success presentation is owned independently by
+     * [TopicAcknowledgements], so a terminal refresh can neither lose nor dismiss an acknowledgement.
      */
     val refreshKind: TopicRefreshKind = TopicRefreshKind.None,
     /**
@@ -588,33 +587,14 @@ sealed interface TopicEffect {
     data class LandingResolvedWithoutScroll(val page: Int) : TopicEffect
 
     /**
-     * Issue #200 — emitted when the post-submit force refresh (`refreshTopicPage`) fails.
-     * HFR has already accepted the post (the editor only emits its `SubmitSucceeded`
-     * effect on a `ReplySubmitResult.Success`), but the local refetch could not land,
-     * so the screen falls back to the stale cache. The screen surfaces a Toast (see
-     * `TopicScreen.kt`) telling the user that the post is published but the local view
-     * may not reflect it yet — pull-to-refresh fixes that. Without this effect, the
-     * user lands on a stale page that does not contain their fresh post and assumes
-     * the submit silently failed.
-     */
-    data object PostSubmitRefreshFailed : TopicEffect
-
-    /**
-     * #1243 — HFR accepted a reply whose published post is on a later page than the one refreshed
-     * in place. The read flag cannot be advanced by an automatic authenticated load of the tail, so
-     * the screen surfaces a Snackbar with an explicit action to open [page].
-     */
-    data class PostSubmittedElsewhere(val page: Int) : TopicEffect
-
-    /**
      * #335 — emitted when a manual pull-to-refresh (`Refresh` intent) failed to reach HFR. The
      * current page stays on screen (cache-first); the screen surfaces a Toast inviting a retry.
      */
     data object RefreshFailed : TopicEffect
 
     /**
-     * #292 — emitted after a post was successfully deleted. The screen surfaces a confirmation
-     * toast; the ViewModel separately force-refreshes the current page so the removed post
+     * #292 — emitted after a post was successfully deleted. The acknowledgement state presents a snackbar;
+     * the ViewModel separately force-refreshes the current page so the removed post
      * disappears (unless the deletion removed the whole topic, an out-of-scope path today).
      */
     data object PostDeleted : TopicEffect

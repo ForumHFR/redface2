@@ -625,6 +625,33 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
+    fun `unknown recipient in a reply is a generic certain refusal without a recipient field instruction`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.UnknownRecipient)
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            submissionClock,
+            smileyRepository(), favoriteRepository, localCollections,
+        )
+        viewModel.onContentChanged(TextFieldValue("Private reply"))
+        viewModel.effects.test {
+            viewModel.onSubmit()
+            runCurrent()
+            expectNoEvents()
+        }
+
+        val state = viewModel.state.value
+        assertEquals(PrivateMessageReplyError.Refused, state.submitError)
+        assertEquals(R.string.messages_reply_error_refused, state.submitError?.bannerResId)
+        assertEquals("Private reply", state.draft.text)
+        assertNull(draftStore.entries.values.single().attempt)
+        assertFalse(state.isSubmitting)
+    }
+
+    @Test
     fun `invalid hash check refetches the form silently`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } returns form()

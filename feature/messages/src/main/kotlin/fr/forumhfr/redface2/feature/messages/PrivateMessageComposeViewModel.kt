@@ -646,8 +646,8 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         ReplyFailureReason.InvalidHashCheck -> PrivateMessageReplyError.InvalidHashCheck
         ReplyFailureReason.AntiFlood -> PrivateMessageReplyError.AntiFlood
         ReplyFailureReason.LoginRequired -> PrivateMessageReplyError.LoginRequired
-        // Unknown covers every unpinned server answer — including a rejected recipient — and
-        // must stay non-destructive (cf. class KDoc). TopicLocked has no composer analogue.
+        ReplyFailureReason.UnknownRecipient -> PrivateMessageReplyError.UnknownRecipient
+        // Unrecognised answers remain uncertain. TopicLocked has no composer analogue.
         ReplyFailureReason.TopicLocked -> PrivateMessageReplyError.Unexpected
         ReplyFailureReason.Unknown -> PrivateMessageReplyError.Uncertain
     }

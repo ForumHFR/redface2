@@ -3,7 +3,6 @@ package fr.forumhfr.redface2.core.ui.pager
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
-import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
@@ -59,7 +58,7 @@ class PageNavigationTest {
             }
         }
 
-        compose.onNodeWithContentDescription("Aller à la dernière page").performClick()
+        compose.onNodeWithText("Dernière page").performClick()
 
         assertEquals(listOf(12), selectedPages)
     }
@@ -79,7 +78,7 @@ class PageNavigationTest {
             }
         }
 
-        compose.onNodeWithContentDescription("Aller à la dernière page").assertIsNotEnabled()
+        compose.onNodeWithText("Dernière page").assertIsNotEnabled()
     }
 
     @Test
@@ -98,7 +97,7 @@ class PageNavigationTest {
             }
         }
 
-        compose.onNodeWithContentDescription("Aller à la première page").performClick()
+        compose.onNodeWithText("Première page").performClick()
 
         assertEquals(listOf(1), selectedPages)
     }
@@ -118,6 +117,6 @@ class PageNavigationTest {
             }
         }
 
-        compose.onNodeWithContentDescription("Aller à la première page").assertIsNotEnabled()
+        compose.onNodeWithText("Première page").assertIsNotEnabled()
     }
 }

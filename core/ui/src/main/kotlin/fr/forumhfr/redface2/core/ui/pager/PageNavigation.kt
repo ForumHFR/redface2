@@ -23,8 +23,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -135,8 +133,6 @@ private fun ExtremePageActions(
     enabled: Boolean,
     onOpenPage: (Int) -> Unit,
 ) {
-    val firstPageDescription = stringResource(R.string.pager_first_page_a11y)
-    val lastPageDescription = stringResource(R.string.pager_last_page_a11y)
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -146,9 +142,7 @@ private fun ExtremePageActions(
             onClick = { onOpenPage(1) },
             enabled = enabled && currentPage != 1,
             contentPadding = ExtremePageButtonContentPadding,
-            modifier = Modifier
-                .weight(1f)
-                .semantics { contentDescription = firstPageDescription },
+            modifier = Modifier.weight(1f),
         ) {
             Text(
                 text = stringResource(R.string.pager_first_page),
@@ -160,9 +154,7 @@ private fun ExtremePageActions(
             onClick = { onOpenPage(totalPages) },
             enabled = enabled && hasKnownTotal && currentPage != totalPages,
             contentPadding = ExtremePageButtonContentPadding,
-            modifier = Modifier
-                .weight(1f)
-                .semantics { contentDescription = lastPageDescription },
+            modifier = Modifier.weight(1f),
         ) {
             Text(
                 text = stringResource(R.string.pager_last_page),

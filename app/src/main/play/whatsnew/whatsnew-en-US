@@ -1,3 +1,5 @@
-Redface 2 v0.66.0 — dev.
-- Safer sending: a published message is never sent twice or kept as a draft.
-- Connection lost after sending: "Uncertain send", check the topic before resending.
+Redface 2 v0.68.0 — beta.
+- In-app reporting: Settings → HFR account or account menu, by HFR private message to the project.
+- Sending: "Message posted" / "Message edited" confirmations and "Last page" button; duplicate sends prevented; uncertain sends flagged, check before retrying.
+- Quotes: jumps no longer get stuck when the message is missing from the page.
+- TalkBack: First/Last page announced only once.

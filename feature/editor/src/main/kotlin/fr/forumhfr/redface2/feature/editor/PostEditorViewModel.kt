@@ -9,6 +9,7 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
@@ -202,7 +203,7 @@ class PostEditorViewModel @AssistedInject constructor(
         drafts = EditorDraftSession(draftStore, draftKey),
         errors = EditorSubmissionErrors(
             uncertain = SubmitError.Uncertain, draftWriteFailed = SubmitError.DraftWriteFailed,
-            sessionExpired = SubmitError.SessionExpired, unknown = SubmitError.Hfr(ReplyFailureReason.Unknown),
+            sessionExpired = SubmitError.SessionExpired, unknown = SubmitError.Uncertain,
             network = SubmitError.Network, sessionExpiredAfterEntry = SubmitError.Uncertain,
         ),
         callbacks = EditorSubmissionCallbacks<PostEditorEffect>(
@@ -1042,11 +1043,20 @@ class PostEditorViewModel @AssistedInject constructor(
                 targetPage = result.targetPage,
                 scrollTo = result.numreponse ?: snapshot.numreponse.takeIf { snapshot.mode == PostEditorMode.Edit },
                 quotedNumreponses = quotedNumreponsesFor(snapshot),
+                operation = if (snapshot.mode == PostEditorMode.Edit) {
+                    PostSubmitOperation.Edit
+                } else {
+                    PostSubmitOperation.Publish
+                },
             ),
         )
         is ReplySubmitResult.Failure -> {
             EditorDelivery(
-                error = SubmitError.Hfr(result.reason),
+                error = if (result.reason == ReplyFailureReason.Unknown) {
+                    SubmitError.Uncertain
+                } else {
+                    SubmitError.Hfr(result.reason)
+                },
                 afterSettled = if (result.reason == ReplyFailureReason.InvalidHashCheck) {
                     {
                         loadedForm = null

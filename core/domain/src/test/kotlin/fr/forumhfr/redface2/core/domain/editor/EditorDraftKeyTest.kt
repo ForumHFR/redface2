@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.domain.editor
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Test
 
 /**
@@ -9,6 +10,12 @@ import org.junit.Test
  * are a contract, not an implementation detail. The reply key must NOT vary with the quoted post.
  */
 class EditorDraftKeyTest {
+
+    @Test
+    fun `report key is distinct from the private message composer`() {
+        assertEquals("report", EditorDraftKey.report())
+        assertNotEquals(EditorDraftKey.mpCompose(), EditorDraftKey.report())
+    }
 
     @Test
     fun `reply key carries cat and topic id`() {

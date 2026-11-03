@@ -10,6 +10,20 @@ Format inspiré de [Keep a Changelog](https://keepachangelog.com/fr/1.1.0/). Les
 
 ---
 
+## [0.13.4] - 2026-11-03
+
+**Promotion bêta 0.68.0** : alignement des pages publiques sur la nouvelle bêta et traçabilité des évolutions de specs depuis la bêta 0.65.0.
+
+### Changed
+
+- Pages d'entrée (`README.md`, `AGENTS.md`, `docs/index.md`, `docs/guides/contributing.md`) : état du projet = bêta publique **0.68.0**, canal dev aligné sur la bêta au 03/11/2026.
+- `docs/specs/roadmap.md` : plage de livraison de la refonte UI étendue jusqu'à la bêta **0.68.0**.
+- `docs/specs/mvi.md` : accusé d'envoi unique dans la vue Topic, distinct du rafraîchissement, et offre « Dernière page » restaurable ([#1525](https://github.com/ForumHFR/redface2/pull/1525)).
+- `docs/specs/navigation.md` : parcours « Signalement au projet », formulaire intégré accessible depuis les réglages et le menu compte, envoi par MP HFR à XaTriX (formulaire bloqué pour ce compte) et brouillon privé lié au compte ([#1531](https://github.com/ForumHFR/redface2/issues/1531), [#1532](https://github.com/ForumHFR/redface2/pull/1532), [#1534](https://github.com/ForumHFR/redface2/pull/1534)).
+- `docs/legal/csae/index.html` : page française et anglaise alignée sur le formulaire intégré, la connexion HFR requise et le recours à l'application mail sans connexion ; distinction avec l'alerte aux modérateurs HFR ([#1532](https://github.com/ForumHFR/redface2/pull/1532)).
+
+---
+
 ## [0.13.3] - 2026-10-31
 
 **Promotion bêta 0.65.0** : alignement des pages publiques sur la nouvelle bêta.

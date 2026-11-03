@@ -1,0 +1,11 @@
+Source: forum.hardware.fr (capture authentifiee live, compte XaTelitte). 2026-11-03 09:39 (Paris)
+Captured page: reponse HTTP 200 au POST bddpost.php?config=hfr.inc d'un NOUVEAU MP (cat=prive, post= vide,
+  dest=XaTriX, sujet "RF2 capture nouveau MP"), formulaire obtenu par GET
+  message.php?config=hfr.inc&cat=prive&sond=0&p=1&subcat=0&dest=&subcatgroup=0.
+Methode: curl authentifie (login POST login_validation.php -> cookies), corps reconstitue a l'identique de
+  DefaultPrivateMessageWriteRepository.buildComposeFormBody (Jsoup 1.23.2, UTF-8, UA Redface2/0.1, sans Referer),
+  redirections non suivies. MP reel cree (3207754, XaTelitte -> XaTriX, go XaTriX du 2026-11-02).
+Notes: page de succes « Votre message a été posté avec succès ! » + meta Refresh vers forum1.php?cat=prive ;
+  aucun id de MP dans la reponse.
+Privacy: scrubbe (cookies hors corps ; aucun hash_check, userId ni email dans la page). Rapport :
+  redface2-work/reports/report-form-mp-capture.md (hors depot).

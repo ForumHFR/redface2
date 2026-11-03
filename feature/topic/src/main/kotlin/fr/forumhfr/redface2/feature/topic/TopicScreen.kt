@@ -46,7 +46,6 @@ import androidx.compose.material3.OutlinedCard
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SmallFloatingActionButton
@@ -118,6 +117,7 @@ import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
 import fr.forumhfr.redface2.core.domain.ego.isEgoPost
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
+import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.Poll
@@ -291,7 +291,7 @@ fun TopicScreen(
      */
     pendingSubmitResult: TopicSubmitResult? = null,
     /** #895 étape 4 (PR 2) — clears the `:app` pending-submit slot once the result was applied. */
-    onSubmitResultConsumed: () -> Unit = {},
+    onSubmitResultConsumed: (Long) -> Unit = {},
     /**
      * #291 / #604 lot 3 — the multi-quote selection of THIS topic as FULL previews, in selection
      * order. Owned by `:app` (the basket must survive the editor round-trip and re-entering the
@@ -370,14 +370,6 @@ fun TopicScreen(
     val lazyListState = rememberLazyListState()
     val snackbarHostState = remember { SnackbarHostState() }
     val snackbarScope = rememberCoroutineScope()
-    // #1301 — ONE owner for the whole post-submit feedback (« Message publié », then « Message
-    // publié en page N » once the refreshed page reports a later one). Material serialises
-    // showSnackbar behind a single mutex, so two independent launches showed the reader BOTH
-    // confirmations in a row (beta feedback from nicko) ; through the coordinator the second
-    // replaces the first.
-    val submitFeedback = remember(snackbarHostState) {
-        TopicSubmitFeedback { snackbarHostState.currentSnackbarData?.dismiss() }
-    }
     // #1137 — measured height (px) of the « Dernier message lu » separator, written from where the
     // marker is composed (onSizeChanged, inside the last-read post's item — cf. TopicLoadedContent)
     // and read by the flag landing below to put the marker's top edge on the landing line (the post
@@ -435,8 +427,8 @@ fun TopicScreen(
     // and clear the :app slot. The quick-reply sheet path below calls applySubmitResult directly.
     LaunchedEffect(pendingSubmitResult?.eventId) {
         pendingSubmitResult?.let { result ->
-            viewModel.applySubmitResult(result.targetPage, result.scrollTo, result.quotedNumreponses)
-            onSubmitResultConsumed()
+            viewModel.applySubmitResult(result)
+            onSubmitResultConsumed(result.eventId)
         }
     }
     // #895 étape 4 — feed the engine's per-page anchor map on every scroll settle (drag/fling
@@ -465,10 +457,6 @@ fun TopicScreen(
     // Lint flags `context.getString(R.string.…)` inside a Compose call site (the call is in a
     // suspending lambda but the surrounding scope is still a Composable). Capturing the message
     // upfront keeps the rule happy and avoids re-resolving on every effect.
-    val refreshFailedMsg = stringResource(R.string.topic_post_submit_refresh_failed)
-    val postSubmittedMsg = stringResource(R.string.topic_post_submit_confirmed)
-    val submittedElsewhereMsg = stringResource(R.string.topic_post_submitted_elsewhere)
-    val submittedElsewhereAction = stringResource(R.string.topic_post_submitted_elsewhere_action)
     // #335 — manual pull-to-refresh failure message (resolved upfront, same rationale).
     val refreshManualFailedMsg = stringResource(R.string.topic_refresh_failed)
     // Chantier C (#546) — intra-topic search failure message (resolved upfront, same rationale).
@@ -493,7 +481,6 @@ fun TopicScreen(
     val pollClosedMsg = stringResource(R.string.topic_poll_close_success)
     val pollCloseFailedMsg = stringResource(R.string.topic_poll_close_failure)
     // #292 — delete feedback messages, resolved upfront (same rationale as refreshFailedMsg).
-    val deleteSuccessMsg = stringResource(R.string.topic_post_delete_success)
     val deleteFailedLoginMsg = stringResource(R.string.topic_post_delete_failed_login)
     val deleteFailedLockedMsg = stringResource(R.string.topic_post_delete_failed_locked)
     val deleteFailedGenericMsg = stringResource(R.string.topic_post_delete_failed_generic)
@@ -508,18 +495,15 @@ fun TopicScreen(
     // confirm → close flow) ; the outcomes ride the screen's single TopicEffect collector below.
     val closePollState by viewModel.closePollState.collectAsStateWithLifecycle()
 
-    // #1301 — only a real submit confirms publication; the durable PostSubmitJump kind survives a
-    // recreation during « Y aller » without replaying it. Both kinds keep the progress hairline.
     TopicSubmitFeedbackEffect(
-        refreshKind = state.refreshKind,
-        submitFeedback = submitFeedback,
-        scope = snackbarScope,
-    ) {
-        snackbarHostState.showSnackbar(
-            message = postSubmittedMsg,
-            duration = SnackbarDuration.Indefinite,
-        )
-    }
+        acknowledgements = viewModel.submitAcknowledgements,
+        host = snackbarHostState,
+        active = routeCurrent,
+        account = state.connectedPseudo?.let(::canonicalizePseudo),
+        openPage = { page ->
+            viewModel.openSubmittedPostPage(page, alignedDepartureAnchor())
+        },
+    )
 
     // Bug fix (build 89) — report the loaded title up so `:app` caches it per topic. The next page
     // (recreated screen) reads it back through `request.titleHint`, keeping the top bar title stable
@@ -683,40 +667,6 @@ fun TopicScreen(
                         viewModel.onLandingApplied(effect)
                     }
                 }
-                TopicEffect.PostSubmitRefreshFailed -> {
-                    // Issue #200 — HFR accepted the post but the local force refresh failed.
-                    // #1301 — remove the in-flight success confirmation before its error replacement.
-                    submitFeedback.dismissConfirmation()
-                    // Surface a Toast so the user knows the submit went through and can
-                    // re-trigger the refresh manually (pull-to-refresh / Retry) instead of
-                    // assuming the post was silently lost.
-                    android.widget.Toast.makeText(
-                        context,
-                        refreshFailedMsg,
-                        android.widget.Toast.LENGTH_LONG,
-                    ).show()
-                }
-                is TopicEffect.PostSubmittedElsewhere -> {
-                    // #1301 — REPLACES the « Message publié » confirmation through the single
-                    // coordinator instead of queueing a second snackbar behind it. The launch keeps
-                    // the effect collector free while the snackbar stays on screen.
-                    submitFeedback.offerSubmittedElsewhere(
-                        scope = snackbarScope,
-                        show = {
-                            snackbarHostState.showSnackbar(
-                                message = String.format(Locale.getDefault(), submittedElsewhereMsg, effect.page),
-                                actionLabel = submittedElsewhereAction,
-                                duration = SnackbarDuration.Long,
-                            )
-                        },
-                        openPage = {
-                            viewModel.openSubmittedPostPage(
-                                page = effect.page,
-                                departureAnchor = alignedDepartureAnchor(),
-                            )
-                        },
-                    )
-                }
                 TopicEffect.RefreshFailed -> {
                     // #335 — manual pull-to-refresh could not reach HFR; the page stays on screen
                     // (cache-first) and the Toast invites a retry.
@@ -726,15 +676,8 @@ fun TopicScreen(
                         android.widget.Toast.LENGTH_LONG,
                     ).show()
                 }
-                TopicEffect.PostDeleted -> {
-                    // #292 — HFR accepted the deletion; the ViewModel force-refreshes the page so the
-                    // post is already gone by the time this lands. Confirm with a Toast.
-                    android.widget.Toast.makeText(
-                        context,
-                        deleteSuccessMsg,
-                        android.widget.Toast.LENGTH_SHORT,
-                    ).show()
-                }
+                // The ViewModel records this success in the shared acknowledgement state.
+                TopicEffect.PostDeleted -> Unit
                 is TopicEffect.PostDeleteFailed -> {
                     val message = when (effect.reason) {
                         DeleteFailureReason.LoginRequired -> deleteFailedLoginMsg
@@ -855,7 +798,9 @@ fun TopicScreen(
         // Vague 4 (#604) lot 1 / #895 étape 4 — a reply POSTed from the quick-reply sheet goes
         // straight to the retained ViewModel (in-place force refresh, #200/#226/#1243) : the sheet
         // never entered the back stack and the topic entry no longer gets replaced.
-        onQuickReplySubmitted = viewModel::applySubmitResult,
+        onQuickReplySubmitted = { page, post, quotes ->
+            viewModel.applySubmitResult(page, post, quotes)
+        },
         onEdit = onEdit,
         onEditFirstPost = onEditFirstPost,
         // #895 étape 4 — MANUAL page change (swipe, header pager, ‹/› FABs, boundary cards) :

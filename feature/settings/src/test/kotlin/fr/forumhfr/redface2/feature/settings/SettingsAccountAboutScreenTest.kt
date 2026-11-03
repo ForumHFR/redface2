@@ -9,6 +9,7 @@ import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -23,6 +24,14 @@ import org.robolectric.annotation.Config
 class SettingsAccountAboutScreenTest {
     @get:Rule
     val compose = createComposeRule()
+
+    @Test
+    fun `report row dispatches its real click while anonymous`() {
+        var reports = 0
+        mount(isAuthenticated = false, onOpenSanctions = {}, onReportContent = { reports++ })
+        compose.onNodeWithText("Signaler un contenu ou un problème").performScrollTo().performClick()
+        assertEquals(1, reports)
+    }
 
     @Test
     fun `authenticated account opens sanctions and retains future profile settings`() {
@@ -67,7 +76,11 @@ class SettingsAccountAboutScreenTest {
         }
     }
 
-    private fun mount(isAuthenticated: Boolean, onOpenSanctions: () -> Unit) {
+    private fun mount(
+        isAuthenticated: Boolean,
+        onOpenSanctions: () -> Unit,
+        onReportContent: () -> Unit = {},
+    ) {
         compose.setContent {
             RedfaceTheme(darkTheme = false, dynamicColor = false) {
                 SettingsAccountAboutScreen(
@@ -75,7 +88,7 @@ class SettingsAccountAboutScreenTest {
                     versionName = "0.54.5",
                     versionCode = 1,
                     onOpenDiagnostics = {},
-                    onReportContent = {},
+                    onReportContent = onReportContent,
                     isAuthenticated = isAuthenticated,
                     onOpenSanctions = onOpenSanctions,
                 )

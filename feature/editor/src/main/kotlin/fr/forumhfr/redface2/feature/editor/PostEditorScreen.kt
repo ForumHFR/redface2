@@ -1,4 +1,6 @@
 package fr.forumhfr.redface2.feature.editor
+
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.ui.editor.rememberEditorImagePicker
 import fr.forumhfr.redface2.core.ui.editor.UploadProgressLabel
 import fr.forumhfr.redface2.core.ui.editor.bannerText
@@ -45,6 +47,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -82,7 +85,9 @@ import fr.forumhfr.redface2.core.ui.editor.editorControlsMaxHeight
 @Composable
 fun PostEditorScreen(
     request: PostEditorRequest,
-    onSubmitSucceeded: (targetPage: Int?, scrollTo: Int?, quotedNumreponses: List<Int>) -> Unit,
+    onSubmitSucceeded: (
+        targetPage: Int?, scrollTo: Int?, quotedNumreponses: List<Int>, operation: PostSubmitOperation,
+    ) -> Unit,
     // #604 lot 4a — pops this editor AFTER the ViewModel flushed the draft (CloseCommitted).
     // Default keeps callers without the wiring on the platform back (no flush) — `:app` wires it.
     onClose: (() -> Unit)? = null,
@@ -92,11 +97,14 @@ fun PostEditorScreen(
     ),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val currentOnSubmitSucceeded by rememberUpdatedState(onSubmitSucceeded)
     LaunchedEffect(viewModel) {
         viewModel.effects.collect { effect ->
             when (effect) {
                 is PostEditorEffect.SubmitSucceeded ->
-                    onSubmitSucceeded(effect.targetPage, effect.scrollTo, effect.quotedNumreponses)
+                    currentOnSubmitSucceeded(
+                        effect.targetPage, effect.scrollTo, effect.quotedNumreponses, effect.operation,
+                    )
                 PostEditorEffect.CloseCommitted -> onClose?.invoke()
             }
         }
@@ -656,6 +664,7 @@ private val SubmitError.bannerResId: Int
             ReplyFailureReason.TopicLocked -> R.string.editor_error_topic_locked
             ReplyFailureReason.LoginRequired -> R.string.editor_error_login_required
             ReplyFailureReason.Unknown -> R.string.editor_error_unknown
+            ReplyFailureReason.UnknownRecipient -> R.string.editor_error_unknown
         }
         SubmitError.Uncertain -> fr.forumhfr.redface2.core.ui.R.string.editor_submission_uncertain
         SubmitError.DraftWriteFailed -> fr.forumhfr.redface2.core.ui.R.string.editor_submission_draft_write_failed

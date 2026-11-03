@@ -239,4 +239,5 @@
          l'éditeur ouvert par « Poster un message » (#15) : la liste n'a aucune page de sujet à
          rafraîchir, c'est le seul retour que le lecteur obtient. -->
     <string name="flags_post_submit_confirmed">Message publié</string>
+    <string name="flags_post_edit_confirmed">Message modifié</string>
 </resources>

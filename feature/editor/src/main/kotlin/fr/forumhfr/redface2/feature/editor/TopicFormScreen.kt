@@ -1,4 +1,6 @@
 package fr.forumhfr.redface2.feature.editor
+
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.ui.editor.rememberEditorImagePicker
 import fr.forumhfr.redface2.core.ui.editor.UploadProgressLabel
 import fr.forumhfr.redface2.core.ui.editor.bannerText
@@ -37,6 +39,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -71,7 +74,7 @@ import fr.forumhfr.redface2.core.ui.editor.editorControlsMaxHeight
 @Suppress("LongParameterList") // One callback per navigation outcome — each wired to a distinct :app pop.
 fun TopicFormScreen(
     request: TopicFormRequest,
-    onSubmitSucceeded: (targetPage: Int?, scrollTo: Int?) -> Unit,
+    onSubmitSucceeded: (targetPage: Int?, scrollTo: Int?, operation: PostSubmitOperation) -> Unit,
     // #206 workaround — `subject` is the exact posted title, forwarded to the category
     // listing so it can highlight the freshly-created row (HFR never returns the new id).
     onNewTopicCreated: (cat: Int, subcat: Int, newTopicId: Int?, newNumreponse: Int?, subject: String) -> Unit,
@@ -85,6 +88,7 @@ fun TopicFormScreen(
     ),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val currentOnSubmitSucceeded by rememberUpdatedState(onSubmitSucceeded)
     val context = LocalContext.current
     val newTopicCreatedFallback = stringResource(R.string.editor_new_topic_created)
 
@@ -92,7 +96,7 @@ fun TopicFormScreen(
         viewModel.effects.collect { effect ->
             when (effect) {
                 is TopicFormEffect.SubmitSucceeded ->
-                    onSubmitSucceeded(effect.targetPage, effect.scrollTo)
+                    currentOnSubmitSucceeded(effect.targetPage, effect.scrollTo, effect.operation)
                 is TopicFormEffect.NewTopicCreated -> {
                     if (effect.newTopicId == null) {
                         // Fallback path (#206, the only real path): the create succeeded but
@@ -522,6 +526,7 @@ private val SubmitError.bannerResId: Int
             ReplyFailureReason.TopicLocked -> R.string.editor_error_topic_locked
             ReplyFailureReason.LoginRequired -> R.string.editor_error_login_required
             ReplyFailureReason.Unknown -> R.string.editor_error_unknown
+            ReplyFailureReason.UnknownRecipient -> R.string.editor_error_unknown
         }
         SubmitError.Uncertain -> fr.forumhfr.redface2.core.ui.R.string.editor_submission_uncertain
         SubmitError.DraftWriteFailed -> fr.forumhfr.redface2.core.ui.R.string.editor_submission_draft_write_failed

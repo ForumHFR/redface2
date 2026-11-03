@@ -16,6 +16,41 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.68.0` — `open` (bêta) — 2026-11-03
+
+Promotion bêta du lot développé en dev de `0.66.0` à `0.67.2`, complété par le formulaire de signalement, depuis la précédente bêta `0.65.0`. Le détail par version dev figure dans les entrées ci-dessous. Contenu :
+
+- **Signalement intégré** ([#1531](https://github.com/ForumHFR/redface2/issues/1531), [#1532](https://github.com/ForumHFR/redface2/pull/1532), [#1534](https://github.com/ForumHFR/redface2/pull/1534)) : formulaire dans Réglages → Compte HFR → « Signaler un contenu ou un problème », et dans le menu compte → « Signaler un contenu ». Choix du motif (dont la sécurité des enfants), description et lien facultatif ; envoi par MP HFR au compte du projet XaTriX, sans quitter l'app. Une connexion HFR est nécessaire ; sans connexion, « Écrire par email » reste disponible. La page CSAE décrit ce parcours, ajouté à la suite du refus Play « normes pour la sécurité des enfants ». L'action « Alerter » les modérateurs HFR reste distincte.
+- **Accusés d'envoi** ([#1437](https://github.com/ForumHFR/redface2/issues/1437), [#1446](https://github.com/ForumHFR/redface2/issues/1446), [#1525](https://github.com/ForumHFR/redface2/pull/1525)) : une seule confirmation « Message publié » ou « Message modifié » dans la vue Topic, y compris depuis les drapeaux, sans disparition prématurée au rafraîchissement. Après une citation depuis une ancienne page, le bouton « Dernière page » rejoint la dernière page réelle ; cette offre survit à une rotation ou au retour dans l'app.
+- **Envoi plus sûr** ([#1301](https://github.com/ForumHFR/redface2/issues/1301), [#1522](https://github.com/ForumHFR/redface2/pull/1522)) : doubles envois évités et texte publié retiré des brouillons sur les cinq surfaces d'envoi (réponse/citation, nouveau sujet, réponse MP, nouveau MP, réponse rapide). Si l'envoi est incertain, l'app le signale, garde la saisie et invite à vérifier avant de renvoyer (exception : à la déconnexion ou au changement de compte, les brouillons privés — MP et signalement — sont effacés, même incertains) ; si le brouillon ne peut pas être enregistré avant l'envoi, rien ne part. Aucun renvoi automatique ni envoi sous un autre compte.
+- **Citations** ([#1447](https://github.com/ForumHFR/redface2/issues/1447), [#1527](https://github.com/ForumHFR/redface2/pull/1527)) : un saut vers un message absent de la page affichée recharge la page une fois ; la position de lecture n'est plus bloquée sur cette page.
+- **Accessibilité** ([#1448](https://github.com/ForumHFR/redface2/issues/1448), [#1529](https://github.com/ForumHFR/redface2/pull/1529)) : TalkBack n'annonce plus deux fois les boutons « Première page » et « Dernière page » du sélecteur de page des sujets et des MP.
+- **Refus HFR** ([#1532](https://github.com/ForumHFR/redface2/pull/1532)) : meilleure reconnaissance du refus « pseudo inexistant » lors d'un nouveau MP et de l'anti-flood lors de la création d'un sujet.
+- Dépendances : mises à jour AndroidX ([#1460](https://github.com/ForumHFR/redface2/pull/1460)), réseau et images ([#1518](https://github.com/ForumHFR/redface2/pull/1518)), outillage de build ([#1458](https://github.com/ForumHFR/redface2/pull/1458)) et action CI paths-filter ([#1457](https://github.com/ForumHFR/redface2/pull/1457)).
+
+---
+
+## `0.67.2` — `internal` (dev) — 2026-11-03
+
+Accessibilité du sélecteur de page ([#1448](https://github.com/ForumHFR/redface2/issues/1448) ; [#1529](https://github.com/ForumHFR/redface2/pull/1529)) : TalkBack n'annonce plus deux fois les boutons « Première page » et « Dernière page » (vue Topic et MP).
+
+## `0.67.1` — `internal` (dev) — 2026-11-03
+
+Saut de citation dans la vue Topic ([#1447](https://github.com/ForumHFR/redface2/issues/1447) ; [#1527](https://github.com/ForumHFR/redface2/pull/1527)) : un saut vers un message absent de la page affichée (par exemple « voir le message citant » contre une page en cache) recharge la page une fois puis atterrit sur le message ; la position de lecture n'est plus bloquée sur cette page.
+
+## `0.67.0` — `internal` (dev) — 2026-11-02
+
+Accusés d'envoi dans la vue Topic ([#1437](https://github.com/ForumHFR/redface2/issues/1437), [#1446](https://github.com/ForumHFR/redface2/issues/1446), volet Topic de [#1301](https://github.com/ForumHFR/redface2/issues/1301) ; [#1525](https://github.com/ForumHFR/redface2/pull/1525)) : une seule confirmation par envoi, qui ne disparaît plus en un éclair.
+
+- **« Message publié »** après une réponse ou une citation, **« Message modifié »** après une édition (premier message compris). Aussi depuis les drapeaux.
+- Durée fixe : 4 s, ou 10 s quand un bouton est proposé, allongée selon les réglages d'accessibilité. La fin du rafraîchissement ne la coupe plus.
+- **« Message supprimé »** s'affiche de la même façon (plus de bulle système).
+- Après une citation d'une page ancienne : « Message publié » avec le bouton **« Dernière page »**, au lieu d'un numéro de page deviné. Le bouton va à la vraie dernière page au moment du toucher.
+- Si la page tarde à se rafraîchir, la confirmation arrive au bout d'1 s au plus, une seule fois ; un échec du rafraîchissement est signalé à part.
+- L'offre « Dernière page » survit à une rotation ou au retour dans l'app, et disparaît au changement de compte.
+
+---
+
 ## `0.66.0` — `internal` (dev) — 2026-11-02
 
 Envoi des messages plus sûr ([#1301](https://github.com/ForumHFR/redface2/issues/1301), [#1522](https://github.com/ForumHFR/redface2/pull/1522)), premier lot de la refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)) : un envoi confirmé part au plus une fois, et un message publié n'est plus reproposé comme brouillon. Concerne la réponse et la citation, le nouveau sujet, la réponse et la composition de MP, et la réponse rapide.
