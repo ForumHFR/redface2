@@ -1,2 +1,5 @@
-Redface 2 v0.67.2 — dev.
-- Accessibility: TalkBack no longer announces the "First page" and "Last page" buttons of the page picker twice.
+Redface 2 v0.68.0 — beta.
+- In-app reporting: Settings → HFR account or account menu, by HFR private message to the project.
+- Sending: "Message posted" / "Message edited" confirmations and "Last page" button; duplicate sends prevented, text kept when sending is uncertain.
+- Quotes: jumps no longer get stuck when the message is missing from the page.
+- TalkBack: First/Last page announced only once.
