@@ -1918,6 +1918,173 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `a missing same-page quote leaves filtered results before loading its canonical page (#1447)`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        val cached = fakeTopic(1, 3, posts = listOf(fakePost(100)), searchForm = form)
+        val canonical = cached.copy(title = "canonical", posts = listOf(fakePost(100), fakePost(777)))
+        val results = cached.copy(
+            title = "filtered",
+            searchForm = form.copy(firstnum = null, currentNum = 500),
+        )
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flowOf(cached), flowOf(canonical)))
+        val searchRepository = FakeTopicSearchRepository(result = results)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepository,
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.SubmitSearch)
+            assertEquals(TopicEffect.ScrollToTopOfResults, awaitItem())
+            assertTrue(viewModel.state.value.search.showingFilteredResults)
+            assertEquals(500, viewModel.state.value.search.resumeCursor)
+
+            viewModel.goToPost(targetPage = 1, numreponse = 777)
+            val landing = awaitItem()
+            assertEquals(TopicEffect.ScrollToPost(777), landing)
+            assertEquals(canonical, assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic)
+            val search = viewModel.state.value.search
+            assertFalse(search.showingFilteredResults)
+            assertNull(search.resumeCursor)
+            assertFalse(search.hasMoreFilteredResults)
+            assertFalse(search.canGoPreviousResult)
+            assertFalse(search.canGoNextResult)
+            assertEquals("", search.resultWord)
+            assertEquals("", search.resultSpseudo)
+            assertNull(search.resultAnchor)
+            assertTrue("the navigation keeps the search bar open", search.isActive)
+            assertEquals("iwds", search.word)
+            viewModel.onLandingApplied(landing)
+            viewModel.send(TopicIntent.SearchNextResultsPage)
+            viewModel.send(TopicIntent.NextResult)
+            viewModel.send(TopicIntent.PrevResult)
+            assertEquals(1, searchRepository.requests.size)
+            assertEquals(listOf(1, 1), repository.calls.map { it.third })
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a missing same-page quote fences a late filtered continuation (#1447)`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        val cached = fakeTopic(1, 3, posts = listOf(fakePost(100)), searchForm = form)
+        val canonical = cached.copy(title = "canonical", posts = listOf(fakePost(777)))
+        val results = cached.copy(title = "filtered", searchForm = form.copy(firstnum = null, currentNum = 500))
+        val late = CompletableDeferred<Unit>()
+        val searchRepository = FakeTopicSearchRepository(result = results)
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flowOf(cached), flowOf(canonical)))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepository,
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.SubmitSearch)
+            assertEquals(TopicEffect.ScrollToTopOfResults, awaitItem())
+            searchRepository.gate = { late.await() }
+            searchRepository.ignoreCancellation = true
+            viewModel.send(TopicIntent.SearchNextResultsPage)
+            assertEquals(TopicSearchStatus.Loading, viewModel.state.value.search.status)
+
+            viewModel.goToPost(targetPage = 1, numreponse = 777)
+            val landing = awaitItem()
+            assertEquals(TopicEffect.ScrollToPost(777), landing)
+            viewModel.onLandingApplied(landing)
+            late.complete(Unit)
+            advanceUntilIdle()
+            assertEquals("canonical", assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title)
+            assertEquals(TopicSearchStatus.Idle, viewModel.state.value.search.status)
+            assertFalse(viewModel.state.value.search.showingFilteredResults)
+            assertNull(viewModel.state.value.search.resumeCursor)
+            assertTrue(viewModel.state.value.landing is TopicUiState.Landing.Applied)
+            assertEquals(2, searchRepository.requests.size)
+            assertEquals(2, repository.calls.size)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a missing same-page quote fences a search still waiting for its first results (#1447)`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        val cached = fakeTopic(1, 3, posts = listOf(fakePost(100)), searchForm = form)
+        val canonical = cached.copy(title = "canonical", posts = listOf(fakePost(777)))
+        val late = CompletableDeferred<Unit>()
+        val searchRepository = FakeTopicSearchRepository(result = cached.copy(title = "late-filtered")).apply {
+            gate = { late.await() }
+            ignoreCancellation = true
+        }
+        val repository = FakeTopicRepository(flowsToReturn = listOf(flowOf(cached), flowOf(canonical)))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepository,
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+        viewModel.send(TopicIntent.SubmitSearch)
+        assertFalse(viewModel.state.value.search.showingFilteredResults)
+        assertEquals(TopicSearchStatus.Loading, viewModel.state.value.search.status)
+
+        viewModel.effects.test {
+            viewModel.goToPost(targetPage = 1, numreponse = 777)
+            val landing = awaitItem()
+            assertEquals(TopicEffect.ScrollToPost(777), landing)
+            viewModel.onLandingApplied(landing)
+            late.complete(Unit)
+            advanceUntilIdle()
+            assertEquals("canonical", assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.title)
+            assertEquals(TopicSearchStatus.Idle, viewModel.state.value.search.status)
+            assertFalse(viewModel.state.value.search.showingFilteredResults)
+            assertEquals(2, repository.calls.size)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a same-page quote already in filtered results keeps scrolling within those results (#1447)`() = runTest {
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        val results = fakeTopic(
+            1, 1, posts = listOf(fakePost(777)), searchForm = form.copy(firstnum = null, currentNum = 500),
+        )
+        val repository = searchableRepo(form)
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = FakeTopicSearchRepository(result = results),
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.SubmitSearch)
+            assertEquals(TopicEffect.ScrollToTopOfResults, awaitItem())
+            val search = viewModel.state.value.search
+            viewModel.goToPost(targetPage = 1, numreponse = 777)
+            val landing = awaitItem()
+            assertEquals(TopicEffect.ScrollToPost(777), landing)
+            viewModel.onLandingApplied(landing)
+            assertEquals(search, viewModel.state.value.search)
+            assertEquals(results, assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic)
+            assertEquals(1, repository.calls.size)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `#894 from-start submits an explicit 0 anchor, default anchors the current page`() = runTest {
         val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
         val results = fakeTopic(
@@ -6058,6 +6225,222 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `a failed manual refresh settles the missing-post reload it interrupted before cache (#1447)`() =
+        assertFailedManualRefreshSettlesMissingPostReload(provisionalCache = false)
+
+    @Test
+    fun `a failed manual refresh settles the missing-post reload it interrupted after cache (#1447)`() =
+        assertFailedManualRefreshSettlesMissingPostReload(provisionalCache = true)
+
+    private fun assertFailedManualRefreshSettlesMissingPostReload(provisionalCache: Boolean) = runTest {
+        val cached = fakeTopic(page = 2, totalPages = 3, posts = listOf(fakePost(100)))
+        val reload = CompletableDeferred<Unit>()
+        val refresh = CompletableDeferred<Unit>()
+        var observations = 0
+        var reloadCancelled = false
+        val repository = FakeStreamingEmissionTopicRepository(
+            source = flow {
+                observations++
+                if (observations == 1) {
+                    emit(TopicPageEmission(cached, provisional = false))
+                } else {
+                    try {
+                        if (provisionalCache) emit(TopicPageEmission(cached, provisional = true))
+                        reload.await()
+                        emit(TopicPageEmission(cached.copy(posts = listOf(fakePost(777))), provisional = false))
+                    } finally {
+                        reloadCancelled = true
+                    }
+                }
+            },
+        ).apply {
+            refreshHook = { _, _, _ ->
+                refresh.await()
+                throw IOException("manual refresh offline")
+            }
+        }
+        val handle = SavedStateHandle()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            savedStateHandle = handle,
+        )
+
+        viewModel.effects.test {
+            viewModel.goToPost(targetPage = 2, numreponse = 777)
+            val pending = viewModel.state.value.landing as TopicUiState.Landing.Pending
+            assertEquals(2, observations)
+            assertEquals(provisionalCache, assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).provisional)
+            viewModel.send(TopicIntent.Refresh)
+            assertTrue(reloadCancelled)
+            assertEquals(pending, viewModel.state.value.landing)
+            assertEquals(TopicRefreshKind.Manual, viewModel.state.value.refreshKind)
+            expectNoEvents()
+
+            refresh.complete(Unit)
+            runCurrent()
+            assertEquals(TopicEffect.RefreshFailed, awaitItem())
+            val resolution = awaitItem()
+            assertEquals(TopicEffect.LandingResolvedWithoutScroll(page = 2), resolution)
+            val loaded = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+            assertEquals(cached, loaded.topic)
+            assertFalse(loaded.provisional)
+            assertEquals(TopicRefreshKind.None, viewModel.state.value.refreshKind)
+            viewModel.onLandingApplied(resolution)
+            assertEquals(TopicUiState.Landing.Applied(pending.id, page = 2), viewModel.state.value.landing)
+            val alignment = TopicListAlignment().apply {
+                synchronizeLanding(viewModel.state.value.landing, canonicalPage = 2, isLoaded = true)
+            }
+            assertTrue(alignment.shouldPersist(canonicalPage = 2, isLoaded = true))
+            viewModel.reportPageAnchor(TopicScrollAnchor(index = 14, offset = 31))
+            assertEquals(14, handle.get<Int>("topic.anchorIndex"))
+            assertEquals(31, handle.get<Int>("topic.anchorOffset"))
+            reload.complete(Unit)
+            advanceUntilIdle()
+            assertEquals(2, observations)
+            assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)), repository.refreshCalls)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a failed submit refresh settles an interrupted missing-post reload before cache (#1447)`() =
+        assertFailedSubmitRefreshSettlesMissingPostReload(provisionalCache = false)
+
+    @Test
+    fun `a failed submit refresh settles an interrupted missing-post reload after cache (#1447)`() =
+        assertFailedSubmitRefreshSettlesMissingPostReload(provisionalCache = true)
+
+    private fun assertFailedSubmitRefreshSettlesMissingPostReload(provisionalCache: Boolean) = runTest {
+        val cached = fakeTopic(page = 2, totalPages = 3, posts = listOf(fakePost(100)))
+        val reload = CompletableDeferred<Unit>()
+        val refresh = CompletableDeferred<Unit>()
+        var observations = 0
+        var reloadCancelled = false
+        val repository = FakeStreamingEmissionTopicRepository(
+            source = flow {
+                observations++
+                when (observations) {
+                    1 -> emit(TopicPageEmission(cached, provisional = false))
+                    2 -> {
+                        try {
+                            if (provisionalCache) emit(TopicPageEmission(cached, provisional = true))
+                            reload.await()
+                            emit(TopicPageEmission(cached.copy(posts = listOf(fakePost(777))), provisional = false))
+                        } finally {
+                            reloadCancelled = true
+                        }
+                    }
+                    else -> {
+                        emit(TopicPageEmission(cached, provisional = true))
+                        throw IOException("fallback offline")
+                    }
+                }
+            },
+        ).apply {
+            refreshHook = { _, _, _ ->
+                refresh.await()
+                throw IOException("submit refresh offline")
+            }
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+
+        viewModel.effects.test {
+            viewModel.goToPost(targetPage = 2, numreponse = 777)
+            val interrupted = viewModel.state.value.landing as TopicUiState.Landing.Pending
+            assertEquals(2, observations)
+            viewModel.applySubmitResult(targetPage = 2, scrollTo = 888)
+            val pending = viewModel.state.value.landing as TopicUiState.Landing.Pending
+            assertTrue("the submit replaces the jump landing", pending.id != interrupted.id)
+            assertTrue(reloadCancelled)
+            assertEquals(TopicRefreshKind.PostSubmit, viewModel.state.value.refreshKind)
+            expectNoEvents()
+
+            refresh.complete(Unit)
+            runCurrent()
+            val resolution = awaitItem()
+            assertEquals(TopicEffect.LandingResolvedWithoutScroll(page = 2), resolution)
+            val loaded = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+            assertEquals(cached, loaded.topic)
+            assertFalse("the failed fallback must release its provisional cache", loaded.provisional)
+            assertEquals(TopicRefreshKind.None, viewModel.state.value.refreshKind)
+            val acknowledgement = requireNotNull(viewModel.submitAcknowledgements.feedback.value)
+            assertEquals(TopicAcknowledgement.Kind.Published, acknowledgement.kind)
+            assertTrue(acknowledgement.refreshFailed)
+            assertNull(acknowledgement.lastPage)
+            viewModel.onLandingApplied(resolution)
+            assertEquals(TopicUiState.Landing.Applied(pending.id, page = 2), viewModel.state.value.landing)
+            val alignment = TopicListAlignment().apply {
+                synchronizeLanding(viewModel.state.value.landing, canonicalPage = 2, isLoaded = true)
+            }
+            assertTrue(alignment.shouldPersist(canonicalPage = 2, isLoaded = true))
+            reload.complete(Unit)
+            advanceUntilIdle()
+            assertEquals(3, observations)
+            assertEquals(listOf(Triple(SAMPLE_CAT, SAMPLE_POST, 2)), repository.refreshCalls)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `a late failed replacement refresh cannot settle a newer same-page owner (#1447)`() = runTest {
+        val refresh = CompletableDeferred<Unit>()
+        val nextLoad = CompletableDeferred<Unit>()
+        val cached = fakeTopic(2, 3, posts = listOf(fakePost(100)))
+        var observations = 0
+        val repository = FakeStreamingEmissionTopicRepository(
+            source = flow {
+                observations++
+                when (observations) {
+                    1 -> emit(TopicPageEmission(cached, provisional = false))
+                    2 -> CompletableDeferred<Unit>().await()
+                    else -> {
+                        emit(TopicPageEmission(cached, provisional = true))
+                        nextLoad.await()
+                        emit(TopicPageEmission(cached.copy(posts = listOf(fakePost(888))), provisional = false))
+                    }
+                }
+            },
+        ).apply {
+            refreshHook = { _, _, _ ->
+                withContext(NonCancellable) { refresh.await() }
+                throw IOException("obsolete manual refresh")
+            }
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+
+        viewModel.effects.test {
+            viewModel.goToPost(targetPage = 2, numreponse = 777)
+            viewModel.send(TopicIntent.Refresh)
+            viewModel.send(TopicIntent.Retry)
+            viewModel.goToPost(targetPage = 2, numreponse = 888)
+            val pending = viewModel.state.value.landing
+            refresh.complete(Unit)
+            runCurrent()
+            assertTrue(assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).provisional)
+            assertEquals(pending, viewModel.state.value.landing)
+            expectNoEvents()
+            nextLoad.complete(Unit)
+            advanceUntilIdle()
+            assertEquals(TopicEffect.ScrollToPost(888), awaitItem())
+            assertEquals(3, observations)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `a late missing-post reload failure cannot terminalize a newer owner (#1447)`() = runTest {
         val obsolete = CompletableDeferred<Unit>()
         val nextPage = CompletableDeferred<Unit>()
@@ -7605,12 +7988,14 @@ private class FakeStreamingEmissionTopicRepository(
 ) : TopicRepository {
     private val refreshQueue = ArrayDeque(refreshTopicsToReturn)
     val refreshCalls: MutableList<Triple<Int, Int, Int>> = mutableListOf()
+    var refreshHook: (suspend (cat: Int, post: Int, page: Int) -> Unit)? = null
 
     override fun observeTopicPage(cat: Int, post: Int, page: Int, forceRefresh: Boolean): Flow<TopicPageEmission> =
         source
 
     override suspend fun refreshTopicPage(cat: Int, post: Int, page: Int): Topic {
         refreshCalls += Triple(cat, post, page)
+        refreshHook?.invoke(cat, post, page)
         return refreshQueue.removeFirstOrNull() ?: error("No refresh topic queued (#877 ensureSearchForm)")
     }
 

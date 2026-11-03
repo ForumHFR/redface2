@@ -1201,7 +1201,10 @@ class TopicViewModel @AssistedInject constructor(
                 // Cache-first: keep the page currently on screen and invite a retry via a Toast —
                 // unless a newer owner took the page meanwhile (stale toast suppressed).
                 android.util.Log.w(LOG_TAG, "Manual refresh failed", refreshError)
-                if (generation == ownerGeneration) _effects.trySend(TopicEffect.RefreshFailed)
+                if (generation == ownerGeneration) {
+                    _effects.trySend(TopicEffect.RefreshFailed)
+                    settleRetainedPageLanding(generation)
+                }
             } finally {
                 // Gate Sol PR1 r3 (bloquant 3) — only the still-current owner clears its spinner :
                 // a superseded refresh must not cut a NEWER refresh's indicator (the takeover
@@ -1309,6 +1312,8 @@ class TopicViewModel @AssistedInject constructor(
      */
     private fun becomePageOwner() {
         takeOverFromSearch()
+        // A refresh can replace a load before its first emission and never start another trace.
+        endFirstContentSectionIfNeeded()
         loadJob?.cancel()
         prefetchJob?.cancel()
         // #1188 — a page switch during a citing-post probe owns the page now : cancel the late
@@ -1384,11 +1389,14 @@ class TopicViewModel @AssistedInject constructor(
      * quick win 3) instead of flashing the skeleton — removing that flash is the point of #895.
      * [refreshMissingPost] is the bounded #1447 same-page retry under the EXISTING owner: bypass
      * TTL once and settle its landing against the retained page even on failure/empty completion.
+     * [settleRetainedPageOnCompletion] also releases a failed submit's cache-aside fallback without
+     * forcing another network refresh or replaying the already-resolved submit landing.
      */
     private fun startPageLoad(
         showLoading: Boolean,
         graceLoading: Boolean = false,
         refreshMissingPost: Boolean = false,
+        settleRetainedPageOnCompletion: Boolean = refreshMissingPost,
     ) {
         beginFirstContentSection()
         if (showLoading) {
@@ -1476,12 +1484,12 @@ class TopicViewModel @AssistedInject constructor(
             if (!received && generation == ownerGeneration) {
                 terminalizeEmptyCompletion()
             }
-            if (refreshMissingPost) settleMissingPostRefresh(generation)
+            if (settleRetainedPageOnCompletion) settleRetainedPageLanding(generation)
         }
     }
 
-    /** #1447 — no further emission is coming from this retry; never leave its landing pending. */
-    private fun settleMissingPostRefresh(generation: Int) {
+    /** #1447 — the current owner's refresh is over; settle its landing on the retained page. */
+    private fun settleRetainedPageLanding(generation: Int) {
         if (generation != ownerGeneration) return
         val loaded = (_state.value.mode as? TopicUiState.Mode.Loaded)
             ?.takeIf { it.topic.page == request.page }
@@ -1850,12 +1858,13 @@ class TopicViewModel @AssistedInject constructor(
      * chain, switch when needed and land on [numreponse]. A same-page jump dispatches against the
      * page already on screen; a missing post on a settled page gets one forced cache-aside reload
      * under the same owner (#1447), so a recent citing post can appear even inside the cache TTL.
+     * Missing posts in search results use the normal switch path to reclaim the canonical page.
      */
     fun goToPost(targetPage: Int, numreponse: Int, departureAnchor: TopicScrollAnchor? = null) {
         if (jumpStack.size >= JUMP_STACK_MAX) jumpStack.removeFirst()
         jumpStack.addLast(TopicJumpFrame(request.page, departureAnchor))
         syncJumpAvailability()
-        if (targetPage == request.page) {
+        if (targetPage == request.page && !missingPostNeedsSearchTakeover(numreponse)) {
             departureAnchor?.let { reportPageAnchor(it) }
             armLanding(PendingLanding.Post(numreponse))
             dispatchLandingAgainstScreen()
@@ -1863,6 +1872,15 @@ class TopicViewModel @AssistedInject constructor(
             return
         }
         internalSwitch(targetPage, departureAnchor, landing = PendingLanding.Post(numreponse))
+    }
+
+    private fun missingPostNeedsSearchTakeover(numreponse: Int): Boolean {
+        val current = _state.value
+        val topic = (current.mode as? TopicUiState.Mode.Loaded)?.topic ?: return false
+        val searchOwnsPage = current.search.showingFilteredResults ||
+            searchJob?.isActive == true || searchCursorIndex >= 0
+        // A citation already displayed in the results keeps its existing in-results jump.
+        return searchOwnsPage && topic.posts.none { it.numreponse == numreponse }
     }
 
     private fun loadMissingSamePagePost(numreponse: Int) {
@@ -2143,14 +2161,14 @@ class TopicViewModel @AssistedInject constructor(
                     // back to the cache-aside path with a Retry affordance.
                     android.util.Log.w(LOG_TAG, "Submit-result refresh failed", refreshError)
                     if (generation != ownerGeneration) return@launch
-                    handleSubmitRefreshFailure(acknowledgementId)
+                    handleSubmitRefreshFailure(acknowledgementId, generation)
                 }
                 return@launch
             }
         }
     }
 
-    private fun handleSubmitRefreshFailure(acknowledgementId: Long?) {
+    private fun handleSubmitRefreshFailure(acknowledgementId: Long?, generation: Int) {
         _state.update { it.copy(refreshKind = TopicRefreshKind.None) }
         if (acknowledgementId != null) {
             submitAcknowledgements.refreshFailed(acknowledgementId)
@@ -2160,7 +2178,11 @@ class TopicViewModel @AssistedInject constructor(
             )
         }
         resolvePendingLandingWithoutScroll()
-        startPageLoad(showLoading = _state.value.mode !is TopicUiState.Mode.Loaded)
+        settleRetainedPageLanding(generation)
+        startPageLoad(
+            showLoading = _state.value.mode !is TopicUiState.Mode.Loaded,
+            settleRetainedPageOnCompletion = true,
+        )
     }
 
     /**
@@ -3037,6 +3059,7 @@ class TopicViewModel @AssistedInject constructor(
     private fun launchSearch(request: TopicSearchRequest, isFresh: Boolean, rewindToIndex: Int? = null) {
         // Take over from any previous search; cancel the in-flight normal load / prefetch so a late
         // observeTopicPage emission cannot land on top of the page this search is about to render.
+        endFirstContentSectionIfNeeded()
         searchJob?.cancel()
         loadJob?.cancel()
         prefetchJob?.cancel()
