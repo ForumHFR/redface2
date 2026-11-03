@@ -1,2 +1,2 @@
-Redface 2 v0.67.1 — dev.
-- Topic view: jumping to a post missing from the displayed page reloads it and lands on the post; reading position is no longer stuck.
+Redface 2 v0.67.2 — dev.
+- Accessibility: TalkBack no longer announces the "First page" and "Last page" buttons of the page picker twice.

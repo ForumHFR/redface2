@@ -1,2 +1,2 @@
-Redface 2 v0.67.1 — dev.
-- Vue Topic : un saut vers un message absent de la page affichée la recharge et atterrit sur le message ; la position de lecture n'est plus bloquée.
+Redface 2 v0.67.2 — dev.
+- Accessibilité : TalkBack n'annonce plus deux fois les boutons « Première page » et « Dernière page » du sélecteur de page.
