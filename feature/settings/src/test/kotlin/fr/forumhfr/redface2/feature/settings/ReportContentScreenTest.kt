@@ -74,6 +74,24 @@ class ReportContentScreenTest {
     }
 
     @Test
+    fun recipientSeesExplanationAndEmailInsteadOfSend() {
+        mount(ready().copy(session = ReportSession.RECIPIENT))
+        compose.onNodeWithText(
+            "Vous êtes le destinataire des signalements : ils ne peuvent pas être envoyés depuis ce compte.",
+        ).assertIsDisplayed()
+        compose.onNodeWithText("Envoyer le signalement").assertDoesNotExist()
+        compose.onNodeWithText("Confirmer l’envoi").assertDoesNotExist()
+        compose.onNodeWithText("Se connecter").assertDoesNotExist()
+        compose.onNodeWithText("Écrire par email")
+            .assertTextEquals("Écrire par email", "Ouvre l’application mail")
+            .assertIsDisplayed()
+            .assertIsEnabled()
+            .assertHasClickAction()
+            .performClick()
+        assertEquals(listOf(ReportContentIntent.Email), intents)
+    }
+
+    @Test
     fun accountMenuReportActionDispatchesItsActualClick() {
         var reports = 0
         compose.setContent {

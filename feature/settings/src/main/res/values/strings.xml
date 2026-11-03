@@ -557,6 +557,7 @@
     <string name="report_delivery">Ce formulaire envoie votre signalement par message privé HFR au compte du projet, sans quitter l’application.</string>
     <string name="report_identity_notice">Le compte HFR connecté sera utilisé pour l’envoi : votre pseudo sera visible du destinataire. Aucun journal ni contenu cité n’est ajouté automatiquement.</string>
     <string name="report_login_explanation">Connectez-vous à un compte HFR pour remplir et envoyer le formulaire. Vous reviendrez ici après la connexion. Vous pouvez aussi nous écrire par email.</string>
+    <string name="report_self_recipient">Vous êtes le destinataire des signalements : ils ne peuvent pas être envoyés depuis ce compte.</string>
     <string name="report_login">Se connecter</string>
     <string name="report_email">Écrire par email</string>
     <string name="report_email_external">Ouvre l’application mail</string>

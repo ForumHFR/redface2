@@ -120,6 +120,13 @@ private fun ReportScrollableContent(
                 CircularProgressIndicator()
             }
             ReportSession.ANONYMOUS -> ReportAnonymousActions(onIntent)
+            ReportSession.RECIPIENT -> {
+                Text(
+                    stringResource(R.string.report_self_recipient),
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                )
+                ReportEmailAction(onIntent)
+            }
             ReportSession.AUTHENTICATED -> {
                 Column(
                     modifier = Modifier.onFocusChanged { inputFocused = it.hasFocus }.focusGroup(),
@@ -138,6 +145,11 @@ private fun ReportScrollableContent(
 private fun ReportAnonymousActions(onIntent: (ReportContentIntent) -> Unit) {
     Text(stringResource(R.string.report_login_explanation))
     Button(onClick = { onIntent(ReportContentIntent.Login) }) { Text(stringResource(R.string.report_login)) }
+    ReportEmailAction(onIntent)
+}
+
+@Composable
+private fun ReportEmailAction(onIntent: (ReportContentIntent) -> Unit) {
     TextButton(onClick = { onIntent(ReportContentIntent.Email) }) {
         Column {
             Text(stringResource(R.string.report_email))

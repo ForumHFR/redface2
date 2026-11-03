@@ -11,7 +11,7 @@ data class ReportDraft(
     val link: String = "",
 )
 
-enum class ReportSession { CHECKING, ANONYMOUS, AUTHENTICATED }
+enum class ReportSession { CHECKING, ANONYMOUS, RECIPIENT, AUTHENTICATED }
 
 enum class ReportError {
     UNCERTAIN, DRAFT_WRITE_FAILED, SESSION_EXPIRED, NETWORK, INVALID_HASH, ANTI_FLOOD,

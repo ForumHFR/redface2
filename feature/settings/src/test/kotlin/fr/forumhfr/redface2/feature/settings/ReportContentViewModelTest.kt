@@ -97,6 +97,92 @@ class ReportContentViewModelTest {
     }
 
     @Test
+    fun recipientSessionNeverFetchesOrSubmitsRegardlessOfCaseAndWhitespace() = runTest {
+        listOf("XaTriX", "xatrix", " \tXaTrIx \n").forEach { pseudo ->
+            store.activeOwner = "xatrix"
+            auth.value = AuthState.Authenticated(pseudo)
+            val vm = create()
+            runCurrent()
+            fill(vm)
+            vm.onIntent(ReportContentIntent.RetryForm)
+            vm.onIntent(ReportContentIntent.Submit)
+            vm.onIntent(ReportContentIntent.SubmitWithTimeout(4_000L))
+            runCurrent()
+            assertEquals(ReportSession.RECIPIENT, vm.state.value.session)
+            assertEquals(ReportDraft(), vm.state.value.draft)
+            assertFalse(vm.state.value.requiresLogin)
+            assertFalse(vm.state.value.canEdit)
+            assertFalse(vm.state.value.canSubmit)
+            assertFalse(vm.state.value.formAvailable)
+            vm.viewModelScope.cancel()
+        }
+        coVerify(exactly = 0) { repository.fetchComposeForm(any()) }
+        coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun recipientCanEmailAndCloseWithoutChangingTheStoredDraft() = runTest {
+        store.activeOwner = "xatrix"
+        auth.value = AuthState.Authenticated("XaTriX")
+        store.preload(EditorDraftKey.report(), ReportDraftCodec.encode(
+            ReportDraft(ReportReason.OTHER, "Description privée du destinataire"),
+        ))
+        val before = store.entries.getValue(EditorDraftKey.report())
+        val vm = create()
+        runCurrent()
+        vm.effects.test {
+            vm.onIntent(ReportContentIntent.Email)
+            assertEquals(ReportContentEffect.Email, awaitItem())
+            vm.onIntent(ReportContentIntent.Close)
+            runCurrent()
+            assertEquals(ReportContentEffect.CloseCommitted, awaitItem())
+            expectNoEvents()
+        }
+        assertEquals(before, store.entries.getValue(EditorDraftKey.report()))
+        coVerify(exactly = 0) { repository.fetchComposeForm(any()) }
+        coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun accountChangesToggleRecipientBlockAndRestoreTheOtherAccountsDraft() = runTest {
+        store.activeOwner = "xatrix"
+        auth.value = AuthState.Authenticated("XaTriX")
+        val vm = create()
+        runCurrent()
+        assertEquals(ReportSession.RECIPIENT, vm.state.value.session)
+
+        store.activeOwner = "tester"
+        auth.value = AuthState.Authenticated("tester")
+        runCurrent()
+        fill(vm)
+        val before = vm.state.value.draft
+        advanceTimeBy(751)
+        runCurrent()
+        assertTrue(vm.state.value.canSubmit)
+
+        store.activeOwner = "xatrix"
+        auth.value = AuthState.Authenticated("xatrix")
+        runCurrent()
+        assertEquals(ReportSession.RECIPIENT, vm.state.value.session)
+        assertEquals(ReportDraft(), vm.state.value.draft)
+        assertFalse(vm.state.value.canSubmit)
+        fillWithLateEdits(vm)
+        vm.onIntent(ReportContentIntent.RetryForm)
+        vm.onIntent(ReportContentIntent.Submit)
+        runCurrent()
+        coVerify(exactly = 1) { repository.fetchComposeForm("XaTriX") }
+
+        store.activeOwner = "tester"
+        auth.value = AuthState.Authenticated("tester")
+        runCurrent()
+        assertEquals(ReportSession.AUTHENTICATED, vm.state.value.session)
+        assertEquals(before, vm.state.value.draft)
+        assertTrue(vm.state.value.canSubmit)
+        coVerify(exactly = 2) { repository.fetchComposeForm("XaTriX") }
+        coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun checkingSessionNeverFetchesOrSubmits() = runTest {
         val pendingAuth = MutableSharedFlow<AuthState>()
         val vm = create(pendingAuth)
@@ -285,7 +371,7 @@ class ReportContentViewModelTest {
             assertEquals(before, vm.state.value.draft)
             assertEquals(attempt, store.entries.getValue(EditorDraftKey.report()).attempt)
         }
-        coVerify(exactly = 2) { repository.fetchComposeForm("XaTelitte") }
+        coVerify(exactly = 2) { repository.fetchComposeForm("XaTriX") }
         coVerify(exactly = 1) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
     }
 
@@ -340,6 +426,8 @@ class ReportContentViewModelTest {
 
     @Test
     fun submitUsesFixedRecipientAndOptions() = runTest {
+        store.activeOwner = "xatelitte"
+        auth.value = AuthState.Authenticated("XaTelitte")
         val vm = create()
         runCurrent()
         fill(vm)
@@ -349,10 +437,10 @@ class ReportContentViewModelTest {
             assertEquals(ReportContentEffect.SubmitSucceeded, awaitItem())
             expectNoEvents()
         }
-        coVerify(exactly = 1) { repository.fetchComposeForm("XaTelitte") }
+        coVerify(exactly = 1) { repository.fetchComposeForm("XaTriX") }
         coVerify(exactly = 1) {
             repository.submitNewMessage(
-                any(), "XaTelitte", "Redface 2 — Signalement", any(),
+                any(), "XaTriX", "Redface 2 — Signalement", any(),
                 ReplyFormOptions(signatureEnabled = false, smileyDisabled = true, emailNotificationEnabled = false),
             )
         }
@@ -428,7 +516,7 @@ class ReportContentViewModelTest {
         runCurrent()
         assertEquals(before, vm.state.value.draft)
         assertEquals(ReportError.INVALID_HASH, vm.state.value.error)
-        coVerify(exactly = 2) { repository.fetchComposeForm("XaTelitte") }
+        coVerify(exactly = 2) { repository.fetchComposeForm("XaTriX") }
         coVerify(exactly = 1) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
     }
 
@@ -676,6 +764,63 @@ class ReportContentViewModelTest {
         assertEquals(ReportDraft(), vm.state.value.draft)
         assertFalse(vm.state.value.formAvailable)
         assertTrue(vm.state.value.formError)
+    }
+
+    @Test
+    fun lateFormAfterSwitchingToRecipientDoesNotReactivateTheForm() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        coEvery { repository.fetchComposeForm(any()) } coAnswers {
+            withContext(NonCancellable) { gate.await() }
+            reportComposeForm()
+        }
+        val vm = create()
+        runCurrent()
+        store.activeOwner = "xatrix"
+        auth.value = AuthState.Authenticated("XaTriX")
+        runCurrent()
+        gate.complete(Unit)
+        runCurrent()
+        vm.onIntent(ReportContentIntent.RetryForm)
+        vm.onIntent(ReportContentIntent.Submit)
+        runCurrent()
+        assertEquals(ReportSession.RECIPIENT, vm.state.value.session)
+        assertEquals(ReportDraft(), vm.state.value.draft)
+        assertFalse(vm.state.value.formAvailable)
+        assertFalse(vm.state.value.canSubmit)
+        assertEquals(null, vm.state.value.error)
+        coVerify(exactly = 1) { repository.fetchComposeForm("XaTriX") }
+        coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun lateSuccessAfterSwitchingToRecipientEmitsNoResult() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } coAnswers {
+            withContext(NonCancellable) { gate.await() }
+            ReplySubmitResult.Success(null, null)
+        }
+        val vm = create()
+        runCurrent()
+        fill(vm)
+        vm.effects.test {
+            vm.onIntent(ReportContentIntent.Submit)
+            runCurrent()
+            assertTrue(vm.state.value.isSending)
+            store.activeOwner = "xatrix"
+            auth.value = AuthState.Authenticated("XaTriX")
+            runCurrent()
+            gate.complete(Unit)
+            runCurrent()
+            expectNoEvents()
+        }
+        assertEquals(ReportSession.RECIPIENT, vm.state.value.session)
+        assertEquals(ReportDraft(), vm.state.value.draft)
+        assertFalse(vm.state.value.formAvailable)
+        assertFalse(vm.state.value.isSending)
+        assertFalse(vm.state.value.canSubmit)
+        assertEquals(null, vm.state.value.error)
+        coVerify(exactly = 1) { repository.fetchComposeForm("XaTriX") }
+        coVerify(exactly = 1) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
     }
 
     @Test
