@@ -1,3 +1,2 @@
-Redface 2 v0.67.0 — dev.
-- Topic view: one confirmation per send, "Message published" or "Message edited", no longer gone in a flash.
-- After a quote: "Last page" button instead of a guessed page number.
+Redface 2 v0.67.1 — dev.
+- Topic view: jumping to a post missing from the displayed page reloads it and lands on the post; reading position is no longer stuck.

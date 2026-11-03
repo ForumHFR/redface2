@@ -1,3 +1,2 @@
-Redface 2 v0.67.0 — dev.
-- Vue Topic : une seule confirmation par envoi, « Message publié » ou « Message modifié », qui ne disparaît plus en un éclair.
-- Après une citation : bouton « Dernière page » au lieu d'un numéro de page deviné.
+Redface 2 v0.67.1 — dev.
+- Vue Topic : un saut vers un message absent de la page affichée la recharge et atterrit sur le message ; la position de lecture n'est plus bloquée.
