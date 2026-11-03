@@ -484,7 +484,7 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `submit fails whole when a card's prefill comes back blank (#291)`() = runTest {
+    fun `submit keeps draft and uncertainty when a card's prefill comes back blank (#291)`() = runTest {
         // A 200-OK form whose textarea prefill is EMPTY would otherwise silently drop a quote
         // the user explicitly selected — same contract as a failed fetch: fail globally.
         replyRepository.formResult = Result.success(authenticatedForm())
@@ -503,7 +503,7 @@ class PostEditorViewModelTest {
         viewModel.state.test {
             val settled = expectMostRecentItem()
             assertFalse(settled.isSubmitting)
-            assertEquals(SubmitError.Hfr(ReplyFailureReason.Unknown), settled.submitError)
+            assertEquals(SubmitError.Uncertain, settled.submitError)
             assertEquals("cards intact", listOf(101, 303), settled.quotes.map { it.numreponse })
             assertEquals("body intact", "Reply", settled.draft.text)
             cancelAndIgnoreRemainingEvents()

@@ -199,7 +199,7 @@ class TopicFormViewModel @AssistedInject constructor(
         drafts = EditorDraftSession(draftStore, draftKey),
         errors = EditorSubmissionErrors(
             uncertain = SubmitError.Uncertain, draftWriteFailed = SubmitError.DraftWriteFailed,
-            sessionExpired = SubmitError.SessionExpired, unknown = SubmitError.Hfr(ReplyFailureReason.Unknown),
+            sessionExpired = SubmitError.SessionExpired, unknown = SubmitError.Uncertain,
             network = SubmitError.Network, sessionExpiredAfterEntry = SubmitError.Uncertain,
         ),
         callbacks = EditorSubmissionCallbacks<TopicFormEffect>(
@@ -850,7 +850,11 @@ class TopicFormViewModel @AssistedInject constructor(
 
     private fun failureDelivery(reason: ReplyFailureReason): EditorDelivery<TopicFormEffect> {
         return EditorDelivery(
-            error = SubmitError.Hfr(reason),
+            error = if (reason == ReplyFailureReason.Unknown) {
+                SubmitError.Uncertain
+            } else {
+                SubmitError.Hfr(reason)
+            },
             afterSettled = if (reason == ReplyFailureReason.InvalidHashCheck) {
                 {
                     loadedForm = null

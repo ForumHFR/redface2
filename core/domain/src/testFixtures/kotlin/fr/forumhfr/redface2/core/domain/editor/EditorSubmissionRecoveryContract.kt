@@ -13,6 +13,7 @@ import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -62,6 +63,58 @@ abstract class EditorSubmissionRecoveryContract {
             assertEquals("edited after uncertainty", adapter.snapshot().body)
             assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
             assertFalse(adapter.snapshot().restoreOffered)
+        }
+    }
+
+    /** An unrecognised POST response cannot prove refusal: retain the attempt across reopening. */
+    @Test
+    fun unknownPostResponsePersistsAndRestoresUncertainty() {
+        val scenario = EditorSubmissionScenario().apply { postRejection = ReplyFailureReason.Unknown }
+        withReadyAdapter(scenario = scenario) { adapter ->
+            startSending(adapter)
+            val body = adapter.snapshot().body
+            adapter.completePost()
+            runCurrent()
+            val entry = scenario.store.entries.values.single()
+            assertEquals(EditorDraftStore.AttemptStatus.UNCERTAIN, entry.attempt?.status)
+            assertEquals(body, entry.draft.body)
+            assertEquals(body, adapter.snapshot().body)
+            assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
+            assertFalse(adapter.snapshot().isSending)
+            assertEquals(0, adapter.successEffects)
+            advanceTimeBy(751)
+            runCurrent()
+            assertEquals("aucun renvoi automatique après une réponse inconnue", 1, adapter.postCalls)
+            scenario.recreateEditor()
+            advanceTimeBy(751)
+            runCurrent()
+            assertEquals(body, adapter.snapshot().body)
+            assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
+            assertEquals(entry.attempt, scenario.store.entries.values.single().attempt)
+            assertFalse(adapter.snapshot().restoreOffered)
+            assertFalse(adapter.snapshot().confirmationVisible)
+            assertEquals("aucun renvoi automatique à la réouverture", 1, adapter.postCalls)
+            assertEquals(0, adapter.successEffects)
+        }
+    }
+
+    @Test
+    fun recognisedPostRejectionRemainsCertain() {
+        val scenario = EditorSubmissionScenario().apply { postRejection = ReplyFailureReason.AntiFlood }
+        withReadyAdapter(scenario = scenario) { adapter ->
+            startSending(adapter)
+            val body = adapter.snapshot().body
+            adapter.completePost()
+            runCurrent()
+            val entry = scenario.store.entries.values.single()
+            assertNull("un refus reconnu efface le marqueur de tentative", entry.attempt)
+            assertEquals(body, entry.draft.body)
+            assertEquals(body, adapter.snapshot().body)
+            assertTrue(adapter.snapshot().error != SubmissionErrorProbe.UNCERTAIN)
+            assertFalse(adapter.snapshot().isSending)
+            assertTrue(adapter.snapshot().canSubmit)
+            assertEquals(0, adapter.successEffects)
+            assertEquals(1, adapter.postCalls)
         }
     }
 

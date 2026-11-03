@@ -203,7 +203,7 @@ class PostEditorViewModel @AssistedInject constructor(
         drafts = EditorDraftSession(draftStore, draftKey),
         errors = EditorSubmissionErrors(
             uncertain = SubmitError.Uncertain, draftWriteFailed = SubmitError.DraftWriteFailed,
-            sessionExpired = SubmitError.SessionExpired, unknown = SubmitError.Hfr(ReplyFailureReason.Unknown),
+            sessionExpired = SubmitError.SessionExpired, unknown = SubmitError.Uncertain,
             network = SubmitError.Network, sessionExpiredAfterEntry = SubmitError.Uncertain,
         ),
         callbacks = EditorSubmissionCallbacks<PostEditorEffect>(
@@ -1052,7 +1052,11 @@ class PostEditorViewModel @AssistedInject constructor(
         )
         is ReplySubmitResult.Failure -> {
             EditorDelivery(
-                error = SubmitError.Hfr(result.reason),
+                error = if (result.reason == ReplyFailureReason.Unknown) {
+                    SubmitError.Uncertain
+                } else {
+                    SubmitError.Hfr(result.reason)
+                },
                 afterSettled = if (result.reason == ReplyFailureReason.InvalidHashCheck) {
                     {
                         loadedForm = null
