@@ -60,10 +60,10 @@ class ReportContentViewModel @AssistedInject constructor(
     private val _effects = Channel<ReportContentEffect>(Channel.BUFFERED)
     val effects = _effects.receiveAsFlow()
     private var confirmPreference: Boolean? = null
+    private var generation = 0
     private var submission = newSubmission()
     private var activeOwner: String? = null
     private var authObserved = false
-    private var generation = 0
     private var formJob: Job? = null
     private var loadedForm: ReplyForm? = null
     private var closeRequested = false
@@ -82,7 +82,7 @@ class ReportContentViewModel @AssistedInject constructor(
 
     private fun newSubmission() = EditorSubmissionBinding(
         environment = EditorSubmissionEnvironment(viewModelScope, dependencies.clock, dependencies.diagnostics),
-        drafts = EditorDraftSession(dependencies.drafts, EditorDraftKey.report()),
+        drafts = EditorDraftSession(reportDraftStore(), EditorDraftKey.report()),
         callbacks = EditorSubmissionCallbacks<ReportContentEffect, ReportError>(
             state = { value -> _state.update { it.copy(submission = value) } },
             error = ::submissionError,
@@ -94,6 +94,36 @@ class ReportContentViewModel @AssistedInject constructor(
             network = ReportError.NETWORK, sessionExpiredAfterEntry = ReportError.UNCERTAIN,
         ),
     ).also { it.setPreference(confirmPreference) }
+
+    // Observe successful content writes without changing the shared binding's error callbacks.
+    private fun reportDraftStore(): EditorDraftStore {
+        val opening = generation
+        return object : EditorDraftStore by dependencies.drafts {
+            override suspend fun saveIfVersion(
+                owner: String?, key: String, draft: EditorDraftStore.Draft, expectedVersion: Long,
+            ) = dependencies.drafts.saveIfVersion(owner, key, draft, expectedVersion).also {
+                draftWritten(it, opening)
+            }
+
+            override suspend fun saveUnresolved(
+                token: EditorDraftStore.AttemptToken, draft: EditorDraftStore.Draft, expectedVersion: Long,
+            ) = dependencies.drafts.saveUnresolved(token, draft, expectedVersion).also {
+                draftWritten(it, opening)
+            }
+
+            override suspend fun startNewComposition(
+                owner: String?, key: String, draft: EditorDraftStore.Draft, expectedVersion: Long,
+            ) = dependencies.drafts.startNewComposition(owner, key, draft, expectedVersion).also {
+                draftWritten(it, opening)
+            }
+        }
+    }
+
+    private fun draftWritten(result: EditorDraftStore.StoreWriteResult, opening: Int) {
+        if (opening == generation && result is EditorDraftStore.StoreWriteResult.Written) {
+            _state.update { it.copy(draftWriteFailed = false) }
+        }
+    }
 
     private fun submissionError(error: ReportError?) {
         _state.update {

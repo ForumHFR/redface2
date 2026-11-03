@@ -406,6 +406,7 @@ class ReportContentViewModelTest {
             advanceTimeBy(751)
             runCurrent()
             assertEquals(vm.state.value.draft, ReportDraftCodec.decode(store.entries.values.single().draft))
+            assertFalse(vm.state.value.draftWriteFailed)
             assertEquals(ReportError.UNCERTAIN, vm.state.value.error)
             assertTrue(vm.state.value.submission is EditorSubmissionState.Uncertain)
             assertTrue(vm.state.value.canSubmit)
@@ -582,6 +583,7 @@ class ReportContentViewModelTest {
             expectNoEvents()
         }
         assertEquals(before, ReportDraftCodec.decode(store.entries.values.single().draft))
+        assertFalse(vm.state.value.draftWriteFailed)
         assertEquals(ReportError.UNCERTAIN, vm.state.value.error)
         assertTrue(vm.state.value.submission is EditorSubmissionState.Uncertain)
         assertEquals(attempt, store.entries.getValue(EditorDraftKey.report()).attempt)
