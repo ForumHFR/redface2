@@ -183,12 +183,12 @@ class ReportContentViewModelTest {
     }
 
     @Test
-    fun uncertainAttemptPurgedOnSwitchToRecipientRestoresAnEmptyUsableFormAndMessageCheck() = runTest {
+    fun uncertainAttemptPurgedOnSwitchToRecipientRestoresAUsableFormAfterMessageCheckAndReopening() = runTest {
         assertPurgedAttemptRecovery("XaTriX", ReportSession.RECIPIENT)
     }
 
     @Test
-    fun uncertainAttemptPurgedOnSwitchToAnotherAccountRestoresAnEmptyUsableFormAndMessageCheck() = runTest {
+    fun uncertainAttemptPurgedOnSwitchToAnotherAccountRestoresAUsableFormAfterMessageCheckAndReopening() = runTest {
         assertPurgedAttemptRecovery("other", ReportSession.AUTHENTICATED)
     }
 
@@ -212,7 +212,6 @@ class ReportContentViewModelTest {
         assertTrue(vm.state.value.draftWriteFailed)
         assertFalse(vm.state.value.draftReady)
         assertFalse(vm.state.value.canEdit)
-        assertFalse(vm.state.value.draftPurged)
 
         vm.effects.test {
             fillWithLateEdits(vm)
@@ -915,7 +914,6 @@ class ReportContentViewModelTest {
         val vm = create()
         runCurrent()
         assertEquals(draft, vm.state.value.draft)
-        assertFalse(vm.state.value.draftPurged)
         assertEquals(EditorSubmissionState.Uncertain(token), vm.state.value.submission)
 
         vm.effects.test {
@@ -932,7 +930,6 @@ class ReportContentViewModelTest {
             )
             assertEquals(ReportDraft(), vm.state.value.draft)
             assertTrue(vm.state.value.draftReady)
-            assertTrue(vm.state.value.draftPurged)
             assertTrue(vm.state.value.canEdit)
             assertTrue(vm.state.value.formAvailable)
             assertFalse(vm.state.value.draftWriteFailed)
@@ -954,7 +951,22 @@ class ReportContentViewModelTest {
             expectNoEvents()
         }
         assertEquals(before.attempt, store.entries.getValue(key).attempt)
-        assertEquals(vm.state.value.draft, ReportDraftCodec.decode(store.entries.getValue(key).draft))
+        assertEquals(ReportDraftCodec.encode(ReportDraft()), store.entries.getValue(key).draft)
+        vm.viewModelScope.cancel()
+
+        val reopened = create()
+        runCurrent()
+        assertEquals(ReportDraft(), reopened.state.value.draft)
+        assertTrue(reopened.state.value.draftReady)
+        assertTrue(reopened.state.value.canEdit)
+        assertTrue(reopened.state.value.formAvailable)
+        assertFalse(reopened.state.value.draftWriteFailed)
+        assertFalse(reopened.state.value.canSubmit)
+        assertEquals(ReportError.UNCERTAIN, reopened.state.value.error)
+        assertEquals(EditorSubmissionState.Uncertain(token), reopened.state.value.submission)
+        assertEquals(before.attempt, store.entries.getValue(key).attempt)
+        fill(reopened)
+        assertTrue(reopened.state.value.canSubmit)
         coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
     }
 
@@ -966,7 +978,6 @@ class ReportContentViewModelTest {
         assertEquals(EditorDraftStore.Draft("", isPrivate = true), purged.draft)
         assertEquals(ReportDraft(), vm.state.value.draft)
         assertTrue(vm.state.value.draftReady)
-        assertTrue(vm.state.value.draftPurged)
         assertTrue(vm.state.value.canEdit)
         assertTrue(vm.state.value.formAvailable)
         assertFalse(vm.state.value.canSubmit)

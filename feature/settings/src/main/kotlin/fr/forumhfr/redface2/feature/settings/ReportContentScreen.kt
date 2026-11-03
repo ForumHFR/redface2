@@ -238,7 +238,7 @@ private fun ReportFormStatusContent(state: ReportContentUiState, onIntent: (Repo
     }
     state.error?.let { error ->
         Text(
-            stringResource(error.messageRes(state.draftPurged)), color = MaterialTheme.colorScheme.error,
+            stringResource(error.messageRes()), color = MaterialTheme.colorScheme.error,
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
         )
         if (error == ReportError.UNCERTAIN) {
@@ -298,12 +298,8 @@ private val ReportReason.labelRes: Int
         ReportReason.OTHER -> R.string.report_reason_other
     }
 
-private fun ReportError.messageRes(draftPurged: Boolean): Int = when (this) {
-    ReportError.UNCERTAIN -> if (draftPurged) {
-        R.string.report_error_uncertain_purged
-    } else {
-        R.string.report_error_uncertain
-    }
+private fun ReportError.messageRes(): Int = when (this) {
+    ReportError.UNCERTAIN -> R.string.report_error_uncertain
     ReportError.DRAFT_WRITE_FAILED -> R.string.report_error_draft
     ReportError.SESSION_EXPIRED -> R.string.report_error_session
     ReportError.NETWORK -> R.string.report_error_network

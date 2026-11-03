@@ -141,7 +141,7 @@ class ReportContentScreenTest {
     fun uncertaintyPreservesInputAndOffersMessageCheck() {
         mount(ready().copy(error = ReportError.UNCERTAIN))
         compose.onNodeWithText(
-            "Envoi non confirmé. Vérifiez vos messages avant de renvoyer. Votre saisie est conservée.",
+            "Envoi non confirmé. Vérifiez vos messages avant de renvoyer.",
         ).performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Description privée").performScrollTo().assertExists()
         compose.onNodeWithText("Vérifier mes messages").performScrollTo().assertIsEnabled().performClick()
@@ -149,9 +149,9 @@ class ReportContentScreenTest {
     }
 
     @Test
-    fun purgedUncertainReportKeepsTheWarningEditableFieldsAndMessageCheck() {
+    fun emptyUncertainReportKeepsTheWarningWithoutPreservationPromiseAndEditableFields() {
         mount(ready().copy(
-            draft = ReportDraft(), draftPurged = true, error = ReportError.UNCERTAIN,
+            draft = ReportDraft(), error = ReportError.UNCERTAIN,
             submission = EditorSubmissionState.Uncertain(null),
         ))
         compose.onNodeWithText(
@@ -179,7 +179,7 @@ class ReportContentScreenTest {
                 "Votre saisie est conservée.",
         ).performScrollTo().assertIsDisplayed()
         compose.onNodeWithText(
-            "Envoi non confirmé. Vérifiez vos messages avant de renvoyer. Votre saisie est conservée.",
+            "Envoi non confirmé. Vérifiez vos messages avant de renvoyer.",
         ).performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Vérifier mes messages").performScrollTo().assertIsEnabled().performClick()
         compose.onNodeWithText("Envoyer le signalement").performScrollTo().assertIsEnabled()
@@ -191,7 +191,7 @@ class ReportContentScreenTest {
         showSubmissionErrorFromBottom(ReportError.UNCERTAIN)
 
         assertFullyVisible(
-            "Envoi non confirmé. Vérifiez vos messages avant de renvoyer. Votre saisie est conservée.",
+            "Envoi non confirmé. Vérifiez vos messages avant de renvoyer.",
         )
         assertFullyVisible("Vérifier mes messages")
         compose.onNodeWithText("Envoyer le signalement").assertIsEnabled()
@@ -273,7 +273,7 @@ class ReportContentScreenTest {
             submission = EditorSubmissionState.Uncertain(null),
         ))
         compose.onNodeWithText(
-            "Envoi non confirmé. Vérifiez vos messages avant de renvoyer. Votre saisie est conservée.",
+            "Envoi non confirmé. Vérifiez vos messages avant de renvoyer.",
         ).performScrollTo().assertExists()
         compose.onNodeWithText("Se connecter").performScrollTo().assertIsEnabled().performClick()
         compose.onNodeWithText("Vérifier mes messages").performScrollTo().assertIsEnabled().performClick()

@@ -23,7 +23,6 @@ data class ReportContentUiState(
     val sessionExpired: Boolean = false,
     val draft: ReportDraft = ReportDraft(),
     val draftReady: Boolean = false,
-    val draftPurged: Boolean = false,
     val isLoadingForm: Boolean = false,
     val formAvailable: Boolean = false,
     val formError: Boolean = false,
