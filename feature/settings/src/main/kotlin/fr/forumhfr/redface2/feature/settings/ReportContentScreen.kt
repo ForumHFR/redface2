@@ -56,7 +56,7 @@ fun ReportContentScreen(
     val state by viewModel.state.collectAsStateWithLifecycle()
     LaunchedEffect(viewModel) { viewModel.effects.collect(onEffect) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        if (viewModel.state.value.error == ReportError.SESSION_EXPIRED) {
+        if (viewModel.state.value.requiresLogin) {
             viewModel.onIntent(ReportContentIntent.RetryForm)
         }
     }
@@ -159,9 +159,9 @@ private fun ReportFormStatus(state: ReportContentUiState, onIntent: (ReportConte
                 Text(stringResource(R.string.report_check_messages))
             }
         }
-        if (error == ReportError.SESSION_EXPIRED) {
-            Button(onClick = { onIntent(ReportContentIntent.Login) }) { Text(stringResource(R.string.report_login)) }
-        }
+    }
+    if (state.requiresLogin) {
+        Button(onClick = { onIntent(ReportContentIntent.Login) }) { Text(stringResource(R.string.report_login)) }
     }
 }
 

@@ -91,7 +91,7 @@ class ReportContentViewModel @AssistedInject constructor(
         errors = EditorSubmissionErrors(
             uncertain = ReportError.UNCERTAIN, draftWriteFailed = ReportError.DRAFT_WRITE_FAILED,
             sessionExpired = ReportError.SESSION_EXPIRED, unknown = ReportError.UNCERTAIN,
-            network = ReportError.NETWORK,
+            network = ReportError.NETWORK, sessionExpiredAfterEntry = ReportError.UNCERTAIN,
         ),
     ).also { it.setPreference(confirmPreference) }
 
@@ -183,7 +183,7 @@ class ReportContentViewModel @AssistedInject constructor(
             loadedForm = form
             _state.update {
                 it.copy(
-                    isLoadingForm = false, formAvailable = true,
+                    isLoadingForm = false, formAvailable = true, sessionExpired = false,
                     error = when {
                         it.error != ReportError.SESSION_EXPIRED -> it.error
                         it.submission is EditorSubmissionState.Uncertain -> ReportError.UNCERTAIN
@@ -196,7 +196,16 @@ class ReportContentViewModel @AssistedInject constructor(
 
     private fun sessionExpired() {
         loadedForm = null
-        _state.update { it.copy(isLoadingForm = false, formAvailable = false, error = ReportError.SESSION_EXPIRED) }
+        _state.update {
+            it.copy(
+                isLoadingForm = false, formAvailable = false, sessionExpired = true,
+                error = if (it.submission is EditorSubmissionState.Uncertain) {
+                    ReportError.UNCERTAIN
+                } else {
+                    ReportError.SESSION_EXPIRED
+                },
+            )
+        }
     }
 
     private fun formFailed() {
@@ -223,8 +232,9 @@ class ReportContentViewModel @AssistedInject constructor(
 
     private fun login() {
         val current = _state.value
-        val loginRequired = current.session == ReportSession.ANONYMOUS || current.error == ReportError.SESSION_EXPIRED
-        if (loginRequired && !submission.blocksClose && !closeRequested) _effects.trySend(ReportContentEffect.Login)
+        if (current.requiresLogin && !submission.blocksClose && !closeRequested) {
+            _effects.trySend(ReportContentEffect.Login)
+        }
     }
 
     private fun email() {
@@ -270,14 +280,27 @@ class ReportContentViewModel @AssistedInject constructor(
         }
         if (permit is SubmissionRequest.Accepted) {
             submission.launch(permit, ReportDraftCodec.encode(snapshot.draft)) {
-                delivery(dependencies.repository.submitNewMessage(
-                    form = form, recipients = REPORT_RECIPIENT, subject = REPORT_SUBJECT,
-                    bbcodeContent = ReportMessageFormatter.format(snapshot.draft, initial.build),
-                    options = ReplyFormOptions(
-                        signatureEnabled = false, smileyDisabled = true, emailNotificationEnabled = false,
-                    ),
-                ))
+                sendReport(form, snapshot.draft)
             }
+        }
+    }
+
+    private suspend fun sendReport(
+        form: ReplyForm,
+        draft: ReportDraft,
+    ): EditorDelivery<ReportContentEffect, ReportError> {
+        val opening = generation
+        return try {
+            delivery(dependencies.repository.submitNewMessage(
+                form = form, recipients = REPORT_RECIPIENT, subject = REPORT_SUBJECT,
+                bbcodeContent = ReportMessageFormatter.format(draft, initial.build),
+                options = ReplyFormOptions(
+                    signatureEnabled = false, smileyDisabled = true, emailNotificationEnabled = false,
+                ),
+            ))
+        } catch (expired: SessionExpiredException) {
+            if (opening == generation) sessionExpired()
+            throw expired
         }
     }
 

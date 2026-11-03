@@ -3,11 +3,14 @@ package fr.forumhfr.redface2.feature.settings
 import app.cash.turbine.test
 import androidx.lifecycle.viewModelScope
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
+import fr.forumhfr.redface2.core.domain.editor.EditorWriteOwner
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.AuthState
@@ -25,6 +28,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.Flow
@@ -164,7 +168,7 @@ class ReportContentViewModelTest {
     }
 
     @Test
-    fun sessionRecoveryRestoresTheWarningForAnUnresolvedAttempt() = runTest {
+    fun sessionRecoveryKeepsTheWarningForAnUnresolvedAttempt() = runTest {
         coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
         val vm = create()
@@ -176,16 +180,149 @@ class ReportContentViewModelTest {
         coEvery { repository.fetchComposeForm(any()) } returns reportComposeForm().copy(isAnonymous = true)
         vm.onIntent(ReportContentIntent.RetryForm)
         runCurrent()
-        assertEquals(ReportError.SESSION_EXPIRED, vm.state.value.error)
+        assertEquals(ReportError.UNCERTAIN, vm.state.value.error)
+        assertTrue(vm.state.value.requiresLogin)
 
         coEvery { repository.fetchComposeForm(any()) } returns reportComposeForm()
         vm.onIntent(ReportContentIntent.RetryForm)
         runCurrent()
 
         assertTrue(vm.state.value.formAvailable)
+        assertFalse(vm.state.value.requiresLogin)
         assertEquals(ReportError.UNCERTAIN, vm.state.value.error)
         assertEquals(before, vm.state.value.draft)
         coVerify(exactly = 1) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun sessionExpiryAfterSendPersistsAndRestoresUncertaintyWithoutResending() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } coAnswers {
+            gate.await()
+            throw SessionExpiredException("https://forum.hardware.fr/login.php")
+        }
+        val vm = create()
+        runCurrent()
+        fill(vm)
+        val before = vm.state.value.draft
+        vm.effects.test {
+            vm.onIntent(ReportContentIntent.Submit)
+            runCurrent()
+            assertTrue(vm.state.value.submission is EditorSubmissionState.Sending)
+            assertEquals(EditorDraftStore.AttemptStatus.IN_PROGRESS, store.entries.values.single().attempt?.status)
+            gate.complete(Unit)
+            runCurrent()
+            expectNoEvents()
+        }
+        val attempt = store.entries.getValue(EditorDraftKey.report()).attempt
+        assertEquals(EditorDraftStore.AttemptStatus.UNCERTAIN, attempt?.status)
+        assertEquals(ReportError.UNCERTAIN, vm.state.value.error)
+        assertTrue(vm.state.value.requiresLogin)
+        assertFalse(vm.state.value.canSubmit)
+        assertEquals(before, vm.state.value.draft)
+        assertEquals(before, ReportDraftCodec.decode(store.entries.values.single().draft))
+        vm.viewModelScope.cancel()
+
+        coEvery { repository.fetchComposeForm(any()) } throws
+            SessionExpiredException("https://forum.hardware.fr/login.php")
+        val restored = create()
+        runCurrent()
+        restored.effects.test {
+            restored.onIntent(ReportContentIntent.Submit)
+            runCurrent()
+            expectNoEvents()
+        }
+        assertTrue(restored.state.value.submission is EditorSubmissionState.Uncertain)
+        assertEquals(ReportError.UNCERTAIN, restored.state.value.error)
+        assertTrue(restored.state.value.requiresLogin)
+        assertEquals(before, restored.state.value.draft)
+        assertEquals(attempt, store.entries.getValue(EditorDraftKey.report()).attempt)
+        coVerify(exactly = 1) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun loginAfterSessionExpiryDuringSendPreservesTheUnresolvedAttempt() = runTest {
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } throws
+            SessionExpiredException("https://forum.hardware.fr/login.php")
+        val vm = create()
+        runCurrent()
+        fill(vm)
+        val before = vm.state.value.draft
+        vm.effects.test {
+            vm.onIntent(ReportContentIntent.Submit)
+            runCurrent()
+            expectNoEvents()
+            val attempt = store.entries.getValue(EditorDraftKey.report()).attempt
+            assertEquals(EditorDraftStore.AttemptStatus.UNCERTAIN, attempt?.status)
+            assertTrue(vm.state.value.requiresLogin)
+            vm.onIntent(ReportContentIntent.Login)
+            assertEquals(ReportContentEffect.Login, awaitItem())
+            assertEquals(ReportError.UNCERTAIN, vm.state.value.error)
+            assertEquals(attempt, store.entries.getValue(EditorDraftKey.report()).attempt)
+
+            // Même compte : ON_RESUME recharge le formulaire sans réémettre le POST.
+            auth.value = AuthState.Authenticated("tester")
+            vm.onIntent(ReportContentIntent.RetryForm)
+            runCurrent()
+            expectNoEvents()
+            assertFalse(vm.state.value.requiresLogin)
+            assertTrue(vm.state.value.canSubmit)
+            assertTrue(vm.state.value.submission is EditorSubmissionState.Uncertain)
+            assertEquals(ReportError.UNCERTAIN, vm.state.value.error)
+            assertEquals(before, vm.state.value.draft)
+            assertEquals(attempt, store.entries.getValue(EditorDraftKey.report()).attempt)
+        }
+        coVerify(exactly = 2) { repository.fetchComposeForm("XaTelitte") }
+        coVerify(exactly = 1) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun transportGuardRefusalBeforeEmissionRemainsCertain() = runTest {
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } coAnswers {
+            checkNotNull(currentCoroutineContext()[EditorWriteOwner]).rejectBeforeEmission()
+        }
+        val vm = create()
+        runCurrent()
+        fill(vm)
+        val before = vm.state.value.draft
+        vm.effects.test {
+            vm.onIntent(ReportContentIntent.Submit)
+            runCurrent()
+            expectNoEvents()
+        }
+        assertEquals(ReportError.SESSION_EXPIRED, vm.state.value.error)
+        assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
+        assertEquals(null, store.entries.getValue(EditorDraftKey.report()).attempt)
+        assertEquals(before, vm.state.value.draft)
+        coVerify(exactly = 1) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun lateSessionExpiryAfterAccountChangeIsIgnored() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } coAnswers {
+            withContext(NonCancellable) {
+                gate.await()
+                throw SessionExpiredException("https://forum.hardware.fr/login.php")
+            }
+        }
+        val vm = create()
+        runCurrent()
+        fill(vm)
+        vm.effects.test {
+            vm.onIntent(ReportContentIntent.Submit)
+            runCurrent()
+            store.activeOwner = "other"
+            auth.value = AuthState.Authenticated("other")
+            runCurrent()
+            gate.complete(Unit)
+            runCurrent()
+            expectNoEvents()
+        }
+        assertEquals(ReportDraft(), vm.state.value.draft)
+        assertTrue(vm.state.value.formAvailable)
+        assertFalse(vm.state.value.requiresLogin)
+        assertEquals(null, vm.state.value.error)
     }
 
     @Test

@@ -90,6 +90,22 @@ class ReportContentScreenTest {
         assertEquals(listOf(ReportContentIntent.CheckMessages), intents)
     }
 
+    @Test
+    fun expiredSessionOffersLoginAlongsideTheUncertaintyWarning() {
+        mount(ready().copy(
+            sessionExpired = true, formAvailable = false, error = ReportError.UNCERTAIN,
+            submission = EditorSubmissionState.Uncertain(null),
+        ))
+        compose.onNodeWithText(
+            "Envoi non confirmé. Vérifiez vos messages avant de renvoyer. Votre saisie est conservée.",
+        ).performScrollTo().assertExists()
+        compose.onNodeWithText("Se connecter").performScrollTo().assertIsEnabled().performClick()
+        compose.onNodeWithText("Vérifier mes messages").performScrollTo().assertIsEnabled().performClick()
+        compose.onNodeWithText("Description privée").performScrollTo().assertExists()
+        compose.onNodeWithText("Envoyer le signalement").assertIsNotEnabled()
+        assertEquals(listOf(ReportContentIntent.Login, ReportContentIntent.CheckMessages), intents)
+    }
+
     private fun ready() = ReportContentUiState(
         session = ReportSession.AUTHENTICATED, draftReady = true, formAvailable = true,
         draft = ReportDraft(ReportReason.OTHER, "Description privée"),

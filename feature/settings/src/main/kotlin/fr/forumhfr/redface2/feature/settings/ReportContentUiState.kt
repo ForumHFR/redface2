@@ -20,6 +20,7 @@ enum class ReportError {
 
 data class ReportContentUiState(
     val session: ReportSession = ReportSession.CHECKING,
+    val sessionExpired: Boolean = false,
     val draft: ReportDraft = ReportDraft(),
     val draftReady: Boolean = false,
     val isLoadingForm: Boolean = false,
@@ -28,6 +29,8 @@ data class ReportContentUiState(
     val submission: EditorSubmissionState = EditorSubmissionState.Ready,
     val error: ReportError? = null,
 ) {
+    val requiresLogin: Boolean
+        get() = session == ReportSession.ANONYMOUS || sessionExpired || error == ReportError.SESSION_EXPIRED
     val isSending: Boolean
         get() = submission is EditorSubmissionState.PersistingAttempt || submission is EditorSubmissionState.Sending
     val canEdit: Boolean
