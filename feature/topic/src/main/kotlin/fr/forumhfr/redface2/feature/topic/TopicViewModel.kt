@@ -1858,17 +1858,24 @@ class TopicViewModel @AssistedInject constructor(
      * chain, switch when needed and land on [numreponse]. A same-page jump dispatches against the
      * page already on screen; a missing post on a settled page gets one forced cache-aside reload
      * under the same owner (#1447), so a recent citing post can appear even inside the cache TTL.
-     * Missing posts in search results use the normal switch path to reclaim the canonical page.
+     * Missing posts in search results first reclaim the canonical snapshot under a new owner,
+     * then share that same bounded retry and failure settlement instead of switching pages.
      */
     fun goToPost(targetPage: Int, numreponse: Int, departureAnchor: TopicScrollAnchor? = null) {
         if (jumpStack.size >= JUMP_STACK_MAX) jumpStack.removeFirst()
         jumpStack.addLast(TopicJumpFrame(request.page, departureAnchor))
         syncJumpAvailability()
-        if (targetPage == request.page && !missingPostNeedsSearchTakeover(numreponse)) {
+        if (targetPage == request.page) {
             departureAnchor?.let { reportPageAnchor(it) }
+            val leavingSearch = missingPostNeedsSearchTakeover(numreponse)
+            val canonicalLoadRequired = leavingSearch && !restoreCanonicalPageFromSearch()
             armLanding(PendingLanding.Post(numreponse))
-            dispatchLandingAgainstScreen()
-            loadMissingSamePagePost(numreponse)
+            if (canonicalLoadRequired) {
+                startPageLoad(showLoading = true, refreshMissingPost = true)
+            } else {
+                dispatchLandingAgainstScreen()
+                loadMissingSamePagePost(numreponse, reloadCanonicalPage = leavingSearch)
+            }
             return
         }
         internalSwitch(targetPage, departureAnchor, landing = PendingLanding.Post(numreponse))
@@ -1883,15 +1890,34 @@ class TopicViewModel @AssistedInject constructor(
         return searchOwnsPage && topic.posts.none { it.numreponse == numreponse }
     }
 
-    private fun loadMissingSamePagePost(numreponse: Int) {
+    /** #1447 — reclaim search ownership; return false when no canonical snapshot can be restored. */
+    private fun restoreCanonicalPageFromSearch(): Boolean {
+        submitAcknowledgements.clear()
+        becomePageOwner()
+        savedStateHandle[KEY_FORCE_REFRESH_DONE] = true
+        val snapshot = pageSnapshots[request.page] ?: return false
+        _state.update {
+            it.copy(
+                mode = loadedMode(snapshot),
+                availablePages = (1..snapshot.totalPages).toList(),
+                search = it.search.capturingAnchor(snapshot),
+            )
+        }
+        return true
+    }
+
+    private fun loadMissingSamePagePost(numreponse: Int, reloadCanonicalPage: Boolean = false) {
         val loaded = _state.value.mode as? TopicUiState.Mode.Loaded ?: return
         // A provisional emission or an LRU snapshot whose load is still running must wait for
         // that owner's terminal content. In particular, a second jump shares the pending retry.
         val awaitingContent = loaded.provisional || loadJob?.isActive == true
+        val missingPost = loaded.topic.posts.none { it.numreponse == numreponse }
+        // A search exit still reloads a restored snapshot to rehydrate transient poll forms.
+        // Only an absent target needs to bypass TTL and settle a retained landing on failure.
         if (loaded.topic.page == request.page && !awaitingContent &&
-            loaded.topic.posts.none { it.numreponse == numreponse }
+            (reloadCanonicalPage || missingPost)
         ) {
-            startPageLoad(showLoading = false, refreshMissingPost = true)
+            startPageLoad(showLoading = false, refreshMissingPost = missingPost)
         }
     }
 
