@@ -85,7 +85,7 @@ class ReportContentViewModel @AssistedInject constructor(
         drafts = EditorDraftSession(dependencies.drafts, EditorDraftKey.report()),
         callbacks = EditorSubmissionCallbacks<ReportContentEffect, ReportError>(
             state = { value -> _state.update { it.copy(submission = value) } },
-            error = { value -> _state.update { it.copy(error = value) } },
+            error = ::submissionError,
             success = { value -> _effects.trySend(value) },
         ),
         errors = EditorSubmissionErrors(
@@ -94,6 +94,17 @@ class ReportContentViewModel @AssistedInject constructor(
             network = ReportError.NETWORK, sessionExpiredAfterEntry = ReportError.UNCERTAIN,
         ),
     ).also { it.setPreference(confirmPreference) }
+
+    private fun submissionError(error: ReportError?) {
+        _state.update {
+            // A storage failure cannot resolve an attempt whose delivery is still unknown.
+            if (error == ReportError.DRAFT_WRITE_FAILED) {
+                it.copy(draftWriteFailed = true)
+            } else {
+                it.copy(error = error, draftWriteFailed = false)
+            }
+        }
+    }
 
     private fun authChanged(auth: AuthState) {
         val owner = (auth as? AuthState.Authenticated)?.pseudo?.lowercase()
@@ -119,7 +130,7 @@ class ReportContentViewModel @AssistedInject constructor(
         val binding = submission
         val entry = binding.restore(EditorDraftKey.report())
         if (opening != generation) return
-        if (entry == null && _state.value.error == ReportError.DRAFT_WRITE_FAILED) return
+        if (entry == null && _state.value.draftWriteFailed) return
         if (binding.drafts.owner == activeOwner) {
             acceptDraft(entry, opening)
         } else {
@@ -131,7 +142,7 @@ class ReportContentViewModel @AssistedInject constructor(
     private suspend fun acceptDraft(entry: EditorDraftStore.DraftEntry?, opening: Int) {
         val draft = entry?.let { ReportDraftCodec.decode(it.draft) }
         if (entry != null && draft == null) {
-            _state.update { it.copy(error = ReportError.DRAFT_WRITE_FAILED) }
+            _state.update { it.copy(draftWriteFailed = true) }
         } else {
             _state.update { it.copy(draft = draft ?: it.draft, draftReady = true) }
             fetchForm(opening)

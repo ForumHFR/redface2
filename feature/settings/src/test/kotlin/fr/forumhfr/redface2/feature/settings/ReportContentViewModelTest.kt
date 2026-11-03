@@ -35,6 +35,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
@@ -377,6 +378,44 @@ class ReportContentViewModelTest {
     }
 
     @Test
+    fun autosaveFailureAndRecoveryPreserveAnUnknownDelivery() = runTest {
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        val vm = create()
+        runCurrent()
+        fill(vm)
+        vm.onIntent(ReportContentIntent.Submit)
+        runCurrent()
+        val attempt = store.entries.getValue(EditorDraftKey.report()).attempt
+        assertEquals(EditorDraftStore.AttemptStatus.UNCERTAIN, attempt?.status)
+
+        vm.effects.test {
+            store.saveFailure = IOException("storage unavailable")
+            vm.onIntent(ReportContentIntent.DescriptionChanged("Edited after unknown delivery"))
+            advanceTimeBy(751)
+            runCurrent()
+            assertTrue(vm.state.value.draftWriteFailed)
+            assertEquals(ReportError.UNCERTAIN, vm.state.value.error)
+            assertTrue(vm.state.value.submission is EditorSubmissionState.Uncertain)
+            assertTrue(vm.state.value.canSubmit)
+            assertEquals(attempt, store.entries.getValue(EditorDraftKey.report()).attempt)
+            expectNoEvents()
+
+            store.saveFailure = null
+            vm.onIntent(ReportContentIntent.DescriptionChanged("Saved after storage recovery"))
+            advanceTimeBy(751)
+            runCurrent()
+            assertEquals(vm.state.value.draft, ReportDraftCodec.decode(store.entries.values.single().draft))
+            assertEquals(ReportError.UNCERTAIN, vm.state.value.error)
+            assertTrue(vm.state.value.submission is EditorSubmissionState.Uncertain)
+            assertTrue(vm.state.value.canSubmit)
+            assertEquals(attempt, store.entries.getValue(EditorDraftKey.report()).attempt)
+            expectNoEvents()
+        }
+        coVerify(exactly = 1) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun invalidHashReloadPreservesInput() = runTest {
         coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
@@ -499,7 +538,8 @@ class ReportContentViewModelTest {
             vm.onIntent(ReportContentIntent.CheckMessages)
             runCurrent()
             expectNoEvents()
-            assertEquals(ReportError.DRAFT_WRITE_FAILED, vm.state.value.error)
+            assertTrue(vm.state.value.draftWriteFailed)
+            assertEquals(null, vm.state.value.error)
             store.saveFailure = null
             vm.onIntent(ReportContentIntent.DescriptionChanged("Updated after failed save"))
             assertEquals("Updated after failed save", vm.state.value.draft.description)
@@ -508,6 +548,44 @@ class ReportContentViewModelTest {
             assertEquals(ReportContentEffect.CheckMessages, awaitItem())
             expectNoEvents()
         }
+    }
+
+    @Test
+    fun messageCheckFlushFailureAndRecoveryPreserveAnUnknownDelivery() = runTest {
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        val vm = create()
+        runCurrent()
+        fill(vm)
+        vm.onIntent(ReportContentIntent.Submit)
+        runCurrent()
+        val before = vm.state.value.draft
+        val attempt = store.entries.getValue(EditorDraftKey.report()).attempt
+        assertEquals(EditorDraftStore.AttemptStatus.UNCERTAIN, attempt?.status)
+
+        vm.effects.test {
+            store.saveFailure = IOException("storage unavailable")
+            vm.onIntent(ReportContentIntent.CheckMessages)
+            runCurrent()
+            expectNoEvents()
+            assertTrue(vm.state.value.draftWriteFailed)
+            assertEquals(ReportError.UNCERTAIN, vm.state.value.error)
+            assertTrue(vm.state.value.submission is EditorSubmissionState.Uncertain)
+            assertTrue(vm.state.value.canSubmit)
+            assertEquals(before, vm.state.value.draft)
+            assertEquals(attempt, store.entries.getValue(EditorDraftKey.report()).attempt)
+
+            store.saveFailure = null
+            vm.onIntent(ReportContentIntent.CheckMessages)
+            runCurrent()
+            assertEquals(ReportContentEffect.CheckMessages, awaitItem())
+            expectNoEvents()
+        }
+        assertEquals(before, ReportDraftCodec.decode(store.entries.values.single().draft))
+        assertEquals(ReportError.UNCERTAIN, vm.state.value.error)
+        assertTrue(vm.state.value.submission is EditorSubmissionState.Uncertain)
+        assertEquals(attempt, store.entries.getValue(EditorDraftKey.report()).attempt)
+        coVerify(exactly = 1) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
     }
 
     @Test

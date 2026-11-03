@@ -32,6 +32,7 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.height
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -127,6 +128,24 @@ class ReportContentScreenTest {
     }
 
     @Test
+    fun storageFailureShowsBothErrorsAndKeepsMessageCheckAvailable() {
+        mount(ready().copy(
+            error = ReportError.UNCERTAIN, draftWriteFailed = true,
+            submission = EditorSubmissionState.Uncertain(null),
+        ))
+        compose.onNodeWithText(
+            "Impossible de lire ou d’enregistrer le brouillon. Aucun nouvel envoi n’a été effectué. " +
+                "Votre saisie est conservée.",
+        ).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(
+            "Envoi non confirmé. Vérifiez vos messages avant de renvoyer. Votre saisie est conservée.",
+        ).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Vérifier mes messages").performScrollTo().assertIsEnabled().performClick()
+        compose.onNodeWithText("Envoyer le signalement").performScrollTo().assertIsEnabled()
+        assertEquals(listOf(ReportContentIntent.CheckMessages), intents)
+    }
+
+    @Test
     fun uncertaintyBecomesFullyVisibleAfterSubmittingFromTheBottom() {
         showSubmissionErrorFromBottom(ReportError.UNCERTAIN)
 
@@ -145,6 +164,44 @@ class ReportContentScreenTest {
 
         assertFullyVisible("Connexion à HFR impossible. Votre saisie est conservée. Réessayez.")
         compose.onNodeWithText("Envoyer le signalement").assertIsEnabled()
+    }
+
+    @Test
+    fun refusalBecomesFullyVisibleAfterSubmittingFromTheBottom() {
+        showSubmissionErrorFromBottom(ReportError.ANTI_FLOOD)
+
+        assertFullyVisible(
+            "HFR a refusé l’envoi pour limiter les messages rapprochés. " +
+                "Réessayez plus tard ; votre saisie est conservée.",
+        )
+        compose.onNodeWithText("Envoyer le signalement").assertIsEnabled()
+    }
+
+    @Test
+    @Config(qualifiers = "w800dp-h480dp-xxhdpi")
+    fun formLoadFailureDoesNotScrollAwayFromTheFocusedInput() {
+        val state = mount(ready().copy(
+            isLoadingForm = true, formAvailable = false, draft = ReportDraft(ReportReason.OTHER, ""),
+        ))
+        val label = "Description du problème *"
+        focusWithKeyboard(label)
+        val field = compose.onNodeWithText(label)
+        field.performTextInput("Saisie pendant le chargement")
+        val before = assertFullyVisible(label)
+
+        compose.runOnIdle {
+            state.value = state.value.copy(isLoadingForm = false, formError = true)
+        }
+        compose.waitForIdle()
+
+        field.assertIsFocused()
+        assertEquals(before, assertFullyVisible(label))
+        field.performTextInput(" après l’échec")
+        assertEquals("Saisie pendant le chargement après l’échec", state.value.draft.description)
+        compose.onNodeWithText(
+            "Impossible de charger le formulaire HFR. Votre saisie est conservée.",
+        ).assertExists()
+        assertTrue(intents.none { it is ReportContentIntent.SubmitWithTimeout })
     }
 
     @Test

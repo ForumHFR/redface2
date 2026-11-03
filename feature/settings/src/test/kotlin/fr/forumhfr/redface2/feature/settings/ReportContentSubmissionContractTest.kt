@@ -136,8 +136,7 @@ private class ReportSubmissionAdapter(
             isUploading = false, confirmationVisible = it.armToken != null, armId = it.armToken?.id,
             error = when (it.error) {
                 ReportError.UNCERTAIN -> SubmissionErrorProbe.UNCERTAIN
-                ReportError.DRAFT_WRITE_FAILED -> SubmissionErrorProbe.DRAFT_WRITE_FAILED
-                else -> null
+                else -> if (it.draftWriteFailed) SubmissionErrorProbe.DRAFT_WRITE_FAILED else null
             },
             blocksClose = it.submission.blocksBodyMutation,
         )

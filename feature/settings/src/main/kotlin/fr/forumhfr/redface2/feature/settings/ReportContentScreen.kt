@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.settings
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -34,6 +35,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -105,6 +107,7 @@ private fun ReportScrollableContent(
     onIntent: (ReportContentIntent) -> Unit,
     maxFieldHeight: Dp,
 ) {
+    var inputFocused by remember { mutableStateOf(false) }
     // Keep the send action in the scroll so it cannot squeeze the focused field above the IME.
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
@@ -118,8 +121,13 @@ private fun ReportScrollableContent(
             }
             ReportSession.ANONYMOUS -> ReportAnonymousActions(onIntent)
             ReportSession.AUTHENTICATED -> {
-                ReportForm(state, onIntent, maxFieldHeight)
-                ReportFormStatus(state, onIntent)
+                Column(
+                    modifier = Modifier.onFocusChanged { inputFocused = it.hasFocus }.focusGroup(),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    ReportForm(state, onIntent, maxFieldHeight)
+                }
+                ReportFormStatus(state, onIntent, inputFocused)
                 ReportSubmitButton(state, onIntent)
             }
         }
@@ -170,11 +178,19 @@ private fun ReportForm(
 }
 
 @Composable
-private fun ReportFormStatus(state: ReportContentUiState, onIntent: (ReportContentIntent) -> Unit) {
+private fun ReportFormStatus(
+    state: ReportContentUiState,
+    onIntent: (ReportContentIntent) -> Unit,
+    inputFocused: Boolean,
+) {
     val bringIntoView = remember { BringIntoViewRequester() }
-    var placed by remember(state.error, state.formError) { mutableStateOf(false) }
-    LaunchedEffect(placed, state.error, state.formError) {
-        if (placed && (state.error != null || state.formError)) {
+    val submissionError = state.error?.takeUnless { it == ReportError.SESSION_EXPIRED }
+    val passiveError = state.formError || state.draftWriteFailed || state.requiresLogin
+    val revealPassiveError = submissionError == null && passiveError && !inputFocused
+    // Only a new send result may interrupt typing. Other failures wait until focus leaves the form.
+    var placed by remember(submissionError, revealPassiveError) { mutableStateOf(false) }
+    LaunchedEffect(placed, submissionError, revealPassiveError) {
+        if (placed && (submissionError != null || revealPassiveError)) {
             bringIntoView.bringIntoView()
         }
     }
@@ -188,7 +204,7 @@ private fun ReportFormStatus(state: ReportContentUiState, onIntent: (ReportConte
 
 @Composable
 private fun ReportFormStatusContent(state: ReportContentUiState, onIntent: (ReportContentIntent) -> Unit) {
-    if (state.isLoadingForm || (!state.draftReady && state.error == null)) {
+    if (state.isLoadingForm || (!state.draftReady && !state.draftWriteFailed)) {
         Text(stringResource(R.string.report_loading), style = MaterialTheme.typography.bodyMedium)
     }
     if (state.formError) {
@@ -197,16 +213,22 @@ private fun ReportFormStatusContent(state: ReportContentUiState, onIntent: (Repo
             Text(stringResource(R.string.report_retry))
         }
     }
+    if (state.draftWriteFailed) {
+        Text(
+            stringResource(R.string.report_error_draft), color = MaterialTheme.colorScheme.error,
+            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+        )
+        if (!state.draftReady) {
+            TextButton(onClick = { onIntent(ReportContentIntent.RetryForm) }) {
+                Text(stringResource(R.string.report_retry))
+            }
+        }
+    }
     state.error?.let { error ->
         Text(
             stringResource(error.messageRes), color = MaterialTheme.colorScheme.error,
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
         )
-        if (error == ReportError.DRAFT_WRITE_FAILED && !state.draftReady) {
-            TextButton(onClick = { onIntent(ReportContentIntent.RetryForm) }) {
-                Text(stringResource(R.string.report_retry))
-            }
-        }
         if (error == ReportError.UNCERTAIN) {
             TextButton(onClick = { onIntent(ReportContentIntent.CheckMessages) }) {
                 Text(stringResource(R.string.report_check_messages))

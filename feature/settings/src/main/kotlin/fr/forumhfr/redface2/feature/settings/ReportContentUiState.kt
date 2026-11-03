@@ -28,6 +28,7 @@ data class ReportContentUiState(
     val formError: Boolean = false,
     val submission: EditorSubmissionState = EditorSubmissionState.Ready,
     val error: ReportError? = null,
+    val draftWriteFailed: Boolean = false,
 ) {
     val requiresLogin: Boolean
         get() = session == ReportSession.ANONYMOUS || sessionExpired || error == ReportError.SESSION_EXPIRED
