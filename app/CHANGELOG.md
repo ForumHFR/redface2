@@ -16,6 +16,10 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.67.2` — `internal` (dev) — 2026-11-03
+
+Accessibilité du sélecteur de page ([#1448](https://github.com/ForumHFR/redface2/issues/1448) ; [#1529](https://github.com/ForumHFR/redface2/pull/1529)) : TalkBack n'annonce plus deux fois les boutons « Première page » et « Dernière page » (vue Topic et MP).
+
 ## `0.67.1` — `internal` (dev) — 2026-11-03
 
 Saut de citation dans la vue Topic ([#1447](https://github.com/ForumHFR/redface2/issues/1447) ; [#1527](https://github.com/ForumHFR/redface2/pull/1527)) : un saut vers un message absent de la page affichée (par exemple « voir le message citant » contre une page en cache) recharge la page une fois puis atterrit sur le message ; la position de lecture n'est plus bloquée sur cette page.
