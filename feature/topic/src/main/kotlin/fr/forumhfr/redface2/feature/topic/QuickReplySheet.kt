@@ -323,6 +323,7 @@ internal fun QuickReplySubmitError.messageRes(): Int = when (this) {
         ReplyFailureReason.TopicLocked -> R.string.quick_reply_error_topic_locked
         ReplyFailureReason.LoginRequired -> R.string.quick_reply_error_login_required
         ReplyFailureReason.Unknown -> R.string.quick_reply_error_unknown
+        ReplyFailureReason.UnknownRecipient -> R.string.quick_reply_error_unknown
     }
 }
 

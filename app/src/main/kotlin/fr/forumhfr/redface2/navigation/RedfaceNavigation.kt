@@ -1,7 +1,6 @@
 package fr.forumhfr.redface2.navigation
 
 import android.app.Activity
-import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
@@ -258,7 +257,7 @@ data class PrivateMessageComposeRoute(
  */
 private fun NavKey?.hidesNavigationSuite(): Boolean =
     this is PostEditorRoute || this is TopicFormRoute || this is PrivateMessageReplyRoute ||
-        this is PrivateMessageComposeRoute || this is ImageViewerRoute
+        this is PrivateMessageComposeRoute || this is ImageViewerRoute || this is ReportContentRoute
 
 /**
  * #494 — type de barre de navigation à passer au [NavigationSuiteScaffoldLayout]. Sur téléphone l'adaptatif
@@ -1148,8 +1147,6 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
         LifecycleEventEffect(Lifecycle.Event.ON_START) {
             mpBadgeViewModel.onAppForegrounded()
         }
-        val reportEmailSubject = stringResource(fr.forumhfr.redface2.core.ui.R.string.account_menu_report_email_subject)
-        val reportNoEmailClient = stringResource(fr.forumhfr.redface2.core.ui.R.string.account_menu_no_email_client)
         // #531 — optimistic « read » marks of the inbox, now keyed by the conversation DATE seen at
         // open-time (was a bare Set<Int>). Storing the date lets a fresh page-1 network result RECONCILE
         // the mark: HFR re-flagging a thread unread is only honoured when its server date is STRICTLY
@@ -1183,10 +1180,8 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
         // Anonymous) — keeping a positive value here would then silently swallow the next session's
         // first reconcile.
         var lastReconciledGeneration by remember { mutableStateOf(0) }
-        // #301 follow-up — bumped when the new-conversation composer pops back after a successful
-        // send. The MP list collects the signal and refreshes itself so the created conversation
-        // appears at the top (its thread id is unknown — the bddpost success response of a new MP
-        // is not topic-shaped). In-memory only, like the other private-message hints above.
+        // Requests page 1 after a successful new conversation or an explicit report message check.
+        // A refresh request carries no delivery verdict. In-memory only, like the hints above.
         var privateMessageSentSignal by remember { mutableStateOf<Long?>(null) }
         // #1040 lot 6 — successful reply outcome owed to the RETAINED conversation ViewModel.
         // Keyed by canonical account + thread, never serialized; the event counter prevents replay.
@@ -1269,7 +1264,7 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
             topicSubmitRelay.clear()
             flagsSubmitAckRequest = 0L
             flagsSubmitAckAccount = null
-            resetStack(messagesBackStack, MessagesRoute, MessagesRoute)
+            resetMessagesPreservingReport(messagesBackStack)
         }
 
         // #624 — the post/topic editor pins an « Envoyer » bar above the keyboard. Inside the bottom-nav
@@ -1380,7 +1375,7 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                             onLogout = accountViewModel::logout,
                             onOpenDiagnostics = { activeBackStack.add(DiagnosticsRoute) },
                             onReportContent = {
-                                startReportEmail(context, reportEmailSubject, reportNoEmailClient)
+                                openReportFromAccount(activeBackStack)
                             },
                             avatarUrl = accountAvatarUrl,
                             avatarAppearance = accountAvatarAppearance,
@@ -1418,7 +1413,16 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                                 },
                             ),
                             onReportContent = {
-                                startReportEmail(context, reportEmailSubject, reportNoEmailClient)
+                                openReportFromSettings(activeBackStack)
+                            },
+                            onCheckReportMessages = {
+                                openMessagesForReport(
+                                    messagesBackStack,
+                                    requestInboxRefresh = {
+                                        privateMessageSentSignal = (privateMessageSentSignal ?: 0L) + 1L
+                                    },
+                                    switchTab = switchTab,
+                                )
                             },
                             privateMessageNavState = PrivateMessageNavState(
                                 // #531 — the screen only needs membership, so it gets the marked thread ids;
@@ -1482,7 +1486,7 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                                 },
                                 sentSignal = privateMessageSentSignal,
                                 onConversationSent = {
-                                    privateMessageSentSignal = System.currentTimeMillis()
+                                    privateMessageSentSignal = (privateMessageSentSignal ?: 0L) + 1L
                                 },
                             ),
                             privateMessageSubmitNavState = PrivateMessageSubmitNavState(
@@ -1715,30 +1719,6 @@ private fun ImmersiveBackButton(
     }
 }
 
-/**
- * Issue #198 — fires the « Signaler un contenu » mailto intent. Falls back to a Toast when no
- * mail client is installed (rooted devices, emulators). Subject string lives in `:core:ui` so
- * `:feature:messages` no longer owns the global "report content" affordance.
- */
-private fun startReportEmail(
-    context: Context,
-    subject: String,
-    noEmailClientMessage: String,
-) {
-    val intent = Intent(Intent.ACTION_SENDTO).apply {
-        data = "mailto:$REPORT_EMAIL".toUri()
-        putExtra(Intent.EXTRA_EMAIL, arrayOf(REPORT_EMAIL))
-        putExtra(Intent.EXTRA_SUBJECT, subject)
-    }
-    try {
-        context.startActivity(intent)
-    } catch (_: ActivityNotFoundException) {
-        Toast.makeText(context, noEmailClientMessage, Toast.LENGTH_LONG).show()
-    }
-}
-
-private const val REPORT_EMAIL: String = "xat@azora.fr"
-
 // #445 — the `channel` product flavor whose BuildConfig.FLAVOR gates the debug bounds overlay. Matches
 // the `dev` flavor name in app/build.gradle.kts; prod/beta never expose the overlay.
 private const val DEV_CHANNEL: String = "dev"
@@ -1774,7 +1754,7 @@ private data class PrivateMessageNavState(
     val onThreadOpenedAt: (threadId: Int, date: Instant) -> Unit = { _, _ -> },
     val onReconcileReadMarks: (generation: Int, conversations: List<PrivateMessageSummary>) -> Unit =
         { _, _ -> },
-    /** #301 follow-up — last successful new-conversation send ; the MP list refreshes on change. */
+    /** Inbox refresh request after a new conversation or an explicit report message check. */
     val sentSignal: Long? = null,
     /** #301 follow-up — bumps [sentSignal] when the composer reports a successful send. */
     val onConversationSent: () -> Unit = {},
@@ -2252,9 +2232,9 @@ private fun RedfaceNavHost(
     onFlagsQuickConfigConsumed: () -> Unit,
     // #1301 — bounded acknowledgement owed to the flags list when an editor opened there submits.
     flagsSubmitAckNavState: FlagsSubmitAckNavState,
-    // #494 — the « Signaler un contenu » row of the settings Account/About sub-page reuses the same
-    // report-email flow as the account menu (which owns `context` + the report strings).
+    // Account/About opens the report without a topic prefill; the account menu uses its current route.
     onReportContent: () -> Unit,
+    onCheckReportMessages: () -> Unit,
     privateMessageNavState: PrivateMessageNavState,
     // #1040 lot 6 — successful reply handoff to the retained conversation ViewModel.
     privateMessageSubmitNavState: PrivateMessageSubmitNavState,
@@ -2436,16 +2416,10 @@ private fun RedfaceNavHost(
             entry<LoginRoute> {
                 LoginScreen(
                     onAuthenticated = {
-                        // Pop the login screen — FlagsRoute reactively re-renders
-                        // to "Connecté en tant que <pseudo>" through observeAuthState().
-                        if (backStack.size > 1) {
-                            backStack.removeAt(backStack.lastIndex)
-                        }
+                        finishLogin(backStack)
                     },
                     onCancel = {
-                        if (backStack.size > 1) {
-                            backStack.removeAt(backStack.lastIndex)
-                        }
+                        finishLogin(backStack)
                     },
                 )
             }
@@ -2791,6 +2765,13 @@ private fun RedfaceNavHost(
                     },
                     onOpenMyImages = { backStack.add(MyImagesRoute) },
                     topBarActions = accountMenu,
+                )
+            }
+            entry<ReportContentRoute> {
+                ReportContentEntry(
+                    backStack = backStack,
+                    onCheckMessages = onCheckReportMessages,
+                    onConversationSent = privateMessageNavState.onConversationSent,
                 )
             }
             entry<SettingsAccountAboutRoute> {

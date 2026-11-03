@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.parser.write
 
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
+import org.jsoup.Jsoup
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
@@ -11,6 +12,71 @@ import org.junit.Test
 class ReplySubmitResponseParserTest {
 
     private val parser = ReplySubmitResponseParser()
+
+    @Test
+    fun `new private message capture is a success without a thread id`() {
+        val result = parser.parse(readFixture("mp_new_post_success.html")) as ReplySubmitResult.Success
+        assertNotNull(result.refreshUrl)
+        assertNull(result.topicId)
+        assertNull(result.targetPage)
+        assertNull(result.numreponse)
+    }
+
+    @Test
+    fun `unknown recipient capture is a certain refusal without retaining the pseudo`() {
+        assertEquals(
+            ReplySubmitResult.Failure(ReplyFailureReason.UnknownRecipient),
+            parser.parse(readFixture("mp_new_post_unknown_recipient.html")),
+        )
+    }
+
+    @Test
+    fun `echoed recipient cannot turn a certain refusal into anti flood`() {
+        // Substitution dans la capture réelle, sans modifier la fixture HFR.
+        val html = readFixture("mp_new_post_unknown_recipient.html")
+            .replace("rf2-inexistant-zz9", "tentatives de flood123")
+        assertEquals(
+            ReplySubmitResult.Failure(ReplyFailureReason.UnknownRecipient),
+            parser.parse(html),
+        )
+    }
+
+    @Test
+    fun `topic quoting anti flood is not a server refusal`() {
+        // Substitution du contenu d'un post dans une capture réelle, pas une nouvelle fixture.
+        val topic = Jsoup.parse(readFixture("topic_redface2_p24.html"))
+        requireNotNull(topic.getElementById("para2785202"))
+            .text("Afin de prevenir les tentatives de flood : nouveaux sujets consécutifs.")
+        assertEquals(
+            ReplySubmitResult.Failure(ReplyFailureReason.Unknown),
+            parser.parse(topic.outerHtml()),
+        )
+    }
+
+    @Test
+    fun `anti flood outside the server message does not override a captured success`() {
+        // Substitution dans la capture de succès ; le texte ajouté est explicitement synthétique.
+        val html = readFixture("mp_new_post_success.html")
+            .replace("</body>", "<p>tentatives de flood</p></body>")
+        assertTrue(parser.parse(html) is ReplySubmitResult.Success)
+    }
+
+    @Test
+    fun `new topic anti flood is a certain refusal`() {
+        // Phrase de Redface v1, page non capturée ; enveloppe minimale explicitement synthétique.
+        val sentence = "Afin de prevenir les tentatives de flood, vous ne pouvez poster " +
+            "plus de 3 nouveaux sujets consécutifs."
+        val html = "<html><body><div class=\"hop\">$sentence</div></body></html>"
+        assertEquals(ReplySubmitResult.Failure(ReplyFailureReason.AntiFlood), parser.parse(html))
+        assertEquals(
+            ReplySubmitResult.Failure(ReplyFailureReason.AntiFlood),
+            parser.parse("<div class=\"hop\">Vous ne pouvez poster plus de 3 nouveaux sujets consécutifs.</div>"),
+        )
+        assertEquals(
+            ReplySubmitResult.Failure(ReplyFailureReason.AntiFlood),
+            parser.parse("<div class=\"hop\">Afin de prevenir les tentatives de flood.</div>"),
+        )
+    }
 
     @Test
     fun `success response extracts refresh URL and target page`() {
