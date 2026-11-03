@@ -664,6 +664,7 @@ private val SubmitError.bannerResId: Int
             ReplyFailureReason.TopicLocked -> R.string.editor_error_topic_locked
             ReplyFailureReason.LoginRequired -> R.string.editor_error_login_required
             ReplyFailureReason.Unknown -> R.string.editor_error_unknown
+            ReplyFailureReason.UnknownRecipient -> R.string.editor_error_unknown
         }
         SubmitError.Uncertain -> fr.forumhfr.redface2.core.ui.R.string.editor_submission_uncertain
         SubmitError.DraftWriteFailed -> fr.forumhfr.redface2.core.ui.R.string.editor_submission_draft_write_failed

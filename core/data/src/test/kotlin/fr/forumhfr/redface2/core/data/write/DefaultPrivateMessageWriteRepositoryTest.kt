@@ -536,7 +536,7 @@ class DefaultPrivateMessageWriteRepositoryTest {
     @Test
     fun `submitNewMessage overrides dest and sujet and forwards the composer routing verbatim`() = runTest {
         server.enqueue(MockResponse().setBody(fixture("mp_compose_form.html")))
-        server.enqueue(MockResponse().setBody(fixture("write_reply_success_response.html")))
+        server.enqueue(MockResponse().setBody(fixture("mp_new_post_success.html")))
 
         val form = repository.fetchComposeForm()
         val result = repository.submitNewMessage(
@@ -573,6 +573,16 @@ class DefaultPrivateMessageWriteRepositoryTest {
         assertEquals("1100", body["verifrequet"])
         assertEquals("TestUser", body["pseudo"])
         assertFalse("password must never be transmitted", body.containsKey("password"))
+    }
+
+    @Test
+    fun `submitNewMessage classifies missing recipient without logging its echoed pseudo`() = runTest {
+        server.enqueue(MockResponse().setBody(fixture("mp_compose_form.html")))
+        server.enqueue(MockResponse().setBody(fixture("mp_new_post_unknown_recipient.html")))
+        val form = repository.fetchComposeForm()
+        val result = repository.submitNewMessage(form, "rf2-inexistant-zz9", "Signalement", "Description")
+        assertEquals(ReplySubmitResult.Failure(ReplyFailureReason.UnknownRecipient), result)
+        assertFalse(diagnostics.entries.value.any { it.message.contains("rf2-inexistant-zz9", ignoreCase = true) })
     }
 
     @Test

@@ -143,4 +143,5 @@
          libellé que le topic (topic_post_ego_state_description), possédé par chaque feature. -->
     <string name="messages_post_ego_state_description">Votre message</string>
     <string name="messages_post_moderation_state_description">Message de la modération</string>
+    <string name="messages_compose_error_unknown_recipient">Envoi refusé : un pseudo du champ Destinataires n’existe pas. Vérifiez ce champ.</string>
 </resources>

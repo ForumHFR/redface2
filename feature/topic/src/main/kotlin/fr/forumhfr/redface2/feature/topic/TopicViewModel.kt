@@ -3343,6 +3343,7 @@ class TopicViewModel @AssistedInject constructor(
         ReplyFailureReason.LoginRequired -> DeleteFailureReason.LoginRequired
         ReplyFailureReason.TopicLocked -> DeleteFailureReason.TopicLocked
         ReplyFailureReason.EmptyMessage,
+        ReplyFailureReason.UnknownRecipient,
         ReplyFailureReason.InvalidHashCheck,
         ReplyFailureReason.AntiFlood,
         ReplyFailureReason.Unknown,

@@ -45,8 +45,11 @@ class ReplySubmitResponseParser {
             body.contains(EMPTY_MESSAGE_MARKER, ignoreCase = true) ->
                 ReplySubmitResult.Failure(ReplyFailureReason.EmptyMessage)
 
-            body.contains(ANTI_FLOOD_MARKER, ignoreCase = true) ->
+            ANTI_FLOOD_MARKERS.any { body.contains(it, ignoreCase = true) } ->
                 ReplySubmitResult.Failure(ReplyFailureReason.AntiFlood)
+
+            body.contains(UNKNOWN_RECIPIENT_MARKER, ignoreCase = true) ->
+                ReplySubmitResult.Failure(ReplyFailureReason.UnknownRecipient)
 
             body.contains(TOPIC_LOCKED_MARKER, ignoreCase = true) ->
                 ReplySubmitResult.Failure(ReplyFailureReason.TopicLocked)
@@ -123,8 +126,12 @@ class ReplySubmitResponseParser {
         )
         private const val EMPTY_MESSAGE_MARKER: String =
             "remplir tous les champs avant de poster"
-        private const val ANTI_FLOOD_MARKER: String =
-            "consécutives dans un intervalle de 10 minutes"
+        private val ANTI_FLOOD_MARKERS = listOf(
+            "consécutives dans un intervalle de 10 minutes",
+            "nouveaux sujets consécutifs",
+            "tentatives de flood",
+        )
+        private const val UNKNOWN_RECIPIENT_MARKER = "le pseudo suivant n'existe pas"
         private const val TOPIC_LOCKED_MARKER: String = "sujet a été fermé"
         private const val SUCCESS_MARKER: String = "votre réponse a été postée avec succès"
 

@@ -1,0 +1,319 @@
+package fr.forumhfr.redface2.feature.settings
+
+import app.cash.turbine.test
+import androidx.lifecycle.viewModelScope
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
+import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
+import fr.forumhfr.redface2.core.model.write.ReplyForm
+import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
+import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
+import io.mockk.coEvery
+import io.mockk.coVerify
+import io.mockk.every
+import io.mockk.mockk
+import java.io.IOException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.resetMain
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.withContext
+import org.junit.After
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+
+@OptIn(ExperimentalCoroutinesApi::class)
+class ReportContentViewModelTest {
+    private val auth = MutableStateFlow<AuthState>(AuthState.Authenticated("tester"))
+    private val repository = mockk<PrivateMessageWriteRepository>()
+    private val store = VersionedEditorDraftStore()
+    private val viewModels = mutableListOf<ReportContentViewModel>()
+
+    @Before
+    fun setUp() {
+        Dispatchers.setMain(StandardTestDispatcher())
+        coEvery { repository.fetchComposeForm(any()) } returns reportComposeForm()
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Success(null, null)
+    }
+
+    @After
+    fun tearDown() {
+        viewModels.forEach { it.viewModelScope.cancel() }
+        Dispatchers.resetMain()
+    }
+
+    @Test
+    fun anonymousSessionNeverFetchesOrSubmits() = runTest {
+        auth.value = AuthState.Anonymous
+        val vm = create()
+        runCurrent()
+        vm.onIntent(ReportContentIntent.Submit)
+        runCurrent()
+        assertEquals(ReportSession.ANONYMOUS, vm.state.value.session)
+        coVerify(exactly = 0) { repository.fetchComposeForm(any()) }
+        coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+        auth.value = AuthState.Authenticated("tester")
+        runCurrent()
+        assertTrue(vm.state.value.formAvailable)
+    }
+
+    @Test
+    fun checkingSessionNeverFetchesOrSubmits() = runTest {
+        val pendingAuth = MutableSharedFlow<AuthState>()
+        val vm = create(pendingAuth)
+        runCurrent()
+        vm.onIntent(ReportContentIntent.Submit)
+        runCurrent()
+        assertEquals(ReportSession.CHECKING, vm.state.value.session)
+        coVerify(exactly = 0) { repository.fetchComposeForm(any()) }
+        coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun formLoadFailureCanBeRetriedWithoutLosingInput() = runTest {
+        coEvery { repository.fetchComposeForm(any()) } throws IllegalStateException("no form")
+        val vm = create()
+        runCurrent()
+        fill(vm)
+        val before = vm.state.value.draft
+        assertTrue(vm.state.value.formError)
+        assertFalse(vm.state.value.canSubmit)
+        coEvery { repository.fetchComposeForm(any()) } returns reportComposeForm()
+        vm.onIntent(ReportContentIntent.RetryForm)
+        runCurrent()
+        assertEquals(before, vm.state.value.draft)
+        assertTrue(vm.state.value.canSubmit)
+    }
+
+    @Test
+    fun anonymousFormRequiresLoginWithoutAllowingPost() = runTest {
+        coEvery { repository.fetchComposeForm(any()) } returns reportComposeForm().copy(isAnonymous = true)
+        val vm = create()
+        runCurrent()
+        fill(vm)
+        vm.onIntent(ReportContentIntent.Submit)
+        runCurrent()
+        assertEquals(ReportError.SESSION_EXPIRED, vm.state.value.error)
+        assertFalse(vm.state.value.canSubmit)
+        coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun submitUsesFixedRecipientAndOptions() = runTest {
+        val vm = create()
+        runCurrent()
+        fill(vm)
+        vm.effects.test {
+            vm.onIntent(ReportContentIntent.Submit)
+            runCurrent()
+            assertEquals(ReportContentEffect.SubmitSucceeded, awaitItem())
+            expectNoEvents()
+        }
+        coVerify(exactly = 1) { repository.fetchComposeForm("XaTelitte") }
+        coVerify(exactly = 1) {
+            repository.submitNewMessage(
+                any(), "XaTelitte", "Redface 2 — Signalement", any(),
+                ReplyFormOptions(signatureEnabled = false, smileyDisabled = true, emailNotificationEnabled = false),
+            )
+        }
+        assertFalse(vm.state.value.canSubmit)
+    }
+
+    @Test
+    fun unknownKeepsEveryFieldAndEmitsNoSuccess() = runTest {
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        val vm = create()
+        runCurrent()
+        fill(vm)
+        val before = vm.state.value.draft
+        vm.effects.test {
+            vm.onIntent(ReportContentIntent.Submit)
+            runCurrent()
+            expectNoEvents()
+        }
+        assertEquals(before, vm.state.value.draft)
+        assertEquals(ReportError.UNCERTAIN, vm.state.value.error)
+        assertTrue(store.entries.values.single().draft.isPrivate)
+    }
+
+    @Test
+    fun invalidHashReloadPreservesInput() = runTest {
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
+        val vm = create()
+        runCurrent()
+        fill(vm)
+        val before = vm.state.value.draft
+        vm.onIntent(ReportContentIntent.Submit)
+        runCurrent()
+        assertEquals(before, vm.state.value.draft)
+        assertEquals(ReportError.INVALID_HASH, vm.state.value.error)
+        coVerify(exactly = 2) { repository.fetchComposeForm("XaTelitte") }
+        coVerify(exactly = 1) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun knownRefusalsPreserveEveryFieldAndResolveTheAttempt() = runTest {
+        val refusals = listOf(
+            ReplyFailureReason.AntiFlood to ReportError.ANTI_FLOOD,
+            ReplyFailureReason.UnknownRecipient to ReportError.UNKNOWN_RECIPIENT,
+        )
+        refusals.forEach { (reason, error) ->
+            coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
+                ReplySubmitResult.Failure(reason)
+            val vm = create()
+            runCurrent()
+            fill(vm)
+            val before = vm.state.value.draft
+            vm.effects.test {
+                vm.onIntent(ReportContentIntent.Submit)
+                runCurrent()
+                expectNoEvents()
+            }
+            assertEquals(error, vm.state.value.error)
+            assertEquals(before, vm.state.value.draft)
+            assertEquals(null, store.entries.getValue(EditorDraftKey.report()).attempt)
+            vm.viewModelScope.cancel()
+        }
+    }
+
+    @Test
+    fun reasonDescriptionAndLinkAreFrozenBeforeDurableSaveCompletes() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        store.beginGate = gate
+        val vm = create()
+        runCurrent()
+        fill(vm)
+        val before = vm.state.value.draft
+        vm.onIntent(ReportContentIntent.Submit)
+        runCurrent()
+        vm.onIntent(ReportContentIntent.ReasonChanged(ReportReason.OTHER))
+        vm.onIntent(ReportContentIntent.DescriptionChanged("Late text"))
+        vm.onIntent(ReportContentIntent.LinkChanged("https://example.org/late"))
+        assertEquals(before, vm.state.value.draft)
+        coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+        gate.complete(Unit)
+        runCurrent()
+        coVerify(exactly = 1) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun closeFlushesEveryFieldToThePrivateReportKey() = runTest {
+        val vm = create()
+        runCurrent()
+        fill(vm)
+        val before = vm.state.value.draft
+        vm.effects.test {
+            vm.onIntent(ReportContentIntent.Close)
+            runCurrent()
+            assertEquals(ReportContentEffect.CloseCommitted, awaitItem())
+        }
+        assertEquals(setOf(EditorDraftKey.report()), store.entries.keys)
+        val stored = store.entries.values.single().draft
+        assertTrue(stored.isPrivate)
+        assertEquals(before, ReportDraftCodec.decode(stored))
+    }
+
+    @Test
+    fun processLossRestoresAllFieldsAsUncertainWithoutResending() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } coAnswers {
+            gate.await()
+            ReplySubmitResult.Success(null, null)
+        }
+        val vm = create()
+        runCurrent()
+        fill(vm)
+        val before = vm.state.value.draft
+        vm.onIntent(ReportContentIntent.Submit)
+        runCurrent()
+        assertEquals(EditorDraftStore.AttemptStatus.IN_PROGRESS, store.entries.values.single().attempt?.status)
+        vm.viewModelScope.cancel()
+        val restored = create()
+        runCurrent()
+        assertEquals(before, restored.state.value.draft)
+        assertEquals(ReportError.UNCERTAIN, restored.state.value.error)
+        coVerify(exactly = 1) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun lateFormAfterAccountChangeIsIgnored() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        var calls = 0
+        coEvery { repository.fetchComposeForm(any()) } coAnswers {
+            val thisCall = ++calls
+            if (thisCall == 1) withContext(NonCancellable) { gate.await() }
+            if (thisCall == 1) reportComposeForm() else throw IOException("new form unavailable")
+        }
+        val vm = create()
+        runCurrent()
+        fill(vm)
+        store.activeOwner = "other"
+        auth.value = AuthState.Authenticated("other")
+        runCurrent()
+        gate.complete(Unit)
+        runCurrent()
+        assertEquals(ReportDraft(), vm.state.value.draft)
+        assertFalse(vm.state.value.formAvailable)
+        assertTrue(vm.state.value.formError)
+    }
+
+    @Test
+    fun draftOfAnAccountNotYetObservedIsNeverDisplayed() = runTest {
+        store.activeOwner = "other"
+        store.preload(EditorDraftKey.report(), ReportDraftCodec.encode(
+            ReportDraft(ReportReason.OTHER, "Other account private description"),
+        ))
+        val vm = create()
+        runCurrent()
+        assertEquals(ReportDraft(), vm.state.value.draft)
+        assertEquals(ReportError.SESSION_EXPIRED, vm.state.value.error)
+        coVerify(exactly = 0) { repository.fetchComposeForm(any()) }
+    }
+
+    private fun TestScope.create(authStates: Flow<AuthState> = auth): ReportContentViewModel {
+        val authRepository = mockk<AuthRepository>()
+        every { authRepository.observeAuthState() } returns authStates
+        val preferences = mockk<UserPreferencesRepository>()
+        every { preferences.observeConfirmBeforePosting() } returns flowOf(false)
+        return ReportContentViewModel(
+            ReportInitialContent(ReportBuildInfo("0.65.0", 123, "beta")),
+            ReportDependencies(repository, authRepository, preferences, store, DiagnosticsLog(),
+                DiagnosticsClock { testScheduler.currentTime * 1_000_000L }),
+        ).also { viewModels += it }
+    }
+
+    private fun fill(vm: ReportContentViewModel) {
+        vm.onIntent(ReportContentIntent.ReasonChanged(ReportReason.CHILD_SAFETY))
+        vm.onIntent(ReportContentIntent.DescriptionChanged("Description privée"))
+        vm.onIntent(ReportContentIntent.LinkChanged("https://forum.hardware.fr/"))
+    }
+}
+
+internal fun reportComposeForm() = ReplyForm(
+    sujet = "", hashCheck = "test-token",
+    hiddenFields = mapOf("cat" to "prive"), isAnonymous = false,
+)

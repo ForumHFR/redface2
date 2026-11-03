@@ -108,6 +108,7 @@ data class PrivateMessageReplyUiState(
  */
 sealed interface PrivateMessageReplyError {
     data object Empty : PrivateMessageReplyError
+    data object UnknownRecipient : PrivateMessageReplyError
     data object InvalidHashCheck : PrivateMessageReplyError
     data object AntiFlood : PrivateMessageReplyError
     data object LoginRequired : PrivateMessageReplyError

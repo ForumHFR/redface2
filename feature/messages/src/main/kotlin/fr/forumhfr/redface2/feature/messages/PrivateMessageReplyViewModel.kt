@@ -632,6 +632,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         ReplyFailureReason.InvalidHashCheck -> PrivateMessageReplyError.InvalidHashCheck
         ReplyFailureReason.AntiFlood -> PrivateMessageReplyError.AntiFlood
         ReplyFailureReason.LoginRequired -> PrivateMessageReplyError.LoginRequired
+        ReplyFailureReason.UnknownRecipient -> PrivateMessageReplyError.UnknownRecipient
         // TopicLocked has no private-message analogue, and Unknown is the unrecognised-response
         // fallback: both map to the non-destructive "verify the conversation" banner.
         ReplyFailureReason.TopicLocked -> PrivateMessageReplyError.Unexpected

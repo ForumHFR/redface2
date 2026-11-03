@@ -13,6 +13,39 @@ class ReplySubmitResponseParserTest {
     private val parser = ReplySubmitResponseParser()
 
     @Test
+    fun `new private message capture is a success without a thread id`() {
+        val result = parser.parse(readFixture("mp_new_post_success.html")) as ReplySubmitResult.Success
+        assertNotNull(result.refreshUrl)
+        assertNull(result.topicId)
+        assertNull(result.targetPage)
+        assertNull(result.numreponse)
+    }
+
+    @Test
+    fun `unknown recipient capture is a certain refusal without retaining the pseudo`() {
+        assertEquals(
+            ReplySubmitResult.Failure(ReplyFailureReason.UnknownRecipient),
+            parser.parse(readFixture("mp_new_post_unknown_recipient.html")),
+        )
+    }
+
+    @Test
+    fun `new topic anti flood is a certain refusal`() {
+        // Phrase de Redface v1, page non capturée ; ceci n'est pas une fixture HTML HFR.
+        val sentence = "Afin de prevenir les tentatives de flood, vous ne pouvez poster " +
+            "plus de 3 nouveaux sujets consécutifs."
+        assertEquals(ReplySubmitResult.Failure(ReplyFailureReason.AntiFlood), parser.parse(sentence))
+        assertEquals(
+            ReplySubmitResult.Failure(ReplyFailureReason.AntiFlood),
+            parser.parse("Vous ne pouvez poster plus de 3 nouveaux sujets consécutifs."),
+        )
+        assertEquals(
+            ReplySubmitResult.Failure(ReplyFailureReason.AntiFlood),
+            parser.parse("Afin de prevenir les tentatives de flood."),
+        )
+    }
+
+    @Test
     fun `success response extracts refresh URL and target page`() {
         val html = readFixture("write_reply_success_response.html")
         val result = parser.parse(html)

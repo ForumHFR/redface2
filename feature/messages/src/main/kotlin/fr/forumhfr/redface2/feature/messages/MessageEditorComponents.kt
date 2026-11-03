@@ -459,6 +459,7 @@ private const val ADMIN_PSEUDO = "Administration"
 internal val PrivateMessageReplyError.bannerResId: Int
     get() = when (this) {
         PrivateMessageReplyError.Empty -> R.string.messages_reply_error_empty
+        PrivateMessageReplyError.UnknownRecipient -> R.string.messages_compose_error_unknown_recipient
         PrivateMessageReplyError.InvalidHashCheck -> R.string.messages_reply_error_invalid_hash
         PrivateMessageReplyError.AntiFlood -> R.string.messages_reply_error_anti_flood
         PrivateMessageReplyError.LoginRequired -> R.string.messages_reply_error_login_required

@@ -11,11 +11,15 @@ package fr.forumhfr.redface2.core.domain.editor
  * being cited (otherwise each « Citer » would fork a separate draft).
  */
 object EditorDraftKey {
+    private const val REPORT_KEY = "report"
+
     fun reply(cat: Int, topicId: Int): String = "reply:$cat:$topicId"
     fun newTopic(cat: Int): String = "newtopic:$cat"
     fun editPost(cat: Int, numreponse: Int): String = "edit:$cat:$numreponse"
     fun editFirstPost(cat: Int, numreponse: Int): String = "editfp:$cat:$numreponse"
     fun mpReply(threadId: Int): String = "mpreply:$threadId"
+
+    fun report(): String = REPORT_KEY
 
     // A function (not a const) for API symmetry with the sibling key builders above: there is a
     // single MP-compose draft at a time, so the key is fixed.
