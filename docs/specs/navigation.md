@@ -253,15 +253,16 @@ Issue #198 — chaque écran principal (Drapeaux, Forum, Recherche, Messages) ac
 
 - état compte (« Anonyme » / « Connecté en tant que X » / « Compte en cours de vérification… » pendant le warmup DataStore) ;
 - action `Se connecter` ou `Se déconnecter` selon `AuthState` ;
-- `Paramètres alpha`, `Diagnostics alpha`, `Signaler un contenu` (formulaire intégré `ReportContentRoute`) ;
+- `Diagnostics`, `Signaler un contenu` (formulaire intégré `ReportContentRoute`) ;
 - footer version `v{name} (build {code})`.
 
 Le badge est un carré à coins arrondis (8dp), **pas un cercle**, cohérent avec [`RedfaceUserAvatar`]({{ site.baseurl }}/specs/models#post). L'anti-flicker auth est préservé : tant que `authState == null`, le badge montre `…` plutôt que `?` pour ne pas surfacer transitoirement un état « Anonyme ». La déconnexion (`AppAccountViewModel.logout`) vide d'abord `FlagRepository.clearSessionCache()` avant `AuthRepository.logout()` ; cet ordering est verrouillé par `AppAccountViewModelTest` côté `:app`.
 
 #### Signalement au projet
 
-Le menu compte et Réglages → Compte & à propos ouvrent `ReportContentRoute`, sans paramètres,
-un écran plein écran de `:feature:settings` qui masque la navigation inférieure. Les deux entrées
+Le menu compte (« Ouvrir le menu compte » → « Signaler un contenu ») et « Réglages » → « Compte HFR »
+(écran « Compte HFR et à propos ») → « Signaler un contenu ou un problème » ouvrent `ReportContentRoute`,
+sans paramètres, un écran plein écran de `:feature:settings` qui masque la navigation inférieure. Les deux entrées
 ouvrent un formulaire au lien vide, sauf restauration d'un brouillon du compte. Le lien facultatif
 est saisi manuellement. Aucun texte ni contexte privé n'est sérialisé dans la route ou le `SavedStateHandle`.
 
