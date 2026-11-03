@@ -1914,9 +1914,8 @@ class TopicViewModel @AssistedInject constructor(
         val missingPost = loaded.topic.posts.none { it.numreponse == numreponse }
         // A search exit still reloads a restored snapshot to rehydrate transient poll forms.
         // Only an absent target needs to bypass TTL and settle a retained landing on failure.
-        if (loaded.topic.page == request.page && !awaitingContent &&
-            (reloadCanonicalPage || missingPost)
-        ) {
+        val needsPageReload = reloadCanonicalPage || missingPost
+        if (loaded.topic.page == request.page && !awaitingContent && needsPageReload) {
             startPageLoad(showLoading = false, refreshMissingPost = missingPost)
         }
     }
