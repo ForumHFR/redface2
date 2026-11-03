@@ -177,7 +177,12 @@ class ReportContentViewModel @AssistedInject constructor(
         if (entry != null && draft == null) {
             _state.update { it.copy(draftWriteFailed = true) }
         } else {
-            _state.update { it.copy(draft = draft ?: it.draft, draftReady = true) }
+            _state.update {
+                it.copy(
+                    draft = draft ?: it.draft, draftReady = true,
+                    draftPurged = entry?.let(ReportDraftCodec::isPurged) == true,
+                )
+            }
             fetchForm(opening)
         }
     }
@@ -324,6 +329,7 @@ class ReportContentViewModel @AssistedInject constructor(
             submission.confirm(token)
         }
         if (permit is SubmissionRequest.Accepted) {
+            _state.update { it.copy(draftPurged = false) }
             submission.launch(permit, ReportDraftCodec.encode(snapshot.draft)) {
                 sendReport(form, snapshot.draft)
             }

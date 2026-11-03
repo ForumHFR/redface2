@@ -193,6 +193,70 @@ class ReportContentViewModelTest {
     }
 
     @Test
+    fun certainFailureAfterPurgeOnSwitchToRecipientRestoresAnEmptyUsableForm() = runTest {
+        assertPurgedCertainFailureRecovery("XaTriX")
+    }
+
+    @Test
+    fun certainFailureAfterPurgeOnSwitchToAnotherAccountRestoresAnEmptyUsableForm() = runTest {
+        assertPurgedCertainFailureRecovery("other")
+    }
+
+    @Test
+    fun corruptDraftWithContentRemainsRejectedAndCannotBeOverwritten() = runTest {
+        val key = EditorDraftKey.report()
+        store.preload(key, EditorDraftStore.Draft("Private content", isPrivate = true))
+        val before = store.entries.getValue(key)
+        val vm = create()
+        runCurrent()
+        assertTrue(vm.state.value.draftWriteFailed)
+        assertFalse(vm.state.value.draftReady)
+        assertFalse(vm.state.value.canEdit)
+        assertFalse(vm.state.value.draftPurged)
+
+        vm.effects.test {
+            fillWithLateEdits(vm)
+            vm.onIntent(ReportContentIntent.RetryForm)
+            runCurrent()
+            vm.onIntent(ReportContentIntent.Submit)
+            vm.onIntent(ReportContentIntent.CheckMessages)
+            advanceTimeBy(751)
+            runCurrent()
+            expectNoEvents()
+        }
+        assertTrue(vm.state.value.draftWriteFailed)
+        assertFalse(vm.state.value.draftReady)
+        assertEquals(before, store.entries.getValue(key))
+        assertEquals(0, store.saveCount)
+        coVerify(exactly = 0) { repository.fetchComposeForm(any()) }
+        coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun purgedDraftRewriteCannotOverwriteANewerContentRevision() = runTest {
+        val key = EditorDraftKey.report()
+        store.preload(key, EditorDraftStore.Draft("", isPrivate = true))
+        val vm = create()
+        runCurrent()
+        assertTrue(vm.state.value.canEdit)
+        val newer = ReportDraftCodec.encode(ReportDraft(ReportReason.OTHER, "Newer private content"))
+        assertEquals(
+            EditorDraftStore.StoreWriteResult.Written(1),
+            store.saveIfVersion("tester", key, newer, expectedVersion = 0),
+        )
+        val before = store.entries.getValue(key)
+
+        vm.effects.test {
+            vm.onIntent(ReportContentIntent.Close)
+            runCurrent()
+            expectNoEvents()
+        }
+        assertTrue(vm.state.value.draftWriteFailed)
+        assertEquals(before, store.entries.getValue(key))
+        coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun checkingSessionNeverFetchesOrSubmits() = runTest {
         val pendingAuth = MutableSharedFlow<AuthState>()
         val vm = create(pendingAuth)
@@ -851,6 +915,7 @@ class ReportContentViewModelTest {
         val vm = create()
         runCurrent()
         assertEquals(draft, vm.state.value.draft)
+        assertFalse(vm.state.value.draftPurged)
         assertEquals(EditorSubmissionState.Uncertain(token), vm.state.value.submission)
 
         vm.effects.test {
@@ -867,6 +932,7 @@ class ReportContentViewModelTest {
             )
             assertEquals(ReportDraft(), vm.state.value.draft)
             assertTrue(vm.state.value.draftReady)
+            assertTrue(vm.state.value.draftPurged)
             assertTrue(vm.state.value.canEdit)
             assertTrue(vm.state.value.formAvailable)
             assertFalse(vm.state.value.draftWriteFailed)
@@ -890,6 +956,68 @@ class ReportContentViewModelTest {
         assertEquals(before.attempt, store.entries.getValue(key).attempt)
         assertEquals(vm.state.value.draft, ReportDraftCodec.decode(store.entries.getValue(key).draft))
         coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    private suspend fun TestScope.assertPurgedCertainFailureRecovery(pseudo: String) {
+        val vm = returnAfterPurgedCertainFailure(pseudo)
+        val key = EditorDraftKey.report()
+        val purged = store.entries.getValue(key)
+        assertEquals(null, purged.attempt)
+        assertEquals(EditorDraftStore.Draft("", isPrivate = true), purged.draft)
+        assertEquals(ReportDraft(), vm.state.value.draft)
+        assertTrue(vm.state.value.draftReady)
+        assertTrue(vm.state.value.draftPurged)
+        assertTrue(vm.state.value.canEdit)
+        assertTrue(vm.state.value.formAvailable)
+        assertFalse(vm.state.value.canSubmit)
+        assertFalse(vm.state.value.draftWriteFailed)
+        assertEquals(null, vm.state.value.error)
+        assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
+
+        vm.effects.test {
+            vm.onIntent(ReportContentIntent.Submit)
+            vm.onIntent(ReportContentIntent.RetryForm)
+            runCurrent()
+            expectNoEvents()
+            assertTrue(vm.state.value.canEdit)
+            assertEquals(null, vm.state.value.error)
+            fill(vm)
+            assertTrue(vm.state.value.canSubmit)
+            vm.onIntent(ReportContentIntent.Close)
+            runCurrent()
+            assertEquals(ReportContentEffect.CloseCommitted, awaitItem())
+            expectNoEvents()
+        }
+        val saved = store.entries.getValue(key)
+        assertEquals(purged.version + 1, saved.version)
+        assertEquals(null, saved.attempt)
+        assertEquals(ReportDraftCodec.encode(vm.state.value.draft), saved.draft)
+        coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    private suspend fun TestScope.returnAfterPurgedCertainFailure(pseudo: String): ReportContentViewModel {
+        val key = EditorDraftKey.report()
+        val draft = ReportDraftCodec.encode(ReportDraft(ReportReason.OTHER, "Private content"))
+        store.beginAttempt("tester", key, draft, expectedVersion = 0)
+        val vm = create()
+        runCurrent()
+        val gate = CompletableDeferred<Unit>()
+        store.finishGate = gate
+        // Retrying first resolves the restored attempt without entering the write repository.
+        vm.onIntent(ReportContentIntent.Submit)
+        runCurrent()
+        try {
+            assertTrue(vm.state.value.isSending)
+            switchAccount(pseudo)
+            runCurrent()
+        } finally {
+            // Metadata-only CERTAIN_FAILURE completes even after accountChanged cancels execution.
+            gate.complete(Unit)
+        }
+        runCurrent()
+        switchAccount("tester")
+        runCurrent()
+        return vm
     }
 
     private fun switchAccount(pseudo: String) {

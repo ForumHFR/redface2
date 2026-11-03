@@ -43,20 +43,32 @@ class ReportDraftCodecTest {
     }
 
     @Test
-    fun missingMetadataIsAcceptedOnlyForAnErasedPrivateUnresolvedAttempt() {
+    fun purgedDraftAfterCertainFailureRestoresAnEmptyReport() {
+        val entry = DraftEntry(Draft("", isPrivate = true, updatedAt = 1234), version = 7)
+        assertEquals(ReportDraft(), ReportDraftCodec.decode(entry))
+        assertTrue(ReportDraftCodec.isPurged(entry))
+    }
+
+    @Test
+    fun missingMetadataIsAcceptedOnlyForErasedPrivateRecoverableEntries() {
         val stored = Draft("", isPrivate = true)
         assertNull(ReportDraftCodec.decode(stored))
-        assertNull(ReportDraftCodec.decode(DraftEntry(stored, 0)))
         assertNull(ReportDraftCodec.decode(attemptEntry(stored, AttemptStatus.PUBLISHED)))
         val malformed = listOf(
             stored.copy(isPrivate = false),
             stored.copy(body = " "),
+            stored.copy(body = "Private content"),
             stored.copy(subject = ""),
             stored.copy(recipients = ""),
+            stored.copy(subject = "Private subject"),
+            stored.copy(recipients = "recipient"),
             stored.copy(subject = "report:2:OTHER\n"),
             stored.copy(subject = "report:1:MISSING\n"),
         )
-        malformed.forEach { assertNull(ReportDraftCodec.decode(attemptEntry(it))) }
+        malformed.forEach {
+            assertNull(ReportDraftCodec.decode(DraftEntry(it, version = 7)))
+            assertNull(ReportDraftCodec.decode(attemptEntry(it)))
+        }
     }
 
     private fun attemptEntry(draft: Draft, status: AttemptStatus = AttemptStatus.UNCERTAIN) = DraftEntry(

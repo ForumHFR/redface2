@@ -238,7 +238,7 @@ private fun ReportFormStatusContent(state: ReportContentUiState, onIntent: (Repo
     }
     state.error?.let { error ->
         Text(
-            stringResource(error.messageRes), color = MaterialTheme.colorScheme.error,
+            stringResource(error.messageRes(state.draftPurged)), color = MaterialTheme.colorScheme.error,
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
         )
         if (error == ReportError.UNCERTAIN) {
@@ -298,15 +298,18 @@ private val ReportReason.labelRes: Int
         ReportReason.OTHER -> R.string.report_reason_other
     }
 
-private val ReportError.messageRes: Int
-    get() = when (this) {
-        ReportError.UNCERTAIN -> R.string.report_error_uncertain
-        ReportError.DRAFT_WRITE_FAILED -> R.string.report_error_draft
-        ReportError.SESSION_EXPIRED -> R.string.report_error_session
-        ReportError.NETWORK -> R.string.report_error_network
-        ReportError.INVALID_HASH -> R.string.report_error_hash
-        ReportError.ANTI_FLOOD -> R.string.report_error_flood
-        ReportError.UNKNOWN_RECIPIENT -> R.string.report_error_recipient
-        ReportError.EMPTY_MESSAGE -> R.string.report_error_empty
-        ReportError.REFUSED -> R.string.report_error_refused
+private fun ReportError.messageRes(draftPurged: Boolean): Int = when (this) {
+    ReportError.UNCERTAIN -> if (draftPurged) {
+        R.string.report_error_uncertain_purged
+    } else {
+        R.string.report_error_uncertain
     }
+    ReportError.DRAFT_WRITE_FAILED -> R.string.report_error_draft
+    ReportError.SESSION_EXPIRED -> R.string.report_error_session
+    ReportError.NETWORK -> R.string.report_error_network
+    ReportError.INVALID_HASH -> R.string.report_error_hash
+    ReportError.ANTI_FLOOD -> R.string.report_error_flood
+    ReportError.UNKNOWN_RECIPIENT -> R.string.report_error_recipient
+    ReportError.EMPTY_MESSAGE -> R.string.report_error_empty
+    ReportError.REFUSED -> R.string.report_error_refused
+}

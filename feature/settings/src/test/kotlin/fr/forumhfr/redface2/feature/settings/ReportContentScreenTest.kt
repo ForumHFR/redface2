@@ -140,6 +140,9 @@ class ReportContentScreenTest {
     @Test
     fun uncertaintyPreservesInputAndOffersMessageCheck() {
         mount(ready().copy(error = ReportError.UNCERTAIN))
+        compose.onNodeWithText(
+            "Envoi non confirmé. Vérifiez vos messages avant de renvoyer. Votre saisie est conservée.",
+        ).performScrollTo().assertIsDisplayed()
         compose.onNodeWithText("Description privée").performScrollTo().assertExists()
         compose.onNodeWithText("Vérifier mes messages").performScrollTo().assertIsEnabled().performClick()
         assertEquals(listOf(ReportContentIntent.CheckMessages), intents)
@@ -148,12 +151,15 @@ class ReportContentScreenTest {
     @Test
     fun purgedUncertainReportKeepsTheWarningEditableFieldsAndMessageCheck() {
         mount(ready().copy(
-            draft = ReportDraft(), error = ReportError.UNCERTAIN,
+            draft = ReportDraft(), draftPurged = true, error = ReportError.UNCERTAIN,
             submission = EditorSubmissionState.Uncertain(null),
         ))
         compose.onNodeWithText(
-            "Envoi non confirmé. Vérifiez vos messages avant de renvoyer. Votre saisie est conservée.",
+            "Envoi non confirmé. Vérifiez vos messages avant de renvoyer.",
         ).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText(
+            "Envoi non confirmé. Vérifiez vos messages avant de renvoyer. Votre saisie est conservée.",
+        ).assertDoesNotExist()
         compose.onNodeWithText("Description du problème *").performScrollTo().assertIsEnabled()
         compose.onNodeWithText("Lien du contenu (facultatif)").performScrollTo().assertIsEnabled()
         compose.onNodeWithText("Autre").performScrollTo().assertIsEnabled()
