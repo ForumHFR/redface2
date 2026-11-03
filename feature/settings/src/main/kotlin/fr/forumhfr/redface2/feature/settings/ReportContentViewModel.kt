@@ -173,7 +173,7 @@ class ReportContentViewModel @AssistedInject constructor(
     }
 
     private suspend fun acceptDraft(entry: EditorDraftStore.DraftEntry?, opening: Int) {
-        val draft = entry?.let { ReportDraftCodec.decode(it.draft) }
+        val draft = entry?.let { ReportDraftCodec.decode(it) }
         if (entry != null && draft == null) {
             _state.update { it.copy(draftWriteFailed = true) }
         } else {

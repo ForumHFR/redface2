@@ -146,6 +146,23 @@ class ReportContentScreenTest {
     }
 
     @Test
+    fun purgedUncertainReportKeepsTheWarningEditableFieldsAndMessageCheck() {
+        mount(ready().copy(
+            draft = ReportDraft(), error = ReportError.UNCERTAIN,
+            submission = EditorSubmissionState.Uncertain(null),
+        ))
+        compose.onNodeWithText(
+            "Envoi non confirmé. Vérifiez vos messages avant de renvoyer. Votre saisie est conservée.",
+        ).performScrollTo().assertIsDisplayed()
+        compose.onNodeWithText("Description du problème *").performScrollTo().assertIsEnabled()
+        compose.onNodeWithText("Lien du contenu (facultatif)").performScrollTo().assertIsEnabled()
+        compose.onNodeWithText("Autre").performScrollTo().assertIsEnabled()
+        compose.onNodeWithText("Envoyer le signalement").performScrollTo().assertIsNotEnabled()
+        compose.onNodeWithText("Vérifier mes messages").performScrollTo().assertIsEnabled().performClick()
+        assertEquals(listOf(ReportContentIntent.CheckMessages), intents)
+    }
+
+    @Test
     fun storageFailureShowsBothErrorsAndKeepsMessageCheckAvailable() {
         mount(ready().copy(
             error = ReportError.UNCERTAIN, draftWriteFailed = true,
