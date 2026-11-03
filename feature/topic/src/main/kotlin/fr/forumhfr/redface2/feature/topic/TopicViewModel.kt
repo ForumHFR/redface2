@@ -1382,16 +1382,23 @@ class TopicViewModel @AssistedInject constructor(
      * [becomePageOwner] first. [showLoading] is `false` when the switch engine already activated a
      * memory snapshot : the collect then refreshes the page IN PLACE (provisional pill + hairline,
      * quick win 3) instead of flashing the skeleton — removing that flash is the point of #895.
+     * [refreshMissingPost] is the bounded #1447 same-page retry under the EXISTING owner: bypass
+     * TTL once and settle its landing against the retained page even on failure/empty completion.
      */
-    private fun startPageLoad(showLoading: Boolean, graceLoading: Boolean = false) {
+    private fun startPageLoad(
+        showLoading: Boolean,
+        graceLoading: Boolean = false,
+        refreshMissingPost: Boolean = false,
+    ) {
         beginFirstContentSection()
         if (showLoading) {
             _state.update { it.copy(mode = TopicUiState.Mode.Loading) }
         }
         // #231 made consumable (Sol point 4) : the TTL bypass applies until its first TERMINAL
         // fresh emission, then never replays across process death ; interrupted → resumes.
-        val effectiveForceRefresh = request.forceRefresh &&
-            savedStateHandle.get<Boolean>(KEY_FORCE_REFRESH_DONE) != true
+        val effectiveForceRefresh = refreshMissingPost || (
+            request.forceRefresh && savedStateHandle.get<Boolean>(KEY_FORCE_REFRESH_DONE) != true
+        )
         // F4 — belt over the job cancellation : a page switch bumps the owner generation, so an
         // emission raced from the previous owner can never write over the new page.
         val generation = ownerGeneration
@@ -1425,7 +1432,7 @@ class TopicViewModel @AssistedInject constructor(
                     // #910 — a failed load must never leave a dangling grace (it would post a
                     // skeleton over the error state, or an endless hairline).
                     grace?.cancel()
-                    terminalizeLoadFailure(error)
+                    terminalizeLoadFailure(error, generation)
                 }
                 .collect { emission ->
                     // F4 — drop an emission raced from a previous owner (page switch / takeover).
@@ -1469,7 +1476,18 @@ class TopicViewModel @AssistedInject constructor(
             if (!received && generation == ownerGeneration) {
                 terminalizeEmptyCompletion()
             }
+            if (refreshMissingPost) settleMissingPostRefresh(generation)
         }
+    }
+
+    /** #1447 — no further emission is coming from this retry; never leave its landing pending. */
+    private fun settleMissingPostRefresh(generation: Int) {
+        if (generation != ownerGeneration) return
+        val loaded = (_state.value.mode as? TopicUiState.Mode.Loaded)
+            ?.takeIf { it.topic.page == request.page }
+            ?: return
+        _state.update { it.copy(mode = loaded.copy(provisional = false)) }
+        dispatchPendingLanding(loaded.topic, terminal = true)
     }
 
     /**
@@ -1477,8 +1495,10 @@ class TopicViewModel @AssistedInject constructor(
      * screen OF THIS PAGE stays (the refresh failure is swallowed) ; anything else — grace hold
      * of the departed page, entry skeleton — surfaces Error (a durable « displayed ≠ canonical »
      * state is exactly what the #907 gates forbid, and Retry reloads the target).
+     * A late failure from a superseded owner must not terminalize the new owner's load (#1447).
      */
-    private fun terminalizeLoadFailure(error: Throwable) {
+    private fun terminalizeLoadFailure(error: Throwable, generation: Int) {
+        if (generation != ownerGeneration) return
         _state.update { current ->
             val displayed = current.mode as? TopicUiState.Mode.Loaded
             if (displayed != null && displayed.topic.page == request.page) {
@@ -1828,7 +1848,8 @@ class TopicViewModel @AssistedInject constructor(
     /**
      * #699/#782 — jump to a cited post : push the departure `{page, tap-time anchor}` on the jump
      * chain, switch when needed and land on [numreponse]. A same-page jump dispatches against the
-     * page already on screen (no reload — the historical route replace rebuilt everything).
+     * page already on screen; a missing post on a settled page gets one forced cache-aside reload
+     * under the same owner (#1447), so a recent citing post can appear even inside the cache TTL.
      */
     fun goToPost(targetPage: Int, numreponse: Int, departureAnchor: TopicScrollAnchor? = null) {
         if (jumpStack.size >= JUMP_STACK_MAX) jumpStack.removeFirst()
@@ -1838,9 +1859,22 @@ class TopicViewModel @AssistedInject constructor(
             departureAnchor?.let { reportPageAnchor(it) }
             armLanding(PendingLanding.Post(numreponse))
             dispatchLandingAgainstScreen()
+            loadMissingSamePagePost(numreponse)
             return
         }
         internalSwitch(targetPage, departureAnchor, landing = PendingLanding.Post(numreponse))
+    }
+
+    private fun loadMissingSamePagePost(numreponse: Int) {
+        val loaded = _state.value.mode as? TopicUiState.Mode.Loaded ?: return
+        // A provisional emission or an LRU snapshot whose load is still running must wait for
+        // that owner's terminal content. In particular, a second jump shares the pending retry.
+        val awaitingContent = loaded.provisional || loadJob?.isActive == true
+        if (loaded.topic.page == request.page && !awaitingContent &&
+            loaded.topic.posts.none { it.numreponse == numreponse }
+        ) {
+            startPageLoad(showLoading = false, refreshMissingPost = true)
+        }
     }
 
     /**
