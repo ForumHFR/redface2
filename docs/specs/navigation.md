@@ -269,7 +269,9 @@ est saisi manuellement. Aucun texte ni contexte privé n'est sérialisé dans la
 Le formulaire permet de choisir un motif (sécurité des enfants, contenu illicite, harcèlement,
 problème de l'application, autre), de décrire le problème et d'ajouter un lien HTTP(S) facultatif.
 Après vérification de la session, il utilise `PrivateMessageWriteRepository` pour envoyer un MP
-au compte fixe du projet **XaTelitte**, sujet « Redface 2 — Signalement ». Le pseudo de l'expéditeur
+au compte fixe du projet **XaTriX**, sujet « Redface 2 — Signalement ». Un pré-contrôle bloque le
+chargement du formulaire HFR et l'envoi si le pseudo connecté, après trim et sans distinction de casse,
+est celui du destinataire ; un message explicatif remplace le formulaire. Le pseudo de l'expéditeur
 est visible du destinataire ; signature, smileys et notification email sont désactivés. Les seules
 informations ajoutées automatiquement sont la version, le code et le canal fournis par `:app`.
 
@@ -277,7 +279,7 @@ Sans connexion, le bouton principal ouvre `LoginRoute`, puis revient au formulai
 réinitialisation de la pile Messages à la transition d'authentification, la route de signalement
 est conservée ; le callback de connexion ne dépile que `LoginRoute`, quel que soit l'ordre de ces
 deux opérations. « Écrire par email », avec la mention « Ouvre l'application mail », reste un
-second moyen pour les utilisateurs non connectés, vers `xat@azora.fr`.
+second moyen pour les utilisateurs non connectés ou connectés avec le compte destinataire, vers `xat@azora.fr`.
 
 Le brouillon est privé, lié au compte et stocké sous `EditorDraftKey.report()`, distinct de `mpnew`.
 `EditorSubmissionBinding` et `EditorDraftSession` figent l'envoi, persistent la tentative avant POST,

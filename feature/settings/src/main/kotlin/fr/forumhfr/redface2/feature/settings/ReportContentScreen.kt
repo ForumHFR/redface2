@@ -120,6 +120,13 @@ private fun ReportScrollableContent(
                 CircularProgressIndicator()
             }
             ReportSession.ANONYMOUS -> ReportAnonymousActions(onIntent)
+            ReportSession.RECIPIENT -> {
+                Text(
+                    stringResource(R.string.report_self_recipient),
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
+                )
+                ReportEmailAction(onIntent)
+            }
             ReportSession.AUTHENTICATED -> {
                 Column(
                     modifier = Modifier.onFocusChanged { inputFocused = it.hasFocus }.focusGroup(),
@@ -138,6 +145,11 @@ private fun ReportScrollableContent(
 private fun ReportAnonymousActions(onIntent: (ReportContentIntent) -> Unit) {
     Text(stringResource(R.string.report_login_explanation))
     Button(onClick = { onIntent(ReportContentIntent.Login) }) { Text(stringResource(R.string.report_login)) }
+    ReportEmailAction(onIntent)
+}
+
+@Composable
+private fun ReportEmailAction(onIntent: (ReportContentIntent) -> Unit) {
     TextButton(onClick = { onIntent(ReportContentIntent.Email) }) {
         Column {
             Text(stringResource(R.string.report_email))
@@ -226,7 +238,7 @@ private fun ReportFormStatusContent(state: ReportContentUiState, onIntent: (Repo
     }
     state.error?.let { error ->
         Text(
-            stringResource(error.messageRes), color = MaterialTheme.colorScheme.error,
+            stringResource(error.messageRes()), color = MaterialTheme.colorScheme.error,
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
         )
         if (error == ReportError.UNCERTAIN) {
@@ -286,15 +298,14 @@ private val ReportReason.labelRes: Int
         ReportReason.OTHER -> R.string.report_reason_other
     }
 
-private val ReportError.messageRes: Int
-    get() = when (this) {
-        ReportError.UNCERTAIN -> R.string.report_error_uncertain
-        ReportError.DRAFT_WRITE_FAILED -> R.string.report_error_draft
-        ReportError.SESSION_EXPIRED -> R.string.report_error_session
-        ReportError.NETWORK -> R.string.report_error_network
-        ReportError.INVALID_HASH -> R.string.report_error_hash
-        ReportError.ANTI_FLOOD -> R.string.report_error_flood
-        ReportError.UNKNOWN_RECIPIENT -> R.string.report_error_recipient
-        ReportError.EMPTY_MESSAGE -> R.string.report_error_empty
-        ReportError.REFUSED -> R.string.report_error_refused
-    }
+private fun ReportError.messageRes(): Int = when (this) {
+    ReportError.UNCERTAIN -> R.string.report_error_uncertain
+    ReportError.DRAFT_WRITE_FAILED -> R.string.report_error_draft
+    ReportError.SESSION_EXPIRED -> R.string.report_error_session
+    ReportError.NETWORK -> R.string.report_error_network
+    ReportError.INVALID_HASH -> R.string.report_error_hash
+    ReportError.ANTI_FLOOD -> R.string.report_error_flood
+    ReportError.UNKNOWN_RECIPIENT -> R.string.report_error_recipient
+    ReportError.EMPTY_MESSAGE -> R.string.report_error_empty
+    ReportError.REFUSED -> R.string.report_error_refused
+}

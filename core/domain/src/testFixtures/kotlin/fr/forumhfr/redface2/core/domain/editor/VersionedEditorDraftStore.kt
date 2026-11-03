@@ -38,6 +38,23 @@ open class VersionedEditorDraftStore : EditorDraftStore {
     private var sequence = 0
 
     fun preload(key: String, draft: Draft) { entries[key] = DraftEntry(draft, 0) }
+
+    /** Mirrors Room's account-switch purge: only durable attempts survive, with no private content. */
+    fun purgePrivateForUser(owner: String) {
+        val owned = ownerEntries[owner.lowercase()] ?: return
+        for ((key, entry) in owned.toMap()) {
+            if (entry.draft.isPrivate) {
+                if (entry.attempt == null) {
+                    owned.remove(key)
+                    deletedKeys += key
+                } else {
+                    owned[key] = entry.copy(draft = entry.draft.copy(body = "", subject = null, recipients = null))
+                }
+                writes++
+            }
+        }
+    }
+
     override suspend fun currentOwner(): String? = activeOwner
     override suspend fun load(owner: String?, key: String): Draft? =
         loadEntry(owner, key)?.takeUnless { it.attempt?.status == AttemptStatus.PUBLISHED }?.draft

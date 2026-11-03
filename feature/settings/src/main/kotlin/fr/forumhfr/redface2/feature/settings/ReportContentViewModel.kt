@@ -146,10 +146,13 @@ class ReportContentViewModel @AssistedInject constructor(
         submission.accountChanged()
         closeRequested = false
         loadedForm = null
-        _state.value = ReportContentUiState(
-            session = if (owner == null) ReportSession.ANONYMOUS else ReportSession.AUTHENTICATED,
-        )
-        if (owner != null) {
+        val session = when {
+            owner == null -> ReportSession.ANONYMOUS
+            owner.trim().equals(REPORT_RECIPIENT, ignoreCase = true) -> ReportSession.RECIPIENT
+            else -> ReportSession.AUTHENTICATED
+        }
+        _state.value = ReportContentUiState(session = session)
+        if (session == ReportSession.AUTHENTICATED) {
             submission = newSubmission()
             val opening = generation
             formJob = viewModelScope.launch { restoreAndLoad(opening) }
@@ -170,7 +173,7 @@ class ReportContentViewModel @AssistedInject constructor(
     }
 
     private suspend fun acceptDraft(entry: EditorDraftStore.DraftEntry?, opening: Int) {
-        val draft = entry?.let { ReportDraftCodec.decode(it.draft) }
+        val draft = entry?.let { ReportDraftCodec.decode(it) }
         if (entry != null && draft == null) {
             _state.update { it.copy(draftWriteFailed = true) }
         } else {
@@ -277,7 +280,10 @@ class ReportContentViewModel @AssistedInject constructor(
     }
 
     private fun email() {
-        if (_state.value.session == ReportSession.ANONYMOUS) _effects.trySend(ReportContentEffect.Email)
+        val session = _state.value.session
+        if (session == ReportSession.ANONYMOUS || session == ReportSession.RECIPIENT) {
+            _effects.trySend(ReportContentEffect.Email)
+        }
     }
 
     private fun confirm(token: ArmToken?) {

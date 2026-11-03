@@ -557,6 +557,7 @@
     <string name="report_delivery">Ce formulaire envoie votre signalement par message privé HFR au compte du projet, sans quitter l’application.</string>
     <string name="report_identity_notice">Le compte HFR connecté sera utilisé pour l’envoi : votre pseudo sera visible du destinataire. Aucun journal ni contenu cité n’est ajouté automatiquement.</string>
     <string name="report_login_explanation">Connectez-vous à un compte HFR pour remplir et envoyer le formulaire. Vous reviendrez ici après la connexion. Vous pouvez aussi nous écrire par email.</string>
+    <string name="report_self_recipient">Vous êtes le destinataire des signalements : ils ne peuvent pas être envoyés depuis ce compte.</string>
     <string name="report_login">Se connecter</string>
     <string name="report_email">Écrire par email</string>
     <string name="report_email_external">Ouvre l’application mail</string>
@@ -577,7 +578,7 @@
     <string name="report_confirm">Confirmer l’envoi</string>
     <string name="report_check_messages">Vérifier mes messages</string>
     <string name="report_sent">Votre signalement a été envoyé.</string>
-    <string name="report_error_uncertain">Envoi non confirmé. Vérifiez vos messages avant de renvoyer. Votre saisie est conservée.</string>
+    <string name="report_error_uncertain">Envoi non confirmé. Vérifiez vos messages avant de renvoyer.</string>
     <string name="report_error_draft">Impossible de lire ou d’enregistrer le brouillon. Aucun nouvel envoi n’a été effectué. Votre saisie est conservée.</string>
     <string name="report_error_session">Votre session HFR a expiré ou changé. Reconnectez-vous avant de réessayer.</string>
     <string name="report_error_network">Connexion à HFR impossible. Votre saisie est conservée. Réessayez.</string>
