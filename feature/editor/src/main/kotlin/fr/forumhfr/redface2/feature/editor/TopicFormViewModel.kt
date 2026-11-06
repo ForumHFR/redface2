@@ -20,16 +20,15 @@ import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionErrors
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionRequest
-import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.HfrFavoriteSmileyRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollections
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
-import fr.forumhfr.redface2.core.domain.upload.UploadException
 import fr.forumhfr.redface2.core.domain.upload.UploadFailureDiagnostics
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
@@ -45,16 +44,20 @@ import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.model.write.TopicForm
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.EditorError
+import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.MAX_IMAGES_PER_UPLOAD
 import fr.forumhfr.redface2.core.ui.editor.SmileyFavoriteMutations
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerFavoriteSources
 import fr.forumhfr.redface2.core.ui.editor.SmileyWikiKeywordsSource
-import fr.forumhfr.redface2.core.ui.editor.UploadError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.imageInsertBbcodeOrNull
 import fr.forumhfr.redface2.core.ui.editor.insertBbcodeToken
 import fr.forumhfr.redface2.core.ui.editor.pickedImagesForUpload
+import fr.forumhfr.redface2.core.ui.editor.toEditorError
+import fr.forumhfr.redface2.core.ui.editor.toEditorUploadError
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -199,9 +202,10 @@ class TopicFormViewModel @AssistedInject constructor(
         environment = EditorSubmissionEnvironment(viewModelScope, clock, diagnostics),
         drafts = EditorDraftSession(draftStore, draftKey),
         errors = EditorSubmissionErrors(
-            uncertain = SubmitError.Uncertain, draftWriteFailed = SubmitError.DraftWriteFailed,
-            sessionExpired = SubmitError.SessionExpired, unknown = SubmitError.Uncertain,
-            network = SubmitError.Network, preparationFailed = SubmitError.Hfr(ReplyFailureReason.Unknown),
+            uncertain = EditorErrors.uncertain, draftWriteFailed = EditorErrors.draftWriteFailed,
+            sessionExpired = EditorErrors.sessionExpired, unknown = EditorErrors.uncertain,
+            network = EditorErrors.network, preparationFailed = EditorErrors.invalidForm,
+            quoteFetchFailed = EditorErrors.quoteFetchFailed,
         ),
         callbacks = EditorSubmissionCallbacks<TopicFormEffect>(
             state = { value ->
@@ -307,7 +311,7 @@ class TopicFormViewModel @AssistedInject constructor(
             it.withDraft(TextFieldValue(draft.body, TextRange(draft.body.length))).copy(
                 subject = TextFieldValue(draft.subject.orEmpty()),
                 draftHydratedFromServer = true, subjectHydratedFromServer = true,
-                restorableDraft = null, restorableSubject = null, submitError = SubmitError.Uncertain,
+                restorableDraft = null, restorableSubject = null, submitError = EditorErrors.uncertain,
             )
         }
     }
@@ -382,6 +386,7 @@ class TopicFormViewModel @AssistedInject constructor(
             is TopicFormIntent.SubmitConfirmed -> onSubmitConfirmed(intent)
             TopicFormIntent.SubmitConfirmationDismissed -> submission.disarm()
             TopicFormIntent.ErrorDismissed -> submission.acknowledge(::scheduleAutosave)
+            TopicFormIntent.ReloadRequested -> reloadForm()
             is TopicFormIntent.SubcatSelected ->
                 _state.update { it.copy(selectedSubcat = intent.id) }
             is TopicFormIntent.ToggleSignature ->
@@ -525,12 +530,15 @@ class TopicFormViewModel @AssistedInject constructor(
     private fun onImagePickerEvent(event: ImagePickerEvent) {
         if (submission.blocksMutation) return
         diagnostics.recordImagePickerEvent(event)
+        if (event is ImagePickerEvent.Unavailable) {
+            _state.update { it.copy(uploadError = EditorErrors.pickerAbsent) }
+        }
         if (event is ImagePickerEvent.Result) {
             val pickedImages = pickedImagesForUpload(event.contract, event.uris)
             val showEmptyPickerBanner = pickedImages.isEmpty() && uploadJob?.isActive != true
-            onImagesPicked(pickedImages)
+            onImagesPicked(event.uris)
             if (showEmptyPickerBanner) {
-                _state.update { it.copy(uploadError = UploadError.NoImageReceived) }
+                _state.update { it.copy(uploadError = EditorErrors.noImageReceived) }
             }
         }
     }
@@ -540,7 +548,7 @@ class TopicFormViewModel @AssistedInject constructor(
      * `PostEditorViewModel.onImagesPicked` contract (multi-image #490): the picked [uris] are read
      * and uploaded sequentially (one in-flight at a time), each success inserts its `[img]` at the
      * caret in pick order (with a leading newline from the second image on) and autosaves, and the
-     * batch stops at the first failure — the already-inserted images stay, the typed [UploadError]
+     * batch stops at the first failure — the already-inserted images stay, the typed [EditorError]
      * is surfaced. A blank list, an anonymous session (no [activeUserId]) or an upload already in
      * flight are ignored. [TopicFormState.uploadProgress] carries « n/N » when the batch has more
      * than one image.
@@ -551,14 +559,15 @@ class TopicFormViewModel @AssistedInject constructor(
     private fun onImagesPicked(uris: List<String>) {
         diagnostics.recordImagesPicked(uris.size)
         val userId = activeUserId
-        val targets = uris.filter { it.isNotBlank() }
+        val received = uris.filter { it.isNotBlank() }
+        val targets = received.take(MAX_IMAGES_PER_UPLOAD)
         // One guard (ReturnCount): nothing in flight already, an authenticated owner, a non-empty pick.
         if (!canStartUpload(userId, targets)) return
         val multiple = targets.size > 1
         _state.update {
             it.copy(
                 isUploading = true,
-                uploadError = null,
+                uploadError = if (received.size > MAX_IMAGES_PER_UPLOAD) EditorErrors.imageLimit else it.uploadError,
                 uploadProgress = if (multiple) UploadProgress(completed = 0, total = targets.size) else null,
             )
         }
@@ -593,7 +602,7 @@ class TopicFormViewModel @AssistedInject constructor(
                     _state.update { it.copy(uploadProgress = UploadProgress(completed, targets.size)) }
                 }
             }
-            _state.update { it.copy(isUploading = false, uploadError = null, uploadProgress = null) }
+            _state.update { it.copy(isUploading = false, uploadProgress = null) }
         }
     }
 
@@ -602,15 +611,7 @@ class TopicFormViewModel @AssistedInject constructor(
             _state.update { it.copy(isUploading = false, uploadProgress = null) }
             throw error
         }
-        val mapped = when (error) {
-            is UploadException.TooLarge -> UploadError.TooLarge
-            is UploadException.UnsupportedType -> UploadError.UnsupportedType
-            is UploadException.Server -> UploadError.Server(code = error.code, providerId = error.providerId)
-            is UploadException.Malformed -> UploadError.Malformed(providerId = error.providerId)
-            is UploadException.Configuration -> UploadError.Configuration
-            is UploadException.Network -> UploadError.Network
-            else -> UploadError.Network
-        }
+        val mapped = EditorErrors.stopped(error.toEditorUploadError(), _state.value.uploadProgress)
         diagnostics.record(
             DiagnosticsLog.Level.WARN,
             LOG_TAG_VM,
@@ -627,11 +628,6 @@ class TopicFormViewModel @AssistedInject constructor(
                     value.text.ifBlank { null }
                 } else {
                     current.restorableSubject
-                },
-                submitError = if (current.submitError != SubmitError.Uncertain && value.text != current.subject.text) {
-                    null
-                } else {
-                    current.submitError
                 },
             )
         }
@@ -687,7 +683,7 @@ class TopicFormViewModel @AssistedInject constructor(
 
     private fun loadEditFirstPostFormIfPossible() {
         val context = buildEditFirstPostContext() ?: run {
-            _state.update { it.copy(submitError = SubmitError.MissingSubcat) }
+            _state.update { it.copy(submitError = EditorErrors.missingSubcat) }
             return
         }
         _state.update { it.copy(isLoadingForm = true) }
@@ -715,15 +711,24 @@ class TopicFormViewModel @AssistedInject constructor(
         }
     }
 
+    private fun reloadForm() {
+        if (_state.value.isLoadingForm || submission.blocksMutation) return
+        submission.disarm()
+        when (request.mode) {
+            TopicFormMode.New -> loadNewTopicFormIfPossible()
+            TopicFormMode.EditFirstPost -> loadEditFirstPostFormIfPossible()
+        }
+    }
+
     private fun handleFetchFailure(error: Throwable) {
         if (error is CancellationException) {
             _state.update { it.copy(isLoadingForm = false) }
             throw error
         }
         val mapped = when (error) {
-            is SessionExpiredException -> SubmitError.SessionExpired
-            is IOException -> SubmitError.Network
-            else -> SubmitError.Hfr(ReplyFailureReason.Unknown)
+            is SessionExpiredException -> EditorErrors.sessionExpired
+            is IOException -> EditorErrors.formNetwork
+            else -> EditorErrors.invalidForm
         }
         diagnostics.record(
             DiagnosticsLog.Level.WARN,
@@ -734,7 +739,7 @@ class TopicFormViewModel @AssistedInject constructor(
         _state.update {
             it.copy(
                 isLoadingForm = false,
-                submitError = if (it.submitError == SubmitError.Uncertain) it.submitError else mapped,
+                submitError = if (it.submitError == EditorErrors.uncertain) it.submitError else mapped,
             )
         }
     }
@@ -753,7 +758,7 @@ class TopicFormViewModel @AssistedInject constructor(
         val form = loadedForm
         if (!snapshot.canSubmit || form == null) return
         if (form.isAnonymous) {
-            _state.update { it.copy(submitError = SubmitError.Hfr(ReplyFailureReason.LoginRequired)) }
+            _state.update { it.copy(submitError = ReplyFailureReason.LoginRequired.toEditorError()) }
         } else {
             val permit = submission.request(intent.timeoutMillis, snapshot.canSubmit && !closeRequested)
             if (permit is SubmissionRequest.Accepted) launchSubmission(permit, snapshot, form)
@@ -800,7 +805,7 @@ class TopicFormViewModel @AssistedInject constructor(
 
     private fun loadNewTopicFormIfPossible() {
         val context = buildNewTopicContext() ?: run {
-            _state.update { it.copy(submitError = SubmitError.MissingSubcat) }
+            _state.update { it.copy(submitError = EditorErrors.missingSubcat) }
             return
         }
         _state.update { it.copy(isLoadingForm = true) }
@@ -857,9 +862,9 @@ class TopicFormViewModel @AssistedInject constructor(
                 EditorSendOutcome.CERTAIN_FAILURE
             },
             error = if (reason == ReplyFailureReason.Unknown) {
-                SubmitError.Uncertain
+                EditorErrors.uncertain
             } else {
-                SubmitError.Hfr(reason)
+                reason.toEditorError()
             },
             afterSettled = if (reason == ReplyFailureReason.InvalidHashCheck) {
                 {
@@ -985,8 +990,8 @@ class TopicFormViewModel @AssistedInject constructor(
             // Anti-clobber : do not overwrite once set, so a silent `InvalidHashCheck`
             // refetch on an anonymous fallback does not erase a previously known id.
             userId = userId ?: form.userId,
-            submitError = if (submitError != SubmitError.Uncertain && form.isAnonymous) {
-                SubmitError.Hfr(ReplyFailureReason.LoginRequired)
+            submitError = if (submitError != EditorErrors.uncertain && form.isAnonymous) {
+                ReplyFailureReason.LoginRequired.toEditorError()
             } else {
                 submitError
             },

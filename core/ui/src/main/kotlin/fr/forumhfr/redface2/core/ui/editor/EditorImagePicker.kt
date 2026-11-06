@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.ui.editor
 
+import android.content.ActivityNotFoundException
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -64,13 +65,24 @@ fun rememberEditorImagePicker(mode: ImagePickerMode, onEvent: (ImagePickerEvent)
     return {
         val request = imagePickRequestFor(mode)
         onEvent(ImagePickerEvent.Launched(mode = mode, contract = imagePickerContractFor(mode)))
-        when (request) {
-            ImagePickRequest.PhotoPicker -> photoPicker.launch(
-                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-            )
-            is ImagePickRequest.GetContent -> getContent.launch(request.mimeType)
-            is ImagePickRequest.Documents -> documentPicker.launch(request.mimeTypes.toTypedArray())
+        launchEditorImagePicker(mode, onEvent) {
+            when (request) {
+                ImagePickRequest.PhotoPicker -> photoPicker.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                )
+                is ImagePickRequest.GetContent -> getContent.launch(request.mimeType)
+                is ImagePickRequest.Documents -> documentPicker.launch(request.mimeTypes.toTypedArray())
+            }
         }
+    }
+}
+
+/** Only the launch boundary may emit Unavailable; cancellation/result stays a different event. */
+internal fun launchEditorImagePicker(mode: ImagePickerMode, onEvent: (ImagePickerEvent) -> Unit, launch: () -> Unit) {
+    try {
+        launch()
+    } catch (_: ActivityNotFoundException) {
+        onEvent(ImagePickerEvent.Unavailable(mode, imagePickerContractFor(mode)))
     }
 }
 

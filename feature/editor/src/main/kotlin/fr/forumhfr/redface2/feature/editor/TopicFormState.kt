@@ -1,26 +1,25 @@
 package fr.forumhfr.redface2.feature.editor
 
-import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
-import fr.forumhfr.redface2.core.ui.editor.UploadError
-import fr.forumhfr.redface2.core.ui.editor.UploadProgress
-
 import androidx.compose.ui.text.input.TextFieldValue
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
-import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
-import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.validateBbcodeDraft
 import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.model.write.TopicFormSubcategoryChoice
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.EditorError
+import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
 /**
  * MVI state of the topic-level form. [TopicFormMode.EditFirstPost] edits the
  * first post of an existing topic (Phase 2D #148) ; [TopicFormMode.New] creates
  * a brand-new topic (Phase 2E #149).
  *
- * Reuses [SubmitError] from `PostEditorState.kt` for the error envelope —
+ * Reuses [EditorError] from the shared `core:ui` catalogue for the error envelope —
  * the failure variants HFR can return are identical for post-level and
  * topic-level edits (same `bdd.php` endpoint, same classifier).
  */
@@ -59,7 +58,7 @@ data class TopicFormState(
     val isSubmitting: Boolean = false,
     /** ED-161/169: terminal success and in-flight reservation are state, never a replayed effect. */
     val submission: EditorSubmissionState = EditorSubmissionState.Ready,
-    val submitError: SubmitError? = null,
+    val submitError: EditorError? = null,
     /**
      * True once we have hydrated `subject` from the parsed form. Kept independent
      * from [draftHydratedFromServer] so a slow fetch that lands while the user
@@ -109,7 +108,7 @@ data class TopicFormState(
      */
     val isUploading: Boolean = false,
     /** #459 — typed upload failure surfaced as a dismissible banner ; mirrors [PostEditorState.uploadError]. */
-    val uploadError: UploadError? = null,
+    val uploadError: EditorError? = null,
     /** #459 — « n/N » batch counter (null for a single image) ; mirrors [PostEditorState.uploadProgress]. */
     val uploadProgress: UploadProgress? = null,
     /** #1128 — observed continuously so the next image pick uses the current preference. */
@@ -197,6 +196,7 @@ sealed interface TopicFormIntent {
     data object SubmitConfirmationDismissed : TopicFormIntent
 
     data object ErrorDismissed : TopicFormIntent
+    data object ReloadRequested : TopicFormIntent
     data class SubcatSelected(val id: Int) : TopicFormIntent
     data class ToggleSignature(val enabled: Boolean) : TopicFormIntent
     data class ToggleSmileyDisabled(val disabled: Boolean) : TopicFormIntent
@@ -287,5 +287,4 @@ internal fun TopicFormState.withDraft(updated: TextFieldValue): TopicFormState =
     copy(
         draft = updated,
         validation = validateBbcodeDraft(updated.text),
-        submitError = if (submitError != SubmitError.Uncertain && updated.text != draft.text) null else submitError,
     )

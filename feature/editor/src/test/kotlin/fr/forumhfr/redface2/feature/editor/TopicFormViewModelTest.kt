@@ -1,50 +1,43 @@
 package fr.forumhfr.redface2.feature.editor
 
-import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
-import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollectionSnapshot
-import fr.forumhfr.redface2.core.model.EditorSmileySource
-import fr.forumhfr.redface2.core.model.HfrFavoriteSmileyMutationResult
-import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
-import fr.forumhfr.redface2.core.ui.editor.UploadError
-
-import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
-import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionScenario
-import fr.forumhfr.redface2.core.domain.editor.SubmissionErrorProbe
-import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionAdapter
-import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
-import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionScenario
 import fr.forumhfr.redface2.core.domain.editor.SubmissionBodyMutation
+import fr.forumhfr.redface2.core.domain.editor.SubmissionErrorProbe
 import fr.forumhfr.redface2.core.domain.editor.SubmissionProbe
+import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
-import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
-import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
-import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
-import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
-import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
-import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
+import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
+import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
+import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
+import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
+import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
-import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
-import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
-import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollectionSnapshot
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.upload.ImageUpload
 import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
@@ -53,39 +46,47 @@ import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadedImage
 import fr.forumhfr.redface2.core.domain.upload.UploadedImageRecord
+import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.EditorSmiley
+import fr.forumhfr.redface2.core.model.EditorSmileySource
+import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.core.model.HfrFavoriteSmileyMutationResult
+import fr.forumhfr.redface2.core.model.PostBlock
+import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.PostInline
+import fr.forumhfr.redface2.core.model.SmileyWikiKeywordsResult
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.ImagePickerContract
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
-import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
-import fr.forumhfr.redface2.core.model.EditorSmiley
-import fr.forumhfr.redface2.core.model.SmileyWikiKeywordsResult
-import fr.forumhfr.redface2.core.model.FlagType
-import fr.forumhfr.redface2.core.model.PostBlock
-import fr.forumhfr.redface2.core.model.PostContent
-import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.write.EditFirstPostContext
 import fr.forumhfr.redface2.core.model.write.NewTopicContext
 import fr.forumhfr.redface2.core.model.write.NewTopicSubmitResult
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.model.write.TopicForm
 import fr.forumhfr.redface2.core.model.write.TopicFormSubcategoryChoice
 import fr.forumhfr.redface2.core.model.write.TopicPollForm
+import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
+import fr.forumhfr.redface2.core.ui.editor.UploadProgress
+import fr.forumhfr.redface2.core.ui.editor.toEditorError
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
@@ -121,6 +122,50 @@ class TopicFormViewModelTest {
     @After
     fun tearDown() {
         Dispatchers.resetMain()
+    }
+
+    @Test
+    fun `partial upload retains count failure and inserted image after typing`() = runTest {
+        val uploads = FakeUploadRepository().apply {
+            uploadException = UploadException.TooLarge(1)
+            failOnCall = 2
+        }
+        val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT, uploadRepository = uploads)
+        testScheduler.advanceUntilIdle()
+        vm.submit(TopicFormIntent.ImagesPicked(listOf("content://pick/1", "content://pick/2", "content://pick/3")))
+        testScheduler.advanceUntilIdle()
+        assertEquals(2, uploads.uploadCalls)
+        assertEquals(1, Regex("\\[img]").findAll(vm.state.value.draft.text).count())
+        val expected = EditorErrors.stopped(EditorErrors.tooLarge, UploadProgress(1, 3))
+        assertEquals(expected, vm.state.value.uploadError)
+        vm.submit(TopicFormIntent.ContentChanged(TextFieldValue(vm.state.value.draft.text + "typed")))
+        assertEquals(expected, vm.state.value.uploadError)
+        assertFalse(vm.state.value.isUploading)
+    }
+
+    @Test
+    fun `ED131 errors survive body selection subject selection subcategory options and insertions`() = runTest {
+        topicFormRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.EmptyMessage)
+        val vm = newViewModel()
+        testScheduler.advanceUntilIdle()
+        vm.submit(TopicFormIntent.SubmitClicked())
+        testScheduler.advanceUntilIdle()
+        vm.submit(TopicFormIntent.ImagePickerEventReceived(
+            ImagePickerEvent.Unavailable(ImagePickerMode.PHOTO_PICKER, ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA),
+        ))
+        listOf(
+            TopicFormIntent.ContentChanged(TextFieldValue("body")),
+            TopicFormIntent.ContentChanged(TextFieldValue("body", TextRange(0, 2))),
+            TopicFormIntent.SubjectChanged(TextFieldValue("title")),
+            TopicFormIntent.SubjectChanged(TextFieldValue("title", TextRange(0, 2))),
+            TopicFormIntent.SubcatSelected(SAMPLE_SUBCAT),
+            TopicFormIntent.ToggleSignature(false),
+            TopicFormIntent.ToolbarActionClicked(BbcodeAction.Bold),
+        ).forEach { intent ->
+            vm.submit(intent)
+            assertEquals(intent.toString(), EditorErrors.empty, vm.state.value.submitError)
+            assertEquals(intent.toString(), EditorErrors.pickerAbsent, vm.state.value.uploadError)
+        }
     }
 
     @Test
@@ -174,9 +219,8 @@ class TopicFormViewModelTest {
             // their first submit was rejected.
             val submitError = finalState.submitError
             assertTrue(
-                "expected submitError to be SubmitError.Hfr(InvalidHashCheck), was $submitError",
-                submitError is SubmitError.Hfr &&
-                    submitError.reason == ReplyFailureReason.InvalidHashCheck,
+                "expected submitError to be InvalidHashCheck.toEditorError(), was $submitError",
+                submitError == EditorErrors.invalidHashCheck,
             )
             cancelAndIgnoreRemainingEvents()
         }
@@ -527,8 +571,7 @@ class TopicFormViewModelTest {
             val submitError = finalState.submitError
             assertTrue(
                 "expected submitError to be Hfr(InvalidHashCheck), was $submitError",
-                submitError is SubmitError.Hfr &&
-                    submitError.reason == ReplyFailureReason.InvalidHashCheck,
+                submitError == EditorErrors.invalidHashCheck,
             )
             cancelAndIgnoreRemainingEvents()
         }
@@ -546,8 +589,8 @@ class TopicFormViewModelTest {
             assertTrue(final.isAnonymous)
             val error = final.submitError
             assertTrue(
-                "expected SubmitError.Hfr(LoginRequired), was $error",
-                error is SubmitError.Hfr && error.reason == ReplyFailureReason.LoginRequired,
+                "expected LoginRequired.toEditorError(), was $error",
+                error == EditorErrors.loginRequired,
             )
             cancelAndIgnoreRemainingEvents()
         }
@@ -1472,7 +1515,7 @@ class TopicFormViewModelTest {
             testScheduler.advanceUntilIdle()
 
             assertEquals(
-                stateBefore.copy(uploadError = UploadError.NoImageReceived),
+                stateBefore.copy(uploadError = EditorErrors.noImageReceived),
                 viewModel.state.value,
             )
             assertFalse(viewModel.state.value.isUploading)
@@ -1546,11 +1589,12 @@ class TopicFormViewModelTest {
 
         assertEquals(uris.take(10), reader.readUris)
         assertEquals(10, uploads.uploadCalls)
+        assertEquals(EditorErrors.imageLimit, viewModel.state.value.uploadError)
         assertEquals(
             listOf(
                 "result contract=OpenMultipleDocuments count=11 " +
                     "sources=[content://com.android.providers.media.documents]",
-                "onImagesPicked count=10",
+                "onImagesPicked count=11",
             ),
             diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
         )
@@ -1611,7 +1655,7 @@ class TopicFormViewModelTest {
         testScheduler.advanceUntilIdle()
 
         val state = viewModel.state.value
-        assertEquals(UploadError.TooLarge, state.uploadError)
+        assertEquals(EditorErrors.stopped(EditorErrors.tooLarge, UploadProgress(0, 2)), state.uploadError)
         assertFalse(state.isUploading)
         assertEquals(1, uploads.uploadCalls)
         assertEquals("", state.draft.text)
@@ -1752,11 +1796,11 @@ class TopicFormViewModelTest {
                     it.draft.text, it.canSubmit, it.isSubmitting, it.isUploading, it.showSubmitConfirmation,
                     armId = it.armToken?.id,
                     error = when (it.submitError) {
-                        SubmitError.Network -> SubmissionErrorProbe.NETWORK
-                        SubmitError.SessionExpired -> SubmissionErrorProbe.SESSION_EXPIRED
-                        SubmitError.Uncertain -> SubmissionErrorProbe.UNCERTAIN
-                        SubmitError.DraftWriteFailed -> SubmissionErrorProbe.DRAFT_WRITE_FAILED
-                        SubmitError.Hfr(ReplyFailureReason.Unknown) -> SubmissionErrorProbe.PREPARATION_FAILED
+                        EditorErrors.network -> SubmissionErrorProbe.NETWORK
+                        EditorErrors.sessionExpired -> SubmissionErrorProbe.SESSION_EXPIRED
+                        EditorErrors.uncertain -> SubmissionErrorProbe.UNCERTAIN
+                        EditorErrors.draftWriteFailed -> SubmissionErrorProbe.DRAFT_WRITE_FAILED
+                        EditorErrors.invalidForm -> SubmissionErrorProbe.PREPARATION_FAILED
                         else -> null
                     },
                     restoreOffered = it.restorableDraft != null,
@@ -1868,6 +1912,7 @@ class TopicFormViewModelTest {
     /** #459 — fake [UploadRepository] ; only [uploadWithCurrentProvider] matters here. */
     private class FakeUploadRepository : UploadRepository {
         var uploadException: Throwable? = null
+        var failOnCall: Int = 1
         /** When set, holds the upload in flight until the test releases it (mirrors PostEditor's fake). */
         var uploadGate: CompletableDeferred<Unit>? = null
         var uploadCalls: Int = 0
@@ -1876,7 +1921,7 @@ class TopicFormViewModelTest {
         override suspend fun uploadWithCurrentProvider(image: ImageUpload, userId: String): UploadedImage {
             uploadCalls += 1
             uploadGate?.await()
-            uploadException?.let { throw it }
+            uploadException?.takeIf { uploadCalls >= failOnCall }?.let { throw it }
             return UploadedImage(
                 provider = UploadProviderId.DIBERIE,
                 imageUrl = "https://rehost.diberie.com/Picture/Get/f/1",

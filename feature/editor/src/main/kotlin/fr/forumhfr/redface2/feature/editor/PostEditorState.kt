@@ -1,16 +1,15 @@
 package fr.forumhfr.redface2.feature.editor
-import fr.forumhfr.redface2.core.ui.editor.UploadError
-import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
 import androidx.compose.ui.text.input.TextFieldValue
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
-import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.validateBbcodeDraft
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
-import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
+import fr.forumhfr.redface2.core.ui.editor.EditorError
+import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
 /**
  * MVI state of the post-level editor. Local draft + parsed preview AST + the
@@ -36,6 +35,8 @@ data class PostEditorState(
      * (one implementation, `TopicReplyQuoteMaterializer`). Always empty in [PostEditorMode.Edit].
      */
     val quotes: List<QuoteSelection> = emptyList(),
+    /** ED-132: acknowledgement never abandons a requested inline quote. */
+    val pendingQuotes: List<QuoteSelection> = emptyList(),
     val draft: TextFieldValue = TextFieldValue(),
     val preview: PostContent = PostContent(blocks = emptyList()),
     val isPreviewVisible: Boolean = false,
@@ -47,7 +48,7 @@ data class PostEditorState(
     /** ED-161/169: terminal success and in-flight reservation are state, never a replayed effect. */
     val submission: EditorSubmissionState = EditorSubmissionState.Ready,
     /** Surfaces an HFR-classified failure to the UI. Null means "no error to show". */
-    val submitError: SubmitError? = null,
+    val submitError: EditorError? = null,
     /**
      * Tracks whether we already prefilled [draft] from `ReplyForm.initialContent`.
      * Used by the ViewModel to make sure a stale form refetch (e.g. after
@@ -107,9 +108,9 @@ data class PostEditorState(
     val isUploading: Boolean = false,
     /**
      * #459 PR2 — typed upload failure surfaced after a failed pick→read→upload. Null means « no
-     * error to show ». Cleared on a fresh content mutation or via [PostEditorIntent.UploadErrorDismissed].
+     * error to show ». Cleared only via [PostEditorIntent.UploadErrorDismissed].
      */
-    val uploadError: UploadError? = null,
+    val uploadError: EditorError? = null,
     /**
      * Multi-image upload — progress of the in-flight batch, or null when no batch (or a single
      * image) is uploading. [UploadProgress.total] > 1 is what the editor uses to show an « n/N »
@@ -143,53 +144,15 @@ data class PostEditorState(
             (draft.text.isNotBlank() || (mode == PostEditorMode.Reply && quotes.isNotEmpty())) &&
             !isSubmitting &&
             !submission.blocksBodyMutation &&
-            !isLoadingForm &&
+            !isLoadingForm && pendingQuotes.isEmpty() &&
             !isUploading
 
     val isSubmitEnabled: Boolean get() = canSubmit
 }
 
-/**
- * UI-facing error envelope. The repository's [ReplyFailureReason] is the canonical
- * type — we wrap it here so transport-level failures (IO, session) can land alongside
- * the HFR-classified reasons without leaking exception types into the View.
- */
-sealed interface SubmitError {
-    /** A classified failure surfaced verbatim by HFR (see fixtures). */
-    data class Hfr(val reason: ReplyFailureReason) : SubmitError
-
-    /** ED-168/170: HFR may have accepted the write; never invite an automatic retry. */
-    data object Uncertain : SubmitError
-
-    /** ED-170: the durable attempt could not be written; no write repository was entered. */
-    data object DraftWriteFailed : SubmitError
-
-    /** Network / IO error. The draft is preserved ; the user can retry. */
-    data object Network : SubmitError
-
-    /** Auth cookie was rejected mid-flow. The UI prompts a fresh login. */
-    data object SessionExpired : SubmitError
-
-    /**
-     * The active topic page does not carry a `subcat` yet (cache pre-dates Phase 2C).
-     * The UI tells the user to refresh the topic first.
-     */
-    data object MissingSubcat : SubmitError
-}
-
-// #459 — UploadError / UploadProgress were born here and are now promoted to
-// `:core:ui` (core.ui.editor.EditorUpload) so the MP composers share the same
-// upload vocabulary as the topic-side editors.
-
 internal fun PostEditorState.withDraft(updated: TextFieldValue): PostEditorState =
     copy(
         draft = updated,
         validation = validateBbcodeDraft(updated.text),
-        // Clear an error as soon as the user mutates the draft — they have implicitly
-        // accepted that we will try again. Keep it on toolbar-only mutations though
-        // (caller resets `submitError` directly when needed).
-        submitError = if (submitError != SubmitError.Uncertain && updated.text != draft.text) null else submitError,
-        // #459 PR2 — same rule for the image-upload error : a fresh text edit dismisses the stale
-        // banner. A successful upload INSERTS text via this path, which also clears any prior error.
-        uploadError = if (updated.text != draft.text) null else uploadError,
+        // ED-131: text and selection mutations retain both error slots.
     )

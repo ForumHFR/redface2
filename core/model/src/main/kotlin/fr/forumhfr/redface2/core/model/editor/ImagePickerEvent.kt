@@ -19,6 +19,8 @@ sealed interface ImagePickerEvent {
         val contract: ImagePickerContract,
     ) : ImagePickerEvent
 
+    data class Unavailable(val mode: ImagePickerMode, val contract: ImagePickerContract) : ImagePickerEvent
+
     data class Result(
         val contract: ImagePickerContract,
         val uris: List<String>,

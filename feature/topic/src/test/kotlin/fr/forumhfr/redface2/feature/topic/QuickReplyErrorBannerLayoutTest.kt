@@ -24,6 +24,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.width
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.editor.EditorError
+import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -48,12 +50,12 @@ class QuickReplyErrorBannerLayoutTest {
     val compose = createComposeRule()
 
     @Test
-    fun uncertainFits() = assertBanner(QuickReplySubmitError.Uncertain, "Envoi incertain")
+    fun uncertainFits() = assertBanner(EditorErrors.uncertain, "Envoi incertain")
 
     @Test
-    fun draftWriteFailedFits() = assertBanner(QuickReplySubmitError.DraftWriteFailed, "Brouillon non écrit")
+    fun draftWriteFailedFits() = assertBanner(EditorErrors.draftWriteFailed, "Brouillon non écrit")
 
-    private fun assertBanner(error: QuickReplySubmitError, label: String) {
+    private fun assertBanner(error: EditorError, label: String) {
         compose.setContent {
             val density = LocalDensity.current
             val configuration = Configuration(LocalConfiguration.current).apply { fontScale = 1.3f }
@@ -79,7 +81,7 @@ class QuickReplyErrorBannerLayoutTest {
         }
         assertSummary(label)
         val detail = compose.onNodeWithText("Votre message a peut-être été envoyé", substring = true)
-        if (error == QuickReplySubmitError.DraftWriteFailed) {
+        if (error == EditorErrors.draftWriteFailed) {
             detail.assertDoesNotExist()
         } else {
             val detailBounds = detail.assertIsDisplayed().getUnclippedBoundsInRoot()

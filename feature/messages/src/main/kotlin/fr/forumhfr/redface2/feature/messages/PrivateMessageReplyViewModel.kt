@@ -21,19 +21,18 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDelivery
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionBinding
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionCallbacks
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionEnvironment
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionErrors
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionRequest
-import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.HfrFavoriteSmileyRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollections
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
-import fr.forumhfr.redface2.core.domain.upload.UploadException
 import fr.forumhfr.redface2.core.domain.upload.UploadFailureDiagnostics
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageReplyQuoteMaterializer
@@ -47,16 +46,21 @@ import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.EditorError
+import fr.forumhfr.redface2.core.ui.editor.EditorErrorSurface
+import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.MAX_IMAGES_PER_UPLOAD
 import fr.forumhfr.redface2.core.ui.editor.SmileyFavoriteMutations
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerFavoriteSources
 import fr.forumhfr.redface2.core.ui.editor.SmileyWikiKeywordsSource
-import fr.forumhfr.redface2.core.ui.editor.UploadError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.imageInsertBbcodeOrNull
 import fr.forumhfr.redface2.core.ui.editor.insertBbcodeToken
 import fr.forumhfr.redface2.core.ui.editor.pickedImagesForUpload
+import fr.forumhfr.redface2.core.ui.editor.toEditorError
+import fr.forumhfr.redface2.core.ui.editor.toEditorUploadError
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -150,7 +154,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     private val submission = EditorSubmissionBinding(
         environment = EditorSubmissionEnvironment(viewModelScope, clock, diagnostics),
         drafts = EditorDraftSession(draftStore, draftKey),
-        callbacks = EditorSubmissionCallbacks<PrivateMessageReplyEffect, PrivateMessageReplyError>(
+        callbacks = EditorSubmissionCallbacks<PrivateMessageReplyEffect, EditorError>(
             state = { value ->
                 _state.update {
                     it.copy(
@@ -165,12 +169,12 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             success = { value -> _effects.trySend(value) },
         ),
         errors = EditorSubmissionErrors(
-            uncertain = PrivateMessageReplyError.Uncertain,
-            draftWriteFailed = PrivateMessageReplyError.DraftWriteFailed,
-            sessionExpired = PrivateMessageReplyError.SessionExpired,
-            unknown = PrivateMessageReplyError.Uncertain,
-            network = PrivateMessageReplyError.Network,
-            preparationFailed = PrivateMessageReplyError.Unexpected,
+            uncertain = EditorErrors.uncertain(EditorErrorSurface.MessageReply),
+            draftWriteFailed = EditorErrors.draftWriteFailed,
+            sessionExpired = EditorErrors.sessionExpired,
+            unknown = EditorErrors.uncertain(EditorErrorSurface.MessageReply),
+            network = EditorErrors.network,
+            preparationFailed = EditorErrors.invalidForm,
         ),
     )
 
@@ -237,7 +241,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             _state.update {
                 it.withDraftPreview(TextFieldValue(draft.body, TextRange(draft.body.length))).copy(
                     draftHydratedFromForm = true,
-                    restorableDraft = null, submitError = PrivateMessageReplyError.Uncertain,
+                    restorableDraft = null, submitError = EditorErrors.uncertain(EditorErrorSurface.MessageReply),
                 )
             }
         } else {
@@ -578,7 +582,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         val form = loadedForm ?: return
         if (!snapshot.canSubmit || closeRequested) return
         if (form.isAnonymous) {
-            _state.update { it.copy(submitError = PrivateMessageReplyError.LoginRequired) }
+            _state.update { it.copy(submitError = EditorErrors.loginRequired) }
         } else {
             val permit = submission.request(timeoutMillis, snapshot.canSubmit)
             if (permit is SubmissionRequest.Accepted) launchSubmission(permit, snapshot, form)
@@ -610,7 +614,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
 
     private fun submissionDelivery(
         result: ReplySubmitResult,
-    ): EditorDelivery<PrivateMessageReplyEffect, PrivateMessageReplyError> =
+    ): EditorDelivery<PrivateMessageReplyEffect, EditorError> =
         when (result) {
             is ReplySubmitResult.Success -> EditorDelivery(
                 effect = PrivateMessageReplyEffect.SubmitSucceeded(
@@ -619,7 +623,8 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             )
             is ReplySubmitResult.Failure -> {
                 EditorDelivery(
-                    outcome = if (result.reason == ReplyFailureReason.Unknown) {
+                    outcome = if (result.reason == ReplyFailureReason.Unknown ||
+                        result.reason == ReplyFailureReason.TopicLocked) {
                         EditorSendOutcome.UNCERTAIN
                     } else {
                         EditorSendOutcome.CERTAIN_FAILURE
@@ -635,24 +640,13 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             }
         }
 
-    private fun ReplyFailureReason.toReplyError(): PrivateMessageReplyError = when (this) {
-        ReplyFailureReason.EmptyMessage -> PrivateMessageReplyError.Empty
-        ReplyFailureReason.InvalidHashCheck -> PrivateMessageReplyError.InvalidHashCheck
-        ReplyFailureReason.AntiFlood -> PrivateMessageReplyError.AntiFlood
-        ReplyFailureReason.LoginRequired -> PrivateMessageReplyError.LoginRequired
-        ReplyFailureReason.UnknownRecipient -> PrivateMessageReplyError.Refused
-        // TopicLocked has no private-message analogue, and Unknown is the unrecognised-response
-        // fallback: both map to the non-destructive "verify the conversation" banner.
-        ReplyFailureReason.TopicLocked -> PrivateMessageReplyError.Unexpected
-        ReplyFailureReason.Unknown -> PrivateMessageReplyError.Uncertain
-    }
+    private fun ReplyFailureReason.toReplyError(): EditorError = toEditorError(EditorErrorSurface.MessageReply)
 
     private fun PrivateMessageReplyUiState.withDraftPreview(updated: TextFieldValue): PrivateMessageReplyUiState =
         copy(
             draft = updated,
             preview = if (isPreviewVisible) previewParser.parsePreview(updated.text) else preview,
-            // #459 — a fresh text edit dismisses a stale upload banner — parity with PostEditorState.
-            uploadError = if (updated.text != draft.text) null else uploadError,
+            // ED-131: programmatic insertions and typing retain upload errors.
         )
 
     /**
@@ -687,12 +681,15 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     fun onImagePickerEvent(event: ImagePickerEvent) {
         if (submission.blocksMutation) return
         diagnostics.recordImagePickerEvent(event)
+        if (event is ImagePickerEvent.Unavailable) {
+            _state.update { it.copy(uploadError = EditorErrors.pickerAbsent) }
+        }
         if (event is ImagePickerEvent.Result) {
             val pickedImages = pickedImagesForUpload(event.contract, event.uris)
             val showEmptyPickerBanner = pickedImages.isEmpty() && uploadJob?.isActive != true
-            onImagesPicked(pickedImages)
+            onImagesPicked(event.uris)
             if (showEmptyPickerBanner) {
-                _state.update { it.copy(uploadError = UploadError.NoImageReceived) }
+                _state.update { it.copy(uploadError = EditorErrors.noImageReceived) }
             }
         }
     }
@@ -701,7 +698,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
      * #459 — pick→read→upload→insert for this MP composer, same proven contract as
      * `PostEditorViewModel.onImagesPicked` (multi-image #490): sequential batch, one `[img]` per
      * success in pick order (leading newline from the 2nd on), autosave after each insertion, stop
-     * at the first failure with the typed [UploadError] surfaced. A blank list, an anonymous
+     * at the first failure with the typed [EditorError] surfaced. A blank list, an anonymous
      * session or an upload already in flight are ignored.
      */
     private fun canStartUpload(userId: String?, targets: List<String>): Boolean =
@@ -710,7 +707,8 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     fun onImagesPicked(uris: List<String>) {
         diagnostics.recordImagesPicked(uris.size)
         val userId = activeUserId
-        val targets = uris.filter { it.isNotBlank() }
+        val received = uris.filter { it.isNotBlank() }
+        val targets = received.take(MAX_IMAGES_PER_UPLOAD)
         // One guard (ReturnCount): nothing in flight already, an authenticated owner, a non-empty pick.
         if (!canStartUpload(userId, targets)) return
         submission.disarm()
@@ -718,7 +716,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         _state.update {
             it.copy(
                 isUploading = true,
-                uploadError = null,
+                uploadError = if (received.size > MAX_IMAGES_PER_UPLOAD) EditorErrors.imageLimit else it.uploadError,
                 uploadProgress = if (multiple) UploadProgress(completed = 0, total = targets.size) else null,
             )
         }
@@ -753,7 +751,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                     _state.update { it.copy(uploadProgress = UploadProgress(completed, targets.size)) }
                 }
             }
-            _state.update { it.copy(isUploading = false, uploadError = null, uploadProgress = null) }
+            _state.update { it.copy(isUploading = false, uploadProgress = null) }
         }
     }
 
@@ -797,15 +795,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             _state.update { it.copy(isUploading = false, uploadProgress = null) }
             throw error
         }
-        val mapped = when (error) {
-            is UploadException.TooLarge -> UploadError.TooLarge
-            is UploadException.UnsupportedType -> UploadError.UnsupportedType
-            is UploadException.Server -> UploadError.Server(code = error.code, providerId = error.providerId)
-            is UploadException.Malformed -> UploadError.Malformed(providerId = error.providerId)
-            is UploadException.Configuration -> UploadError.Configuration
-            is UploadException.Network -> UploadError.Network
-            else -> UploadError.Network
-        }
+        val mapped = EditorErrors.stopped(error.toEditorUploadError(), _state.value.uploadProgress)
         diagnostics.record(
             DiagnosticsLog.Level.WARN,
             LOG_TAG_UPLOAD,

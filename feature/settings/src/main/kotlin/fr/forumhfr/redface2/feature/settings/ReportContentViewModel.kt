@@ -15,13 +15,13 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDelivery
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionBinding
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionCallbacks
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionEnvironment
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionErrors
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionRequest
-import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.AuthState
@@ -92,7 +92,7 @@ class ReportContentViewModel @AssistedInject constructor(
         errors = EditorSubmissionErrors(
             uncertain = ReportError.UNCERTAIN, draftWriteFailed = ReportError.DRAFT_WRITE_FAILED,
             sessionExpired = ReportError.SESSION_EXPIRED, unknown = ReportError.UNCERTAIN,
-            network = ReportError.NETWORK, preparationFailed = ReportError.REFUSED,
+            network = ReportError.NETWORK, preparationFailed = ReportError.INVALID_FORM,
         ),
     ).also { it.setPreference(confirmPreference) }
 

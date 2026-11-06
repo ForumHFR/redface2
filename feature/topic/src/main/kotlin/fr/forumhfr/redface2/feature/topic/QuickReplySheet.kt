@@ -50,11 +50,12 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
-import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
+import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummary
-import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummaryKind
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsCallbacks
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsColumn
+import fr.forumhfr.redface2.core.ui.editor.bannerText
+import fr.forumhfr.redface2.core.ui.editor.hasSubmissionSummary
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 
 /**
@@ -294,37 +295,13 @@ private fun QuickReplyConfirmationDialog(visible: Boolean, onConfirm: () -> Unit
 
 /** The sheet's submission summary and verification detail, in the existing fields column. */
 @Composable
-internal fun QuickReplyErrorBanner(error: QuickReplySubmitError) {
-    val summary = when (error) {
-        QuickReplySubmitError.Uncertain -> EditorSubmissionSummaryKind.Uncertain
-        QuickReplySubmitError.DraftWriteFailed -> EditorSubmissionSummaryKind.DraftWriteFailed
-        else -> null
-    }
-    if (summary != null) EditorSubmissionSummary(summary)
-    if (error != QuickReplySubmitError.DraftWriteFailed) Text(
-        text = stringResource(error.messageRes()),
+internal fun QuickReplyErrorBanner(error: EditorError) {
+    if (error.hasSubmissionSummary) EditorSubmissionSummary(error)
+    Text(
+        text = error.bannerText(),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.error,
     )
-}
-
-/** The same wording as the full editor's error banner, module-local copies (feature/topic res). */
-internal fun QuickReplySubmitError.messageRes(): Int = when (this) {
-    QuickReplySubmitError.Uncertain -> R.string.quick_reply_error_uncertain
-    QuickReplySubmitError.DraftWriteFailed ->
-        fr.forumhfr.redface2.core.ui.R.string.editor_submission_draft_write_failed
-    QuickReplySubmitError.Network -> R.string.quick_reply_error_network
-    QuickReplySubmitError.SessionExpired -> R.string.quick_reply_error_session_expired
-    QuickReplySubmitError.QuoteFetchFailed -> R.string.quick_reply_error_quote_fetch
-    is QuickReplySubmitError.Hfr -> when (reason) {
-        ReplyFailureReason.EmptyMessage -> R.string.quick_reply_error_empty
-        ReplyFailureReason.InvalidHashCheck -> R.string.quick_reply_error_invalid_hash
-        ReplyFailureReason.AntiFlood -> R.string.quick_reply_error_anti_flood
-        ReplyFailureReason.TopicLocked -> R.string.quick_reply_error_topic_locked
-        ReplyFailureReason.LoginRequired -> R.string.quick_reply_error_login_required
-        ReplyFailureReason.Unknown -> R.string.quick_reply_error_unknown
-        ReplyFailureReason.UnknownRecipient -> R.string.quick_reply_error_unknown
-    }
 }
 
 // #604 lot 3 — QuoteCard / QuoteCardControls promoted to `:core:ui` (core.ui.editor.QuoteCards):

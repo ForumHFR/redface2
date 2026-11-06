@@ -11,6 +11,8 @@ fun DiagnosticsLog.recordImagePickerEvent(event: ImagePickerEvent) {
     val message = when (event) {
         is ImagePickerEvent.Launched ->
             "launch mode=${event.mode.name} contract=${event.contract.diagnosticName}"
+        is ImagePickerEvent.Unavailable ->
+            "unavailable mode=${event.mode.name} contract=${event.contract.diagnosticName}"
         is ImagePickerEvent.Result -> {
             val sources = event.uris
                 .map(DiagnosticRedactor::redactUriSource)

@@ -1,12 +1,9 @@
 package fr.forumhfr.redface2.feature.editor
 
-import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
-import fr.forumhfr.redface2.core.ui.editor.UploadError
-import fr.forumhfr.redface2.core.ui.editor.UploadProgress
-
 import androidx.compose.ui.text.input.TextFieldValue
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 
 /**
@@ -31,6 +28,9 @@ sealed interface PostEditorIntent {
 
     /** User dismissed an in-flight error banner. Clears [PostEditorState.submitError]. */
     data object ErrorDismissed : PostEditorIntent
+
+    /** ED-132: GET only; never shares the submit intent or its arm identity. */
+    data object ReloadRequested : PostEditorIntent
 
     /** Toggle « Activer votre signature » (HFR `signature=1`). */
     data class ToggleSignature(val enabled: Boolean) : PostEditorIntent

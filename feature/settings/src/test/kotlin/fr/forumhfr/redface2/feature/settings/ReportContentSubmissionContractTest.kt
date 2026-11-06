@@ -136,7 +136,7 @@ private class ReportSubmissionAdapter(
             body = it.draft.description, canSubmit = it.canSubmit, isSending = it.isSending,
             isUploading = false, confirmationVisible = it.armToken != null, armId = it.armToken?.id,
             error = when (it.error) {
-                ReportError.REFUSED -> SubmissionErrorProbe.PREPARATION_FAILED
+                ReportError.INVALID_FORM -> SubmissionErrorProbe.PREPARATION_FAILED
                 ReportError.NETWORK -> SubmissionErrorProbe.NETWORK
                 ReportError.SESSION_EXPIRED -> SubmissionErrorProbe.SESSION_EXPIRED
                 ReportError.UNCERTAIN -> SubmissionErrorProbe.UNCERTAIN

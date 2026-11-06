@@ -1,12 +1,5 @@
 package fr.forumhfr.redface2.feature.editor
 
-import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
-import fr.forumhfr.redface2.core.ui.editor.rememberEditorImagePicker
-import fr.forumhfr.redface2.core.ui.editor.UploadProgressLabel
-import fr.forumhfr.redface2.core.ui.editor.bannerText
-
-import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
-import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
@@ -32,7 +25,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummary
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -49,13 +41,22 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
 import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
+import fr.forumhfr.redface2.core.ui.editor.EditorError
+import fr.forumhfr.redface2.core.ui.editor.EditorErrorAction
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
+import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummary
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
+import fr.forumhfr.redface2.core.ui.editor.UploadProgressLabel
+import fr.forumhfr.redface2.core.ui.editor.bannerText
 import fr.forumhfr.redface2.core.ui.editor.editorControlsMaxHeight
+import fr.forumhfr.redface2.core.ui.editor.hasSubmissionSummary
+import fr.forumhfr.redface2.core.ui.editor.rememberEditorImagePicker
 
 /**
  * Topic-level form screen. Live for [TopicFormMode.EditFirstPost] (Phase 2D
@@ -345,8 +346,8 @@ private fun TopicFormControlsZone(
 }
 
 /**
- * Dismissible error banners of the topic composer: the submit failure (typed [SubmitError]) and the
- * #459 upload failure (typed `UploadError`, same rendering as `PostEditorContent`). Extracted so
+ * Dismissible error banners of the topic composer: the submit failure (typed [EditorError]) and the
+ * #459 upload failure (typed `EditorError`, same rendering as `PostEditorContent`). Extracted so
  * [TopicFormContent] stays under detekt's cyclomatic-complexity budget (same rationale as
  * `UploadProgressLabel`).
  */
@@ -356,18 +357,29 @@ internal fun TopicFormErrorBanners(
     onIntent: (TopicFormIntent) -> Unit,
 ) {
     state.submitError?.let { error ->
-        val summary = error.summaryKind
+        val summary = error.takeIf { it.hasSubmissionSummary }
         if (summary != null) {
             EditorSubmissionSummary(summary)
+            Text(
+                text = error.bannerText(), style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
         } else {
             Text(
-                text = stringResource(error.bannerResId),
+                text = error.bannerText(),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
             )
         }
-        TextButton(onClick = { onIntent(TopicFormIntent.ErrorDismissed) }) {
-            Text(text = stringResource(R.string.editor_error_dismiss))
+        val reload = error.action == EditorErrorAction.Reload
+        TextButton(onClick = {
+            onIntent(if (reload) TopicFormIntent.ReloadRequested else TopicFormIntent.ErrorDismissed)
+        }) {
+            Text(text = stringResource(if (reload) {
+                fr.forumhfr.redface2.core.ui.R.string.editor_action_reload
+            } else {
+                R.string.editor_error_dismiss
+            }))
         }
     }
     state.uploadError?.let { error ->
@@ -514,22 +526,4 @@ private val TopicFormMode.titleResId: Int
     get() = when (this) {
         TopicFormMode.New -> R.string.editor_topic_new_title
         TopicFormMode.EditFirstPost -> R.string.editor_topic_edit_first_post_title
-    }
-
-private val SubmitError.bannerResId: Int
-    get() = when (this) {
-        is SubmitError.Hfr -> when (reason) {
-            ReplyFailureReason.EmptyMessage -> R.string.editor_error_empty
-            ReplyFailureReason.InvalidHashCheck -> R.string.editor_error_invalid_hash
-            ReplyFailureReason.AntiFlood -> R.string.editor_error_anti_flood
-            ReplyFailureReason.TopicLocked -> R.string.editor_error_topic_locked
-            ReplyFailureReason.LoginRequired -> R.string.editor_error_login_required
-            ReplyFailureReason.Unknown -> R.string.editor_error_unknown
-            ReplyFailureReason.UnknownRecipient -> R.string.editor_error_unknown
-        }
-        SubmitError.Uncertain -> fr.forumhfr.redface2.core.ui.R.string.editor_submission_uncertain
-        SubmitError.DraftWriteFailed -> fr.forumhfr.redface2.core.ui.R.string.editor_submission_draft_write_failed
-        SubmitError.Network -> R.string.editor_error_network
-        SubmitError.SessionExpired -> R.string.editor_error_session_expired
-        SubmitError.MissingSubcat -> R.string.editor_error_missing_subcat
     }
