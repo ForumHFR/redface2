@@ -18,20 +18,30 @@ internal data class TopicAcknowledgement(
     val lastPage: Int? = null,
     val refreshFailed: Boolean = false,
     val expiresAtMillis: Long? = null,
+    val revision: Int = 0,
+    val offerOnly: Boolean = false,
 ) {
     enum class Kind { Published, Edited, Deleted, RefreshWarning }
 }
 
-/** Save acceptance before consuming the relay, then keep it until presentation (or offer expiry). */
+/**
+ * Save acceptance before consuming the relay. The 1 s deadline confirms acceptance, but only the
+ * first terminal refresh closes it: a Published acknowledgement may gain one late last-page offer.
+ * Identity fences departures/accounts/new submissions; revision fences callbacks from replaced
+ * presentations. An offer's accessible expiry starts only when it actually acquires the host.
+ */
 internal class TopicAcknowledgements(
     private val saved: SavedStateHandle,
     private val scope: CoroutineScope,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
+    private enum class Phase { Waiting, Deadline, Finished }
+
     private var sequence = saved.get<Long>(KEY_SEQUENCE) ?: 0L
     private var accepted: TopicAcknowledgement? = null
     private var wasPresented = false
-    private var settled = true
+    private var phase = Phase.Finished
+    private var confirmationExpiresAtMillis: Long? = null
     private var waitUntilMillis: Long? = null
     private var deadlineJob: Job? = null
     private val mutableFeedback = MutableStateFlow<TopicAcknowledgement?>(null)
@@ -44,7 +54,7 @@ internal class TopicAcknowledgements(
     }
 
     fun accept(account: String, operation: PostSubmitOperation): Long {
-        reset()
+        clear()
         val ack = TopicAcknowledgement(
             nextId(), account,
             if (operation == PostSubmitOperation.Edit) TopicAcknowledgement.Kind.Edited
@@ -52,7 +62,7 @@ internal class TopicAcknowledgements(
         )
         accepted = ack
         wasPresented = false
-        settled = false
+        phase = Phase.Waiting
         waitUntilMillis = now() + TOPIC_SUBMIT_ACK_WAIT_MILLIS
         saveAcknowledgement()
         awaitDeadline(ack.id)
@@ -63,30 +73,47 @@ internal class TopicAcknowledgements(
         val deadline = waitUntilMillis ?: now()
         deadlineJob = scope.launch {
             delay((deadline - now()).coerceAtLeast(0))
-            settle(id, null)
+            confirmAtDeadline(id)
         }
     }
 
-    fun refreshed(id: Long, lastPage: Int?) = settle(id, lastPage)
+    private fun confirmAtDeadline(id: Long) {
+        val ack = accepted?.takeIf { it.id == id } ?: return
+        if (phase != Phase.Waiting) return
+        phase = Phase.Deadline
+        mutableFeedback.value = ack
+        saveAcknowledgement()
+    }
 
-    private fun settle(id: Long, lastPage: Int?) {
-        val ack = accepted?.takeIf { it.id == id && !settled } ?: return
-        settled = true
+    fun refreshed(id: Long, lastPage: Int?) {
+        val ack = accepted?.takeIf { it.id == id } ?: return
+        if (phase == Phase.Finished) return
+        val late = phase == Phase.Deadline
+        phase = Phase.Finished
         deadlineJob?.cancel()
-        mutableFeedback.value = ack.copy(
-            lastPage = lastPage.takeIf { ack.kind == TopicAcknowledgement.Kind.Published },
-        )
+        val page = lastPage.takeIf { ack.kind == TopicAcknowledgement.Kind.Published }
+        if (!late || page != null) {
+            val confirmationVisible = confirmationExpiresAtMillis?.let { it > now() } == true
+            val ready = ack.copy(
+                lastPage = page,
+                revision = if (late) ack.revision + 1 else ack.revision,
+                offerOnly = late && wasPresented && !confirmationVisible,
+            )
+            accepted = ready
+            mutableFeedback.value = ready
+        }
         saveAcknowledgement()
     }
 
     fun refreshFailed(id: Long) {
         val ack = accepted?.takeIf { it.id == id } ?: return
+        if (phase == Phase.Finished) return
         deadlineJob?.cancel()
-        settled = true
+        phase = Phase.Finished
         mutableFeedback.value = if (wasPresented) {
             TopicAcknowledgement(nextId(), ack.account, TopicAcknowledgement.Kind.RefreshWarning)
         } else {
-            ack.copy(refreshFailed = true)
+            ack.copy(refreshFailed = true, revision = ack.revision + 1).also { accepted = it }
         }
         saveAcknowledgement()
     }
@@ -102,52 +129,59 @@ internal class TopicAcknowledgements(
         saveAcknowledgement()
     }
 
-    fun forPresentation(id: Long): TopicAcknowledgement? {
-        val ack = feedback.value?.takeIf { it.id == id } ?: return null
+    fun forPresentation(id: Long, revision: Int? = null): TopicAcknowledgement? {
+        val ack = current(id, revision) ?: return null
         return if (ack.expiresAtMillis?.let { it <= now() } == true) {
-            dismiss(id)
+            dismiss(id, ack.revision)
             null
         } else {
             ack
         }
     }
 
-    /** Called only when this event actually owns the host mutex. Consuming never cancels display. */
-    fun presented(id: Long, timeoutMillis: Long) {
-        val ack = feedback.value?.takeIf { it.id == id } ?: return
+    /** Called only when this revision owns the host mutex. Consumption never cancels display. */
+    fun presented(id: Long, timeoutMillis: Long, revision: Int? = null) {
+        val ack = current(id, revision) ?: return
         if (accepted?.id == id) wasPresented = true
+        val startedAt = now()
+        val deadline = ack.expiresAtMillis ?: (startedAt + timeoutMillis.coerceAtMost(Long.MAX_VALUE - startedAt))
         if (ack.lastPage == null) {
+            confirmationExpiresAtMillis = deadline
             mutableFeedback.value = null
         } else {
-            val startedAt = now()
-            val deadline = ack.expiresAtMillis ?: (startedAt + timeoutMillis.coerceAtMost(Long.MAX_VALUE - startedAt))
             mutableFeedback.value = ack.copy(expiresAtMillis = deadline)
             deadlineJob?.cancel()
             deadlineJob = scope.launch {
                 delay((deadline - now()).coerceAtLeast(0))
-                dismiss(id)
+                dismiss(id, ack.revision)
             }
         }
         saveAcknowledgement()
     }
 
-    fun remainingMillis(id: Long): Long? = feedback.value
-        ?.takeIf { it.id == id }?.expiresAtMillis?.let { (it - now()).coerceAtLeast(0) }
+    fun remainingMillis(id: Long, revision: Int? = null): Long? = current(id, revision)
+        ?.expiresAtMillis?.let { (it - now()).coerceAtLeast(0) }
 
-    fun takeOffer(id: Long, account: String): Int? {
-        val ack = feedback.value?.takeIf {
-            it.id == id && it.account.equals(account, ignoreCase = true) &&
-                (it.expiresAtMillis?.let { deadline -> deadline > now() } == true)
-        } ?: return null
-        dismiss(id)
+    fun takeOffer(id: Long, account: String, revision: Int? = null): Int? {
+        val ack = forPresentation(id, revision) ?: return null
+        if (!ack.account.equals(account, ignoreCase = true)) return null
+        if (ack.expiresAtMillis == null) return null
+        dismiss(id, ack.revision)
         return ack.lastPage
     }
 
-    fun dismiss(id: Long) {
-        if (feedback.value?.id != id) return
+    /** Old host callbacks must not dismiss a newer revision of the same accepted submission. */
+    fun dismiss(id: Long, revision: Int? = null) {
+        if (accepted?.matches(id, revision) == true) confirmationExpiresAtMillis = null
+        if (current(id, revision) == null) return
         mutableFeedback.value = null
         saveAcknowledgement()
     }
+
+    private fun current(id: Long, revision: Int?) = feedback.value?.takeIf { it.matches(id, revision) }
+
+    private fun TopicAcknowledgement.matches(id: Long, revision: Int?) =
+        this.id == id && (revision == null || this.revision == revision)
 
     fun accountChanged(account: String?) {
         if (accepted?.account?.equals(account, ignoreCase = true) == false ||
@@ -164,7 +198,8 @@ internal class TopicAcknowledgements(
         deadlineJob?.cancel()
         accepted = null
         wasPresented = false
-        settled = true
+        phase = Phase.Finished
+        confirmationExpiresAtMillis = null
         waitUntilMillis = null
         mutableFeedback.value = null
         saved.remove<ArrayList<String>>(KEY_OFFER)
@@ -173,13 +208,15 @@ internal class TopicAcknowledgements(
     private fun nextId(): Long = (++sequence).also { saved[KEY_SEQUENCE] = it }
 
     private fun saveAcknowledgement() {
-        val pending = feedback.value ?: accepted?.takeIf { !settled && !wasPresented }
+        val pending = feedback.value ?: accepted?.takeIf { phase != Phase.Finished }
         saved[KEY_OFFER] = pending?.let {
+            // Append to the legacy nine fields; old settled records remain terminal on restore.
             arrayListOf(
                 it.id.toString(), it.account, it.lastPage?.toString().orEmpty(),
                 it.expiresAtMillis?.toString().orEmpty(), it.kind.name,
                 it.refreshFailed.toString(), waitUntilMillis?.toString().orEmpty(),
-                settled.toString(), wasPresented.toString(),
+                (phase != Phase.Waiting).toString(), wasPresented.toString(),
+                phase.name, it.revision.toString(), it.offerOnly.toString(),
             )
         }
     }
@@ -195,9 +232,16 @@ internal class TopicAcknowledgements(
             it.kind == TopicAcknowledgement.Kind.Published || it.kind == TopicAcknowledgement.Kind.Edited
         }
         waitUntilMillis = record.getOrNull(6)?.toLongOrNull()
-        settled = record.getOrNull(7)?.toBooleanStrictOrNull() ?: true
+        // Old records only distinguished waiting from terminal. Never reopen an old terminal result.
+        phase = Phase.entries.firstOrNull { it.name == record.getOrNull(9) }
+            ?: if (record.getOrNull(7) == "false") Phase.Waiting else Phase.Finished
         wasPresented = record.getOrNull(8)?.toBooleanStrictOrNull() ?: (ack.expiresAtMillis != null)
-        if (settled) mutableFeedback.value = ack else awaitDeadline(ack.id)
+        when {
+            phase == Phase.Waiting -> awaitDeadline(ack.id)
+            // A process death loses the in-flight refresh and the old host, not an unshown offer.
+            phase == Phase.Deadline && wasPresented -> Unit
+            else -> mutableFeedback.value = ack
+        }
     }
 
     private fun restoreAcknowledgement(record: ArrayList<String>): TopicAcknowledgement? {
@@ -213,6 +257,8 @@ internal class TopicAcknowledgements(
                 id, account, kind, page,
                 refreshFailed = record.getOrNull(5)?.toBooleanStrictOrNull() ?: false,
                 expiresAtMillis = deadline,
+                revision = record.getOrNull(10)?.toIntOrNull() ?: 0,
+                offerOnly = record.getOrNull(11)?.toBooleanStrictOrNull() ?: false,
             )
         }
     }
