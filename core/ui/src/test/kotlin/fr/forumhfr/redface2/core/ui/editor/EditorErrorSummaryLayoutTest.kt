@@ -120,7 +120,9 @@ class EditorErrorSummaryLayoutTest {
         if (kotlin.math.abs(density.density - 3f) > 0.001f) add("density=${density.density}")
         if (kotlin.math.abs(density.fontScale - 1.3f) > 0.001f) add("fontScale=${density.fontScale}")
         val expectedSize = 11f * FontScalePreference.L.factor
-        if (kotlin.math.abs(layout.layoutInput.style.fontSize.value - expectedSize) > 0.001f) add("style != labelSmall L")
+        if (kotlin.math.abs(layout.layoutInput.style.fontSize.value - expectedSize) > 0.001f) {
+            add("style != labelSmall L")
+        }
         if (intrinsic > EDITOR_SUMMARY_TEXT_WIDTH_DP) add("intrinsic=${intrinsic}dp")
         if (layout.lineCount != 1) add("lines=${layout.lineCount}")
         if (layout.multiParagraph.didExceedMaxLines) add("maxLines exceeded")

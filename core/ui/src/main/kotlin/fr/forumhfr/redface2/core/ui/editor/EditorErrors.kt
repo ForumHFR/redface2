@@ -139,7 +139,11 @@ object EditorErrors {
     } else {
         EditorError(
             EditorCause.UploadStopped(progress.completed, progress.total, failure.cause), EditorErrorClass.Upload,
-            EditorText(R.plurals.editor_summary_stopped, listOf(progress.completed, progress.total), progress.completed),
+            EditorText(
+                R.plurals.editor_summary_stopped,
+                listOf(progress.completed, progress.total),
+                quantity = progress.completed,
+            ),
             EditorText(R.plurals.editor_detail_stopped, listOf(progress.completed, progress.total,
                 failure.detail ?: failure.summary), progress.completed),
             EditorErrorAction.Details,

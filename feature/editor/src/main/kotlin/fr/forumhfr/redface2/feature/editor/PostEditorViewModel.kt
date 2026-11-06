@@ -313,9 +313,13 @@ class PostEditorViewModel @AssistedInject constructor(
     private fun resolveQuoteRenderingThenLoad() {
         val restored = savedStateHandle.get<IntArray>(PENDING_QUOTES_KEY)?.decodeInlineQuoteRequest().orEmpty()
         val initialQuotes = (restored + request.initialQuotes).distinctBy { it.numreponse }
-        if (initialQuotes.isEmpty() || submission.state is EditorSubmissionState.Uncertain ||
-            savedStateHandle.get<String>(DELIVERED_QUOTES_KEY) == initialQuotes.inlineQuoteDeliveryKey() ||
-            savedStateHandle.get<String>(IGNORED_QUOTES_KEY) == initialQuotes.inlineQuoteDeliveryKey()) {
+        if (initialQuotes.isEmpty() || submission.state is EditorSubmissionState.Uncertain) {
+            loadReplyFormIfPossible()
+            return
+        }
+        val deliveryKey = initialQuotes.inlineQuoteDeliveryKey()
+        if (savedStateHandle.get<String>(DELIVERED_QUOTES_KEY) == deliveryKey ||
+            savedStateHandle.get<String>(IGNORED_QUOTES_KEY) == deliveryKey) {
             loadReplyFormIfPossible()
             return
         }
