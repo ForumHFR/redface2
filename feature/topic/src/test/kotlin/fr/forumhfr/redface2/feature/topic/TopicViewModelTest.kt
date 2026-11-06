@@ -554,7 +554,7 @@ class TopicViewModelTest {
     }
 
     @Test
-    fun `filtered citing-post return falls back to top when the badge post is absent from the canonical page`() = runTest {
+    fun `same-page filtered citing-post return falls back to top when the badge post is absent`() = runTest {
         val target = fakePost(700, citedCount = 1)
         val citer = fakePost(801)
         val departure = TopicScrollAnchor(index = 1, offset = 17)

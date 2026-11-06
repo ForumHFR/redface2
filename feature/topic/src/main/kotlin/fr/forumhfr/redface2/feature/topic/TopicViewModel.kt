@@ -768,8 +768,8 @@ class TopicViewModel @AssistedInject constructor(
     private fun openCitingPost(post: Post, departureAnchor: TopicScrollAnchor?) {
         val current = _state.value
         val sheet = current.citingPostsSheet ?: return
-        val loaded = sheet.content as? CitingPostsSheetContent.Loaded ?: return
-        if (loaded.posts.none { it.numreponse == post.numreponse }) return
+        val loaded = sheet.content as? CitingPostsSheetContent.Loaded
+        if (loaded == null || loaded.posts.none { it.numreponse == post.numreponse }) return
         // Filtered coordinates cannot be replayed on a canonical page (same-page takeover or
         // cross-page return). Keep the badge's post instead, before dismissal and the probe.
         val pageAnchor = departureAnchor.takeUnless { current.search.showingFilteredResults }
@@ -1717,17 +1717,24 @@ class TopicViewModel @AssistedInject constructor(
                 } else {
                     TopicEffect.LandingResolvedWithoutScroll(armed.page)
                 }
-            is PendingLanding.PostOrTop -> when {
-                topic.posts.any { post -> post.numreponse == landing.numreponse } ->
-                    TopicEffect.ScrollToPost(landing.numreponse)
-                terminal -> TopicEffect.ScrollToTop(armed.page)
-                else -> null
-            }
+            is PendingLanding.PostOrTop -> postOrTopLandingEffect(topic, landing, armed.page, terminal)
             is PendingLanding.Anchor -> TopicEffect.ScrollToAnchor(landing.anchor, armed.page)
             PendingLanding.Bottom -> TopicEffect.ScrollToEndOfPage(armed.page)
             PendingLanding.Top -> TopicEffect.ScrollToTop(armed.page)
         } ?: return
         deliverLanding(effect, armed)
+    }
+
+    private fun postOrTopLandingEffect(
+        topic: Topic,
+        landing: PendingLanding.PostOrTop,
+        page: Int,
+        terminal: Boolean,
+    ): TopicEffect? = when {
+        topic.posts.any { post -> post.numreponse == landing.numreponse } ->
+            TopicEffect.ScrollToPost(landing.numreponse)
+        terminal -> TopicEffect.ScrollToTop(page)
+        else -> null
     }
 
     /** Resolve the current owner's landing without moving the list (terminal miss/fallback). */
