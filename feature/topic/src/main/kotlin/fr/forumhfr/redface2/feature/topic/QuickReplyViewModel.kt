@@ -23,6 +23,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionEnvironment
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionErrors
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionRequest
+import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
 import fr.forumhfr.redface2.core.domain.write.QuotedNumreponses
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
@@ -210,6 +211,8 @@ class QuickReplyViewModel @AssistedInject constructor(
                 QuickReplySubmitError.Uncertain, QuickReplySubmitError.DraftWriteFailed,
                 QuickReplySubmitError.SessionExpired, QuickReplySubmitError.Uncertain,
                 network = QuickReplySubmitError.Network,
+                preparationFailed = QuickReplySubmitError.QuoteFetchFailed,
+                quoteFetchFailed = QuickReplySubmitError.QuoteFetchFailed,
             ),
         ).also { it.setPreference(confirmationPreference) }
     }
@@ -377,11 +380,15 @@ class QuickReplyViewModel @AssistedInject constructor(
                     it.copy(isPreparingQuotes = false, submitError = QuickReplySubmitError.SessionExpired)
                 }
             } catch (_: IOException) {
-                _state.update {
-                    it.copy(isPreparingQuotes = false, submitError = QuickReplySubmitError.QuoteFetchFailed)
-                }
+                quotePreparationFailed()
+            } catch (_: IllegalStateException) {
+                quotePreparationFailed()
             }
         }
+    }
+
+    private fun quotePreparationFailed() {
+        _state.update { it.copy(isPreparingQuotes = false, submitError = QuickReplySubmitError.QuoteFetchFailed) }
     }
 
     /** #604 lot 2 — arm a quote card ; idempotent per numreponse (re-citing a post is a no-op). */
@@ -560,6 +567,11 @@ class QuickReplyViewModel @AssistedInject constructor(
                     QuickReplySubmitError.Hfr(result.reason)
                 }
                 EditorDelivery(
+                    outcome = if (result.reason == ReplyFailureReason.Unknown) {
+                        EditorSendOutcome.UNCERTAIN
+                    } else {
+                        EditorSendOutcome.CERTAIN_FAILURE
+                    },
                     error = error,
                     afterSettled = if (result.reason == ReplyFailureReason.InvalidHashCheck) {
                         {
@@ -586,7 +598,14 @@ class QuickReplyViewModel @AssistedInject constructor(
     } catch (_: SessionExpiredException) {
         throw EditorPreparationException(EditorPreparationException.Reason.SESSION_EXPIRED)
     } catch (_: IOException) {
-        throw EditorPreparationException(EditorPreparationException.Reason.NETWORK)
+        val reason = if (quotes.isEmpty()) {
+            EditorPreparationException.Reason.NETWORK
+        } else {
+            EditorPreparationException.Reason.QUOTE_FETCH
+        }
+        throw EditorPreparationException(reason)
+    } catch (_: IllegalStateException) {
+        throw EditorPreparationException(EditorPreparationException.Reason.INVALID_FORM)
     }
 
     private fun updateCurrentPage(page: Int) {

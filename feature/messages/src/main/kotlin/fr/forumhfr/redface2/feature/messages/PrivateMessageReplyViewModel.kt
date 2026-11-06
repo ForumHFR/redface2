@@ -27,6 +27,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionEnvironment
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionErrors
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionRequest
+import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.HfrFavoriteSmileyRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollections
@@ -168,6 +169,8 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             draftWriteFailed = PrivateMessageReplyError.DraftWriteFailed,
             sessionExpired = PrivateMessageReplyError.SessionExpired,
             unknown = PrivateMessageReplyError.Uncertain,
+            network = PrivateMessageReplyError.Network,
+            preparationFailed = PrivateMessageReplyError.Unexpected,
         ),
     )
 
@@ -616,6 +619,11 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             )
             is ReplySubmitResult.Failure -> {
                 EditorDelivery(
+                    outcome = if (result.reason == ReplyFailureReason.Unknown) {
+                        EditorSendOutcome.UNCERTAIN
+                    } else {
+                        EditorSendOutcome.CERTAIN_FAILURE
+                    },
                     error = result.reason.toReplyError(),
                     afterSettled = if (result.reason == ReplyFailureReason.InvalidHashCheck) {
                         {

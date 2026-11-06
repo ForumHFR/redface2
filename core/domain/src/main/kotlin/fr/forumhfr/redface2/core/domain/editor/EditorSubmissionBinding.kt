@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptOutcome
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptStatus
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptToken
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.StoreWriteResult
+import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import java.io.IOException
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
@@ -19,6 +20,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -39,6 +41,11 @@ data class EditorDelivery<E, F>(
     val effect: E? = null,
     val error: F? = null,
     val afterSettled: (() -> Unit)? = null,
+    val outcome: EditorSendOutcome = if (effect != null) {
+        EditorSendOutcome.SUCCESS
+    } else {
+        EditorSendOutcome.CERTAIN_FAILURE
+    },
 )
 
 /** ED-161/164/166/170/171: shared bridge; the controller owns every submission permit. */
@@ -182,7 +189,7 @@ class EditorSubmissionBinding<E, F>(
             var delivery: EditorDelivery<E, F>? = null
             val ports = ports(draft, trace) {
                 delivery = deliver(send)
-                if (delivery?.effect != null) EditorSendOutcome.SUCCESS else outcome(delivery?.error)
+                checkNotNull(delivery).outcome
             }
             try {
                 controller.execute(permit.token, ports)
@@ -190,6 +197,11 @@ class EditorSubmissionBinding<E, F>(
                     publish()
                     complete(delivery)
                 }
+            } catch (cancelled: CancellationException) {
+                if (controller.session == opening && controller.state is EditorSubmissionState.Uncertain) {
+                    callbacks.error(errors.uncertain)
+                }
+                throw cancelled
             } finally {
                 if (controller.session == opening) {
                     isExecuting = false
@@ -225,21 +237,41 @@ class EditorSubmissionBinding<E, F>(
         failedDelivery(error, when (error.reason) {
             EditorPreparationException.Reason.NETWORK -> errors.network
             EditorPreparationException.Reason.SESSION_EXPIRED -> errors.sessionExpired
+            EditorPreparationException.Reason.INVALID_FORM -> errors.preparationFailed
+            EditorPreparationException.Reason.QUOTE_FETCH -> errors.quoteFetchFailed
         })
     } catch (error: SessionExpiredException) {
-        failedDelivery(error, errors.sessionExpiredAfterEntry)
+        // The login-page sniff alone does not prove that a POST was rejected before storage.
+        transportFailure(error, errors.sessionExpired)
+    } catch (error: HfrServerException) {
+        // Every non-2xx POST remains ambiguous, including login redirects, 421 and 503.
+        failedDelivery(error, errors.uncertain, EditorSendOutcome.UNCERTAIN)
     } catch (error: IOException) {
-        failedDelivery(error, errors.uncertain)
+        transportFailure(error, errors.network)
     } catch (error: IllegalStateException) {
-        failedDelivery(error, errors.unknown)
+        failedDelivery(error, errors.uncertain, EditorSendOutcome.UNCERTAIN)
     }
 
-    private suspend fun failedDelivery(error: Exception, fallback: F): EditorDelivery<E, F> {
+    private suspend fun transportFailure(error: Exception, certainError: F): EditorDelivery<E, F> =
+        if (currentCoroutineContext()[EditorWriteOwner]?.provesNoEmission == true) {
+            failedDelivery(error, certainError)
+        } else {
+            failedDelivery(error, errors.uncertain, EditorSendOutcome.UNCERTAIN)
+        }
+
+    private suspend fun failedDelivery(
+        error: Exception,
+        fallback: F,
+        outcome: EditorSendOutcome = EditorSendOutcome.CERTAIN_FAILURE,
+    ): EditorDelivery<E, F> {
         // RealCall's callTimeout can replace the guard exception with an InterruptedIOException,
         // even without retaining its cause. The transport witness still proves non-emission.
         val rejected = currentCoroutineContext()[EditorWriteOwner]?.rejectedBeforeEmission == true ||
             generateSequence<Throwable>(error) { it.cause }.any { it is EditorAccountChangedBeforeSendException }
-        return EditorDelivery(error = if (rejected) errors.sessionExpired else fallback)
+        return EditorDelivery(
+            error = if (rejected) errors.sessionExpired else fallback,
+            outcome = if (rejected) EditorSendOutcome.CERTAIN_FAILURE else outcome,
+        )
     }
 
     private fun ports(
@@ -249,6 +281,7 @@ class EditorSubmissionBinding<E, F>(
     ): EditorSubmissionPorts {
         val opening = controller.session
         return object : EditorSubmissionPorts {
+            override val isEditorScopeActive: Boolean get() = environment.scope.isActive
             override suspend fun beginAttempt(): EditorDraftStore.BeginAttemptResult {
                 val started = environment.clock.elapsedRealtimeNanos()
                 val result = drafts.begin(draft)
@@ -262,7 +295,7 @@ class EditorSubmissionBinding<E, F>(
                     accountChanged()
                     return EditorSendOutcome.CERTAIN_FAILURE
                 }
-                return sendOwned(attempt, trace, send)
+                return send()
                     .also { trace.result(EditorSubmissionTrace.Result.valueOf(it.name)) }
             }
             override suspend fun stopDraftWrites() {
@@ -291,29 +324,8 @@ class EditorSubmissionBinding<E, F>(
         }
     }
 
-    private suspend fun sendOwned(
-        attempt: AttemptToken,
-        trace: EditorSubmissionTrace,
-        send: suspend () -> EditorSendOutcome,
-    ): EditorSendOutcome {
-        val owner = EditorWriteOwner(attempt.owner)
-        return try {
-            withContext(owner) { send() }
-        } catch (cancelled: CancellationException) {
-            // The guard ran without emitting HTTP bytes, but accountChanged may have cancelled the
-            // continuation first. Resolve this known refusal without reviving the invalidated UI.
-            if (owner.rejectedBeforeEmission) {
-                val result = withContext(NonCancellable) { drafts.finish(attempt, AttemptOutcome.CERTAIN_FAILURE) }
-                if (result !is StoreWriteResult.Written) trace.storageFailure(EditorSubmissionFailure.OUTCOME, result)
-            }
-            throw cancelled
-        }
-    }
-
     private fun publish() = callbacks.state(controller.state)
     private fun session(owner: String?, key: String) = EditorSession(UUID.randomUUID().toString(), owner, key)
-    private fun outcome(error: F?): EditorSendOutcome =
-        if (error == errors.uncertain) EditorSendOutcome.UNCERTAIN else EditorSendOutcome.CERTAIN_FAILURE
 
     private companion object {
         const val NANOS_PER_MILLI = 1_000_000L

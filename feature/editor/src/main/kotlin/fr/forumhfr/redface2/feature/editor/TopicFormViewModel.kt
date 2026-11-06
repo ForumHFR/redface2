@@ -23,6 +23,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionErrors
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionRequest
+import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.HfrFavoriteSmileyRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollections
@@ -200,7 +201,7 @@ class TopicFormViewModel @AssistedInject constructor(
         errors = EditorSubmissionErrors(
             uncertain = SubmitError.Uncertain, draftWriteFailed = SubmitError.DraftWriteFailed,
             sessionExpired = SubmitError.SessionExpired, unknown = SubmitError.Uncertain,
-            network = SubmitError.Network, sessionExpiredAfterEntry = SubmitError.Uncertain,
+            network = SubmitError.Network, preparationFailed = SubmitError.Hfr(ReplyFailureReason.Unknown),
         ),
         callbacks = EditorSubmissionCallbacks<TopicFormEffect>(
             state = { value ->
@@ -850,6 +851,11 @@ class TopicFormViewModel @AssistedInject constructor(
 
     private fun failureDelivery(reason: ReplyFailureReason): EditorDelivery<TopicFormEffect> {
         return EditorDelivery(
+            outcome = if (reason == ReplyFailureReason.Unknown) {
+                EditorSendOutcome.UNCERTAIN
+            } else {
+                EditorSendOutcome.CERTAIN_FAILURE
+            },
             error = if (reason == ReplyFailureReason.Unknown) {
                 SubmitError.Uncertain
             } else {

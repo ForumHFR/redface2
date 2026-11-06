@@ -370,6 +370,7 @@ class ReportContentViewModelTest {
     fun sessionExpiryAfterSendPersistsAndRestoresUncertaintyWithoutResending() = runTest {
         val gate = CompletableDeferred<Unit>()
         coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } coAnswers {
+            checkNotNull(currentCoroutineContext()[EditorWriteOwner]).markEmissionPossible()
             gate.await()
             throw SessionExpiredException("https://forum.hardware.fr/login.php")
         }
@@ -414,8 +415,10 @@ class ReportContentViewModelTest {
 
     @Test
     fun loginAfterSessionExpiryDuringSendPreservesTheUnresolvedAttempt() = runTest {
-        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } throws
-            SessionExpiredException("https://forum.hardware.fr/login.php")
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } coAnswers {
+            checkNotNull(currentCoroutineContext()[EditorWriteOwner]).markEmissionPossible()
+            throw SessionExpiredException("https://forum.hardware.fr/login.php")
+        }
         val vm = create()
         runCurrent()
         fill(vm)
@@ -797,6 +800,7 @@ class ReportContentViewModelTest {
     fun processLossRestoresAllFieldsAsUncertainWithoutResending() = runTest {
         val gate = CompletableDeferred<Unit>()
         coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } coAnswers {
+            checkNotNull(currentCoroutineContext()[EditorWriteOwner]).markEmissionPossible()
             gate.await()
             ReplySubmitResult.Success(null, null)
         }

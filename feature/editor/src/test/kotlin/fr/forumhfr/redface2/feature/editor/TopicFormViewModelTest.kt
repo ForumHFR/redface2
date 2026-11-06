@@ -1752,8 +1752,11 @@ class TopicFormViewModelTest {
                     it.draft.text, it.canSubmit, it.isSubmitting, it.isUploading, it.showSubmitConfirmation,
                     armId = it.armToken?.id,
                     error = when (it.submitError) {
+                        SubmitError.Network -> SubmissionErrorProbe.NETWORK
+                        SubmitError.SessionExpired -> SubmissionErrorProbe.SESSION_EXPIRED
                         SubmitError.Uncertain -> SubmissionErrorProbe.UNCERTAIN
                         SubmitError.DraftWriteFailed -> SubmissionErrorProbe.DRAFT_WRITE_FAILED
+                        SubmitError.Hfr(ReplyFailureReason.Unknown) -> SubmissionErrorProbe.PREPARATION_FAILED
                         else -> null
                     },
                     restoreOffered = it.restorableDraft != null,
@@ -2015,6 +2018,7 @@ class TopicFormViewModelTest {
             selectedSubcat: Int,
             options: ReplyFormOptions,
         ): ReplySubmitResult {
+            submitScenario?.prepare()
             submitCalls += 1
             lastSubmittedContext = context
             lastSubmittedSubject = subject
@@ -2042,6 +2046,7 @@ class TopicFormViewModelTest {
             selectedSubcat: Int,
             options: ReplyFormOptions,
         ): NewTopicSubmitResult {
+            submitScenario?.prepare()
             newTopicSubmitCalls += 1
             lastNewTopicContext = context
             lastSubmittedSubject = subject

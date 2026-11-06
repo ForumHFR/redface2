@@ -21,6 +21,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionEnvironment
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionErrors
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionRequest
+import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.AuthState
@@ -91,7 +92,7 @@ class ReportContentViewModel @AssistedInject constructor(
         errors = EditorSubmissionErrors(
             uncertain = ReportError.UNCERTAIN, draftWriteFailed = ReportError.DRAFT_WRITE_FAILED,
             sessionExpired = ReportError.SESSION_EXPIRED, unknown = ReportError.UNCERTAIN,
-            network = ReportError.NETWORK, sessionExpiredAfterEntry = ReportError.UNCERTAIN,
+            network = ReportError.NETWORK, preparationFailed = ReportError.REFUSED,
         ),
     ).also { it.setPreference(confirmPreference) }
 
@@ -352,6 +353,11 @@ class ReportContentViewModel @AssistedInject constructor(
     private fun delivery(result: ReplySubmitResult): EditorDelivery<ReportContentEffect, ReportError> = when (result) {
         is ReplySubmitResult.Success -> EditorDelivery(effect = ReportContentEffect.SubmitSucceeded)
         is ReplySubmitResult.Failure -> EditorDelivery(
+            outcome = if (result.reason == ReplyFailureReason.Unknown) {
+                EditorSendOutcome.UNCERTAIN
+            } else {
+                EditorSendOutcome.CERTAIN_FAILURE
+            },
             error = result.reason.reportError(),
             afterSettled = if (result.reason == ReplyFailureReason.InvalidHashCheck) ({ retryForm() }) else null,
         )
