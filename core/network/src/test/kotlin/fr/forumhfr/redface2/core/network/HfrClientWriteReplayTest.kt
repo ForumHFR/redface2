@@ -3,12 +3,14 @@ package fr.forumhfr.redface2.core.network
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
 import fr.forumhfr.redface2.core.domain.editor.EditorWriteOwner
 import fr.forumhfr.redface2.core.network.di.NetworkModule
+import java.io.IOException
 import java.net.InetAddress
 import java.net.URLDecoder
 import java.net.ServerSocket
 import java.net.UnknownHostException
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicInteger
 import javax.net.ssl.SSLHandshakeException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.test.runTest
@@ -48,6 +50,8 @@ import org.junit.runners.Parameterized
 class HfrClientWriteReplayTest(private val path: WritePath) {
     private val server = MockWebServer()
     private val connections = CopyOnWriteArrayList<Connection>()
+    private val requestHeadersStarts = AtomicInteger()
+    private val requestBodyStarts = AtomicInteger()
     private lateinit var mutation: OkHttpClient
     private lateinit var client: HfrClient
     private lateinit var baseUrl: HttpUrl
@@ -76,6 +80,12 @@ class HfrClientWriteReplayTest(private val path: WritePath) {
             .eventListener(object : EventListener() {
                 override fun connectionAcquired(call: Call, connection: Connection) {
                     connections += connection
+                }
+                override fun requestHeadersStart(call: Call) {
+                    if (call.request().method == "POST") requestHeadersStarts.incrementAndGet()
+                }
+                override fun requestBodyStart(call: Call) {
+                    requestBodyStarts.incrementAndGet()
                 }
             })
             .callTimeout(5, TimeUnit.SECONDS)
@@ -170,8 +180,9 @@ class HfrClientWriteReplayTest(private val path: WritePath) {
         val result = runCatching { observedSubmit() }
 
         assertEquals(1, server.requestCount - baseline)
+        assertSingleEmissionAttempt()
         assertFalse(witness.provesNoEmission)
-        assertTrue("la rupture doit être signalée au repository", result.isFailure)
+        assertTrue("la rupture doit être signalée au repository", result.exceptionOrNull() is IOException)
     }
 
     @Test
@@ -216,10 +227,12 @@ class HfrClientWriteReplayTest(private val path: WritePath) {
         enqueueFallback()
         val body = FormBody.Builder().add("content_form", "x".repeat(1_000_000)).build()
 
-        assertTrue(runCatching { observedSubmit(body) }.isFailure)
+        assertTrue(runCatching { observedSubmit(body) }.exceptionOrNull() is IOException)
 
         assertFalse(witness.provesNoEmission)
-        assertEquals(1, server.requestCount)
+        // A body-write failure can reach the client before MockWebServer records the partial request.
+        // Count every emission attempt on the client, including a replay with no recorded request.
+        assertSingleEmissionAttempt()
     }
 
     @Test
@@ -246,6 +259,11 @@ class HfrClientWriteReplayTest(private val path: WritePath) {
     private suspend fun observedSubmit(body: FormBody = formBody()): String {
         witness = EditorWriteOwner("tester")
         return withContext(witness) { path.submit(client, body) }
+    }
+
+    private fun assertSingleEmissionAttempt() {
+        assertEquals("$path : une seule émission d'en-têtes, aucun rejeu", 1, requestHeadersStarts.get())
+        assertEquals("$path : le corps a commencé à être émis une seule fois", 1, requestBodyStarts.get())
     }
 
     private suspend fun assertSingleWrite(response: MockResponse) {

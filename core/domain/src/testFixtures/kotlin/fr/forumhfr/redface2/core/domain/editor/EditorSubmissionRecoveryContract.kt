@@ -164,7 +164,10 @@ abstract class EditorSubmissionRecoveryContract {
         }
     }
 
-    /** ED-170: teardown is not a local send cancellation, even before the emission boundary. */
+    /**
+     * ED-170: teardown is not a local send cancellation, even before the emission boundary.
+     * Restored attempts remain unresolved; autosave can normalize their marker to UNCERTAIN.
+     */
     @Test
     fun recreationDuringPreparationRestoresUnresolvedAttemptWithoutResending() {
         val gate = CompletableDeferred<Unit>()
@@ -185,13 +188,39 @@ abstract class EditorSubmissionRecoveryContract {
             assertFalse(adapter.snapshot().restoreOffered)
             assertFalse(adapter.snapshot().confirmationVisible)
             gate.complete(Unit)
+            runCurrent()
+            assertEquals("teardown must not finish the old attempt", 0, scenario.store.finishCalls)
+            assertEquals(entry, scenario.store.entries.values.single())
             advanceTimeBy(751)
             runCurrent()
             assertEquals(1, scenario.preparationCalls)
             assertEquals(0, adapter.postCalls)
             assertEquals(0, scenario.emittedPosts)
             assertEquals(0, adapter.successEffects)
-            assertEquals(entry.attempt, scenario.store.entries.values.single().attempt)
+            val recovered = scenario.store.entries.values.single()
+            assertEquals(entry.draft, recovered.draft)
+            assertEquals(entry.attempt?.token, recovered.attempt?.token)
+            // Opening autosaves may normalize IN_PROGRESS to UNCERTAIN via saveUnresolved.
+            // Neither marker acknowledges the attempt; no outcome may come from the destroyed scope.
+            assertTrue(
+                recovered.attempt?.status in setOf(
+                    EditorDraftStore.AttemptStatus.IN_PROGRESS, EditorDraftStore.AttemptStatus.UNCERTAIN,
+                ),
+            )
+            assertEquals(0, scenario.store.finishCalls)
+            assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
+            adapter.editBody("edited after preparation teardown")
+            advanceTimeBy(751)
+            runCurrent()
+            val edited = scenario.store.entries.values.single()
+            assertEquals("edited after preparation teardown", edited.draft.body)
+            assertEquals(entry.attempt?.copy(status = EditorDraftStore.AttemptStatus.UNCERTAIN), edited.attempt)
+            assertEquals(0, scenario.store.finishCalls)
+            assertEquals(1, scenario.preparationCalls)
+            assertEquals(0, adapter.postCalls)
+            assertEquals(0, scenario.emittedPosts)
+            assertEquals(0, adapter.successEffects)
+            assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
         }
     }
 
