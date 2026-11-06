@@ -306,6 +306,8 @@ class TopicViewModel @AssistedInject constructor(
      * - [PostOrBottom] → [TopicEffect.ScrollToPost] when the numreponse is on the page, else no
      *   scroll — terminal on the first Loaded either way (#974/#1243 : a submit that carried quotes
      *   resumes on the cited post when visible and otherwise preserves the reader's position) ;
+     * - [PostOrTop] → [TopicEffect.ScrollToPost] for a filtered citing-post return, or top only
+     *   once the badge's post is absent from a terminal representation ;
      * - [Anchor] → [TopicEffect.ScrollToAnchor] (revisit / #782 return / process restore) ;
      * - [Bottom] → [TopicEffect.ScrollToEndOfPage] (post-submit `#bas`, #412 `page - 1` step) ;
      * - [Top] → [TopicEffect.ScrollToTop] (default landing of a fresh page).
@@ -321,6 +323,7 @@ class TopicViewModel @AssistedInject constructor(
          */
         data class Post(val numreponse: Int, val lastRead: Boolean = false) : PendingLanding
         data class PostOrBottom(val numreponse: Int) : PendingLanding
+        data class PostOrTop(val numreponse: Int) : PendingLanding
         data class Anchor(val anchor: TopicScrollAnchor) : PendingLanding
         data object Bottom : PendingLanding
         data object Top : PendingLanding
@@ -335,8 +338,8 @@ class TopicViewModel @AssistedInject constructor(
         val lastPageRedirectAllowed: Boolean = false,
     )
 
-    /** #782 — one frame of the quote-jump return stack : the departure page + tap-time anchor. */
-    private data class TopicJumpFrame(val page: Int, val anchor: TopicScrollAnchor?)
+    /** #782 — departure page + return landing captured before resolving the jump. */
+    private data class TopicJumpFrame(val page: Int, val landing: PendingLanding?)
 
     /**
      * Async-trace cookie for the `rf2.topic.first_content` section. The section starts when
@@ -545,7 +548,7 @@ class TopicViewModel @AssistedInject constructor(
             // to recover from a transient error.
             TopicIntent.Retry -> loadCurrentPage()
             is TopicIntent.OnCitedBadgeClick -> openCitingPosts(intent.post)
-            is TopicIntent.OnCitingPostClick -> openCitingPost(intent.post)
+            is TopicIntent.OnCitingPostClick -> openCitingPost(intent.post, intent.departureAnchor)
             TopicIntent.OnDismissCitingSheet -> dismissCitingPosts()
             is TopicIntent.DeletePost -> deletePost(intent.numreponse)
             is TopicIntent.RequestModerationAlert -> requestModerationAlert(intent.numreponse)
@@ -759,13 +762,22 @@ class TopicViewModel @AssistedInject constructor(
 
     /**
      * #783 — filtered rows expose `page=1&numreponse=…`; HFR's redirect is the source of truth for
-     * the real page. Once resolved, reuse [goToPost] unchanged so the #782 return chain and
+     * the real page. Once resolved, reuse [goToPost] so the #782 return chain and
      * [TopicEffect.ScrollToPost] landing remain identical to every other in-topic jump.
      */
-    private fun openCitingPost(post: Post) {
-        val loaded = _state.value.citingPostsSheet?.content as? CitingPostsSheetContent.Loaded
-            ?: return
-        if (loaded.posts.none { it.numreponse == post.numreponse }) return
+    private fun openCitingPost(post: Post, departureAnchor: TopicScrollAnchor?) {
+        val current = _state.value
+        val sheet = current.citingPostsSheet ?: return
+        val loaded = sheet.content as? CitingPostsSheetContent.Loaded
+        if (loaded == null || loaded.posts.none { it.numreponse == post.numreponse }) return
+        // Filtered coordinates cannot be replayed on a canonical page (same-page takeover or
+        // cross-page return). Keep the badge's post instead, before dismissal and the probe.
+        val pageAnchor = departureAnchor.takeUnless { current.search.showingFilteredResults }
+        val returnLanding = if (current.search.showingFilteredResults) {
+            PendingLanding.PostOrTop(sheet.numreponse)
+        } else {
+            pageAnchor?.let { PendingLanding.Anchor(it) }
+        }
         dismissCitingPosts()
         citingPostNavigationJob?.cancel()
         // #1188 — capture the page owner BEFORE the probe suspends. A page switch during the ≤3 s
@@ -790,7 +802,12 @@ class TopicViewModel @AssistedInject constructor(
             if (generation != ownerGeneration) return@launch
             // The unfiltered href rendered by quote_only carries page=1. A failed probe therefore
             // degrades to that same server-provided fallback, never to a guessed page.
-            goToPost(targetPage = resolvedPage ?: 1, numreponse = post.numreponse)
+            goToPost(
+                targetPage = resolvedPage ?: 1,
+                numreponse = post.numreponse,
+                departureAnchor = pageAnchor,
+                returnLanding = returnLanding,
+            )
         }
     }
 
@@ -1483,6 +1500,9 @@ class TopicViewModel @AssistedInject constructor(
             grace?.cancel()
             if (!received && generation == ownerGeneration) {
                 terminalizeEmptyCompletion()
+                // Failure before any emission also completes through catch. A retained snapshot
+                // is now terminal for this owner, so a missing PostOrTop must release its landing.
+                settleRetainedPageLanding(generation)
             }
             if (settleRetainedPageOnCompletion) settleRetainedPageLanding(generation)
         }
@@ -1669,10 +1689,12 @@ class TopicViewModel @AssistedInject constructor(
 
     /**
      * #895/#1300 — dispatch the landing owed to the page on screen, once, for the owning
-     * generation. [terminal] comes from the CURRENT `TopicPageEmission`, never from a retained
-     * `Mode.Loaded`: an LRU snapshot is settled historically but remains provisional for this
-     * landing owner. A missing [PendingLanding.Post] therefore survives only an explicitly
-     * transient representation; the first terminal one resolves it without scrolling.
+     * generation. During a load, [terminal] comes from the CURRENT `TopicPageEmission`, never from
+     * a retained `Mode.Loaded`: an LRU snapshot is settled historically but remains provisional
+     * for this landing owner. An established same-page return may settle immediately when idle.
+     * A missing [PendingLanding.Post] or [PendingLanding.PostOrTop] therefore
+     * survives a transient representation; the first terminal one resolves it without scrolling
+     * or falls back to top, respectively.
      */
     private fun dispatchPendingLanding(topic: Topic, terminal: Boolean) {
         // Gate Sol PR1 (bloquant 2) — refuse a stale pair : a dispatch reached from an untagged
@@ -1698,11 +1720,24 @@ class TopicViewModel @AssistedInject constructor(
                 } else {
                     TopicEffect.LandingResolvedWithoutScroll(armed.page)
                 }
+            is PendingLanding.PostOrTop -> postOrTopLandingEffect(topic, landing, armed.page, terminal)
             is PendingLanding.Anchor -> TopicEffect.ScrollToAnchor(landing.anchor, armed.page)
             PendingLanding.Bottom -> TopicEffect.ScrollToEndOfPage(armed.page)
             PendingLanding.Top -> TopicEffect.ScrollToTop(armed.page)
         } ?: return
         deliverLanding(effect, armed)
+    }
+
+    private fun postOrTopLandingEffect(
+        topic: Topic,
+        landing: PendingLanding.PostOrTop,
+        page: Int,
+        terminal: Boolean,
+    ): TopicEffect? = when {
+        topic.posts.any { post -> post.numreponse == landing.numreponse } ->
+            TopicEffect.ScrollToPost(landing.numreponse)
+        terminal -> TopicEffect.ScrollToTop(page)
+        else -> null
     }
 
     /** Resolve the current owner's landing without moving the list (terminal miss/fallback). */
@@ -1861,9 +1896,17 @@ class TopicViewModel @AssistedInject constructor(
      * Missing posts in search results first reclaim the canonical snapshot under a new owner,
      * then share that same bounded retry and failure settlement instead of switching pages.
      */
-    fun goToPost(targetPage: Int, numreponse: Int, departureAnchor: TopicScrollAnchor? = null) {
+    fun goToPost(targetPage: Int, numreponse: Int, departureAnchor: TopicScrollAnchor? = null) =
+        goToPost(targetPage, numreponse, departureAnchor, departureAnchor?.let { PendingLanding.Anchor(it) })
+
+    private fun goToPost(
+        targetPage: Int,
+        numreponse: Int,
+        departureAnchor: TopicScrollAnchor?,
+        returnLanding: PendingLanding?,
+    ) {
         if (jumpStack.size >= JUMP_STACK_MAX) jumpStack.removeFirst()
-        jumpStack.addLast(TopicJumpFrame(request.page, departureAnchor))
+        jumpStack.addLast(TopicJumpFrame(request.page, returnLanding))
         syncJumpAvailability()
         if (targetPage == request.page) {
             departureAnchor?.let { reportPageAnchor(it) }
@@ -1921,22 +1964,21 @@ class TopicViewModel @AssistedInject constructor(
     }
 
     /**
-     * #782 — unwind ONE quote jump : land back on the departure page at the tap-time anchor.
+     * #782 — unwind ONE quote jump : land back on the departure page at the captured position.
+     * Citing-post jumps from filtered results use the badge's post, or top if it is absent.
      * Returns `false` when the chain is empty — the caller (screen back handling) then lets the
      * system back leave the topic. A return is never a « page - 1 » reading step (no bottom).
      */
     fun returnFromJump(departureAnchor: TopicScrollAnchor? = null): Boolean {
         val frame = jumpStack.removeLastOrNull() ?: return false
         syncJumpAvailability()
-        val landing = frame.anchor?.let { PendingLanding.Anchor(it) }
+        val landing = frame.landing
         if (frame.page == request.page) {
             departureAnchor?.let { reportPageAnchor(it) }
-            armLanding(
-                landing
-                    ?: pageAnchors[frame.page]?.let { PendingLanding.Anchor(it) }
-                    ?: PendingLanding.Top,
-            )
-            dispatchLandingAgainstScreen()
+            // Same-page settles overwrite pageAnchors with the arrival, so only the frame's
+            // captured landing can restore the departure. Without it, use the explicit top fallback.
+            armLanding(landing ?: PendingLanding.Top)
+            dispatchLandingAgainstScreen(terminal = loadJob?.isActive != true)
         } else {
             internalSwitch(frame.page, departureAnchor, landing = landing)
         }
@@ -2108,10 +2150,12 @@ class TopicViewModel @AssistedInject constructor(
      * Dispatch the pending landing against the page already on screen (same-page / snapshot).
      * Synchronous since the r2 gate : [dispatchPendingLanding] no longer suspends, so there is no
      * untagged coroutine racing a newer navigation.
+     * [terminal] settles a return on an established page when no load is pending. Snapshot
+     * activations keep the default false because their new owner's load has yet to start.
      */
-    private fun dispatchLandingAgainstScreen() {
+    private fun dispatchLandingAgainstScreen(terminal: Boolean = false) {
         val loaded = _state.value.mode as? TopicUiState.Mode.Loaded ?: return
-        dispatchPendingLanding(loaded.topic, terminal = false)
+        dispatchPendingLanding(loaded.topic, terminal = terminal && !loaded.provisional)
     }
 
     /**
