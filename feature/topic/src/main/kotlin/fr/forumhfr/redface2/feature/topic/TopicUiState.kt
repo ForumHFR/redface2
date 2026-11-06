@@ -404,8 +404,11 @@ sealed interface TopicIntent {
     /** #783 — opens the native HFR reverse-citation sheet for a server-counted post. */
     data class OnCitedBadgeClick(val post: Post) : TopicIntent
 
-    /** #783 — closes the sheet, resolves the citing post's real page, then uses the jump engine. */
-    data class OnCitingPostClick(val post: Post) : TopicIntent
+    /** #783 — keeps the tap-time departure while resolving the citing post's real page. */
+    data class OnCitingPostClick(
+        val post: Post,
+        val departureAnchor: TopicScrollAnchor? = null,
+    ) : TopicIntent
 
     /** #783 — closes the reverse-citation sheet and cancels its in-flight read. */
     data object OnDismissCitingSheet : TopicIntent

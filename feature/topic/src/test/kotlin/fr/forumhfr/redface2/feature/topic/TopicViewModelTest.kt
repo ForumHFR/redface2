@@ -212,15 +212,18 @@ class TopicViewModelTest {
     }
 
     @Test
-    fun `citing-post click dismisses resolves its page and reuses the jump landing`() = runTest {
+    fun `same-page citing-post click returns to the tap anchor after landing`() = runTest {
         val target = fakePost(numreponse = 700, citedCount = 2)
         val citer = fakePost(numreponse = 801, author = "Alice")
+        val departure = TopicScrollAnchor(index = 3, offset = 17)
+        val arrival = TopicScrollAnchor(index = 9, offset = 31)
+        val probeGate = CompletableDeferred<Unit>()
         val repository = FakeTopicRepository(
             listOf(flowOf(fakeTopic(1, 1, posts = listOf(target, citer)))),
         ).apply {
             citingResult = Result.success(listOf(citer))
         }
-        val search = FakeSearchRepository(pageToResolve = 1)
+        val search = FakeSearchRepository(pageToResolve = 1, resolveGate = probeGate)
         val viewModel = topicViewModel(
             request = topicRequest(page = 1),
             topicRepository = repository,
@@ -229,17 +232,71 @@ class TopicViewModelTest {
         )
         viewModel.send(TopicIntent.OnCitedBadgeClick(target))
         advanceUntilIdle()
+        viewModel.reportPageAnchor(departure)
 
         viewModel.effects.test {
-            viewModel.send(TopicIntent.OnCitingPostClick(citer))
-
-            assertEquals(TopicEffect.ScrollToPost(citer.numreponse), awaitItem())
+            viewModel.send(TopicIntent.OnCitingPostClick(citer, departureAnchor = departure))
             assertEquals(null, viewModel.state.value.citingPostsSheet)
-            assertTrue(viewModel.state.value.canReturnFromJump)
             assertEquals(
                 listOf(Triple(SAMPLE_CAT, SAMPLE_POST, citer.numreponse)),
                 search.resolveCalls,
             )
+            expectNoEvents()
+            // A later settle during the probe must not replace the tap-time departure.
+            viewModel.reportPageAnchor(TopicScrollAnchor(index = 5, offset = 4))
+            probeGate.complete(Unit)
+            advanceUntilIdle()
+            val landing = awaitItem()
+            assertEquals(TopicEffect.ScrollToPost(citer.numreponse), landing)
+            assertTrue(viewModel.state.value.canReturnFromJump)
+            viewModel.onLandingApplied(landing)
+            viewModel.reportPageAnchor(arrival)
+
+            assertTrue(viewModel.returnFromJump(arrival))
+            assertEquals(TopicEffect.ScrollToAnchor(departure, page = 1), awaitItem())
+            assertEquals(1, viewModel.state.value.request.page)
+            assertFalse(viewModel.state.value.canReturnFromJump)
+            assertEquals(1, repository.calls.size)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `cross-page citing-post click returns to the departure page and anchor`() = runTest {
+        val target = fakePost(numreponse = 700, citedCount = 1)
+        val citer = fakePost(numreponse = 900, author = "Alice")
+        val departure = TopicScrollAnchor(index = 3, offset = 17)
+        val arrival = TopicScrollAnchor(index = 8, offset = 29)
+        val origin = fakeTopic(2, 4, posts = listOf(target))
+        val repository = FakeTopicRepository(
+            listOf(flowOf(origin), flowOf(fakeTopic(4, 4, posts = listOf(citer))), flowOf(origin)),
+        ).apply { citingResult = Result.success(listOf(citer)) }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            searchRepository = FakeSearchRepository(pageToResolve = 4),
+        )
+        viewModel.send(TopicIntent.OnCitedBadgeClick(target))
+        advanceUntilIdle()
+        viewModel.reportPageAnchor(departure)
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.OnCitingPostClick(citer, departureAnchor = departure))
+            val landing = awaitItem()
+            assertEquals(TopicEffect.ScrollToPost(citer.numreponse), landing)
+            assertEquals(4, viewModel.state.value.request.page)
+            assertTrue(viewModel.state.value.canReturnFromJump)
+            viewModel.onLandingApplied(landing)
+            viewModel.reportPageAnchor(arrival)
+
+            assertTrue(viewModel.returnFromJump(arrival))
+            assertEquals(TopicEffect.ScrollToAnchor(departure, page = 2), awaitItem())
+            assertEquals(2, viewModel.state.value.request.page)
+            assertFalse(viewModel.state.value.canReturnFromJump)
+            assertEquals(listOf(2, 4, 2), repository.calls.map { it.third })
+            expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -4172,6 +4229,60 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `same-page quote jump returns to its tap anchor after the arrival is persisted (#782)`() = runTest {
+        val departure = TopicScrollAnchor(index = 3, offset = 17)
+        val arrival = TopicScrollAnchor(index = 9, offset = 31)
+        val repository = FakeTopicRepository(listOf(flowOf(fakeTopic(2, 2, posts = listOf(fakePost(900))))))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+
+        viewModel.effects.test {
+            viewModel.goToPost(targetPage = 2, numreponse = 900, departureAnchor = departure)
+            val landing = awaitItem()
+            assertEquals(TopicEffect.ScrollToPost(900), landing)
+            viewModel.onLandingApplied(landing)
+            viewModel.reportPageAnchor(arrival)
+
+            assertTrue(viewModel.returnFromJump(arrival))
+            assertEquals(TopicEffect.ScrollToAnchor(departure, page = 2), awaitItem())
+            assertEquals(2, viewModel.state.value.request.page)
+            assertFalse(viewModel.state.value.canReturnFromJump)
+            assertEquals(1, repository.calls.size)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `same-page return without a tap anchor falls back to top instead of the arrival`() = runTest {
+        val arrival = TopicScrollAnchor(index = 9, offset = 31)
+        val repository = FakeTopicRepository(listOf(flowOf(fakeTopic(2, 2, posts = listOf(fakePost(900))))))
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+        )
+        viewModel.reportPageAnchor(TopicScrollAnchor(index = 3, offset = 17))
+
+        viewModel.effects.test {
+            viewModel.goToPost(targetPage = 2, numreponse = 900)
+            val landing = awaitItem()
+            assertEquals(TopicEffect.ScrollToPost(900), landing)
+            viewModel.onLandingApplied(landing)
+            viewModel.reportPageAnchor(arrival)
+
+            assertTrue(viewModel.returnFromJump(arrival))
+            assertEquals(TopicEffect.ScrollToTop(page = 2), awaitItem())
+            assertFalse(viewModel.state.value.canReturnFromJump)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `a manual page switch clears the jump chain (#895)`() = runTest {
         val repository = FakeTopicRepository(
             flowsToReturn = listOf(
@@ -6334,8 +6445,10 @@ class TopicViewModelTest {
     }
 
     @Test
-    fun `a same-page citing post absent from the cache lands after one forced reload (#1447)`() = runTest {
+    fun `a same-page citing post absent from cache returns to the tap anchor after reload (#1447)`() = runTest {
         val target = fakePost(777)
+        val departure = TopicScrollAnchor(index = 3, offset = 17)
+        val arrival = TopicScrollAnchor(index = 14, offset = 31)
         val reply = CompletableDeferred<Unit>()
         val cached = fakeTopic(page = 2, totalPages = 2, posts = listOf(fakePost(100, citedCount = 1)))
         val fresh = cached.copy(posts = cached.posts + target)
@@ -6357,9 +6470,10 @@ class TopicViewModelTest {
         )
         viewModel.send(TopicIntent.OnCitedBadgeClick(cached.posts.single()))
         advanceUntilIdle()
+        viewModel.reportPageAnchor(departure)
 
         viewModel.effects.test {
-            viewModel.send(TopicIntent.OnCitingPostClick(target))
+            viewModel.send(TopicIntent.OnCitingPostClick(target, departureAnchor = departure))
             val pending = viewModel.state.value.landing as TopicUiState.Landing.Pending
             assertEquals(cached, assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic)
             assertEquals(2, repository.calls.size)
@@ -6372,6 +6486,12 @@ class TopicViewModelTest {
             assertEquals(pending, viewModel.state.value.landing)
             viewModel.onLandingApplied(landing)
             assertEquals(TopicUiState.Landing.Applied(pending.id, page = 2), viewModel.state.value.landing)
+            viewModel.reportPageAnchor(arrival)
+
+            assertTrue(viewModel.returnFromJump(arrival))
+            assertEquals(TopicEffect.ScrollToAnchor(departure, page = 2), awaitItem())
+            assertEquals(2, viewModel.state.value.request.page)
+            assertFalse(viewModel.state.value.canReturnFromJump)
             assertEquals(2, repository.calls.size)
             expectNoEvents()
             cancelAndIgnoreRemainingEvents()
@@ -7851,6 +7971,7 @@ internal fun submitFeedbackTestViewModel(repository: TopicRepository): TopicView
  */
 private class FakeSearchRepository(
     private val pageToResolve: Int? = null,
+    private val resolveGate: CompletableDeferred<Unit>? = null,
 ) : SearchRepository {
     val resolveCalls: MutableList<Triple<Int, Int, Int>> = mutableListOf()
 
@@ -7859,6 +7980,7 @@ private class FakeSearchRepository(
 
     override suspend fun resolveSearchResultPage(cat: Int, post: Int, numreponse: Int): Int? {
         resolveCalls += Triple(cat, post, numreponse)
+        resolveGate?.await()
         return pageToResolve
     }
 }

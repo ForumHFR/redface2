@@ -545,7 +545,7 @@ class TopicViewModel @AssistedInject constructor(
             // to recover from a transient error.
             TopicIntent.Retry -> loadCurrentPage()
             is TopicIntent.OnCitedBadgeClick -> openCitingPosts(intent.post)
-            is TopicIntent.OnCitingPostClick -> openCitingPost(intent.post)
+            is TopicIntent.OnCitingPostClick -> openCitingPost(intent.post, intent.departureAnchor)
             TopicIntent.OnDismissCitingSheet -> dismissCitingPosts()
             is TopicIntent.DeletePost -> deletePost(intent.numreponse)
             is TopicIntent.RequestModerationAlert -> requestModerationAlert(intent.numreponse)
@@ -762,7 +762,7 @@ class TopicViewModel @AssistedInject constructor(
      * the real page. Once resolved, reuse [goToPost] unchanged so the #782 return chain and
      * [TopicEffect.ScrollToPost] landing remain identical to every other in-topic jump.
      */
-    private fun openCitingPost(post: Post) {
+    private fun openCitingPost(post: Post, departureAnchor: TopicScrollAnchor?) {
         val loaded = _state.value.citingPostsSheet?.content as? CitingPostsSheetContent.Loaded
             ?: return
         if (loaded.posts.none { it.numreponse == post.numreponse }) return
@@ -790,7 +790,11 @@ class TopicViewModel @AssistedInject constructor(
             if (generation != ownerGeneration) return@launch
             // The unfiltered href rendered by quote_only carries page=1. A failed probe therefore
             // degrades to that same server-provided fallback, never to a guessed page.
-            goToPost(targetPage = resolvedPage ?: 1, numreponse = post.numreponse)
+            goToPost(
+                targetPage = resolvedPage ?: 1,
+                numreponse = post.numreponse,
+                departureAnchor = departureAnchor,
+            )
         }
     }
 
@@ -1931,11 +1935,9 @@ class TopicViewModel @AssistedInject constructor(
         val landing = frame.anchor?.let { PendingLanding.Anchor(it) }
         if (frame.page == request.page) {
             departureAnchor?.let { reportPageAnchor(it) }
-            armLanding(
-                landing
-                    ?: pageAnchors[frame.page]?.let { PendingLanding.Anchor(it) }
-                    ?: PendingLanding.Top,
-            )
+            // Same-page settles overwrite pageAnchors with the arrival, so only the frame's
+            // tap-time anchor can restore the departure. Without it, use the explicit top fallback.
+            armLanding(landing ?: PendingLanding.Top)
             dispatchLandingAgainstScreen()
         } else {
             internalSwitch(frame.page, departureAnchor, landing = landing)

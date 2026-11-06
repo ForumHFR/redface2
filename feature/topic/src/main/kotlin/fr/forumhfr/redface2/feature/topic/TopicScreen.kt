@@ -403,8 +403,8 @@ fun TopicScreen(
         alignment = alignment,
     )
     // Gate r1 — tap-time departure anchor, but ONLY while aligned : right after a rapid second
-    // page tap the list may still sit at the previous page's offset. A null departure just falls
-    // back to the engine's stored anchor for the departed page.
+    // page tap the list may still sit at the previous page's offset. Unaligned coordinates must
+    // never be reused as a tap-time anchor.
     val alignedDepartureAnchor = {
         val current = viewModel.state.value
         currentAnchor().takeIf {
@@ -812,6 +812,9 @@ fun TopicScreen(
         // anchor} on its jump chain and lands on the target (highlight via ScrollToPost).
         onGoToPost = { page, numreponse ->
             viewModel.goToPost(page, numreponse, alignedDepartureAnchor())
+        },
+        onCitingPostClick = { post ->
+            viewModel.send(TopicIntent.OnCitingPostClick(post, alignedDepartureAnchor()))
         },
         onOpenProfile = onOpenProfile,
         onOpenImageViewer = onOpenImageViewer,
@@ -1334,6 +1337,7 @@ internal fun TopicContent(
     onOpenPage: (Int) -> Unit,
     // #699 — quote-header tap, threaded down to the post cards (cf. TopicScreen KDoc).
     onGoToPost: (page: Int, numreponse: Int) -> Unit = { _, _ -> },
+    onCitingPostClick: (Post) -> Unit,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit = { _, _, _ -> },
     onOpenImageViewer: (ImageViewerRequest) -> Unit = {},
     // #792 — « Envoyer un MP » entry of the post menu, forwarded up to `:app` (MP composer).
@@ -1750,7 +1754,7 @@ internal fun TopicContent(
         CitingPostsSheet(
             state = sheet,
             onDismiss = { onIntent(TopicIntent.OnDismissCitingSheet) },
-            onPostClick = { post -> onIntent(TopicIntent.OnCitingPostClick(post)) },
+            onPostClick = onCitingPostClick,
         )
     }
 }
