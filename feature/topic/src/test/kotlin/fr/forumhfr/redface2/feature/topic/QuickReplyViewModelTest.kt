@@ -83,6 +83,44 @@ class QuickReplyViewModelTest {
     }
 
     @Test
+    fun `expired hash with failed prefetch fetches a new form before the next POST`() = runTest {
+        val base = FakeQuickReplyRepository(results = mutableListOf(
+            ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck),
+        ))
+        var fetches = 0
+        var submittedHash: String? = null
+        val repository = object : ReplyRepository by base {
+            override suspend fun fetchReplyForm(context: ReplyContext): ReplyForm {
+                fetches++
+                if (fetches == 2) throw IOException("refresh offline")
+                return base.fetchReplyForm(context).copy(hashCheck = "hash-$fetches")
+            }
+
+            override suspend fun submitReply(
+                context: ReplyContext, form: ReplyForm, bbcodeContent: String, options: ReplyFormOptions,
+            ): ReplySubmitResult {
+                submittedHash = form.hashCheck
+                return base.submitReply(context, form, bbcodeContent, options)
+            }
+        }
+        val vm = quickReplyViewModel(replyRepository = repository)
+        vm.onSheetOpened()
+        advanceUntilIdle()
+        vm.onTextChanged(TextFieldValue("body"))
+        vm.onSubmitClicked()
+        advanceUntilIdle()
+        assertEquals(EditorErrors.invalidHashCheck, vm.state.value.submitError)
+        assertEquals(2, fetches)
+        assertEquals(1, base.submitCalls)
+        assertEquals("hash-1", submittedHash)
+        vm.onSubmitClicked()
+        advanceUntilIdle()
+        assertEquals(3, fetches)
+        assertEquals(2, base.submitCalls)
+        assertEquals("hash-3", submittedHash)
+    }
+
+    @Test
     fun `ED132 quote alone with empty prefill stays blocked through close and reopen (#1033)`() = runTest {
         val repository = FakeQuickReplyRepository(quotePrefills = mapOf(101 to ""))
         val vm = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
@@ -90,7 +128,7 @@ class QuickReplyViewModelTest {
         advanceUntilIdle()
         vm.onSubmitClicked()
         assertEquals("", vm.state.value.text.text)
-        assertEquals(EditorErrors.quoteFetchFailed, vm.state.value.submitError)
+        assertEquals(EditorErrors.quoteFetchFailed(inline = true, quickReply = true), vm.state.value.submitError)
         assertFalse(vm.state.value.canSubmit)
         vm.onDismissed()
         advanceUntilIdle()
@@ -153,7 +191,7 @@ class QuickReplyViewModelTest {
         advanceUntilIdle()
         val effect = vm.effects.first() as QuickReplyEffect.EscalateToFullEditor
         assertEquals(listOf(202, 101), effect.quotes.map { it.numreponse })
-        assertEquals(EditorErrors.quoteFetchFailed, vm.state.value.submitError)
+        assertEquals(EditorErrors.quoteFetchFailed(inline = true, quickReply = true), vm.state.value.submitError)
         vm.onDismissed()
         advanceUntilIdle()
         vm.onSheetOpened()
@@ -431,7 +469,7 @@ class QuickReplyViewModelTest {
             viewModel.onEscalateRequested()
             runCurrent()
             expectNoEvents()
-            assertEquals(EditorErrors.draftWriteFailed, viewModel.state.value.submitError)
+            assertEquals(EditorErrors.draftSaveFailed, viewModel.state.value.submitError)
         }
     }
 
@@ -733,7 +771,7 @@ class QuickReplyViewModelTest {
 
         val state = viewModel.state.value
         assertEquals("acquis", state.text.text)
-        assertEquals(EditorErrors.quoteFetchFailed, state.submitError)
+        assertEquals(EditorErrors.quoteFetchFailed(inline = true, quickReply = true), state.submitError)
         assertFalse(state.isPreparingQuotes)
     }
 
@@ -749,10 +787,17 @@ class QuickReplyViewModelTest {
         advanceUntilIdle()
 
         assertEquals(0, repository.submitCalls)
-        assertEquals(EditorErrors.quoteFetchFailed, viewModel.state.value.submitError)
+        assertEquals(EditorErrors.quoteFetchFailed(inline = false), viewModel.state.value.submitError)
         assertEquals("body", viewModel.state.value.text.text)
         assertEquals(listOf(101), viewModel.state.value.quotes.map { it.numreponse })
         assertEquals(null, store.entries.values.single().attempt)
+        assertTrue(viewModel.state.value.canSubmit)
+        viewModel.onQuoteRemoved(101)
+        assertTrue(viewModel.state.value.canSubmit)
+        viewModel.onSubmitClicked()
+        advanceUntilIdle()
+        assertEquals(1, repository.submitCalls)
+        assertEquals(listOf("body"), repository.submittedBodies)
     }
 
     @Test
@@ -769,7 +814,7 @@ class QuickReplyViewModelTest {
         advanceUntilIdle()
 
         assertEquals(0, repository.submitCalls)
-        assertEquals(EditorErrors.quoteFetchFailed, viewModel.state.value.submitError)
+        assertEquals(EditorErrors.quoteFetchFailed(inline = false), viewModel.state.value.submitError)
         assertEquals("body", viewModel.state.value.text.text)
         assertEquals(null, store.entries.values.single().attempt)
     }
@@ -793,7 +838,7 @@ class QuickReplyViewModelTest {
             val expected = if (failure is fr.forumhfr.redface2.core.domain.auth.SessionExpiredException) {
                 EditorErrors.sessionExpired
             } else {
-                EditorErrors.quoteFetchFailed
+                EditorErrors.quoteFetchFailed(inline = false)
             }
             assertEquals(expected, viewModel.state.value.submitError)
             assertEquals(0, repository.submitCalls)
@@ -817,7 +862,8 @@ class QuickReplyViewModelTest {
             advanceUntilIdle()
 
             assertEquals(0, repository.submitCalls)
-            assertEquals(EditorErrors.quoteFetchFailed, viewModel.state.value.submitError)
+            assertEquals(EditorErrors.quoteFetchFailed(inline = true, quickReply = true),
+                viewModel.state.value.submitError)
             assertFalse(viewModel.state.value.isPreparingQuotes)
             assertEquals("body", viewModel.state.value.text.text)
         }
@@ -1067,7 +1113,7 @@ class QuickReplyViewModelTest {
                         EditorErrors.sessionExpired -> SubmissionErrorProbe.SESSION_EXPIRED
                         EditorErrors.uncertain -> SubmissionErrorProbe.UNCERTAIN
                         EditorErrors.draftWriteFailed -> SubmissionErrorProbe.DRAFT_WRITE_FAILED
-                        EditorErrors.invalidForm, EditorErrors.quoteFetchFailed ->
+                        EditorErrors.invalidForm, EditorErrors.quoteFetchFailed(inline = false) ->
                             SubmissionErrorProbe.PREPARATION_FAILED
                         else -> null
                     },

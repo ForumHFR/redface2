@@ -50,6 +50,9 @@ class EditorErrorCatalogTest {
             Row(EditorErrors.draftWriteFailed, EditorCause.DraftWriteFailed, EditorErrorClass.Certain,
                 R.string.editor_submission_draft_write_failed, R.string.editor_detail_draft_write_failed,
                 EditorErrorAction.Details),
+            Row(EditorErrors.draftSaveFailed, EditorCause.DraftSaveFailed, EditorErrorClass.Information,
+                R.string.editor_submission_draft_write_failed, R.string.editor_detail_draft_save_failed,
+                EditorErrorAction.Details),
             Row(EditorErrors.invalidForm, EditorCause.InvalidForm, EditorErrorClass.Certain,
                 R.string.editor_summary_form, R.string.editor_error_unknown, EditorErrorAction.Reload),
             Row(EditorErrors.formNetwork, EditorCause.FormNetwork, EditorErrorClass.Certain,
@@ -61,7 +64,7 @@ class EditorErrorCatalogTest {
             Row(EditorErrors.missingTitle, EditorCause.MissingTitle, EditorErrorClass.Validation,
                 R.string.editor_summary_title, null, EditorErrorAction.Complete),
             Row(EditorErrors.missingSubcategory, EditorCause.MissingSubcategory, EditorErrorClass.Validation,
-                R.string.editor_summary_subcategory, null, EditorErrorAction.Complete),
+                R.string.editor_summary_subcategory, R.string.editor_detail_subcategory, EditorErrorAction.Complete),
             Row(EditorErrors.missingRecipients, EditorCause.MissingRecipients, EditorErrorClass.Validation,
                 R.string.editor_summary_recipients, null, EditorErrorAction.Complete),
             Row(EditorErrors.missingSubject, EditorCause.MissingSubject, EditorErrorClass.Validation,
@@ -135,6 +138,38 @@ class EditorErrorCatalogTest {
         assertEquals(EditorErrors.topicLocked, ReplyFailureReason.TopicLocked.toEditorError())
         assertEquals(EditorErrors.loginRequired, ReplyFailureReason.LoginRequired.toEditorError())
         assertEquals(EditorErrors.unknownRecipient, ReplyFailureReason.UnknownRecipient.toEditorError())
+    }
+
+    @Test
+    fun `ordinary draft errors and card quotes make no false promise about sending`() {
+        val draft = checkNotNull(EditorErrors.draftSaveFailed.detail).resolve(context)
+        assertFalse(draft.contains("Rien n’est parti"))
+        assertEquals("Brouillon non écrit", EditorErrors.draftSaveFailed.summary.resolve(context))
+        assertTrue(EditorErrors.draftSaveFailed.hasSubmissionSummary)
+        val cards = checkNotNull(EditorErrors.quoteFetchFailed(inline = false).detail).resolve(context)
+        assertTrue(cards.contains("retirez sa carte"))
+        assertFalse(cards.contains("bloqué"))
+        assertFalse(cards.contains("ignorer"))
+        assertTrue(checkNotNull(EditorErrors.quoteFetchFailed.detail).resolve(context).contains("l’ignorer"))
+        val inline = EditorErrors.quoteFetchFailed(inline = true, quickReply = true)
+        assertTrue(checkNotNull(inline.detail).resolve(context).contains("envoi bloqué"))
+        assertEquals("Sous-cat. absente", EditorErrors.missingSubcategory.summary.resolve(context))
+        assertEquals("Choisissez une sous-catégorie pour créer ce nouveau sujet.",
+            EditorErrors.missingSubcategory.detail?.resolve(context))
+        assertFalse(checkNotNull(EditorErrors.invalidHashCheck.detail).resolve(context).contains("rechargé"))
+        assertEquals("Formulaire expiré", EditorErrors.invalidHashCheck.summary.resolve(context))
+    }
+
+    @Test
+    fun `successful form fetch resolves only the matching loading errors`() {
+        assertEquals(null, EditorErrors.formNetwork.afterFormLoaded())
+        assertEquals(null, EditorErrors.invalidForm.afterFormLoaded())
+        assertEquals(EditorErrors.quoteFetchFailed, EditorErrors.quoteFetchFailed.afterFormLoaded())
+        assertEquals(null, EditorErrors.quoteFetchFailed.afterFormLoaded(quotesResolved = true))
+        listOf(EditorErrors.uncertain, EditorErrors.draftWriteFailed, EditorErrors.draftSaveFailed,
+            EditorErrors.antiFlood, EditorErrors.missingSubcategory).forEach {
+            assertEquals(it, it.afterFormLoaded(quotesResolved = true))
+        }
     }
 
     @Test

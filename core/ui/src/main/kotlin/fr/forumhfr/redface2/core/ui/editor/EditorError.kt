@@ -62,7 +62,10 @@ fun EditorError.bannerText(): String = (detail ?: summary).resolve()
 
 /** D44: retain the two existing warning-icon summaries in the old chrome. */
 val EditorError.hasSubmissionSummary: Boolean
-    get() = cause == EditorCause.Uncertain || cause == EditorCause.DraftWriteFailed
+    get() = when (cause) {
+        EditorCause.Uncertain, EditorCause.DraftWriteFailed, EditorCause.DraftSaveFailed -> true
+        else -> false
+    }
 
 sealed interface EditorCause {
     data object Empty : EditorCause
@@ -74,6 +77,7 @@ sealed interface EditorCause {
     data object Network : EditorCause
     data object QuoteFetchFailed : EditorCause
     data object DraftWriteFailed : EditorCause
+    data object DraftSaveFailed : EditorCause
     data object InvalidForm : EditorCause
     data object FormNetwork : EditorCause
     data object Uncertain : EditorCause

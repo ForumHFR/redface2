@@ -207,7 +207,8 @@ class QuickReplyViewModel @AssistedInject constructor(
                 EditorErrors.sessionExpired, EditorErrors.uncertain,
                 network = EditorErrors.network,
                 preparationFailed = EditorErrors.invalidForm,
-                quoteFetchFailed = EditorErrors.quoteFetchFailed,
+                quoteFetchFailed = EditorErrors.quoteFetchFailed(inline = false),
+                draftSaveFailed = EditorErrors.draftSaveFailed,
             ),
         ).also { it.setPreference(confirmationPreference) }
     }
@@ -420,7 +421,12 @@ class QuickReplyViewModel @AssistedInject constructor(
         submission === opening && !opening.blocksMutation
 
     private fun quotePreparationFailed() {
-        _state.update { it.copy(isPreparingQuotes = false, submitError = EditorErrors.quoteFetchFailed) }
+        _state.update {
+            it.copy(
+                isPreparingQuotes = false,
+                submitError = EditorErrors.quoteFetchFailed(inline = true, quickReply = true),
+            )
+        }
     }
 
     /** #604 lot 2 — arm a quote card ; idempotent per numreponse (re-citing a post is a no-op). */

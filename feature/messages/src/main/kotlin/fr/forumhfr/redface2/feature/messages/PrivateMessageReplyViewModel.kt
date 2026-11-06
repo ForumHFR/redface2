@@ -55,6 +55,7 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerFavoriteSources
 import fr.forumhfr.redface2.core.ui.editor.SmileyWikiKeywordsSource
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
+import fr.forumhfr.redface2.core.ui.editor.afterFormLoaded
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.imageInsertBbcodeOrNull
 import fr.forumhfr.redface2.core.ui.editor.insertBbcodeToken
@@ -171,6 +172,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         errors = EditorSubmissionErrors(
             uncertain = EditorErrors.uncertain(EditorErrorSurface.MessageReply),
             draftWriteFailed = EditorErrors.draftWriteFailed,
+            draftSaveFailed = EditorErrors.draftSaveFailed,
             sessionExpired = EditorErrors.sessionExpired,
             unknown = EditorErrors.uncertain(EditorErrorSurface.MessageReply),
             network = EditorErrors.network,
@@ -404,6 +406,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             isLoadingForm = false,
             formAvailable = true,
             formError = false,
+            submitError = submitError.afterFormLoaded(),
             signatureEnabled = if (hydrateOptions) {
                 form.options.signatureEnabled || form.hiddenFields["signature"] == "1"
             } else {
@@ -716,7 +719,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         _state.update {
             it.copy(
                 isUploading = true,
-                uploadError = if (received.size > MAX_IMAGES_PER_UPLOAD) EditorErrors.imageLimit else it.uploadError,
+                uploadError = if (received.size > MAX_IMAGES_PER_UPLOAD) EditorErrors.imageLimit else null,
                 uploadProgress = if (multiple) UploadProgress(completed = 0, total = targets.size) else null,
             )
         }

@@ -42,6 +42,11 @@ object EditorErrors {
         R.string.editor_submission_draft_write_failed, R.string.editor_detail_draft_write_failed,
                 EditorErrorAction.Details,
     )
+    val draftSaveFailed = create(
+        EditorCause.DraftSaveFailed, EditorErrorClass.Information,
+        R.string.editor_submission_draft_write_failed, R.string.editor_detail_draft_save_failed,
+        EditorErrorAction.Details,
+    )
     val invalidForm = create(
         EditorCause.InvalidForm, EditorErrorClass.Certain,
         R.string.editor_summary_form, R.string.editor_error_unknown, EditorErrorAction.Reload,
@@ -64,7 +69,7 @@ object EditorErrors {
     )
     val missingSubcategory = create(
         EditorCause.MissingSubcategory, EditorErrorClass.Validation,
-        R.string.editor_summary_subcategory, null, EditorErrorAction.Complete,
+        R.string.editor_summary_subcategory, R.string.editor_detail_subcategory, EditorErrorAction.Complete,
     )
     val missingRecipients = create(
         EditorCause.MissingRecipients, EditorErrorClass.Validation,
@@ -110,6 +115,14 @@ object EditorErrors {
     val refused = create(
         EditorCause.Refused, EditorErrorClass.Certain,
         R.string.editor_summary_refused, R.string.messages_reply_error_refused, EditorErrorAction.Details,
+    )
+
+    fun quoteFetchFailed(inline: Boolean, quickReply: Boolean = false): EditorError = quoteFetchFailed.copy(
+        detail = EditorText(when {
+            !inline -> R.string.editor_detail_quote_cards
+            quickReply -> R.string.quick_reply_error_quote_fetch
+            else -> R.string.editor_error_quote_fetch
+        }),
     )
 
     fun uncertain(surface: EditorErrorSurface): EditorError = uncertain.copy(
@@ -162,4 +175,13 @@ object EditorErrors {
         detail: Int?,
         action: EditorErrorAction,
     ) = EditorError(cause, errorClass, EditorText(summary), detail?.let { EditorText(it) }, action)
+}
+
+/** A successful GET resolves only its own errors; send, draft and validation errors survive. */
+fun EditorError?.afterFormLoaded(quotesResolved: Boolean = false): EditorError? = takeUnless {
+    when (it?.cause) {
+        EditorCause.InvalidForm, EditorCause.FormNetwork -> true
+        EditorCause.QuoteFetchFailed -> quotesResolved
+        else -> false
+    }
 }

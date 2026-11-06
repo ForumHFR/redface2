@@ -35,6 +35,7 @@ import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
 import java.io.IOException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
@@ -63,6 +64,60 @@ class PendingQuoteHandoffTest {
 
     @After
     fun tearDown() { Dispatchers.resetMain() }
+
+    @Test
+    fun `escalation restores text before quote retry after process death and inserts only once`() = runTest {
+        val scenario = RecreationScenario(DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L })
+        val sheet = scenario.sheet()
+        sheet.onSheetOpened(scenario.quotes)
+        advanceUntilIdle()
+        sheet.onTextChanged(TextFieldValue("text from the sheet"))
+        sheet.onEscalateRequested()
+        advanceUntilIdle()
+        val handoff = sheet.effects.first() as QuickReplyEffect.EscalateToFullEditor
+        assertEquals(scenario.quotes, handoff.quotes)
+        val savedState = SavedStateHandle()
+        var editor = scenario.editor(savedState, handoff.quotes)
+        try {
+            advanceUntilIdle()
+            assertEquals("text from the sheet", editor.state.value.draft.text)
+            assertEquals(EditorErrors.quoteFetchFailed, editor.state.value.submitError)
+            editor.viewModelScope.cancel()
+            // Same route, SavedStateHandle and durable store, but a genuinely new ViewModel.
+            val restoreGate = CompletableDeferred<Unit>()
+            scenario.drafts.loadGate = restoreGate
+            editor = scenario.editor(savedState, handoff.quotes)
+            val writes = scenario.drafts.writes
+            editor.submit(PostEditorIntent.ReloadRequested)
+            assertEquals(writes, scenario.drafts.writes)
+            assertFalse(editor.state.value.isLoadingForm)
+            restoreGate.complete(Unit)
+            advanceUntilIdle()
+            assertEquals("text from the sheet", editor.state.value.draft.text)
+            assertFalse(editor.state.value.canSubmit)
+            scenario.quoteAvailable = true
+            editor.submit(PostEditorIntent.ReloadRequested)
+            advanceUntilIdle()
+            val expected = "[quotemsg=101]quote[/quotemsg]\n\ntext from the sheet"
+            assertEquals(expected, editor.state.value.draft.text)
+            assertEquals(expected, scenario.drafts.saved[EditorDraftKey.reply(23, 35421)]?.body)
+            assertTrue(editor.state.value.pendingQuotes.isEmpty())
+            assertNull(editor.state.value.submitError)
+            editor.submit(PostEditorIntent.ReloadRequested)
+            advanceUntilIdle()
+            assertEquals(expected, editor.state.value.draft.text)
+            // Recreating again after delivery restores the whole stored body without replaying it.
+            editor.viewModelScope.cancel()
+            editor = scenario.editor(savedState, handoff.quotes)
+            advanceUntilIdle()
+            assertEquals(expected, editor.state.value.draft.text)
+            assertEquals(expected, scenario.drafts.saved[EditorDraftKey.reply(23, 35421)]?.body)
+            coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
+        } finally {
+            editor.viewModelScope.cancel()
+            sheet.viewModelScope.cancel()
+        }
+    }
 
     @Test
     fun `blocked sheet escalates pending quotes then full editor abandons without POST or text loss`() = runTest {
@@ -99,7 +154,7 @@ class PendingQuoteHandoffTest {
         assertFalse(sheet.state.value.canSubmit)
         assertFalse(sheet.state.value.isPreparingQuotes)
         assertFalse(sheet.state.value.isSubmitting)
-        assertEquals(EditorErrors.quoteFetchFailed, sheet.state.value.submitError)
+        assertEquals(EditorErrors.quoteFetchFailed(inline = true, quickReply = true), sheet.state.value.submitError)
         sheet.onEscalateRequested()
         advanceUntilIdle()
         val handoff = sheet.effects.first() as QuickReplyEffect.EscalateToFullEditor
@@ -136,5 +191,50 @@ class PendingQuoteHandoffTest {
             editor.viewModelScope.cancel()
             sheet.viewModelScope.cancel()
         }
+    }
+
+    private class RecreationScenario(private val clock: DiagnosticsClock) {
+        val drafts = VersionedEditorDraftStore()
+        val quotes = listOf(QuoteSelection(QuoteLocator(1, 101, null), "alice", ""))
+        var quoteAvailable = false
+        private val diagnostics = DiagnosticsLog()
+        private val preferences = mockk<UserPreferencesRepository> {
+            every { observeConfirmBeforePosting() } returns flowOf(false)
+            every { observeQuoteCardsEnabled() } returns flowOf(false)
+            every { observeEditorImageInsert() } returns flowOf(EditorImageInsert.REDUCED)
+            every { observeImagePickerMode() } returns flowOf(ImagePickerMode.DEFAULT)
+        }
+        private val auth = mockk<AuthRepository> {
+            every { observeAuthState() } returns flowOf(AuthState.Authenticated("tester"))
+        }
+        private val localSmileys = mockk<SmileyLocalCollections> {
+            every { observe() } returns flowOf(SmileyLocalCollectionSnapshot())
+        }
+        val repository = mockk<ReplyRepository> {
+            coEvery { fetchReplyForm(any()) } answers {
+                val quoted = firstArg<ReplyContext>().isQuote
+                if (quoted && !quoteAvailable) throw IOException("gone")
+                ReplyForm(hashCheck = "FAKE_HASH", sujet = "Topic", hiddenFields = emptyMap(),
+                    isAnonymous = false, initialContent = if (quoted) "[quotemsg=101]quote[/quotemsg]" else "")
+            }
+        }
+        private val materializer = TopicReplyQuoteMaterializer(repository)
+
+        fun sheet() = QuickReplyViewModel(
+            QuickReplyRequest(cat = 23, subcat = 0, topicId = 35421, page = 1), SavedStateHandle(),
+            repository, materializer, EditorSessionResources(drafts, preferences, auth, clock, diagnostics),
+        )
+
+        fun editor(savedState: SavedStateHandle, quotes: List<QuoteSelection>) = PostEditorViewModel(
+            request = PostEditorRequest(PostEditorMode.Reply, 23, 35421, null, 1, 0,
+                initialQuotes = quotes, resumeSharedDraft = true),
+            previewParser = mockk(relaxed = true), replyRepository = repository,
+            editPostRepository = mockk(relaxed = true), smileyRepository = mockk(relaxed = true),
+            userPreferencesRepository = preferences, draftStore = drafts, diagnostics = diagnostics,
+            uploadRepository = mockk(relaxed = true), imageUploadReader = mockk(relaxed = true),
+            authRepository = auth, quoteMaterializer = materializer,
+            hfrFavoriteSmileyRepository = mockk(relaxed = true), smileyLocalCollections = localSmileys,
+            clock = clock, savedStateHandle = savedState,
+        )
     }
 }

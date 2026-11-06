@@ -59,6 +59,7 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerFavoriteSources
 import fr.forumhfr.redface2.core.ui.editor.SmileyWikiKeywordsSource
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
+import fr.forumhfr.redface2.core.ui.editor.afterFormLoaded
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.decodeInlineQuoteRequest
 import fr.forumhfr.redface2.core.ui.editor.encodeInlineQuoteRequest
@@ -218,6 +219,7 @@ class PostEditorViewModel @AssistedInject constructor(
             sessionExpired = EditorErrors.sessionExpired, unknown = EditorErrors.uncertain,
             network = EditorErrors.network, preparationFailed = EditorErrors.invalidForm,
             quoteFetchFailed = EditorErrors.quoteFetchFailed,
+            draftSaveFailed = EditorErrors.draftSaveFailed,
         ),
         callbacks = EditorSubmissionCallbacks<PostEditorEffect>(
             state = { value ->
@@ -230,7 +232,14 @@ class PostEditorViewModel @AssistedInject constructor(
                     )
                 }
             },
-            error = { value -> _state.update { it.copy(submitError = value) } },
+            error = { value ->
+                _state.update {
+                    val mapped = if (value?.cause == EditorCause.QuoteFetchFailed) {
+                        EditorErrors.quoteFetchFailed(inline = it.pendingQuotes.isNotEmpty())
+                    } else { value }
+                    it.copy(submitError = mapped)
+                }
+            },
             success = { value -> _effects.trySend(value) },
         ),
     )
@@ -256,6 +265,8 @@ class PostEditorViewModel @AssistedInject constructor(
 
     /** #459 PR2 — in-flight image upload job ; one at a time, cancelled on [onCleared]. */
     private var uploadJob: Job? = null
+    private var draftRestored = false
+    private var sharedDraftResumed = false
 
     init {
         submission.observePreference(userPreferencesRepository.observeConfirmBeforePosting())
@@ -289,6 +300,7 @@ class PostEditorViewModel @AssistedInject constructor(
         }
         viewModelScope.launch {
             restoreDraftIfAny()
+            draftRestored = true
             if (_state.value.draft.text.isNotBlank() && _state.value.restorableDraft == null) scheduleAutosave()
             when (request.mode) {
                 PostEditorMode.Reply -> resolveQuoteRenderingThenLoad()
@@ -357,7 +369,7 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     private fun reloadForm() {
-        if (submission.blocksMutation || _state.value.isLoadingForm) return
+        if (!draftRestored || submission.blocksMutation || _state.value.isLoadingForm) return
         submission.disarm()
         val pending = _state.value.pendingQuotes
         when {
@@ -415,7 +427,11 @@ class PostEditorViewModel @AssistedInject constructor(
                         return@fold
                     }
                     if (!insertInline) {
-                        _state.update { it.copy(isLoadingForm = false, submitError = null) }
+                        _state.update {
+                            it.withFormHydration(form.copy(initialContent = ""), it.preview).copy(
+                                submitError = it.submitError.afterFormLoaded(quotesResolved = true),
+                            )
+                        }
                         return@fold
                     }
                     val prefills = form.initialContent.trimEnd()
@@ -437,9 +453,7 @@ class PostEditorViewModel @AssistedInject constructor(
                     savedStateHandle[DELIVERED_QUOTES_KEY] = quotes.inlineQuoteDeliveryKey()
                     setPendingQuotes(emptyList())
                     _state.update { current ->
-                        current.copy(submitError = current.submitError.takeUnless {
-                            it?.cause == EditorCause.QuoteFetchFailed
-                        })
+                        current.copy(submitError = current.submitError.afterFormLoaded(quotesResolved = true))
                     }
                     scheduleAutosave()
                 },
@@ -484,10 +498,11 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     private fun resumeSharedDraft(body: String) {
-        if (savedStateHandle.get<Boolean>(SHARED_DRAFT_RESUMED_KEY) == true || submission.blocksMutation) return
-        savedStateHandle[SHARED_DRAFT_RESUMED_KEY] = true
+        // The body lives in the draft store, not SavedStateHandle. A new instance MUST reload it.
+        if (sharedDraftResumed || submission.blocksMutation) return
+        sharedDraftResumed = true
         _state.update { current ->
-            val combined = if (current.draft.text.isBlank()) {
+            val combined = if (current.draft.text.isBlank() || current.draft.text == body) {
                 body
             } else {
                 current.draft.text.trimEnd() + "\n\n" + body
@@ -511,7 +526,9 @@ class PostEditorViewModel @AssistedInject constructor(
             (draft.text.isBlank() || draft.text == draftHydratedContent)
 
     /** ED-170: CAS autosave clears blank content without deleting any newer generation or marker. */
-    private fun scheduleAutosave() = submission.autosave(::draftSnapshot)
+    private fun scheduleAutosave() {
+        if (draftRestored) submission.autosave(::draftSnapshot)
+    }
 
     private fun draftSnapshot(): EditorDraftStore.Draft? {
         val snapshot = _state.value
@@ -781,7 +798,7 @@ class PostEditorViewModel @AssistedInject constructor(
         _state.update {
             it.copy(
                 isUploading = true,
-                uploadError = if (received.size > MAX_IMAGES_PER_UPLOAD) EditorErrors.imageLimit else it.uploadError,
+                uploadError = if (received.size > MAX_IMAGES_PER_UPLOAD) EditorErrors.imageLimit else null,
                 uploadProgress = if (multiple) UploadProgress(completed = 0, total = targets.size) else null,
             )
         }
@@ -1024,11 +1041,7 @@ class PostEditorViewModel @AssistedInject constructor(
             // Anti-clobber : do not overwrite once set, so a silent `InvalidHashCheck`
             // refetch on an anonymous fallback does not erase a previously known id.
             userId = userId ?: form.userId,
-            submitError = if (submitError != EditorErrors.uncertain && form.isAnonymous) {
-                ReplyFailureReason.LoginRequired.toEditorError()
-            } else {
-                submitError
-            },
+            submitError = submitError.afterFormLoaded() ?: EditorErrors.loginRequired.takeIf { form.isAnonymous },
         )
     }
 
@@ -1051,7 +1064,8 @@ class PostEditorViewModel @AssistedInject constructor(
         val mapped = when (error) {
             is SessionExpiredException -> EditorErrors.sessionExpired
             else -> when {
-                quoteFetch || _state.value.pendingQuotes.isNotEmpty() -> EditorErrors.quoteFetchFailed
+                quoteFetch || _state.value.pendingQuotes.isNotEmpty() ->
+                    EditorErrors.quoteFetchFailed(inline = _state.value.pendingQuotes.isNotEmpty())
                 error is IOException -> EditorErrors.formNetwork
                 else -> EditorErrors.invalidForm
             }
@@ -1292,6 +1306,5 @@ class PostEditorViewModel @AssistedInject constructor(
         // panel makes it obvious which layer recorded an entry.
         private const val LOG_TAG_VM = "PostEditorVM"
         private const val DRAFT_RESTORE_OFFER_FINGERPRINT_KEY = "draft_restore_offer_fingerprint"
-        private const val SHARED_DRAFT_RESUMED_KEY = "shared_draft_resumed"
     }
 }

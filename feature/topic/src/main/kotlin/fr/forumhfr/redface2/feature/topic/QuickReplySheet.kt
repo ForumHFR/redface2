@@ -50,7 +50,6 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
-import fr.forumhfr.redface2.core.ui.editor.EditorCause
 import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummary
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsCallbacks
@@ -299,11 +298,7 @@ private fun QuickReplyConfirmationDialog(visible: Boolean, onConfirm: () -> Unit
 internal fun QuickReplyErrorBanner(error: EditorError) {
     if (error.hasSubmissionSummary) EditorSubmissionSummary(error)
     Text(
-        text = if (error.cause == EditorCause.QuoteFetchFailed) {
-            stringResource(fr.forumhfr.redface2.core.ui.R.string.quick_reply_error_quote_fetch)
-        } else {
-            error.bannerText()
-        },
+        text = error.bannerText(),
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.error,
     )

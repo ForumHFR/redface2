@@ -96,7 +96,7 @@ class ReportContentViewModel @AssistedInject constructor(
         ),
     ).also { it.setPreference(confirmPreference) }
 
-    // Observe successful content writes without changing the shared binding's error callbacks.
+    // Observe content-write results separately: storage and uncertain delivery can both be displayed.
     private fun reportDraftStore(): EditorDraftStore {
         val opening = generation
         return object : EditorDraftStore by dependencies.drafts {
@@ -121,8 +121,8 @@ class ReportContentViewModel @AssistedInject constructor(
     }
 
     private fun draftWritten(result: EditorDraftStore.StoreWriteResult, opening: Int) {
-        if (opening == generation && result is EditorDraftStore.StoreWriteResult.Written) {
-            _state.update { it.copy(draftWriteFailed = false) }
+        if (opening == generation) {
+            _state.update { it.copy(draftWriteFailed = result !is EditorDraftStore.StoreWriteResult.Written) }
         }
     }
 

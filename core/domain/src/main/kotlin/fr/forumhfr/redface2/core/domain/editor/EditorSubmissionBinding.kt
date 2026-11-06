@@ -61,6 +61,9 @@ class EditorSubmissionBinding<E, F>(
     private var execution: Job? = null
     private var preference: Boolean? = null
     private var initialized = false
+    private var uncertainError = false
+    private var attemptWriteFailed = false
+    private var pendingDraftFailure = false
     var isExecuting = false
         private set
     val isInitialized: Boolean get() = initialized && !drafts.invalidated
@@ -80,7 +83,7 @@ class EditorSubmissionBinding<E, F>(
         val entry = try {
             drafts.load()
         } catch (_: IOException) {
-            callbacks.error(errors.draftWriteFailed)
+            draftSaveFailed()
             null
         }
         if (drafts.invalidated) return null
@@ -89,7 +92,7 @@ class EditorSubmissionBinding<E, F>(
         controller.openSession(session(drafts.owner, key), attempt)
         initialized = true
         publish()
-        if (attempt != null) callbacks.error(errors.uncertain)
+        if (attempt != null) showError(errors.uncertain)
         return entry?.takeUnless { it.attempt?.status == AttemptStatus.PUBLISHED }
     }
 
@@ -98,11 +101,13 @@ class EditorSubmissionBinding<E, F>(
         autosave?.cancel()
         armExpiry?.cancel()
         initialized = false
+        attemptWriteFailed = false
+        pendingDraftFailure = false
         isExecuting = false
         controller.openSession(session(null, controller.session.key))
         execution?.cancel()
         publish()
-        callbacks.error(null)
+        showError(null)
     }
 
     fun disarm() {
@@ -125,7 +130,8 @@ class EditorSubmissionBinding<E, F>(
     /** ED-170: hiding uncertainty acknowledges its durable attempt before ordinary autosaves resume. */
     fun acknowledge(onAcknowledged: () -> Unit) {
         if (controller.state !is EditorSubmissionState.Uncertain) {
-            callbacks.error(null)
+            attemptWriteFailed = false
+            showPendingDraftFailure()
         } else {
             val opening = controller.session
             environment.scope.launch {
@@ -133,8 +139,12 @@ class EditorSubmissionBinding<E, F>(
                 val acknowledged = controller.acknowledgeUncertain(ports)
                 if (controller.session == opening) {
                     publish()
-                    callbacks.error(if (acknowledged) null else errors.uncertain)
-                    if (acknowledged) onAcknowledged()
+                    if (acknowledged) {
+                        showPendingDraftFailure()
+                        onAcknowledged()
+                    } else {
+                        showError(errors.uncertain)
+                    }
                 }
             }
         }
@@ -165,10 +175,24 @@ class EditorSubmissionBinding<E, F>(
 
     suspend fun persist(draft: EditorDraftStore.Draft?): StoreWriteResult? {
         val result = if (draft != null && initialized && !blocksClose) drafts.save(draft) else null
+        if (result is StoreWriteResult.Written) pendingDraftFailure = false
         if (result != null && result !is StoreWriteResult.Written && !drafts.invalidated) {
-            callbacks.error(errors.draftWriteFailed)
+            draftSaveFailed()
         }
         return result
+    }
+
+    private fun draftSaveFailed() {
+        pendingDraftFailure = true
+        environment.diagnostics.record(DiagnosticsLog.Level.WARN, "EditorDraft", "draft_storage_failed")
+        if (!uncertainError && controller.state !is EditorSubmissionState.Uncertain && !attemptWriteFailed) {
+            showPendingDraftFailure()
+        }
+    }
+
+    private fun showPendingDraftFailure() {
+        showError(if (pendingDraftFailure) errors.draftSaveFailed else null)
+        pendingDraftFailure = false
     }
 
     suspend fun flush(draft: EditorDraftStore.Draft?): StoreWriteResult? {
@@ -181,7 +205,8 @@ class EditorSubmissionBinding<E, F>(
         draft: EditorDraftStore.Draft,
         send: suspend () -> EditorDelivery<E, F>,
     ) {
-        callbacks.error(null)
+        attemptWriteFailed = false
+        showError(null)
         isExecuting = true
         val opening = controller.session
         val trace = EditorSubmissionTrace(environment.diagnostics)
@@ -199,7 +224,7 @@ class EditorSubmissionBinding<E, F>(
                 }
             } catch (cancelled: CancellationException) {
                 if (controller.session == opening && controller.state is EditorSubmissionState.Uncertain) {
-                    callbacks.error(errors.uncertain)
+                    showError(errors.uncertain)
                 }
                 throw cancelled
             } finally {
@@ -222,7 +247,7 @@ class EditorSubmissionBinding<E, F>(
         if (attempt != null && controller.consumeSuccess(attempt)) {
             delivery?.effect?.let(callbacks.success)
         } else if (current is EditorSubmissionState.Uncertain) {
-            callbacks.error(errors.uncertain)
+            showError(errors.uncertain)
         } else {
             delivery?.error?.let(callbacks.error)
         }
@@ -318,10 +343,17 @@ class EditorSubmissionBinding<E, F>(
                     EditorSubmissionTrace.Result.DRAFT_WRITE_FAILED,
                 )
                 if (stage == EditorSubmissionFailure.ATTEMPT && controller.session == opening) {
-                    callbacks.error(errors.draftWriteFailed)
+                    attemptWriteFailed = true
+                    showError(errors.draftWriteFailed)
                 }
             }
         }
+    }
+
+    private fun showError(value: F?) {
+        // Arming a deliberate retry temporarily changes Uncertain to Armed; its warning still wins.
+        uncertainError = value == errors.uncertain
+        callbacks.error(value)
     }
 
     private fun publish() = callbacks.state(controller.state)

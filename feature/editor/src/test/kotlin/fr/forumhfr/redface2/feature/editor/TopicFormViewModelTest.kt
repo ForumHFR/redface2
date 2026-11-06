@@ -125,6 +125,67 @@ class TopicFormViewModelTest {
     }
 
     @Test
+    fun `successful reload resolves form network errors in new topic and first post modes`() = runTest {
+        for (creating in listOf(false, true)) {
+            topicFormRepository.formFailure = java.io.IOException("offline")
+            val vm = if (creating) newTopicViewModel(entrySubcat = SAMPLE_SUBCAT) else newViewModel()
+            testScheduler.advanceUntilIdle()
+            assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
+            topicFormRepository.formFailure = null
+            vm.submit(TopicFormIntent.ReloadRequested)
+            testScheduler.advanceUntilIdle()
+            assertNull(vm.state.value.submitError)
+            vm.viewModelScope.cancel()
+        }
+    }
+
+    @Test
+    fun `successful reload keeps uncertainty in new topic and first post modes`() = runTest {
+        topicFormRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        topicFormRepository.newTopicSubmitResult = NewTopicSubmitResult.Failure(ReplyFailureReason.Unknown)
+        for (creating in listOf(false, true)) {
+            draftStore = FakeEditorDraftStore()
+            val vm = if (creating) newTopicViewModel(entrySubcat = SAMPLE_SUBCAT) else newViewModel()
+            testScheduler.advanceUntilIdle()
+            vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("title")))
+            vm.submit(TopicFormIntent.ContentChanged(TextFieldValue("body")))
+            vm.submit(TopicFormIntent.SubmitClicked())
+            testScheduler.advanceUntilIdle()
+            assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
+            vm.submit(TopicFormIntent.ReloadRequested)
+            testScheduler.advanceUntilIdle()
+            assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
+            vm.viewModelScope.cancel()
+        }
+    }
+
+    @Test
+    fun `new upload clears the old failure only after passing the upload guard`() = runTest {
+        val uploads = FakeUploadRepository().apply { uploadException = UploadException.TooLarge(1) }
+        val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT, uploadRepository = uploads)
+        testScheduler.advanceUntilIdle()
+        vm.submit(TopicFormIntent.ImagesPicked(listOf("content://first")))
+        testScheduler.advanceUntilIdle()
+        assertEquals(EditorErrors.tooLarge, vm.state.value.uploadError)
+        uploads.uploadException = null
+        val gate = CompletableDeferred<Unit>()
+        uploads.uploadGate = gate
+        vm.submit(TopicFormIntent.ImagesPicked(listOf("content://second")))
+        assertNull(vm.state.value.uploadError)
+        vm.submit(TopicFormIntent.ImagePickerEventReceived(
+            ImagePickerEvent.Unavailable(ImagePickerMode.PHOTO_PICKER, ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA),
+        ))
+        vm.submit(TopicFormIntent.ImagesPicked(List(11) { "content://ignored/$it" }))
+        assertEquals(EditorErrors.pickerAbsent, vm.state.value.uploadError)
+        gate.complete(Unit)
+        testScheduler.advanceUntilIdle()
+        vm.submit(TopicFormIntent.ImagesPicked(listOf("content://third")))
+        testScheduler.advanceUntilIdle()
+        assertNull(vm.state.value.uploadError)
+        assertEquals(3, uploads.uploadCalls)
+    }
+
+    @Test
     fun `partial upload retains count failure and inserted image after typing`() = runTest {
         val uploads = FakeUploadRepository().apply {
             uploadException = UploadException.TooLarge(1)
@@ -2017,6 +2078,7 @@ class TopicFormViewModelTest {
         )
 
         var formGate: CompletableDeferred<Unit>? = null
+        var formFailure: Throwable? = null
         // #312 — holds an in-flight submit (both Edit FP and New) until the test releases it,
         // mirroring `FakeReplyRepository.submitGate` in `PostEditorViewModelTest`.
         var submitGate: CompletableDeferred<Unit>? = null
@@ -2052,6 +2114,7 @@ class TopicFormViewModelTest {
             formFetches += 1
             lastFetchedContext = context
             formGate?.await()
+            formFailure?.let { throw it }
             return formResult
         }
 
@@ -2080,6 +2143,7 @@ class TopicFormViewModelTest {
             newTopicFormFetches += 1
             lastNewTopicContext = context
             formGate?.await()
+            formFailure?.let { throw it }
             return newTopicFormResult
         }
 

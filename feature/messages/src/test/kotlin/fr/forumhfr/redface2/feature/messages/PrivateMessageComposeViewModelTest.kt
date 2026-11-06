@@ -8,6 +8,7 @@ import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.editor.EditorPreparationException
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
@@ -152,6 +153,62 @@ class PrivateMessageComposeViewModelTest {
         smileyLocalCollections = localCollections,
         savedStateHandle = savedStateHandle,
     )
+
+    @Test
+    fun `successful form retry clears preparation errors and preserves uncertain delivery`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val vm = viewModel(repository)
+        vm.onRecipientsChanged("alice")
+        vm.onSubjectChanged("title")
+        advanceUntilIdle()
+        vm.onContentChanged(TextFieldValue("body"))
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } throws
+            EditorPreparationException(EditorPreparationException.Reason.INVALID_FORM)
+        vm.onSubmit()
+        advanceUntilIdle()
+        assertEquals(EditorErrors.invalidForm, vm.state.value.submitError)
+        vm.retryFormLoad()
+        advanceUntilIdle()
+        assertNull(vm.state.value.submitError)
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        vm.onSubmit()
+        advanceUntilIdle()
+        val uncertain = vm.state.value.submitError
+        assertEquals(EditorErrors.uncertain(EditorErrorSurface.MessageCompose), uncertain)
+        vm.retryFormLoad()
+        advanceUntilIdle()
+        assertEquals(uncertain, vm.state.value.submitError)
+    }
+
+    @Test
+    fun `new upload clears the old failure only after passing the upload guard`() = runTest {
+        val uploads = FakeUploadRepository().apply { uploadException = UploadException.TooLarge(1) }
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val vm = viewModel(repository, uploadRepository = uploads)
+        advanceUntilIdle()
+        vm.onImagesPicked(listOf("content://first"))
+        advanceUntilIdle()
+        assertEquals(EditorErrors.tooLarge, vm.state.value.uploadError)
+        uploads.uploadException = null
+        val gate = CompletableDeferred<Unit>()
+        uploads.uploadGate = gate
+        vm.onImagesPicked(listOf("content://second"))
+        assertNull(vm.state.value.uploadError)
+        vm.onImagePickerEvent(
+            ImagePickerEvent.Unavailable(ImagePickerMode.PHOTO_PICKER, ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA),
+        )
+        vm.onImagesPicked(List(11) { "content://ignored/$it" })
+        assertEquals(EditorErrors.pickerAbsent, vm.state.value.uploadError)
+        gate.complete(Unit)
+        advanceUntilIdle()
+        vm.onImagesPicked(listOf("content://third"))
+        advanceUntilIdle()
+        assertNull(vm.state.value.uploadError)
+        assertEquals(3, uploads.uploadCalls)
+    }
 
     @Test
     fun `partial upload retains count failure and inserted image after typing`() = runTest {

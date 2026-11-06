@@ -134,6 +134,52 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `successful reload clears only loading errors and keeps an uncertain send`() = runTest {
+        replyRepository.formException = IOException("offline")
+        val vm = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+        assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
+        replyRepository.formException = null
+        vm.submit(PostEditorIntent.ReloadRequested)
+        testScheduler.advanceUntilIdle()
+        assertNull(vm.state.value.submitError)
+        replyRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("body")))
+        vm.submit(PostEditorIntent.SubmitClicked())
+        testScheduler.advanceUntilIdle()
+        vm.submit(PostEditorIntent.ReloadRequested)
+        testScheduler.advanceUntilIdle()
+        assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
+        assertEquals(1, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `new upload replaces the previous failure but an ignored pick preserves the current error`() = runTest {
+        uploadRepository.uploadException = UploadException.TooLarge(1)
+        val vm = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+        vm.submit(PostEditorIntent.ImagesPicked(listOf("content://first")))
+        testScheduler.advanceUntilIdle()
+        assertEquals(EditorErrors.tooLarge, vm.state.value.uploadError)
+        uploadRepository.uploadException = null
+        val gate = CompletableDeferred<Unit>()
+        uploadRepository.uploadGate = gate
+        vm.submit(PostEditorIntent.ImagesPicked(listOf("content://second")))
+        assertNull(vm.state.value.uploadError)
+        vm.submit(PostEditorIntent.ImagePickerEventReceived(
+            ImagePickerEvent.Unavailable(ImagePickerMode.PHOTO_PICKER, ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA),
+        ))
+        vm.submit(PostEditorIntent.ImagesPicked(List(11) { "content://ignored/$it" }))
+        assertEquals(EditorErrors.pickerAbsent, vm.state.value.uploadError)
+        gate.complete(Unit)
+        testScheduler.advanceUntilIdle()
+        vm.submit(PostEditorIntent.ImagesPicked(listOf("content://third")))
+        testScheduler.advanceUntilIdle()
+        assertNull(vm.state.value.uploadError)
+        assertEquals(3, uploadRepository.uploadCalls)
+    }
+
+    @Test
     fun `ED131 submit and picker errors survive typing selection options and programmatic insertion`() = runTest {
         replyRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.EmptyMessage)
         val vm = newReplyViewModel()
@@ -666,7 +712,7 @@ class PostEditorViewModelTest {
         viewModel.state.test {
             val settled = expectMostRecentItem()
             assertFalse(settled.isSubmitting)
-            assertEquals(EditorErrors.quoteFetchFailed, settled.submitError)
+            assertEquals(EditorErrors.quoteFetchFailed(inline = false), settled.submitError)
             assertEquals("cards intact", listOf(101, 303), settled.quotes.map { it.numreponse })
             assertEquals("body intact", "Reply", settled.draft.text)
             cancelAndIgnoreRemainingEvents()
@@ -693,7 +739,7 @@ class PostEditorViewModelTest {
         viewModel.state.test {
             val settled = expectMostRecentItem()
             assertFalse(settled.isSubmitting)
-            assertEquals(EditorErrors.quoteFetchFailed, settled.submitError)
+            assertEquals(EditorErrors.quoteFetchFailed(inline = false), settled.submitError)
             assertEquals("cards intact", listOf(101, 303), settled.quotes.map { it.numreponse })
             assertEquals("body intact", "Reply", settled.draft.text)
             cancelAndIgnoreRemainingEvents()
@@ -713,7 +759,7 @@ class PostEditorViewModelTest {
         testScheduler.advanceUntilIdle()
 
         assertEquals(0, replyRepository.submitCalls)
-        assertEquals(EditorErrors.quoteFetchFailed, viewModel.state.value.submitError)
+        assertEquals(EditorErrors.quoteFetchFailed(inline = false), viewModel.state.value.submitError)
         assertEquals("Reply", viewModel.state.value.draft.text)
         assertEquals(listOf(101), viewModel.state.value.quotes.map { it.numreponse })
         replyRepository.formResultsByNumrep = mapOf(
@@ -724,6 +770,16 @@ class PostEditorViewModelTest {
         assertEquals(0, replyRepository.submitCalls)
         assertEquals("Reply", viewModel.state.value.draft.text)
         assertEquals(listOf(101), viewModel.state.value.quotes.map { it.numreponse })
+        assertNull(viewModel.state.value.submitError)
+        assertFalse(viewModel.state.value.canIgnorePendingQuote)
+        assertTrue(viewModel.state.value.canSubmit)
+        viewModel.submit(PostEditorIntent.QuoteRemoved(101))
+        assertTrue(viewModel.state.value.canSubmit)
+        replyRepository.submitResult = ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, replyRepository.submitCalls)
+        assertEquals("Reply", replyRepository.lastSubmittedBbcode)
     }
 
     @Test
@@ -1238,7 +1294,7 @@ class PostEditorViewModelTest {
                         EditorErrors.sessionExpired -> SubmissionErrorProbe.SESSION_EXPIRED
                         EditorErrors.uncertain -> SubmissionErrorProbe.UNCERTAIN
                         EditorErrors.draftWriteFailed -> SubmissionErrorProbe.DRAFT_WRITE_FAILED
-                        EditorErrors.invalidForm, EditorErrors.quoteFetchFailed ->
+                        EditorErrors.invalidForm, EditorErrors.quoteFetchFailed(inline = false) ->
                             SubmissionErrorProbe.PREPARATION_FAILED
                         else -> null
                     },
@@ -2618,7 +2674,7 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `resumeSharedDraft is applied only once across ViewModel recreation`() = runTest {
+    fun `resumeSharedDraft rehydrates each new ViewModel without duplicating the stored text`() = runTest {
         val savedStateHandle = SavedStateHandle()
         draftStore.preload(
             EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID),
@@ -2631,6 +2687,7 @@ class PostEditorViewModelTest {
         )
         testScheduler.advanceUntilIdle()
         assertEquals("texte de la sheet", first.state.value.draft.text)
+        first.viewModelScope.cancel()
 
         val recreated = newReplyViewModel(
             resumeSharedDraft = true,
@@ -2638,7 +2695,8 @@ class PostEditorViewModelTest {
         )
         testScheduler.advanceUntilIdle()
 
-        assertEquals("", recreated.state.value.draft.text)
+        assertEquals("texte de la sheet", recreated.state.value.draft.text)
+        assertEquals("texte de la sheet", draftStore.saved[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)]?.body)
         assertNull(recreated.state.value.restorableDraft)
     }
 

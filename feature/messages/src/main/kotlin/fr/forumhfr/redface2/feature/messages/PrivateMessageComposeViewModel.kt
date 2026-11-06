@@ -53,6 +53,7 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerFavoriteSources
 import fr.forumhfr.redface2.core.ui.editor.SmileyWikiKeywordsSource
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
+import fr.forumhfr.redface2.core.ui.editor.afterFormLoaded
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.imageInsertBbcodeOrNull
 import fr.forumhfr.redface2.core.ui.editor.insertBbcodeToken
@@ -166,6 +167,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         errors = EditorSubmissionErrors(
             uncertain = EditorErrors.uncertain(EditorErrorSurface.MessageCompose),
             draftWriteFailed = EditorErrors.draftWriteFailed,
+            draftSaveFailed = EditorErrors.draftSaveFailed,
             sessionExpired = EditorErrors.sessionExpired,
             unknown = EditorErrors.uncertain(EditorErrorSurface.MessageCompose),
             network = EditorErrors.network,
@@ -420,6 +422,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
             isLoadingForm = false,
             formAvailable = true,
             formError = false,
+            submitError = submitError.afterFormLoaded(),
             // The composer's `dest` text input comes back through hiddenFields ; a
             // server-side prefill (dest= in the GET) seeds the local field once.
             recipients = nextRecipients,
@@ -704,7 +707,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         _state.update {
             it.copy(
                 isUploading = true,
-                uploadError = if (received.size > MAX_IMAGES_PER_UPLOAD) EditorErrors.imageLimit else it.uploadError,
+                uploadError = if (received.size > MAX_IMAGES_PER_UPLOAD) EditorErrors.imageLimit else null,
                 uploadProgress = if (multiple) UploadProgress(completed = 0, total = targets.size) else null,
             )
         }

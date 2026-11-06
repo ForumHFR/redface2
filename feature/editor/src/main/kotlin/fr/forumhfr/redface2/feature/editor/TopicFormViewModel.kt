@@ -52,6 +52,7 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerFavoriteSources
 import fr.forumhfr.redface2.core.ui.editor.SmileyWikiKeywordsSource
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
+import fr.forumhfr.redface2.core.ui.editor.afterFormLoaded
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.imageInsertBbcodeOrNull
 import fr.forumhfr.redface2.core.ui.editor.insertBbcodeToken
@@ -206,6 +207,7 @@ class TopicFormViewModel @AssistedInject constructor(
             sessionExpired = EditorErrors.sessionExpired, unknown = EditorErrors.uncertain,
             network = EditorErrors.network, preparationFailed = EditorErrors.invalidForm,
             quoteFetchFailed = EditorErrors.quoteFetchFailed,
+            draftSaveFailed = EditorErrors.draftSaveFailed,
         ),
         callbacks = EditorSubmissionCallbacks<TopicFormEffect>(
             state = { value ->
@@ -567,7 +569,7 @@ class TopicFormViewModel @AssistedInject constructor(
         _state.update {
             it.copy(
                 isUploading = true,
-                uploadError = if (received.size > MAX_IMAGES_PER_UPLOAD) EditorErrors.imageLimit else it.uploadError,
+                uploadError = if (received.size > MAX_IMAGES_PER_UPLOAD) EditorErrors.imageLimit else null,
                 uploadProgress = if (multiple) UploadProgress(completed = 0, total = targets.size) else null,
             )
         }
@@ -990,11 +992,7 @@ class TopicFormViewModel @AssistedInject constructor(
             // Anti-clobber : do not overwrite once set, so a silent `InvalidHashCheck`
             // refetch on an anonymous fallback does not erase a previously known id.
             userId = userId ?: form.userId,
-            submitError = if (submitError != EditorErrors.uncertain && form.isAnonymous) {
-                ReplyFailureReason.LoginRequired.toEditorError()
-            } else {
-                submitError
-            },
+            submitError = submitError.afterFormLoaded() ?: EditorErrors.loginRequired.takeIf { form.isAnonymous },
         )
     }
 

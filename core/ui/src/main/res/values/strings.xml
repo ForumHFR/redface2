@@ -215,7 +215,7 @@
     <string name="editor_quote_a11y_moved">Citation de %1$s déplacée en position %2$d</string>
     <!-- R0b / ED-130: shared editor error catalogue. -->
     <string name="editor_error_empty">Message vide. HFR refuse les réponses sans contenu.</string>
-    <string name="editor_error_invalid_hash">Formulaire HFR rechargé. Votre texte est conservé ; renvoyez votre message quand vous êtes prêt.</string>
+    <string name="editor_error_invalid_hash">Le formulaire HFR a expiré. Votre texte est conservé. Un nouveau formulaire est nécessaire avant l’envoi ; si son chargement échoue, vérifiez votre connexion puis réessayez.</string>
     <string name="editor_error_anti_flood">Anti-flood HFR. Patientez quelques minutes avant de renvoyer votre message.</string>
     <string name="editor_error_topic_locked">Ce sujet a été fermé. Impossible de poster une réponse.</string>
     <string name="editor_error_login_required">Vous devez être connecté pour envoyer. Connectez-vous depuis votre compte ; votre texte est conservé.</string>
@@ -242,7 +242,7 @@
     <string name="editor_summary_form">Réponse illisible</string>
     <string name="editor_summary_stale_topic">Sujet périmé</string>
     <string name="editor_summary_title">Titre manquant</string>
-    <string name="editor_summary_subcategory">Sous-catégorie</string>
+    <string name="editor_summary_subcategory">Sous-cat. absente</string>
     <string name="editor_summary_recipients">Destinataire vide</string>
     <string name="editor_summary_subject">Sujet manquant</string>
     <string name="editor_summary_no_image">Image absente</string>
@@ -254,6 +254,9 @@
     <string name="editor_summary_recipient_unknown">Pseudo inconnu</string>
     <string name="editor_summary_refused">Envoi refusé</string>
     <string name="editor_detail_draft_write_failed">Rien n’est parti : la tentative n’a pas pu être enregistrée sur cet appareil. Vérifiez l’espace disponible avant de renvoyer.</string>
+    <string name="editor_detail_draft_save_failed">Le brouillon n’a pas pu être enregistré sur cet appareil ; votre texte reste affiché. Vérifiez l’espace disponible.</string>
+    <string name="editor_detail_subcategory">Choisissez une sous-catégorie pour créer ce nouveau sujet.</string>
+    <string name="editor_detail_quote_cards">Citation non chargée. Réessayez l’envoi pour la charger à nouveau, ou retirez sa carte pour envoyer sans elle.</string>
     <string name="editor_detail_form_network">Le formulaire HFR n’a pas pu être chargé. Rien n’est parti. Vérifiez votre connexion puis rechargez le formulaire.</string>
     <string name="editor_detail_picker_absent">Aucun sélecteur d’images n’est disponible. Choisissez un autre sélecteur dans les réglages ou installez un gestionnaire de fichiers.</string>
     <string name="editor_detail_image_limit">La sélection est limitée à 10 images. Seules les dix premières images sont conservées, dans l’ordre de sélection.</string>

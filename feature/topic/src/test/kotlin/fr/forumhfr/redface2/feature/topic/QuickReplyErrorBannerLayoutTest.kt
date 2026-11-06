@@ -50,6 +50,18 @@ class QuickReplyErrorBannerLayoutTest {
     val compose = createComposeRule()
 
     @Test
+    fun `card quote failure offers a removable card without claiming submission is blocked`() {
+        compose.setContent {
+            RedfaceTheme(darkTheme = false) { QuickReplyErrorBanner(EditorErrors.quoteFetchFailed(inline = false)) }
+        }
+        compose.onNodeWithText(
+            "Citation non chargée. Réessayez l’envoi pour la charger à nouveau, " +
+                "ou retirez sa carte pour envoyer sans elle.",
+        ).assertIsDisplayed()
+        compose.onNodeWithText("Ignorer la citation").assertDoesNotExist()
+    }
+
+    @Test
     fun uncertainFits() = assertBanner(EditorErrors.uncertain, "Envoi incertain")
 
     @Test
@@ -58,7 +70,9 @@ class QuickReplyErrorBannerLayoutTest {
     @Test
     fun `quote failure detail explains reciting and escalation to ignore the quote`() {
         compose.setContent {
-            RedfaceTheme(darkTheme = false) { QuickReplyErrorBanner(EditorErrors.quoteFetchFailed) }
+            RedfaceTheme(darkTheme = false) {
+                QuickReplyErrorBanner(EditorErrors.quoteFetchFailed(inline = true, quickReply = true))
+            }
         }
         compose.onNodeWithText(
             "Citation non chargée, envoi bloqué. Refaites « Citer » ou ouvrez l’éditeur complet " +
