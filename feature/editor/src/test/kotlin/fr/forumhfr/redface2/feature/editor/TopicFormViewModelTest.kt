@@ -1756,7 +1756,7 @@ class TopicFormViewModelTest {
                         SubmitError.SessionExpired -> SubmissionErrorProbe.SESSION_EXPIRED
                         SubmitError.Uncertain -> SubmissionErrorProbe.UNCERTAIN
                         SubmitError.DraftWriteFailed -> SubmissionErrorProbe.DRAFT_WRITE_FAILED
-                        SubmitError.Unknown -> SubmissionErrorProbe.PREPARATION_FAILED
+                        SubmitError.Hfr(ReplyFailureReason.Unknown) -> SubmissionErrorProbe.PREPARATION_FAILED
                         else -> null
                     },
                     restoreOffered = it.restorableDraft != null,

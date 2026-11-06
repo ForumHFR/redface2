@@ -154,11 +154,44 @@ abstract class EditorSubmissionRecoveryContract {
             runCurrent()
             assertEquals(0, adapter.postCalls)
             assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
-            assertEquals(EditorDraftStore.AttemptStatus.IN_PROGRESS, scenario.store.entries.values.single().attempt?.status)
+            assertEquals(
+                EditorDraftStore.AttemptStatus.IN_PROGRESS, scenario.store.entries.values.single().attempt?.status,
+            )
             scenario.recreateEditor()
             runCurrent()
             assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
             assertEquals(0, adapter.successEffects)
+        }
+    }
+
+    /** ED-170: teardown is not a local send cancellation, even before the emission boundary. */
+    @Test
+    fun recreationDuringPreparationRestoresUnresolvedAttemptWithoutResending() {
+        val gate = CompletableDeferred<Unit>()
+        val scenario = EditorSubmissionScenario().apply { preparationGate = gate }
+        withReadyAdapter(scenario = scenario) { adapter ->
+            adapter.clickSubmit()
+            runCurrent()
+            assertEquals(1, scenario.preparationCalls)
+            assertEquals(0, adapter.postCalls)
+            val entry = scenario.store.entries.values.single()
+            assertEquals(EditorDraftStore.AttemptStatus.IN_PROGRESS, entry.attempt?.status)
+            scenario.recreateEditor()
+            runCurrent()
+            assertEquals(entry.attempt, scenario.store.entries.values.single().attempt)
+            assertEquals(entry.draft.body, adapter.snapshot().body)
+            assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
+            assertFalse(adapter.snapshot().isSending)
+            assertFalse(adapter.snapshot().restoreOffered)
+            assertFalse(adapter.snapshot().confirmationVisible)
+            gate.complete(Unit)
+            advanceTimeBy(751)
+            runCurrent()
+            assertEquals(1, scenario.preparationCalls)
+            assertEquals(0, adapter.postCalls)
+            assertEquals(0, scenario.emittedPosts)
+            assertEquals(0, adapter.successEffects)
+            assertEquals(entry.attempt, scenario.store.entries.values.single().attempt)
         }
     }
 
@@ -193,7 +226,9 @@ abstract class EditorSubmissionRecoveryContract {
             runCurrent()
             assertEquals(1, scenario.emittedPosts)
             assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
-            assertEquals(EditorDraftStore.AttemptStatus.IN_PROGRESS, scenario.store.entries.values.single().attempt?.status)
+            assertEquals(
+                EditorDraftStore.AttemptStatus.IN_PROGRESS, scenario.store.entries.values.single().attempt?.status,
+            )
             scenario.recreateEditor()
             runCurrent()
             assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)

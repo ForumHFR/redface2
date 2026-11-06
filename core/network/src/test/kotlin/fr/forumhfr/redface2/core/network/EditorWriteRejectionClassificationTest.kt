@@ -54,7 +54,9 @@ class EditorWriteRejectionClassificationTest {
     @Test
     fun `timeout is certain only while the witness proves non emission`() = runTest {
         assertClassification(InterruptedIOException("timeout"), rejected = false, expected = "network")
-        assertClassification(InterruptedIOException("timeout"), rejected = false, expected = "uncertain", emitted = true)
+        assertClassification(
+            InterruptedIOException("timeout"), rejected = false, expected = "uncertain", emitted = true,
+        )
     }
 
     @Test

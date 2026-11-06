@@ -505,7 +505,7 @@ class PostEditorViewModelTest {
         viewModel.state.test {
             val settled = expectMostRecentItem()
             assertFalse(settled.isSubmitting)
-            assertEquals(SubmitError.Unknown, settled.submitError)
+            assertEquals(SubmitError.Hfr(ReplyFailureReason.Unknown), settled.submitError)
             assertEquals("cards intact", listOf(101, 303), settled.quotes.map { it.numreponse })
             assertEquals("body intact", "Reply", settled.draft.text)
             cancelAndIgnoreRemainingEvents()
@@ -514,7 +514,9 @@ class PostEditorViewModelTest {
 
     @Test
     fun `unreadable quote form is a certain preparation failure with zero POST`() = runTest {
-        replyRepository.formResultsByNumrep = mapOf(101 to Result.failure(IllegalStateException("Reply form not found")))
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.failure(IllegalStateException("Reply form not found")),
+        )
         val viewModel = newReplyViewModel(initialQuotes = listOf(card(101)))
         testScheduler.advanceUntilIdle()
         viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Reply")))
@@ -523,7 +525,7 @@ class PostEditorViewModelTest {
         testScheduler.advanceUntilIdle()
 
         assertEquals(0, replyRepository.submitCalls)
-        assertEquals(SubmitError.Unknown, viewModel.state.value.submitError)
+        assertEquals(SubmitError.Hfr(ReplyFailureReason.Unknown), viewModel.state.value.submitError)
         assertEquals("Reply", viewModel.state.value.draft.text)
         assertEquals(listOf(101), viewModel.state.value.quotes.map { it.numreponse })
     }
@@ -1040,7 +1042,7 @@ class PostEditorViewModelTest {
                         SubmitError.SessionExpired -> SubmissionErrorProbe.SESSION_EXPIRED
                         SubmitError.Uncertain -> SubmissionErrorProbe.UNCERTAIN
                         SubmitError.DraftWriteFailed -> SubmissionErrorProbe.DRAFT_WRITE_FAILED
-                        SubmitError.Unknown -> SubmissionErrorProbe.PREPARATION_FAILED
+                        SubmitError.Hfr(ReplyFailureReason.Unknown) -> SubmissionErrorProbe.PREPARATION_FAILED
                         else -> null
                     },
                     restoreOffered = it.restorableDraft != null,

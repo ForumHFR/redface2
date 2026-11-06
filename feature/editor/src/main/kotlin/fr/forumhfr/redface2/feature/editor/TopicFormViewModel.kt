@@ -201,7 +201,7 @@ class TopicFormViewModel @AssistedInject constructor(
         errors = EditorSubmissionErrors(
             uncertain = SubmitError.Uncertain, draftWriteFailed = SubmitError.DraftWriteFailed,
             sessionExpired = SubmitError.SessionExpired, unknown = SubmitError.Uncertain,
-            network = SubmitError.Network, preparationFailed = SubmitError.Unknown,
+            network = SubmitError.Network, preparationFailed = SubmitError.Hfr(ReplyFailureReason.Unknown),
         ),
         callbacks = EditorSubmissionCallbacks<TopicFormEffect>(
             state = { value ->

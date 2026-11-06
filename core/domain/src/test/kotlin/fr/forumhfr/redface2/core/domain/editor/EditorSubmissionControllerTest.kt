@@ -10,6 +10,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.StoreWriteResult
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.runCurrent
@@ -305,6 +306,7 @@ class EditorSubmissionControllerTest {
     }
 
     @Test
+    @OptIn(ExperimentalCoroutinesApi::class)
     fun `local cancellation awaits durable resolution before propagating`() = runTest {
         ports.emissionPossible = false
         ports.sendGate = CompletableDeferred()
@@ -318,6 +320,21 @@ class EditorSubmissionControllerTest {
         job.join()
         assertTrue(job.isCancelled)
         assertEquals(EditorSubmissionState.Ready, controller.state)
+    }
+
+    @Test
+    fun `editor scope destruction before emission leaves the attempt unresolved for recovery`() = runTest {
+        ports.emissionPossible = false
+        ports.sendGate = CompletableDeferred()
+        val job = launch(start = CoroutineStart.UNDISPATCHED) { controller.execute(reserve(), ports) }
+        ports.isEditorScopeActive = false
+        job.cancel()
+        job.join()
+        assertEquals(listOf("begin", "send"), ports.events)
+        assertEquals(EditorSubmissionState.Uncertain(attempt), controller.state)
+        controller.openSession(session.copy(id = "recreated"), Attempt(attempt, AttemptStatus.IN_PROGRESS))
+        assertEquals(EditorSubmissionState.Uncertain(attempt), controller.state)
+        assertFalse(controller.consumeSuccess(attempt))
     }
 
     @Test
@@ -562,6 +579,7 @@ class EditorSubmissionControllerTest {
     private fun failed(): StoreWriteResult = StoreWriteResult.Failed(IOException("storage failed"))
 
     private class Ports(private val attempt: AttemptToken) : EditorSubmissionPorts {
+        override var isEditorScopeActive = true
         val events = mutableListOf<String>()
         val failures = mutableListOf<EditorSubmissionFailure>()
         var begin: BeginAttemptResult = BeginAttemptResult.Started(attempt)

@@ -20,6 +20,7 @@ import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -40,7 +41,11 @@ data class EditorDelivery<E, F>(
     val effect: E? = null,
     val error: F? = null,
     val afterSettled: (() -> Unit)? = null,
-    val outcome: EditorSendOutcome = if (effect != null) EditorSendOutcome.SUCCESS else EditorSendOutcome.CERTAIN_FAILURE,
+    val outcome: EditorSendOutcome = if (effect != null) {
+        EditorSendOutcome.SUCCESS
+    } else {
+        EditorSendOutcome.CERTAIN_FAILURE
+    },
 )
 
 /** ED-161/164/166/170/171: shared bridge; the controller owns every submission permit. */
@@ -276,6 +281,7 @@ class EditorSubmissionBinding<E, F>(
     ): EditorSubmissionPorts {
         val opening = controller.session
         return object : EditorSubmissionPorts {
+            override val isEditorScopeActive: Boolean get() = environment.scope.isActive
             override suspend fun beginAttempt(): EditorDraftStore.BeginAttemptResult {
                 val started = environment.clock.elapsedRealtimeNanos()
                 val result = drafts.begin(draft)

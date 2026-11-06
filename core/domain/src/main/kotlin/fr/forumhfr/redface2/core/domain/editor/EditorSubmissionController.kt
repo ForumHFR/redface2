@@ -217,7 +217,10 @@ class EditorSubmissionController(private val clock: DiagnosticsClock, initialSes
         val outcome = try {
             withContext(owner) { ports.send(attempt) }
         } catch (cancelled: CancellationException) {
-            if (owner.cancelBeforeEmission()) resolveLocalCancellation(token, attempt, ports)
+            // Seal even on destruction, but do not resolve an attempt on the editor's teardown path.
+            if (owner.cancelBeforeEmission() && ports.isEditorScopeActive) {
+                resolveLocalCancellation(token, attempt, ports)
+            }
             throw cancelled
         } catch (_: IOException) {
             EditorSendOutcome.UNCERTAIN

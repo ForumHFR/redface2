@@ -800,6 +800,7 @@ class ReportContentViewModelTest {
     fun processLossRestoresAllFieldsAsUncertainWithoutResending() = runTest {
         val gate = CompletableDeferred<Unit>()
         coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } coAnswers {
+            checkNotNull(currentCoroutineContext()[EditorWriteOwner]).markEmissionPossible()
             gate.await()
             ReplySubmitResult.Success(null, null)
         }

@@ -205,7 +205,7 @@ class PostEditorViewModel @AssistedInject constructor(
         errors = EditorSubmissionErrors(
             uncertain = SubmitError.Uncertain, draftWriteFailed = SubmitError.DraftWriteFailed,
             sessionExpired = SubmitError.SessionExpired, unknown = SubmitError.Uncertain,
-            network = SubmitError.Network, preparationFailed = SubmitError.Unknown,
+            network = SubmitError.Network, preparationFailed = SubmitError.Hfr(ReplyFailureReason.Unknown),
         ),
         callbacks = EditorSubmissionCallbacks<PostEditorEffect>(
             state = { value ->
@@ -1115,19 +1115,7 @@ class PostEditorViewModel @AssistedInject constructor(
             quotedNumreponse = quotes.first().numreponse,
             quoteRef = null,
         )
-        val quoteForm = try {
-            quoteMaterializer.fetchFormWithQuotes(
-                context = quoteContext,
-                extraQuoteNumreponses = quotes.drop(1).map { it.numreponse },
-                truncate = quotes.any { it.truncate },
-            )
-        } catch (_: SessionExpiredException) {
-            throw EditorPreparationException(EditorPreparationException.Reason.SESSION_EXPIRED)
-        } catch (_: IOException) {
-            throw EditorPreparationException(EditorPreparationException.Reason.NETWORK)
-        } catch (_: IllegalStateException) {
-            throw EditorPreparationException(EditorPreparationException.Reason.INVALID_FORM)
-        }
+        val quoteForm = fetchReplyQuoteForm(quoteContext, quotes)
         val body = snapshot.draft.text
         return replyRepository.submitReply(
             context = quoteContext,
@@ -1139,6 +1127,23 @@ class PostEditorViewModel @AssistedInject constructor(
             },
             options = options,
         )
+    }
+
+    private suspend fun fetchReplyQuoteForm(context: ReplyContext, quotes: List<QuoteSelection>): ReplyForm {
+        val reason = try {
+            return quoteMaterializer.fetchFormWithQuotes(
+                context = context,
+                extraQuoteNumreponses = quotes.drop(1).map { it.numreponse },
+                truncate = quotes.any { it.truncate },
+            )
+        } catch (_: SessionExpiredException) {
+            EditorPreparationException.Reason.SESSION_EXPIRED
+        } catch (_: IOException) {
+            EditorPreparationException.Reason.NETWORK
+        } catch (_: IllegalStateException) {
+            EditorPreparationException.Reason.INVALID_FORM
+        }
+        throw EditorPreparationException(reason)
     }
 
     @Suppress("ReturnCount") // Each guard returns null with a distinct reason
