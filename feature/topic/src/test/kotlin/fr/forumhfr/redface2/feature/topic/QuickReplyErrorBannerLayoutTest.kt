@@ -55,6 +55,18 @@ class QuickReplyErrorBannerLayoutTest {
     @Test
     fun draftWriteFailedFits() = assertBanner(EditorErrors.draftWriteFailed, "Brouillon non écrit")
 
+    @Test
+    fun `quote failure detail explains reciting and escalation to ignore the quote`() {
+        compose.setContent {
+            RedfaceTheme(darkTheme = false) { QuickReplyErrorBanner(EditorErrors.quoteFetchFailed) }
+        }
+        compose.onNodeWithText(
+            "Citation non chargée, envoi bloqué. Refaites « Citer » ou ouvrez l’éditeur complet " +
+                "pour envoyer sans la citation.",
+        ).assertIsDisplayed()
+        compose.onNodeWithText("Recharger").assertDoesNotExist()
+    }
+
     private fun assertBanner(error: EditorError, label: String) {
         compose.setContent {
             val density = LocalDensity.current

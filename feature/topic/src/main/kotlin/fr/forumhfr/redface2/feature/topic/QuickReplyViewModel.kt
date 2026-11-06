@@ -404,17 +404,20 @@ class QuickReplyViewModel @AssistedInject constructor(
                 if (submission === opening) _state.update { it.copy(isPreparingQuotes = false) }
                 throw cancelled
             } catch (_: SessionExpiredException) {
-                if (submission !== opening || opening.blocksMutation) return@launch
+                if (!canCompleteQuotePreparation(opening)) return@launch
                 _state.update {
                     it.copy(isPreparingQuotes = false, submitError = EditorErrors.sessionExpired)
                 }
             } catch (_: IOException) {
-                if (submission === opening && !opening.blocksMutation) quotePreparationFailed()
+                if (canCompleteQuotePreparation(opening)) quotePreparationFailed()
             } catch (_: IllegalStateException) {
-                if (submission === opening && !opening.blocksMutation) quotePreparationFailed()
+                if (canCompleteQuotePreparation(opening)) quotePreparationFailed()
             }
         }
     }
+
+    private fun canCompleteQuotePreparation(opening: EditorSubmissionBinding<QuickReplyEffect, EditorError>): Boolean =
+        submission === opening && !opening.blocksMutation
 
     private fun quotePreparationFailed() {
         _state.update { it.copy(isPreparingQuotes = false, submitError = EditorErrors.quoteFetchFailed) }

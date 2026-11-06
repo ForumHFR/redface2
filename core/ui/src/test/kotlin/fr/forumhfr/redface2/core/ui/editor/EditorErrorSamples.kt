@@ -34,4 +34,6 @@ internal val editorErrorSamples: List<EditorError> = listOf(
     listOf(EditorErrors.server(999, it), EditorErrors.malformed(it))
 } + EditorErrorSurface.entries.map(EditorErrors::uncertain) + listOf(
     EditorErrors.stopped(EditorErrors.server(503, UploadProviderId.DIBERIE), UploadProgress(9, 10)),
+    EditorErrors.stopped(EditorErrors.tooLarge, UploadProgress(0, 10)),
+    EditorErrors.stopped(EditorErrors.tooLarge, UploadProgress(1, 10)),
 )

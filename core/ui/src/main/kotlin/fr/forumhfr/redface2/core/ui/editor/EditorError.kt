@@ -1,7 +1,7 @@
 package fr.forumhfr.redface2.core.ui.editor
 
 import android.content.Context
-import androidx.annotation.StringRes
+import androidx.annotation.AnyRes
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
@@ -14,6 +14,7 @@ import fr.forumhfr.redface2.core.ui.R
 const val EDITOR_SUMMARY_TEXT_WIDTH_DP = 150
 
 /** ED-130: presentation is independent of the durable send outcome in core:domain. */
+@ConsistentCopyVisibility
 data class EditorError internal constructor(
     val cause: EditorCause,
     val errorClass: EditorErrorClass,
@@ -35,11 +36,21 @@ val EditorErrorAction.label: EditorText
     })
 
 /** No Context, exception, HTML or server-supplied text survives in a UI error. */
-data class EditorText(@param:StringRes val resourceId: Int, val arguments: List<Any> = emptyList()) {
-    fun resolve(context: Context): String = context.getString(
-        resourceId,
-        *arguments.map { if (it is EditorText) it.resolve(context) else it }.toTypedArray(),
-    )
+data class EditorText(
+    @param:AnyRes val resourceId: Int,
+    val arguments: List<Any> = emptyList(),
+    /** Non-null selects a plurals resource; agreement follows the number of inserted images. */
+    val quantity: Int? = null,
+) {
+    fun resolve(context: Context): String {
+        val template = if (quantity == null) {
+            context.getString(resourceId)
+        } else {
+            context.resources.getQuantityString(resourceId, quantity)
+        }
+        val resolvedArguments = arguments.map { if (it is EditorText) it.resolve(context) else it }.toTypedArray()
+        return template.format(locale = context.resources.configuration.locales[0], args = resolvedArguments)
+    }
 }
 
 @Composable

@@ -153,6 +153,18 @@ class EditorErrorCatalogTest {
     }
 
     @Test
+    fun `stopped upload agrees with inserted count and keeps the nested failure detail`() {
+        listOf(0, 1, 2, 9).forEach { completed ->
+            val error = EditorErrors.stopped(EditorErrors.tooLarge, UploadProgress(completed, 10))
+            val ending = if (completed <= 1) "insérée" else "insérées"
+            val noun = if (completed <= 1) "image" else "images"
+            assertEquals("$completed/10 $ending", error.summary.resolve(context))
+            assertEquals("$completed/10 $noun $ending. ${EditorErrors.tooLarge.detail?.resolve(context)}",
+                error.detail?.resolve(context))
+        }
+    }
+
+    @Test
     fun `upload mapping preserves host status and partial insertion count`() {
         assertEquals(EditorErrors.tooLarge, UploadException.TooLarge(1).toEditorUploadError())
         assertEquals(EditorErrors.unsupportedType, UploadException.UnsupportedType(null).toEditorUploadError())
@@ -164,9 +176,9 @@ class EditorErrorCatalogTest {
             val stopped = EditorErrors.stopped(failure, UploadProgress(1, 10))
             assertEquals(EditorCause.UploadStopped(1, 10, failure.cause), stopped.cause)
             assertEquals(EditorErrorClass.Upload, stopped.errorClass)
-            assertEquals("1/10 insérées", stopped.summary.resolve(context))
+            assertEquals("1/10 insérée", stopped.summary.resolve(context))
             val detail = checkNotNull(stopped.detail).resolve(context)
-            assertTrue(detail, detail.startsWith("1/10 images insérées."))
+            assertTrue(detail, detail.startsWith("1/10 image insérée."))
             assertTrue(detail, detail.contains("503"))
             assertTrue(detail, detail.contains(context.getString(if (host == UploadProviderId.DIBERIE) {
                 R.string.editor_upload_provider_diberie

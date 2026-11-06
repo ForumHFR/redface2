@@ -32,6 +32,9 @@ sealed interface PostEditorIntent {
     /** ED-132: GET only; never shares the submit intent or its arm identity. */
     data object ReloadRequested : PostEditorIntent
 
+    /** ED-132: explicit abandonment after repeated failure; never sends or edits the body. */
+    data object PendingQuoteIgnored : PostEditorIntent
+
     /** Toggle « Activer votre signature » (HFR `signature=1`). */
     data class ToggleSignature(val enabled: Boolean) : PostEditorIntent
 

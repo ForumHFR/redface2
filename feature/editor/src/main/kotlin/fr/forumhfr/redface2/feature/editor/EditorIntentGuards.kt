@@ -5,7 +5,8 @@ internal val PostEditorIntent.mutatesEditor: Boolean
     get() = when (this) {
         is PostEditorIntent.SubmitClicked, is PostEditorIntent.SubmitConfirmed,
         PostEditorIntent.SubmitConfirmationDismissed, PostEditorIntent.CloseRequested,
-        PostEditorIntent.ErrorDismissed, PostEditorIntent.ReloadRequested, PostEditorIntent.UploadErrorDismissed,
+        PostEditorIntent.ErrorDismissed, PostEditorIntent.ReloadRequested, PostEditorIntent.PendingQuoteIgnored,
+        PostEditorIntent.UploadErrorDismissed,
         PostEditorIntent.TogglePreview -> false
         else -> true
     }

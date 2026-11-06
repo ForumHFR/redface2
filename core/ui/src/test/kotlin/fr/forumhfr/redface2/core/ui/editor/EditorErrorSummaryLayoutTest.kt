@@ -27,12 +27,10 @@ import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
-import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
-import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
+import org.junit.runners.model.MultipleFailureException
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
@@ -62,7 +60,7 @@ class EditorErrorSummaryLayoutTest {
                     val style = MaterialTheme.typography.labelSmall
                     val density = LocalDensity.current
                     val labels = (editorErrorSamples.map { it.summary } +
-                        EditorText(R.string.editor_summary_stopped, listOf(10, 10)))
+                        EditorText(R.plurals.editor_summary_stopped, listOf(10, 10), quantity = 10))
                         .map { it.resolve(context) } + "Accès restreint" // Reserved #242: test only.
                     SideEffect {
                         labels.distinct().forEach { label ->
@@ -87,27 +85,47 @@ class EditorErrorSummaryLayoutTest {
             }
         }
         compose.waitForIdle()
-        assertEquals(360f, compose.onRoot().getUnclippedBoundsInRoot().width.value, 0.5f)
-        assertTrue(layouts.isNotEmpty())
+        val failures = mutableListOf<Throwable>()
+        val rootWidth = compose.onRoot().getUnclippedBoundsInRoot().width.value
+        if (kotlin.math.abs(rootWidth - 360f) > 0.5f) failures += AssertionError("Root width: ${rootWidth}dp")
+        if (layouts.isEmpty()) failures += AssertionError("ED-133: no summaries measured")
+        val violations = linkedMapOf<String, List<String>>()
         layouts.forEach { (label, layout) ->
             val density = layout.layoutInput.density
             val intrinsic = layout.multiParagraph.intrinsics.maxIntrinsicWidth / density.density
-            val message = "$label: intrinsic=${intrinsic}dp, budget=$EDITOR_SUMMARY_TEXT_WIDTH_DP"
-            println("ED-133 $message")
-            assertEquals(message, 3f, density.density, 0.001f)
-            assertEquals(message, 1.3f, density.fontScale, 0.001f)
-            assertEquals(message, 11f * FontScalePreference.L.factor, layout.layoutInput.style.fontSize.value, 0.001f)
-            assertTrue(message, intrinsic <= EDITOR_SUMMARY_TEXT_WIDTH_DP)
-            assertEquals(message, 1, layout.lineCount)
-            assertFalse(message, layout.multiParagraph.didExceedMaxLines)
-            assertFalse(message, layout.isLineEllipsized(0))
-            assertEquals(message, label.length, layout.getLineEnd(0))
-            assertTrue(message, layout.getLineRight(0) / density.density <= EDITOR_SUMMARY_TEXT_WIDTH_DP)
+            println("ED-133 $label: intrinsic=${intrinsic}dp, lines=${layout.lineCount}, " +
+                "ellipse=${layout.isLineEllipsized(0)}, budget=$EDITOR_SUMMARY_TEXT_WIDTH_DP")
+            summaryViolations(label, layout).takeIf { it.isNotEmpty() }?.let { violations[label] = it }
         }
+        // Banner TextButtons (including “Ignorer la citation”) wrap outside this summary slot;
+        // only ArmedSubmitButton participates in the ED-133 horizontal width reservation.
         listOf("Envoyer", "Confirmer").forEach { label ->
             // The button itself includes padding and reserves both labels, even when only one is visible.
             val width = compose.onNodeWithText(label).getUnclippedBoundsInRoot().width.value
-            assertTrue("$label button: ${width}dp", width <= 150f)
+            println("ED-133 ArmedSubmitButton $label: width=${width}dp, budget=150")
+            if (width > 150f) failures += AssertionError("ArmedSubmitButton $label: ${width}dp > 150dp")
         }
+        val d44Labels = setOf("Envoi incertain", "Brouillon non écrit")
+        val ordinary = violations.filterKeys { it !in d44Labels }
+        val d44 = violations.filterKeys { it in d44Labels }
+        if (ordinary.isNotEmpty()) failures += AssertionError("ED-133 dépassements complets : $ordinary")
+        // Separate assertion: D44 text is protected and must never be shortened to make this green.
+        if (d44.isNotEmpty()) failures += AssertionError("Réserve D44 — textes inchangés, budget 150 dp : $d44")
+        MultipleFailureException.assertEmpty(failures)
+    }
+
+    private fun summaryViolations(label: String, layout: TextLayoutResult): List<String> = buildList {
+        val density = layout.layoutInput.density
+        val intrinsic = layout.multiParagraph.intrinsics.maxIntrinsicWidth / density.density
+        if (kotlin.math.abs(density.density - 3f) > 0.001f) add("density=${density.density}")
+        if (kotlin.math.abs(density.fontScale - 1.3f) > 0.001f) add("fontScale=${density.fontScale}")
+        val expectedSize = 11f * FontScalePreference.L.factor
+        if (kotlin.math.abs(layout.layoutInput.style.fontSize.value - expectedSize) > 0.001f) add("style != labelSmall L")
+        if (intrinsic > EDITOR_SUMMARY_TEXT_WIDTH_DP) add("intrinsic=${intrinsic}dp")
+        if (layout.lineCount != 1) add("lines=${layout.lineCount}")
+        if (layout.multiParagraph.didExceedMaxLines) add("maxLines exceeded")
+        if (layout.isLineEllipsized(0)) add("ellipsis")
+        if (layout.getLineEnd(0) != label.length) add("last character missing")
+        if (layout.getLineRight(0) / density.density > EDITOR_SUMMARY_TEXT_WIDTH_DP) add("right edge > budget")
     }
 }

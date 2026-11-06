@@ -217,6 +217,110 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `ED132 repeated quote failure permits explicit abandonment without editing or POST`() = runTest {
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.failure(IOException("offline")))
+        val vm = newReplyViewModel(
+            initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        testScheduler.advanceUntilIdle()
+        val typed = TextFieldValue("keep this text", TextRange(2, 5))
+        vm.submit(PostEditorIntent.ContentChanged(typed))
+        assertEquals(1, vm.state.value.quoteFetchFailures)
+        vm.submit(PostEditorIntent.PendingQuoteIgnored)
+        assertFalse(vm.state.value.canIgnorePendingQuote)
+        assertEquals(listOf(101), vm.state.value.pendingQuotes.map { it.numreponse })
+
+        vm.submit(PostEditorIntent.ReloadRequested)
+        testScheduler.advanceUntilIdle()
+        assertEquals(2, vm.state.value.quoteFetchFailures)
+        assertTrue(vm.state.value.canIgnorePendingQuote)
+        assertFalse(vm.state.value.canSubmit)
+        vm.submit(PostEditorIntent.ErrorDismissed)
+        assertNull(vm.state.value.submitError)
+        assertFalse("acknowledgement alone cannot abandon", vm.state.value.canSubmit)
+        assertEquals(listOf(101), vm.state.value.pendingQuotes.map { it.numreponse })
+        // Show the banner again; another reload is harmless and the count stays saturated.
+        vm.submit(PostEditorIntent.ReloadRequested)
+        testScheduler.advanceUntilIdle()
+        assertEquals(2, vm.state.value.quoteFetchFailures)
+        vm.submit(PostEditorIntent.PendingQuoteIgnored)
+        testScheduler.advanceUntilIdle()
+        assertEquals(typed, vm.state.value.draft)
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        assertNull(vm.state.value.submitError)
+        assertEquals(0, vm.state.value.quoteFetchFailures)
+        assertFalse(vm.state.value.canIgnorePendingQuote)
+        assertTrue(vm.state.value.isSubmitEnabled)
+        assertEquals(0, replyRepository.submitCalls)
+        assertNull("abandonment warms the plain form only", replyRepository.lastFetchedContext?.quotedNumreponse)
+        // A later explicit submit really works: enabled must not hide a missing form/hash.
+        replyRepository.submitResult = ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        vm.submit(PostEditorIntent.SubmitClicked())
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, replyRepository.submitCalls)
+        assertEquals(typed.text, replyRepository.lastSubmittedBbcode)
+    }
+
+    @Test
+    fun `ED132 ignoring a quote cannot insert a plain form prefill into an empty body`() = runTest {
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.success(authenticatedForm("")))
+        replyRepository.formResult = Result.success(authenticatedForm("unexpected plain prefill"))
+        val vm = newReplyViewModel(
+            initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        testScheduler.advanceUntilIdle()
+        vm.submit(PostEditorIntent.ReloadRequested)
+        testScheduler.advanceUntilIdle()
+        vm.submit(PostEditorIntent.PendingQuoteIgnored)
+        testScheduler.advanceUntilIdle()
+        assertEquals(TextFieldValue(), vm.state.value.draft)
+        assertNull(vm.state.value.submitError)
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        assertFalse("an empty reply remains unsendable", vm.state.value.canSubmit)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `ED132 failure count survives process recreation and ignored request is never replayed`() = runTest {
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.failure(IOException("offline")))
+        val saved = SavedStateHandle()
+        val first = newReplyViewModel(
+            initialQuotes = listOf(card(101)), savedStateHandle = saved,
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, first.state.value.quoteFetchFailures)
+        first.viewModelScope.cancel()
+        val restored = SavedStateHandle(saved.keys().associateWith { saved.get<Any?>(it) })
+        // No route handoff survives process death; only coordinates + count from SavedStateHandle.
+        val second = newReplyViewModel(
+            savedStateHandle = restored,
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        testScheduler.advanceUntilIdle()
+        assertEquals(2, second.state.value.quoteFetchFailures)
+        assertTrue(second.state.value.canIgnorePendingQuote)
+        second.submit(PostEditorIntent.ContentChanged(TextFieldValue("still here")))
+        second.submit(PostEditorIntent.PendingQuoteIgnored)
+        testScheduler.advanceUntilIdle()
+        assertTrue(second.state.value.canSubmit)
+        second.viewModelScope.cancel()
+        val afterIgnore = SavedStateHandle(restored.keys().associateWith { restored.get<Any?>(it) })
+        val quoteFetches = replyRepository.fetchedContexts.count { it.isQuote }
+        val third = newReplyViewModel(
+            initialQuotes = listOf(card(101)), savedStateHandle = afterIgnore,
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        testScheduler.advanceUntilIdle()
+        assertTrue(third.state.value.pendingQuotes.isEmpty())
+        assertEquals(0, third.state.value.quoteFetchFailures)
+        assertEquals(quoteFetches, replyRepository.fetchedContexts.count { it.isQuote })
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
     fun `initial state mirrors the request and starts with an empty draft`() = runTest {
         val viewModel = newReplyViewModel()
         viewModel.state.test {

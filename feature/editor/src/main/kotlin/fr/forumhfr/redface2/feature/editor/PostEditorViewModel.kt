@@ -135,6 +135,7 @@ class PostEditorViewModel @AssistedInject constructor(
             // (cards vs inline [quotemsg]) is decided per opening from the persisted preference,
             // which is a suspend read — see [resolveQuoteRenderingThenLoad] in init.
             quotes = emptyList(),
+            quoteFetchFailures = savedStateHandle.get<Int>(QUOTE_FAILURES_KEY) ?: 0,
         ),
     )
     val state: StateFlow<PostEditorState> = _state.asStateFlow()
@@ -313,7 +314,8 @@ class PostEditorViewModel @AssistedInject constructor(
         val restored = savedStateHandle.get<IntArray>(PENDING_QUOTES_KEY)?.decodeInlineQuoteRequest().orEmpty()
         val initialQuotes = (restored + request.initialQuotes).distinctBy { it.numreponse }
         if (initialQuotes.isEmpty() || submission.state is EditorSubmissionState.Uncertain ||
-            savedStateHandle.get<String>(DELIVERED_QUOTES_KEY) == initialQuotes.inlineQuoteDeliveryKey()) {
+            savedStateHandle.get<String>(DELIVERED_QUOTES_KEY) == initialQuotes.inlineQuoteDeliveryKey() ||
+            savedStateHandle.get<String>(IGNORED_QUOTES_KEY) == initialQuotes.inlineQuoteDeliveryKey()) {
             loadReplyFormIfPossible()
             return
         }
@@ -342,8 +344,12 @@ class PostEditorViewModel @AssistedInject constructor(
      * through [withFormHydration] (with a content-blanked form, so the text path stays inert).
      */
     private fun setPendingQuotes(quotes: List<QuoteSelection>) {
-        savedStateHandle[PENDING_QUOTES_KEY] = quotes.encodeInlineQuoteRequest()
-        _state.update { it.copy(pendingQuotes = quotes) }
+        val encoded = quotes.encodeInlineQuoteRequest()
+        val sameRequest = savedStateHandle.get<IntArray>(PENDING_QUOTES_KEY)?.contentEquals(encoded) == true
+        val failures = if (sameRequest) _state.value.quoteFetchFailures else 0
+        savedStateHandle[PENDING_QUOTES_KEY] = encoded
+        savedStateHandle[QUOTE_FAILURES_KEY] = failures
+        _state.update { it.copy(pendingQuotes = quotes, quoteFetchFailures = failures) }
     }
 
     private fun reloadForm() {
@@ -357,6 +363,20 @@ class PostEditorViewModel @AssistedInject constructor(
             request.mode == PostEditorMode.Edit -> loadEditFormIfPossible()
             else -> loadReplyFormIfPossible()
         }
+    }
+
+    private fun ignorePendingQuote() {
+        val snapshot = _state.value
+        if (!snapshot.canIgnorePendingQuote || submission.blocksMutation) return
+        submission.disarm()
+        savedStateHandle[IGNORED_QUOTES_KEY] = snapshot.pendingQuotes.inlineQuoteDeliveryKey()
+        setPendingQuotes(emptyList())
+        _state.update { current ->
+            current.copy(submitError = current.submitError.takeUnless { it?.cause == EditorCause.QuoteFetchFailed })
+        }
+        // A failed quote fetch may never have yielded a hash. Warm only the plain form, with
+        // hydration disabled: ignoring a citation cannot insert content, even into a blank body.
+        if (loadedForm == null) loadReplyFormIfPossible(preserveDraft = true)
     }
 
     private fun loadReplyFormWithInlineQuotes(quotes: List<QuoteSelection>, insertInline: Boolean = true) {
@@ -549,6 +569,7 @@ class PostEditorViewModel @AssistedInject constructor(
             PostEditorIntent.SubmitConfirmationDismissed -> submission.disarm()
             PostEditorIntent.ErrorDismissed -> submission.acknowledge(::scheduleAutosave)
             PostEditorIntent.ReloadRequested -> reloadForm()
+            PostEditorIntent.PendingQuoteIgnored -> ignorePendingQuote()
             is PostEditorIntent.ToggleSignature ->
                 _state.update { it.copy(signatureEnabled = intent.enabled) }
             is PostEditorIntent.ToggleSmileyDisabled ->
@@ -860,7 +881,7 @@ class PostEditorViewModel @AssistedInject constructor(
         }
     }
 
-    private fun loadReplyFormIfPossible() {
+    private fun loadReplyFormIfPossible(preserveDraft: Boolean = false) {
         val context = buildReplyContext() ?: run {
             _state.update { it.copy(submitError = EditorErrors.missingSubcat) }
             return
@@ -870,7 +891,10 @@ class PostEditorViewModel @AssistedInject constructor(
         // [quotemsg] blocks are materialised fresh at submit (see [onSubmitClicked]), exactly
         // like the quick-reply sheet. This fetch only warms the hash and hydrates the per-post
         // options. Cards OFF goes through [loadReplyFormWithInlineQuotes] instead (#805).
-        launchFormFetch { replyRepository.fetchReplyForm(context) }
+        launchFormFetch {
+            val form = replyRepository.fetchReplyForm(context)
+            if (preserveDraft) form.copy(initialContent = "") else form
+        }
     }
 
     private fun loadEditFormIfPossible() {
@@ -1011,6 +1035,11 @@ class PostEditorViewModel @AssistedInject constructor(
             // the snapshot before death) does not see `isLoadingForm = true` forever.
             _state.update { it.copy(isLoadingForm = false) }
             throw error
+        }
+        if (quoteFetch && _state.value.pendingQuotes.isNotEmpty()) {
+            val failures = (_state.value.quoteFetchFailures + 1).coerceAtMost(2)
+            savedStateHandle[QUOTE_FAILURES_KEY] = failures
+            _state.update { it.copy(quoteFetchFailures = failures) }
         }
         // Map known transport-level failures to a typed EditorError ; classify the
         // rest as Unknown rather than letting the exception bubble up and crash the
@@ -1253,6 +1282,8 @@ class PostEditorViewModel @AssistedInject constructor(
     private companion object {
         const val DELIVERED_QUOTES_KEY = "postEditor.deliveredQuotes"
         const val PENDING_QUOTES_KEY = "postEditor.pendingQuotes"
+        const val QUOTE_FAILURES_KEY = "postEditor.quoteFailures"
+        const val IGNORED_QUOTES_KEY = "postEditor.ignoredQuotes"
         // Distinct from the repository's "ReplyRepository" tag so the diagnostics
         // panel makes it obvious which layer recorded an entry.
         private const val LOG_TAG_VM = "PostEditorVM"

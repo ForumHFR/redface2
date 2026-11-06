@@ -61,6 +61,7 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
 import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
+import fr.forumhfr.redface2.core.ui.editor.EditorCause
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorAction
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
 import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummary
@@ -408,20 +409,24 @@ internal fun PostEditorAlertBanners(
             )
         } else {
             Text(
-                text = error.bannerText(),
+                text = if (error.cause == EditorCause.QuoteFetchFailed && state.canIgnorePendingQuote) {
+                    stringResource(fr.forumhfr.redface2.core.ui.R.string.editor_error_quote_ignore)
+                } else {
+                    error.bannerText()
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
             )
         }
         val reload = state.pendingQuotes.isNotEmpty() || error.action == EditorErrorAction.Reload
-        TextButton(onClick = {
-            onIntent(if (reload) PostEditorIntent.ReloadRequested else PostEditorIntent.ErrorDismissed)
-        }) {
-            Text(text = stringResource(if (reload) {
-                fr.forumhfr.redface2.core.ui.R.string.editor_action_reload
-            } else {
-                R.string.editor_error_dismiss
-            }))
+        val (action, label) = when {
+            state.canIgnorePendingQuote -> PostEditorIntent.PendingQuoteIgnored to
+                fr.forumhfr.redface2.core.ui.R.string.editor_action_ignore_quote
+            reload -> PostEditorIntent.ReloadRequested to fr.forumhfr.redface2.core.ui.R.string.editor_action_reload
+            else -> PostEditorIntent.ErrorDismissed to R.string.editor_error_dismiss
+        }
+        TextButton(onClick = { onIntent(action) }, enabled = !state.isLoadingForm) {
+            Text(text = stringResource(label))
         }
     }
     state.uploadError?.let { error ->

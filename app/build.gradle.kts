@@ -248,6 +248,8 @@ dependencies {
     implementation(libs.coil.network.okhttp)
 
     testImplementation(libs.junit4)
+    // ED-132: real sheet → full editor handoff, sharing the versioned in-memory draft store.
+    testImplementation(testFixtures(project(":core:domain")))
     testImplementation(libs.coil.core)
     testImplementation(libs.coil.svg)
     testImplementation(libs.kotlinx.coroutines.test)

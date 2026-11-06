@@ -37,6 +37,8 @@ data class PostEditorState(
     val quotes: List<QuoteSelection> = emptyList(),
     /** ED-132: acknowledgement never abandons a requested inline quote. */
     val pendingQuotes: List<QuoteSelection> = emptyList(),
+    /** Saturates at two; restored with the pending request after process death. */
+    val quoteFetchFailures: Int = 0,
     val draft: TextFieldValue = TextFieldValue(),
     val preview: PostContent = PostContent(blocks = emptyList()),
     val isPreviewVisible: Boolean = false,
@@ -146,6 +148,10 @@ data class PostEditorState(
             !submission.blocksBodyMutation &&
             !isLoadingForm && pendingQuotes.isEmpty() &&
             !isUploading
+
+    val canIgnorePendingQuote: Boolean
+        get() = pendingQuotes.isNotEmpty() && quoteFetchFailures >= 2 && !isLoadingForm &&
+            !submission.blocksBodyMutation
 
     val isSubmitEnabled: Boolean get() = canSubmit
 }
