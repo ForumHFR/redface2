@@ -321,6 +321,7 @@ class TopicViewModel @AssistedInject constructor(
          */
         data class Post(val numreponse: Int, val lastRead: Boolean = false) : PendingLanding
         data class PostOrBottom(val numreponse: Int) : PendingLanding
+        data class PostOrTop(val numreponse: Int) : PendingLanding
         data class Anchor(val anchor: TopicScrollAnchor) : PendingLanding
         data object Bottom : PendingLanding
         data object Top : PendingLanding
@@ -335,8 +336,8 @@ class TopicViewModel @AssistedInject constructor(
         val lastPageRedirectAllowed: Boolean = false,
     )
 
-    /** #782 — one frame of the quote-jump return stack : the departure page + tap-time anchor. */
-    private data class TopicJumpFrame(val page: Int, val anchor: TopicScrollAnchor?)
+    /** #782 — departure page + return landing captured before resolving the jump. */
+    private data class TopicJumpFrame(val page: Int, val landing: PendingLanding?)
 
     /**
      * Async-trace cookie for the `rf2.topic.first_content` section. The section starts when
@@ -759,13 +760,22 @@ class TopicViewModel @AssistedInject constructor(
 
     /**
      * #783 — filtered rows expose `page=1&numreponse=…`; HFR's redirect is the source of truth for
-     * the real page. Once resolved, reuse [goToPost] unchanged so the #782 return chain and
+     * the real page. Once resolved, reuse [goToPost] so the #782 return chain and
      * [TopicEffect.ScrollToPost] landing remain identical to every other in-topic jump.
      */
     private fun openCitingPost(post: Post, departureAnchor: TopicScrollAnchor?) {
-        val loaded = _state.value.citingPostsSheet?.content as? CitingPostsSheetContent.Loaded
-            ?: return
+        val current = _state.value
+        val sheet = current.citingPostsSheet ?: return
+        val loaded = sheet.content as? CitingPostsSheetContent.Loaded ?: return
         if (loaded.posts.none { it.numreponse == post.numreponse }) return
+        // Filtered coordinates cannot be replayed on a canonical page (same-page takeover or
+        // cross-page return). Keep the badge's post instead, before dismissal and the probe.
+        val pageAnchor = departureAnchor.takeUnless { current.search.showingFilteredResults }
+        val returnLanding = if (current.search.showingFilteredResults) {
+            PendingLanding.PostOrTop(sheet.numreponse)
+        } else {
+            pageAnchor?.let { PendingLanding.Anchor(it) }
+        }
         dismissCitingPosts()
         citingPostNavigationJob?.cancel()
         // #1188 — capture the page owner BEFORE the probe suspends. A page switch during the ≤3 s
@@ -793,7 +803,8 @@ class TopicViewModel @AssistedInject constructor(
             goToPost(
                 targetPage = resolvedPage ?: 1,
                 numreponse = post.numreponse,
-                departureAnchor = departureAnchor,
+                departureAnchor = pageAnchor,
+                returnLanding = returnLanding,
             )
         }
     }
@@ -1702,6 +1713,12 @@ class TopicViewModel @AssistedInject constructor(
                 } else {
                     TopicEffect.LandingResolvedWithoutScroll(armed.page)
                 }
+            is PendingLanding.PostOrTop ->
+                if (topic.posts.any { post -> post.numreponse == landing.numreponse }) {
+                    TopicEffect.ScrollToPost(landing.numreponse)
+                } else {
+                    TopicEffect.ScrollToTop(armed.page)
+                }
             is PendingLanding.Anchor -> TopicEffect.ScrollToAnchor(landing.anchor, armed.page)
             PendingLanding.Bottom -> TopicEffect.ScrollToEndOfPage(armed.page)
             PendingLanding.Top -> TopicEffect.ScrollToTop(armed.page)
@@ -1865,9 +1882,17 @@ class TopicViewModel @AssistedInject constructor(
      * Missing posts in search results first reclaim the canonical snapshot under a new owner,
      * then share that same bounded retry and failure settlement instead of switching pages.
      */
-    fun goToPost(targetPage: Int, numreponse: Int, departureAnchor: TopicScrollAnchor? = null) {
+    fun goToPost(targetPage: Int, numreponse: Int, departureAnchor: TopicScrollAnchor? = null) =
+        goToPost(targetPage, numreponse, departureAnchor, departureAnchor?.let { PendingLanding.Anchor(it) })
+
+    private fun goToPost(
+        targetPage: Int,
+        numreponse: Int,
+        departureAnchor: TopicScrollAnchor?,
+        returnLanding: PendingLanding?,
+    ) {
         if (jumpStack.size >= JUMP_STACK_MAX) jumpStack.removeFirst()
-        jumpStack.addLast(TopicJumpFrame(request.page, departureAnchor))
+        jumpStack.addLast(TopicJumpFrame(request.page, returnLanding))
         syncJumpAvailability()
         if (targetPage == request.page) {
             departureAnchor?.let { reportPageAnchor(it) }
@@ -1925,18 +1950,19 @@ class TopicViewModel @AssistedInject constructor(
     }
 
     /**
-     * #782 — unwind ONE quote jump : land back on the departure page at the tap-time anchor.
+     * #782 — unwind ONE quote jump : land back on the departure page at the captured position.
+     * Citing-post jumps from filtered results use the badge's post, or top if it is absent.
      * Returns `false` when the chain is empty — the caller (screen back handling) then lets the
      * system back leave the topic. A return is never a « page - 1 » reading step (no bottom).
      */
     fun returnFromJump(departureAnchor: TopicScrollAnchor? = null): Boolean {
         val frame = jumpStack.removeLastOrNull() ?: return false
         syncJumpAvailability()
-        val landing = frame.anchor?.let { PendingLanding.Anchor(it) }
+        val landing = frame.landing
         if (frame.page == request.page) {
             departureAnchor?.let { reportPageAnchor(it) }
             // Same-page settles overwrite pageAnchors with the arrival, so only the frame's
-            // tap-time anchor can restore the departure. Without it, use the explicit top fallback.
+            // captured landing can restore the departure. Without it, use the explicit top fallback.
             armLanding(landing ?: PendingLanding.Top)
             dispatchLandingAgainstScreen()
         } else {
