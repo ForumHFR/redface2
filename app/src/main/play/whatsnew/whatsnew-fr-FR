@@ -1,2 +1,3 @@
-Redface 2 v0.69.0 — dev.
+Redface 2 v0.69.1 — dev.
+- Citations : après avoir ouvert un message depuis « cité N fois », Back ramène au post de départ, y compris sur la même page, après un lien direct ou pendant une recherche.
 - Envoi : une coupure avant le départ du message affiche l'erreur réseau (rien n'est parti) ; après un départ possible, « Envoi incertain » demande toujours de vérifier avant de renvoyer.

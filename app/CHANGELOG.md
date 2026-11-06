@@ -16,6 +16,13 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.69.1` — `internal` (dev) — 2026-11-06
+
+Retour depuis « cité N fois » ([#1447](https://github.com/ForumHFR/redface2/issues/1447) ; [#1541](https://github.com/ForumHFR/redface2/pull/1541)) : après avoir touché un message citant dans la liste, un seul Back ramène au post de départ. Auparavant, le premier Back ne faisait rien et le second quittait le sujet.
+
+- Le correctif couvre aussi les sauts sur la même page, après une arrivée par lien direct sans défilement et pendant une recherche dans le sujet.
+- Défaut ancien ([#783](https://github.com/ForumHFR/redface2/issues/783)), rendu visible en `0.67.1` par #1447. Merci à **Dintr-un lemn** pour son retour sur le topic DEV (post #2805442).
+
 ## `0.69.0` — `internal` (dev) — 2026-11-06
 
 Refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)), lot R0b, partie 1 ([#1456](https://github.com/ForumHFR/redface2/issues/1456) ; [#1539](https://github.com/ForumHFR/redface2/pull/1539)) : les échecs d'envoi sont classés selon le moment de la coupure, sur les cinq surfaces d'envoi et le signalement.
