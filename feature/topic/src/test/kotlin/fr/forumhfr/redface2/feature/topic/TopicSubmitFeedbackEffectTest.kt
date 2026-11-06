@@ -30,6 +30,7 @@ import kotlinx.coroutines.test.TestCoroutineScheduler
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -223,7 +224,9 @@ class TopicSubmitFeedbackEffectTest {
         val shown = mutableListOf<String>()
         compose.setContent {
             LaunchedEffect(fixture.host) {
-                snapshotFlow { fixture.host.currentSnackbarData }.filterNotNull().collect { shown += it.visuals.message }
+                snapshotFlow { fixture.host.currentSnackbarData }
+                    .filterNotNull()
+                    .collect { shown += it.visuals.message }
             }
             TopicSubmitFeedbackEffect(fixture.store, fixture.host, true, "xaat", openPage = {})
         }
@@ -278,6 +281,44 @@ class TopicSubmitFeedbackEffectTest {
 
     @Test
     fun `late accessible offer on a new host keeps only its remaining duration`() {
+        val (fixture, host) = lateAccessibleOfferOnNewHost()
+        val displayed = requireNotNull(host.currentSnackbarData)
+        // Keep store time fixed: the new host's cap must dismiss the offer without the store's timer.
+        compose.mainClock.advanceTimeBy(9_000)
+        compose.runOnIdle { assertSame(displayed, host.currentSnackbarData) }
+        compose.mainClock.advanceTimeBy(1_100)
+        compose.waitUntil { host.currentSnackbarData == null }
+        assertNull(fixture.store.feedback.value)
+    }
+
+    @Test
+    fun `late accessible offer on a new host can be taken only once`() {
+        val opened = mutableListOf<Int>()
+        val (fixture, host) = lateAccessibleOfferOnNewHost { opened += it }
+        val offer = requireNotNull(fixture.store.feedback.value)
+        val action = requireNotNull(host.currentSnackbarData)
+        compose.runOnIdle {
+            fixture.clock.advanceTimeBy(9_000)
+            fixture.clock.runCurrent()
+        }
+        compose.mainClock.advanceTimeBy(9_000)
+        compose.runOnIdle {
+            assertSame(action, host.currentSnackbarData)
+            assertEquals(1_000L, fixture.store.remainingMillis(offer.id))
+            action.performAction()
+        }
+        compose.waitUntil { opened.size == 1 }
+        compose.runOnIdle {
+            action.performAction()
+            assertNull(fixture.store.takeOffer(offer.id, "xaat", offer.revision))
+        }
+        compose.waitForIdle()
+        assertEquals(listOf(6), opened)
+        assertNull(host.currentSnackbarData)
+        assertNull(fixture.store.feedback.value)
+    }
+
+    private fun lateAccessibleOfferOnNewHost(openPage: (Int) -> Unit = {}): Pair<LateFeedback, SnackbarHostState> {
         compose.mainClock.autoAdvance = false
         val fixture = lateFeedback()
         val host = mutableStateOf(fixture.host)
@@ -291,33 +332,38 @@ class TopicSubmitFeedbackEffectTest {
         }
         compose.setContent {
             CompositionLocalProvider(LocalAccessibilityManager provides accessibility) {
-                TopicSubmitFeedbackEffect(fixture.store, host.value, true, "xaat", openPage = {})
+                TopicSubmitFeedbackEffect(fixture.store, host.value, true, "xaat", openPage)
             }
         }
-        compose.mainClock.advanceTimeByFrame()
         var id = 0L
         compose.runOnIdle { id = fixture.acceptAtDeadline() }
-        compose.mainClock.advanceTimeByFrame()
-        compose.waitUntil { host.value.currentSnackbarData != null }
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeUntil(timeoutMillis = 1_000) { host.value.currentSnackbarData != null }
         compose.runOnIdle { fixture.store.refreshed(id, 6) }
-        compose.mainClock.advanceTimeByFrame()
-        compose.waitUntil { fixture.store.feedback.value?.expiresAtMillis != null }
-        val deadline = fixture.store.feedback.value?.expiresAtMillis
-        assertEquals(31_000L, deadline)
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeUntil(timeoutMillis = 1_000) {
+            fixture.store.feedback.value?.expiresAtMillis != null
+        }
+        val offer = requireNotNull(fixture.store.feedback.value)
+        assertEquals(31_000L, offer.expiresAtMillis)
         val oldHost = host.value
         compose.runOnIdle {
             fixture.clock.advanceTimeBy(20_000)
             fixture.clock.runCurrent()
-            host.value = SnackbarHostState()
         }
-        compose.mainClock.advanceTimeByFrame()
-        compose.waitUntil { host.value.currentSnackbarData != null }
+        compose.mainClock.advanceTimeBy(20_000)
+        val newHost = SnackbarHostState()
+        compose.runOnIdle { host.value = newHost }
+        // Flush snapshot notifications before driving the recomposition and its restarted effect.
+        // Frozen-clock waitUntil alone cannot drive that work.
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeUntil(timeoutMillis = 1_000) { newHost.currentSnackbarData != null }
         assertNull(oldHost.currentSnackbarData)
-        assertEquals(deadline, fixture.store.feedback.value?.expiresAtMillis)
+        assertEquals(offer, fixture.store.feedback.value)
+        assertEquals("Dernière page", newHost.currentSnackbarData?.visuals?.actionLabel)
+        assertEquals(SnackbarDuration.Long, newHost.currentSnackbarData?.visuals?.duration)
         assertEquals(10_000L, fixture.store.remainingMillis(id))
-        compose.mainClock.advanceTimeBy(10_100)
-        compose.waitUntil { host.value.currentSnackbarData == null }
-        assertNull(fixture.store.feedback.value)
+        return fixture to newHost
     }
 
     @Test
