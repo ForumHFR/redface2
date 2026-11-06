@@ -175,6 +175,7 @@ class TopicAcknowledgementsTest {
         val id = store.accept("xaat", PostSubmitOperation.Publish)
         advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
         runCurrent()
+        val confirmation = requireNotNull(store.feedback.value)
         store.presented(id, 4_000)
         store.refreshed(id, lastPage = 6)
         val offer = requireNotNull(store.feedback.value)
@@ -182,9 +183,17 @@ class TopicAcknowledgementsTest {
         assertEquals(6, offer.lastPage)
         store.refreshed(id, lastPage = 9)
         assertEquals(offer, store.feedback.value)
-        store.presented(id, 10_000)
-        assertEquals(6, store.takeOffer(id, "xaat"))
-        assertNull(store.takeOffer(id, "xaat"))
+        store.dismiss(id, confirmation.revision)
+        assertEquals(offer, store.feedback.value)
+        store.presented(id, 60_000, confirmation.revision)
+        assertEquals(offer, store.feedback.value)
+        assertNull(store.feedback.value?.expiresAtMillis)
+        store.presented(id, 10_000, offer.revision)
+        val presentedOffer = store.feedback.value
+        assertNull(store.takeOffer(id, "xaat", confirmation.revision))
+        assertEquals(presentedOffer, store.feedback.value)
+        assertEquals(6, store.takeOffer(id, "xaat", offer.revision))
+        assertNull(store.takeOffer(id, "xaat", offer.revision))
     }
 
     @Test
@@ -288,6 +297,40 @@ class TopicAcknowledgementsTest {
         assertEquals(offer, restored.feedback.value)
         restored.refreshed(id, lastPage = 9)
         assertEquals(6, restored.takeOffer(id, "xaat"))
+    }
+
+    @Test
+    fun `restored late offer does not repeat a confirmation already presented`() = runTest {
+        repeat(2) { offerPresented ->
+            val saved = SavedStateHandle()
+            val oldScope = CoroutineScope(backgroundScope.coroutineContext + Job())
+            val store = TopicAcknowledgements(saved, oldScope) { testScheduler.currentTime }
+            val id = store.accept("xaat", PostSubmitOperation.Publish)
+            advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
+            runCurrent()
+            store.presented(id, 4_000)
+            advanceTimeBy(1_000)
+            runCurrent()
+            store.refreshed(id, lastPage = 6)
+            assertEquals(6, store.feedback.value?.lastPage)
+            assertFalse(requireNotNull(store.feedback.value).offerOnly)
+            if (offerPresented == 1) store.presented(id, 30_000)
+            val offer = requireNotNull(store.feedback.value)
+            advanceTimeBy(1_000)
+            runCurrent()
+            val snapshot = copyHandle(saved)
+            oldScope.cancel()
+
+            val restored = TopicAcknowledgements(snapshot, backgroundScope) { testScheduler.currentTime }
+            assertEquals(offer.copy(offerOnly = true), restored.feedback.value)
+            restored.presented(id, 60_000, offer.revision)
+            assertEquals(
+                offer.expiresAtMillis ?: (testScheduler.currentTime + 60_000),
+                restored.feedback.value?.expiresAtMillis,
+            )
+            assertEquals(6, restored.takeOffer(id, "xaat", offer.revision))
+            assertNull(restored.takeOffer(id, "xaat", offer.revision))
+        }
     }
 
     @Test

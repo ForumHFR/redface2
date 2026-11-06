@@ -29,6 +29,7 @@ internal data class TopicAcknowledgement(
  * first terminal refresh closes it: a Published acknowledgement may gain one late last-page offer.
  * Identity fences departures/accounts/new submissions; revision fences callbacks from replaced
  * presentations. An offer's accessible expiry starts only when it actually acquires the host.
+ * Restoring a known offer never repeats a confirmation already presented by the previous process.
  */
 internal class TopicAcknowledgements(
     private val saved: SavedStateHandle,
@@ -164,10 +165,12 @@ internal class TopicAcknowledgements(
 
     fun takeOffer(id: Long, account: String, revision: Int? = null): Int? {
         val ack = forPresentation(id, revision) ?: return null
-        if (!ack.account.equals(account, ignoreCase = true)) return null
-        if (ack.expiresAtMillis == null) return null
-        dismiss(id, ack.revision)
-        return ack.lastPage
+        return if (ack.account.equals(account, ignoreCase = true) && ack.expiresAtMillis != null) {
+            dismiss(id, ack.revision)
+            ack.lastPage
+        } else {
+            null
+        }
     }
 
     /** Old host callbacks must not dismiss a newer revision of the same accepted submission. */
@@ -240,9 +243,12 @@ internal class TopicAcknowledgements(
             phase == Phase.Waiting -> awaitDeadline(ack.id)
             // A process death loses the in-flight refresh and the old host, not an unshown offer.
             phase == Phase.Deadline && wasPresented -> Unit
-            else -> mutableFeedback.value = ack
+            else -> mutableFeedback.value = ack.forRestoredPresentation()
         }
     }
+
+    private fun TopicAcknowledgement.forRestoredPresentation() =
+        if (wasPresented && lastPage != null) copy(offerOnly = true) else this
 
     private fun restoreAcknowledgement(record: ArrayList<String>): TopicAcknowledgement? {
         val id = record.getOrNull(0)?.toLongOrNull()

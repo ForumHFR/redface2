@@ -179,18 +179,28 @@ class TopicSubmitFeedbackEffectTest {
             }
         }
         var id = 0L
-        compose.runOnIdle { id = fixture.acceptAtDeadline() }
+        var oldRevision = 0
+        compose.runOnIdle {
+            id = fixture.acceptAtDeadline()
+            oldRevision = requireNotNull(fixture.store.feedback.value).revision
+        }
         compose.waitUntil { host.currentSnackbarData != null }
         val old = host.currentSnackbarData!!
         assertEquals("Message publié", old.visuals.message)
         assertEquals(SnackbarDuration.Short, old.visuals.duration)
         compose.runOnIdle { fixture.store.refreshed(id, 6) }
         compose.waitUntil { host.currentSnackbarData?.visuals?.actionLabel == "Dernière page" }
+        compose.waitUntil { fixture.store.feedback.value?.expiresAtMillis != null }
         assertEquals("Message publié", host.currentSnackbarData?.visuals?.message)
         assertEquals(SnackbarDuration.Long, host.currentSnackbarData?.visuals?.duration)
         compose.runOnIdle {
-            old.dismiss()
-            old.performAction()
+            val offer = requireNotNull(fixture.store.feedback.value)
+            fixture.store.dismiss(id, oldRevision)
+            assertEquals(offer, fixture.store.feedback.value)
+            fixture.store.presented(id, 60_000, oldRevision)
+            assertEquals(offer, fixture.store.feedback.value)
+            assertNull(fixture.store.takeOffer(id, "xaat", oldRevision))
+            assertEquals(offer, fixture.store.feedback.value)
         }
         compose.waitForIdle()
         assertNull(opened)

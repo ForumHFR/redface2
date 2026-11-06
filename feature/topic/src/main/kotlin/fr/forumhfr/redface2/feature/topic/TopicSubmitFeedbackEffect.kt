@@ -8,6 +8,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.platform.AccessibilityManager
 import androidx.compose.ui.platform.LocalAccessibilityManager
 import androidx.compose.ui.platform.LocalResources
 import androidx.lifecycle.Lifecycle
@@ -51,12 +52,7 @@ internal fun TopicSubmitFeedbackEffect(
                     val isError = ack.refreshFailed || ack.kind == TopicAcknowledgement.Kind.RefreshWarning
                     feedback.present(this, error = isError, replace = ack.lastPage != null && ack.revision > 0) {
                         val latest = acknowledgements.forPresentation(ack.id, ack.revision) ?: return@present
-                        val timeout = accessibility?.calculateRecommendedTimeoutMillis(
-                            if (latest.lastPage == null) 4_000L else 10_000L,
-                            containsIcons = true,
-                            containsText = true,
-                            containsControls = latest.lastPage != null,
-                        ) ?: if (latest.lastPage == null) 4_000L else 10_000L
+                        val timeout = acknowledgementTimeoutMillis(accessibility, latest)
                         host.presentTopicAcknowledgement(acknowledgements, latest, resources, timeout) {
                             currentOpenPage(it)
                         }
@@ -65,6 +61,16 @@ internal fun TopicSubmitFeedbackEffect(
             }
         }
     }
+}
+
+private fun acknowledgementTimeoutMillis(accessibility: AccessibilityManager?, ack: TopicAcknowledgement): Long {
+    val duration = if (ack.lastPage == null) 4_000L else 10_000L
+    return accessibility?.calculateRecommendedTimeoutMillis(
+        duration,
+        containsIcons = true,
+        containsText = true,
+        containsControls = ack.lastPage != null,
+    ) ?: duration
 }
 
 private suspend fun SnackbarHostState.presentTopicAcknowledgement(
