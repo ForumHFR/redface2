@@ -175,11 +175,15 @@ class EditorSubmissionBinding<E, F>(
 
     suspend fun persist(draft: EditorDraftStore.Draft?): StoreWriteResult? {
         val result = if (draft != null && initialized && !blocksClose) drafts.save(draft) else null
-        if (result is StoreWriteResult.Written) pendingDraftFailure = false
+        resolveDraftFailure(result)
         if (result != null && result !is StoreWriteResult.Written && !drafts.invalidated) {
             draftSaveFailed()
         }
         return result
+    }
+
+    private fun resolveDraftFailure(result: StoreWriteResult?) {
+        if (result is StoreWriteResult.Written) pendingDraftFailure = false
     }
 
     private fun draftSaveFailed() {
@@ -245,6 +249,7 @@ class EditorSubmissionBinding<E, F>(
             else -> null
         }
         if (attempt != null && controller.consumeSuccess(attempt)) {
+            pendingDraftFailure = false
             delivery?.effect?.let(callbacks.success)
         } else if (current is EditorSubmissionState.Uncertain) {
             showError(errors.uncertain)
@@ -305,12 +310,15 @@ class EditorSubmissionBinding<E, F>(
         send: suspend () -> EditorSendOutcome,
     ): EditorSubmissionPorts {
         val opening = controller.session
+        var writtenAttempt: AttemptToken? = null
         return object : EditorSubmissionPorts {
             override val isEditorScopeActive: Boolean get() = environment.scope.isActive
             override suspend fun beginAttempt(): EditorDraftStore.BeginAttemptResult {
                 val started = environment.clock.elapsedRealtimeNanos()
                 val result = drafts.begin(draft)
                 if (result is EditorDraftStore.BeginAttemptResult.Started) {
+                    writtenAttempt = result.token
+                    pendingDraftFailure = false
                     trace.durable((environment.clock.elapsedRealtimeNanos() - started) / NANOS_PER_MILLI)
                 }
                 return result
@@ -330,13 +338,18 @@ class EditorSubmissionBinding<E, F>(
             }
             override suspend fun finishAttempt(attempt: AttemptToken, outcome: AttemptOutcome): StoreWriteResult {
                 if (controller.session == opening) publish()
-                return if (outcome == AttemptOutcome.CERTAIN_FAILURE) {
+                val result = if (outcome == AttemptOutcome.CERTAIN_FAILURE) {
                     withContext(NonCancellable) { drafts.finish(attempt, outcome) }
                 } else {
                     drafts.finish(attempt, outcome)
                 }
+                // Acknowledging an older attempt only changes metadata; it cannot save newer edits.
+                if (attempt == writtenAttempt) resolveDraftFailure(result)
+                return result
             }
-            override suspend fun erasePublishedContent(attempt: AttemptToken) = drafts.erase(attempt)
+            override suspend fun erasePublishedContent(attempt: AttemptToken): StoreWriteResult {
+                return drafts.erase(attempt).also(::resolveDraftFailure)
+            }
             override fun recordFailure(stage: EditorSubmissionFailure, result: StoreWriteResult) {
                 trace.storageFailure(stage, result)
                 if (stage == EditorSubmissionFailure.ATTEMPT) trace.result(

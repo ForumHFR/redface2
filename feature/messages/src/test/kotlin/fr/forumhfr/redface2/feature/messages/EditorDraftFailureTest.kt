@@ -18,10 +18,12 @@ import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import java.io.IOException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -100,6 +102,60 @@ class EditorDraftFailureTest {
     }
 
     @Test
+    fun `successful retry write resolves deferred failure before anti flood dismissal`() = runTest {
+        val store = VersionedEditorDraftStore()
+        val harness = deferDraftFailure(store)
+        store.saveFailure = null
+        val permit = harness.binding.request(4_000, true) as SubmissionRequest.Accepted
+        harness.binding.launch(permit, EditorDraftStore.Draft(body = "edited")) {
+            EditorDelivery(error = EditorErrors.antiFlood)
+        }
+        runCurrent()
+        assertEquals("edited", store.saved["draft"]?.body)
+        assertEquals(EditorSubmissionState.Ready, harness.binding.state)
+        assertEquals(EditorErrors.antiFlood, harness.error)
+        harness.binding.acknowledge {}
+        assertNull(harness.error)
+        assertEquals(1, harness.log.entries.value.count { it.tag == "EditorDraft" })
+    }
+
+    @Test
+    fun `terminal success cannot surface a previously deferred draft failure`() = runTest {
+        val store = VersionedEditorDraftStore()
+        val harness = deferDraftFailure(store)
+        store.saveFailure = null
+        val permit = harness.binding.request(4_000, true) as SubmissionRequest.Accepted
+        harness.binding.launch(permit, EditorDraftStore.Draft(body = "edited")) { EditorDelivery(effect = Unit) }
+        runCurrent()
+        assertTrue(harness.binding.state is EditorSubmissionState.Succeeded)
+        assertEquals(1, harness.successes)
+        assertEquals("", store.saved["draft"]?.body)
+        assertEquals(EditorDraftStore.AttemptStatus.PUBLISHED, store.entries["draft"]?.attempt?.status)
+        harness.binding.acknowledge {}
+        runCurrent()
+        assertNull(harness.error)
+        assertEquals(1, harness.successes)
+    }
+
+    private suspend fun TestScope.deferDraftFailure(store: VersionedEditorDraftStore): Harness {
+        val harness = Harness(this, store)
+        harness.binding.restore("draft")
+        harness.binding.setPreference(false)
+        val permit = harness.binding.request(4_000, true) as SubmissionRequest.Accepted
+        harness.binding.launch(permit, EditorDraftStore.Draft(body = "sent")) {
+            EditorDelivery(outcome = EditorSendOutcome.UNCERTAIN)
+        }
+        runCurrent()
+        store.saveFailure = IOException("full")
+        harness.binding.autosave { EditorDraftStore.Draft(body = "edited") }
+        advanceTimeBy(751)
+        runCurrent()
+        assertEquals("sent", store.saved["draft"]?.body)
+        assertEquals(EditorErrors.uncertain, harness.error)
+        return harness
+    }
+
+    @Test
     fun `attempt failure keeps its certain detail until acknowledged without any POST`() = runTest {
         val store = VersionedEditorDraftStore().apply { beginFailure = IOException("full") }
         val harness = Harness(this, store)
@@ -123,11 +179,12 @@ class EditorDraftFailureTest {
 
     private class Harness(scope: CoroutineScope, store: EditorDraftStore) {
         var error: EditorError? = null
+        var successes = 0
         val log = DiagnosticsLog()
         val binding = EditorSubmissionBinding(
             EditorSubmissionEnvironment(scope, DiagnosticsClock { 0L }, log),
             EditorDraftSession(store, "draft"),
-            EditorSubmissionCallbacks<Unit, EditorError>(state = {}, error = { error = it }, success = {}),
+            EditorSubmissionCallbacks<Unit, EditorError>(state = {}, error = { error = it }, success = { successes++ }),
             EditorSubmissionErrors(
                 EditorErrors.uncertain, EditorErrors.draftWriteFailed, EditorErrors.sessionExpired,
                 EditorErrors.uncertain, draftSaveFailed = EditorErrors.draftSaveFailed,

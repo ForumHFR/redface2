@@ -330,8 +330,7 @@ class PostEditorViewModel @AssistedInject constructor(
             return
         }
         val deliveryKey = initialQuotes.inlineQuoteDeliveryKey()
-        if (savedStateHandle.get<String>(DELIVERED_QUOTES_KEY) == deliveryKey ||
-            savedStateHandle.get<String>(IGNORED_QUOTES_KEY) == deliveryKey) {
+        if (savedStateHandle.get<String>(IGNORED_QUOTES_KEY) == deliveryKey) {
             loadReplyFormIfPossible()
             return
         }
@@ -399,6 +398,41 @@ class PostEditorViewModel @AssistedInject constructor(
         if (_state.value.isLoadingForm || submission.blocksMutation) return
         submission.disarm()
         if (insertInline) setPendingQuotes(quotes)
+        val missing = if (insertInline) missingInlineQuotes(quotes) else quotes
+        if (missing.isEmpty()) {
+            finishInlineQuoteDelivery()
+            if (loadedForm == null) loadReplyFormIfPossible(preserveDraft = true)
+        } else {
+            fetchQuoteForm(missing, quotes, insertInline)
+        }
+    }
+
+    private fun missingInlineQuotes(quotes: List<QuoteSelection>): List<QuoteSelection> {
+        val snapshot = _state.value
+        // A cold editor can offer the durable body in a banner instead of applying it immediately.
+        val body = snapshot.draft.text + "\n" + snapshot.restorableDraft.orEmpty()
+        val present = QuotedNumreponses.fromBbcode(body).toSet()
+        return quotes.filterNot { it.numreponse in present }
+    }
+
+    private fun finishInlineQuoteDelivery() {
+        // Keep the request coordinates: a Bundle can outlive an insertion that never reached disk.
+        // Only the restored body proves delivery, so an old Bundle cannot duplicate a durable quote.
+        // If the user saved a deletion, recreation intentionally requests the absent quote again.
+        savedStateHandle[QUOTE_FAILURES_KEY] = 0
+        _state.update {
+            it.copy(
+                pendingQuotes = emptyList(), quoteFetchFailures = 0,
+                submitError = it.submitError.afterFormLoaded(quotesResolved = true),
+            )
+        }
+    }
+
+    private fun fetchQuoteForm(
+        quotes: List<QuoteSelection>,
+        requestedQuotes: List<QuoteSelection>,
+        insertInline: Boolean,
+    ) {
         val context = buildReplyContext() ?: run {
             _state.update { it.copy(submitError = EditorErrors.missingSubcat) }
             return
@@ -434,6 +468,13 @@ class PostEditorViewModel @AssistedInject constructor(
                         }
                         return@fold
                     }
+                    // Typing or draft restoration may have supplied some tags while the GET ran.
+                    // Reconcile again before insertion; fetch only what is still missing.
+                    if (missingInlineQuotes(quotes).size != quotes.size) {
+                        _state.update { it.withFormHydration(form.copy(initialContent = ""), it.preview) }
+                        loadReplyFormWithInlineQuotes(requestedQuotes)
+                        return@fold
+                    }
                     val prefills = form.initialContent.trimEnd()
                     _state.update { current ->
                         val existing = current.draft.text
@@ -450,11 +491,7 @@ class PostEditorViewModel @AssistedInject constructor(
                                 restorableDraft = current.restorableDraft.takeIf { it != combined },
                             )
                     }
-                    savedStateHandle[DELIVERED_QUOTES_KEY] = quotes.inlineQuoteDeliveryKey()
-                    setPendingQuotes(emptyList())
-                    _state.update { current ->
-                        current.copy(submitError = current.submitError.afterFormLoaded(quotesResolved = true))
-                    }
+                    finishInlineQuoteDelivery()
                     scheduleAutosave()
                 },
                 onFailure = { error -> handleFetchFailure(error, quoteFetch = true) },
@@ -1298,7 +1335,6 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     private companion object {
-        const val DELIVERED_QUOTES_KEY = "postEditor.deliveredQuotes"
         const val PENDING_QUOTES_KEY = "postEditor.pendingQuotes"
         const val QUOTE_FAILURES_KEY = "postEditor.quoteFailures"
         const val IGNORED_QUOTES_KEY = "postEditor.ignoredQuotes"
