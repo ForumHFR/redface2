@@ -1,3 +1,4 @@
-Redface 2 v0.69.1 — dev.
-- Citations : après avoir ouvert un message depuis « cité N fois », Back ramène au post de départ, y compris sur la même page, après un lien direct ou pendant une recherche.
-- Envoi : une coupure avant le départ du message affiche l'erreur réseau (rien n'est parti) ; après un départ possible, « Envoi incertain » demande toujours de vérifier avant de renvoyer.
+Redface 2 v0.69.2 — dev.
+- Interface : composants Material 3 en version 1.5 (bêta). Pour fermer une feuille en la tirant vers le bas, relâchez en mouvement ou tirez-la au-delà de sa moitié.
+- Citations : après avoir ouvert un message depuis « cité N fois », Back ramène au post de départ.
+- Envoi : une coupure avant le départ du message affiche l'erreur réseau (rien n'est parti) ; après un départ possible, « Envoi incertain » demande de vérifier avant de renvoyer.

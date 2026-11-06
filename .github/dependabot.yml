@@ -8,6 +8,12 @@ updates:
     schedule:
       interval: "monthly"
     open-pull-requests-limit: 5
+    ignore:
+      # #1509 — retirer avec l'épinglage dans #1474
+      - dependency-name: "androidx.compose.material3:material3"
+        update-types:
+          - "version-update:semver-minor"
+          - "version-update:semver-major"
     groups:
       build-toolchain:
         patterns:

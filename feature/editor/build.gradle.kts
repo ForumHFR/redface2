@@ -10,6 +10,12 @@ android {
         unitTests {
             isIncludeAndroidResources = true
             isReturnDefaultValues = true
+            all {
+                // Record-only Roborazzi harness, identical to :feature:messages: hardware
+                // PixelCopy keeps Compose drawing faithful without the AGP 9-incompatible plugin.
+                it.systemProperties["robolectric.pixelCopyRenderMode"] = "hardware"
+                it.systemProperties["roborazzi.test.record"] = "true"
+            }
         }
     }
 }
@@ -41,5 +47,7 @@ dependencies {
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.coil.core)
     testImplementation(libs.coil.test)
+    testImplementation(libs.roborazzi)
+    testImplementation(libs.roborazzi.compose)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }

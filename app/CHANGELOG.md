@@ -16,6 +16,15 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.69.2` — `internal` (dev) — 2026-11-06
+
+Refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)), lot R0m ([#1509](https://github.com/ForumHFR/redface2/issues/1509) ; [#1524](https://github.com/ForumHFR/redface2/pull/1524)) : `material3` passe en **1.5.0-beta02**, épinglé sur la BOM Compose stable 2026.09.00 (foundation, ui et runtime restent en 1.12.1). Prérequis de la refonte ; l'interface ne change pas, sauf sur un point.
+
+- Fermeture d'une feuille par glissé : relâcher en mouvement ferme toujours ; après un arrêt du doigt, il faut avoir tiré la feuille au-delà de la moitié de sa hauteur (auparavant, 120 à 200 px suffisaient). Changement de material3 1.5, accepté.
+- Les feuilles d'options de l'éditeur, de pagination du sujet et de pagination des MP gardent leur comportement de la 1.4 ; écran des couleurs adapté à la 1.5 (placeholder des champs).
+- Vérifié sur émulateur API 34 et sur Galaxy S10e (API 31) : 15 feuilles sur 17, smileys, menus, navigation ; 140 captures Roborazzi identiques au pixel entre 1.4 et 1.5.
+- Porte Gm : au moins trois jours en dev sans retour bloquant avant toute bêta qui contient ce lot.
+
 ## `0.69.1` — `internal` (dev) — 2026-11-06
 
 Retour depuis « cité N fois » ([#1447](https://github.com/ForumHFR/redface2/issues/1447) ; [#1541](https://github.com/ForumHFR/redface2/pull/1541)) : après avoir touché un message citant dans la liste, un seul Back ramène au post de départ. Auparavant, le premier Back ne faisait rien et le second quittait le sujet.
