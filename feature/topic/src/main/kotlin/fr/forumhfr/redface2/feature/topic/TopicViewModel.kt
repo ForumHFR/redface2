@@ -1500,6 +1500,9 @@ class TopicViewModel @AssistedInject constructor(
             grace?.cancel()
             if (!received && generation == ownerGeneration) {
                 terminalizeEmptyCompletion()
+                // Failure before any emission also completes through catch. A retained snapshot
+                // is now terminal for this owner, so a missing PostOrTop must release its landing.
+                settleRetainedPageLanding(generation)
             }
             if (settleRetainedPageOnCompletion) settleRetainedPageLanding(generation)
         }

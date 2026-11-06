@@ -303,6 +303,64 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `deep-link landing without an anchor report returns to the badge post after a cross-page jump`() = runTest {
+        val target = fakePost(numreponse = 2805153, citedCount = 1)
+        val citer = fakePost(numreponse = 2805200)
+        val origin = fakeTopic(94, 95, posts = listOf(fakePost(100), fakePost(200), target, fakePost(300)))
+        val repository = FakeTopicRepository(
+            listOf(flowOf(origin), flowOf(fakeTopic(95, 95, posts = listOf(citer))), flowOf(origin)),
+        ).apply { citingResult = Result.success(listOf(citer)) }
+        val handle = SavedStateHandle()
+        val alignment = TopicListAlignment()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 94, scrollTo = target.numreponse),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Anonymous),
+            searchRepository = FakeSearchRepository(pageToResolve = 95),
+            savedStateHandle = handle,
+        )
+
+        viewModel.effects.test {
+            val entry = awaitItem()
+            assertEquals(TopicEffect.ScrollToPost(target.numreponse), entry)
+            alignment.synchronizeLanding(viewModel.state.value.landing, canonicalPage = 94, isLoaded = true)
+            assertFalse(alignment.shouldPersist(canonicalPage = 94, isLoaded = true))
+            // The deep-link scroll is applied and acknowledged, without a manual scroll settle.
+            viewModel.onLandingApplied(entry)
+            alignment.synchronizeLanding(viewModel.state.value.landing, canonicalPage = 94, isLoaded = true)
+            val departure = TopicScrollAnchor(index = 3, offset = 0).takeIf {
+                alignment.shouldPersist(canonicalPage = 94, isLoaded = true)
+            }
+            assertEquals(TopicScrollAnchor(index = 3, offset = 0), departure)
+            assertNull(handle.get<Int>("topic.anchorIndex"))
+            assertNull(handle.get<Int>("topic.anchorOffset"))
+            viewModel.send(TopicIntent.OnCitedBadgeClick(target))
+            advanceUntilIdle()
+
+            viewModel.send(TopicIntent.OnCitingPostClick(citer, departureAnchor = departure))
+            val landing = awaitItem()
+            assertEquals(TopicEffect.ScrollToPost(citer.numreponse), landing)
+            assertEquals(95, viewModel.state.value.request.page)
+            viewModel.onLandingApplied(landing)
+
+            // No reportPageAnchor at entry or arrival: only the tap-time anchor can restore Q.
+            assertTrue(viewModel.returnFromJump(TopicScrollAnchor(index = 1, offset = 0)))
+            val returned = awaitItem()
+            assertEquals(TopicEffect.ScrollToAnchor(requireNotNull(departure), page = 94), returned)
+            val anchor = (returned as TopicEffect.ScrollToAnchor).anchor
+            assertEquals(target.numreponse, origin.posts[anchor.index - 1].numreponse)
+            assertEquals(origin, assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic)
+            assertEquals(94, viewModel.state.value.request.page)
+            viewModel.onLandingApplied(returned)
+            assertTrue(viewModel.state.value.landing is TopicUiState.Landing.Applied)
+            assertFalse(viewModel.state.value.canReturnFromJump)
+            assertEquals(listOf(94, 95, 94), repository.calls.map { it.third })
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `same-page citing-post return from reordered filtered results targets the badge post`() = runTest {
         val target = fakePost(700, citedCount = 1)
         val citer = fakePost(801)
@@ -547,6 +605,95 @@ class TopicViewModelTest {
             assertEquals(pending, viewModel.state.value.landing)
             viewModel.onLandingApplied(returned)
             assertEquals(TopicUiState.Landing.Applied(pending.id, page = 2), viewModel.state.value.landing)
+            assertEquals(listOf(2, 4, 2), repository.calls.map { it.third })
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `cross-page filtered citing-post return settles on its snapshot after a load failure`() {
+        assertFilteredCitingReturnWithoutEmission(failLoad = true)
+    }
+
+    @Test
+    fun `cross-page filtered citing-post return settles on its snapshot after an empty load`() {
+        assertFilteredCitingReturnWithoutEmission(failLoad = false)
+    }
+
+    private fun assertFilteredCitingReturnWithoutEmission(failLoad: Boolean) = runTest {
+        val target = fakePost(700, citedCount = 1)
+        val citer = fakePost(900)
+        val reply = CompletableDeferred<Unit>()
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        val cached = fakeTopic(2, 4, posts = listOf(fakePost(100)), searchForm = form)
+        val results = cached.copy(
+            posts = listOf(target),
+            searchForm = form.copy(firstnum = null, currentNum = 500),
+        )
+        val repository = FakeTopicRepository(
+            listOf(
+                flowOf(cached),
+                flowOf(fakeTopic(4, 4, posts = listOf(citer))),
+                flow {
+                    reply.await()
+                    if (failLoad) throw IOException("offline before any emission")
+                },
+            ),
+        ).apply { citingResult = Result.success(listOf(citer)) }
+        val handle = SavedStateHandle()
+        val alignment = TopicListAlignment()
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            searchRepository = FakeSearchRepository(pageToResolve = 4),
+            topicSearchRepository = FakeTopicSearchRepository(result = results),
+            savedStateHandle = handle,
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.SubmitSearch)
+            assertEquals(TopicEffect.ScrollToTopOfResults, awaitItem())
+            assertTrue(viewModel.state.value.search.showingFilteredResults)
+            viewModel.send(TopicIntent.OnCitedBadgeClick(target))
+            advanceUntilIdle()
+
+            viewModel.send(TopicIntent.OnCitingPostClick(citer, departureAnchor = TopicScrollAnchor(1, 17)))
+            val landing = awaitItem()
+            assertEquals(TopicEffect.ScrollToPost(citer.numreponse), landing)
+            viewModel.onLandingApplied(landing)
+            assertTrue(viewModel.returnFromJump(TopicScrollAnchor(1, 29)))
+            val pending = viewModel.state.value.landing as TopicUiState.Landing.Pending
+            assertEquals(2, viewModel.state.value.request.page)
+            assertEquals(cached, assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic)
+            alignment.synchronizeLanding(pending, canonicalPage = 2, isLoaded = true)
+            assertFalse(alignment.shouldPersist(canonicalPage = 2, isLoaded = true))
+            expectNoEvents()
+
+            reply.complete(Unit)
+            advanceUntilIdle()
+            val returned = awaitItem()
+            assertEquals(TopicEffect.ScrollToTop(page = 2), returned)
+            val retained = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+            assertEquals(cached, retained.topic)
+            assertFalse(retained.provisional)
+            assertEquals(pending, viewModel.state.value.landing)
+            alignment.synchronizeLanding(viewModel.state.value.landing, canonicalPage = 2, isLoaded = true)
+            assertFalse(alignment.shouldPersist(canonicalPage = 2, isLoaded = true))
+            viewModel.onLandingApplied(returned)
+            assertEquals(TopicUiState.Landing.Applied(pending.id, page = 2), viewModel.state.value.landing)
+            alignment.synchronizeLanding(viewModel.state.value.landing, canonicalPage = 2, isLoaded = true)
+            val anchor = TopicScrollAnchor(index = 0, offset = 0).takeIf {
+                alignment.shouldPersist(canonicalPage = 2, isLoaded = true)
+            }
+            assertEquals(TopicScrollAnchor(index = 0, offset = 0), anchor)
+            anchor?.let(viewModel::reportPageAnchor)
+            assertEquals(0, handle.get<Int>("topic.anchorIndex"))
+            assertEquals(0, handle.get<Int>("topic.anchorOffset"))
+            assertFalse(viewModel.state.value.canReturnFromJump)
             assertEquals(listOf(2, 4, 2), repository.calls.map { it.third })
             expectNoEvents()
             cancelAndIgnoreRemainingEvents()
