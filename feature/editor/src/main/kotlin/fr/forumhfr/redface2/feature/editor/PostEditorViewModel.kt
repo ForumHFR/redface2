@@ -25,6 +25,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorPreparationException
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionErrors
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionRequest
+import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.HfrFavoriteSmileyRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollections
@@ -204,7 +205,7 @@ class PostEditorViewModel @AssistedInject constructor(
         errors = EditorSubmissionErrors(
             uncertain = SubmitError.Uncertain, draftWriteFailed = SubmitError.DraftWriteFailed,
             sessionExpired = SubmitError.SessionExpired, unknown = SubmitError.Uncertain,
-            network = SubmitError.Network, sessionExpiredAfterEntry = SubmitError.Uncertain,
+            network = SubmitError.Network, preparationFailed = SubmitError.Hfr(ReplyFailureReason.Unknown),
         ),
         callbacks = EditorSubmissionCallbacks<PostEditorEffect>(
             state = { value ->
@@ -1052,6 +1053,11 @@ class PostEditorViewModel @AssistedInject constructor(
         )
         is ReplySubmitResult.Failure -> {
             EditorDelivery(
+                outcome = if (result.reason == ReplyFailureReason.Unknown) {
+                    EditorSendOutcome.UNCERTAIN
+                } else {
+                    EditorSendOutcome.CERTAIN_FAILURE
+                },
                 error = if (result.reason == ReplyFailureReason.Unknown) {
                     SubmitError.Uncertain
                 } else {
@@ -1109,17 +1115,7 @@ class PostEditorViewModel @AssistedInject constructor(
             quotedNumreponse = quotes.first().numreponse,
             quoteRef = null,
         )
-        val quoteForm = try {
-            quoteMaterializer.fetchFormWithQuotes(
-                context = quoteContext,
-                extraQuoteNumreponses = quotes.drop(1).map { it.numreponse },
-                truncate = quotes.any { it.truncate },
-            )
-        } catch (_: SessionExpiredException) {
-            throw EditorPreparationException(EditorPreparationException.Reason.SESSION_EXPIRED)
-        } catch (_: IOException) {
-            throw EditorPreparationException(EditorPreparationException.Reason.NETWORK)
-        }
+        val quoteForm = fetchReplyQuoteForm(quoteContext, quotes)
         val body = snapshot.draft.text
         return replyRepository.submitReply(
             context = quoteContext,
@@ -1131,6 +1127,23 @@ class PostEditorViewModel @AssistedInject constructor(
             },
             options = options,
         )
+    }
+
+    private suspend fun fetchReplyQuoteForm(context: ReplyContext, quotes: List<QuoteSelection>): ReplyForm {
+        val reason = try {
+            return quoteMaterializer.fetchFormWithQuotes(
+                context = context,
+                extraQuoteNumreponses = quotes.drop(1).map { it.numreponse },
+                truncate = quotes.any { it.truncate },
+            )
+        } catch (_: SessionExpiredException) {
+            EditorPreparationException.Reason.SESSION_EXPIRED
+        } catch (_: IOException) {
+            EditorPreparationException.Reason.NETWORK
+        } catch (_: IllegalStateException) {
+            EditorPreparationException.Reason.INVALID_FORM
+        }
+        throw EditorPreparationException(reason)
     }
 
     @Suppress("ReturnCount") // Each guard returns null with a distinct reason

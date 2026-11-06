@@ -79,6 +79,7 @@ private class ReportSubmissionAdapter(
             reportComposeForm()
         }
         coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } coAnswers {
+            scenario.prepare()
             postCalls++
             scenario.awaitPost(gate)
             scenario.postFailure?.let { throw it }
@@ -135,6 +136,9 @@ private class ReportSubmissionAdapter(
             body = it.draft.description, canSubmit = it.canSubmit, isSending = it.isSending,
             isUploading = false, confirmationVisible = it.armToken != null, armId = it.armToken?.id,
             error = when (it.error) {
+                ReportError.REFUSED -> SubmissionErrorProbe.PREPARATION_FAILED
+                ReportError.NETWORK -> SubmissionErrorProbe.NETWORK
+                ReportError.SESSION_EXPIRED -> SubmissionErrorProbe.SESSION_EXPIRED
                 ReportError.UNCERTAIN -> SubmissionErrorProbe.UNCERTAIN
                 else -> if (it.draftWriteFailed) SubmissionErrorProbe.DRAFT_WRITE_FAILED else null
             },

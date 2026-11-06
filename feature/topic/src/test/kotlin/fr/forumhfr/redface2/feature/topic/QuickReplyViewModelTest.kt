@@ -19,6 +19,7 @@ import fr.forumhfr.redface2.core.domain.editor.SubmissionBodyMutation
 import fr.forumhfr.redface2.core.domain.editor.SubmissionErrorProbe
 import fr.forumhfr.redface2.core.domain.editor.SubmissionProbe
 import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorWriteOwner
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
@@ -49,6 +50,7 @@ import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.currentCoroutineContext
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -622,6 +624,92 @@ class QuickReplyViewModelTest {
     }
 
     @Test
+    fun `blank quote preparation is certain with no POST in card mode`() = runTest {
+        val repository = FakeQuickReplyRepository(quotePrefills = mapOf(101 to ""))
+        val store = FakeQuickReplyDraftStore()
+        val viewModel = quickReplyViewModel(replyRepository = repository, draftStore = store)
+        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        viewModel.onTextChanged(TextFieldValue("body"))
+
+        viewModel.onSubmitClicked()
+        advanceUntilIdle()
+
+        assertEquals(0, repository.submitCalls)
+        assertEquals(QuickReplySubmitError.QuoteFetchFailed, viewModel.state.value.submitError)
+        assertEquals("body", viewModel.state.value.text.text)
+        assertEquals(listOf(101), viewModel.state.value.quotes.map { it.numreponse })
+        assertEquals(null, store.entries.values.single().attempt)
+    }
+
+    @Test
+    fun `unreadable quote form is certain with no POST in card mode`() = runTest {
+        val repository = FakeQuickReplyRepository().apply {
+            quoteFormFailure = IllegalStateException("Reply form not found")
+        }
+        val store = FakeQuickReplyDraftStore()
+        val viewModel = quickReplyViewModel(replyRepository = repository, draftStore = store)
+        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        viewModel.onTextChanged(TextFieldValue("body"))
+
+        viewModel.onSubmitClicked()
+        advanceUntilIdle()
+
+        assertEquals(0, repository.submitCalls)
+        assertEquals(QuickReplySubmitError.QuoteFetchFailed, viewModel.state.value.submitError)
+        assertEquals("body", viewModel.state.value.text.text)
+        assertEquals(null, store.entries.values.single().attempt)
+    }
+
+    @Test
+    fun `quote GET failures are certain and keep their existing cause text`() = runTest {
+        val failures = listOf(
+            IOException("quote GET failed"),
+            fr.forumhfr.redface2.core.domain.error.HfrServerException(503, "quote GET"),
+            fr.forumhfr.redface2.core.domain.auth.SessionExpiredException("quote GET"),
+        )
+        for (failure in failures) {
+            val repository = FakeQuickReplyRepository().apply { quoteFormFailure = failure }
+            val store = FakeQuickReplyDraftStore()
+            val viewModel = quickReplyViewModel(replyRepository = repository, draftStore = store)
+            viewModel.onSheetOpened(listOf(preview(101, "alice")))
+            viewModel.onTextChanged(TextFieldValue("body"))
+            viewModel.onSubmitClicked()
+            advanceUntilIdle()
+
+            val expected = if (failure is fr.forumhfr.redface2.core.domain.auth.SessionExpiredException) {
+                QuickReplySubmitError.SessionExpired
+            } else {
+                QuickReplySubmitError.QuoteFetchFailed
+            }
+            assertEquals(expected, viewModel.state.value.submitError)
+            assertEquals(0, repository.submitCalls)
+            assertEquals(null, store.entries.values.single().attempt)
+            assertEquals("body", viewModel.state.value.text.text)
+        }
+    }
+
+    @Test
+    fun `blank or unreadable inline quote preparation is caught without a POST`() = runTest {
+        for (unreadable in listOf(false, true)) {
+            val repository = FakeQuickReplyRepository(quotePrefills = mapOf(101 to "")).apply {
+                if (unreadable) quoteFormFailure = IllegalStateException("Reply form not found")
+            }
+            val viewModel = quickReplyViewModel(
+                replyRepository = repository, quoteCardsEnabled = false,
+                draftStore = FakeQuickReplyDraftStore(initialBody = "body"),
+            )
+
+            viewModel.onSheetOpened(listOf(preview(101, "alice")))
+            advanceUntilIdle()
+
+            assertEquals(0, repository.submitCalls)
+            assertEquals(QuickReplySubmitError.QuoteFetchFailed, viewModel.state.value.submitError)
+            assertFalse(viewModel.state.value.isPreparingQuotes)
+            assertEquals("body", viewModel.state.value.text.text)
+        }
+    }
+
+    @Test
     fun `dismiss cancels an in-flight inline materialisation`() = runTest {
         // Réserve Codex n°2 — a fetch started for an abandoned composition must never inject
         // its BBCode into the next one.
@@ -861,8 +949,11 @@ class QuickReplyViewModelTest {
                     armId = token?.id,
                     blocksClose = it.isSubmitting,
                     error = when (it.submitError) {
+                        QuickReplySubmitError.Network -> SubmissionErrorProbe.NETWORK
+                        QuickReplySubmitError.SessionExpired -> SubmissionErrorProbe.SESSION_EXPIRED
                         QuickReplySubmitError.Uncertain -> SubmissionErrorProbe.UNCERTAIN
                         QuickReplySubmitError.DraftWriteFailed -> SubmissionErrorProbe.DRAFT_WRITE_FAILED
+                        QuickReplySubmitError.QuoteFetchFailed -> SubmissionErrorProbe.PREPARATION_FAILED
                         else -> null
                     },
                 )
@@ -984,6 +1075,7 @@ private class FakeQuickReplyRepository(
     var submitGate: CompletableDeferred<Unit>? = null
     var submitScenario: EditorSubmissionScenario? = null
     var submitException: IOException? = null
+    var quoteFormFailure: Exception? = null
     val submittedBodies = mutableListOf<String>()
     val submittedPages = mutableListOf<Int>()
     val fetchedPages = mutableListOf<Int>()
@@ -993,6 +1085,7 @@ private class FakeQuickReplyRepository(
         fetchCalls++
         fetchedPages += context.page
         fetchedQuotedNumreponses += context.quotedNumreponse
+        if (context.isQuote) quoteFormFailure?.let { throw it }
         val prefill = context.quotedNumreponse
             ?.let { quotePrefills[it] ?: "[quotemsg=$it]corps[/quotemsg]" }
             .orEmpty()
@@ -1011,9 +1104,11 @@ private class FakeQuickReplyRepository(
         bbcodeContent: String,
         options: ReplyFormOptions,
     ): ReplySubmitResult {
+        submitScenario?.prepare()
         submitCalls++
         submittedBodies += bbcodeContent
         submittedPages += context.page
+        if (submitScenario == null) currentCoroutineContext()[EditorWriteOwner]?.markEmissionPossible()
         submitGate?.let { gate -> submitScenario?.awaitPost(gate) ?: gate.await() }
         submitException?.let { throw it }
         return results.removeFirstOrNull() ?: ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
