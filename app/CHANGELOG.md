@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.69.0` — `internal` (dev) — 2026-11-06
+
+Refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)), lot R0b, partie 1 ([#1456](https://github.com/ForumHFR/redface2/issues/1456) ; [#1539](https://github.com/ForumHFR/redface2/pull/1539)) : les échecs d'envoi sont classés selon le moment de la coupure, sur les cinq surfaces d'envoi et le signalement.
+
+- Une coupure prouvée **avant** le départ du message (pas de réseau, serveur injoignable, connexion refusée ou expirée) affiche l'erreur réseau habituelle : rien n'est parti, on peut renvoyer. Jusqu'ici, toute erreur réseau était présentée comme « Envoi incertain ».
+- Une coupure **après** un départ possible, une réponse HFR inattendue ou une page de connexion reçue après l'envoi restent « Envoi incertain » : vérifier le sujet ou la conversation avant de renvoyer. La page de connexion est désormais traitée ainsi sur toutes les surfaces.
+- Une préparation impossible (citation non récupérée, formulaire vide ou illisible) n'envoie rien et le dit.
+- Une annulation avant l'envoi est enregistrée comme telle ; si l'app est fermée pendant l'envoi, la tentative est restaurée comme incertaine.
+- Les textes affichés ne changent pas (nouveaux messages d'erreur avec la partie 2).
+
 ## `0.68.0` — `open` (bêta) — 2026-11-03
 
 Promotion bêta du lot développé en dev de `0.66.0` à `0.67.2`, complété par le formulaire de signalement, depuis la précédente bêta `0.65.0`. Le détail par version dev figure dans les entrées ci-dessous. Contenu :

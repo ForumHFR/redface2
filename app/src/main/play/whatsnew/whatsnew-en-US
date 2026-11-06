@@ -1,5 +1,2 @@
-Redface 2 v0.68.0 — beta.
-- In-app reporting: Settings → HFR account or account menu, by HFR private message to the project.
-- Sending: "Message posted" / "Message edited" confirmations and "Last page" button; duplicate sends prevented; uncertain sends flagged, check before retrying.
-- Quotes: jumps no longer get stuck when the message is missing from the page.
-- TalkBack: First/Last page announced only once.
+Redface 2 v0.69.0 — dev.
+- Sending: a failure before the message leaves shows the network error (nothing was sent); after a possible send, "Uncertain send" still asks you to check before retrying.
