@@ -1,3 +1,4 @@
-Redface 2 v0.69.1 — dev.
-- Quotes: after opening a post from "quoted N times", Back returns to the original post, including on the same page, after a direct link or during a topic search.
-- Sending: a failure before the message leaves shows the network error (nothing was sent); after a possible send, "Uncertain send" still asks you to check before retrying.
+Redface 2 v0.69.2 — dev.
+- Interface: Material 3 components updated to 1.5 (beta). To close a sheet by dragging it down, release while moving or drag it past half its height.
+- Quotes: after opening a post from "quoted N times", Back returns to the original post.
+- Sending: a failure before the message leaves shows the network error (nothing was sent); after a possible send, "Uncertain send" asks you to check before retrying.
