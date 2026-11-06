@@ -411,6 +411,149 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `cross-page filtered citing-post return waits for the badge post absent from its snapshot`() = runTest {
+        val target = fakePost(700, citedCount = 1)
+        val citer = fakePost(900)
+        val departure = TopicScrollAnchor(index = 1, offset = 17)
+        val arrival = TopicScrollAnchor(index = 1, offset = 29)
+        val reply = CompletableDeferred<Unit>()
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        val cached = fakeTopic(2, 4, posts = listOf(fakePost(100)), searchForm = form)
+        val fresh = cached.copy(posts = cached.posts + target)
+        val results = cached.copy(
+            posts = listOf(target, fakePost(100)),
+            searchForm = form.copy(firstnum = null, currentNum = 500),
+        )
+        val repository = FakeTopicRepository(
+            listOf(
+                flowOf(cached),
+                flowOf(fakeTopic(4, 4, posts = listOf(citer))),
+                flow {
+                    reply.await()
+                    emit(fresh)
+                },
+            ),
+        ).apply { citingResult = Result.success(listOf(citer)) }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            searchRepository = FakeSearchRepository(pageToResolve = 4),
+            topicSearchRepository = FakeTopicSearchRepository(result = results),
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.SubmitSearch)
+            assertEquals(TopicEffect.ScrollToTopOfResults, awaitItem())
+            assertTrue(viewModel.state.value.search.showingFilteredResults)
+            viewModel.send(TopicIntent.OnCitedBadgeClick(target))
+            advanceUntilIdle()
+            viewModel.reportPageAnchor(departure)
+
+            viewModel.send(TopicIntent.OnCitingPostClick(citer, departureAnchor = departure))
+            val landing = awaitItem()
+            assertEquals(TopicEffect.ScrollToPost(citer.numreponse), landing)
+            viewModel.onLandingApplied(landing)
+            viewModel.reportPageAnchor(arrival)
+
+            assertTrue(viewModel.returnFromJump(arrival))
+            val pending = viewModel.state.value.landing as TopicUiState.Landing.Pending
+            val snapshot = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+            assertEquals(2, viewModel.state.value.request.page)
+            assertEquals(cached, snapshot.topic)
+            // A historical terminal snapshot is still transient for the new landing owner.
+            assertFalse(snapshot.provisional)
+            assertFalse(viewModel.state.value.canReturnFromJump)
+            expectNoEvents()
+
+            reply.complete(Unit)
+            advanceUntilIdle()
+            val returned = awaitItem()
+            assertEquals(TopicEffect.ScrollToPost(target.numreponse), returned)
+            assertEquals(fresh, assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic)
+            assertEquals(pending, viewModel.state.value.landing)
+            viewModel.onLandingApplied(returned)
+            assertEquals(TopicUiState.Landing.Applied(pending.id, page = 2), viewModel.state.value.landing)
+            assertEquals(listOf(2, 4, 2), repository.calls.map { it.third })
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
+    fun `cross-page filtered citing-post return falls back to top only after a terminal badge miss`() = runTest {
+        val target = fakePost(700, citedCount = 1)
+        val citer = fakePost(900)
+        val departure = TopicScrollAnchor(index = 1, offset = 17)
+        val arrival = TopicScrollAnchor(index = 1, offset = 29)
+        val reply = CompletableDeferred<Unit>()
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        val cached = fakeTopic(2, 4, posts = listOf(fakePost(100)), searchForm = form)
+        val fresh = cached.copy(posts = cached.posts + fakePost(200))
+        val results = cached.copy(
+            posts = listOf(target, fakePost(100)),
+            searchForm = form.copy(firstnum = null, currentNum = 500),
+        )
+        val repository = FakeTopicRepository(
+            listOf(
+                flowOf(cached),
+                flowOf(fakeTopic(4, 4, posts = listOf(citer))),
+                flow {
+                    reply.await()
+                    emit(fresh)
+                },
+            ),
+        ).apply { citingResult = Result.success(listOf(citer)) }
+        val viewModel = topicViewModel(
+            request = topicRequest(page = 2),
+            topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            searchRepository = FakeSearchRepository(pageToResolve = 4),
+            topicSearchRepository = FakeTopicSearchRepository(result = results),
+        )
+        viewModel.send(TopicIntent.OpenSearch)
+        viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.SubmitSearch)
+            assertEquals(TopicEffect.ScrollToTopOfResults, awaitItem())
+            assertTrue(viewModel.state.value.search.showingFilteredResults)
+            viewModel.send(TopicIntent.OnCitedBadgeClick(target))
+            advanceUntilIdle()
+            viewModel.reportPageAnchor(departure)
+
+            viewModel.send(TopicIntent.OnCitingPostClick(citer, departureAnchor = departure))
+            val landing = awaitItem()
+            assertEquals(TopicEffect.ScrollToPost(citer.numreponse), landing)
+            viewModel.onLandingApplied(landing)
+            viewModel.reportPageAnchor(arrival)
+
+            assertTrue(viewModel.returnFromJump(arrival))
+            val pending = viewModel.state.value.landing as TopicUiState.Landing.Pending
+            val snapshot = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+            assertEquals(2, viewModel.state.value.request.page)
+            assertEquals(cached, snapshot.topic)
+            assertFalse(snapshot.provisional)
+            assertFalse(viewModel.state.value.canReturnFromJump)
+            expectNoEvents()
+
+            reply.complete(Unit)
+            advanceUntilIdle()
+            val returned = awaitItem()
+            assertEquals(TopicEffect.ScrollToTop(page = 2), returned)
+            assertEquals(fresh, assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic)
+            assertEquals(pending, viewModel.state.value.landing)
+            viewModel.onLandingApplied(returned)
+            assertEquals(TopicUiState.Landing.Applied(pending.id, page = 2), viewModel.state.value.landing)
+            assertEquals(listOf(2, 4, 2), repository.calls.map { it.third })
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `filtered citing-post return falls back to top when the badge post is absent from the canonical page`() = runTest {
         val target = fakePost(700, citedCount = 1)
         val citer = fakePost(801)

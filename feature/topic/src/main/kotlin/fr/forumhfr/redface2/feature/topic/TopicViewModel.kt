@@ -306,6 +306,8 @@ class TopicViewModel @AssistedInject constructor(
      * - [PostOrBottom] → [TopicEffect.ScrollToPost] when the numreponse is on the page, else no
      *   scroll — terminal on the first Loaded either way (#974/#1243 : a submit that carried quotes
      *   resumes on the cited post when visible and otherwise preserves the reader's position) ;
+     * - [PostOrTop] → [TopicEffect.ScrollToPost] for a filtered citing-post return, or top only
+     *   once the badge's post is absent from a terminal representation ;
      * - [Anchor] → [TopicEffect.ScrollToAnchor] (revisit / #782 return / process restore) ;
      * - [Bottom] → [TopicEffect.ScrollToEndOfPage] (post-submit `#bas`, #412 `page - 1` step) ;
      * - [Top] → [TopicEffect.ScrollToTop] (default landing of a fresh page).
@@ -1684,10 +1686,12 @@ class TopicViewModel @AssistedInject constructor(
 
     /**
      * #895/#1300 — dispatch the landing owed to the page on screen, once, for the owning
-     * generation. [terminal] comes from the CURRENT `TopicPageEmission`, never from a retained
-     * `Mode.Loaded`: an LRU snapshot is settled historically but remains provisional for this
-     * landing owner. A missing [PendingLanding.Post] therefore survives only an explicitly
-     * transient representation; the first terminal one resolves it without scrolling.
+     * generation. During a load, [terminal] comes from the CURRENT `TopicPageEmission`, never from
+     * a retained `Mode.Loaded`: an LRU snapshot is settled historically but remains provisional
+     * for this landing owner. An established same-page return may settle immediately when idle.
+     * A missing [PendingLanding.Post] or [PendingLanding.PostOrTop] therefore
+     * survives a transient representation; the first terminal one resolves it without scrolling
+     * or falls back to top, respectively.
      */
     private fun dispatchPendingLanding(topic: Topic, terminal: Boolean) {
         // Gate Sol PR1 (bloquant 2) — refuse a stale pair : a dispatch reached from an untagged
@@ -1713,12 +1717,12 @@ class TopicViewModel @AssistedInject constructor(
                 } else {
                     TopicEffect.LandingResolvedWithoutScroll(armed.page)
                 }
-            is PendingLanding.PostOrTop ->
-                if (topic.posts.any { post -> post.numreponse == landing.numreponse }) {
+            is PendingLanding.PostOrTop -> when {
+                topic.posts.any { post -> post.numreponse == landing.numreponse } ->
                     TopicEffect.ScrollToPost(landing.numreponse)
-                } else {
-                    TopicEffect.ScrollToTop(armed.page)
-                }
+                terminal -> TopicEffect.ScrollToTop(armed.page)
+                else -> null
+            }
             is PendingLanding.Anchor -> TopicEffect.ScrollToAnchor(landing.anchor, armed.page)
             PendingLanding.Bottom -> TopicEffect.ScrollToEndOfPage(armed.page)
             PendingLanding.Top -> TopicEffect.ScrollToTop(armed.page)
@@ -1964,7 +1968,7 @@ class TopicViewModel @AssistedInject constructor(
             // Same-page settles overwrite pageAnchors with the arrival, so only the frame's
             // captured landing can restore the departure. Without it, use the explicit top fallback.
             armLanding(landing ?: PendingLanding.Top)
-            dispatchLandingAgainstScreen()
+            dispatchLandingAgainstScreen(terminal = loadJob?.isActive != true)
         } else {
             internalSwitch(frame.page, departureAnchor, landing = landing)
         }
@@ -2136,10 +2140,12 @@ class TopicViewModel @AssistedInject constructor(
      * Dispatch the pending landing against the page already on screen (same-page / snapshot).
      * Synchronous since the r2 gate : [dispatchPendingLanding] no longer suspends, so there is no
      * untagged coroutine racing a newer navigation.
+     * [terminal] settles a return on an established page when no load is pending. Snapshot
+     * activations keep the default false because their new owner's load has yet to start.
      */
-    private fun dispatchLandingAgainstScreen() {
+    private fun dispatchLandingAgainstScreen(terminal: Boolean = false) {
         val loaded = _state.value.mode as? TopicUiState.Mode.Loaded ?: return
-        dispatchPendingLanding(loaded.topic, terminal = false)
+        dispatchPendingLanding(loaded.topic, terminal = terminal && !loaded.provisional)
     }
 
     /**
