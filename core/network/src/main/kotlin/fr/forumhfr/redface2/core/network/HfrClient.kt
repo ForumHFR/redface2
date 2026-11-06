@@ -608,6 +608,7 @@ class HfrClient @Inject constructor(
                 editorWrite.cookieJar.loadForRequest(url).filter { it.name == "md_user" }.map { it.value },
             ),
         )
+        if (editorWrite.networkInterceptors.none { it is EditorWriteOwnerInterceptor }) owner.emissionUnobserved()
         val request = Request.Builder().url(url).post(OneShotFormBody(formBody))
             .tag(EditorWriteOwner::class.java, owner).build()
         editorWrite.newDiagnosticCall(request).executeAuthenticatedHtml()

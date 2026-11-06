@@ -25,6 +25,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorPreparationException
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionErrors
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionRequest
+import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.HfrFavoriteSmileyRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollections
@@ -204,7 +205,7 @@ class PostEditorViewModel @AssistedInject constructor(
         errors = EditorSubmissionErrors(
             uncertain = SubmitError.Uncertain, draftWriteFailed = SubmitError.DraftWriteFailed,
             sessionExpired = SubmitError.SessionExpired, unknown = SubmitError.Uncertain,
-            network = SubmitError.Network, sessionExpiredAfterEntry = SubmitError.Uncertain,
+            network = SubmitError.Network, preparationFailed = SubmitError.Unknown,
         ),
         callbacks = EditorSubmissionCallbacks<PostEditorEffect>(
             state = { value ->
@@ -1052,6 +1053,11 @@ class PostEditorViewModel @AssistedInject constructor(
         )
         is ReplySubmitResult.Failure -> {
             EditorDelivery(
+                outcome = if (result.reason == ReplyFailureReason.Unknown) {
+                    EditorSendOutcome.UNCERTAIN
+                } else {
+                    EditorSendOutcome.CERTAIN_FAILURE
+                },
                 error = if (result.reason == ReplyFailureReason.Unknown) {
                     SubmitError.Uncertain
                 } else {
@@ -1119,6 +1125,8 @@ class PostEditorViewModel @AssistedInject constructor(
             throw EditorPreparationException(EditorPreparationException.Reason.SESSION_EXPIRED)
         } catch (_: IOException) {
             throw EditorPreparationException(EditorPreparationException.Reason.NETWORK)
+        } catch (_: IllegalStateException) {
+            throw EditorPreparationException(EditorPreparationException.Reason.INVALID_FORM)
         }
         val body = snapshot.draft.text
         return replyRepository.submitReply(

@@ -16,6 +16,7 @@ enum class EditorSubmissionFailure { ATTEMPT, QUIESCE, OUTCOME, CLEANUP }
  * [stopDraftWrites] cancels and joins autosaves before the published marker. [recordFailure] must not throw.
  * A failed marker preserves the text and the one success pop, with a terminal Uncertain(accepted = true).
  * Transport cancellation after emission leaves the durable attempt unresolved; adapters classify other failures.
+ * Proven local cancellation is resolved durably before propagation, without restoring an invalidated session.
  */
 interface EditorSubmissionPorts {
     suspend fun beginAttempt(): BeginAttemptResult

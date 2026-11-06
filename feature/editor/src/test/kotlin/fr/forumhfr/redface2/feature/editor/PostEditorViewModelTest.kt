@@ -29,6 +29,7 @@ import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.editor.SubmissionBodyMutation
 import fr.forumhfr.redface2.core.domain.editor.SubmissionProbe
+import fr.forumhfr.redface2.core.domain.editor.EditorWriteOwner
 import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
 import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
 import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
@@ -92,6 +93,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import kotlinx.coroutines.currentCoroutineContext
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -484,7 +486,7 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `submit keeps draft and uncertainty when a card's prefill comes back blank (#291)`() = runTest {
+    fun `submit keeps draft and certain failure when a card's prefill comes back blank (#291)`() = runTest {
         // A 200-OK form whose textarea prefill is EMPTY would otherwise silently drop a quote
         // the user explicitly selected — same contract as a failed fetch: fail globally.
         replyRepository.formResult = Result.success(authenticatedForm())
@@ -503,11 +505,27 @@ class PostEditorViewModelTest {
         viewModel.state.test {
             val settled = expectMostRecentItem()
             assertFalse(settled.isSubmitting)
-            assertEquals(SubmitError.Uncertain, settled.submitError)
+            assertEquals(SubmitError.Unknown, settled.submitError)
             assertEquals("cards intact", listOf(101, 303), settled.quotes.map { it.numreponse })
             assertEquals("body intact", "Reply", settled.draft.text)
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `unreadable quote form is a certain preparation failure with zero POST`() = runTest {
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.failure(IllegalStateException("Reply form not found")))
+        val viewModel = newReplyViewModel(initialQuotes = listOf(card(101)))
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(PostEditorIntent.ContentChanged(TextFieldValue("Reply")))
+
+        viewModel.submit(PostEditorIntent.SubmitClicked())
+        testScheduler.advanceUntilIdle()
+
+        assertEquals(0, replyRepository.submitCalls)
+        assertEquals(SubmitError.Unknown, viewModel.state.value.submitError)
+        assertEquals("Reply", viewModel.state.value.draft.text)
+        assertEquals(listOf(101), viewModel.state.value.quotes.map { it.numreponse })
     }
 
     @Test
@@ -1018,8 +1036,11 @@ class PostEditorViewModelTest {
                     it.draft.text, it.canSubmit, it.isSubmitting, it.isUploading, it.showSubmitConfirmation,
                     armId = it.armToken?.id,
                     error = when (it.submitError) {
+                        SubmitError.Network -> SubmissionErrorProbe.NETWORK
+                        SubmitError.SessionExpired -> SubmissionErrorProbe.SESSION_EXPIRED
                         SubmitError.Uncertain -> SubmissionErrorProbe.UNCERTAIN
                         SubmitError.DraftWriteFailed -> SubmissionErrorProbe.DRAFT_WRITE_FAILED
+                        SubmitError.Unknown -> SubmissionErrorProbe.PREPARATION_FAILED
                         else -> null
                     },
                     restoreOffered = it.restorableDraft != null,
@@ -2892,11 +2913,13 @@ class PostEditorViewModelTest {
             bbcodeContent: String,
             options: fr.forumhfr.redface2.core.model.write.ReplyFormOptions,
         ): ReplySubmitResult {
+            submitScenario?.prepare()
             submitCalls += 1
             lastSubmittedContext = context
             lastSubmittedBbcode = bbcodeContent
             lastSubmittedForm = form
             lastSubmittedOptions = options
+            if (submitScenario == null) currentCoroutineContext()[EditorWriteOwner]?.markEmissionPossible()
             submitGate?.let { gate -> submitScenario?.awaitPost(gate) ?: gate.await() }
             submitException?.let { throw it }
             return submitResult ?: error("submitResult not set")
@@ -2955,10 +2978,12 @@ class PostEditorViewModelTest {
             bbcodeContent: String,
             options: fr.forumhfr.redface2.core.model.write.ReplyFormOptions,
         ): ReplySubmitResult {
+            submitScenario?.prepare()
             submitCalls += 1
             lastSubmittedContext = context
             lastSubmittedBbcode = bbcodeContent
             lastSubmittedOptions = options
+            if (submitScenario == null) currentCoroutineContext()[EditorWriteOwner]?.markEmissionPossible()
             submitGate?.let { gate -> submitScenario?.awaitPost(gate) ?: gate.await() }
             submitException?.let { throw it }
             return submitResult ?: error("submitResult not set")

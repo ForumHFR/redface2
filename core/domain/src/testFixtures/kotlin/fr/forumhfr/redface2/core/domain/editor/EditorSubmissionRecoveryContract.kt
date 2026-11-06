@@ -11,6 +11,7 @@ import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.CancellationException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -99,8 +100,13 @@ abstract class EditorSubmissionRecoveryContract {
     }
 
     @Test
-    fun recognisedPostRejectionRemainsCertain() {
-        val scenario = EditorSubmissionScenario().apply { postRejection = ReplyFailureReason.AntiFlood }
+    fun recognisedPostRejectionRemainsCertain() = recognisedRejection(ReplyFailureReason.AntiFlood)
+
+    @Test
+    fun unknownRecipientRejectionRemainsCertain() = recognisedRejection(ReplyFailureReason.UnknownRecipient)
+
+    private fun recognisedRejection(reason: ReplyFailureReason) {
+        val scenario = EditorSubmissionScenario().apply { postRejection = reason }
         withReadyAdapter(scenario = scenario) { adapter ->
             startSending(adapter)
             val body = adapter.snapshot().body
@@ -115,6 +121,83 @@ abstract class EditorSubmissionRecoveryContract {
             assertTrue(adapter.snapshot().canSubmit)
             assertEquals(0, adapter.successEffects)
             assertEquals(1, adapter.postCalls)
+        }
+    }
+
+    @Test
+    fun cancelledPreparationResolvesBeforeReopeningWithoutAPost() {
+        val scenario = EditorSubmissionScenario().apply {
+            preparationFailure = CancellationException("local preparation cancelled")
+        }
+        withReadyAdapter(scenario = scenario) { adapter ->
+            adapter.clickSubmit()
+            runCurrent()
+            assertEquals(0, adapter.postCalls)
+            assertEquals(0, scenario.emittedPosts)
+            assertNull(scenario.store.entries.values.single().attempt)
+            assertFalse(adapter.snapshot().isSending)
+            scenario.recreateEditor()
+            runCurrent()
+            assertTrue(adapter.snapshot().error != SubmissionErrorProbe.UNCERTAIN)
+            assertEquals(0, adapter.successEffects)
+        }
+    }
+
+    @Test
+    fun failedCancellationResolutionKeepsConservativeRecovery() {
+        val scenario = EditorSubmissionScenario().apply {
+            preparationFailure = CancellationException("local preparation cancelled")
+            store.finishFailure = IOException("outcome unavailable")
+        }
+        withReadyAdapter(scenario = scenario) { adapter ->
+            adapter.clickSubmit()
+            runCurrent()
+            assertEquals(0, adapter.postCalls)
+            assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
+            assertEquals(EditorDraftStore.AttemptStatus.IN_PROGRESS, scenario.store.entries.values.single().attempt?.status)
+            scenario.recreateEditor()
+            runCurrent()
+            assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
+            assertEquals(0, adapter.successEffects)
+        }
+    }
+
+    @Test
+    fun accountChangeCancelsPreparationWithoutRevivingTheOldUi() {
+        val scenario = EditorSubmissionScenario().apply { preparationGate = CompletableDeferred() }
+        withReadyAdapter(scenario = scenario) { adapter ->
+            adapter.clickSubmit()
+            runCurrent()
+            assertEquals(1, scenario.preparationCalls)
+            assertEquals(0, adapter.postCalls)
+            scenario.switchAccount()
+            runCurrent()
+            val invalidated = adapter.snapshot()
+            scenario.preparationGate?.complete(Unit)
+            runCurrent()
+            assertEquals(invalidated.body, adapter.snapshot().body)
+            assertEquals(invalidated.error, adapter.snapshot().error)
+            assertEquals(0, adapter.postCalls)
+            assertEquals(0, adapter.successEffects)
+            scenario.store.activeOwner = "tester"
+            assertNull(scenario.store.entries.values.single().attempt)
+        }
+    }
+
+    @Test
+    fun cancelledPostRetainsUnresolvedAttempt() {
+        val scenario = EditorSubmissionScenario().apply { cancelPost = true }
+        withReadyAdapter(scenario = scenario) { adapter ->
+            startSending(adapter)
+            adapter.completePost()
+            runCurrent()
+            assertEquals(1, scenario.emittedPosts)
+            assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
+            assertEquals(EditorDraftStore.AttemptStatus.IN_PROGRESS, scenario.store.entries.values.single().attempt?.status)
+            scenario.recreateEditor()
+            runCurrent()
+            assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
+            assertEquals(0, adapter.successEffects)
         }
     }
 

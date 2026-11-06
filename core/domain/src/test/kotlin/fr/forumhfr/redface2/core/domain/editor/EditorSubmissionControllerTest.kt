@@ -12,6 +12,8 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.test.runCurrent
+import kotlinx.coroutines.currentCoroutineContext
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -303,6 +305,50 @@ class EditorSubmissionControllerTest {
     }
 
     @Test
+    fun `local cancellation awaits durable resolution before propagating`() = runTest {
+        ports.emissionPossible = false
+        ports.sendGate = CompletableDeferred()
+        ports.finishGate = CompletableDeferred()
+        val job = launch(start = CoroutineStart.UNDISPATCHED) { controller.execute(reserve(), ports) }
+        job.cancel()
+        runCurrent()
+        assertFalse("cancellation must await CERTAIN_FAILURE", job.isCompleted)
+        assertEquals(listOf("begin", "send", "CERTAIN_FAILURE"), ports.events)
+        ports.finishGate?.complete(Unit)
+        job.join()
+        assertTrue(job.isCancelled)
+        assertEquals(EditorSubmissionState.Ready, controller.state)
+    }
+
+    @Test
+    fun `failed local cancellation resolution retains uncertainty`() = runTest {
+        ports.emissionPossible = false
+        ports.sendGate = CompletableDeferred()
+        ports.finish = failed()
+        val job = launch(start = CoroutineStart.UNDISPATCHED) { controller.execute(reserve(), ports) }
+        job.cancel()
+        job.join()
+        assertEquals(EditorSubmissionState.Uncertain(attempt), controller.state)
+        assertEquals(listOf(EditorSubmissionFailure.OUTCOME), ports.failures)
+        assertFalse(controller.consumeSuccess(attempt))
+    }
+
+    @Test
+    fun `local cancellation resolves old attempt without reviving invalidated session`() = runTest {
+        ports.emissionPossible = false
+        ports.sendGate = CompletableDeferred()
+        val job = launch(start = CoroutineStart.UNDISPATCHED) { controller.execute(reserve(), ports) }
+        val next = session.copy(id = "new-account", owner = "bob")
+        controller.openSession(next)
+        job.cancel()
+        job.join()
+        assertEquals(listOf("begin", "send", "CERTAIN_FAILURE"), ports.events)
+        assertEquals(next, controller.session)
+        assertEquals(EditorSubmissionState.Ready, controller.state)
+        assertFalse(controller.consumeSuccess(attempt))
+    }
+
+    @Test
     fun `cancelled cleanup keeps published success`() = runTest {
         ports.eraseGate = CompletableDeferred()
         val job = launch(start = CoroutineStart.UNDISPATCHED) { controller.execute(reserve(), ports) }
@@ -524,6 +570,7 @@ class EditorSubmissionControllerTest {
         var outcome = EditorSendOutcome.SUCCESS
         var beginGate: CompletableDeferred<Unit>? = null
         var sendGate: CompletableDeferred<Unit>? = null
+        var emissionPossible = true
         var eraseGate: CompletableDeferred<Unit>? = null
         var finishGate: CompletableDeferred<Unit>? = null
         var beginError: IOException? = null
@@ -540,6 +587,7 @@ class EditorSubmissionControllerTest {
         }
         override suspend fun send(attempt: AttemptToken): EditorSendOutcome {
             events += "send"
+            if (emissionPossible) checkNotNull(currentCoroutineContext()[EditorWriteOwner]).markEmissionPossible()
             sendGate?.await()
             sendError?.let { throw it }
             return outcome

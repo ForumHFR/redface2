@@ -33,6 +33,7 @@ open class VersionedEditorDraftStore : EditorDraftStore {
     var saveFailure: IOException? = null
     var beginFailure: IOException? = null
     var cleanupFailure: IOException? = null
+    var finishFailure: IOException? = null
     var beginCalls = 0
         private set
     private var sequence = 0
@@ -143,6 +144,7 @@ open class VersionedEditorDraftStore : EditorDraftStore {
 
     override suspend fun finishAttempt(token: AttemptToken, outcome: AttemptOutcome): StoreWriteResult {
         finishGate?.await()
+        finishFailure?.let { return StoreWriteResult.Failed(it) }
         return if (token.owner != activeOwner && outcome != AttemptOutcome.CERTAIN_FAILURE) {
             StoreWriteResult.OwnerChanged
         } else {

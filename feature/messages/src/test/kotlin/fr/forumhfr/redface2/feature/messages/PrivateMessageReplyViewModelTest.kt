@@ -1612,6 +1612,7 @@ class PrivateMessageReplyViewModelTest {
             form()
         }
         coEvery { repository.submitReply(any(), any(), any(), any(), any()) } coAnswers {
+            scenario.prepare()
             submissionCalls += 1
             scenario.awaitPost(postGate)
             scenario.postFailure?.let { throw it }
@@ -1694,8 +1695,11 @@ class PrivateMessageReplyViewModelTest {
                     it.draft.text, it.canSubmit, it.isSubmitting, it.isUploading, it.showSubmitConfirmation,
                     armId = it.armToken?.id,
                     error = when (it.submitError) {
+                        PrivateMessageReplyError.Network -> SubmissionErrorProbe.NETWORK
+                        PrivateMessageReplyError.SessionExpired -> SubmissionErrorProbe.SESSION_EXPIRED
                         PrivateMessageReplyError.Uncertain -> SubmissionErrorProbe.UNCERTAIN
                         PrivateMessageReplyError.DraftWriteFailed -> SubmissionErrorProbe.DRAFT_WRITE_FAILED
+                        PrivateMessageReplyError.Unexpected -> SubmissionErrorProbe.PREPARATION_FAILED
                         else -> null
                     },
                     restoreOffered = it.restorableDraft != null,

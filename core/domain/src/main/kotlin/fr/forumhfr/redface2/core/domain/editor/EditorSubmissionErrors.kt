@@ -7,5 +7,6 @@ data class EditorSubmissionErrors<F>(
     val sessionExpired: F,
     val unknown: F,
     val network: F = unknown,
-    val sessionExpiredAfterEntry: F = sessionExpired,
+    val preparationFailed: F = unknown,
+    val quoteFetchFailed: F = network,
 )

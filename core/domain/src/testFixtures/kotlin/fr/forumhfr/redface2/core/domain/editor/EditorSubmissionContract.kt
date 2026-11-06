@@ -428,6 +428,58 @@ abstract class EditorSubmissionContract : EditorSubmissionRecoveryContract() {
     @Test
     fun ioExceptionAfterWriteEntryIsUncertain() = writeFailureIsUncertain(IOException("response lost"))
 
+    @Test
+    fun localNetworkFailureIsCertainWithoutAPost() {
+        val scenario = EditorSubmissionScenario().apply { preparationFailure = IOException("offline before POST") }
+        withReadyAdapter(scenario = scenario) { adapter ->
+            val body = adapter.snapshot().body
+            adapter.clickSubmit()
+            runCurrent()
+            assertEquals(0, adapter.postCalls)
+            assertEquals(0, scenario.emittedPosts)
+            assertEquals(SubmissionErrorProbe.NETWORK, adapter.snapshot().error)
+            assertEquals(null, scenario.store.entries.values.single().attempt)
+            assertEquals(body, adapter.snapshot().body)
+            assertEquals(0, adapter.successEffects)
+        }
+    }
+
+    @Test
+    fun emptyPreparationIsCertainWithoutAPost() {
+        val scenario = EditorSubmissionScenario().apply {
+            preparationFailure = EditorPreparationException(EditorPreparationException.Reason.INVALID_FORM)
+        }
+        withReadyAdapter(scenario = scenario) { adapter ->
+            adapter.clickSubmit()
+            runCurrent()
+            assertEquals(0, adapter.postCalls)
+            assertEquals(0, scenario.emittedPosts)
+            assertEquals(null, scenario.store.entries.values.single().attempt)
+            assertFalse(adapter.snapshot().isSending)
+            assertEquals(SubmissionErrorProbe.PREPARATION_FAILED, adapter.snapshot().error)
+            assertEquals(0, adapter.successEffects)
+        }
+    }
+
+    @Test
+    fun sessionExpiryDuringLocalPreparationIsCertain() {
+        val scenario = EditorSubmissionScenario().apply {
+            preparationFailure = fr.forumhfr.redface2.core.domain.auth.SessionExpiredException("local preparation")
+        }
+        withReadyAdapter(scenario = scenario) { adapter ->
+            adapter.clickSubmit()
+            runCurrent()
+            assertEquals(0, adapter.postCalls)
+            assertEquals(SubmissionErrorProbe.SESSION_EXPIRED, adapter.snapshot().error)
+            assertEquals(null, scenario.store.entries.values.single().attempt)
+        }
+    }
+
+    @Test
+    fun loginRecognitionAfterEmissionCannotProveRefusal() = writeFailureIsUncertain(
+        fr.forumhfr.redface2.core.domain.auth.SessionExpiredException("https://example.test/login.php"),
+    )
+
     private fun writeFailureIsUncertain(error: IOException) {
         val scenario = EditorSubmissionScenario().apply { postFailure = error }
         withReadyAdapter(scenario = scenario) { adapter ->
@@ -513,6 +565,6 @@ data class SubmissionProbe(
     val blocksClose: Boolean = isSending,
 )
 
-enum class SubmissionErrorProbe { UNCERTAIN, DRAFT_WRITE_FAILED }
+enum class SubmissionErrorProbe { UNCERTAIN, DRAFT_WRITE_FAILED, NETWORK, SESSION_EXPIRED, PREPARATION_FAILED }
 
 enum class SubmissionBodyMutation { TYPING, SMILEY, FORMAT, IMAGE_URL, RESTORE, SHARED_RESTORE }
