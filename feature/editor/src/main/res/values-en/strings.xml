@@ -1,4 +1,0 @@
-<resources>
-    <string name="editor_legacy_quote_dropped">An old quote request was not retained after the update. Your draft is still available. Please select the message to quote again.</string>
-    <string name="editor_action_resume_quote">After checking, resume the quote</string>
-</resources>
