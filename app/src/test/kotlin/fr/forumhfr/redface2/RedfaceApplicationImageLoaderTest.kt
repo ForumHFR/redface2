@@ -1,14 +1,32 @@
 package fr.forumhfr.redface2
 
+import android.graphics.Bitmap
+import coil3.ImageLoader
+import coil3.asImage
+import coil3.decode.DataSource
+import coil3.decode.DecodeResult
+import coil3.decode.Decoder
+import coil3.decode.ImageSource
+import coil3.fetch.Fetcher
+import coil3.fetch.SourceFetchResult
 import coil3.gif.AnimatedImageDecoder
 import coil3.request.CachePolicy
 import coil3.request.ErrorResult
 import coil3.request.ImageRequest
+import coil3.request.SuccessResult
 import coil3.svg.SvgDecoder
 import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
+import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
+import okio.Buffer
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -21,10 +39,8 @@ import org.robolectric.RuntimeEnvironment
  * whole format to the §6 error slot. Pins the decoder roster — GIF (#109) and SVG (#960 P4,
  * « formats exotiques affichés »: the header-only probe cannot read SVG bounds by design, the
  * painter decodes and the G2 protocol takes the geometry from it). Coil 3 service-loads the
- * decoders of classpath artifacts, so this pins the ROSTER available to the app's loader —
- * removing the coil-gif/coil-svg DEPENDENCY trips it; the explicit adds in RedfaceApplication
- * are documentation + belt for a disabled service loader and are NOT individually pinned here
- * (with service loading active the roster stays green without them — Sol P4).
+ * decoders of classpath artifacts. The bounded animated factory must precede any service-loaded
+ * animated factory so every animated decode shares its semaphore (#1411).
  */
 @RunWith(RobolectricTestRunner::class)
 class RedfaceApplicationImageLoaderTest {
@@ -64,17 +80,100 @@ class RedfaceApplicationImageLoaderTest {
     }
 
     @Test
-    fun `the singleton loader registers the gif and svg decoders`() {
+    fun `the singleton loader selects the bounded animated factory before any bare animated factory`() {
         val application = RedfaceApplication().apply { imageClient = OkHttpClient() }
         val loader = application.newImageLoader(RuntimeEnvironment.getApplication())
-        val factories = loader.components.decoderFactories
-        assertTrue(
-            "the animated GIF decoder must stay registered (#109)",
-            factories.any { it is AnimatedImageDecoder.Factory },
-        )
-        assertTrue(
-            "the SVG decoder must be registered (#960 P4)",
-            factories.any { it is SvgDecoder.Factory },
-        )
+        try {
+            val factories = loader.components.decoderFactories
+            assertEquals(1, factories.count { it is BoundedAnimatedDecoderFactory })
+            assertTrue(
+                "animated decoding must use the shared semaphore before any bare factory (#1411)",
+                factories.firstOrNull {
+                    it is BoundedAnimatedDecoderFactory || it is AnimatedImageDecoder.Factory
+                } is BoundedAnimatedDecoderFactory,
+            )
+            assertTrue(
+                "the SVG decoder must be registered (#960 P4)",
+                factories.any { it is SvgDecoder.Factory },
+            )
+        } finally {
+            loader.shutdown()
+        }
     }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    @Test
+    fun `concurrent image requests share the bounded decoder factory permit`() = runTest {
+        val context = RuntimeEnvironment.getApplication()
+        val dispatcher = StandardTestDispatcher(testScheduler)
+        val release = CompletableDeferred<Unit>()
+        var fetched = 0
+        var created = 0
+        var active = 0
+        var maxActive = 0
+        val factory = BoundedAnimatedDecoderFactory(
+            delegate = Decoder.Factory { _, _, _ ->
+                created++
+                Decoder {
+                    active++
+                    maxActive = maxOf(maxActive, active)
+                    try {
+                        release.await()
+                        DecodeResult(
+                            image = Bitmap.createBitmap(1, 1, Bitmap.Config.ARGB_8888).asImage(),
+                            isSampled = false,
+                        )
+                    } finally {
+                        active--
+                    }
+                }
+            },
+        )
+        val loader = ImageLoader.Builder(context)
+            .coroutineContext(dispatcher)
+            .components {
+                add(Fetcher.Factory<SpyImage> { _, options, _ ->
+                    Fetcher {
+                        fetched++
+                        SourceFetchResult(
+                            source = ImageSource(Buffer(), options.fileSystem),
+                            mimeType = "image/test",
+                            dataSource = DataSource.MEMORY,
+                        )
+                    }
+                })
+                add(factory)
+            }
+            .build()
+        try {
+            val requests = List(2) { index ->
+                async {
+                    loader.execute(
+                        ImageRequest.Builder(context)
+                            .data(SpyImage(index))
+                            .size(1)
+                            .memoryCachePolicy(CachePolicy.DISABLED)
+                            .diskCachePolicy(CachePolicy.DISABLED)
+                            .build(),
+                    )
+                }
+            }
+            runCurrent()
+
+            assertEquals(2, fetched)
+            assertEquals(2, created)
+            assertEquals(1, active)
+            requests.forEach { assertFalse(it.isCompleted) }
+
+            release.complete(Unit)
+            requests.forEach { assertTrue(it.await() is SuccessResult) }
+            assertEquals(1, maxActive)
+            assertEquals(0, active)
+        } finally {
+            release.complete(Unit)
+            loader.shutdown()
+        }
+    }
+
+    private data class SpyImage(val id: Int)
 }
