@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.data.editor
 
 import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
+import fr.forumhfr.redface2.core.domain.editor.UnreadableInlineQuoteRequestException
 import java.io.IOException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -46,11 +47,15 @@ class PendingInlineQuoteRequestCodecTest {
             document.replace("\"version\":1", "\"extra\":true,\"version\":1"),
         )
         for (raw in invalid) {
-            val error = assertThrows(IOException::class.java) { PendingInlineQuoteRequestCodec.decode(raw, key) }
+            val error = assertThrows(UnreadableInlineQuoteRequestException::class.java) {
+                PendingInlineQuoteRequestCodec.decode(raw, key)
+            }
             assertEquals("Invalid pending inline quote request", error.message)
         }
         for (otherKey in listOf("reply:13:35421", "reply:23:35395", "mpnew")) {
-            assertThrows(IOException::class.java) { PendingInlineQuoteRequestCodec.decode(document, otherKey) }
+            assertThrows(UnreadableInlineQuoteRequestException::class.java) {
+                PendingInlineQuoteRequestCodec.decode(document, otherKey)
+            }
             val request = PendingInlineQuoteRequestCodec.decode(document, key)
             assertThrows(IOException::class.java) { PendingInlineQuoteRequestCodec.encode(request, otherKey) }
         }

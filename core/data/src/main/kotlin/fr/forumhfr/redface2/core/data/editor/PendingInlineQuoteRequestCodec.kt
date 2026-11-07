@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.data.editor
 
 import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
+import fr.forumhfr.redface2.core.domain.editor.UnreadableInlineQuoteRequestException
 import java.io.IOException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -31,7 +32,7 @@ internal object PendingInlineQuoteRequestCodec {
         ).also { require(it.key == key) }
     } catch (_: IllegalArgumentException) {
         // Never include the serialized payload in an error or diagnostic.
-        throw IOException("Invalid pending inline quote request")
+        throw UnreadableInlineQuoteRequestException()
     }
 
     @Serializable

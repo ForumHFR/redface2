@@ -802,6 +802,11 @@ fun TopicScreen(
             }
         },
         onEscalateToFullEditor = onEscalateToFullEditor,
+        prepareSheetQuotes = { quotes, onPrepared ->
+            viewModel.prepareEditorQuotes(quotes) { cards ->
+                if (currentRouteCheck.value()) onPrepared(cards)
+            }
+        },
         // Vague 4 (#604) lot 1 / #895 étape 4 — a reply POSTed from the quick-reply sheet goes
         // straight to the retained ViewModel (in-place force refresh, #200/#226/#1243) : the sheet
         // never entered the back stack and the topic entry no longer gets replaced.
@@ -1344,6 +1349,8 @@ internal fun TopicContent(
         quotes: List<QuoteSelection>,
         consumesBasket: Boolean,
     ) -> Unit = { _, _, _, _ -> },
+    prepareSheetQuotes: (List<QuoteSelection>, (List<QuoteSelection>) -> Unit) -> Unit =
+        { cards, ready -> ready(cards) },
     onEdit: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onEditFirstPost: (subcat: Int, page: Int, numreponse: Int) -> Unit,
     onOpenPage: (Int) -> Unit,
@@ -1479,9 +1486,8 @@ internal fun TopicContent(
                         WritingSurface.FULL_EDITOR -> onReply(subcat, page, emptyList())
                     }
                 },
-                // #1553: snapshot the selection at the gesture. The full-editor callback awaits
-                // durable preparation; the sheet retains its launch path until the next slice.
-                // Both paths keep the basket until successful submission.
+                // #1553: both surfaces choose rendering and await durable inline entry at the
+                // gesture. Only transient cards travel in the launch; success consumes the basket.
                 onMultiQuote = { subcat, page ->
                     val selection = multiQuoteSelections.toList()
                     when (writingSurfaceFor(state.writingSurfacePreset, quoteCount = selection.size)) {
@@ -1491,16 +1497,18 @@ internal fun TopicContent(
                             // without sending keeps the selection armed (the « Citer N » FAB and
                             // counter survive a cancel). The clear happens on the sheet's
                             // SubmitSucceeded (or its escalation's) via consumesBasket below.
-                            quickReplyFor = QuickReplyLaunch(
-                                request = QuickReplyRequest(
-                                    cat = state.request.cat,
-                                    subcat = subcat,
-                                    topicId = state.request.post,
-                                    page = page,
-                                ),
-                                initialQuotes = selection,
-                                consumesBasket = true,
-                            )
+                            prepareSheetQuotes(selection) { cards ->
+                                quickReplyFor = QuickReplyLaunch(
+                                    request = QuickReplyRequest(
+                                        cat = state.request.cat,
+                                        subcat = subcat,
+                                        topicId = state.request.post,
+                                        page = page,
+                                    ),
+                                    initialQuotes = cards,
+                                    consumesBasket = true,
+                                )
+                            }
                         }
                     }
                 },
@@ -1608,15 +1616,17 @@ internal fun TopicContent(
                                 // restore banner, not silently appended.
                                 onQuoteRequested = { preview ->
                                     when (writingSurfaceFor(state.writingSurfacePreset, quoteCount = 1)) {
-                                        WritingSurface.SHEET -> quickReplyFor = QuickReplyLaunch(
-                                            request = QuickReplyRequest(
-                                                cat = state.request.cat,
-                                                subcat = mode.topic.subcat,
-                                                topicId = state.request.post,
-                                                page = mode.topic.page,
-                                            ),
-                                            initialQuotes = listOf(preview),
-                                        )
+                                        WritingSurface.SHEET -> prepareSheetQuotes(listOf(preview)) { cards ->
+                                            quickReplyFor = QuickReplyLaunch(
+                                                request = QuickReplyRequest(
+                                                    cat = state.request.cat,
+                                                    subcat = mode.topic.subcat,
+                                                    topicId = state.request.post,
+                                                    page = mode.topic.page,
+                                                ),
+                                                initialQuotes = cards,
+                                            )
+                                        }
                                         WritingSurface.FULL_EDITOR ->
                                             onReply(mode.topic.subcat, mode.topic.page, listOf(preview))
                                     }
@@ -4381,85 +4391,31 @@ internal fun rememberQuickReplyLaunch(): MutableState<QuickReplyLaunch?> =
     rememberSaveable(stateSaver = QuickReplyLaunchSaver) { mutableStateOf(null) }
 
 /**
- * #953 (F3) — explicit [Saver] for the (non-Parcelable) [QuickReplyLaunch] : the flat list is
- * `[cat, subcat, topicId, page, consumesBasket, then page/numreponse/ref/author/excerpt/truncate
- * per quote]` — primitives only, all Bundle-safe. A null launch (sheet closed) is handled by [listSaver]
- * itself : the empty list it produces is stored as null, restored as null, and this saver's
- * `restore` only ever sees non-empty lists.
+ * #1553: save the mount and opening metadata only. Cards are transient; inline coordinates live
+ * exclusively in Room. Older saver tails (including previews/coordinates) are ignored on restore.
  */
 internal val QuickReplyLaunchSaver: Saver<QuickReplyLaunch?, Any> = listSaver<QuickReplyLaunch?, Any>(
     save = { launch ->
-        if (launch == null) {
-            emptyList()
-        } else {
-            buildList {
-                add(launch.request.cat)
-                add(launch.request.subcat)
-                add(launch.request.topicId)
-                add(launch.request.page)
-                add(launch.consumesBasket)
-                launch.initialQuotes.forEach { quote ->
-                    add(quote.locator.page)
-                    add(quote.numreponse)
-                    add(quote.locator.ref ?: QUICK_REPLY_SAVER_REF_ABSENT)
-                    add(quote.author)
-                    add(quote.excerpt)
-                    add(quote.truncate)
-                }
-            }
-        }
+        if (launch == null) emptyList() else listOf(
+            launch.request.cat, launch.request.subcat, launch.request.topicId,
+            launch.request.page, launch.consumesBasket,
+        )
     },
     restore = { saved ->
-        if (saved.size < QUICK_REPLY_SAVER_HEADER_SIZE) {
-            null
-        } else {
-            QuickReplyLaunch(
-                request = QuickReplyRequest(
-                    cat = saved[0] as Int,
-                    subcat = saved[1] as Int,
-                    topicId = saved[2] as Int,
-                    page = saved[3] as Int,
-                ),
-                initialQuotes = saved
-                    .drop(QUICK_REPLY_SAVER_HEADER_SIZE)
-                    .let { quoteFields ->
-                        quoteFields.chunked(quickReplySaverQuoteFields(quoteFields.size))
-                    }
-                    .map { fields ->
-                        val page = fields[0] as Int
-                        val numreponse = fields[1] as Int
-                        val ref = fields[2] as Int
-                        val author = fields[3] as String
-                        val excerpt = fields[4] as String
-                        val truncate = fields.getOrNull(5) as? Boolean ?: false
-                        QuoteSelection(
-                            locator = QuoteLocator(
-                                page = page,
-                                numreponse = numreponse,
-                                ref = ref.takeUnless { it == QUICK_REPLY_SAVER_REF_ABSENT },
-                            ),
-                            author = author,
-                            excerpt = excerpt,
-                            truncate = truncate,
-                        )
-                    },
-                consumesBasket = saved[4] as Boolean,
-            )
-        }
+        if (saved.size < QUICK_REPLY_SAVER_HEADER_SIZE) null else QuickReplyLaunch(
+            request = QuickReplyRequest(
+                cat = saved[0] as Int,
+                subcat = saved[1] as Int,
+                topicId = saved[2] as Int,
+                page = saved[3] as Int,
+            ),
+            consumesBasket = saved[4] as Boolean,
+        )
     },
 )
 
-/** [QuickReplyLaunchSaver] layout: request Ints + consumesBasket before the quote fields. */
+/** Request coordinates and basket-consumption flag; no citation fields. */
 private const val QUICK_REPLY_SAVER_HEADER_SIZE = 5
-
-/** [QuickReplyLaunchSaver] layout : page, numreponse, ref, author, excerpt, truncate per quote. */
-private const val QUICK_REPLY_SAVER_QUOTE_FIELDS = 6
-
-/** Pre-#327 saved launches did not carry the truncate flag. */
-private const val QUICK_REPLY_SAVER_QUOTE_FIELDS_LEGACY = 5
-
-/** Bundle-safe encoding of a nullable quote ref; real HFR refs are non-negative. */
-private const val QUICK_REPLY_SAVER_REF_ABSENT = -1
 
 /** #806 — the two composition surfaces a write tap can open. */
 internal enum class WritingSurface { SHEET, FULL_EDITOR }
@@ -4501,13 +4457,6 @@ internal fun Post.toQuoteSelection(page: Int, truncate: Boolean = false): QuoteS
     excerpt = postContentExcerpt(content),
     truncate = truncate,
 )
-
-private fun quickReplySaverQuoteFields(size: Int): Int =
-    if (size % QUICK_REPLY_SAVER_QUOTE_FIELDS == 0) {
-        QUICK_REPLY_SAVER_QUOTE_FIELDS
-    } else {
-        QUICK_REPLY_SAVER_QUOTE_FIELDS_LEGACY
-    }
 
 internal fun shouldEnableReply(topic: Topic, isAuthenticated: Boolean): Boolean =
     topic.canReply && isAuthenticated

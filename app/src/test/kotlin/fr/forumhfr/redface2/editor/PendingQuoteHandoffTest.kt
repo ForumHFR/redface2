@@ -16,6 +16,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.StoreWriteResult
 import fr.forumhfr.redface2.core.domain.editor.EditorSessionResources
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
+import fr.forumhfr.redface2.core.domain.editor.UnreadableInlineQuoteRequestException
 import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollectionSnapshot
@@ -410,7 +411,7 @@ class PendingQuoteHandoffTest {
     fun `unreadable durable request blocks every GET and POST until restoration succeeds`() = runTest {
         val scenario = Scenario()
         scenario.enqueue()
-        scenario.drafts.loadFailure = IOException("unreadable quote document")
+        scenario.drafts.loadFailure = UnreadableInlineQuoteRequestException()
         val editor = scenario.editor()
         advanceUntilIdle()
         assertTrue(editor.state.value.quoteStorageUnavailable)
@@ -542,24 +543,65 @@ class PendingQuoteHandoffTest {
     }
 
     @Test
-    fun `temporary sheet escalation preserves text and transient cards without seeding an inline request`() = runTest {
+    fun `durable escalation never replays a frozen transfer flag`() = runTest {
         val scenario = Scenario()
+        scenario.enqueue()
         scenario.quoteAvailable = false
-        val quotes = listOf(QuoteSelection(QuoteLocator(1, 101, null), "alice", "preview"))
-        val sheet = scenario.sheet()
-        sheet.onSheetOpened(quotes)
+        val frozen = mapOf<String, Any?>(
+            "quickReply.pendingTransferred" to true,
+            "quickReply.pendingQuotes" to intArrayOf(101, 1, -1, 0),
+        )
+        val sheet = scenario.sheet(SavedStateHandle(frozen))
+        sheet.onSheetOpened()
         advanceUntilIdle()
         sheet.onTextChanged(TextFieldValue("text from the sheet"))
         sheet.onEscalateRequested()
         advanceUntilIdle()
         val handoff = sheet.effects.first() as QuickReplyEffect.EscalateToFullEditor
+        assertTrue(handoff.quotes.isEmpty())
+        assertEquals(scenario.request, scenario.pending)
+        // A new editor instance reads Room; no inline coordinates travel through the handoff.
+        scenario.quoteAvailable = true
         val editor = scenario.editor(cards = handoff.quotes)
         advanceUntilIdle()
-        // Slice 2b will replace this in-memory bridge with the shared durable request.
-        assertEquals("text from the sheet", editor.state.value.draft.text)
-        assertEquals(quotes, editor.state.value.quotes)
-        assertTrue(editor.state.value.pendingQuotes.isEmpty())
+        assertEquals("[quotemsg=101]quote[/quotemsg]\n\ntext from the sheet", editor.state.value.draft.text)
+        assertTrue(editor.state.value.quotes.isEmpty())
         assertNull(scenario.pending)
+        editor.viewModelScope.cancel()
+        val fetches = scenario.fetchedQuotes.size
+        sheet.onSheetOpened() // Return to the retained sheet VM before recreating it.
+        advanceUntilIdle()
+        assertTrue(sheet.state.value.pendingQuotes.isEmpty())
+        assertEquals(fetches, scenario.fetchedQuotes.size)
+        sheet.viewModelScope.cancel()
+        val restoredSheet = scenario.sheet(SavedStateHandle(frozen))
+        restoredSheet.onSheetOpened()
+        advanceUntilIdle()
+        assertTrue(restoredSheet.state.value.pendingQuotes.isEmpty())
+        assertEquals(fetches, scenario.fetchedQuotes.size)
+        assertEquals(scenario.body, restoredSheet.state.value.text.text)
+        scenario.noPost()
+        restoredSheet.viewModelScope.cancel()
+    }
+
+    @Test
+    fun `card escalation keeps the previews in memory and creates no durable request`() = runTest {
+        val scenario = Scenario()
+        val cards = listOf(QuoteSelection(QuoteLocator(1, 101, null), "alice", "preview"))
+        // Rendering was decided at the gesture. The current inline preference cannot reinterpret cards.
+        val sheet = scenario.sheet()
+        sheet.onSheetOpened(cards)
+        sheet.onTextChanged(TextFieldValue("body"))
+        sheet.onEscalateRequested()
+        advanceUntilIdle()
+        val handoff = sheet.effects.first() as QuickReplyEffect.EscalateToFullEditor
+        assertEquals(cards, handoff.quotes)
+        assertNull(scenario.pending)
+        val editor = scenario.editor(cards = handoff.quotes)
+        advanceUntilIdle()
+        assertEquals(cards, editor.state.value.quotes)
+        assertEquals("body", editor.state.value.draft.text)
+        assertTrue(scenario.fetchedQuotes.isEmpty())
         scenario.noPost()
         editor.viewModelScope.cancel()
         sheet.viewModelScope.cancel()
@@ -618,8 +660,8 @@ class PendingQuoteHandoffTest {
 
         fun noPost() { coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any()) } }
 
-        fun sheet() = QuickReplyViewModel(
-            QuickReplyRequest(cat = 23, subcat = 0, topicId = 35421, page = 1), SavedStateHandle(),
+        fun sheet(saved: SavedStateHandle = SavedStateHandle()) = QuickReplyViewModel(
+            QuickReplyRequest(cat = 23, subcat = 0, topicId = 35421, page = 1), saved,
             repository, TopicReplyQuoteMaterializer(repository),
             EditorSessionResources(drafts, preferences, auth,
                 DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L }, DiagnosticsLog()),

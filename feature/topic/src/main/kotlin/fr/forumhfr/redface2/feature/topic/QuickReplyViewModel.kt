@@ -23,11 +23,13 @@ import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionCallbacks
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionEnvironment
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionErrors
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.domain.editor.SubmissionRequest
 import fr.forumhfr.redface2.core.domain.write.QuotedNumreponses
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -36,13 +38,11 @@ import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.EditorCause
 import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
-import fr.forumhfr.redface2.core.ui.editor.decodeInlineQuoteRequest
-import fr.forumhfr.redface2.core.ui.editor.encodeInlineQuoteRequest
-import fr.forumhfr.redface2.core.ui.editor.inlineQuoteDeliveryKey
 import fr.forumhfr.redface2.core.ui.editor.toEditorError
 import java.io.IOException
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
@@ -53,7 +53,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -74,7 +73,13 @@ data class QuickReplyUiState(
      * multi-quote basket : never persisted, the #405 row only ever carries the typed body.
      */
     val quotes: List<QuoteSelection> = emptyList(),
+    /** Projection of the request owned by EditorDraftSession, never a launch/Bundle authority. */
     val pendingQuotes: List<QuoteSelection> = emptyList(),
+    val quoteFetchFailures: Int = 0,
+    val quoteStorageUnavailable: Boolean = true,
+    val restorableDraft: String? = null,
+    val isDiscardingDraft: Boolean = false,
+    val legacyQuoteRequestDropped: Boolean = false,
     val submission: EditorSubmissionState = EditorSubmissionState.Ready,
     val isSubmitting: Boolean = false,
     /**
@@ -90,7 +95,15 @@ data class QuickReplyUiState(
     /** With quote cards armed, an empty body is a valid submit (quotes-only reply). */
     val canSubmit: Boolean
         get() = (text.text.isNotBlank() || quotes.isNotEmpty()) && !isSubmitting && !isPreparingQuotes &&
-            !submission.blocksBodyMutation && pendingQuotes.isEmpty()
+            !submission.blocksBodyMutation && pendingQuotes.isEmpty() && !quoteStorageUnavailable &&
+            restorableDraft == null && !isDiscardingDraft
+
+    val hasDormantQuote: Boolean
+        get() = pendingQuotes.isNotEmpty() && submission is EditorSubmissionState.Uncertain
+
+    val canIgnorePendingQuote: Boolean
+        get() = pendingQuotes.isNotEmpty() && (quoteFetchFailures >= 2 || hasDormantQuote) &&
+            !isPreparingQuotes && !submission.blocksBodyMutation && !isDiscardingDraft
 }
 
 /** One-shot events consumed by the sheet composable. */
@@ -126,9 +139,9 @@ sealed interface QuickReplyEffect {
  *
  * Draft sharing IS the sheet↔full-screen transfer: both surfaces read and write the same
  * [EditorDraftKey.reply] row. One deliberate divergence from the full editor — the sheet
- * AUTO-applies a cached draft into the field instead of surfacing a restore banner: the sheet is
- * the « resume quickly » surface, and its dirty-close contract (autosave, never a silent loss)
- * means the field content and the row are the same thing.
+ * AUTO-applies a cached draft for an ordinary reply. When a new inline request meets an older
+ * body, the sheet offers that body before fetching quotes: ignoring the body preserves the request.
+ * Unresolved attempts always restore their body and keep their new request dormant.
  */
 @HiltViewModel(assistedFactory = QuickReplyViewModel.Factory::class)
 class QuickReplyViewModel @AssistedInject constructor(
@@ -194,7 +207,6 @@ class QuickReplyViewModel @AssistedInject constructor(
             },
             error = { value -> _state.update { it.copy(submitError = value) } },
             success = { value ->
-                savedStateHandle.remove<String>(KEY_DELIVERED_QUOTES)
                 _state.update { it.copy(text = TextFieldValue(""), quotes = emptyList(), submitError = null) }
                 _effects.trySend(value)
             },
@@ -219,9 +231,16 @@ class QuickReplyViewModel @AssistedInject constructor(
         val ready = sessionReady
         openJob = viewModelScope.launch {
             val entry = initial.restore(draftKey)
+            if (submission !== initial) return@launch
             if (entry?.attempt != null) seedDraft(entry.draft.body)
+            _state.update {
+                it.copy(
+                    quoteStorageUnavailable = !initial.isInitialized,
+                    pendingQuotes = initial.drafts.pendingInlineQuoteRequest.toSelections(),
+                )
+            }
             ready.complete(Unit)
-            prefetchForm()
+            if (initial.isInitialized) prefetchForm()
         }
         viewModelScope.launch {
             userPreferencesRepository.observeConfirmBeforePosting().catch { emit(true) }.collect { value ->
@@ -244,10 +263,8 @@ class QuickReplyViewModel @AssistedInject constructor(
                     autosaveJob?.cancel()
                     openJob?.cancel()
                     sessionReady.cancel()
-                    savedStateHandle.remove<Boolean>(KEY_PENDING_TRANSFERRED)
-                    savedStateHandle.remove<IntArray>(KEY_PENDING_QUOTES)
-                    savedStateHandle.remove<String>(KEY_DELIVERED_QUOTES)
-                    _state.update { it.copy(pendingQuotes = emptyList()) }
+                    savedStateHandle[KEY_QUOTE_FAILURES] = 0
+                    _state.update { it.copy(pendingQuotes = emptyList(), quoteStorageUnavailable = true) }
                 }
                 previous = owner
                 observed = true
@@ -259,23 +276,7 @@ class QuickReplyViewModel @AssistedInject constructor(
         _state.update { it.copy(text = TextFieldValue(body, TextRange(body.length))) }
     }
 
-    /**
-     * Called at EACH sheet opening (not just the first): the VM outlives the sheet, so its
-     * in-memory text can go stale whenever another surface touched the shared #405 row —
-     * typically escalate → edit in the full-screen editor → back → reopen. The row is the
-     * source of truth ; the field is unconditionally re-seeded from it (gate Codex PR #788).
-     *
-     * [initialQuotes] (#604 lot 3) — the citations this opening delivers, in citation order : one
-     * preview for « Citer », the whole basket for « Citer N » under the full-screen threshold.
-     * Delivery happens ONCE per sheet composition (the sheet keys its effect on the VM alone) ;
-     * a deliberate re-cite is a new launch, hence a new composition.
-     *
-     * Rendering is decided HERE per opening (#805 arbitrage, `observeQuoteCardsEnabled().first()`) :
-     * cards ON → idempotent card adds (unchanged #604 behaviour) ; cards OFF (default) → the
-     * `[quotemsg]` prefills are fetched now and APPENDED to the live field content at completion
-     * (never a replacement computed from the row — réserve Codex n°1).
-     */
-    /** ED-86: a restored composition retains the VM's current arm and deadline. */
+    /** A restored mount retains the VM's current arm/deadline and buffered success. */
     fun onSheetAttached(currentPage: Int, initialQuotes: List<QuoteSelection>, restored: Boolean) {
         if (!restored || !hasOpened) onSheetOpened(currentPage, initialQuotes)
     }
@@ -285,12 +286,16 @@ class QuickReplyViewModel @AssistedInject constructor(
     }
 
     /**
-     * [currentPage] is the topic page visible at this opening. It is intentionally not part of the
-     * Hilt key : the draft and in-flight submit contract remain scoped to the topic, while the HFR
-     * form context is rebuilt per opening and per submit.
+     * Reload the shared row at every opening. [initialQuotes] contains transient cards only;
+     * inline gestures have already awaited their Room write in TopicViewModel.
      */
     fun onSheetOpened(currentPage: Int, initialQuotes: List<QuoteSelection> = emptyList()) {
-        // Rotation during an active send must retain its permit and buffered success (ED-86).
+        openSheet(currentPage, initialQuotes)
+    }
+
+    private fun openSheet(
+        currentPage: Int, initialQuotes: List<QuoteSelection>, retainedText: TextFieldValue? = null,
+    ) {
         if (submission.isExecuting) return
         hasOpened = true
         sheetOpen = true
@@ -301,15 +306,15 @@ class QuickReplyViewModel @AssistedInject constructor(
         sessionReady.cancel()
         submission.disarm()
         updateCurrentPage(currentPage)
-        // A successful handoff transfers ownership of the pending request to the full editor.
-        // Keep the current sheet blocked until it closes, then never replay that request here.
-        val transferred = savedStateHandle.remove<Boolean>(KEY_PENDING_TRANSFERRED) == true
-        val pending = if (transferred) emptyList() else _state.value.pendingQuotes.ifEmpty {
-            savedStateHandle.get<IntArray>(KEY_PENDING_QUOTES)?.decodeInlineQuoteRequest().orEmpty()
-        }
-        val requested = (pending + initialQuotes).distinctBy { it.numreponse }
-        _state.value = QuickReplyUiState(pendingQuotes = requested)
-        savedStateHandle[KEY_PENDING_QUOTES] = requested.encodeInlineQuoteRequest()
+        // v20 launch coordinates are deliberately discarded, never decoded or imported.
+        val legacy = savedStateHandle.remove<IntArray>("quickReply.pendingQuotes")
+        savedStateHandle.remove<String>("quickReply.deliveredQuotes")
+        savedStateHandle.remove<Boolean>("quickReply.pendingTransferred")
+        _state.value = QuickReplyUiState(
+            quotes = initialQuotes.distinctBy { it.numreponse },
+            quoteFetchFailures = savedStateHandle[KEY_QUOTE_FAILURES] ?: 0,
+            legacyQuoteRequestDropped = _state.value.legacyQuoteRequestDropped || legacy?.isNotEmpty() == true,
+        )
         val opening = newSubmission()
         val ready = CompletableDeferred<Unit>()
         submission = opening
@@ -317,117 +322,207 @@ class QuickReplyViewModel @AssistedInject constructor(
         openJob = viewModelScope.launch {
             val entry = opening.restore(draftKey)
             if (submission !== opening) return@launch
-            seedDraft(entry?.draft?.body.orEmpty())
+            val pending = opening.drafts.pendingInlineQuoteRequest
+            val body = entry?.draft?.body.orEmpty()
+            val offer = body.takeIf { it.isNotBlank() && pending != null && entry?.attempt == null }
+            seedDraft(if (offer == null) body else "")
+            retainedText?.takeIf { it.text.isNotBlank() }?.let { value -> _state.update { it.copy(text = value) } }
+            _state.update { current ->
+                val inlinePosts = pending?.quotes?.map { it.numreponse }.orEmpty().toSet()
+                current.copy(
+                    quoteStorageUnavailable = !opening.isInitialized,
+                    restorableDraft = offer,
+                    pendingQuotes = pending.toSelections(),
+                    quotes = current.quotes.filterNot { it.numreponse in inlinePosts },
+                )
+            }
             ready.complete(Unit)
+            if (!opening.isInitialized || !sheetOpen) return@launch
             prefetchForm()
-            // Recovered attempts never receive a second server quote prefill (ED-81/170).
-            if (entry?.attempt != null) {
-                setPendingQuotes(emptyList())
-                return@launch
-            }
-            if (!sheetOpen) return@launch
-            if (requested.isEmpty()) return@launch
-            if (pending.isEmpty() && userPreferencesRepository.observeQuoteCardsEnabled().first()) {
-                // Through onQuoteAdded : keeps the dedup + #808 cap semantics of a manual add.
-                requested.forEach(::onQuoteAdded)
-                setPendingQuotes(emptyList())
-            } else {
-                val quotes = requested
-                // Process-restored delivery identity: a recreated sheet reloads the autosaved
-                // inline BBCode without fetching and appending the same quote set a second time.
-                val deliveryKey = quotes.inlineQuoteDeliveryKey()
-                if (savedStateHandle.get<String>(KEY_DELIVERED_QUOTES) != deliveryKey) {
-                    setPendingQuotes(quotes)
-                    materializeInlineQuotes(quotes, deliveryKey)
-                } else {
-                    setPendingQuotes(emptyList())
-                }
-            }
+            resumePendingInlineQuotes()
         }
     }
 
-    /**
-     * #805 cards OFF — fetch the `[quotemsg]` prefills (same materializer call as the cards-ON
-     * submit) and insert them into the field. The insert CONCATENATES onto the field content as
-     * it is at completion time — typing during the fetch is never lost, successive citations
-     * keep their chronological order, and the caret lands after the inserted quote (the natural
-     * « continue typing » position). The fresh quote form also warms [loadedForm] : its hash is
-     * exactly what the pre-cards flow rode at submit.
-     */
-    private fun setPendingQuotes(quotes: List<QuoteSelection>) {
-        savedStateHandle[KEY_PENDING_QUOTES] = quotes.encodeInlineQuoteRequest()
-        _state.update { it.copy(pendingQuotes = quotes) }
+    private fun PendingInlineQuoteRequest?.toSelections(): List<QuoteSelection> = this?.quotes?.map {
+        QuoteSelection(QuoteLocator(it.page, it.numreponse, it.ref), "", "", it.truncate)
+    }.orEmpty()
+
+    private fun missingInlineQuotes(): List<QuoteSelection> {
+        val present = QuotedNumreponses.fromBbcode(_state.value.text.text).toSet()
+        return _state.value.pendingQuotes.filterNot { it.numreponse in present }
     }
 
-    private fun materializeInlineQuotes(quotes: List<QuoteSelection>, deliveryKey: String) {
-        if (_state.value.isPreparingQuotes || submission.blocksMutation) return
+    private fun resumePendingInlineQuotes() {
+        val current = _state.value
+        if (!sheetOpen || !submission.isInitialized || submission.blocksMutation || current.isPreparingQuotes ||
+            current.pendingQuotes.isEmpty() || current.hasDormantQuote || current.restorableDraft != null ||
+            current.isDiscardingDraft
+        ) return
+        materializeInlineQuotes()
+    }
+
+    /** GETs may suspend while the user types; reconcile against the LIVE body before committing. */
+    private fun materializeInlineQuotes() {
         submission.disarm()
         val opening = submission
         val baseContext = replyContext()
-        materializeJob = viewModelScope.launch {
-            _state.update { it.copy(isPreparingQuotes = true) }
+        val missing = missingInlineQuotes()
+        _state.update { it.copy(isPreparingQuotes = true) }
+        materializeJob = viewModelScope.launch(start = CoroutineStart.LAZY) {
             try {
-                val quoteContext = baseContext.copy(
-                    quotedNumreponse = quotes.first().numreponse,
-                    quoteRef = null,
-                )
-                val form = quoteMaterializer.fetchFormWithQuotes(
-                    context = quoteContext,
-                    extraQuoteNumreponses = quotes.drop(1).map { it.numreponse },
-                    truncate = quotes.any { it.truncate },
-                )
-                currentCoroutineContext().ensureActive()
-                check(form.initialContent.isNotBlank()) { "empty quote prefill" }
-                if (submission !== opening || opening.blocksMutation) return@launch
-                rememberLoadedForm(form, quoteContext.page)
-                val prefills = form.initialContent.trimEnd()
-                _state.update { current ->
-                    val existing = current.text.text
-                    // #881 — the inserted quote block ends the field here, so it carries exactly
-                    // ONE trailing newline (normalised: prefills are trimEnd()'d above, never
-                    // blind-appended) and the caret lands on the fresh line below the citation.
-                    val combined =
-                        (if (existing.isBlank()) prefills else existing.trimEnd() + "\n\n" + prefills) + "\n"
-                    current.copy(
-                        text = TextFieldValue(text = combined, selection = TextRange(combined.length)),
-                        isPreparingQuotes = false,
+                if (missing.isNotEmpty()) {
+                    val quoteContext = baseContext.copy(quotedNumreponse = missing.first().numreponse, quoteRef = null)
+                    val form = quoteMaterializer.fetchFormWithQuotes(
+                        context = quoteContext,
+                        extraQuoteNumreponses = missing.drop(1).map { it.numreponse },
+                        truncate = missing.any { it.truncate },
                     )
+                    currentCoroutineContext().ensureActive()
+                    check(form.initialContent.isNotBlank()) { "empty quote prefill" }
+                    if (!canCompleteQuotePreparation(opening)) return@launch
+                    rememberLoadedForm(form, quoteContext.page)
+                    if (missingInlineQuotes() != missing) {
+                        _state.update { it.copy(isPreparingQuotes = false) }
+                        resumePendingInlineQuotes()
+                        return@launch
+                    }
+                    val prefills = form.initialContent.trimEnd()
+                    _state.update { current ->
+                        val existing = current.text.text
+                        val combined =
+                            (if (existing.isBlank()) prefills else existing.trimEnd() + "\n\n" + prefills) + "\n"
+                        current.copy(text = TextFieldValue(combined, TextRange(combined.length)))
+                    }
                 }
-                savedStateHandle[KEY_DELIVERED_QUOTES] = deliveryKey
-                setPendingQuotes(emptyList())
-                _state.update { current ->
-                    current.copy(submitError = current.submitError.takeUnless {
-                        it?.cause == EditorCause.QuoteFetchFailed
-                    })
-                }
-                scheduleAutosave()
+                commitInlineQuoteDelivery(opening)
             } catch (cancelled: CancellationException) {
                 if (submission === opening) _state.update { it.copy(isPreparingQuotes = false) }
                 throw cancelled
             } catch (_: SessionExpiredException) {
-                if (!canCompleteQuotePreparation(opening)) return@launch
-                _state.update {
-                    it.copy(isPreparingQuotes = false, submitError = EditorErrors.sessionExpired)
-                }
+                if (canCompleteQuotePreparation(opening)) quotePreparationFailed(EditorErrors.sessionExpired)
             } catch (_: IOException) {
                 if (canCompleteQuotePreparation(opening)) quotePreparationFailed()
             } catch (_: IllegalStateException) {
                 if (canCompleteQuotePreparation(opening)) quotePreparationFailed()
             }
         }
+        materializeJob?.start()
     }
 
-    private fun canCompleteQuotePreparation(opening: EditorSubmissionBinding<QuickReplyEffect, EditorError>): Boolean =
-        submission === opening && !opening.blocksMutation
+    private suspend fun commitInlineQuoteDelivery(opening: EditorSubmissionBinding<QuickReplyEffect, EditorError>) {
+        val pending = opening.drafts.pendingInlineQuoteRequest ?: return
+        autosaveJob?.cancel()
+        val result = opening.drafts.consumeInlineQuoteRequest(pending, EditorDraftStore.Draft(_state.value.text.text))
+        if (!canCompleteQuotePreparation(opening)) return
+        if (result is EditorDraftStore.StoreWriteResult.Written) {
+            finishInlineQuoteDelivery()
+            scheduleAutosave() // Preserve keystrokes made while the CAS returned.
+        } else {
+            quoteStorageFailed(result)
+        }
+    }
 
-    private fun quotePreparationFailed() {
-        _state.update {
-            it.copy(
-                isPreparingQuotes = false,
-                submitError = EditorErrors.quoteFetchFailed(inline = true, quickReply = true),
+    private fun finishInlineQuoteDelivery() {
+        savedStateHandle[KEY_QUOTE_FAILURES] = 0
+        _state.update { current ->
+            current.copy(
+                pendingQuotes = emptyList(), isPreparingQuotes = false, quoteFetchFailures = 0,
+                submitError = current.submitError.takeUnless {
+                    it?.cause == EditorCause.QuoteFetchFailed || it?.cause == EditorCause.DraftSaveFailed
+                },
             )
         }
     }
+
+    private fun canCompleteQuotePreparation(opening: EditorSubmissionBinding<QuickReplyEffect, EditorError>): Boolean =
+        submission === opening && !opening.blocksMutation && !opening.drafts.invalidated && sheetOpen
+
+    private fun quotePreparationFailed(
+        error: EditorError = EditorErrors.quoteFetchFailed(inline = true, quickReply = true),
+    ) {
+        val failures = _state.value.quoteFetchFailures + 1
+        savedStateHandle[KEY_QUOTE_FAILURES] = failures
+        _state.update { it.copy(isPreparingQuotes = false, quoteFetchFailures = failures, submitError = error) }
+    }
+
+    private fun quoteStorageFailed(result: EditorDraftStore.StoreWriteResult?) {
+        _state.update {
+            it.copy(
+                isPreparingQuotes = false, isDiscardingDraft = false,
+                quoteStorageUnavailable = it.quoteStorageUnavailable ||
+                    result is EditorDraftStore.StoreWriteResult.Conflict,
+                submitError = if (it.hasDormantQuote) EditorErrors.uncertain else EditorErrors.draftSaveFailed,
+            )
+        }
+    }
+
+    fun onQuoteReloadRequested() {
+        if (_state.value.quoteStorageUnavailable) {
+            if (submission.drafts.invalidated) openSheet(currentPage, emptyList()) else {
+                openSheet(currentPage, _state.value.quotes, retainedText = _state.value.text)
+            }
+        } else {
+            resumePendingInlineQuotes()
+        }
+    }
+
+    fun onPendingQuoteIgnored() {
+        if (!_state.value.canIgnorePendingQuote || submission.blocksMutation) return
+        val opening = submission
+        val pending = opening.drafts.pendingInlineQuoteRequest ?: return
+        submission.disarm()
+        autosaveJob?.cancel()
+        _state.update { it.copy(isPreparingQuotes = true) }
+        materializeJob = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            val result = opening.drafts.consumeInlineQuoteRequest(pending)
+            if (!canCompleteQuotePreparation(opening)) return@launch
+            if (result is EditorDraftStore.StoreWriteResult.Written) {
+                finishInlineQuoteDelivery()
+                scheduleAutosave()
+            } else {
+                quoteStorageFailed(result)
+            }
+        }
+        materializeJob?.start()
+    }
+
+    fun onDormantQuoteResumed() {
+        if (!_state.value.hasDormantQuote || _state.value.isPreparingQuotes || submission.blocksMutation) return
+        submission.acknowledge { resumePendingInlineQuotes() }
+    }
+
+    fun onDraftRestoreRequested() {
+        val offered = _state.value.restorableDraft ?: return
+        if (_state.value.isDiscardingDraft || submission.blocksMutation) return
+        submission.disarm()
+        val existing = _state.value.text.text
+        seedDraft(if (existing.isBlank() || existing == offered) offered else existing.trimEnd() + "\n\n" + offered)
+        _state.update { it.copy(restorableDraft = null) }
+        scheduleAutosave()
+        resumePendingInlineQuotes()
+    }
+
+    fun onDraftDiscardRequested() {
+        if (_state.value.restorableDraft == null || _state.value.isDiscardingDraft || submission.blocksMutation) return
+        submission.disarm()
+        autosaveJob?.cancel()
+        val opening = submission
+        _state.update { it.copy(isDiscardingDraft = true) }
+        materializeJob = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            val result = opening.flush(EditorDraftStore.Draft(body = ""))
+            if (!canCompleteQuotePreparation(opening)) return@launch
+            if (result is EditorDraftStore.StoreWriteResult.Written) {
+                _state.update { it.copy(restorableDraft = null, isDiscardingDraft = false) }
+                scheduleAutosave()
+                resumePendingInlineQuotes()
+            } else {
+                quoteStorageFailed(result)
+            }
+        }
+        materializeJob?.start()
+    }
+
+    fun onLegacyQuoteNoticeDismissed() { _state.update { it.copy(legacyQuoteRequestDropped = false) } }
 
     /** #604 lot 2 — arm a quote card ; idempotent per numreponse (re-citing a post is a no-op). */
     fun onQuoteAdded(preview: QuoteSelection) {
@@ -466,7 +561,7 @@ class QuickReplyViewModel @AssistedInject constructor(
     }
 
     fun onTextChanged(value: TextFieldValue) {
-        if (submission.blocksMutation) return
+        if (submission.blocksMutation || _state.value.isDiscardingDraft) return
         submission.disarm()
         _state.update {
             it.copy(
@@ -498,19 +593,19 @@ class QuickReplyViewModel @AssistedInject constructor(
     fun onEscalateRequested() {
         // #805 cards OFF — inert while the [quotemsg] insert is in flight : escalating now would
         // hand over a row without the citation the user just asked for.
-        if (submission.blocksClose || _state.value.isPreparingQuotes) return
+        if (submission.blocksClose || _state.value.isPreparingQuotes || _state.value.isDiscardingDraft) return
         submission.disarm()
-        sheetOpen = false
         autosaveJob?.cancel()
         val session = submission
         val ready = sessionReady
-        val body = _state.value.text.text
-        val quotes = (_state.value.quotes + _state.value.pendingQuotes).distinctBy { it.numreponse }
+        val body = bodyForHandoff()
+        val quotes = _state.value.quotes
         viewModelScope.launch {
             ready.await()
             val result = session.flush(EditorDraftStore.Draft(body = body))
             if (result is EditorDraftStore.StoreWriteResult.Written) {
-                savedStateHandle[KEY_PENDING_TRANSFERRED] = true
+                if (submission !== session || session.drafts.invalidated) return@launch
+                sheetOpen = false
                 _effects.send(QuickReplyEffect.EscalateToFullEditor(quotes))
             }
         }
@@ -522,7 +617,7 @@ class QuickReplyViewModel @AssistedInject constructor(
      * scoped to the topic's nav entry).
      */
     fun onDismissed() {
-        if (submission.blocksClose) return
+        if (submission.blocksClose || _state.value.isDiscardingDraft) return
         sheetOpen = false
         submission.disarm()
         // Cancel the GET, retain its request: closing is not an explicit quote abandonment.
@@ -535,15 +630,23 @@ class QuickReplyViewModel @AssistedInject constructor(
         // owner never happens (gate Sol).
         val session = submission
         val ready = sessionReady
-        val body = _state.value.text.text
+        val body = bodyForHandoff()
         viewModelScope.launch {
             ready.await()
             session.flush(EditorDraftStore.Draft(body = body))
         }
     }
 
+    private fun bodyForHandoff(): String {
+        val current = _state.value
+        val offered = current.restorableDraft ?: return current.text.text
+        return if (current.text.text.isBlank() || current.text.text == offered) offered else {
+            current.text.text.trimEnd() + "\n\n" + offered
+        }
+    }
+
     private fun scheduleAutosave() {
-        if (submission.blocksMutation) return
+        if (submission.blocksMutation || _state.value.restorableDraft != null || _state.value.isDiscardingDraft) return
         autosaveJob?.cancel()
         // #953 F2 — same capture-at-scheduling rule as [onDismissed] : session and body belong
         // to the keystroke that scheduled this debounce, whatever happens before it fires.
@@ -685,9 +788,7 @@ class QuickReplyViewModel @AssistedInject constructor(
         /** Same debounce as the other #405 consumers. */
         const val AUTOSAVE_DEBOUNCE_MS = 750L
 
-        /** Stable, process-restored identity of the inline quote set already delivered to the draft. */
-        const val KEY_PENDING_TRANSFERRED = "quickReply.pendingTransferred"
-        const val KEY_PENDING_QUOTES = "quickReply.pendingQuotes"
-        const val KEY_DELIVERED_QUOTES = "quickReply.deliveredQuotes"
+        /** UI retry count only; request existence and delivery belong exclusively to Room. */
+        const val KEY_QUOTE_FAILURES = "quickReply.quoteFetchFailures"
     }
 }

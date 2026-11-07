@@ -2971,6 +2971,8 @@ private fun RedfaceNavHost(
                     // the shared #405 row, so the editor auto-applies it (resumeSharedDraft = true,
                     // silent append — same composition act) WITHOUT surfacing the restore banner.
                     onEscalateToFullEditor = { subcat, page, quotes, consumesBasket ->
+                        // #1553: pending inline coordinates stay in the shared durable row. This
+                        // handoff contains cards only, even after a failed quote GET in the sheet.
                         // #868-#870 — the escalated editor inherits the sheet session's basket
                         // consumption : a « Citer N » sheet escalated to full screen still empties
                         // the basket on ITS successful submit, and only then. The handoff is built

@@ -131,7 +131,7 @@ class TopicViewModel @AssistedInject constructor(
     private var preparingEditorQuotes = false
 
     /**
-     * #1553: a full-editor quote gesture chooses its rendering before opening. Inline coordinates
+     * #1553: a sheet or full-editor quote gesture chooses its rendering before opening. Inline coordinates
      * must be committed through the domain store first; only card previews travel in memory.
      * Restoration never calls this entry point. Duplicate taps while preparing share one opening.
      */

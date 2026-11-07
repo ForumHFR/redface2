@@ -14,15 +14,21 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.width
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.model.write.QuoteLocator
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
@@ -68,18 +74,90 @@ class QuickReplyErrorBannerLayoutTest {
     fun draftWriteFailedFits() = assertBanner(EditorErrors.draftWriteFailed, "Brouillon non écrit")
 
     @Test
-    fun `quote failure detail explains reciting and escalation to ignore the quote`() {
+    fun `quote failure detail explains reload and explicit ignore after two failures`() {
         compose.setContent {
             RedfaceTheme(darkTheme = false) {
                 QuickReplyErrorBanner(EditorErrors.quoteFetchFailed(inline = true, quickReply = true))
             }
         }
         compose.onNodeWithText(
-            "Citation non chargée, envoi bloqué. Refaites « Citer » ou ouvrez l’éditeur complet " +
-                "pour envoyer sans la citation.",
+            "Citation non chargée, envoi bloqué. Utilisez « Recharger ». Après deux échecs, " +
+                "vous pourrez ignorer la citation pour envoyer votre texte seul.",
         ).assertIsDisplayed()
         compose.onNodeWithText("Recharger").assertDoesNotExist()
     }
+
+    @Test
+    fun `dormant quote exposes both explicit decisions without submitting`() {
+        val actions = mutableListOf<String>()
+        val token = EditorDraftStore.AttemptToken("tester", "reply:23:35421", "attempt", 1)
+        val state = QuickReplyUiState(
+            pendingQuotes = listOf(QuoteSelection(QuoteLocator(1, 101, null), "", "")),
+            quoteStorageUnavailable = false,
+            submission = EditorSubmissionState.Uncertain(token),
+            submitError = EditorErrors.uncertain,
+        )
+        compose.setContent {
+            RedfaceTheme(darkTheme = false) {
+                Column { QuickReplyStatus(state, callbacks(actions)) }
+            }
+        }
+        compose.onNodeWithText("Après vérification, reprendre la citation").assertIsEnabled().performClick()
+        compose.onNodeWithText("Ignorer la citation").assertIsEnabled().performClick()
+        compose.onNodeWithText("Recharger").assertDoesNotExist()
+        assertEquals(listOf("resume", "ignore quote"), actions)
+        assertFalse(state.canSubmit)
+    }
+
+    @Test
+    fun `offered body and failed quote have distinct ignore actions`() {
+        val actions = mutableListOf<String>()
+        val state = QuickReplyUiState(
+            restorableDraft = "older body",
+            pendingQuotes = listOf(QuoteSelection(QuoteLocator(1, 101, null), "", "")),
+            quoteFetchFailures = 2,
+            quoteStorageUnavailable = false,
+        )
+        compose.setContent {
+            RedfaceTheme(darkTheme = false) {
+                Column { QuickReplyStatus(state, callbacks(actions)) }
+            }
+        }
+        compose.onNodeWithText("Ignorer le brouillon").performClick()
+        compose.onNodeWithText("Ignorer la citation").performClick()
+        compose.onNodeWithText("Citation en attente").assertIsDisplayed()
+        compose.onNodeWithText("Recharger").assertDoesNotExist() // No GET behind the offer.
+        assertEquals(listOf("ignore body", "ignore quote"), actions)
+        assertFalse(state.canSubmit)
+    }
+
+    @Test
+    fun `two quote failures retain reload beside ignore`() {
+        val actions = mutableListOf<String>()
+        val state = QuickReplyUiState(
+            pendingQuotes = listOf(QuoteSelection(QuoteLocator(1, 101, null), "", "")),
+            quoteFetchFailures = 2,
+            quoteStorageUnavailable = false,
+            submitError = EditorErrors.quoteFetchFailed(inline = true, quickReply = true),
+        )
+        compose.setContent {
+            RedfaceTheme(darkTheme = false) {
+                Column { QuickReplyStatus(state, callbacks(actions)) }
+            }
+        }
+        compose.onNodeWithText("Recharger").assertIsEnabled().performClick()
+        compose.onNodeWithText("Ignorer la citation").assertIsEnabled().performClick()
+        assertEquals(listOf("reload", "ignore quote"), actions)
+    }
+
+    private fun callbacks(actions: MutableList<String>) = QuickReplyQuoteCallbacks(
+        onReload = { actions += "reload" },
+        onIgnore = { actions += "ignore quote" },
+        onResume = { actions += "resume" },
+        onRestoreDraft = { actions += "restore body" },
+        onDiscardDraft = { actions += "ignore body" },
+        onDismissLegacy = { actions += "dismiss legacy" },
+    )
 
     private fun assertBanner(error: EditorError, label: String) {
         compose.setContent {

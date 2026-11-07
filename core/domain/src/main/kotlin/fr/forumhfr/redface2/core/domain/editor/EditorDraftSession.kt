@@ -28,8 +28,16 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         private set
 
     suspend fun load(): DraftEntry? {
-        owner = store.currentOwner()
-        val entry = key?.let { store.loadEntry(owner, it) }
+        readable = false
+        val entry = try {
+            owner = store.currentOwner()
+            key?.let { store.loadEntry(owner, it) }
+        } catch (error: IOException) {
+            // Preserve the ordinary best-effort restore contract. Versioned writes still guard
+            // the row; only an unreadable inline request seals the session until a reload.
+            readable = error !is UnreadableInlineQuoteRequestException
+            throw error
+        }
         version = entry?.version ?: 0L
         published = entry?.attempt?.status == AttemptStatus.PUBLISHED
         unresolved = entry?.attempt?.token?.takeUnless { published }

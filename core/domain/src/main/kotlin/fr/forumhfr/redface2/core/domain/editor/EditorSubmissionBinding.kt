@@ -81,11 +81,15 @@ class EditorSubmissionBinding<E, F>(
 
     @Suppress("ReturnCount") // Guard clauses (load failure / invalidated owner) + the restore tail.
     suspend fun restore(key: String): EditorDraftStore.DraftEntry? {
+        initialized = false
         val entry = try {
             drafts.load()
-        } catch (_: IOException) {
+        } catch (_: UnreadableInlineQuoteRequestException) {
             draftSaveFailed()
             return null
+        } catch (_: IOException) {
+            draftSaveFailed()
+            null
         }
         if (drafts.invalidated) return null
         // PUBLISHED suppresses restoration, but a deliberate new composition is allowed by CAS.

@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.core.domain.editor
 
+import java.io.IOException
+
 /**
  * Durable coordinates for inline topic quotes, without card snapshots or HFR credentials (#1553).
  * [numreponse][Quote.numreponse] is unique per category, never globally. The enclosing topic scope
@@ -35,3 +37,6 @@ class PendingInlineQuoteRequest(val cat: Int, val topicId: Int, quotes: List<Quo
         }
     }
 }
+
+/** A corrupt/unknown durable request must never be mistaken for an absent draft. */
+class UnreadableInlineQuoteRequestException : IOException("Invalid pending inline quote request")

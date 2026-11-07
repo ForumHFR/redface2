@@ -104,7 +104,7 @@ class EditorSubmissionBindingTest {
     @Test
     fun `tryDisarm reports acceptance and publishes even when mutation is blocked`() = runTest {
         val states = mutableListOf<EditorSubmissionState>()
-        val binding = binding(VersionedEditorDraftStore(), state = { states += it })
+        val binding = binding(VersionedEditorDraftStore(), states = states)
         binding.restore("key")
         binding.setPreference(true)
         assertTrue(binding.request(4_000, true) is SubmissionRequest.Armed)
@@ -123,6 +123,56 @@ class EditorSubmissionBindingTest {
         assertFalse(binding.tryDisarm())
         assertEquals(blockedState, binding.state)
         assertEquals(listOf(blockedState), states)
+    }
+
+    @Test
+    fun `ordinary load errors still initialize autosave and publish a visible storage error`() = runTest {
+        // The shared binding must retain the same contract for topic/new MP/reply MP surfaces.
+        listOf(
+            EditorDraftKey.reply(23, 35421), EditorDraftKey.mpCompose(),
+            EditorDraftKey.mpReply(42), EditorDraftKey.newTopic(23),
+        ).forEach { key ->
+            val store = VersionedEditorDraftStore().apply { loadFailure = IOException("disk") }
+            val states = mutableListOf<EditorSubmissionState>()
+            val failures = mutableListOf<String?>()
+            val binding = binding(store, key, states, failures)
+            assertNull(binding.restore(key))
+            assertTrue(binding.isInitialized)
+            assertEquals(listOf(EditorSubmissionState.Ready), states)
+            assertEquals(listOf("save"), failures)
+            store.loadFailure = null
+            binding.autosave { Draft("continued composition") }
+            advanceTimeBy(751)
+            runCurrent()
+            assertEquals("continued composition", store.saved[key]?.body)
+            binding.setPreference(false)
+            val permit = binding.request(4_000, true) as SubmissionRequest.Accepted
+            binding.launch(permit, Draft("continued composition")) { EditorDelivery(effect = Unit) }
+            runCurrent()
+            assertEquals(1, store.beginCalls)
+        }
+    }
+
+    @Test
+    fun `an unreadable inline request remains sealed and cannot overwrite or send`() = runTest {
+        val store = VersionedEditorDraftStore().apply { loadFailure = UnreadableInlineQuoteRequestException() }
+        val states = mutableListOf<EditorSubmissionState>()
+        val failures = mutableListOf<String?>()
+        val binding = binding(store, states = states, failures = failures)
+        assertNull(binding.restore("key"))
+        assertFalse(binding.isInitialized)
+        assertEquals(listOf("save"), failures)
+        assertTrue(states.isEmpty())
+        binding.autosave { Draft("must not replace the unreadable row") }
+        binding.setPreference(false)
+        assertEquals(SubmissionRequest.Ignored, binding.request(4_000, true))
+        advanceTimeBy(751)
+        runCurrent()
+        assertEquals(0, store.writes)
+        assertEquals(0, store.beginCalls)
+        store.loadFailure = null
+        binding.restore("key")
+        assertTrue(binding.isInitialized)
     }
 
     private suspend fun TestScope.retryRejectedBegin(confirmation: Boolean) {
@@ -153,15 +203,17 @@ class EditorSubmissionBindingTest {
 
     private fun TestScope.binding(
         store: VersionedEditorDraftStore,
-        state: (EditorSubmissionState) -> Unit = {},
+        key: String = "key",
+        states: MutableList<EditorSubmissionState> = mutableListOf(),
+        failures: MutableList<String?> = mutableListOf(),
     ) = EditorSubmissionBinding(
         EditorSubmissionEnvironment(
             this,
             DiagnosticsClock { testScheduler.currentTime * 1_000_000L },
             DiagnosticsLog(),
         ),
-        EditorDraftSession(store, "key"),
-        EditorSubmissionCallbacks<Unit, String>(state = state, error = {}, success = {}),
-        EditorSubmissionErrors("uncertain", "draft", "session", "unknown"),
+        EditorDraftSession(store, key),
+        EditorSubmissionCallbacks<Unit, String>(state = { states += it }, error = { failures += it }, success = {}),
+        EditorSubmissionErrors("uncertain", "draft", "session", "unknown", draftSaveFailed = "save"),
     )
 }
