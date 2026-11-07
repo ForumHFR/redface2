@@ -39,6 +39,10 @@ data class PostEditorState(
     val pendingQuotes: List<QuoteSelection> = emptyList(),
     /** Saturates at two; restored with the pending request after process death. */
     val quoteFetchFailures: Int = 0,
+    /** ED-72: v20 Bundle coordinates were dropped, without importing them into Room. */
+    val legacyQuoteRequestDropped: Boolean = false,
+    /** Invalid/unreadable durable content cannot authorize submission. */
+    val quoteStorageUnavailable: Boolean = false,
     val draft: TextFieldValue = TextFieldValue(),
     val preview: PostContent = PostContent(blocks = emptyList()),
     val isPreviewVisible: Boolean = false,
@@ -146,11 +150,14 @@ data class PostEditorState(
             (draft.text.isNotBlank() || (mode == PostEditorMode.Reply && quotes.isNotEmpty())) &&
             !isSubmitting &&
             !submission.blocksBodyMutation &&
-            !isLoadingForm && pendingQuotes.isEmpty() &&
+            !isLoadingForm && !quoteStorageUnavailable && pendingQuotes.isEmpty() &&
             !isUploading
 
+    val hasDormantQuote: Boolean
+        get() = pendingQuotes.isNotEmpty() && submission is EditorSubmissionState.Uncertain
+
     val canIgnorePendingQuote: Boolean
-        get() = pendingQuotes.isNotEmpty() && quoteFetchFailures >= 2 && !isLoadingForm &&
+        get() = pendingQuotes.isNotEmpty() && (quoteFetchFailures >= 2 || hasDormantQuote) && !isLoadingForm &&
             !submission.blocksBodyMutation
 
     val isSubmitEnabled: Boolean get() = canSubmit

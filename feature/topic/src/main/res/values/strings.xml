@@ -253,4 +253,5 @@
     <string name="topic_alert_link_view_post">Voir le message</string>
     <string name="topic_alert_link_topic_page">%1$s, page %2$d</string>
     <string name="topic_alert_link_post_fallback">Message n° %1$d du sujet %2$d, page %3$d</string>
+    <string name="topic_quote_preparation_failed">La demande de citation n’a pas pu être enregistrée. Veuillez réessayer.</string>
 </resources>

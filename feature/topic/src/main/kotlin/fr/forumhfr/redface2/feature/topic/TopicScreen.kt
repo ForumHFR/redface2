@@ -306,12 +306,11 @@ fun TopicScreen(
      */
     onToggleMultiQuote: (selection: QuoteSelection) -> Unit = {},
     /**
-     * #291 / #604 lot 3 — « Citer N » AT OR ABOVE the full-screen threshold : opens the editor
-     * with the basket's cards (`:app` hands the previews over in memory and clears the basket).
-     * Below the threshold the screen opens the quick-reply sheet itself and consumes the basket
-     * through [onClearMultiQuote] instead. Receives the topic's `(subcat, page)` like [onReply].
+     * #1553: « Citer N » to the full editor, after durable preparation. [quotes] contains only
+     * transient cards; inline coordinates are already in Room. The topic's basket is consumed
+     * only after successful submission, including an inline opening with an empty card handoff.
      */
-    onMultiQuote: (subcat: Int, page: Int) -> Unit = { _, _ -> },
+    onMultiQuote: (subcat: Int, page: Int, quotes: List<QuoteSelection>) -> Unit = { _, _, _ -> },
     /**
      * #604 lot 3 — clears the multi-quote basket after the sheet consumed it (« Citer N » below
      * the threshold) : the cards live on in the sheet's ViewModel, and backing out must not
@@ -459,6 +458,7 @@ fun TopicScreen(
     // upfront keeps the rule happy and avoids re-resolving on every effect.
     // #335 — manual pull-to-refresh failure message (resolved upfront, same rationale).
     val refreshManualFailedMsg = stringResource(R.string.topic_refresh_failed)
+    val quotePreparationFailedMsg = stringResource(R.string.topic_quote_preparation_failed)
     // Chantier C (#546) — intra-topic search failure message (resolved upfront, same rationale).
     val searchFailedMsg = stringResource(R.string.topic_search_failed)
     // Chantier B (#546) — « no further result » Toast (resolved upfront, same rationale).
@@ -541,6 +541,9 @@ fun TopicScreen(
         viewModel.effects.collect { effect ->
             if (effect.isScrollEffect()) scrollLandingJob?.cancel()
             when (effect) {
+                TopicEffect.QuotePreparationFailed -> {
+                    snackbarScope.launch { snackbarHostState.showSnackbar(quotePreparationFailedMsg) }
+                }
                 is TopicEffect.ScrollToPost -> {
                     val page = viewModel.state.value.request.page
                     scrollLandingJob = launch {
@@ -793,7 +796,11 @@ fun TopicScreen(
         onLastReadMarkerMeasured = { lastReadMarkerHeightPx.intValue = it },
         onIntent = viewModel::send,
         onBack = onBack,
-        onReply = onReply,
+        onReply = { subcat, page, quotes ->
+            viewModel.prepareEditorQuotes(quotes) { cards ->
+                if (currentRouteCheck.value()) onReply(subcat, page, cards)
+            }
+        },
         onEscalateToFullEditor = onEscalateToFullEditor,
         // Vague 4 (#604) lot 1 / #895 étape 4 — a reply POSTed from the quick-reply sheet goes
         // straight to the retained ViewModel (in-place force refresh, #200/#226/#1243) : the sheet
@@ -828,7 +835,11 @@ fun TopicScreen(
         onFavoriteAction = viewModel::requestAddFavoriteAtPost,
         multiQuoteSelections = multiQuoteSelections,
         onToggleMultiQuote = onToggleMultiQuote,
-        onMultiQuote = onMultiQuote,
+        onMultiQuote = { subcat, page, quotes ->
+            viewModel.prepareEditorQuotes(quotes) { cards ->
+                if (currentRouteCheck.value()) onMultiQuote(subcat, page, cards)
+            }
+        },
         onClearMultiQuote = onClearMultiQuote,
         pollManualExpanded = pollManualExpanded,
         onPollExpansionChanged = onPollExpansionChanged,
@@ -1355,7 +1366,7 @@ internal fun TopicContent(
     // and the basket clear once the sheet consumed the cards.
     multiQuoteSelections: List<QuoteSelection> = emptyList(),
     onToggleMultiQuote: (selection: QuoteSelection) -> Unit = {},
-    onMultiQuote: (subcat: Int, page: Int) -> Unit = { _, _ -> },
+    onMultiQuote: (subcat: Int, page: Int, quotes: List<QuoteSelection>) -> Unit = { _, _, _ -> },
     // #436 — empties the whole basket (« Tout vider », long-press on the « Citer N » FAB).
     onClearMultiQuote: () -> Unit = {},
     // #465/#1170 — the topic's manual poll choice (owned by :app, null = follow the automatic poll
@@ -1468,20 +1479,13 @@ internal fun TopicContent(
                         WritingSurface.FULL_EDITOR -> onReply(subcat, page, emptyList())
                     }
                 },
-                // #604 lot 3 / #806 — preset routing (mockup P3, « le cas qui force le plein
-                // écran ») : when the sheet wins, the cards are pre-armed and the basket is
-                // consumed HERE (they live on in the sheet's ViewModel) ; when the full-screen
-                // editor wins (3+ under SHEET, any citation under SHEET_EXCEPT_QUOTES, always
-                // under FULL_EDITOR), the `:app` path (in-memory handoff + basket clear) takes
-                // over. The sheet branch snapshots the selection BEFORE its local clear so the
-                // launch can never observe a half-emptied basket ; the full-editor branch
-                // delegates to the existing `:app` contract, which reads the hoisted basket and
-                // hands it over BEFORE clearing it (RedfaceNavigation, « Citer N » entry) — the
-                // local snapshot is not what that branch ships (gate Codex #806).
+                // #1553: snapshot the selection at the gesture. The full-editor callback awaits
+                // durable preparation; the sheet retains its launch path until the next slice.
+                // Both paths keep the basket until successful submission.
                 onMultiQuote = { subcat, page ->
                     val selection = multiQuoteSelections.toList()
                     when (writingSurfaceFor(state.writingSurfacePreset, quoteCount = selection.size)) {
-                        WritingSurface.FULL_EDITOR -> onMultiQuote(subcat, page)
+                        WritingSurface.FULL_EDITOR -> onMultiQuote(subcat, page, selection)
                         WritingSurface.SHEET -> {
                             // #868/#869 — the basket is NO LONGER cleared here : closing the sheet
                             // without sending keeps the selection armed (the « Citer N » FAB and

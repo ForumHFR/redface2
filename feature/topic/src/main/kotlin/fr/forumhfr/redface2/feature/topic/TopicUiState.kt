@@ -522,6 +522,9 @@ enum class DeleteFailureReason {
  * the user scrolled away, replaying a scroll on rotation would steal focus).
  */
 sealed interface TopicEffect {
+    /** A quote request failed to reach durable storage; the editor must stay closed. */
+    data object QuotePreparationFailed : TopicEffect
+
     data class ModerationAlertCompleted(val outcome: ModerationAlertOutcome) : TopicEffect
     data class ModerationAlertFailed(val kind: HfrErrorKind) : TopicEffect
     data object ModerationAlertSignInRequired : TopicEffect

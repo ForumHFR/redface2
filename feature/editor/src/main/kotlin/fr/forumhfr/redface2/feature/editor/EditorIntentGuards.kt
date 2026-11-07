@@ -6,6 +6,7 @@ internal val PostEditorIntent.mutatesEditor: Boolean
         is PostEditorIntent.SubmitClicked, is PostEditorIntent.SubmitConfirmed,
         PostEditorIntent.SubmitConfirmationDismissed, PostEditorIntent.CloseRequested,
         PostEditorIntent.ErrorDismissed, PostEditorIntent.ReloadRequested, PostEditorIntent.PendingQuoteIgnored,
+        PostEditorIntent.PendingQuoteResumed, PostEditorIntent.LegacyQuoteNoticeDismissed,
         PostEditorIntent.UploadErrorDismissed,
         PostEditorIntent.TogglePreview -> false
         else -> true

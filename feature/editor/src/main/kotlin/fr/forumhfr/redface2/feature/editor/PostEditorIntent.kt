@@ -35,6 +35,11 @@ sealed interface PostEditorIntent {
     /** ED-132: explicit abandonment after repeated failure; never sends or edits the body. */
     data object PendingQuoteIgnored : PostEditorIntent
 
+    /** Acknowledge the uncertain attempt durably before resuming its dormant request. */
+    data object PendingQuoteResumed : PostEditorIntent
+
+    data object LegacyQuoteNoticeDismissed : PostEditorIntent
+
     /** Toggle « Activer votre signature » (HFR `signature=1`). */
     data class ToggleSignature(val enabled: Boolean) : PostEditorIntent
 

@@ -30,10 +30,12 @@ open class VersionedEditorDraftStore : EditorDraftStore {
     var saveReturnGate: CompletableDeferred<Unit>? = null
     var finishGate: CompletableDeferred<Unit>? = null
     var cleanupGate: CompletableDeferred<Unit>? = null
+    var loadFailure: IOException? = null
     var saveFailure: IOException? = null
     var beginFailure: IOException? = null
     var cleanupFailure: IOException? = null
     var finishFailure: IOException? = null
+    val attemptedIds = mutableListOf<String>()
     var beginCalls = 0
         private set
     var finishCalls = 0
@@ -63,6 +65,7 @@ open class VersionedEditorDraftStore : EditorDraftStore {
     override suspend fun load(owner: String?, key: String): Draft? =
         loadEntry(owner, key)?.takeUnless { it.attempt?.status == AttemptStatus.PUBLISHED }?.draft
     override suspend fun loadEntry(owner: String?, key: String): DraftEntry? {
+        loadFailure?.let { throw it }
         loadGate?.await()
         return entries[key].takeIf { owner != null && owner == activeOwner }
     }
@@ -179,6 +182,7 @@ open class VersionedEditorDraftStore : EditorDraftStore {
         owner: String?, key: String, snapshot: Draft, expectedVersion: Long, attemptId: String,
     ): BeginAttemptResult {
         beginCalls++
+        attemptedIds += attemptId
         beginGate?.await()
         val failure = beginFailure
         val rejection = when {

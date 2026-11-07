@@ -13,6 +13,7 @@ import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionAdapter
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionScenario
 import fr.forumhfr.redface2.core.domain.editor.EditorWriteOwner
@@ -340,7 +341,7 @@ class PostEditorViewModelTest {
         assertEquals(1, first.state.value.quoteFetchFailures)
         first.viewModelScope.cancel()
         val restored = SavedStateHandle(saved.keys().associateWith { saved.get<Any?>(it) })
-        // No route handoff survives process death; only coordinates + count from SavedStateHandle.
+        // The durable row retains coordinates; only the failure count comes from SavedStateHandle.
         val second = newReplyViewModel(
             savedStateHandle = restored,
             userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
@@ -356,7 +357,7 @@ class PostEditorViewModelTest {
         val afterIgnore = SavedStateHandle(restored.keys().associateWith { restored.get<Any?>(it) })
         val quoteFetches = replyRepository.fetchedContexts.count { it.isQuote }
         val third = newReplyViewModel(
-            initialQuotes = listOf(card(101)), savedStateHandle = afterIgnore,
+            initialQuotes = listOf(card(101)), savedStateHandle = afterIgnore, quoteAction = false,
             userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
         )
         testScheduler.advanceUntilIdle()
@@ -1334,8 +1335,22 @@ class PostEditorViewModelTest {
             FakeUserPreferencesRepository(quoteCardsEnabled = true),
         authRepository: AuthRepository = FakeAuthRepository(),
         savedStateHandle: SavedStateHandle = SavedStateHandle(),
-    ): PostEditorViewModel =
-        PostEditorViewModel(
+        quoteAction: Boolean = true,
+    ): PostEditorViewModel {
+        val cards = (userPreferencesRepository as? FakeUserPreferencesRepository)?.quoteCardsEnabled?.value ?: true
+        if (quoteAction && !cards && initialQuotes.isNotEmpty()) {
+            // Emulate the producer's durable boundary, never the ViewModel's restoration.
+            val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+            val entry = draftStore.entries[key]?.takeUnless {
+                it.attempt?.status == EditorDraftStore.AttemptStatus.PUBLISHED
+            }
+            val pending = PendingInlineQuoteRequest(SAMPLE_CAT, SAMPLE_TOPIC_ID, initialQuotes.map {
+                PendingInlineQuoteRequest.Quote(it.numreponse, it.locator.page, it.locator.ref, it.truncate)
+            })
+            val draft = (entry?.draft ?: EditorDraftStore.Draft("")).copy(pendingInlineQuoteRequest = pending)
+            draftStore.entries[key] = EditorDraftStore.DraftEntry(draft, (entry?.version ?: 0) + 1, entry?.attempt)
+        }
+        return PostEditorViewModel(
             request = PostEditorRequest(
                 mode = PostEditorMode.Reply,
                 cat = SAMPLE_CAT,
@@ -1343,7 +1358,7 @@ class PostEditorViewModelTest {
                 numreponse = null,
                 page = SAMPLE_PAGE,
                 subcat = subcat,
-                initialQuotes = initialQuotes,
+                initialQuotes = if (cards) initialQuotes else emptyList(),
                 resumeSharedDraft = resumeSharedDraft,
             ),
             previewParser = previewParser,
@@ -1362,6 +1377,7 @@ class PostEditorViewModelTest {
             quoteMaterializer = TopicReplyQuoteMaterializer(replyRepository),
             savedStateHandle = savedStateHandle,
         )
+    }
 
     // ----- Phase 2F-B (#11) / #441 : smiley picker ----------------------------------
     // The picker machinery (open/dismiss, ≤ 2-chars gate, debounce, stale-result guards,
@@ -2913,6 +2929,24 @@ class PostEditorViewModelTest {
     // ----- #604 lot 3 : cartes de citation dans l'éditeur ---------------------
 
     @Test
+    fun `durable inline request keeps its rendering and preserves distinct new card previews`() = runTest {
+        val pending = PendingInlineQuoteRequest(SAMPLE_CAT, SAMPLE_TOPIC_ID,
+            listOf(PendingInlineQuoteRequest.Quote(101, SAMPLE_PAGE)))
+        draftStore.preload(EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID),
+            EditorDraftStore.Draft(body = "", pendingInlineQuoteRequest = pending))
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm("[quotemsg=101]durable quote[/quotemsg]")),
+        )
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101), card(202)))
+        testScheduler.advanceUntilIdle()
+        assertEquals("[quotemsg=101]durable quote[/quotemsg]\n", vm.state.value.draft.text)
+        assertEquals(listOf(202), vm.state.value.quotes.map { it.numreponse })
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        assertNull(draftStore.saved[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)]?.pendingInlineQuoteRequest)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
     fun `initial quote cards are seeded in order and deduplicated`() = runTest {
         replyRepository.formResult = Result.success(authenticatedForm())
         val viewModel = newReplyViewModel(initialQuotes = listOf(card(202), card(101), card(202)))
@@ -3312,7 +3346,7 @@ class PostEditorViewModelTest {
         quoteCardsEnabled: Boolean = false,
     ) : UserPreferencesRepository {
         private val confirmBeforePosting = MutableStateFlow(confirmBeforePosting)
-        private val quoteCardsEnabled = MutableStateFlow(quoteCardsEnabled)
+        val quoteCardsEnabled = MutableStateFlow(quoteCardsEnabled)
 
         override fun observeProxyConfig(): Flow<ProxyConfig> = MutableStateFlow(ProxyConfig())
         override suspend fun saveProxyConfig(config: ProxyConfig) = Unit

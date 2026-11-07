@@ -319,9 +319,9 @@ private fun PostEditorControlsZone(
     showSubmitBar: Boolean,
 ) {
     val scroll = rememberScrollState()
-    val hasAlert = state.restorableDraft != null ||
+    val hasAlert = state.legacyQuoteRequestDropped || state.restorableDraft != null ||
         state.submitError != null || state.uploadError != null
-    LaunchedEffect(state.restorableDraft != null, state.submitError, state.uploadError) {
+    LaunchedEffect(state.legacyQuoteRequestDropped, state.restorableDraft != null, state.submitError, state.uploadError) {
         if (hasAlert) scroll.animateScrollTo(0)
     }
     LaunchedEffect(state.isPreviewVisible) {
@@ -399,6 +399,15 @@ internal fun PostEditorAlertBanners(
             onDiscard = { onIntent(PostEditorIntent.DraftDiscardRequested) },
         )
     }
+    if (state.legacyQuoteRequestDropped) {
+        Text(
+            text = stringResource(R.string.editor_legacy_quote_dropped),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        TextButton(onClick = { onIntent(PostEditorIntent.LegacyQuoteNoticeDismissed) }) {
+            Text(stringResource(R.string.editor_error_dismiss))
+        }
+    }
     state.submitError?.let { error ->
         val summary = error.takeIf { it.hasSubmissionSummary }
         if (summary != null) {
@@ -418,8 +427,10 @@ internal fun PostEditorAlertBanners(
                 color = MaterialTheme.colorScheme.error,
             )
         }
-        val reload = state.pendingQuotes.isNotEmpty() || error.action == EditorErrorAction.Reload
+        val reload = state.quoteStorageUnavailable || state.pendingQuotes.isNotEmpty() ||
+            error.action == EditorErrorAction.Reload
         val (action, label) = when {
+            state.hasDormantQuote -> PostEditorIntent.PendingQuoteResumed to R.string.editor_action_resume_quote
             state.canIgnorePendingQuote -> PostEditorIntent.PendingQuoteIgnored to
                 fr.forumhfr.redface2.core.ui.R.string.editor_action_ignore_quote
             reload -> PostEditorIntent.ReloadRequested to fr.forumhfr.redface2.core.ui.R.string.editor_action_reload
@@ -427,6 +438,11 @@ internal fun PostEditorAlertBanners(
         }
         TextButton(onClick = { onIntent(action) }, enabled = !state.isLoadingForm) {
             Text(text = stringResource(label))
+        }
+        if (state.hasDormantQuote) {
+            TextButton(onClick = { onIntent(PostEditorIntent.PendingQuoteIgnored) }, enabled = !state.isLoadingForm) {
+                Text(stringResource(fr.forumhfr.redface2.core.ui.R.string.editor_action_ignore_quote))
+            }
         }
     }
     state.uploadError?.let { error ->

@@ -9,6 +9,8 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptToken
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
@@ -71,6 +73,51 @@ class PostEditorQuoteRetryUiTest {
         compose.onNodeWithText("Ignorer la citation").performClick()
         assertEquals(listOf(PostEditorIntent.ReloadRequested, PostEditorIntent.PendingQuoteIgnored), intents)
         assertTrue(intents.none { it is PostEditorIntent.SubmitClicked || it == PostEditorIntent.ErrorDismissed })
+    }
+
+    @Test
+    fun `dormant quote exposes both explicit decisions without submitting or dismissing uncertainty`() {
+        val intents = mutableListOf<PostEditorIntent>()
+        compose.setContent {
+            RedfaceTheme(darkTheme = false) {
+                Column {
+                    PostEditorAlertBanners(
+                        PostEditorState(
+                            mode = PostEditorMode.Reply, cat = 23, topicId = 35421,
+                            numreponse = null, page = 1, subcat = 0,
+                            pendingQuotes = listOf(QuoteSelection(QuoteLocator(1, 101, null), "", "")),
+                            submission = EditorSubmissionState.Uncertain(AttemptToken("tester", "key", "id", 1)),
+                            submitError = EditorErrors.uncertain,
+                        ),
+                        onIntent = intents::add,
+                    )
+                }
+            }
+        }
+        compose.onNodeWithText("Après vérification, reprendre la citation").performClick()
+        compose.onNodeWithText("Ignorer la citation").performClick()
+        assertEquals(listOf(PostEditorIntent.PendingQuoteResumed, PostEditorIntent.PendingQuoteIgnored), intents)
+    }
+
+    @Test
+    fun `v20 transition explicitly tells the user to select the quote again`() {
+        val intents = mutableListOf<PostEditorIntent>()
+        compose.setContent {
+            RedfaceTheme(darkTheme = false) {
+                Column {
+                    PostEditorAlertBanners(
+                        PostEditorState(
+                            mode = PostEditorMode.Reply, cat = 23, topicId = 35421,
+                            numreponse = null, page = 1, subcat = 0, legacyQuoteRequestDropped = true,
+                        ),
+                        onIntent = intents::add,
+                    )
+                }
+            }
+        }
+        compose.onNodeWithText("Veuillez sélectionner à nouveau le message à citer.", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Masquer").performClick()
+        assertEquals(listOf(PostEditorIntent.LegacyQuoteNoticeDismissed), intents)
     }
 
 }
