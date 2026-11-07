@@ -1,4 +1,5 @@
-Redface 2 v0.69.4 — dev.
-- Editors: rewritten error messages, kept while typing. A quote that failed to load blocks "Send": "Reload", then "Ignore quote".
-- Sending: after a reply or quote from an older page, "Last page" appears even if reloading takes over 1 s.
-- Interface: Material 3 components updated to 1.5 (beta). To close a sheet by dragging it down, release while moving or drag it past half its height.
+Redface 2 v0.69.5 — dev.
+- Viewer: animated GIFs are decoded one at a time; no more freezes or missing images after a zoomed GIF.
+- Viewer: a vertical swipe no longer brings the action bar back.
+- Editor: no more background crash after many insertions in a long message.
+- New PM: rebuilt text field (one undo step per action, preview computed off the main thread).
