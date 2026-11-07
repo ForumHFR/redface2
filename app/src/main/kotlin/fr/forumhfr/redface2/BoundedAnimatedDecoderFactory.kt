@@ -10,7 +10,7 @@ import kotlinx.coroutines.sync.withPermit
 
 /**
  * #1411: animated decoding copies the full encoded source into the Java heap, using about twice
- * the GIF size per decode. Up to nine concurrent decodes were measured on return from the viewer.
+ * the GIF size per decode. Nine to fourteen concurrent decodes were measured on return from the viewer.
  * Share one semaphore across this factory's decoders to bound that transient allocation overlap.
  */
 internal class BoundedAnimatedDecoderFactory(
