@@ -6,24 +6,24 @@ import org.junit.Test
 class TextFieldStateBbcodeTest {
     @Test
     fun changedRangeKeepsCommonPrefixAndSuffix() {
-        assertEquals(BbcodeChangedRange(3, 6, 7), bbcodeChangedRange("abcOLDxyz", "abcNEW!xyz"))
+        assertEquals(BbcodeTextReplacement(3, 6, "NEW!"), minimalReplacement("abcOLDxyz", "abcNEW!xyz"))
     }
 
     @Test
     fun changedRangeNeverOverlapsOnInsertionDeletionOrRepeatedText() {
         listOf(
-            Triple("aaaa", "aaaaa", BbcodeChangedRange(4, 4, 5)),
-            Triple("aaaaa", "aaaa", BbcodeChangedRange(4, 5, 4)),
-            Triple("", "[b][/b]", BbcodeChangedRange(0, 0, 7)),
-            Triple("abc", "", BbcodeChangedRange(0, 3, 0)),
-            Triple("same", "same", BbcodeChangedRange(4, 4, 4)),
-            Triple("abc", "xyz", BbcodeChangedRange(0, 3, 3)),
+            Triple("aaaa", "aaaaa", BbcodeTextReplacement(4, 4, "a")),
+            Triple("aaaaa", "aaaa", BbcodeTextReplacement(4, 5, "")),
+            Triple("", "[b][/b]", BbcodeTextReplacement(0, 0, "[b][/b]")),
+            Triple("abc", "", BbcodeTextReplacement(0, 3, "")),
+            Triple("same", "same", BbcodeTextReplacement(4, 4, "")),
+            Triple("abc", "xyz", BbcodeTextReplacement(0, 3, "xyz")),
         ).forEach { (before, after, expected) ->
-            val range = bbcodeChangedRange(before, after)
+            val range = minimalReplacement(before, after)
             assertEquals(expected, range)
             assertEquals(
                 after,
-                before.replaceRange(range.start, range.oldEnd, after.substring(range.start, range.newEnd)),
+                before.replaceRange(range.start, range.end, range.text),
             )
         }
     }

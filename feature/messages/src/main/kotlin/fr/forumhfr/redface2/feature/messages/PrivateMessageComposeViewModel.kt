@@ -41,6 +41,7 @@ import fr.forumhfr.redface2.core.domain.upload.UploadFailureDiagnostics
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -112,6 +113,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
 
     /** Body and IME state belong to this ViewModel, never to a Bundle saver. */
     val bodyFieldState = TextFieldState()
+    private var previousBody = bodyFieldState.text.toString()
 
     private val initialRecipients = initialRecipient.orEmpty().trim()
     private val _state = MutableStateFlow(
@@ -258,12 +260,11 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     }
 
     private fun observeBody() {
-        var previous = bodyFieldState.text.toString()
         viewModelScope.launch {
             snapshotFlow { bodyFieldState.text.toString() }.collect { body ->
                 _state.update { it.copy(bodyText = body) }
-                if (body != previous) {
-                    previous = body
+                if (body != previousBody) {
+                    previousBody = body
                     scheduleAutosave()
                 }
             }
@@ -300,15 +301,15 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
      * recoverable if process death loses the live editor state before autosave.
      * ED-81/170: durable status wins over every offer and server prefill.
      */
-    @OptIn(ExperimentalFoundationApi::class)
     private suspend fun restoreDraftIfAny() {
         val entry = submission.restore(draftKey) ?: return
         if (submission.blocksMutation || (entry.attempt != null && !acceptMutation())) return
         val draft = entry.draft
         if (entry.attempt != null) {
             replaceBody(draft.body)
+            previousBody = draft.body
             // Automatic opening establishes the baseline; explicit restore below stays undoable.
-            bodyFieldState.undoState.clearHistory()
+            resetUndoBaseline()
             _state.update {
                 it.copy(
                     subject = draft.subject.orEmpty(), recipients = draft.recipients.orEmpty(),
@@ -331,6 +332,11 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                 }
             }
         }
+    }
+
+    @OptIn(ExperimentalFoundationApi::class)
+    private fun resetUndoBaseline() {
+        bodyFieldState.undoState.clearHistory()
     }
 
     private fun PrivateMessageComposeUiState.canOfferDraftRestore(
@@ -606,7 +612,12 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     }
 
     fun onTogglePreview() {
-        _state.update { it.copy(isPreviewVisible = !it.isPreviewVisible) }
+        _state.update {
+            it.copy(
+                isPreviewVisible = !it.isPreviewVisible,
+                preview = if (it.isPreviewVisible) PostContent(blocks = emptyList()) else it.preview,
+            )
+        }
     }
 
     fun onToggleSignature(enabled: Boolean) {

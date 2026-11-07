@@ -260,7 +260,11 @@ internal fun ComposeEditorBody(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 if (hasRestorableDraft) {
-                    MessageDraftRestoreBanner(onRestore = onDraftRestore, onDiscard = onDraftDiscard)
+                    MessageDraftRestoreBanner(
+                        onRestore = onDraftRestore,
+                        onDiscard = onDraftDiscard,
+                        restoreEnabled = !state.isUploading,
+                    )
                 }
 
                 state.submitError?.let { error ->

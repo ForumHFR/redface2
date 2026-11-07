@@ -59,6 +59,16 @@ class BbcodeTextDiffTest {
     }
 
     @Test
+    fun `both prefix and suffix retreat out of surrogate pairs`() {
+        assertReplacement("😀", "😁🨀", BbcodeTextReplacement(0, 2, "😁🨀"))
+    }
+
+    @Test
+    fun `an isolated low surrogate can become a complete pair`() {
+        assertReplacement("\uDE00x", "😀x", BbcodeTextReplacement(0, 1, "😀"))
+    }
+
+    @Test
     fun `an emoji next to either edge of an insertion is preserved`() {
         assertReplacement("a😀b", "a😀Xb", BbcodeTextReplacement(3, 3, "X"))
         assertReplacement("a😀b", "aX😀b", BbcodeTextReplacement(1, 1, "X"))

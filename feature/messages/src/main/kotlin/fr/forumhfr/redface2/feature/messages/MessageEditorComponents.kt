@@ -110,6 +110,7 @@ internal fun MessageDraftRestoreBanner(
     onRestore: () -> Unit,
     onDiscard: () -> Unit,
     modifier: Modifier = Modifier,
+    restoreEnabled: Boolean = true,
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -131,6 +132,7 @@ internal fun MessageDraftRestoreBanner(
             )
             TextButton(
                 onClick = onRestore,
+                enabled = restoreEnabled,
                 modifier = Modifier.heightIn(min = 48.dp),
                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
             ) {

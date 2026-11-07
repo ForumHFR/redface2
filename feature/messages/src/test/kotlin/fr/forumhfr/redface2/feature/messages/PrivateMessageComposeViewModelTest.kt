@@ -65,6 +65,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
@@ -809,6 +810,34 @@ class PrivateMessageComposeViewModelTest {
     }
 
     @Test
+    fun draftRestoreWaitsUntilUploadCompletes() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        draftStore.preload(
+            EditorDraftKey.mpCompose(),
+            EditorDraftStore.Draft(body = "rescued body", isPrivate = true),
+        )
+        val gate = CompletableDeferred<Unit>()
+        val uploads = FakeUploadRepository().apply { uploadGate = gate }
+        val vm = viewModel(repository, uploadRepository = uploads)
+        vm.onImagesPicked(listOf("content://pick/1"))
+        runCurrent()
+        assertTrue(vm.state.value.isUploading)
+
+        vm.onDraftRestoreRequested()
+        assertEquals("", vm.bodyFieldState.text.toString())
+        assertEquals("rescued body", vm.state.value.restorableDraft)
+
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertFalse(vm.state.value.isUploading)
+        val uploadedBody = vm.bodyFieldState.text.toString()
+        vm.onDraftRestoreRequested()
+        assertEquals("$uploadedBody\n\nrescued body", vm.bodyFieldState.text.toString())
+        assertNull(vm.state.value.restorableDraft)
+    }
+
+    @Test
     fun `recipient prefill does not hide a different stored compose draft`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchComposeForm("bozoleclown") } returns composeForm(dest = "bozoleclown")
@@ -1449,6 +1478,7 @@ class PrivateMessageComposeViewModelTest {
         original.onSubmit()
         advanceUntilIdle()
         original.viewModelScope.cancel()
+        val writesBeforeRestore = draftStore.saveCount
         val restored = viewModel(repository)
         val field = restored.bodyFieldState
         Snapshot.sendApplyNotifications()
@@ -1460,6 +1490,36 @@ class PrivateMessageComposeViewModelTest {
         assertEquals("alice", restored.state.value.recipients)
         assertEquals(EditorErrors.uncertain(EditorErrorSurface.MessageCompose), restored.state.value.submitError)
         assertNull(restored.state.value.restorableDraft)
+        advanceTimeBy(800)
+        runCurrent()
+        assertEquals("automatic hydration must not save an identical draft", writesBeforeRestore, draftStore.saveCount)
+    }
+
+    @Test
+    fun previewIsClearedWhenHiddenAndBeforeReopening() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val oldPreview = PostContent(listOf(PostBlock.Paragraph(listOf(PostInline.Text("old")))))
+        val newPreview = PostContent(listOf(PostBlock.Paragraph(listOf(PostInline.Text("new")))))
+        val vm = viewModel(
+            repository,
+            previewParser = BbcodePreviewParser { if (it == "old") oldPreview else newPreview },
+            defaultDispatcher = StandardTestDispatcher(testScheduler),
+        )
+        vm.editBody(TextFieldValue("old"))
+        vm.onTogglePreview()
+        runCurrent()
+        assertEquals(oldPreview, vm.state.value.preview)
+
+        vm.onTogglePreview()
+        assertFalse(vm.state.value.isPreviewVisible)
+        assertEquals(PostContent(emptyList()), vm.state.value.preview)
+        vm.editBody(TextFieldValue("new"))
+        vm.onTogglePreview()
+        assertTrue(vm.state.value.isPreviewVisible)
+        assertEquals(PostContent(emptyList()), vm.state.value.preview)
+        runCurrent()
+        assertEquals(newPreview, vm.state.value.preview)
     }
 
     @Test

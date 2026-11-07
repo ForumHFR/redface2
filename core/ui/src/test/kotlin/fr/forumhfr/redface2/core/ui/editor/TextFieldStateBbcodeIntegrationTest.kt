@@ -80,6 +80,17 @@ class TextFieldStateBbcodeIntegrationTest {
     }
 
     @Test
+    fun wrappingSelectionNextToEmojiPreservesPairsAndUndoesSelection() {
+        setFieldContent()
+        field().performTextInput("😀word😁")
+        field().performTextInputSelection(TextRange(2, 6))
+        change { state.editBbcode { text, start, end -> applyBbcodeAction(BbcodeAction.Bold, text, start, end) } }
+        assertValue("😀[b]word[/b]😁", TextRange(5, 9))
+        change { state.undoState.undo() }
+        assertValue("😀word😁", TextRange(2, 6))
+    }
+
+    @Test
     fun selectionOnlyFormattingUsesLiveBufferAndDoesNotAddTextUndoEntry() {
         setFieldContent()
         field().performTextInput("hello")
