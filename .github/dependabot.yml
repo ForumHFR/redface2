@@ -14,6 +14,10 @@ updates:
         update-types:
           - "version-update:semver-minor"
           - "version-update:semver-major"
+      # Majeure 6 à migrer à part dans RedfaceColorScheme.kt, cf. #296.
+      - dependency-name: "com.materialkolor:material-color-utilities"
+        update-types:
+          - "version-update:semver-major"
     groups:
       build-toolchain:
         patterns:
