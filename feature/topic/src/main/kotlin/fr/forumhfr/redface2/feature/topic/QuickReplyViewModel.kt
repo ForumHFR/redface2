@@ -352,6 +352,7 @@ class QuickReplyViewModel @AssistedInject constructor(
         return _state.value.pendingQuotes.filterNot { it.numreponse in present }
     }
 
+    @Suppress("ComplexCondition") // One guard per state that must not resume the inline quote fetch.
     private fun resumePendingInlineQuotes() {
         val current = _state.value
         if (!sheetOpen || !submission.isInitialized || submission.blocksMutation || current.isPreparingQuotes ||
