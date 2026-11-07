@@ -116,23 +116,24 @@ class TopicFormInputTest {
     }
 
     @Test
-    fun selectionOnlyKeepsArmedSubmissionAndDoesNotMarkBodyEdited() {
+    fun selectionOnlyDisarmsLikeAnyFieldInteractionAndDoesNotMarkBodyEdited() {
         setFieldContent(confirmBeforePosting = true, editing = true)
         val bodyEdited = TopicFormViewModel::class.java.getDeclaredField("bodyEditedBeforeHydration").apply {
             isAccessible = true
         }
-        val token = compose.runOnIdle {
+        compose.runOnIdle {
             assertFalse(bodyEdited.getBoolean(vm))
             vm.submit(TopicFormIntent.SubmitClicked())
             requireNotNull(vm.state.value.armToken)
         }
         // Exercise user selection through the field, without programmatic TextFieldState.edit.
+        // Same contract as d0e2d80e (every ContentChanged disarmed) and the new PM editor: any field
+        // interaction disarms, but a selection-only change is not a body edit.
         field().performSemanticsAction(SemanticsActions.SetSelection) { assertTrue(it(1, 3, false)) }
         compose.runOnIdle {
             assertEquals("seed", vm.bodyFieldState.text.toString())
             assertEquals(TextRange(1, 3), vm.bodyFieldState.selection)
-            assertEquals(token, vm.state.value.armToken)
-            assertTrue(vm.state.value.showSubmitConfirmation)
+            assertNull(vm.state.value.armToken)
             assertFalse(bodyEdited.getBoolean(vm))
         }
         coVerify(exactly = 0) { repository.submitEditFirstPost(any(), any(), any(), any(), any(), any()) }

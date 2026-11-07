@@ -1668,8 +1668,8 @@ class TopicFormViewModelTest {
         uploadCompletion.complete(Unit)
         syncBody()
         val imageUrl = "https://rehost.diberie.com/Picture/Get/f/1"
-        // Hydration parks the caret at the end; the first upload adds no leading newline.
-        val expected = "$seed[url=$imageUrl][img]$imageUrl[/img][/url]"
+        // Hydration parks the caret at the end; the first upload adds no leading newline (FULL insert mode).
+        val expected = "$seed[img]$imageUrl[/img]"
         assertEquals(expected, vm.bodyFieldState.text.toString())
         assertEquals(TextRange(expected.length), vm.bodyFieldState.selection)
         assertEquals(seed, vm.state.value.draftHydratedContent)
