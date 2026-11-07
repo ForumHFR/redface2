@@ -161,18 +161,7 @@ internal fun PrivateMessageReplyContent(
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
             MessageEditorHeader(title = stringResource(R.string.messages_reply_title), onBack = onBack)
-            // Keep the offer visible while the form replaces the editor, including an offline failure.
-            if (state.restorableDraft != null &&
-                (state.formError || (state.isLoadingForm && !state.formAvailable))
-            ) {
-                Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    MessageDraftRestoreBanner(
-                        onRestore = onDraftRestore,
-                        onDiscard = onDraftDiscard,
-                        restoreEnabled = !state.isUploading && !state.isLoadingForm,
-                    )
-                }
-            }
+            ReplyRestoreOfferOverForm(state = state, onRestore = onDraftRestore, onDiscard = onDraftDiscard)
             when {
                 state.formError -> MessageFormErrorState(onRetry = onRetryFormLoad)
                 state.isLoadingForm && !state.formAvailable -> MessageFormLoadingState()
@@ -371,5 +360,25 @@ internal fun ReplyEditorBody(
                 readOnly = state.isUploading || state.submission.blocksBodyMutation,
             )
         }
+    }
+}
+
+/** Keep the offer visible while the form replaces the editor, including an offline failure. */
+private val PrivateMessageReplyUiState.restoreOfferReplacesEditor: Boolean
+    get() = restorableDraft != null && (formError || isLoadingForm && !formAvailable)
+
+@Composable
+private fun ReplyRestoreOfferOverForm(
+    state: PrivateMessageReplyUiState,
+    onRestore: () -> Unit,
+    onDiscard: () -> Unit,
+) {
+    if (!state.restoreOfferReplacesEditor) return
+    Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        MessageDraftRestoreBanner(
+            onRestore = onRestore,
+            onDiscard = onDiscard,
+            restoreEnabled = !state.isUploading && !state.isLoadingForm,
+        )
     }
 }
