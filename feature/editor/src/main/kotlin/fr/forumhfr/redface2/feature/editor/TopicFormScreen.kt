@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -133,6 +135,8 @@ fun TopicFormScreen(
     val smileyPicker = viewModel.smileyPicker
     TopicFormContent(
         state = state,
+        bodyFieldState = viewModel.bodyFieldState,
+        bodyInputTransformation = viewModel.bodyInputTransformation,
         onIntent = viewModel::submit,
         onOpenSmileys = smileyPicker::open,
         modifier = modifier,
@@ -153,8 +157,11 @@ fun TopicFormScreen(
 }
 
 @Composable
+@Suppress("LongParameterList") // Live body and its synchronous guard accompany the UI projection.
 internal fun TopicFormContent(
     state: TopicFormState,
+    bodyFieldState: TextFieldState,
+    bodyInputTransformation: InputTransformation,
     onIntent: (TopicFormIntent) -> Unit,
     // #441 — opens the shared smiley picker controller (the sheet host lives in
     // TopicFormScreen, next to the controller's state collection).
@@ -193,8 +200,8 @@ internal fun TopicFormContent(
                         onImageUploadRequested = launchImagePicker,
                     )
                     BbcodeTextField(
-                        value = state.draft,
-                        onValueChange = { onIntent(TopicFormIntent.ContentChanged(it)) },
+                        state = bodyFieldState,
+                        inputTransformation = bodyInputTransformation,
                         label = stringResource(R.string.editor_field_label),
                         modifier = Modifier.weight(1f),
                         // #459 — lock editing during a batch so the caret cannot move between two

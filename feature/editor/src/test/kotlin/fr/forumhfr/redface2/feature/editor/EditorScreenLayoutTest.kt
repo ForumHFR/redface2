@@ -1,6 +1,8 @@
 package fr.forumhfr.redface2.feature.editor
 
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
@@ -98,6 +100,8 @@ class EditorScreenLayoutTest {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 TopicFormContent(
                     state = topicState(restorableDraft = "Brouillon à restaurer"),
+                    bodyFieldState = remember { TextFieldState() },
+                    bodyInputTransformation = InputTransformation {},
                     onIntent = {},
                     onOpenSmileys = {},
                     modifier = Modifier.fillMaxSize(),

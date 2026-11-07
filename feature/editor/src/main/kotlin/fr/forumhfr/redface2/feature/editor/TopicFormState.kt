@@ -4,7 +4,6 @@ import androidx.compose.ui.text.input.TextFieldValue
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
-import fr.forumhfr.redface2.core.domain.editor.validateBbcodeDraft
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
@@ -31,7 +30,8 @@ data class TopicFormState(
     val page: Int?,
     val numreponse: Int?,
     val subject: TextFieldValue = TextFieldValue(),
-    val draft: TextFieldValue = TextFieldValue(),
+    /** Descending projection of the live ViewModel buffer; never an editable source. */
+    val bodyText: String = "",
     val preview: PostContent = PostContent(blocks = emptyList()),
     val isPreviewVisible: Boolean = false,
     val validation: BbcodeValidation = BbcodeValidation.Idle,
@@ -70,8 +70,8 @@ data class TopicFormState(
     val subjectHydratedContent: String? = null,
     /** Mirror of [subjectHydratedFromServer] for the BBCode draft. */
     val draftHydratedFromServer: Boolean = false,
-    /** Exact untouched body received from HFR; null until a non-blank hydration lands. */
-    val draftHydratedContent: String? = null,
+    /** Exact server seed, set only when body hydration is applied; empty for a new topic. */
+    val draftHydratedContent: String = "",
     /** Mirror of [PostEditorState.optionsHydratedFromForm] for the same anti-clobber reason. */
     val optionsHydratedFromForm: Boolean = false,
     /**
@@ -147,7 +147,7 @@ data class TopicFormState(
                     page != null &&
                     (selectedSubcat != null && selectedSubcat > 0) &&
                     subject.text.isNotBlank() &&
-                    draft.text.isNotBlank() &&
+                    bodyText.isNotBlank() &&
                     !isLoadingForm &&
                     !isSubmitting &&
                     !submission.blocksBodyMutation &&
@@ -157,7 +157,7 @@ data class TopicFormState(
                 cat != null &&
                     isSubcatChoiceComplete &&
                     subject.text.isNotBlank() &&
-                    draft.text.isNotBlank() &&
+                    bodyText.isNotBlank() &&
                     !isLoadingForm &&
                     !isSubmitting &&
                     !submission.blocksBodyMutation &&
@@ -182,7 +182,6 @@ data class TopicFormState(
  */
 sealed interface TopicFormIntent {
     data class SubjectChanged(val value: TextFieldValue) : TopicFormIntent
-    data class ContentChanged(val value: TextFieldValue) : TopicFormIntent
     data class ToolbarActionClicked(val action: BbcodeAction) : TopicFormIntent
     data object TogglePreview : TopicFormIntent
     data class SubmitClicked(val timeoutMillis: Long = 4_000L) : TopicFormIntent
@@ -282,9 +281,3 @@ sealed interface TopicFormEffect {
      */
     data object CloseCommitted : TopicFormEffect
 }
-
-internal fun TopicFormState.withDraft(updated: TextFieldValue): TopicFormState =
-    copy(
-        draft = updated,
-        validation = validateBbcodeDraft(updated.text),
-    )

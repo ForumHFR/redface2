@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.feature.editor
 
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -83,6 +85,8 @@ class EditorSubmitCallbackRestorationTest {
             TopicFormState(TopicFormMode.EditFirstPost, 23, 401, 35421, 1, 640),
         )
         every { model.effects } returns effects.receiveAsFlow()
+        every { model.bodyFieldState } returns TextFieldState()
+        every { model.bodyInputTransformation } returns InputTransformation {}
         val received = mutableListOf<TopicFormEffect.SubmitSucceeded>()
         restoration.setContent {
             val owner = rememberSubmitAccount(account.value)

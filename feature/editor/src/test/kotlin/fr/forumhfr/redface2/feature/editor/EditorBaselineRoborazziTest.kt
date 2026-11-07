@@ -1,6 +1,8 @@
 package fr.forumhfr.redface2.feature.editor
 
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
@@ -139,8 +141,12 @@ class EditorBaselineRoborazziTest {
                     numreponse = null,
                     hasSubcategorySelect = false,
                     subject = TextFieldValue("Sujet de démonstration"),
-                    draft = draft,
+                    bodyText = draft.text,
                 ),
+                bodyFieldState = remember(scenario) {
+                    TextFieldState(initialText = draft.text, initialSelection = draft.selection)
+                },
+                bodyInputTransformation = InputTransformation {},
                 onIntent = {},
                 onOpenSmileys = {},
                 modifier = Modifier.fillMaxSize(),
