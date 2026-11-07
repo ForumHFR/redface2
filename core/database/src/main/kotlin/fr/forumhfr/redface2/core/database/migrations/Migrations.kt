@@ -526,3 +526,10 @@ val MIGRATION_19_20: Migration = object : Migration(19, 20) {
         db.execSQL("ALTER TABLE editor_drafts ADD COLUMN attemptState TEXT")
     }
 }
+
+/** v20 → v21 (#1553): old drafts retain all fields/attempts; no Bundle coordinates are imported. */
+val MIGRATION_20_21: Migration = object : Migration(20, 21) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE editor_drafts ADD COLUMN pendingInlineQuoteRequest TEXT")
+    }
+}

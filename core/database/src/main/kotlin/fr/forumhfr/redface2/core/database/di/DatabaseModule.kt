@@ -26,6 +26,7 @@ import fr.forumhfr.redface2.core.database.migrations.MIGRATION_17_18
 import fr.forumhfr.redface2.core.database.migrations.MIGRATION_18_19
 import fr.forumhfr.redface2.core.database.migrations.MIGRATION_19_20
 import fr.forumhfr.redface2.core.database.migrations.MIGRATION_1_2
+import fr.forumhfr.redface2.core.database.migrations.MIGRATION_20_21
 import fr.forumhfr.redface2.core.database.migrations.MIGRATION_2_3
 import fr.forumhfr.redface2.core.database.migrations.MIGRATION_3_4
 import fr.forumhfr.redface2.core.database.migrations.MIGRATION_4_5
@@ -68,6 +69,7 @@ object DatabaseModule {
             MIGRATION_17_18,
             MIGRATION_18_19,
             MIGRATION_19_20,
+            MIGRATION_20_21,
         )
         .build()
 

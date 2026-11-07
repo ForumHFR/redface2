@@ -40,4 +40,6 @@ data class EditorDraftEntity(
     val attemptVersion: Long? = null,
     /** ED-170: IN_PROGRESS, PUBLISHED or UNCERTAIN; no content is encoded in this marker. */
     val attemptState: String? = null,
+    /** #1553: versioned coordinates encoded by :core:data, never card content or HFR credentials. */
+    val pendingInlineQuoteRequest: String? = null,
 )

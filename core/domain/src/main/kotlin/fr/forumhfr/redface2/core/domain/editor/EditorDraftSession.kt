@@ -22,6 +22,8 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
     private var published = false
     private var readable = false
     private var unresolved: AttemptToken? = null
+    var pendingInlineQuoteRequest: PendingInlineQuoteRequest? = null
+        private set
     var invalidated = false
         private set
 
@@ -31,6 +33,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         version = entry?.version ?: 0L
         published = entry?.attempt?.status == AttemptStatus.PUBLISHED
         unresolved = entry?.attempt?.token?.takeUnless { published }
+        pendingInlineQuoteRequest = entry?.draft?.pendingInlineQuoteRequest.takeUnless { published }
         readable = true
         return entry
     }
@@ -45,7 +48,40 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
     suspend fun save(draft: Draft): StoreWriteResult = writes.withLock {
         // Once a storage call can commit, cancellation must not separate its result from adoption.
         withContext(NonCancellable) {
-            val result = if (canWrite()) writeComposition(draft) else StoreWriteResult.OwnerChanged
+            val result = if (canWrite()) writeComposition(ownedDraft(draft)) else StoreWriteResult.OwnerChanged
+            adopt(result)
+            result
+        }
+    }
+
+    /** A new user action only; loading/restoring a surface must never enqueue its launch snapshot. */
+    suspend fun enqueueInlineQuoteRequest(request: PendingInlineQuoteRequest): StoreWriteResult = writes.withLock {
+        withContext(NonCancellable) {
+            val result = mutation {
+                store.enqueueInlineQuoteRequest(owner, checkNotNull(key), request, version)
+            }
+            if (result is StoreWriteResult.Written) {
+                pendingInlineQuoteRequest = pendingInlineQuoteRequest?.merge(request) ?: request
+            }
+            adopt(result)
+            result
+        }
+    }
+
+    /**
+     * Await delivery ([draft] supplied) or ignore (no draft). The exact request guards GET callbacks
+     * that finish after a newer quote action. A dormant request can only be ignored, not delivered.
+     */
+    suspend fun consumeInlineQuoteRequest(
+        request: PendingInlineQuoteRequest, draft: Draft? = null,
+    ): StoreWriteResult = writes.withLock {
+        withContext(NonCancellable) {
+            val result = if (pendingInlineQuoteRequest != request || (draft != null && unresolved != null)) {
+                StoreWriteResult.Conflict
+            } else {
+                mutation { store.consumeInlineQuoteRequest(owner, checkNotNull(key), request, version, draft) }
+            }
+            if (result is StoreWriteResult.Written) pendingInlineQuoteRequest = null
             adopt(result)
             result
         }
@@ -53,10 +89,11 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
 
     suspend fun begin(draft: Draft, attemptId: String): BeginAttemptResult = writes.withLock {
         if (!canWrite()) return@withLock BeginAttemptResult.Rejected(StoreWriteResult.OwnerChanged)
-        val prepared = if (published) writeComposition(draft) else StoreWriteResult.Written(version)
+        val snapshot = ownedDraft(draft)
+        val prepared = if (published) writeComposition(snapshot) else StoreWriteResult.Written(version)
         adopt(prepared)
         if (prepared !is StoreWriteResult.Written) return@withLock BeginAttemptResult.Rejected(prepared)
-        store.beginAttempt(owner, checkNotNull(key), draft, version, attemptId).also { result ->
+        store.beginAttempt(owner, checkNotNull(key), snapshot, version, attemptId).also { result ->
             if (result is BeginAttemptResult.Started) {
                 version = result.token.version
                 unresolved = result.token
@@ -70,6 +107,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
             if (result is StoreWriteResult.Written) {
                 published = outcome == AttemptOutcome.PUBLISHED
                 unresolved = token.takeIf { outcome == AttemptOutcome.UNCERTAIN }
+                if (published) pendingInlineQuoteRequest = null
             }
         }
     }
@@ -79,6 +117,14 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
     }
 
     private fun canWrite(): Boolean = readable && !invalidated && key != null
+
+    private fun ownedDraft(draft: Draft): Draft = draft.copy(pendingInlineQuoteRequest = pendingInlineQuoteRequest)
+
+    private suspend fun mutation(operation: suspend () -> StoreWriteResult): StoreWriteResult = try {
+        if (canWrite()) operation() else StoreWriteResult.OwnerChanged
+    } catch (error: IOException) {
+        StoreWriteResult.Failed(error)
+    }
 
     private suspend fun writeComposition(draft: Draft): StoreWriteResult = try {
         val attempt = unresolved

@@ -55,7 +55,7 @@ class EditorDraftDaoTest {
                 recipients = "bob",
                 updatedAt = 1_700_000_000_000L,
                 isPrivate = true,
-            ),
+            ).copy(pendingInlineQuoteRequest = "coordinates"),
         )
 
         val stored = dao.get("alice|mpnew")
@@ -64,6 +64,7 @@ class EditorDraftDaoTest {
         assertEquals("secret subject", stored.subject)
         assertEquals("bob", stored.recipients)
         assertEquals(true, stored.isPrivate)
+        assertEquals("coordinates", stored.pendingInlineQuoteRequest)
     }
 
     @Test
@@ -90,7 +91,8 @@ class EditorDraftDaoTest {
             val original = draft(
                 "alice|$state", "alice", body = "private body", subject = "private subject",
                 recipients = "recipient", isPrivate = true,
-            ).copy(contentVersion = 7, attemptId = "attempt", attemptVersion = 4, attemptState = state)
+            ).copy(contentVersion = 7, attemptId = "attempt", attemptVersion = 4, attemptState = state,
+                pendingInlineQuoteRequest = "coordinates")
             dao.upsert(original)
             val otherOwner = original.copy(draftKey = "bob|$state", ownerId = "bob")
             val publicDraft = original.copy(draftKey = "alice|public:$state", isPrivate = false)
@@ -99,21 +101,25 @@ class EditorDraftDaoTest {
 
             dao.deletePrivateForUser("alice")
 
-            assertEquals(original.copy(body = "", subject = null, recipients = null), dao.get(original.draftKey))
+            val erased = original.copy(body = "", subject = null, recipients = null, pendingInlineQuoteRequest = null)
+            assertEquals(erased, dao.get(original.draftKey))
             assertEquals(otherOwner, dao.get(otherOwner.draftKey))
             assertEquals(publicDraft, dao.get(publicDraft.draftKey))
             // The transaction remains safe and idempotent on a repeated auth emission.
             dao.deletePrivateForUser("alice")
-            assertEquals(original.copy(body = "", subject = null, recipients = null), dao.get(original.draftKey))
+            assertEquals(erased, dao.get(original.draftKey))
         }
     }
 
     @Test
     fun `deleteOlderThan is a strict less-than at the cutoff boundary`() = runTest {
         val cutoff = 1_700_000_000_000L
-        dao.upsert(draft("alice|old", ownerId = "alice", updatedAt = cutoff - 1))
-        dao.upsert(draft("alice|exact", ownerId = "alice", updatedAt = cutoff))
-        dao.upsert(draft("alice|fresh", ownerId = "alice", updatedAt = cutoff + 1))
+        dao.upsert(draft("alice|old", ownerId = "alice", updatedAt = cutoff - 1)
+            .copy(pendingInlineQuoteRequest = "coordinates"))
+        dao.upsert(draft("alice|exact", ownerId = "alice", updatedAt = cutoff)
+            .copy(pendingInlineQuoteRequest = "coordinates"))
+        dao.upsert(draft("alice|fresh", ownerId = "alice", updatedAt = cutoff + 1)
+            .copy(pendingInlineQuoteRequest = "coordinates"))
 
         dao.deleteOlderThan(cutoff)
 
@@ -121,6 +127,7 @@ class EditorDraftDaoTest {
         assertNull(dao.get("alice|old"))
         // … the row exactly at the cutoff is KEPT (strict `<`, no off-by-one) …
         assertNotNull(dao.get("alice|exact"))
+        assertEquals("coordinates", dao.get("alice|exact")?.pendingInlineQuoteRequest)
         // … and anything newer is obviously kept.
         assertNotNull(dao.get("alice|fresh"))
     }
