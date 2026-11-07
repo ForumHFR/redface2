@@ -8,8 +8,10 @@ import org.gradle.api.Project
 import org.gradle.api.artifacts.VersionCatalog
 import org.gradle.api.artifacts.VersionCatalogsExtension
 import org.gradle.api.plugins.JavaPluginExtension
+import org.gradle.api.tasks.testing.Test
 import org.gradle.kotlin.dsl.configure
 import org.gradle.kotlin.dsl.getByType
+import org.gradle.kotlin.dsl.withType
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
 
@@ -58,6 +60,7 @@ class RedfaceAndroidApplicationConventionPlugin : Plugin<Project> {
         }
 
         configureReleaseBundleStamping()
+        configureTestJvm()
     }
 }
 
@@ -140,6 +143,8 @@ class RedfaceAndroidLibraryConventionPlugin : Plugin<Project> {
                 abortOnError = true
             }
         }
+
+        configureTestJvm()
     }
 }
 
@@ -194,6 +199,19 @@ class RedfaceKotlinJvmLibraryConventionPlugin : Plugin<Project> {
                 jvmTarget.set(JvmTarget.JVM_17)
             }
         }
+    }
+}
+
+/**
+ * Opens JDK internals for unit-test JVMs of Android modules.
+ * Robolectric 4.17 reflects into `jdk.internal.access.SharedSecrets` on API >= 36
+ * (robolectric#11434, closed without an upstream fix). The `ApplicationSharedMemory.create()`
+ * shadow (robolectric#11354) is absent from 4.17 and included since 4.18-beta-1.
+ * Remove this opening once Robolectric >= 4.18 (robolectric#11354) is pinned.
+ */
+private fun Project.configureTestJvm() {
+    tasks.withType<Test>().configureEach {
+        jvmArgs("--add-opens=java.base/jdk.internal.access=ALL-UNNAMED")
     }
 }
 
