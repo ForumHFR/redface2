@@ -451,9 +451,20 @@ class TopicFormViewModel @AssistedInject constructor(
         }
     }
 
+    /** Block user body intents during uploads while keeping headers and picker diagnostics available. */
+    private val TopicFormIntent.mutatesBody: Boolean
+        get() = when (this) {
+            is TopicFormIntent.ToolbarActionClicked,
+            is TopicFormIntent.SmileySelected,
+            is TopicFormIntent.ImageUrlInserted,
+            is TopicFormIntent.ImagesPicked,
+            TopicFormIntent.DraftRestoreRequested -> true
+            else -> false
+        }
+
     @Suppress("CyclomaticComplexMethod") // MVI when-dispatch over the TopicFormIntent variants ; flat by design.
     fun submit(intent: TopicFormIntent) {
-        if (intent.mutatesEditor && !acceptMutation(blockDuringUpload = true)) return
+        if (intent.mutatesEditor && !acceptMutation(blockDuringUpload = intent.mutatesBody)) return
         when (intent) {
             is TopicFormIntent.SubjectChanged -> onSubjectChanged(intent.value)
             is TopicFormIntent.ToolbarActionClicked -> onToolbarActionClicked(intent.action)
@@ -486,15 +497,18 @@ class TopicFormViewModel @AssistedInject constructor(
         }
     }
 
-    /** Replace the untouched seed, preserving an exact suffix or appending after an edited seed. */
+    /**
+     * Replace a blank field or the untouched seed, preserving an exact suffix or appending after an edited seed.
+     * Same rule as the post editor and the private message editors (R0c, #1512 / #1553).
+     */
     private fun onDraftRestoreRequested() {
         val snapshot = _state.value
         val offeredBody = snapshot.restorableDraft ?: return
         val liveBody = bodyFieldState.text.toString()
         val seed = snapshot.draftHydratedContent
         val body = when {
-            liveBody == offeredBody || liveBody == seed -> offeredBody
-            seed.isEmpty() -> if (liveBody.isEmpty()) offeredBody else liveBody + "\n\n" + offeredBody
+            liveBody.isBlank() || liveBody == offeredBody || liveBody == seed -> offeredBody
+            seed.isEmpty() -> liveBody + "\n\n" + offeredBody
             liveBody.startsWith(seed) -> offeredBody + "\n\n" + liveBody.substring(seed.length)
             else -> liveBody + "\n\n" + offeredBody
         }
@@ -946,8 +960,9 @@ class TopicFormViewModel @AssistedInject constructor(
 
     private fun applyFormHydration(form: TopicForm) {
         val snapshot = _state.value
-        val hydrateBody = !submission.blocksMutation && !snapshot.isUploading && snapshot.shouldHydrateDraftFrom(form)
+        val hydrateBody = !submission.blocksMutation && snapshot.shouldHydrateDraftFrom(form)
         if (hydrateBody) {
+            // Programmatic edit bypasses bodyInputTransformation, just like the upload callback.
             replaceBody(form.initialContent)
             previousBody = form.initialContent
             resetUndoBaseline()

@@ -116,6 +116,29 @@ class TopicFormInputTest {
     }
 
     @Test
+    fun selectionOnlyKeepsArmedSubmissionAndDoesNotMarkBodyEdited() {
+        setFieldContent(confirmBeforePosting = true, editing = true)
+        val bodyEdited = TopicFormViewModel::class.java.getDeclaredField("bodyEditedBeforeHydration").apply {
+            isAccessible = true
+        }
+        val token = compose.runOnIdle {
+            assertFalse(bodyEdited.getBoolean(vm))
+            vm.submit(TopicFormIntent.SubmitClicked())
+            requireNotNull(vm.state.value.armToken)
+        }
+        // Exercise user selection through the field, without programmatic TextFieldState.edit.
+        field().performSemanticsAction(SemanticsActions.SetSelection) { assertTrue(it(1, 3, false)) }
+        compose.runOnIdle {
+            assertEquals("seed", vm.bodyFieldState.text.toString())
+            assertEquals(TextRange(1, 3), vm.bodyFieldState.selection)
+            assertEquals(token, vm.state.value.armToken)
+            assertTrue(vm.state.value.showSubmitConfirmation)
+            assertFalse(bodyEdited.getBoolean(vm))
+        }
+        coVerify(exactly = 0) { repository.submitEditFirstPost(any(), any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun blockedInputIsRejectedBeforeRecompositionDuringPersistenceSendingAndUpload() {
         setFieldContent(confirmBeforePosting = false)
         field().performTextInput("body")
@@ -169,11 +192,15 @@ class TopicFormInputTest {
         setFieldContent(confirmBeforePosting = false)
         field().performTextInput("typed")
         compose.runOnIdle {
+            val selectionBeforeRestore = vm.bodyFieldState.selection
             vm.submit(TopicFormIntent.DraftRestoreRequested)
             val state = vm.bodyFieldState
             assertEquals("typed\n\nstored", state.text.toString())
+            assertEquals(TextRange(state.text.length), state.selection)
+            assertTrue(state.undoState.canUndo)
             state.undoState.undo()
             assertEquals("typed", state.text.toString())
+            assertEquals(selectionBeforeRestore, state.selection)
         }
     }
 
