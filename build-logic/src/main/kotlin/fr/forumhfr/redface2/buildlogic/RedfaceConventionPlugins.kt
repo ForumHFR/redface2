@@ -199,14 +199,15 @@ class RedfaceKotlinJvmLibraryConventionPlugin : Plugin<Project> {
                 jvmTarget.set(JvmTarget.JVM_17)
             }
         }
-
-        configureTestJvm()
     }
 }
 
 /**
+ * Opens JDK internals for unit-test JVMs of Android modules.
  * Robolectric 4.17 reflects into `jdk.internal.access.SharedSecrets` on API >= 36
- * (robolectric#11434). Remove this opening once the upstream fix is included in our pinned version.
+ * (robolectric#11434, closed without an upstream fix). The `ApplicationSharedMemory.create()`
+ * shadow (robolectric#11354) is absent from 4.17 and included since 4.18-beta-1.
+ * Remove this opening once Robolectric >= 4.18 (robolectric#11354) is pinned.
  */
 private fun Project.configureTestJvm() {
     tasks.withType<Test>().configureEach {
