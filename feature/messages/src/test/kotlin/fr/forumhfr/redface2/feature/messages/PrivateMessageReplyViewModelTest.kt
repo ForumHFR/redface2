@@ -1771,7 +1771,10 @@ class PrivateMessageReplyViewModelTest {
     private fun replyWithRestoreOffer(seed: String = "seed", draft: String = "draft"): PrivateMessageReplyViewModel {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } returns form(initialContent = seed)
-        draftStore.preload(EditorDraftKey.mpReply(request.threadId), EditorDraftStore.Draft(body = draft, isPrivate = true))
+        draftStore.preload(
+            EditorDraftKey.mpReply(request.threadId),
+            EditorDraftStore.Draft(body = draft, isPrivate = true),
+        )
         return viewModel(repository)
     }
 
@@ -1809,7 +1812,11 @@ class PrivateMessageReplyViewModelTest {
 
     @Test
     fun restoreAppendsAfterTypedTextWhenSeedEmpty() = runTest {
-        assertRestoreAndSingleUndo(replyWithRestoreOffer(seed = ""), TextFieldValue("typed", TextRange(1, 3)), "typed\n\ndraft")
+        assertRestoreAndSingleUndo(
+            replyWithRestoreOffer(seed = ""),
+            TextFieldValue("typed", TextRange(1, 3)),
+            "typed\n\ndraft",
+        )
     }
 
     @Test
@@ -1861,7 +1868,10 @@ class PrivateMessageReplyViewModelTest {
         coEvery { repository.fetchReplyForm(any(), any()) } returnsMany listOf(
             form(initialContent = "seed"), form(initialContent = "different seed"),
         )
-        draftStore.preload(EditorDraftKey.mpReply(request.threadId), EditorDraftStore.Draft(body = "draft", isPrivate = true))
+        draftStore.preload(
+            EditorDraftKey.mpReply(request.threadId),
+            EditorDraftStore.Draft(body = "draft", isPrivate = true),
+        )
         val vm = viewModel(repository)
         vm.retryFormLoad()
         runCurrent()
@@ -1928,7 +1938,10 @@ class PrivateMessageReplyViewModelTest {
         val gate = CompletableDeferred<ReplyForm>()
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } coAnswers { gate.await() }
-        draftStore.preload(EditorDraftKey.mpReply(request.threadId), EditorDraftStore.Draft(body = "draft", isPrivate = true))
+        draftStore.preload(
+            EditorDraftKey.mpReply(request.threadId),
+            EditorDraftStore.Draft(body = "draft", isPrivate = true),
+        )
         val vm = viewModel(repository)
         assertRestoreAndSingleUndo(vm, TextFieldValue("typed", TextRange(1, 3)), "typed\n\ndraft")
         gate.complete(form(initialContent = "late quote"))
@@ -1974,7 +1987,10 @@ class PrivateMessageReplyViewModelTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } coAnswers { formGate.await() }
         val uploads = FakeUploadRepository().apply { this.uploadGate = uploadGate }
-        draftStore.preload(EditorDraftKey.mpReply(request.threadId), EditorDraftStore.Draft(body = "draft", isPrivate = true))
+        draftStore.preload(
+            EditorDraftKey.mpReply(request.threadId),
+            EditorDraftStore.Draft(body = "draft", isPrivate = true),
+        )
         val vm = viewModel(repository, uploadRepository = uploads)
         vm.onImagesPicked(listOf("content://pick/1"))
         assertTrue(vm.state.value.isUploading)
@@ -2019,7 +2035,10 @@ class PrivateMessageReplyViewModelTest {
         val uploads = FakeUploadRepository().apply { uploadGate = gate }
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } returns form(initialContent = "seed")
-        draftStore.preload(EditorDraftKey.mpReply(request.threadId), EditorDraftStore.Draft(body = "draft", isPrivate = true))
+        draftStore.preload(
+            EditorDraftKey.mpReply(request.threadId),
+            EditorDraftStore.Draft(body = "draft", isPrivate = true),
+        )
         val vm = viewModel(repository, uploadRepository = uploads)
         vm.onImagesPicked(listOf("content://pick/1"))
         assertTrue(vm.state.value.isUploading)
@@ -2236,7 +2255,10 @@ class PrivateMessageReplyViewModelTest {
     fun delayedDraftOfferDoesNotOverwriteLiveTyping() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } returns form()
-        draftStore.preload(EditorDraftKey.mpReply(request.threadId), EditorDraftStore.Draft(body = "stored", isPrivate = true))
+        draftStore.preload(
+            EditorDraftKey.mpReply(request.threadId),
+            EditorDraftStore.Draft(body = "stored", isPrivate = true),
+        )
         val loadGate = CompletableDeferred<Unit>()
         draftStore.loadGate = loadGate
         val vm = viewModel(repository)

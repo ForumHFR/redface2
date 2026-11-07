@@ -311,27 +311,29 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     private suspend fun restoreDraftIfAny() {
         val entry = submission.restore(draftKey) ?: return
         if (submission.blocksMutation) return
-        val draft = entry.draft
-        if (entry.attempt != null) {
-            if (!acceptMutation()) return
-            replaceBody(draft.body)
-            resetUndoBaseline()
-            previousBody = draft.body
-            _state.update {
-                it.copy(
-                    draftHydratedFromForm = true,
-                    restorableDraft = null, submitError = EditorErrors.uncertain(EditorErrorSurface.MessageReply),
-                )
-            }
-        } else {
-            val body = draft.body
-            if (body.isNotBlank()) {
-                val fingerprint = draft.restoreOfferFingerprint()
-                val ignored = savedStateHandle.get<String>(DRAFT_RESTORE_OFFER_FINGERPRINT_KEY) == fingerprint
-                if (!ignored && _state.value.canOfferDraftRestore(body)) {
-                    _state.update { it.copy(restorableDraft = body) }
-                }
-            }
+        if (entry.attempt != null) hydrateUncertainAttempt(entry.draft) else offerDraftRestore(entry.draft)
+    }
+
+    private fun hydrateUncertainAttempt(draft: EditorDraftStore.Draft) {
+        if (!acceptMutation()) return
+        replaceBody(draft.body)
+        resetUndoBaseline()
+        previousBody = draft.body
+        _state.update {
+            it.copy(
+                draftHydratedFromForm = true,
+                restorableDraft = null, submitError = EditorErrors.uncertain(EditorErrorSurface.MessageReply),
+            )
+        }
+    }
+
+    private fun offerDraftRestore(draft: EditorDraftStore.Draft) {
+        val body = draft.body
+        if (body.isBlank()) return
+        val fingerprint = draft.restoreOfferFingerprint()
+        val ignored = savedStateHandle.get<String>(DRAFT_RESTORE_OFFER_FINGERPRINT_KEY) == fingerprint
+        if (!ignored && _state.value.canOfferDraftRestore(body)) {
+            _state.update { it.copy(restorableDraft = body) }
         }
     }
 

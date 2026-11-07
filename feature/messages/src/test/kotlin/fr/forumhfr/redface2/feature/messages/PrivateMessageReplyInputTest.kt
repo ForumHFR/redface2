@@ -228,7 +228,10 @@ class PrivateMessageReplyInputTest {
             assertFalse(saved.contains("private reply body"))
             assertFalse(saved.contains("previous private revision"))
             assertTrue(savedStateHandle.keys().isEmpty())
-            assertTrue("Bundle must stay independent of private text and undo history", savedStateSize() < initialBytes + 2_048)
+            assertTrue(
+                "Bundle must stay independent of private text and undo history",
+                savedStateSize() < initialBytes + 2_048,
+            )
             vm.bodyFieldState.undoState.undo()
             assertEquals(previousBody, vm.bodyFieldState.text.toString())
         }
