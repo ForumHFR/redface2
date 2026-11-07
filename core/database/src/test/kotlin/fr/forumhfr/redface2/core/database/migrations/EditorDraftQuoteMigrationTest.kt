@@ -117,7 +117,7 @@ class EditorDraftQuoteMigrationTest {
                         isPrivate, contentVersion, attemptId, attemptVersion, attemptState)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """.trimIndent(),
-                    arrayOf(
+                    arrayOf<Any?>(
                         row.draftKey, row.ownerId, row.body, row.subject, row.recipients, row.updatedAt,
                         if (row.isPrivate) 1 else 0, row.contentVersion,
                         row.attemptId, row.attemptVersion, row.attemptState,
