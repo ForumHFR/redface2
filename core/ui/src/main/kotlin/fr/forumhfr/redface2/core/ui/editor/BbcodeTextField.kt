@@ -218,7 +218,10 @@ internal fun BbcodeTextFieldValueBridge(
             val textChanged = current.text != received.text
             fieldState.edit {
                 // A selection-only resync must not replace text or add a text undo entry.
-                if (textChanged) replace(0, length, received.text)
+                if (textChanged) {
+                    val change = minimalReplacement(current.text, received.text)
+                    replace(change.start, change.end, change.text)
+                }
                 selection = received.selection
             }
         }
