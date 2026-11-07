@@ -4024,6 +4024,116 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `slow quote on page two offers the fresh tail once without navigating`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flowOf(fakeTopic(2, 5))),
+            refreshTopicsToReturn = listOf(fakeTopic(2, 6, posts = listOf(fakePost(640)))),
+        ).apply { refreshHook = { _, _, _ -> gate.await() } }
+        val viewModel = topicViewModel(
+            request = topicRequest(2), topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        viewModel.applySubmitResult(2, 640, listOf(640))
+        advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
+        runCurrent()
+        val id = requireNotNull(viewModel.submitAcknowledgements.feedback.value).id
+        viewModel.submitAcknowledgements.presented(id, 4_000)
+        gate.complete(Unit)
+        runCurrent()
+        assertEquals(6, viewModel.submitAcknowledgements.feedback.value?.lastPage)
+        assertEquals(2, viewModel.state.value.request.page)
+        assertEquals(listOf(2), repository.refreshCalls.map { it.third })
+        viewModel.submitAcknowledgements.presented(id, 10_000)
+        assertEquals(6, viewModel.submitAcknowledgements.takeOffer(id, "xaat"))
+        assertNull(viewModel.submitAcknowledgements.takeOffer(id, "xaat"))
+        destroyViewModel(viewModel)
+    }
+
+    @Test
+    fun `slow full editor quote creating a page offers it once despite duplicate handoff`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flowOf(fakeTopic(2, 2))),
+            refreshTopicsToReturn = listOf(fakeTopic(2, 3, posts = listOf(fakePost(640)))),
+        ).apply { refreshHook = { _, _, _ -> gate.await() } }
+        val viewModel = topicViewModel(
+            request = topicRequest(2), topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        val result = TopicSubmitResult(42, 2, 640, listOf(640), account = "xaat")
+        viewModel.applySubmitResult(result)
+        advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
+        runCurrent()
+        val id = requireNotNull(viewModel.submitAcknowledgements.feedback.value).id
+        viewModel.submitAcknowledgements.presented(id, 4_000)
+        gate.complete(Unit)
+        runCurrent()
+        viewModel.applySubmitResult(result)
+        assertEquals(3, viewModel.submitAcknowledgements.feedback.value?.lastPage)
+        assertEquals(2, viewModel.state.value.request.page)
+        assertEquals(listOf(2), repository.refreshCalls.map { it.third })
+        viewModel.submitAcknowledgements.presented(id, 10_000)
+        assertEquals(3, viewModel.submitAcknowledgements.takeOffer(id, "xaat"))
+        assertNull(viewModel.submitAcknowledgements.takeOffer(id, "xaat"))
+        destroyViewModel(viewModel)
+    }
+
+    @Test
+    fun `slow plain reply from an older page offers the fresh tail without navigating`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flowOf(fakeTopic(2, 5))),
+            refreshTopicsToReturn = listOf(fakeTopic(2, 6)),
+        ).apply { refreshHook = { _, _, _ -> gate.await() } }
+        val viewModel = topicViewModel(
+            request = topicRequest(2), topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        viewModel.applySubmitResult(2, null)
+        advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
+        runCurrent()
+        val id = requireNotNull(viewModel.submitAcknowledgements.feedback.value).id
+        viewModel.submitAcknowledgements.presented(id, 4_000)
+        gate.complete(Unit)
+        runCurrent()
+        assertEquals(6, viewModel.submitAcknowledgements.feedback.value?.lastPage)
+        assertEquals(2, viewModel.state.value.request.page)
+        assertEquals(listOf(2), repository.refreshCalls.map { it.third })
+        viewModel.submitAcknowledgements.presented(id, 10_000)
+        assertEquals(6, viewModel.submitAcknowledgements.takeOffer(id, "xaat"))
+        assertNull(viewModel.submitAcknowledgements.takeOffer(id, "xaat"))
+        destroyViewModel(viewModel)
+    }
+
+    @Test
+    fun `late failed quote refresh warns without offering the cached tail`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flowOf(fakeTopic(2, 6)), flowOf(fakeTopic(2, 6))),
+            refreshErrorToThrow = IOException("offline"),
+        ).apply { refreshHook = { _, _, _ -> gate.await() } }
+        val viewModel = topicViewModel(
+            request = topicRequest(2), topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        viewModel.applySubmitResult(2, 640, listOf(640))
+        advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
+        runCurrent()
+        val id = requireNotNull(viewModel.submitAcknowledgements.feedback.value).id
+        viewModel.submitAcknowledgements.presented(id, 4_000)
+        gate.complete(Unit)
+        runCurrent()
+        val warning = requireNotNull(viewModel.submitAcknowledgements.feedback.value)
+        assertEquals(TopicAcknowledgement.Kind.RefreshWarning, warning.kind)
+        assertNull(warning.lastPage)
+        assertNull(viewModel.submitAcknowledgements.takeOffer(id, "xaat"))
+        assertEquals(2, viewModel.state.value.request.page)
+        assertEquals(TopicRefreshKind.None, viewModel.state.value.refreshKind)
+        destroyViewModel(viewModel)
+    }
+
+    @Test
     fun `duplicate full editor handoff refreshes and acknowledges only once`() = runTest {
         val repository = FakeTopicRepository(
             flowsToReturn = listOf(flow { emit(fakeTopic(2, 2)) }),
