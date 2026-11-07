@@ -1382,21 +1382,34 @@ class TopicFormViewModelTest {
     @Test
     fun restoreKeepsTextTypedAfterSeed() = runTest {
         val vm = editWithRestoreOffer()
-        assertRestoreAndSingleUndo(vm, TextFieldValue("seed suffix", TextRange(1)), "draft\n\n suffix")
+        assertRestoreAndSingleUndo(vm, TextFieldValue("seed suffix", TextRange(1)), "draft\n\nsuffix")
+    }
+
+    @Test
+    fun restoreTreatsBlankSuffixAsUntouchedSeed() = runTest {
+        val vm = editWithRestoreOffer()
+        assertRestoreAndSingleUndo(vm, TextFieldValue("seed  \n", TextRange(4)), "draft")
+    }
+
+    @Test
+    fun restoreTrimsTrailingWhitespaceBeforeSeparator() = runTest {
+        draftStore.preload(EditorDraftKey.newTopic(SAMPLE_CAT), EditorDraftStore.Draft(body = "draft"))
+        val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        assertRestoreAndSingleUndo(vm, TextFieldValue("typed \n\n", TextRange(2)), "typed\n\ndraft")
     }
 
     @Test
     fun restoreAppendsAfterTypedTextWhenSeedEmpty() = runTest {
         draftStore.preload(EditorDraftKey.newTopic(SAMPLE_CAT), EditorDraftStore.Draft(body = "draft"))
         val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
-        assertRestoreAndSingleUndo(vm, TextFieldValue("typed  \n", TextRange(1, 3)), "typed  \n\n\ndraft")
+        assertRestoreAndSingleUndo(vm, TextFieldValue("typed  \n", TextRange(1, 3)), "typed\n\ndraft")
         assertEquals("", vm.state.value.draftHydratedContent)
     }
 
     @Test
     fun restoreAppendsWhenSeedEditedInside() = runTest {
         val vm = editWithRestoreOffer()
-        assertRestoreAndSingleUndo(vm, TextFieldValue("seXd  \n", TextRange(2)), "seXd  \n\n\ndraft")
+        assertRestoreAndSingleUndo(vm, TextFieldValue("seXd  \n", TextRange(2)), "seXd\n\ndraft")
     }
 
     @Test

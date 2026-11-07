@@ -498,7 +498,8 @@ class TopicFormViewModel @AssistedInject constructor(
     }
 
     /**
-     * Replace a blank field or the untouched seed, preserving an exact suffix or appending after an edited seed.
+     * Replace a blank field or the untouched seed (a blank suffix counts as untouched), keep text typed after the
+     * seed after the draft, or append the draft after the trimmed field otherwise.
      * Same rule as the post editor and the private message editors (R0c, #1512 / #1553).
      */
     private fun onDraftRestoreRequested() {
@@ -506,11 +507,12 @@ class TopicFormViewModel @AssistedInject constructor(
         val offeredBody = snapshot.restorableDraft ?: return
         val liveBody = bodyFieldState.text.toString()
         val seed = snapshot.draftHydratedContent
+        val typedAfterSeed = liveBody.takeIf { seed.isNotEmpty() && it.startsWith(seed) }?.substring(seed.length)
         val body = when {
             liveBody.isBlank() || liveBody == offeredBody || liveBody == seed -> offeredBody
-            seed.isEmpty() -> liveBody + "\n\n" + offeredBody
-            liveBody.startsWith(seed) -> offeredBody + "\n\n" + liveBody.substring(seed.length)
-            else -> liveBody + "\n\n" + offeredBody
+            typedAfterSeed != null && typedAfterSeed.isBlank() -> offeredBody
+            typedAfterSeed != null -> offeredBody + "\n\n" + typedAfterSeed.trimStart()
+            else -> liveBody.trimEnd() + "\n\n" + offeredBody
         }
         replaceBody(body)
         _state.update { current ->

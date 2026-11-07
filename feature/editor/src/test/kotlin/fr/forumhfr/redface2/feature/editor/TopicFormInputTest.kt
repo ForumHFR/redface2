@@ -220,7 +220,7 @@ class TopicFormInputTest {
         compose.waitForIdle()
         compose.runOnIdle {
             val state = vm.bodyFieldState
-            val expected = draft + "\n\n" + suffix
+            val expected = draft + "\n\n" + suffix.trimStart()
             assertEquals(expected, state.text.toString())
             assertEquals(TextRange(expected.length), state.selection)
             val layout = requireNotNull(latestTextLayout)
