@@ -155,7 +155,11 @@ class EditorSubmissionBindingTest {
         store: VersionedEditorDraftStore,
         state: (EditorSubmissionState) -> Unit = {},
     ) = EditorSubmissionBinding(
-        EditorSubmissionEnvironment(this, DiagnosticsClock { testScheduler.currentTime * 1_000_000L }, DiagnosticsLog()),
+        EditorSubmissionEnvironment(
+            this,
+            DiagnosticsClock { testScheduler.currentTime * 1_000_000L },
+            DiagnosticsLog(),
+        ),
         EditorDraftSession(store, "key"),
         EditorSubmissionCallbacks<Unit, String>(state = state, error = {}, success = {}),
         EditorSubmissionErrors("uncertain", "draft", "session", "unknown"),

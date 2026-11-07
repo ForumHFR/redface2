@@ -79,6 +79,7 @@ class EditorSubmissionBinding<E, F>(
         }
     }
 
+    @Suppress("ReturnCount") // Guard clauses (load failure / invalidated owner) + the restore tail.
     suspend fun restore(key: String): EditorDraftStore.DraftEntry? {
         val entry = try {
             drafts.load()

@@ -321,7 +321,12 @@ private fun PostEditorControlsZone(
     val scroll = rememberScrollState()
     val hasAlert = state.legacyQuoteRequestDropped || state.restorableDraft != null ||
         state.submitError != null || state.uploadError != null
-    LaunchedEffect(state.legacyQuoteRequestDropped, state.restorableDraft != null, state.submitError, state.uploadError) {
+    LaunchedEffect(
+        state.legacyQuoteRequestDropped,
+        state.restorableDraft != null,
+        state.submitError,
+        state.uploadError,
+    ) {
         if (hasAlert) scroll.animateScrollTo(0)
     }
     LaunchedEffect(state.isPreviewVisible) {
@@ -389,6 +394,7 @@ private fun PostEditorControlsZone(
 }
 
 @Composable
+@Suppress("CyclomaticComplexMethod") // One independent block per banner ; flat by design.
 internal fun PostEditorAlertBanners(
     state: PostEditorState,
     onIntent: (PostEditorIntent) -> Unit,

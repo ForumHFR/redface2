@@ -115,7 +115,8 @@ class PostEditorQuoteRetryUiTest {
                 }
             }
         }
-        compose.onNodeWithText("Veuillez sélectionner à nouveau le message à citer.", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("Veuillez sélectionner à nouveau le message à citer.", substring = true)
+            .assertIsDisplayed()
         compose.onNodeWithText("Masquer").performClick()
         assertEquals(listOf(PostEditorIntent.LegacyQuoteNoticeDismissed), intents)
     }
