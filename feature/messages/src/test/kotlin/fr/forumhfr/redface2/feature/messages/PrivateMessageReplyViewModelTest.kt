@@ -2003,6 +2003,7 @@ class PrivateMessageReplyViewModelTest {
         val vm = viewModel(repository)
         val before = vm.state.value
         assertTrue(before.isLoadingForm)
+        assertEquals("draft", before.restorableDraft)
         vm.onDraftRestoreRequested()
         assertEquals(before, vm.state.value)
         assertFalse(vm.state.value.draftHydratedFromForm)
@@ -2041,6 +2042,34 @@ class PrivateMessageReplyViewModelTest {
         assertEquals("", vm.state.value.draftHydratedContent)
         assertEquals("draft", vm.state.value.restorableDraft)
         assertRestoreAndSingleUndo(vm, TextFieldValue("", TextRange.Zero), "draft")
+    }
+
+    @Test
+    fun restoreAfterFormFailureIsKeptWhenRetriedFormCarriesQuote() = runTest {
+        var fetches = 0
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } coAnswers {
+            if (fetches++ == 0) throw IOException("network down")
+            form(initialContent = "[quote=alice]hello[/quote]\n")
+        }
+        draftStore.preload(
+            EditorDraftKey.mpReply(request.threadId),
+            EditorDraftStore.Draft(body = "draft", isPrivate = true),
+        )
+        val vm = viewModel(repository)
+        runCurrent()
+        assertTrue(vm.state.value.formError)
+        vm.onDraftRestoreRequested()
+        assertEquals("draft", vm.bodyFieldState.text.toString())
+
+        // Restoring after a failure is a decision: the retried form no longer hydrates the body.
+        vm.retryFormLoad()
+        runCurrent()
+        assertTrue(vm.state.value.formAvailable)
+        assertFalse(vm.state.value.formError)
+        assertEquals("draft", vm.bodyFieldState.text.toString())
+        assertEquals("", vm.state.value.draftHydratedContent)
+        assertNull(vm.state.value.restorableDraft)
     }
 
     @Test

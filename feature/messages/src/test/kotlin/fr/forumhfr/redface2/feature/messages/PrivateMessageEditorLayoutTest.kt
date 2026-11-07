@@ -118,6 +118,17 @@ class PrivateMessageEditorLayoutTest {
         compose.onNodeWithText("Restaurer").assertIsEnabled()
         compose.onNodeWithText("Ignorer").assertIsEnabled()
         assertDraftActionsFullyVisible()
+
+        // Editor state: the offer moves into the editor, still a single banner (onNodeWithText fails on two).
+        compose.runOnIdle {
+            state.value = state.value.copy(isLoadingForm = false, formAvailable = true, formError = false)
+        }
+        compose.onNodeWithText("Restaurer").assertIsEnabled()
+
+        // Refetch over an available form: one banner, inactive until the seed is known again.
+        compose.runOnIdle { state.value = state.value.copy(isLoadingForm = true) }
+        compose.onNodeWithText("Restaurer").assertIsNotEnabled()
+        compose.onNodeWithText("Ignorer").assertIsEnabled()
     }
 
     @Test
