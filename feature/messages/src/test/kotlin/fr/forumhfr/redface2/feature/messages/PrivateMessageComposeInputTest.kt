@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.messages
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.ui.Modifier
@@ -129,6 +130,7 @@ class PrivateMessageComposeInputTest {
     }
 
     @Test
+    @OptIn(ExperimentalFoundationApi::class)
     fun initialHydrationStartsNewUndoHistory() {
         val key = EditorDraftKey.mpCompose()
         val token = EditorDraftStore.AttemptToken(checkNotNull(store.activeOwner), key, "hydration", 1)
@@ -152,6 +154,7 @@ class PrivateMessageComposeInputTest {
     }
 
     @Test
+    @OptIn(ExperimentalFoundationApi::class)
     fun requestedRestoreRemainsUndoable() {
         store.preload(EditorDraftKey.mpCompose(), EditorDraftStore.Draft(body = "stored", isPrivate = true))
         setFieldContent(confirmBeforePosting = false)

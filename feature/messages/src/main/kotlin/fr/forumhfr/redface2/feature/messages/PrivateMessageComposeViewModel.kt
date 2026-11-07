@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.messages
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.snapshotFlow
@@ -216,7 +217,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
 
     private fun acceptMutation(blockDuringUpload: Boolean = false): Boolean {
         if (submission.blocksMutation || (blockDuringUpload && _state.value.isUploading)) return false
-        return submission.disarm()
+        return submission.tryDisarm()
     }
 
     init {
@@ -299,6 +300,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
      * recoverable if process death loses the live editor state before autosave.
      * ED-81/170: durable status wins over every offer and server prefill.
      */
+    @OptIn(ExperimentalFoundationApi::class)
     private suspend fun restoreDraftIfAny() {
         val entry = submission.restore(draftKey) ?: return
         if (submission.blocksMutation || (entry.attempt != null && !acceptMutation())) return
