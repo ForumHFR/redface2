@@ -116,7 +116,7 @@ fun PrivateMessageReplyScreen(
 
 @Composable
 @Suppress("LongParameterList") // One callback per editor action — each is wired to a distinct VM method.
-private fun PrivateMessageReplyContent(
+internal fun PrivateMessageReplyContent(
     state: PrivateMessageReplyUiState,
     autoOpenRecipientManager: Boolean,
     onBack: () -> Unit,
@@ -161,6 +161,18 @@ private fun PrivateMessageReplyContent(
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
             MessageEditorHeader(title = stringResource(R.string.messages_reply_title), onBack = onBack)
+            // Keep the offer visible while the form replaces the editor, including an offline failure.
+            if (state.restorableDraft != null &&
+                (state.formError || (state.isLoadingForm && !state.formAvailable))
+            ) {
+                Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                    MessageDraftRestoreBanner(
+                        onRestore = onDraftRestore,
+                        onDiscard = onDraftDiscard,
+                        restoreEnabled = !state.isUploading && !state.isLoadingForm,
+                    )
+                }
+            }
             when {
                 state.formError -> MessageFormErrorState(onRetry = onRetryFormLoad)
                 state.isLoadingForm && !state.formAvailable -> MessageFormLoadingState()
@@ -280,7 +292,7 @@ internal fun ReplyEditorBody(
                     MessageDraftRestoreBanner(
                         onRestore = onDraftRestore,
                         onDiscard = onDraftDiscard,
-                        restoreEnabled = !state.isUploading,
+                        restoreEnabled = !state.isUploading && !state.isLoadingForm,
                     )
                 }
 

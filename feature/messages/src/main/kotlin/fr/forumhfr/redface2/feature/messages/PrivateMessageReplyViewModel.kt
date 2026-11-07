@@ -396,7 +396,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
 
     /** Replace the untouched seed, retain its typed suffix, or append after other live text. */
     fun onDraftRestoreRequested() {
-        if (!acceptMutation(blockDuringUpload = true)) return
+        if (_state.value.isLoadingForm || !acceptMutation(blockDuringUpload = true)) return
         val snapshot = _state.value
         val offeredBody = snapshot.restorableDraft ?: return
         val liveBody = bodyFieldState.text.toString()
@@ -726,6 +726,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                     draftHydratedContent = initial.takeIf { initial.isNotBlank() }.orEmpty(),
                 )
             }
+            if (initial.isNotBlank() && existing.isNotBlank()) scheduleAutosave()
         }
         val liveBody = bodyFieldState.text.toString()
         _state.update { current ->
