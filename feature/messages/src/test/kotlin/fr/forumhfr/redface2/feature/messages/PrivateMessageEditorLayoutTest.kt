@@ -7,6 +7,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasSetTextAction
@@ -108,7 +110,23 @@ class PrivateMessageEditorLayoutTest {
         assertDraftActionsFullyVisible()
     }
 
-    private fun setComposeContent() {
+    @Test
+    fun `new message disables draft restore during upload and keeps discard enabled`() {
+        setComposeContent(isUploading = true)
+
+        compose.onNodeWithText("Restaurer").assertIsNotEnabled()
+        compose.onNodeWithText("Ignorer").assertIsEnabled()
+    }
+
+    @Test
+    fun `new message enables draft restore when no upload is running`() {
+        setComposeContent(isUploading = false)
+
+        compose.onNodeWithText("Restaurer").assertIsEnabled()
+        compose.onNodeWithText("Ignorer").assertIsEnabled()
+    }
+
+    private fun setComposeContent(isUploading: Boolean = false) {
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 ComposeEditorBody(
@@ -116,6 +134,7 @@ class PrivateMessageEditorLayoutTest {
                         isLoadingForm = false,
                         formAvailable = true,
                         restorableDraft = "Brouillon à restaurer",
+                        isUploading = isUploading,
                     ),
                     bodyFieldState = remember { TextFieldState() },
                     bodyInputTransformation = InputTransformation {},

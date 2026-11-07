@@ -1523,6 +1523,32 @@ class PrivateMessageComposeViewModelTest {
     }
 
     @Test
+    fun previewIsRestoredWhenReopenedWithoutEditingBody() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val parsedPreview = PostContent(listOf(PostBlock.Paragraph(listOf(PostInline.Text("body")))))
+        val vm = viewModel(
+            repository,
+            previewParser = BbcodePreviewParser { parsedPreview },
+            defaultDispatcher = StandardTestDispatcher(testScheduler),
+        )
+        vm.editBody(TextFieldValue("body"))
+        vm.onTogglePreview()
+        runCurrent()
+        val publishedPreview = vm.state.value.preview
+        assertEquals(parsedPreview, publishedPreview)
+
+        vm.onTogglePreview()
+        assertFalse(vm.state.value.isPreviewVisible)
+        assertEquals(PostContent(emptyList()), vm.state.value.preview)
+        vm.onTogglePreview()
+        assertTrue(vm.state.value.isPreviewVisible)
+        runCurrent()
+        assertEquals(publishedPreview, vm.state.value.preview)
+        assertTrue(vm.state.value.preview.blocks.isNotEmpty())
+    }
+
+    @Test
     fun previewDiscardsResultAfterEdit() = previewDiscardsStaleResult(hide = false)
 
     @Test

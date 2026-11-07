@@ -8,6 +8,7 @@ class BbcodeTextDiffTest {
     @Test
     fun `common prefix and suffix are preserved`() {
         assertReplacement("abcOLDxyz", "abcNEWxyz", BbcodeTextReplacement(3, 6, "NEW"))
+        assertReplacement("abcOLDxyz", "abcNEW!xyz", BbcodeTextReplacement(3, 6, "NEW!"))
     }
 
     @Test
@@ -39,6 +40,7 @@ class BbcodeTextDiffTest {
     @Test
     fun `empty text supports insertion deletion and no change`() {
         assertReplacement("", "abc", BbcodeTextReplacement(0, 0, "abc"))
+        assertReplacement("", "[b][/b]", BbcodeTextReplacement(0, 0, "[b][/b]"))
         assertReplacement("abc", "", BbcodeTextReplacement(0, 3, ""))
         assertReplacement("", "", BbcodeTextReplacement(0, 0, ""))
     }
