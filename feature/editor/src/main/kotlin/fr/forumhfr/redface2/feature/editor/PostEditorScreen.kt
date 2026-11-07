@@ -259,6 +259,7 @@ internal fun PostEditorContent(
  * #405 — non-destructive draft-restore banner. Shown when a cached draft was found on init
  * ([PostEditorState.restorableDraft] / [TopicFormState] equivalent). « Restaurer » pre-fills the
  * editor ; « Ignorer » deletes the cached row. The draft is never silently applied nor lost.
+ * [restoreEnabled] lets a surface disable « Restaurer » while an upload is in flight (R0c).
  * Shared by [PostEditorContent] and `TopicFormContent` (same string resources).
  */
 @Composable
@@ -266,6 +267,7 @@ internal fun DraftRestoreBanner(
     onRestore: () -> Unit,
     onDiscard: () -> Unit,
     modifier: Modifier = Modifier,
+    restoreEnabled: Boolean = true,
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -287,6 +289,7 @@ internal fun DraftRestoreBanner(
             )
             TextButton(
                 onClick = onRestore,
+                enabled = restoreEnabled,
                 modifier = Modifier.heightIn(min = 48.dp),
                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
             ) {
