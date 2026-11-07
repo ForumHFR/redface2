@@ -16,6 +16,15 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.69.5` — `internal` (dev) — 2026-11-07
+
+Deux correctifs de la visionneuse ([#1411](https://github.com/ForumHFR/redface2/issues/1411) ; [#1556](https://github.com/ForumHFR/redface2/pull/1556)), ([#1309](https://github.com/ForumHFR/redface2/issues/1309) ; [#1557](https://github.com/ForumHFR/redface2/pull/1557)) et refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)), lot R0c, parties 0 et 1 ([#1512](https://github.com/ForumHFR/redface2/issues/1512) ; [#1555](https://github.com/ForumHFR/redface2/pull/1555), [#1558](https://github.com/ForumHFR/redface2/pull/1558)).
+
+- **Visionneuse, GIF** : un seul GIF animé est décodé à la fois. Au retour d'un GIF zoomé, la liste ne relance plus une dizaine de décodages simultanés : fin des gels, des images absentes et des ANR sur les appareils à faible mémoire (émulateur à 256 Mo : 421 → 3 GC bloquants, thread principal bloqué 21 → 0 fois).
+- **Visionneuse, gestes** : un balayage vertical sur une image zoomée qui ne peut pas défiler verticalement ne fait plus réapparaître la barre d'actions comme un tap. Tap, double tap, pincement et défilement inchangés.
+- **Éditeur, sauvegarde** : les insertions de la barre d'outils, des smileys et des citations ne remplacent plus tout le texte. Sur un long message, l'état sauvegardé grossissait à chaque insertion jusqu'à faire planter l'application au passage en arrière-plan (851 ko après 10 insertions sur 20 000 caractères) ; il reste désormais autour de 50 ko.
+- **Nouveau MP** : le champ de texte appartient désormais au ViewModel. Chaque action de la barre d'outils, chaque smiley ou citation s'annule en un pas ; l'aperçu est calculé hors du fil principal et vidé au masquage ; « Restaurer » est désactivé pendant l'envoi d'une image ; une frappe pendant un envoi armé le désarme.
+
 ## `0.69.4` — `internal` (dev) — 2026-11-07
 
 Refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)), lot R0b, partie 2 sur 2 ([#1456](https://github.com/ForumHFR/redface2/issues/1456) ; [#1551](https://github.com/ForumHFR/redface2/pull/1551)) : les cinq éditeurs (post, nouveau sujet, réponse rapide, réponse MP, nouveau MP) partagent un type d'erreur commun et ses textes. L'interface ne change pas, hors textes ; la nouvelle barre de l'éditeur arrive avec R1a-1.
