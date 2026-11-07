@@ -34,6 +34,7 @@ data class EditorSubmissionCallbacks<E, F>(
     val state: (EditorSubmissionState) -> Unit,
     val error: (F?) -> Unit,
     val success: (E) -> Unit,
+    val attemptStarted: (AttemptToken) -> Unit = {},
 )
 
 /** ED-88: the feature supplies its existing navigation effect, after terminal state and cleanup. */
@@ -79,7 +80,10 @@ class EditorSubmissionBinding<E, F>(
         }
     }
 
-    suspend fun restore(key: String): EditorDraftStore.DraftEntry? {
+    suspend fun restore(
+        key: String,
+        onPublished: (AttemptToken) -> Unit = {},
+    ): EditorDraftStore.DraftEntry? {
         val entry = try {
             drafts.load()
         } catch (_: IOException) {
@@ -88,6 +92,7 @@ class EditorSubmissionBinding<E, F>(
         }
         if (drafts.invalidated) return null
         // PUBLISHED suppresses restoration, but a deliberate new composition is allowed by CAS.
+        entry?.attempt?.takeIf { it.status == AttemptStatus.PUBLISHED }?.let { onPublished(it.token) }
         val attempt = entry?.attempt?.takeUnless { it.status == AttemptStatus.PUBLISHED }
         controller.openSession(session(drafts.owner, key), attempt)
         initialized = true
@@ -319,6 +324,8 @@ class EditorSubmissionBinding<E, F>(
                 if (result is EditorDraftStore.BeginAttemptResult.Started) {
                     writtenAttempt = result.token
                     pendingDraftFailure = false
+                    // Bind restored navigation requests before any subsequent suspension or POST.
+                    if (controller.session == opening) callbacks.attemptStarted(result.token)
                     trace.durable((environment.clock.elapsedRealtimeNanos() - started) / NANOS_PER_MILLI)
                 }
                 return result

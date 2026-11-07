@@ -241,6 +241,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 }
             },
             success = { value -> _effects.trySend(value) },
+            attemptStarted = { attempt -> savedStateHandle[LAST_ATTEMPT_KEY] = attempt.savedIdentity() },
         ),
     )
 
@@ -267,6 +268,9 @@ class PostEditorViewModel @AssistedInject constructor(
     private var uploadJob: Job? = null
     private var draftRestored = false
     private var sharedDraftResumed = false
+    private var publishedCompositionRestored = false
+    private var draftRestoreDiscarding = false
+    private var inlineQuoteRendering = false
 
     init {
         submission.observePreference(userPreferencesRepository.observeConfirmBeforePosting())
@@ -323,10 +327,9 @@ class PostEditorViewModel @AssistedInject constructor(
      *   `state.quotes` stays empty → submit takes the plain path (the content is the field).
      */
     private fun resolveQuoteRenderingThenLoad() {
-        val restored = savedStateHandle.get<IntArray>(PENDING_QUOTES_KEY)?.decodeInlineQuoteRequest().orEmpty()
-        val initialQuotes = (restored + request.initialQuotes).distinctBy { it.numreponse }
+        val initialQuotes = if (publishedCompositionRestored) emptyList() else initialQuoteRequest()
         if (initialQuotes.isEmpty() || submission.state is EditorSubmissionState.Uncertain) {
-            loadReplyFormIfPossible()
+            loadReplyFormIfPossible(preserveDraft = publishedCompositionRestored)
             return
         }
         val deliveryKey = initialQuotes.inlineQuoteDeliveryKey()
@@ -343,9 +346,15 @@ class PostEditorViewModel @AssistedInject constructor(
                 }
                 loadReplyFormIfPossible()
             } else {
+                inlineQuoteRendering = true
                 loadReplyFormWithInlineQuotes(initialQuotes)
             }
         }
+    }
+
+    private fun initialQuoteRequest(): List<QuoteSelection> {
+        val restored = savedStateHandle.get<IntArray>(PENDING_QUOTES_KEY)?.decodeInlineQuoteRequest().orEmpty()
+        return (restored + request.initialQuotes).distinctBy { it.numreponse }
     }
 
     /**
@@ -395,12 +404,16 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     private fun loadReplyFormWithInlineQuotes(quotes: List<QuoteSelection>, insertInline: Boolean = true) {
-        if (_state.value.isLoadingForm || submission.blocksMutation) return
+        if (_state.value.isLoadingForm || submission.blocksMutation || (insertInline && !inlineQuoteRendering)) return
         submission.disarm()
         if (insertInline) setPendingQuotes(quotes)
+        // An offer is not the live body. Serialize quote GETs after its decision so accepting
+        // cannot append a second copy of a quote that a GET already inserted into the field.
+        if (insertInline && (_state.value.restorableDraft != null || draftRestoreDiscarding)) return
         val missing = if (insertInline) missingInlineQuotes(quotes) else quotes
         if (missing.isEmpty()) {
             finishInlineQuoteDelivery()
+            scheduleAutosave()
             if (loadedForm == null) loadReplyFormIfPossible(preserveDraft = true)
         } else {
             fetchQuoteForm(missing, quotes, insertInline)
@@ -408,16 +421,13 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     private fun missingInlineQuotes(quotes: List<QuoteSelection>): List<QuoteSelection> {
-        val snapshot = _state.value
-        // A cold editor can offer the durable body in a banner instead of applying it immediately.
-        val body = snapshot.draft.text + "\n" + snapshot.restorableDraft.orEmpty()
-        val present = QuotedNumreponses.fromBbcode(body).toSet()
+        val present = QuotedNumreponses.fromBbcode(_state.value.draft.text).toSet()
         return quotes.filterNot { it.numreponse in present }
     }
 
     private fun finishInlineQuoteDelivery() {
         // Keep the request coordinates: a Bundle can outlive an insertion that never reached disk.
-        // Only the restored body proves delivery, so an old Bundle cannot duplicate a durable quote.
+        // A matching publication retires them on restore; otherwise only the applied body proves delivery.
         // If the user saved a deletion, recreation intentionally requests the absent quote again.
         savedStateHandle[QUOTE_FAILURES_KEY] = 0
         _state.update {
@@ -514,11 +524,24 @@ class PostEditorViewModel @AssistedInject constructor(
      * contract, restored.
      */
     private suspend fun restoreDraftIfAny() {
-        val entry = submission.restore(draftKey.orEmpty())
+        val entry = submission.restore(draftKey.orEmpty(), onPublished = ::discardPublishedQuoteRequest)
         if (entry != null && !submission.blocksMutation) {
             if (entry.attempt != null) restoreAttempt(entry.draft) else restoreOrdinaryDraft(entry.draft)
         }
     }
+
+    private fun discardPublishedQuoteRequest(attempt: EditorDraftStore.AttemptToken) {
+        val launched = savedStateHandle.get<ArrayList<String>>(LAST_ATTEMPT_KEY)
+        if (launched != attempt.savedIdentity()) return
+        // A frozen Bundle and restored route may both retain coordinates of this published body.
+        // A fresh navigation entry has no launched attempt; an unrelated publication cannot match.
+        publishedCompositionRestored = true
+        savedStateHandle[IGNORED_QUOTES_KEY] = initialQuoteRequest().inlineQuoteDeliveryKey()
+        setPendingQuotes(emptyList())
+    }
+
+    private fun EditorDraftStore.AttemptToken.savedIdentity(): ArrayList<String> =
+        arrayListOf(owner, key, id, version.toString())
 
     private fun restoreOrdinaryDraft(draft: EditorDraftStore.Draft) {
         val body = draft.body
@@ -690,14 +713,29 @@ class PostEditorViewModel @AssistedInject constructor(
                 .copy(restorableDraft = null, draftHydratedFromForm = true)
         }
         scheduleAutosave()
+        resumePendingInlineQuotes()
     }
 
     /** #405 — discard the cached draft : delete the row and clear the banner. */
     private fun onDraftDiscardRequested() {
         val body = _state.value.restorableDraft ?: return
         markDraftRestoreOfferIgnored(body)
+        draftRestoreDiscarding = true
         _state.update { it.copy(restorableDraft = null) }
-        viewModelScope.launch { submission.flush(EditorDraftStore.Draft(body = "")) }
+        viewModelScope.launch {
+            try {
+                submission.flush(EditorDraftStore.Draft(body = ""))
+            } finally {
+                draftRestoreDiscarding = false
+            }
+            // Finish the discard before any insertion/autosave can repopulate the row.
+            resumePendingInlineQuotes()
+        }
+    }
+
+    private fun resumePendingInlineQuotes() {
+        val pending = _state.value.pendingQuotes
+        if (pending.isNotEmpty()) loadReplyFormWithInlineQuotes(pending)
     }
 
     private fun markDraftRestoreOfferIgnored(body: String) {
@@ -1338,6 +1376,7 @@ class PostEditorViewModel @AssistedInject constructor(
         const val PENDING_QUOTES_KEY = "postEditor.pendingQuotes"
         const val QUOTE_FAILURES_KEY = "postEditor.quoteFailures"
         const val IGNORED_QUOTES_KEY = "postEditor.ignoredQuotes"
+        const val LAST_ATTEMPT_KEY = "postEditor.lastAttempt"
         // Distinct from the repository's "ReplyRepository" tag so the diagnostics
         // panel makes it obvious which layer recorded an entry.
         private const val LOG_TAG_VM = "PostEditorVM"
