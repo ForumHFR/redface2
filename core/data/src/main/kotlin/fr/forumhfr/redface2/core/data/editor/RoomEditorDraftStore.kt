@@ -17,7 +17,6 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.StoreWriteResult
 import fr.forumhfr.redface2.core.model.AuthState
 import java.io.IOException
 import java.time.Clock
-import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineDispatcher
@@ -127,8 +126,9 @@ class RoomEditorDraftStore @Inject constructor(
         key: String,
         snapshot: Draft,
         expectedVersion: Long,
+        attemptId: String,
     ): BeginAttemptResult {
-        val token = AttemptToken(owner.orEmpty(), key, UUID.randomUUID().toString(), expectedVersion + 1)
+        val token = AttemptToken(owner.orEmpty(), key, attemptId, expectedVersion + 1)
         val result = write(owner) {
             val next = snapshot.toEntity(checkNotNull(owner), key).copy(
                 contentVersion = token.version,

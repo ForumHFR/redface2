@@ -59,6 +59,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -269,6 +270,143 @@ class PendingQuoteHandoffTest {
                 coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
                 editor.viewModelScope.cancel()
             }
+        } finally {
+            editor.viewModelScope.cancel()
+        }
+    }
+
+    @Test
+    fun `snapshot before begin commits retires the quote request after publication and process death`() = runTest {
+        recreateAfterSuspendedBegin(snapshotBeforeCommit = true)
+    }
+
+    @Test
+    fun `snapshot before begin returns retires the quote request after publication and process death`() = runTest {
+        recreateAfterSuspendedBegin(snapshotBeforeCommit = false)
+    }
+
+    private suspend fun TestScope.recreateAfterSuspendedBegin(snapshotBeforeCommit: Boolean) {
+        val scenario = RecreationScenario(DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L })
+        scenario.quoteAvailable = true
+        val beginGate = CompletableDeferred<Unit>()
+        val beginReturnGate = CompletableDeferred<Unit>()
+        scenario.drafts.beginGate = beginGate
+        scenario.drafts.beginReturnGate = beginReturnGate
+        val savedState = SavedStateHandle()
+        var editor = scenario.editor(savedState, scenario.quotes)
+        try {
+            advanceUntilIdle()
+            editor.submit(PostEditorIntent.SubmitClicked())
+            runCurrent()
+            assertEquals(1, scenario.drafts.beginCalls)
+            assertNull(scenario.drafts.entries[scenario.draftKey]?.attempt)
+            if (!snapshotBeforeCommit) {
+                beginGate.complete(Unit)
+                runCurrent()
+                assertEquals(AttemptStatus.IN_PROGRESS, scenario.drafts.entries[scenario.draftKey]?.attempt?.status)
+            }
+            assertTrue(editor.state.value.submission is EditorSubmissionState.PersistingAttempt)
+            val prepared = checkNotNull(savedState.get<ArrayList<String>>("postEditor.lastAttempt"))
+            assertEquals(listOf("tester", scenario.draftKey), prepared.take(2))
+            // Only the handle survives. The frozen Bundle precedes begin's result and any POST.
+            val savedSnapshot = snapshot(savedState)
+            coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
+            beginGate.complete(Unit)
+            beginReturnGate.complete(Unit)
+            advanceUntilIdle()
+            assertTrue(editor.effects.first() is PostEditorEffect.SubmitSucceeded)
+            val published = checkNotNull(scenario.drafts.entries[scenario.draftKey])
+            val attempt = checkNotNull(published.attempt)
+            assertEquals(AttemptStatus.PUBLISHED, attempt.status)
+            assertEquals(listOf(attempt.token.owner, attempt.token.key, attempt.token.id), prepared)
+            val writes = scenario.drafts.writes
+            val fetches = scenario.fetchedQuotes.size
+            editor.viewModelScope.cancel()
+            clearMocks(scenario.repository, answers = false)
+            editor = scenario.editor(SavedStateHandle(savedSnapshot))
+            advanceUntilIdle()
+            assertTrue(editor.state.value.pendingQuotes.isEmpty())
+            assertTrue(editor.state.value.quotes.isEmpty())
+            assertNull(editor.state.value.restorableDraft)
+            assertFalse(editor.state.value.canSubmit)
+            editor.submit(PostEditorIntent.SubmitClicked())
+            editor.submit(PostEditorIntent.ReloadRequested)
+            advanceUntilIdle()
+            assertEquals("", editor.state.value.draft.text)
+            assertEquals(published, scenario.drafts.entries[scenario.draftKey])
+            assertEquals(writes, scenario.drafts.writes)
+            assertEquals(fetches, scenario.fetchedQuotes.size)
+            coVerify(exactly = 0) { scenario.repository.fetchReplyForm(match { it.isQuote }) }
+            coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
+        } finally {
+            editor.viewModelScope.cancel()
+        }
+    }
+
+    @Test
+    fun `failed begin identity cannot retire the request published by a later retry`() = runTest {
+        recreateAfterRejectedBegin(conflict = false)
+    }
+
+    @Test
+    fun `conflicting begin identity cannot retire the request published by a later retry`() = runTest {
+        recreateAfterRejectedBegin(conflict = true)
+    }
+
+    private suspend fun TestScope.recreateAfterRejectedBegin(conflict: Boolean) {
+        val scenario = RecreationScenario(DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L })
+        scenario.quoteAvailable = true
+        val savedState = SavedStateHandle()
+        var editor = scenario.editor(savedState, scenario.quotes)
+        try {
+            advanceUntilIdle()
+            val beginGate = CompletableDeferred<Unit>()
+            scenario.drafts.beginGate = beginGate
+            editor.submit(PostEditorIntent.SubmitClicked())
+            runCurrent()
+            assertTrue(editor.state.value.submission is EditorSubmissionState.PersistingAttempt)
+            val rejectedIdentity = checkNotNull(savedState.get<ArrayList<String>>("postEditor.lastAttempt"))
+            val rejectedSnapshot = snapshot(savedState)
+            if (conflict) {
+                val entry = scenario.drafts.entries.getValue(scenario.draftKey)
+                // A competing autosave advances CAS without changing the body offered on recreation.
+                scenario.drafts.saveIfVersion("tester", scenario.draftKey, entry.draft, entry.version)
+            } else {
+                scenario.drafts.beginFailure = IOException("disk failure")
+            }
+            beginGate.complete(Unit)
+            advanceUntilIdle()
+            assertEquals(EditorSubmissionState.Ready, editor.state.value.submission)
+            assertEquals(EditorErrors.draftWriteFailed, editor.state.value.submitError)
+            assertNull(scenario.drafts.entries[scenario.draftKey]?.attempt)
+            coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
+            scenario.drafts.beginFailure = null
+            scenario.drafts.beginGate = null
+            // Reload the current CAS version, keeping the rejected identity in the frozen handle.
+            editor.viewModelScope.cancel()
+            val retryState = SavedStateHandle(rejectedSnapshot)
+            editor = scenario.editor(retryState)
+            advanceUntilIdle()
+            editor.submit(PostEditorIntent.SubmitClicked())
+            val retryIdentity = checkNotNull(retryState.get<ArrayList<String>>("postEditor.lastAttempt"))
+            assertNotEquals(rejectedIdentity[2], retryIdentity[2])
+            advanceUntilIdle()
+            assertTrue(editor.effects.first() is PostEditorEffect.SubmitSucceeded)
+            val published = checkNotNull(scenario.drafts.entries[scenario.draftKey]?.attempt)
+            assertEquals(AttemptStatus.PUBLISHED, published.status)
+            assertEquals(retryIdentity[2], published.token.id)
+            assertNotEquals(rejectedIdentity[2], published.token.id)
+            val fetches = scenario.fetchedQuotes.size
+            editor.viewModelScope.cancel()
+            clearMocks(scenario.repository, answers = false)
+            editor = scenario.editor(SavedStateHandle(rejectedSnapshot))
+            advanceUntilIdle()
+            val expected = "[quotemsg=101]quote[/quotemsg]\n"
+            assertEquals(expected, editor.state.value.draft.text)
+            assertEquals(expected, scenario.storedBody)
+            assertEquals(listOf(101), scenario.fetchedQuotes.drop(fetches))
+            assertTrue(editor.state.value.pendingQuotes.isEmpty())
+            coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
         } finally {
             editor.viewModelScope.cancel()
         }

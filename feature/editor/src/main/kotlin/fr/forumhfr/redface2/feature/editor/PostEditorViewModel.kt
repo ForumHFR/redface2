@@ -241,7 +241,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 }
             },
             success = { value -> _effects.trySend(value) },
-            attemptStarted = { attempt -> savedStateHandle[LAST_ATTEMPT_KEY] = attempt.savedIdentity() },
+            attemptPrepared = { identity -> savedStateHandle[LAST_ATTEMPT_KEY] = identity.savedIdentity() },
         ),
     )
 
@@ -536,7 +536,7 @@ class PostEditorViewModel @AssistedInject constructor(
 
     private fun discardPublishedQuoteRequest(attempt: EditorDraftStore.AttemptToken) {
         val launched = savedStateHandle.get<ArrayList<String>>(LAST_ATTEMPT_KEY)
-        if (launched != attempt.savedIdentity()) return
+        if (launched != attempt.identity.savedIdentity()) return
         // A frozen Bundle and restored route may both retain coordinates of this published body.
         // A fresh navigation entry has no launched attempt; an unrelated publication cannot match.
         publishedCompositionRestored = true
@@ -544,8 +544,8 @@ class PostEditorViewModel @AssistedInject constructor(
         setPendingQuotes(emptyList())
     }
 
-    private fun EditorDraftStore.AttemptToken.savedIdentity(): ArrayList<String> =
-        arrayListOf(owner, key, id, version.toString())
+    // CAS assigns the version under the draft lock; owner/key/unique UUID already identify this send.
+    private fun EditorDraftStore.AttemptIdentity.savedIdentity(): ArrayList<String> = arrayListOf(owner, key, id)
 
     private fun restoreOrdinaryDraft(draft: EditorDraftStore.Draft) {
         val body = draft.body

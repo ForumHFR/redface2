@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.EditorSubmissionTrace
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptIdentity
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptOutcome
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptStatus
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptToken
@@ -34,7 +35,8 @@ data class EditorSubmissionCallbacks<E, F>(
     val state: (EditorSubmissionState) -> Unit,
     val error: (F?) -> Unit,
     val success: (E) -> Unit,
-    val attemptStarted: (AttemptToken) -> Unit = {},
+    /** Called synchronously by launch, before scheduling any persistence or network work. */
+    val attemptPrepared: (AttemptIdentity) -> Unit = {},
 )
 
 /** ED-88: the feature supplies its existing navigation effect, after terminal state and cleanup. */
@@ -214,14 +216,18 @@ class EditorSubmissionBinding<E, F>(
         draft: EditorDraftStore.Draft,
         send: suspend () -> EditorDelivery<E, F>,
     ) {
+        val reserved = (controller.state as? EditorSubmissionState.PersistingAttempt)?.submission
+        if (permit.token != reserved || isExecuting) return
+        val opening = controller.session
+        val attemptId = UUID.randomUUID().toString()
+        callbacks.attemptPrepared(AttemptIdentity(opening.owner.orEmpty(), opening.key, attemptId))
         attemptWriteFailed = false
         showError(null)
         isExecuting = true
-        val opening = controller.session
         val trace = EditorSubmissionTrace(environment.diagnostics)
         execution = environment.scope.launch(trace) {
             var delivery: EditorDelivery<E, F>? = null
-            val ports = ports(draft, trace) {
+            val ports = ports(draft, trace, attemptId) {
                 delivery = deliver(send)
                 checkNotNull(delivery).outcome
             }
@@ -312,6 +318,7 @@ class EditorSubmissionBinding<E, F>(
     private fun ports(
         draft: EditorDraftStore.Draft,
         trace: EditorSubmissionTrace = EditorSubmissionTrace(environment.diagnostics),
+        attemptId: String = UUID.randomUUID().toString(),
         send: suspend () -> EditorSendOutcome,
     ): EditorSubmissionPorts {
         val opening = controller.session
@@ -320,12 +327,10 @@ class EditorSubmissionBinding<E, F>(
             override val isEditorScopeActive: Boolean get() = environment.scope.isActive
             override suspend fun beginAttempt(): EditorDraftStore.BeginAttemptResult {
                 val started = environment.clock.elapsedRealtimeNanos()
-                val result = drafts.begin(draft)
+                val result = drafts.begin(draft, attemptId)
                 if (result is EditorDraftStore.BeginAttemptResult.Started) {
                     writtenAttempt = result.token
                     pendingDraftFailure = false
-                    // Bind restored navigation requests before any subsequent suspension or POST.
-                    if (controller.session == opening) callbacks.attemptStarted(result.token)
                     trace.durable((environment.clock.elapsedRealtimeNanos() - started) / NANOS_PER_MILLI)
                 }
                 return result
