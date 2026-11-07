@@ -8,8 +8,10 @@ import org.gradle.api.Project
 import org.gradle.api.artifacts.VersionCatalog
 import org.gradle.api.artifacts.VersionCatalogsExtension
 import org.gradle.api.plugins.JavaPluginExtension
+import org.gradle.api.tasks.testing.Test
 import org.gradle.kotlin.dsl.configure
 import org.gradle.kotlin.dsl.getByType
+import org.gradle.kotlin.dsl.withType
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinJvmProjectExtension
 
@@ -58,6 +60,7 @@ class RedfaceAndroidApplicationConventionPlugin : Plugin<Project> {
         }
 
         configureReleaseBundleStamping()
+        configureTestJvm()
     }
 }
 
@@ -140,6 +143,8 @@ class RedfaceAndroidLibraryConventionPlugin : Plugin<Project> {
                 abortOnError = true
             }
         }
+
+        configureTestJvm()
     }
 }
 
@@ -194,6 +199,18 @@ class RedfaceKotlinJvmLibraryConventionPlugin : Plugin<Project> {
                 jvmTarget.set(JvmTarget.JVM_17)
             }
         }
+
+        configureTestJvm()
+    }
+}
+
+/**
+ * Robolectric 4.17 reflects into `jdk.internal.access.SharedSecrets` on API >= 36
+ * (robolectric#11434). Remove this opening once the upstream fix is included in our pinned version.
+ */
+private fun Project.configureTestJvm() {
+    tasks.withType<Test>().configureEach {
+        jvmArgs("--add-opens=java.base/jdk.internal.access=ALL-UNNAMED")
     }
 }
 
