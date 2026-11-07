@@ -1,6 +1,9 @@
 package fr.forumhfr.redface2.feature.messages
 
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertHeightIsAtLeast
@@ -88,6 +91,47 @@ class PrivateMessageEditorLayoutTest {
 
         // ReplyEditorBody has 176 dp after its vertical padding on this 200 dp window.
         assertDraftActionsFullyVisible()
+    }
+
+    @Test
+    fun `new message keeps 160 dp body and both draft actions on short viewport`() {
+        setComposeContent()
+        compose.onNodeWithText("Votre réponse")
+            .assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT - FIELD_LABEL_HEADROOM)
+        assertDraftActionsFullyVisible()
+    }
+
+    @Test
+    @Config(qualifiers = "fr-rFR-w360dp-h200dp-xxhdpi")
+    fun `new message keeps both draft actions visible below the 220 dp budget threshold`() {
+        setComposeContent()
+        assertDraftActionsFullyVisible()
+    }
+
+    private fun setComposeContent() {
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                ComposeEditorBody(
+                    state = PrivateMessageComposeUiState(
+                        isLoadingForm = false,
+                        formAvailable = true,
+                        restorableDraft = "Brouillon à restaurer",
+                    ),
+                    bodyFieldState = remember { TextFieldState() },
+                    bodyInputTransformation = InputTransformation {},
+                    onRecipientsChanged = {},
+                    onSubjectChanged = {},
+                    onToolbarAction = {},
+                    onTogglePreview = {},
+                    onErrorDismissed = {},
+                    onDraftRestore = {},
+                    onDraftDiscard = {},
+                    onImagePickerEvent = {},
+                    onUploadErrorDismissed = {},
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
     }
 
     private fun assertDraftActionsFullyVisible() {
