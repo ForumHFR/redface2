@@ -275,7 +275,10 @@ class ImageViewerTapTest {
         val imageHeight = if (wideImage) 400 else 780
         val engine = FakeImageLoaderEngine.Builder()
             .intercept(SOURCE_URL, ColorImage(android.graphics.Color.BLUE, width = imageWidth, height = imageHeight))
-            .intercept(NEXT_SOURCE_URL, ColorImage(android.graphics.Color.GREEN, width = imageWidth, height = imageHeight))
+            .intercept(
+                NEXT_SOURCE_URL,
+                ColorImage(android.graphics.Color.GREEN, width = imageWidth, height = imageHeight),
+            )
             .build()
         val interceptor = object : Interceptor {
             override suspend fun intercept(chain: Interceptor.Chain): ImageResult {

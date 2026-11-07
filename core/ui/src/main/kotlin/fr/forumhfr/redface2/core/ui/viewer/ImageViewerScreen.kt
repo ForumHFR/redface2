@@ -302,11 +302,9 @@ internal fun ZoomableRemoteImage(
             do {
                 val event = awaitPointerEvent(PointerEventPass.Initial)
                 val pointer = event.changes.firstOrNull { it.id == down.id }
-                if (
-                    pointer == null ||
-                    (pointer.position - down.position).getDistance() > touchSlop ||
-                    event.changes.any { it.id != down.id && it.pressed }
-                ) {
+                val moved = pointer == null || (pointer.position - down.position).getDistance() > touchSlop
+                val secondPointerDown = event.changes.any { it.id != down.id && it.pressed }
+                if (moved || secondPointerDown) {
                     movedBeyondTouchSlop = true
                 }
             } while (event.changes.any { it.pressed })
