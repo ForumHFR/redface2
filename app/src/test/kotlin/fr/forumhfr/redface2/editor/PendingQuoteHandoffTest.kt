@@ -51,6 +51,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
@@ -267,6 +268,65 @@ class PendingQuoteHandoffTest {
                 assertEquals(published, scenario.drafts.entries[scenario.draftKey])
                 assertEquals(writes, scenario.drafts.writes) // No startNewComposition/autosave.
                 assertEquals(fetches, scenario.fetchedQuotes.size)
+                coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
+                editor.viewModelScope.cancel()
+            }
+        } finally {
+            editor.viewModelScope.cancel()
+        }
+    }
+
+    @Test
+    fun `snapshot while armed retires the quote request after confirmation publication and process death`() = runTest {
+        val scenario = RecreationScenario(
+            DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L }, confirmationRequired = true,
+        )
+        scenario.quoteAvailable = true
+        val savedState = SavedStateHandle()
+        var editor = scenario.editor(savedState, scenario.quotes)
+        try {
+            advanceUntilIdle()
+            val writesBeforeArm = scenario.drafts.writes
+            editor.submit(PostEditorIntent.SubmitClicked())
+            assertTrue(editor.state.value.submission is EditorSubmissionState.Armed)
+            val prepared = checkNotNull(savedState.get<ArrayList<String>>("postEditor.lastAttempt"))
+            assertEquals(listOf("tester", scenario.draftKey), prepared.take(2))
+            assertEquals(0, scenario.drafts.beginCalls)
+            assertNull(scenario.drafts.entries[scenario.draftKey]?.attempt)
+            assertEquals(writesBeforeArm, scenario.drafts.writes)
+            // Freeze the Bundle before confirmation, not merely before the durable begin or POST.
+            val savedSnapshot = snapshot(savedState)
+            coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
+            advanceTimeBy(400)
+            editor.submit(PostEditorIntent.SubmitConfirmed(editor.state.value.armToken))
+            advanceUntilIdle()
+            assertTrue(editor.effects.first() is PostEditorEffect.SubmitSucceeded)
+            val published = checkNotNull(scenario.drafts.entries[scenario.draftKey])
+            val attempt = checkNotNull(published.attempt)
+            assertEquals(AttemptStatus.PUBLISHED, attempt.status)
+            assertEquals(listOf(attempt.token.owner, attempt.token.key, attempt.token.id), prepared)
+            coVerify(exactly = 1) { scenario.repository.submitReply(any(), any(), any(), any()) }
+            val writes = scenario.drafts.writes
+            val fetches = scenario.fetchedQuotes.size
+            editor.viewModelScope.cancel()
+            clearMocks(scenario.repository, answers = false)
+            for (routeQuotes in listOf(emptyList(), scenario.quotes)) {
+                editor = scenario.editor(SavedStateHandle(savedSnapshot), routeQuotes)
+                advanceUntilIdle()
+                assertEquals("", editor.state.value.draft.text)
+                assertNull(editor.state.value.restorableDraft)
+                assertTrue(editor.state.value.pendingQuotes.isEmpty())
+                assertTrue(editor.state.value.quotes.isEmpty())
+                assertFalse(editor.state.value.canSubmit)
+                editor.submit(PostEditorIntent.SubmitClicked())
+                editor.submit(PostEditorIntent.SubmitConfirmed(editor.state.value.armToken))
+                editor.submit(PostEditorIntent.ReloadRequested)
+                advanceUntilIdle()
+                assertEquals("", editor.state.value.draft.text)
+                assertEquals(published, scenario.drafts.entries[scenario.draftKey])
+                assertEquals(writes, scenario.drafts.writes)
+                assertEquals(fetches, scenario.fetchedQuotes.size)
+                coVerify(exactly = 0) { scenario.repository.fetchReplyForm(match { it.isQuote }) }
                 coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
                 editor.viewModelScope.cancel()
             }
@@ -824,7 +884,7 @@ class PendingQuoteHandoffTest {
         }
     }
 
-    private class RecreationScenario(private val clock: DiagnosticsClock) {
+    private class RecreationScenario(private val clock: DiagnosticsClock, confirmationRequired: Boolean = false) {
         val drafts = VersionedEditorDraftStore()
         val draftKey = EditorDraftKey.reply(23, 35421)
         val quotes = listOf(QuoteSelection(QuoteLocator(1, 101, null), "alice", ""))
@@ -835,7 +895,7 @@ class PendingQuoteHandoffTest {
         val storedBody: String? get() = drafts.saved[EditorDraftKey.reply(23, 35421)]?.body
         private val diagnostics = DiagnosticsLog()
         private val preferences = mockk<UserPreferencesRepository> {
-            every { observeConfirmBeforePosting() } returns flowOf(false)
+            every { observeConfirmBeforePosting() } returns flowOf(confirmationRequired)
             every { observeQuoteCardsEnabled() } returns flowOf(false)
             every { observeEditorImageInsert() } returns flowOf(EditorImageInsert.REDUCED)
             every { observeImagePickerMode() } returns flowOf(ImagePickerMode.DEFAULT)
