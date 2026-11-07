@@ -404,7 +404,7 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     private fun loadReplyFormWithInlineQuotes(quotes: List<QuoteSelection>, insertInline: Boolean = true) {
-        if (_state.value.isLoadingForm || submission.blocksMutation || (insertInline && !inlineQuoteRendering)) return
+        if (inlineQuoteLoadBlocked(insertInline)) return
         submission.disarm()
         if (insertInline) setPendingQuotes(quotes)
         // An offer is not the live body. Serialize quote GETs after its decision so accepting
@@ -419,6 +419,10 @@ class PostEditorViewModel @AssistedInject constructor(
             fetchQuoteForm(missing, quotes, insertInline)
         }
     }
+
+    /** Inline delivery only runs once this opening chose the inline rendering (cards ON never does). */
+    private fun inlineQuoteLoadBlocked(insertInline: Boolean): Boolean =
+        _state.value.isLoadingForm || submission.blocksMutation || (insertInline && !inlineQuoteRendering)
 
     private fun missingInlineQuotes(quotes: List<QuoteSelection>): List<QuoteSelection> {
         val present = QuotedNumreponses.fromBbcode(_state.value.draft.text).toSet()

@@ -214,6 +214,9 @@ class PendingQuoteHandoffTest {
         }
     }
 
+    /** The Bundle keeps request coordinates only (`InlineQuoteRequest`), never the author nor the excerpt. */
+    private fun List<QuoteSelection>.coordinates() = map { it.locator to it.truncate }
+
     private fun snapshot(handle: SavedStateHandle): Map<String, Any?> = handle.keys().associateWith { key ->
         when (val value = handle.get<Any?>(key)) {
             is IntArray -> value.copyOf()
@@ -399,7 +402,7 @@ class PendingQuoteHandoffTest {
             advanceUntilIdle()
             assertEquals("", editor.state.value.draft.text)
             assertEquals(expected, editor.state.value.restorableDraft)
-            assertEquals(scenario.quotes, editor.state.value.pendingQuotes)
+            assertEquals(scenario.quotes.coordinates(), editor.state.value.pendingQuotes.coordinates())
             assertFalse(editor.state.value.canSubmit)
             assertEquals(fetches, scenario.fetchedQuotes.size)
             editor.submit(PostEditorIntent.DraftRestoreRequested)
@@ -542,7 +545,7 @@ class PendingQuoteHandoffTest {
             advanceUntilIdle()
             assertEquals("", editor.state.value.draft.text)
             assertEquals(offered, editor.state.value.restorableDraft)
-            assertEquals(scenario.quotes, editor.state.value.pendingQuotes)
+            assertEquals(scenario.quotes.coordinates(), editor.state.value.pendingQuotes.coordinates())
             assertFalse(editor.state.value.canSubmit)
             assertTrue(scenario.fetchedQuotes.isEmpty())
             editor.submit(PostEditorIntent.SubmitClicked())
@@ -586,7 +589,7 @@ class PendingQuoteHandoffTest {
             assertEquals("text from the sheet", editor.state.value.draft.text)
             assertEquals("text from the sheet", scenario.storedBody)
             assertEquals(EditorErrors.quoteFetchFailed, editor.state.value.submitError)
-            assertEquals(scenario.quotes, editor.state.value.pendingQuotes)
+            assertEquals(scenario.quotes.coordinates(), editor.state.value.pendingQuotes.coordinates())
             assertFalse(editor.state.value.canSubmit)
             editor.submit(PostEditorIntent.SubmitClicked())
             scenario.quoteAvailable = true
