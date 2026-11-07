@@ -1566,6 +1566,18 @@ class TopicFormViewModelTest {
         assertEquals("", vm.state.value.draftHydratedContent)
         assertNull(vm.state.value.restorableDraft)
         assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
+
+        // Restoring after a failure is a decision: the reloaded form hydrates the blank title, never the body.
+        topicFormRepository.formFailure = null
+        vm.submit(TopicFormIntent.ReloadRequested)
+        syncBody()
+        testScheduler.advanceUntilIdle()
+        assertFalse(vm.state.value.isLoadingForm)
+        assertNull(vm.state.value.submitError)
+        assertEquals("D", vm.bodyFieldState.text.toString())
+        assertEquals("", vm.state.value.draftHydratedContent)
+        assertEquals("Sample first post title", vm.state.value.subject.text)
+        assertNull(vm.state.value.restorableDraft)
     }
 
     @Test
