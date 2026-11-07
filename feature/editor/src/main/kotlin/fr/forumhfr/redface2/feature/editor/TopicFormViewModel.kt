@@ -524,7 +524,8 @@ class TopicFormViewModel @AssistedInject constructor(
                 restorableDraft = null,
                 restorableSubject = null,
                 draftHydratedFromServer = true,
-                subjectHydratedFromServer = true,
+                // A blank title after a restore (offline form failure) stays open to the server title on reload.
+                subjectHydratedFromServer = current.subjectHydratedFromServer || subject.isNotBlank(),
             )
         }
         scheduleAutosave()
