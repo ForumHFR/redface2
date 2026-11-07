@@ -3,12 +3,15 @@ package fr.forumhfr.redface2.feature.messages
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.platform.LocalDensity
@@ -117,7 +120,7 @@ class EditorBaselineRoborazziTest {
             formAvailable = true,
             recipients = "CorrespondantTest",
             subject = "Conversation de démonstration",
-            draft = draft,
+            bodyText = draft.text,
         )
         val isReply = scenario.surface == EditorSurface.Reply
         Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
@@ -147,7 +150,8 @@ class EditorBaselineRoborazziTest {
                         state = newMessage,
                         onRecipientsChanged = {},
                         onSubjectChanged = {},
-                        onContentChanged = {},
+                        bodyFieldState = remember { TextFieldState(draft.text) },
+                        bodyInputTransformation = InputTransformation {},
                         onToolbarAction = {},
                         onTogglePreview = {},
                         onErrorDismissed = {},

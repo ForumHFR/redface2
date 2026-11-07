@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -27,7 +29,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -89,7 +90,8 @@ fun PrivateMessageComposeScreen(
         onBack = viewModel::onCloseRequested,
         onRecipientsChanged = viewModel::onRecipientsChanged,
         onSubjectChanged = viewModel::onSubjectChanged,
-        onContentChanged = viewModel::onContentChanged,
+        bodyFieldState = viewModel.bodyFieldState,
+        bodyInputTransformation = viewModel.bodyInputTransformation,
         onToolbarAction = viewModel::onToolbarAction,
         onTogglePreview = viewModel::onTogglePreview,
         onToggleSignature = viewModel::onToggleSignature,
@@ -117,7 +119,8 @@ private fun PrivateMessageComposeContent(
     onBack: () -> Unit,
     onRecipientsChanged: (String) -> Unit,
     onSubjectChanged: (String) -> Unit,
-    onContentChanged: (TextFieldValue) -> Unit,
+    bodyFieldState: TextFieldState,
+    bodyInputTransformation: InputTransformation,
     onToolbarAction: (BbcodeAction) -> Unit,
     onTogglePreview: () -> Unit,
     onToggleSignature: (Boolean) -> Unit,
@@ -155,7 +158,8 @@ private fun PrivateMessageComposeContent(
                         state = state,
                         onRecipientsChanged = onRecipientsChanged,
                         onSubjectChanged = onSubjectChanged,
-                        onContentChanged = onContentChanged,
+                        bodyFieldState = bodyFieldState,
+                        bodyInputTransformation = bodyInputTransformation,
                         onToolbarAction = onToolbarAction,
                         onTogglePreview = onTogglePreview,
                         onErrorDismissed = onErrorDismissed,
@@ -211,7 +215,8 @@ internal fun ComposeEditorBody(
     state: PrivateMessageComposeUiState,
     onRecipientsChanged: (String) -> Unit,
     onSubjectChanged: (String) -> Unit,
-    onContentChanged: (TextFieldValue) -> Unit,
+    bodyFieldState: TextFieldState,
+    bodyInputTransformation: InputTransformation,
     onToolbarAction: (BbcodeAction) -> Unit,
     onTogglePreview: () -> Unit,
     onErrorDismissed: () -> Unit,
@@ -255,7 +260,11 @@ internal fun ComposeEditorBody(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 if (hasRestorableDraft) {
-                    MessageDraftRestoreBanner(onRestore = onDraftRestore, onDiscard = onDraftDiscard)
+                    MessageDraftRestoreBanner(
+                        onRestore = onDraftRestore,
+                        onDiscard = onDraftDiscard,
+                        restoreEnabled = !state.isUploading,
+                    )
                 }
 
                 state.submitError?.let { error ->
@@ -311,8 +320,8 @@ internal fun ComposeEditorBody(
             }
 
             BbcodeTextField(
-                value = state.draft,
-                onValueChange = onContentChanged,
+                state = bodyFieldState,
+                inputTransformation = bodyInputTransformation,
                 label = stringResource(R.string.messages_reply_field_label),
                 placeholder = stringResource(R.string.messages_reply_field_placeholder),
                 modifier = Modifier.weight(1f),

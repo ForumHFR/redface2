@@ -1,6 +1,5 @@
 package fr.forumhfr.redface2.feature.messages
 
-import androidx.compose.ui.text.input.TextFieldValue
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.PostContent
@@ -30,7 +29,7 @@ data class PrivateMessageComposeUiState(
     /** Exact untouched recipient prefill supplied by routing/HFR, distinct from a user edit. */
     val recipientsHydratedContent: String? = null,
     val subject: String = "",
-    val draft: TextFieldValue = TextFieldValue(),
+    val bodyText: String = "",
     val isPreviewVisible: Boolean = false,
     val preview: PostContent = PostContent(blocks = emptyList()),
     val signatureEnabled: Boolean = false,
@@ -66,7 +65,7 @@ data class PrivateMessageComposeUiState(
 
     val canSubmit: Boolean
         get() = formAvailable && !isLoadingForm && !isSubmitting && !isUploading && !submission.blocksBodyMutation &&
-            recipients.isNotBlank() && subject.isNotBlank() && draft.text.isNotBlank()
+            recipients.isNotBlank() && subject.isNotBlank() && bodyText.isNotBlank()
 
     companion object {
         /** HFR's `maxlength=70` on the composer's `sujet` input (fixture `mp_compose_form.html`). */

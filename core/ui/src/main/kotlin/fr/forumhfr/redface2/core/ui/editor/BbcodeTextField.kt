@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
@@ -72,11 +73,8 @@ internal fun createBbcodeTextFieldContext(context: Context): Context {
 }
 
 /**
- * Controlled Material 3 BBCode text field used by the four full-screen editors.
- *
- * The public API remains [TextFieldValue]-based so the existing ViewModels and toolbar actions own
- * the draft and its selection. Internally, the state-based [BasicTextField] owns IME composition,
- * caret following and selection-handle scrolling. The host must give the field a bounded height.
+ * Compatibility adapter for editors whose ViewModel still owns a [TextFieldValue].
+ * IME composition stays inside the field; migrated editors use the [TextFieldState] overload.
  */
 @Suppress("LongParameterList") // Compose component API: optional defaulted params are idiomatic.
 @Composable
@@ -129,7 +127,36 @@ internal fun BbcodeTextField(
         value = value,
         onValueChange = onValueChange,
     )
+    BbcodeTextField(
+        state = fieldState,
+        label = label,
+        modifier = modifier,
+        placeholder = placeholder,
+        readOnly = readOnly,
+        autoFocus = autoFocus,
+        scrollState = scrollState,
+        onTextLayout = onTextLayout,
+    )
+}
 
+/**
+ * Material 3 BBCode editor with a host-owned buffer, IME composition and selection.
+ * The host must give the field a bounded height. [inputTransformation] guards user edits
+ * synchronously; programmatic edits must be guarded by the owner before editing [state].
+ */
+@Suppress("LongParameterList") // Same chrome and viewport hooks for both editor APIs.
+@Composable
+fun BbcodeTextField(
+    state: TextFieldState,
+    label: String,
+    modifier: Modifier = Modifier,
+    inputTransformation: InputTransformation? = null,
+    placeholder: String? = null,
+    readOnly: Boolean = false,
+    autoFocus: Boolean = false,
+    scrollState: ScrollState = rememberScrollState(),
+    onTextLayout: (Density.(getResult: () -> TextLayoutResult?) -> Unit)? = null,
+) {
     val fieldInteractions = remember { MutableInteractionSource() }
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(Unit) {
@@ -153,7 +180,8 @@ internal fun BbcodeTextField(
     Box(modifier = modifier.fillMaxWidth()) {
         CompositionLocalProvider(LocalContext provides fieldContext) {
             BasicTextField(
-                state = fieldState,
+                state = state,
+                inputTransformation = inputTransformation,
                 readOnly = readOnly,
                 modifier = Modifier
                     .fillMaxSize()
@@ -173,7 +201,7 @@ internal fun BbcodeTextField(
                 interactionSource = fieldInteractions,
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                 decorator = OutlinedTextFieldDefaults.decorator(
-                    state = fieldState,
+                    state = state,
                     enabled = true,
                     lineLimits = lineLimits,
                     outputTransformation = null,

@@ -87,7 +87,7 @@ class BbcodeTextFieldSavedStateTest {
         }
 
         val savedBytes = composeTestRule.runOnIdle { savedStateSize(registry) }
-        // Two parcelled text copies allow small undo records and metadata, but reject ten full replacements.
+        // Two parcelled text copies allow small undo records and metadata, but reject even one full-text entry.
         assertTrue(
             "saved state is $savedBytes bytes; expected less than ${2 * singleTextBytes}",
             savedBytes < 2 * singleTextBytes,

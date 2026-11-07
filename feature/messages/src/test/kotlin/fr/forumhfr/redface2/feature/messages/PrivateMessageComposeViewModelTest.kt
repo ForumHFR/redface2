@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.messages
 
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
@@ -8,11 +9,11 @@ import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
-import fr.forumhfr.redface2.core.domain.editor.EditorPreparationException
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorPreparationException
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionAdapter
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionScenario
 import fr.forumhfr.redface2.core.domain.editor.SubmissionBodyMutation
@@ -31,7 +32,9 @@ import fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.EditorSmileySource
 import fr.forumhfr.redface2.core.model.HfrFavoriteSmileyMutationResult
+import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyUsageEntry
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.ImagePickerContract
@@ -49,14 +52,20 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
@@ -84,8 +93,11 @@ class PrivateMessageComposeViewModelTest {
         Dispatchers.setMain(mainDispatcher)
     }
 
+    private val viewModels = mutableListOf<PrivateMessageComposeViewModel>()
+
     @After
     fun tearDown() {
+        viewModels.forEach { it.viewModelScope.cancel() }
         Dispatchers.resetMain()
     }
 
@@ -137,10 +149,13 @@ class PrivateMessageComposeViewModelTest {
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
         clock: DiagnosticsClock = submissionClock,
         savedStateHandle: SavedStateHandle = SavedStateHandle(),
+        previewParser: BbcodePreviewParser = this.previewParser,
+        defaultDispatcher: CoroutineDispatcher = mainDispatcher,
     ): PrivateMessageComposeViewModel = PrivateMessageComposeViewModel(
         initialRecipient = initialRecipient,
         repository = repository,
         previewParser = previewParser,
+        defaultDispatcher = defaultDispatcher,
         userPreferencesRepository = userPreferences(confirmBeforePosting),
         draftStore = draftStore,
         authRepository = FakeAuthRepository(),
@@ -152,7 +167,21 @@ class PrivateMessageComposeViewModelTest {
         hfrFavoriteSmileyRepository = favoriteRepository,
         smileyLocalCollections = localCollections,
         savedStateHandle = savedStateHandle,
-    )
+    ).also { viewModels += it }
+
+    /** Synthetic JVM user edit; the Compose tests separately exercise real typing/paste. */
+    private fun PrivateMessageComposeViewModel.editBody(
+        value: TextFieldValue,
+        advanceMirror: Boolean = true,
+    ) {
+        bodyFieldState.edit {
+            if (asCharSequence().toString() != value.text) replace(0, length, value.text)
+            selection = value.selection
+            with(bodyInputTransformation) { transformInput() }
+        }
+        Snapshot.sendApplyNotifications()
+        if (advanceMirror) mainDispatcher.scheduler.runCurrent()
+    }
 
     @Test
     fun `successful form retry clears preparation errors and preserves uncertain delivery`() = runTest {
@@ -162,7 +191,7 @@ class PrivateMessageComposeViewModelTest {
         vm.onRecipientsChanged("alice")
         vm.onSubjectChanged("title")
         advanceUntilIdle()
-        vm.onContentChanged(TextFieldValue("body"))
+        vm.editBody(TextFieldValue("body"))
         coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } throws
             EditorPreparationException(EditorPreparationException.Reason.INVALID_FORM)
         vm.onSubmit()
@@ -223,10 +252,10 @@ class PrivateMessageComposeViewModelTest {
         vm.onImagesPicked(listOf("content://pick/1", "content://pick/2", "content://pick/3"))
         advanceUntilIdle()
         assertEquals(2, uploads.uploadCalls)
-        assertEquals(1, Regex("\\[img]").findAll(vm.state.value.draft.text).count())
+        assertEquals(1, Regex("\\[img]").findAll(vm.bodyFieldState.text.toString()).count())
         val expected = EditorErrors.stopped(EditorErrors.tooLarge, UploadProgress(1, 3))
         assertEquals(expected, vm.state.value.uploadError)
-        vm.onContentChanged(TextFieldValue(vm.state.value.draft.text + "typed"))
+        vm.editBody(TextFieldValue(vm.bodyFieldState.text.toString() + "typed"))
         assertEquals(expected, vm.state.value.uploadError)
         assertFalse(vm.state.value.isUploading)
     }
@@ -240,15 +269,15 @@ class PrivateMessageComposeViewModelTest {
         val vm = viewModel(repository)
         vm.onRecipientsChanged("alice")
         vm.onSubjectChanged("title")
-        vm.onContentChanged(TextFieldValue("body"))
+        vm.editBody(TextFieldValue("body"))
         vm.onSubmit()
         advanceUntilIdle()
         vm.onImagePickerEvent(
             ImagePickerEvent.Unavailable(ImagePickerMode.PHOTO_PICKER, ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA),
         )
         listOf<() -> Unit>(
-            { vm.onContentChanged(TextFieldValue("changed")) },
-            { vm.onContentChanged(TextFieldValue("changed", TextRange(1, 3))) },
+            { vm.editBody(TextFieldValue("changed")) },
+            { vm.editBody(TextFieldValue("changed", TextRange(1, 3))) },
             { vm.onRecipientsChanged("bob") },
             { vm.onSubjectChanged("changed") },
             { vm.onToggleSignature(true) },
@@ -274,7 +303,7 @@ class PrivateMessageComposeViewModelTest {
 
         assertEquals(listOf("content://pick/1", "content://pick/2"), reader.readUris)
         assertEquals(2, uploads.uploadCalls)
-        assertEquals(2, Regex("\\[img]").findAll(vm.state.value.draft.text).count())
+        assertEquals(2, Regex("\\[img]").findAll(vm.bodyFieldState.text.toString()).count())
         assertFalse(vm.state.value.isUploading)
     }
 
@@ -293,7 +322,7 @@ class PrivateMessageComposeViewModelTest {
             clock = submissionClock,
         )
         advanceUntilIdle()
-        vm.onContentChanged(
+        vm.editBody(
             TextFieldValue(text = "draft", selection = TextRange(1, 4)),
         )
         advanceUntilIdle()
@@ -474,9 +503,9 @@ class PrivateMessageComposeViewModelTest {
         vm.smileyPicker.open()
         val open = vm.smileyPicker.state.value as SmileyPickerState.Open
         assertEquals(listOf(favorite), open.favoriteSmileys)
-        vm.onContentChanged(TextFieldValue("hello", TextRange(5)))
+        vm.editBody(TextFieldValue("hello", TextRange(5)))
         vm.onSmileySelected(open.favoriteSmileys.single().token)
-        assertEquals("hello [:fictif espace:3] ", vm.state.value.draft.text)
+        assertEquals("hello [:fictif espace:3] ", vm.bodyFieldState.text.toString())
         assertEquals(SmileyPickerState.Hidden, vm.smileyPicker.state.value)
 
         vm.smileyPicker.open()
@@ -553,7 +582,7 @@ class PrivateMessageComposeViewModelTest {
         assertFalse(vm.state.value.canSubmit)
         vm.onSubjectChanged("Hello")
         assertFalse(vm.state.value.canSubmit)
-        vm.onContentChanged(TextFieldValue("corps"))
+        vm.editBody(TextFieldValue("corps"))
         assertTrue(vm.state.value.canSubmit)
     }
 
@@ -579,7 +608,7 @@ class PrivateMessageComposeViewModelTest {
         val vm = viewModel(repository)
         vm.onRecipientsChanged(" bozoleclown, Lt Ripley ")
         vm.onSubjectChanged("  Sujet  ")
-        vm.onContentChanged(TextFieldValue("Bonjour."))
+        vm.editBody(TextFieldValue("Bonjour."))
 
         vm.effects.test {
             vm.onSubmit()
@@ -608,7 +637,7 @@ class PrivateMessageComposeViewModelTest {
         val vm = viewModel(repository)
         vm.onRecipientsChanged("missing-account")
         vm.onSubjectChanged("Sujet")
-        vm.onContentChanged(TextFieldValue("Bonjour."))
+        vm.editBody(TextFieldValue("Bonjour."))
         vm.effects.test {
             vm.onSubmit()
             expectNoEvents()
@@ -616,7 +645,7 @@ class PrivateMessageComposeViewModelTest {
         assertEquals(EditorErrors.unknownRecipient, vm.state.value.submitError)
         assertEquals("missing-account", vm.state.value.recipients)
         assertEquals("Sujet", vm.state.value.subject)
-        assertEquals("Bonjour.", vm.state.value.draft.text)
+        assertEquals("Bonjour.", vm.bodyFieldState.text.toString())
     }
 
     @Test
@@ -630,14 +659,14 @@ class PrivateMessageComposeViewModelTest {
         val vm = viewModel(repository)
         vm.onRecipientsChanged("bozoleclown")
         vm.onSubjectChanged("Sujet")
-        vm.onContentChanged(TextFieldValue("Bonjour."))
+        vm.editBody(TextFieldValue("Bonjour."))
         vm.onSubmit()
 
         val state = vm.state.value
         assertEquals(EditorErrors.uncertain(EditorErrorSurface.MessageCompose), state.submitError)
         assertEquals("bozoleclown", state.recipients)
         assertEquals("Sujet", state.subject)
-        assertEquals("Bonjour.", state.draft.text)
+        assertEquals("Bonjour.", state.bodyText)
     }
 
     @Test
@@ -654,7 +683,7 @@ class PrivateMessageComposeViewModelTest {
         val vm = viewModel(repository)
         vm.onRecipientsChanged("bozoleclown")
         vm.onSubjectChanged("Sujet")
-        vm.onContentChanged(TextFieldValue("Bonjour."))
+        vm.editBody(TextFieldValue("Bonjour."))
 
         vm.effects.test {
             vm.onSubmit()
@@ -674,7 +703,7 @@ class PrivateMessageComposeViewModelTest {
         val vm = viewModel(repository)
         vm.onRecipientsChanged("bozoleclown")
         vm.onSubjectChanged("Sujet")
-        vm.onContentChanged(TextFieldValue("Bonjour."))
+        vm.editBody(TextFieldValue("Bonjour."))
         vm.onSubmit()
         runCurrent() // Wait for the form refresh after the certain failure.
 
@@ -694,7 +723,7 @@ class PrivateMessageComposeViewModelTest {
         val vm = viewModel(repository)
         vm.onRecipientsChanged("quelqu'un d'autre")
         vm.onSubjectChanged("Sujet")
-        vm.onContentChanged(TextFieldValue("Bonjour."))
+        vm.editBody(TextFieldValue("Bonjour."))
         vm.onSubmit() // stale hash → silent refetch returns dest=bozoleclown again
         runCurrent() // Assert after the deferred refetch, not before it starts.
 
@@ -725,7 +754,7 @@ class PrivateMessageComposeViewModelTest {
         val vm = viewModel(repository, confirmBeforePosting = true)
         vm.onRecipientsChanged("bozoleclown")
         vm.onSubjectChanged("Sujet")
-        vm.onContentChanged(TextFieldValue("Bonjour."))
+        vm.editBody(TextFieldValue("Bonjour."))
         vm.onSubmit()
 
         assertTrue(vm.state.value.showSubmitConfirmation)
@@ -742,7 +771,7 @@ class PrivateMessageComposeViewModelTest {
 
         vm.onRecipientsChanged("bozoleclown")
         vm.onSubjectChanged("Salut")
-        vm.onContentChanged(TextFieldValue("Bonjour."))
+        vm.editBody(TextFieldValue("Bonjour."))
         advanceTimeBy(800L)
 
         val key = EditorDraftKey.mpCompose()
@@ -771,13 +800,41 @@ class PrivateMessageComposeViewModelTest {
         assertEquals("rescued body", vm.state.value.restorableDraft)
         assertEquals("rescued subject", vm.state.value.restorableSubject)
         assertEquals("rescued dest", vm.state.value.restorableRecipients)
-        assertEquals("draft is not auto-applied", "", vm.state.value.draft.text)
+        assertEquals("draft is not auto-applied", "", vm.bodyFieldState.text.toString())
 
         vm.onDraftRestoreRequested()
-        assertEquals("rescued body", vm.state.value.draft.text)
+        assertEquals("rescued body", vm.bodyFieldState.text.toString())
         assertEquals("rescued subject", vm.state.value.subject)
         assertEquals("rescued dest", vm.state.value.recipients)
         assertEquals(null, vm.state.value.restorableDraft)
+    }
+
+    @Test
+    fun draftRestoreWaitsUntilUploadCompletes() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        draftStore.preload(
+            EditorDraftKey.mpCompose(),
+            EditorDraftStore.Draft(body = "rescued body", isPrivate = true),
+        )
+        val gate = CompletableDeferred<Unit>()
+        val uploads = FakeUploadRepository().apply { uploadGate = gate }
+        val vm = viewModel(repository, uploadRepository = uploads)
+        vm.onImagesPicked(listOf("content://pick/1"))
+        runCurrent()
+        assertTrue(vm.state.value.isUploading)
+
+        vm.onDraftRestoreRequested()
+        assertEquals("", vm.bodyFieldState.text.toString())
+        assertEquals("rescued body", vm.state.value.restorableDraft)
+
+        gate.complete(Unit)
+        advanceUntilIdle()
+        assertFalse(vm.state.value.isUploading)
+        val uploadedBody = vm.bodyFieldState.text.toString()
+        vm.onDraftRestoreRequested()
+        assertEquals("$uploadedBody\n\nrescued body", vm.bodyFieldState.text.toString())
+        assertNull(vm.state.value.restorableDraft)
     }
 
     @Test
@@ -820,7 +877,7 @@ class PrivateMessageComposeViewModelTest {
         val viewModel = viewModel(repository)
         assertEquals("rescued body", viewModel.state.value.restorableDraft)
 
-        viewModel.onContentChanged(TextFieldValue("rescued body"))
+        viewModel.editBody(TextFieldValue("rescued body"))
         viewModel.onSubjectChanged("rescued subject")
         formGate.complete(composeForm(dest = "alice"))
         advanceUntilIdle()
@@ -850,7 +907,7 @@ class PrivateMessageComposeViewModelTest {
         advanceUntilIdle()
         assertEquals("rescued MP", recreated.state.value.restorableDraft)
 
-        recreated.onContentChanged(TextFieldValue("new live MP"))
+        recreated.editBody(TextFieldValue("new live MP"))
         advanceTimeBy(800L)
         assertEquals("new live MP", draftStore.saved[key]?.body)
         assertEquals("tester", draftStore.lastSavedOwner)
@@ -911,7 +968,7 @@ class PrivateMessageComposeViewModelTest {
 
         viewModel.onDraftRestoreRequested()
         advanceUntilIdle()
-        assertEquals("rescued body", viewModel.state.value.draft.text)
+        assertEquals("rescued body", viewModel.bodyFieldState.text.toString())
         assertEquals("new subject", viewModel.state.value.subject)
         assertEquals("new recipient", viewModel.state.value.recipients)
     }
@@ -934,10 +991,10 @@ class PrivateMessageComposeViewModelTest {
 
         viewModel.onRecipientsChanged("bob")
         viewModel.onSubjectChanged("fresh subject")
-        viewModel.onContentChanged(TextFieldValue("fresh body"))
+        viewModel.editBody(TextFieldValue("fresh body"))
         viewModel.onDraftRestoreRequested()
 
-        assertEquals("fresh body\n\nrescued body", viewModel.state.value.draft.text)
+        assertEquals("fresh body\n\nrescued body", viewModel.bodyFieldState.text.toString())
         assertEquals("fresh subject", viewModel.state.value.subject)
         assertEquals("bob", viewModel.state.value.recipients)
         assertNull(viewModel.state.value.restorableDraft)
@@ -952,10 +1009,10 @@ class PrivateMessageComposeViewModelTest {
             EditorDraftStore.Draft(body = "rescued body", isPrivate = true),
         )
         val viewModel = viewModel(repository)
-        viewModel.onContentChanged(TextFieldValue("live body", selection = TextRange(9)))
+        viewModel.editBody(TextFieldValue("live body", selection = TextRange(9)))
         assertEquals("rescued body", viewModel.state.value.restorableDraft)
 
-        viewModel.onContentChanged(TextFieldValue("live body", selection = TextRange(2)))
+        viewModel.editBody(TextFieldValue("live body", selection = TextRange(2)))
 
         assertEquals("rescued body", viewModel.state.value.restorableDraft)
     }
@@ -989,7 +1046,7 @@ class PrivateMessageComposeViewModelTest {
         val vm = viewModel(repository)
         vm.onRecipientsChanged("bozoleclown")
         vm.onSubjectChanged("Sujet")
-        vm.onContentChanged(TextFieldValue("Bonjour."))
+        vm.editBody(TextFieldValue("Bonjour."))
 
         vm.onSubmit()
         advanceUntilIdle()
@@ -1012,7 +1069,7 @@ class PrivateMessageComposeViewModelTest {
         // persist the state at close time, not the snapshot the debounce captured at scheduling.
         vm.onRecipientsChanged("bozoleclown")
         vm.onSubjectChanged("Salut")
-        vm.onContentChanged(TextFieldValue("dernier mot"))
+        vm.editBody(TextFieldValue("dernier mot"))
         vm.onCloseRequested()
 
         val effect = vm.effects.first()
@@ -1079,11 +1136,11 @@ class PrivateMessageComposeViewModelTest {
 
         viewModel.onRecipientsChanged("alice")
         viewModel.onSubjectChanged("temporary subject")
-        viewModel.onContentChanged(TextFieldValue("temporary body"))
+        viewModel.editBody(TextFieldValue("temporary body"))
         advanceTimeBy(800L)
         viewModel.onRecipientsChanged("")
         viewModel.onSubjectChanged("")
-        viewModel.onContentChanged(TextFieldValue(""))
+        viewModel.editBody(TextFieldValue(""))
         viewModel.onCloseRequested()
 
         assertEquals(PrivateMessageComposeEffect.CloseCommitted, viewModel.effects.first())
@@ -1103,7 +1160,7 @@ class PrivateMessageComposeViewModelTest {
         val vm = viewModel(repository)
         vm.onRecipientsChanged("bozoleclown")
         vm.onSubjectChanged("Sujet")
-        vm.onContentChanged(TextFieldValue("en vol"))
+        vm.editBody(TextFieldValue("en vol"))
 
         vm.onSubmit()
         // Close requested while the POST is in flight — must be inert (gate #803).
@@ -1150,19 +1207,406 @@ class PrivateMessageComposeViewModelTest {
         val vm = viewModel(repository)
         vm.onRecipientsChanged("alice")
         vm.onSubjectChanged("original subject")
-        vm.onContentChanged(TextFieldValue("original body"))
+        vm.editBody(TextFieldValue("original body"))
         vm.onSubmit()
         vm.onRecipientsChanged("bob")
         vm.onSubjectChanged("late subject")
-        vm.onContentChanged(TextFieldValue("late body"))
+        vm.editBody(TextFieldValue("late body"))
         assertEquals("alice", vm.state.value.recipients)
         assertEquals("original subject", vm.state.value.subject)
-        assertEquals("original body", vm.state.value.draft.text)
+        assertEquals("original body", vm.bodyFieldState.text.toString())
         coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
         gate.complete(Unit)
         runCurrent()
         coVerify(exactly = 1) {
             repository.submitNewMessage(any(), "alice", "original subject", "original body", any())
+        }
+    }
+
+    @Test
+    fun submitUsesLiveBodyBeforeMirrorEmission() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        val vm = viewModel(repository)
+        vm.onRecipientsChanged("alice")
+        vm.onSubjectChanged("title")
+        vm.bodyFieldState.edit { append("live body") }
+        assertEquals("", vm.state.value.bodyText)
+        assertFalse(vm.state.value.canSubmit)
+
+        vm.onSubmit()
+        runCurrent()
+
+        coVerify(exactly = 1) { repository.submitNewMessage(any(), "alice", "title", "live body", any()) }
+        assertEquals("live body", draftStore.saved[EditorDraftKey.mpCompose()]?.body)
+    }
+
+    @Test
+    fun submitRejectsBlankLiveBodyWhenMirrorStillAllowsIt() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val vm = viewModel(repository)
+        vm.onRecipientsChanged("alice")
+        vm.onSubjectChanged("title")
+        vm.editBody(TextFieldValue("body"))
+        assertTrue(vm.state.value.canSubmit)
+        vm.bodyFieldState.edit { replace(0, length, "") }
+        assertEquals("body", vm.state.value.bodyText)
+        vm.onSubmit()
+        runCurrent()
+        assertEquals(0, draftStore.beginCalls)
+        coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun submitFreezesBodySubjectAndRecipients() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        draftStore.beginGate = gate
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        val vm = viewModel(repository)
+        vm.onRecipientsChanged(" alice, bob ")
+        vm.onSubjectChanged(" title ")
+        vm.onToggleSignature(false)
+        vm.onToggleSmileyDisabled(true)
+        vm.onToggleEmailNotification(true)
+        vm.bodyFieldState.edit { append("frozen body") }
+        assertEquals("", vm.state.value.bodyText)
+        vm.onSubmit()
+        vm.onRecipientsChanged("mallory")
+        vm.onSubjectChanged("changed")
+        vm.editBody(TextFieldValue("late input"))
+        vm.onToggleSignature(true)
+        vm.onToggleSmileyDisabled(false)
+        vm.onToggleEmailNotification(false)
+        gate.complete(Unit)
+        runCurrent()
+
+        val saved = draftStore.saved.getValue(EditorDraftKey.mpCompose())
+        assertEquals("frozen body", saved.body)
+        assertEquals(" title ", saved.subject)
+        assertEquals(" alice, bob ", saved.recipients)
+        assertTrue(saved.isPrivate)
+        coVerify(exactly = 1) {
+            repository.submitNewMessage(any(), "alice, bob", "title", "frozen body", match {
+                !it.signatureEnabled && it.smileyDisabled && it.emailNotificationEnabled
+            })
+        }
+        assertEquals("frozen body", vm.bodyFieldState.text.toString())
+    }
+
+    @Test
+    fun armingAndConfirmingValidateTheLiveBody() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        val vm = viewModel(repository, confirmBeforePosting = true)
+        vm.onRecipientsChanged("alice")
+        vm.onSubjectChanged("title")
+        vm.bodyFieldState.edit { append("live body") }
+        vm.onSubmit()
+        val token = vm.state.value.armToken
+        assertTrue(token != null)
+        Snapshot.sendApplyNotifications()
+        runCurrent()
+        assertEquals("the mirror must never disarm", token, vm.state.value.armToken)
+        advanceTimeBy(500)
+        vm.onSubmitConfirmed(token)
+        runCurrent()
+        coVerify(exactly = 1) { repository.submitNewMessage(any(), "alice", "title", "live body", any()) }
+    }
+
+    @Test
+    fun restoreOfferUsesLiveBody() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val formGate = CompletableDeferred<ReplyForm>()
+        coEvery { repository.fetchComposeForm(any()) } coAnswers { formGate.await() }
+        draftStore.preload(EditorDraftKey.mpCompose(), EditorDraftStore.Draft(
+            body = "rescued body", subject = "subject", recipients = "alice", isPrivate = true,
+        ))
+        val vm = viewModel(repository)
+        assertEquals("rescued body", vm.state.value.restorableDraft)
+        vm.onSubjectChanged("subject")
+        vm.bodyFieldState.edit { append("rescued body") }
+        assertEquals("", vm.state.value.bodyText)
+        formGate.complete(composeForm(dest = "alice"))
+        runCurrent()
+        assertNull(vm.state.value.restorableDraft)
+        assertEquals("alice", vm.state.value.recipients)
+        assertEquals("rescued body", vm.bodyFieldState.text.toString())
+    }
+
+    @Test
+    fun draftOfferAndRequestedRestoreReadBodyBeforeSnapshotNotification() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val key = EditorDraftKey.mpCompose()
+        draftStore.preload(key, EditorDraftStore.Draft(body = "stored", isPrivate = true))
+        val vm = viewModel(repository)
+        vm.bodyFieldState.edit { append("typed") }
+        assertEquals("", vm.state.value.bodyText)
+        vm.onDraftRestoreRequested()
+        assertEquals("typed\n\nstored", vm.bodyFieldState.text.toString())
+        assertEquals(TextRange(13), vm.bodyFieldState.selection)
+        assertNull(vm.state.value.restorableDraft)
+        Snapshot.sendApplyNotifications()
+        advanceUntilIdle()
+        assertEquals("typed\n\nstored", draftStore.saved[key]?.body)
+    }
+
+    @Test
+    fun delayedDraftOfferDoesNotOverwriteLiveTyping() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        draftStore.preload(EditorDraftKey.mpCompose(), EditorDraftStore.Draft(body = "stored", isPrivate = true))
+        val loadGate = CompletableDeferred<Unit>()
+        draftStore.loadGate = loadGate
+        val vm = viewModel(repository)
+        vm.bodyFieldState.edit { append("typed before load") }
+        assertEquals("", vm.state.value.bodyText)
+        loadGate.complete(Unit)
+        runCurrent()
+        assertNull(vm.state.value.restorableDraft)
+        assertEquals("typed before load", vm.bodyFieldState.text.toString())
+    }
+
+    @Test
+    fun autosaveReadsLiveBodyAtDeadline() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val vm = viewModel(repository)
+        advanceTimeBy(800)
+        runCurrent()
+        assertEquals("initial snapshot must not save an empty draft", 0, draftStore.saveCount)
+        vm.editBody(TextFieldValue("first"))
+        advanceTimeBy(749)
+        vm.bodyFieldState.edit { replace(0, length, "latest") }
+        assertEquals("first", vm.state.value.bodyText)
+        advanceTimeBy(1)
+        runCurrent()
+        assertEquals("latest", draftStore.saved[EditorDraftKey.mpCompose()]?.body)
+    }
+
+    @Test
+    fun selectionChangeDoesNotAutosave() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val vm = viewModel(repository)
+        vm.editBody(TextFieldValue("body"))
+        advanceUntilIdle()
+        val writes = draftStore.saveCount
+        vm.bodyFieldState.edit { selection = TextRange(1, 3) }
+        Snapshot.sendApplyNotifications()
+        advanceUntilIdle()
+        assertEquals(writes, draftStore.saveCount)
+        assertEquals(TextRange(1, 3), vm.bodyFieldState.selection)
+    }
+
+    @Test
+    fun closeFlushesLiveBodyBeforeMirrorEmission() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val vm = viewModel(repository)
+        vm.bodyFieldState.edit { append("last keystroke") }
+        assertEquals("", vm.state.value.bodyText)
+        vm.onCloseRequested()
+        runCurrent()
+        assertEquals("last keystroke", draftStore.saved[EditorDraftKey.mpCompose()]?.body)
+    }
+
+    @Test
+    fun smileyDismissesOnlyAfterAcceptedInsertion() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.EmptyMessage)
+        val gate = CompletableDeferred<Unit>()
+        draftStore.beginGate = gate
+        val vm = viewModel(repository)
+        vm.onRecipientsChanged("alice")
+        vm.onSubjectChanged("subject")
+        vm.editBody(TextFieldValue("body", TextRange(4)))
+        vm.smileyPicker.open()
+        vm.onSubmit()
+        vm.onSmileySelected(":jap:")
+        assertEquals("body", vm.bodyFieldState.text.toString())
+        assertTrue(vm.smileyPicker.state.value is SmileyPickerState.Open)
+        gate.complete(Unit)
+        runCurrent()
+        vm.onSmileySelected(":jap:")
+        assertEquals("body :jap: ", vm.bodyFieldState.text.toString())
+        assertEquals(SmileyPickerState.Hidden, vm.smileyPicker.state.value)
+    }
+
+    @Test
+    fun uploadInsertionPreservesAcceptedImages() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val uploads = FakeUploadRepository().apply {
+            uploadException = UploadException.TooLarge(1)
+            failOnCall = 2
+        }
+        val vm = viewModel(repository, uploadRepository = uploads)
+        vm.editBody(TextFieldValue("before after", TextRange(7)))
+        vm.onImagesPicked(listOf("content://first", "content://second"))
+        Snapshot.sendApplyNotifications()
+        advanceUntilIdle()
+        val expected = "before [url=https://rehost.diberie.com/Picture/Get/f/1]" +
+            "[img]https://rehost.diberie.com/Picture/Get/f/1[/img][/url]after"
+        assertEquals(expected, vm.bodyFieldState.text.toString())
+        assertEquals(TextRange(expected.length - "after".length), vm.bodyFieldState.selection)
+        assertEquals(expected, draftStore.saved[EditorDraftKey.mpCompose()]?.body)
+        assertEquals(2, uploads.uploadCalls)
+        assertEquals(EditorErrors.stopped(EditorErrors.tooLarge, UploadProgress(1, 2)), vm.state.value.uploadError)
+    }
+
+    @Test
+    fun uncertainAttemptRestoresAllFieldsIntoStableBuffer() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        val original = viewModel(repository)
+        original.onRecipientsChanged("alice")
+        original.onSubjectChanged("subject")
+        original.editBody(TextFieldValue("uncertain body"))
+        original.onSubmit()
+        advanceUntilIdle()
+        original.viewModelScope.cancel()
+        val writesBeforeRestore = draftStore.saveCount
+        val restored = viewModel(repository)
+        val field = restored.bodyFieldState
+        Snapshot.sendApplyNotifications()
+        runCurrent()
+        assertTrue(field === restored.bodyFieldState)
+        assertEquals("uncertain body", field.text.toString())
+        assertEquals(TextRange(14), field.selection)
+        assertEquals("subject", restored.state.value.subject)
+        assertEquals("alice", restored.state.value.recipients)
+        assertEquals(EditorErrors.uncertain(EditorErrorSurface.MessageCompose), restored.state.value.submitError)
+        assertNull(restored.state.value.restorableDraft)
+        advanceTimeBy(800)
+        runCurrent()
+        assertEquals("automatic hydration must not save an identical draft", writesBeforeRestore, draftStore.saveCount)
+    }
+
+    @Test
+    fun previewIsClearedWhenHiddenAndBeforeReopening() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val oldPreview = PostContent(listOf(PostBlock.Paragraph(listOf(PostInline.Text("old")))))
+        val newPreview = PostContent(listOf(PostBlock.Paragraph(listOf(PostInline.Text("new")))))
+        val vm = viewModel(
+            repository,
+            previewParser = BbcodePreviewParser { if (it == "old") oldPreview else newPreview },
+            defaultDispatcher = StandardTestDispatcher(testScheduler),
+        )
+        vm.editBody(TextFieldValue("old"))
+        vm.onTogglePreview()
+        runCurrent()
+        assertEquals(oldPreview, vm.state.value.preview)
+
+        vm.onTogglePreview()
+        assertFalse(vm.state.value.isPreviewVisible)
+        assertEquals(PostContent(emptyList()), vm.state.value.preview)
+        vm.editBody(TextFieldValue("new"))
+        vm.onTogglePreview()
+        assertTrue(vm.state.value.isPreviewVisible)
+        assertEquals(PostContent(emptyList()), vm.state.value.preview)
+        runCurrent()
+        assertEquals(newPreview, vm.state.value.preview)
+    }
+
+    @Test
+    fun previewIsRestoredWhenReopenedWithoutEditingBody() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val parsedPreview = PostContent(listOf(PostBlock.Paragraph(listOf(PostInline.Text("body")))))
+        val vm = viewModel(
+            repository,
+            previewParser = BbcodePreviewParser { parsedPreview },
+            defaultDispatcher = StandardTestDispatcher(testScheduler),
+        )
+        vm.editBody(TextFieldValue("body"))
+        vm.onTogglePreview()
+        runCurrent()
+        val publishedPreview = vm.state.value.preview
+        assertEquals(parsedPreview, publishedPreview)
+
+        vm.onTogglePreview()
+        assertFalse(vm.state.value.isPreviewVisible)
+        assertEquals(PostContent(emptyList()), vm.state.value.preview)
+        vm.onTogglePreview()
+        assertTrue(vm.state.value.isPreviewVisible)
+        runCurrent()
+        assertEquals(publishedPreview, vm.state.value.preview)
+        assertTrue(vm.state.value.preview.blocks.isNotEmpty())
+    }
+
+    @Test
+    fun previewDiscardsResultAfterEdit() = previewDiscardsStaleResult(hide = false)
+
+    @Test
+    fun previewDiscardsResultAfterHide() = previewDiscardsStaleResult(hide = true)
+
+    private fun previewDiscardsStaleResult(hide: Boolean) = runTest {
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val executor = Executors.newSingleThreadExecutor()
+        val dispatcher = executor.asCoroutineDispatcher()
+        val oldPreview = PostContent(listOf(PostBlock.Paragraph(listOf(PostInline.Text("old")))))
+        val newPreview = PostContent(listOf(PostBlock.Paragraph(listOf(PostInline.Text("new")))))
+        val parser = BbcodePreviewParser { text ->
+            if (text == "old") {
+                started.countDown()
+                check(release.await(5, TimeUnit.SECONDS)) { "preview barrier timed out" }
+                oldPreview
+            } else {
+                newPreview
+            }
+        }
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val vm = viewModel(repository, previewParser = parser, defaultDispatcher = dispatcher)
+        val published = mutableListOf<PostContent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            vm.state.collect { published += it.preview }
+        }
+        try {
+            vm.editBody(TextFieldValue("old"))
+            vm.onTogglePreview()
+            runCurrent()
+            assertTrue("synchronous parse must be held off Main", started.await(5, TimeUnit.SECONDS))
+            if (hide) {
+                vm.onTogglePreview()
+            } else {
+                // Intentionally omit notifications: the final live-buffer check must still reject old.
+                vm.bodyFieldState.edit { replace(0, length, "new") }
+            }
+            release.countDown()
+            executor.submit {}.get(5, TimeUnit.SECONDS)
+            runCurrent()
+            assertFalse("old parse must never publish", oldPreview in published)
+            if (!hide) {
+                Snapshot.sendApplyNotifications()
+                runCurrent()
+                executor.submit {}.get(5, TimeUnit.SECONDS)
+                runCurrent()
+                assertEquals(newPreview, vm.state.value.preview)
+                assertTrue(newPreview in published)
+            } else {
+                assertFalse(vm.state.value.isPreviewVisible)
+            }
+        } finally {
+            release.countDown()
+            vm.viewModelScope.cancel()
+            dispatcher.close()
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS))
         }
     }
 
@@ -1211,6 +1655,7 @@ class PrivateMessageComposeViewModelTest {
             initialRecipient = "alice",
             repository = repository,
             previewParser = previewParser,
+            defaultDispatcher = UnconfinedTestDispatcher(scope.testScheduler),
             userPreferencesRepository = userPreferences,
             draftStore = draftStore,
             authRepository = authRepository,
@@ -1256,7 +1701,7 @@ class PrivateMessageComposeViewModelTest {
             override fun editBody(body: String) {
                 viewModel.onRecipientsChanged("alice")
                 viewModel.onSubjectChanged("Contract title")
-                viewModel.onContentChanged(TextFieldValue(body, TextRange(body.length)))
+                viewModel.editBody(TextFieldValue(body, TextRange(body.length)), advanceMirror = false)
             }
 
             override fun clickSubmit() = viewModel.onSubmit()
@@ -1279,7 +1724,9 @@ class PrivateMessageComposeViewModelTest {
             override fun snapshot(): SubmissionProbe = viewModel.state.value.let {
                 it.armToken?.let { token -> arms[token.id] = token }
                 SubmissionProbe(
-                    it.draft.text, it.canSubmit, it.isSubmitting, it.isUploading, it.showSubmitConfirmation,
+                    viewModel.bodyFieldState.text.toString(),
+                    it.copy(bodyText = viewModel.bodyFieldState.text.toString()).canSubmit,
+                    it.isSubmitting, it.isUploading, it.showSubmitConfirmation,
                     armId = it.armToken?.id,
                     error = when (it.submitError) {
                         EditorErrors.network -> SubmissionErrorProbe.NETWORK

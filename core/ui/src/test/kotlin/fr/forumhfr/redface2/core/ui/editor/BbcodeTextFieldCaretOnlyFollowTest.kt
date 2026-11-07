@@ -113,6 +113,24 @@ class BbcodeTextFieldCaretOnlyFollowTest {
         assertTrue("a parent selection resync must not echo", fixture.emissions.isEmpty())
     }
 
+    @OptIn(ExperimentalFoundationApi::class)
+    @Test
+    fun parentTextInsertionUndoesToOriginalTextAndSelectionInOneStep() {
+        val initial = TextFieldValue("hello world", TextRange(5))
+        val fixture = setBridgeContent(initial)
+        val insertion = TextFieldValue("hello[b][/b] world", TextRange(8))
+
+        composeTestRule.runOnIdle { fixture.value.value = insertion }
+        composeTestRule.waitForIdle()
+        assertTextFieldStateValue(fixture.fieldState, insertion)
+
+        composeTestRule.runOnIdle { fixture.fieldState.undoState.undo() }
+        composeTestRule.waitForIdle()
+
+        assertTextFieldStateValue(fixture.fieldState, initial)
+        assertFalse(fixture.fieldState.undoState.canUndo)
+    }
+
     @Test
     fun toolbarLikeInsertionLandsAtParentSelection() {
         val fixture = setFieldContent(TextFieldValue("hello world", TextRange(5)))

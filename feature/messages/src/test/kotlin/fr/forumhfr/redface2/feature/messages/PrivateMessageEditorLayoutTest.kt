@@ -1,9 +1,14 @@
 package fr.forumhfr.redface2.feature.messages
 
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasSetTextAction
@@ -88,6 +93,64 @@ class PrivateMessageEditorLayoutTest {
 
         // ReplyEditorBody has 176 dp after its vertical padding on this 200 dp window.
         assertDraftActionsFullyVisible()
+    }
+
+    @Test
+    fun `new message keeps 160 dp body and both draft actions on short viewport`() {
+        setComposeContent()
+        compose.onNodeWithText("Votre réponse")
+            .assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT - FIELD_LABEL_HEADROOM)
+        assertDraftActionsFullyVisible()
+    }
+
+    @Test
+    @Config(qualifiers = "fr-rFR-w360dp-h200dp-xxhdpi")
+    fun `new message keeps both draft actions visible below the 220 dp budget threshold`() {
+        setComposeContent()
+        assertDraftActionsFullyVisible()
+    }
+
+    @Test
+    fun `new message disables draft restore during upload and keeps discard enabled`() {
+        setComposeContent(isUploading = true)
+
+        compose.onNodeWithText("Restaurer").assertIsNotEnabled()
+        compose.onNodeWithText("Ignorer").assertIsEnabled()
+    }
+
+    @Test
+    fun `new message enables draft restore when no upload is running`() {
+        setComposeContent(isUploading = false)
+
+        compose.onNodeWithText("Restaurer").assertIsEnabled()
+        compose.onNodeWithText("Ignorer").assertIsEnabled()
+    }
+
+    private fun setComposeContent(isUploading: Boolean = false) {
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                ComposeEditorBody(
+                    state = PrivateMessageComposeUiState(
+                        isLoadingForm = false,
+                        formAvailable = true,
+                        restorableDraft = "Brouillon à restaurer",
+                        isUploading = isUploading,
+                    ),
+                    bodyFieldState = remember { TextFieldState() },
+                    bodyInputTransformation = InputTransformation {},
+                    onRecipientsChanged = {},
+                    onSubjectChanged = {},
+                    onToolbarAction = {},
+                    onTogglePreview = {},
+                    onErrorDismissed = {},
+                    onDraftRestore = {},
+                    onDraftDiscard = {},
+                    onImagePickerEvent = {},
+                    onUploadErrorDismissed = {},
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
     }
 
     private fun assertDraftActionsFullyVisible() {

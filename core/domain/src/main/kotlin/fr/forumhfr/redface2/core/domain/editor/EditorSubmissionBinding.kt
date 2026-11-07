@@ -120,10 +120,13 @@ class EditorSubmissionBinding<E, F>(
         showError(null)
     }
 
-    fun disarm() {
-        controller.disarm()
+    fun disarm() { tryDisarm() }
+
+    fun tryDisarm(): Boolean {
+        val accepted = controller.disarm()
         armExpiry?.cancel()
         publish()
+        return accepted
     }
 
     fun request(timeoutMillis: Long, canSubmit: Boolean): SubmissionRequest =

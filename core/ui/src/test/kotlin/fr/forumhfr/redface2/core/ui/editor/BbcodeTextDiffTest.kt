@@ -8,6 +8,7 @@ class BbcodeTextDiffTest {
     @Test
     fun `common prefix and suffix are preserved`() {
         assertReplacement("abcOLDxyz", "abcNEWxyz", BbcodeTextReplacement(3, 6, "NEW"))
+        assertReplacement("abcOLDxyz", "abcNEW!xyz", BbcodeTextReplacement(3, 6, "NEW!"))
     }
 
     @Test
@@ -39,6 +40,7 @@ class BbcodeTextDiffTest {
     @Test
     fun `empty text supports insertion deletion and no change`() {
         assertReplacement("", "abc", BbcodeTextReplacement(0, 0, "abc"))
+        assertReplacement("", "[b][/b]", BbcodeTextReplacement(0, 0, "[b][/b]"))
         assertReplacement("abc", "", BbcodeTextReplacement(0, 3, ""))
         assertReplacement("", "", BbcodeTextReplacement(0, 0, ""))
     }
@@ -56,6 +58,16 @@ class BbcodeTextDiffTest {
     @Test
     fun `a shared low surrogate stays inside the replacement`() {
         assertReplacement("a\uD83D\uDE00z", "a\uD83E\uDE00z", BbcodeTextReplacement(1, 3, "\uD83E\uDE00"))
+    }
+
+    @Test
+    fun `both prefix and suffix retreat out of surrogate pairs`() {
+        assertReplacement("😀", "😁🨀", BbcodeTextReplacement(0, 2, "😁🨀"))
+    }
+
+    @Test
+    fun `an isolated low surrogate can become a complete pair`() {
+        assertReplacement("\uDE00x", "😀x", BbcodeTextReplacement(0, 1, "😀"))
     }
 
     @Test

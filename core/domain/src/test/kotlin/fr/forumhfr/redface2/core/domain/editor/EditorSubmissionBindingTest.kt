@@ -14,6 +14,7 @@ import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -202,16 +203,41 @@ class EditorSubmissionBindingTest {
         assertEquals(2, store.beginCalls)
     }
 
+    @Test
+    fun `tryDisarm reports acceptance and publishes even when mutation is blocked`() = runTest {
+        val states = mutableListOf<EditorSubmissionState>()
+        val binding = binding(VersionedEditorDraftStore(), mutableListOf(), state = { states += it })
+        binding.restore("key")
+        binding.setPreference(true)
+        assertTrue(binding.request(4_000, true) is SubmissionRequest.Armed)
+
+        states.clear()
+        assertTrue(binding.tryDisarm())
+        assertEquals(EditorSubmissionState.Ready, binding.state)
+        assertEquals(listOf(EditorSubmissionState.Ready), states)
+
+        binding.setPreference(false)
+        assertTrue(binding.request(4_000, true) is SubmissionRequest.Accepted)
+        assertTrue(binding.blocksMutation)
+        val blockedState = binding.state
+
+        states.clear()
+        assertFalse(binding.tryDisarm())
+        assertEquals(blockedState, binding.state)
+        assertEquals(listOf(blockedState), states)
+    }
+
     private fun TestScope.binding(
         store: VersionedEditorDraftStore,
         prepared: MutableList<AttemptIdentity>,
+        state: (EditorSubmissionState) -> Unit = {},
     ) = EditorSubmissionBinding(
         EditorSubmissionEnvironment(
             this, DiagnosticsClock { testScheduler.currentTime * 1_000_000L }, DiagnosticsLog(),
         ),
         EditorDraftSession(store, "key"),
         EditorSubmissionCallbacks<Unit, String>(
-            state = {}, error = {}, success = {}, attemptPrepared = { prepared += it },
+            state = state, error = {}, success = {}, attemptPrepared = { prepared += it },
         ),
         EditorSubmissionErrors("uncertain", "draft", "session", "unknown"),
     )
