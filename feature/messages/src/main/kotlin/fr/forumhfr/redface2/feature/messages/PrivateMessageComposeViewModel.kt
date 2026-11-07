@@ -210,16 +210,13 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
 
     /** Read the live controller on every input, including the frame before readOnly is recomposed. */
     val bodyInputTransformation = InputTransformation {
+        // Only synchronous submission metadata changes here; no body edit or intent is dispatched.
         if (!acceptMutation(blockDuringUpload = true)) revertAllChanges()
     }
 
     private fun acceptMutation(blockDuringUpload: Boolean = false): Boolean {
         if (submission.blocksMutation || (blockDuringUpload && _state.value.isUploading)) return false
-        // The binding currently discards Controller.disarm()'s Boolean. Preserve its synchronous
-        // refusal through the live postcondition without changing the domain contract in this PR.
-        // À CONFIRMER: propagate that Boolean from the binding when its API change is authorized.
-        submission.disarm()
-        return !submission.blocksMutation
+        return submission.disarm()
     }
 
     init {
@@ -304,11 +301,12 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
      */
     private suspend fun restoreDraftIfAny() {
         val entry = submission.restore(draftKey) ?: return
-        if (submission.blocksMutation) return
+        if (submission.blocksMutation || (entry.attempt != null && !acceptMutation())) return
         val draft = entry.draft
         if (entry.attempt != null) {
-            if (!acceptMutation()) return
             replaceBody(draft.body)
+            // Automatic opening establishes the baseline; explicit restore below stays undoable.
+            bodyFieldState.undoState.clearHistory()
             _state.update {
                 it.copy(
                     subject = draft.subject.orEmpty(), recipients = draft.recipients.orEmpty(),
@@ -635,7 +633,9 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         if (permit is SubmissionRequest.Accepted) launchSubmission(permit, snapshot, form)
     }
 
-    fun onSubmitConfirmationDismissed() = submission.disarm()
+    fun onSubmitConfirmationDismissed() {
+        submission.disarm()
+    }
 
     fun onSubmit(timeoutMillis: Long = 4_000L) {
         val snapshot = _state.value.copy(bodyText = bodyFieldState.text.toString())

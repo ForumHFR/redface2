@@ -21,7 +21,10 @@ class TextFieldStateBbcodeTest {
         ).forEach { (before, after, expected) ->
             val range = bbcodeChangedRange(before, after)
             assertEquals(expected, range)
-            assertEquals(after, before.replaceRange(range.start, range.oldEnd, after.substring(range.start, range.newEnd)))
+            assertEquals(
+                after,
+                before.replaceRange(range.start, range.oldEnd, after.substring(range.start, range.newEnd)),
+            )
         }
     }
 }

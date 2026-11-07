@@ -18,6 +18,8 @@ import androidx.lifecycle.viewModelScope
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
@@ -39,6 +41,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -125,6 +128,46 @@ class PrivateMessageComposeInputTest {
         }
     }
 
+    @Test
+    fun initialHydrationStartsNewUndoHistory() {
+        val key = EditorDraftKey.mpCompose()
+        val token = EditorDraftStore.AttemptToken(checkNotNull(store.activeOwner), key, "hydration", 1)
+        store.entries[key] = EditorDraftStore.DraftEntry(
+            draft = EditorDraftStore.Draft(
+                body = "recovered body", subject = "title", recipients = "alice", isPrivate = true,
+            ),
+            version = token.version,
+            attempt = EditorDraftStore.Attempt(token, EditorDraftStore.AttemptStatus.UNCERTAIN),
+        )
+        setFieldContent(confirmBeforePosting = false)
+
+        compose.runOnIdle {
+            val state = vm.bodyFieldState
+            assertEquals("recovered body", state.text.toString())
+            assertFalse(state.undoState.canUndo)
+            state.undoState.undo()
+            assertEquals("recovered body", state.text.toString())
+            assertFalse(state.undoState.canUndo)
+        }
+    }
+
+    @Test
+    fun requestedRestoreRemainsUndoable() {
+        store.preload(EditorDraftKey.mpCompose(), EditorDraftStore.Draft(body = "stored", isPrivate = true))
+        setFieldContent(confirmBeforePosting = false)
+        field().performTextInput("typed")
+
+        compose.runOnIdle {
+            assertEquals("stored", vm.state.value.restorableDraft)
+            vm.onDraftRestoreRequested()
+            val state = vm.bodyFieldState
+            assertEquals("typed\n\nstored", state.text.toString())
+            assertTrue(state.undoState.canUndo)
+            state.undoState.undo()
+            assertEquals("typed", state.text.toString())
+        }
+    }
+
     private fun assertInputRejected() {
         val selection = compose.runOnIdle { vm.bodyFieldState.selection }
         field().performTextInput(" rejected typing")
@@ -149,6 +192,7 @@ class PrivateMessageComposeInputTest {
         clipboard.setPrimaryClip(ClipData.newPlainText("test", " pasted"))
         coEvery { repository.fetchComposeForm(any()) } returns ReplyForm(
             hashCheck = "abc", sujet = "", hiddenFields = mapOf("cat" to "prive"),
+            isAnonymous = false,
         )
         coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Failure(ReplyFailureReason.EmptyMessage)
