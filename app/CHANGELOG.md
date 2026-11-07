@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.69.4` — `internal` (dev) — 2026-11-07
+
+Refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)), lot R0b, partie 2 sur 2 ([#1456](https://github.com/ForumHFR/redface2/issues/1456) ; [#1551](https://github.com/ForumHFR/redface2/pull/1551)) : les cinq éditeurs (post, nouveau sujet, réponse rapide, réponse MP, nouveau MP) partagent un type d'erreur commun et ses textes. L'interface ne change pas, hors textes ; la nouvelle barre de l'éditeur arrive avec R1a-1.
+
+- **Erreurs** : textes réécrits (résumé court, détail précis). Une erreur ne disparaît plus à la frappe ni à la sélection ; elle est levée quand l'opération qu'elle concerne réussit, ou par l'utilisateur.
+- **Citation non chargée** : « Envoyer » reste inactif tant qu'une citation demandée manque. Le bouton de la bannière devient « Recharger » (sans rien envoyer), puis « Ignorer la citation » après deux échecs : rien n'est inséré, le texte reste. La demande survit à la fermeture de la réponse rapide, au passage à l'éditeur complet et à un arrêt de l'application ; une citation déjà publiée n'est jamais réinsérée.
+- **Brouillon** : un échec d'enregistrement du brouillon a son propre message et ne remplace jamais un « Envoi incertain ».
+- **Images** : « Sélecteur absent » quand aucun sélecteur n'est installé ; au-delà de dix images, les dix premières sont gardées avec une information ; un lot arrêté garde son compteur `k/N` et les images déjà insérées.
+- **MP** : une réponse refusée comme « sujet verrouillé » est présentée comme envoi incertain (vérifiez la conversation), ce que son texte disait déjà.
+
 ## `0.69.3` — `internal` (dev) — 2026-11-07
 
 Offre « Dernière page » après envoi ([#1437](https://github.com/ForumHFR/redface2/issues/1437) ; [#1546](https://github.com/ForumHFR/redface2/pull/1546)) : après une réponse ou une citation depuis une page qui n'est pas la dernière, l'offre apparaît aussi quand le rechargement prend plus d'une seconde.

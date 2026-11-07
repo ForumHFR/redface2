@@ -1,4 +1,4 @@
-Redface 2 v0.69.3 — dev.
-- Sending: after a reply or quote from an older page, "Last page" appears even if reloading takes over 1 s; "Message published" stays immediate, without duplicates.
+Redface 2 v0.69.4 — dev.
+- Editors: rewritten error messages, kept while typing. A quote that failed to load blocks "Send": "Reload", then "Ignore quote".
+- Sending: after a reply or quote from an older page, "Last page" appears even if reloading takes over 1 s.
 - Interface: Material 3 components updated to 1.5 (beta). To close a sheet by dragging it down, release while moving or drag it past half its height.
-- Quotes: after opening a post from "quoted N times", Back returns to the original post.
