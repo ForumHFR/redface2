@@ -32,10 +32,13 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         val entry = try {
             owner = store.currentOwner()
             key?.let { store.loadEntry(owner, it) }
+        } catch (error: UnreadableInlineQuoteRequestException) {
+            // Only an unreadable inline request seals the session until a reload.
+            readable = false
+            throw error
         } catch (error: IOException) {
-            // Preserve the ordinary best-effort restore contract. Versioned writes still guard
-            // the row; only an unreadable inline request seals the session until a reload.
-            readable = error !is UnreadableInlineQuoteRequestException
+            // Preserve the ordinary best-effort restore contract. Versioned writes still guard the row.
+            readable = true
             throw error
         }
         version = entry?.version ?: 0L
