@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -27,7 +29,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -89,7 +90,8 @@ fun PrivateMessageReplyScreen(
         // #618 — auto-open the recipient-manager sheet when entered from the Participants sheet.
         autoOpenRecipientManager = request.openRecipientManager,
         onBack = viewModel::onCloseRequested,
-        onContentChanged = viewModel::onContentChanged,
+        bodyFieldState = viewModel.bodyFieldState,
+        bodyInputTransformation = viewModel.bodyInputTransformation,
         onToolbarAction = viewModel::onToolbarAction,
         onTogglePreview = viewModel::onTogglePreview,
         onToggleSignature = viewModel::onToggleSignature,
@@ -118,7 +120,8 @@ private fun PrivateMessageReplyContent(
     state: PrivateMessageReplyUiState,
     autoOpenRecipientManager: Boolean,
     onBack: () -> Unit,
-    onContentChanged: (TextFieldValue) -> Unit,
+    bodyFieldState: TextFieldState,
+    bodyInputTransformation: InputTransformation,
     onToolbarAction: (BbcodeAction) -> Unit,
     onTogglePreview: () -> Unit,
     onToggleSignature: (Boolean) -> Unit,
@@ -164,7 +167,8 @@ private fun PrivateMessageReplyContent(
                 else -> {
                     ReplyEditorBody(
                         state = state,
-                        onContentChanged = onContentChanged,
+                        bodyFieldState = bodyFieldState,
+                        bodyInputTransformation = bodyInputTransformation,
                         onToolbarAction = onToolbarAction,
                         onTogglePreview = onTogglePreview,
                         onErrorDismissed = onErrorDismissed,
@@ -232,7 +236,8 @@ private fun PrivateMessageReplyContent(
 @Suppress("LongParameterList") // Editor body mirrors the post editor surface; each callback is distinct.
 internal fun ReplyEditorBody(
     state: PrivateMessageReplyUiState,
-    onContentChanged: (TextFieldValue) -> Unit,
+    bodyFieldState: TextFieldState,
+    bodyInputTransformation: InputTransformation,
     onToolbarAction: (BbcodeAction) -> Unit,
     onTogglePreview: () -> Unit,
     onErrorDismissed: () -> Unit,
@@ -272,7 +277,11 @@ internal fun ReplyEditorBody(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 if (state.restorableDraft != null) {
-                    MessageDraftRestoreBanner(onRestore = onDraftRestore, onDiscard = onDraftDiscard)
+                    MessageDraftRestoreBanner(
+                        onRestore = onDraftRestore,
+                        onDiscard = onDraftDiscard,
+                        restoreEnabled = !state.isUploading,
+                    )
                 }
 
                 state.submitError?.let { error ->
@@ -341,8 +350,8 @@ internal fun ReplyEditorBody(
             }
 
             BbcodeTextField(
-                value = state.draft,
-                onValueChange = onContentChanged,
+                state = bodyFieldState,
+                inputTransformation = bodyInputTransformation,
                 label = stringResource(R.string.messages_reply_field_label),
                 placeholder = stringResource(R.string.messages_reply_field_placeholder),
                 modifier = Modifier.weight(1f),

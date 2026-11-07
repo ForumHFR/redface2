@@ -113,7 +113,7 @@ class EditorBaselineRoborazziTest {
         val reply = PrivateMessageReplyUiState(
             isLoadingForm = false,
             formAvailable = true,
-            draft = draft,
+            bodyText = draft.text,
         )
         val newMessage = PrivateMessageComposeUiState(
             isLoadingForm = false,
@@ -134,7 +134,10 @@ class EditorBaselineRoborazziTest {
                 if (isReply) {
                     ReplyEditorBody(
                         state = reply,
-                        onContentChanged = {},
+                        bodyFieldState = remember(scenario) {
+                            TextFieldState(initialText = draft.text, initialSelection = draft.selection)
+                        },
+                        bodyInputTransformation = InputTransformation {},
                         onToolbarAction = {},
                         onTogglePreview = {},
                         onErrorDismissed = {},

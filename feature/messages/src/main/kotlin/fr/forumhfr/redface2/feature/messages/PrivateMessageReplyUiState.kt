@@ -1,6 +1,5 @@
 package fr.forumhfr.redface2.feature.messages
 
-import androidx.compose.ui.text.input.TextFieldValue
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.PostContent
@@ -9,7 +8,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
 /**
- * MVI state of the private-message reply editor (#301). Mirrors the post editor's shape (draft +
+ * MVI state of the private-message reply editor (#301). Mirrors the post editor's shape (body +
  * parsed preview AST + the three HFR per-post option toggles) but is scoped to a private
  * conversation, so it carries no `cat`/`subcat`/quote fields.
  *
@@ -24,14 +23,15 @@ data class PrivateMessageReplyUiState(
     val formAvailable: Boolean = false,
     /** True when the form GET failed (network / session / parse / anonymous) → show retry. */
     val formError: Boolean = false,
-    val draft: TextFieldValue = TextFieldValue(),
+    /** Text-only mirror; selection and undo history stay in the ViewModel. */
+    val bodyText: String = "",
     /**
      * True after the first successful form load has consumed `ReplyForm.initialContent`. It prevents
      * a retry or InvalidHashCheck refetch from duplicating the server-provided quote around edits.
      */
     val draftHydratedFromForm: Boolean = false,
-    /** Exact untouched server quote prefill, distinct from later user edits (#1415). */
-    val draftHydratedContent: String? = null,
+    /** Exact server quote applied once, unchanged by restore or refetch; empty before hydration. */
+    val draftHydratedContent: String = "",
     val isPreviewVisible: Boolean = false,
     val preview: PostContent = PostContent(blocks = emptyList()),
     val signatureEnabled: Boolean = false,
@@ -81,7 +81,7 @@ data class PrivateMessageReplyUiState(
     val recipientsDirty: Boolean = false,
     /**
      * #459 — `true` while an image upload (single or batch) is in flight: toolbar spinner + body
-     * field locked (`readOnly`) so the caret cannot move between two programmatic `[img]` insertions.
+     * field locked (`readOnly`) against user body mutations; programmatic `[img]` insertion remains allowed.
      */
     val isUploading: Boolean = false,
     /** #459 — typed upload failure surfaced as a dismissible banner (shared `:core:ui` taxonomy). */
@@ -95,5 +95,5 @@ data class PrivateMessageReplyUiState(
 
     val canSubmit: Boolean
         get() = formAvailable && !isLoadingForm && !isSubmitting && !isUploading &&
-            !submission.blocksBodyMutation && draft.text.isNotBlank()
+            !submission.blocksBodyMutation && bodyText.isNotBlank()
 }

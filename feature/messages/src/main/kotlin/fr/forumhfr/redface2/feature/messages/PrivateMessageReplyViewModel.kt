@@ -1,7 +1,10 @@
 package fr.forumhfr.redface2.feature.messages
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -10,6 +13,7 @@ import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.coroutines.DefaultDispatcher
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.SmileyPickerCloseCause
@@ -38,6 +42,7 @@ import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.write.PrivateMessageReplyContext
@@ -46,6 +51,7 @@ import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.BbcodeFormatResult
 import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorSurface
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
@@ -57,6 +63,7 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyWikiKeywordsSource
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.afterFormLoaded
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.editBbcode
 import fr.forumhfr.redface2.core.ui.editor.imageInsertBbcodeOrNull
 import fr.forumhfr.redface2.core.ui.editor.insertBbcodeToken
 import fr.forumhfr.redface2.core.ui.editor.pickedImagesForUpload
@@ -64,15 +71,23 @@ import fr.forumhfr.redface2.core.ui.editor.toEditorError
 import fr.forumhfr.redface2.core.ui.editor.toEditorUploadError
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * ED-88/161/169/170/172: private reply with the existing success relay and a durable frozen snapshot.
@@ -85,6 +100,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     @Assisted private val request: PrivateMessageReplyRequest,
     private val repository: PrivateMessageWriteRepository,
     private val previewParser: BbcodePreviewParser,
+    @DefaultDispatcher private val defaultDispatcher: CoroutineDispatcher,
     private val userPreferencesRepository: UserPreferencesRepository,
     private val draftStore: EditorDraftStore,
     // #459 — image upload wiring, same trio + diagnostics as the topic-side editors.
@@ -98,6 +114,11 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     smileyLocalCollections: SmileyLocalCollections,
     private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
+
+    /** Body and IME state belong to this ViewModel, never to a Bundle saver. */
+    val bodyFieldState = TextFieldState()
+    private var previousBody = bodyFieldState.text.toString()
+    private var bodyEditedBeforeHydration = false
 
     private val _state = MutableStateFlow(PrivateMessageReplyUiState())
     val state: StateFlow<PrivateMessageReplyUiState> = _state.asStateFlow()
@@ -197,7 +218,26 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
      */
     private var imageInsertMode: EditorImageInsert = EditorImageInsert.REDUCED
 
+    /** Protect real input before readOnly is recomposed; selection alone still disarms. */
+    val bodyInputTransformation = InputTransformation {
+        val changesBody = mutatesBody(asCharSequence())
+        if (!acceptMutation(blockDuringUpload = changesBody)) {
+            revertAllChanges()
+        } else if (changesBody) {
+            bodyEditedBeforeHydration = true
+        }
+    }
+
+    private fun mutatesBody(text: CharSequence): Boolean = text.toString() != bodyFieldState.text.toString()
+
+    private fun acceptMutation(blockDuringUpload: Boolean = false): Boolean {
+        if (submission.blocksMutation || (blockDuringUpload && _state.value.isUploading)) return false
+        return submission.tryDisarm()
+    }
+
     init {
+        observeBody()
+        observePreview()
         submission.observePreference(userPreferencesRepository.observeConfirmBeforePosting())
         viewModelScope.launch {
             userPreferencesRepository.observeEditorImageInsert().collect { mode ->
@@ -232,6 +272,39 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         }
     }
 
+    private fun observeBody() {
+        viewModelScope.launch {
+            snapshotFlow { bodyFieldState.text.toString() }.collect { body ->
+                _state.update { it.copy(bodyText = body) }
+                if (body != previousBody) {
+                    previousBody = body
+                    scheduleAutosave()
+                }
+            }
+        }
+    }
+
+    @OptIn(ExperimentalCoroutinesApi::class)
+    private fun observePreview() {
+        viewModelScope.launch {
+            combine(
+                snapshotFlow { bodyFieldState.text.toString() },
+                state.map { it.isPreviewVisible }.distinctUntilChanged(),
+            ) { body, visible -> body.takeIf { visible } }
+                .distinctUntilChanged()
+                .conflate()
+                .mapLatest { body ->
+                    body?.let { it to withContext(defaultDispatcher) { previewParser.parsePreview(it) } }
+                }
+                .collect { parsed ->
+                    if (parsed != null && _state.value.isPreviewVisible &&
+                        bodyFieldState.text.toString() == parsed.first) {
+                        _state.update { it.copy(preview = parsed.second) }
+                    }
+                }
+        }
+    }
+
     fun retryFormLoad() = loadForm()
 
     /** ED-81/170: durable status wins over every offer and server prefill. */
@@ -240,8 +313,12 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         if (submission.blocksMutation) return
         val draft = entry.draft
         if (entry.attempt != null) {
+            if (!acceptMutation()) return
+            replaceBody(draft.body)
+            resetUndoBaseline()
+            previousBody = draft.body
             _state.update {
-                it.withDraftPreview(TextFieldValue(draft.body, TextRange(draft.body.length))).copy(
+                it.copy(
                     draftHydratedFromForm = true,
                     restorableDraft = null, submitError = EditorErrors.uncertain(EditorErrorSurface.MessageReply),
                 )
@@ -258,9 +335,10 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         }
     }
 
-    private fun PrivateMessageReplyUiState.canOfferDraftRestore(cachedBody: String): Boolean =
-        draft.text != cachedBody &&
-            (draft.text.isBlank() || draft.text == draftHydratedContent)
+    private fun PrivateMessageReplyUiState.canOfferDraftRestore(cachedBody: String): Boolean {
+        val liveBody = bodyFieldState.text.toString()
+        return liveBody != cachedBody && (liveBody.isBlank() || liveBody == draftHydratedContent)
+    }
 
     /**
      * #405 — debounced autosave of the body, flagged `isPrivate = true` so the logout purge wipes
@@ -270,8 +348,10 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
 
     private fun draftSnapshot(): EditorDraftStore.Draft? {
         val snapshot = _state.value
-        if (snapshot.draft.text.isBlank() && snapshot.restorableDraft != null) return null
-        return EditorDraftStore.Draft(body = snapshot.draft.text, isPrivate = true)
+        val liveBody = bodyFieldState.text.toString()
+        if (snapshot.restorableDraft != null &&
+            (liveBody.isBlank() || liveBody == snapshot.draftHydratedContent)) return null
+        return EditorDraftStore.Draft(body = liveBody, isPrivate = true)
     }
 
     /** #803 pattern — one-shot latch : a committed close is never re-emitted. */
@@ -312,27 +392,41 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         }
     }
 
-    /** #405 — append the cached body after any live text and clear the banner. */
+    /** Replace the untouched seed, retain its typed suffix, or append after other live text. */
     fun onDraftRestoreRequested() {
-        if (submission.blocksMutation) return
-        submission.disarm()
-        val offeredBody = _state.value.restorableDraft ?: return
-        _state.update { current ->
-            val body = if (current.draft.text.isBlank() || current.draft.text == offeredBody) {
-                offeredBody
-            } else {
-                current.draft.text.trimEnd() + "\n\n" + offeredBody
-            }
-            current.withDraftPreview(TextFieldValue(text = body, selection = TextRange(body.length)))
-                .copy(restorableDraft = null)
+        if (!acceptMutation(blockDuringUpload = true)) return
+        val snapshot = _state.value
+        val offeredBody = snapshot.restorableDraft ?: return
+        val liveBody = bodyFieldState.text.toString()
+        val seed = snapshot.draftHydratedContent
+        val typedAfterSeed = liveBody.takeIf { seed.isNotEmpty() && it.startsWith(seed) }?.substring(seed.length)
+        val body = when {
+            liveBody.isBlank() || liveBody == offeredBody || liveBody == seed -> offeredBody
+            typedAfterSeed != null && typedAfterSeed.isBlank() -> offeredBody
+            typedAfterSeed != null -> offeredBody + "\n\n" + typedAfterSeed.trimStart()
+            else -> liveBody.trimEnd() + "\n\n" + offeredBody
         }
+        replaceBody(body)
+        _state.update { it.copy(restorableDraft = null, draftHydratedFromForm = true) }
         scheduleAutosave()
+    }
+
+    private fun replaceBody(body: String) {
+        bodyFieldState.edit {
+            replace(0, length, body)
+            selection = TextRange(length)
+        }
+    }
+
+    @OptIn(ExperimentalFoundationApi::class)
+    private fun resetUndoBaseline() {
+        // A late quote must preserve edits made while the form was loading, including deleted text.
+        if (!bodyEditedBeforeHydration) bodyFieldState.undoState.clearHistory()
     }
 
     /** ED-170: clear the offered content through CAS, preserving a newer generation. */
     fun onDraftDiscardRequested() {
-        if (submission.blocksMutation) return
-        submission.disarm()
+        if (!acceptMutation()) return
         val body = _state.value.restorableDraft ?: return
         markDraftRestoreOfferIgnored(body)
         _state.update { it.copy(restorableDraft = null) }
@@ -373,7 +467,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                 loadedForm = form
                 smileyPicker.refreshFavorites(favoriteStamp)
                 loadedSubmitContext = materialized.submitContext
-                _state.update { it.withLoadedForm(form) }
+                applyFormHydration(form)
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (_: IOException) {
@@ -387,12 +481,10 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     }
 
     private fun PrivateMessageReplyUiState.withLoadedForm(form: ReplyForm): PrivateMessageReplyUiState {
-        // #1074 — consume HFR's quote BBCode exactly once. If the user typed while the
-        // GET was in flight, keep that text below the verbatim server prefill. A silent
-        // InvalidHashCheck refetch sees draftHydratedFromForm=true and cannot duplicate
-        // the block or clobber later edits.
+        // Body hydration is already applied outside this state update. A silent refetch
+        // refreshes only the form metadata, options and unchanged recipient list below.
         if (this@PrivateMessageReplyViewModel.submission.blocksMutation) return copy(isLoadingForm = false)
-        val hydrated = withFormInitialContent(form)
+        val hydrated = this
         // HFR's private "quick reply" form carries the per-post options as plain hidden
         // inputs (e.g. `signature=1`), not checkboxes — so `ReplyForm.options` (read from
         // `checked` attributes) is all-false here. Hydrate from the hidden fields too,
@@ -448,80 +540,41 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         _state.update { it.copy(isLoadingForm = false, formAvailable = false, formError = true) }
     }
 
-    fun onContentChanged(value: TextFieldValue) {
-        if (submission.blocksMutation) return
-        submission.disarm()
-        val textChanged = value.text != _state.value.draft.text
-        _state.update { it.withDraftPreview(value) }
-        if (textChanged) scheduleAutosave()
-    }
-
     fun onToolbarAction(action: BbcodeAction) {
-        if (submission.blocksMutation) return
-        submission.disarm()
-        _state.update { current ->
-            val outcome = applyBbcodeAction(
-                action = action,
-                text = current.draft.text,
-                selectionStart = current.draft.selection.start,
-                selectionEnd = current.draft.selection.end,
-            )
-            current.withDraftPreview(
-                TextFieldValue(
-                    text = outcome.text,
-                    selection = TextRange(outcome.selectionStart, outcome.selectionEnd),
-                ),
-            )
-        }
+        if (!acceptMutation(blockDuringUpload = true)) return
+        val before = bodyFieldState.text.toString()
+        bodyFieldState.editBbcode { text, start, end -> applyBbcodeAction(action, text, start, end) }
+        if (mutatesBody(before)) bodyEditedBeforeHydration = true
         scheduleAutosave()
     }
 
     fun onSmileySelected(token: String) {
-        if (submission.blocksMutation) return
-        submission.disarm()
-        _state.update { current ->
-            val outcome = insertBbcodeToken(
-                token = token,
-                text = current.draft.text,
-                selectionStart = current.draft.selection.start,
-                selectionEnd = current.draft.selection.end,
-            )
-            current.withDraftPreview(
-                TextFieldValue(
-                    text = outcome.text,
-                    selection = TextRange(outcome.selectionStart, outcome.selectionEnd),
-                ),
-            )
-        }
+        if (!acceptMutation(blockDuringUpload = true)) return
+        val before = bodyFieldState.text.toString()
+        bodyFieldState.editBbcode { text, start, end -> insertBbcodeToken(token, text, start, end) }
+        if (mutatesBody(before)) bodyEditedBeforeHydration = true
         smileyPicker.dismiss(SmileyPickerCloseCause.INSERTION)
         scheduleAutosave()
     }
 
     fun onTogglePreview() {
         _state.update { current ->
-            val nextVisible = !current.isPreviewVisible
-            current.copy(
-                isPreviewVisible = nextVisible,
-                preview = if (nextVisible) previewParser.parsePreview(current.draft.text) else current.preview,
-            )
+            current.copy(isPreviewVisible = !current.isPreviewVisible, preview = PostContent(emptyList()))
         }
     }
 
     fun onToggleSignature(enabled: Boolean) {
-        if (submission.blocksMutation) return
-        submission.disarm()
+        if (!acceptMutation()) return
         _state.update { it.copy(signatureEnabled = enabled) }
     }
 
     fun onToggleSmileyDisabled(disabled: Boolean) {
-        if (submission.blocksMutation) return
-        submission.disarm()
+        if (!acceptMutation()) return
         _state.update { it.copy(smileyDisabled = disabled) }
     }
 
     fun onToggleEmailNotification(enabled: Boolean) {
-        if (submission.blocksMutation) return
-        submission.disarm()
+        if (!acceptMutation()) return
         _state.update { it.copy(emailNotificationEnabled = enabled) }
     }
 
@@ -532,8 +585,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
      * existing member is refused (no-op). Ignored entirely when the user is not the owner.
      */
     fun onAddRecipient(pseudo: String) {
-        if (submission.blocksMutation || !_state.value.canManageRecipients) return
-        submission.disarm()
+        if (!_state.value.canManageRecipients || !acceptMutation()) return
         val trimmed = pseudo.trim()
         if (trimmed.isEmpty()) return
         _state.update { current ->
@@ -551,8 +603,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
      * the user is not the owner.
      */
     fun onRemoveRecipient(pseudo: String) {
-        if (submission.blocksMutation) return
-        submission.disarm()
+        if (!acceptMutation()) return
         if (!_state.value.canManageRecipients) return
         val target = pseudo.trim()
         _state.update { current ->
@@ -571,7 +622,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
 
     /** ED-164/166: callbacks carry the identity displayed by the current composition. */
     fun onSubmitConfirmed(token: ArmToken?) {
-        val snapshot = _state.value
+        val snapshot = _state.value.copy(bodyText = bodyFieldState.text.toString())
         val form = loadedForm ?: return
         if (!snapshot.canSubmit || closeRequested) return
         val permit = submission.confirm(token)
@@ -581,7 +632,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     fun onSubmitConfirmationDismissed() = submission.disarm()
 
     fun onSubmit(timeoutMillis: Long = 4_000L) {
-        val snapshot = _state.value
+        val snapshot = _state.value.copy(bodyText = bodyFieldState.text.toString())
         val form = loadedForm ?: return
         if (!snapshot.canSubmit || closeRequested) return
         if (form.isAnonymous) {
@@ -599,14 +650,14 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         form: ReplyForm,
     ) {
         val submitContext = checkNotNull(loadedSubmitContext)
-        submission.launch(permit, EditorDraftStore.Draft(body = snapshot.draft.text, isPrivate = true)) {
+        submission.launch(permit, EditorDraftStore.Draft(body = snapshot.bodyText, isPrivate = true)) {
             val options = ReplyFormOptions(
                 signatureEnabled = snapshot.signatureEnabled, smileyDisabled = snapshot.smileyDisabled,
                 emailNotificationEnabled = snapshot.emailNotificationEnabled,
             )
             val result = repository.submitReply(
                 context = submitContext, form = form,
-                bbcodeContent = snapshot.draft.text, options = options,
+                bbcodeContent = snapshot.bodyText, options = options,
                 recipientsOverride = if (snapshot.canManageRecipients && snapshot.recipientsDirty) {
                     RecipientCsv.join(snapshot.recipients)
                 } else { null },
@@ -645,38 +696,38 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
 
     private fun ReplyFailureReason.toReplyError(): EditorError = toEditorError(EditorErrorSurface.MessageReply)
 
-    private fun PrivateMessageReplyUiState.withDraftPreview(updated: TextFieldValue): PrivateMessageReplyUiState =
-        copy(
-            draft = updated,
-            preview = if (isPreviewVisible) previewParser.parsePreview(updated.text) else preview,
-            // ED-131: programmatic insertions and typing retain upload errors.
-        )
-
-    /**
-     * Applies a server prefill once without reconstructing it. A late form prefixes the untouched
-     * prefill to text already entered while loading; an explicit #405 restore may append after it.
-     */
-    private fun PrivateMessageReplyUiState.withFormInitialContent(form: ReplyForm): PrivateMessageReplyUiState {
-        if (draftHydratedFromForm) return this
-        val initial = form.initialContent
-        return if (initial.isBlank()) {
-            copy(draftHydratedFromForm = true)
-        } else {
-            val existing = draft.text
-            val combined = if (existing.isBlank()) {
-                initial
-            } else {
+    /** Consume the exact server quote once, even when a GET finishes during an upload. */
+    private fun applyFormHydration(form: ReplyForm) {
+        val snapshot = _state.value
+        if (submission.blocksMutation) {
+            _state.update { it.copy(isLoadingForm = false) }
+            return
+        }
+        if (!snapshot.draftHydratedFromForm) {
+            val initial = form.initialContent
+            val existing = bodyFieldState.text.toString()
+            if (initial.isNotBlank()) {
+                bodyEditedBeforeHydration = bodyEditedBeforeHydration || existing.isNotEmpty()
                 val separator = if (initial.endsWith('\n')) "\n" else "\n\n"
-                initial + separator + existing
+                bodyFieldState.editBbcode { _, _, _ ->
+                    val combined = if (existing.isBlank()) initial else initial + separator + existing
+                    BbcodeFormatResult(
+                        combined, combined.length, combined.length,
+                    )
+                }
+                resetUndoBaseline()
+                previousBody = bodyFieldState.text.toString()
             }
-            val hydrated = withDraftPreview(
-                TextFieldValue(text = combined, selection = TextRange(combined.length)),
-            )
-            hydrated.copy(
+            _state.update {
+                it.copy(
                     draftHydratedFromForm = true,
-                draftHydratedContent = combined.takeIf { existing.isBlank() },
-                restorableDraft = restorableDraft.takeIf { it != combined },
-            )
+                    draftHydratedContent = initial.takeIf { initial.isNotBlank() }.orEmpty(),
+                )
+            }
+        }
+        val liveBody = bodyFieldState.text.toString()
+        _state.update { current ->
+            current.withLoadedForm(form).copy(restorableDraft = current.restorableDraft.takeIf { it != liveBody })
         }
     }
 
@@ -713,8 +764,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         val received = uris.filter { it.isNotBlank() }
         val targets = received.take(MAX_IMAGES_PER_UPLOAD)
         // One guard (ReturnCount): nothing in flight already, an authenticated owner, a non-empty pick.
-        if (!canStartUpload(userId, targets)) return
-        submission.disarm()
+        if (!canStartUpload(userId, targets) || !acceptMutation(blockDuringUpload = true)) return
         val multiple = targets.size > 1
         _state.update {
             it.copy(
@@ -771,26 +821,13 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
      */
     private fun insertImageBbcodeAtCaret(bbcode: String, leadingNewline: Boolean) {
         if (submission.blocksMutation) return
-        _state.update { current ->
-            val draft = current.draft
-            val selection = draft.selection
-            val caret = selection.start.coerceIn(0, draft.text.length)
-            val needsNewline = leadingNewline && caret > 0 && draft.text[caret - 1] != '\n'
+        bodyFieldState.editBbcode { text, start, end ->
+            val caret = start.coerceIn(0, text.length)
+            val needsNewline = leadingNewline && caret > 0 && text[caret - 1] != '\n'
             val token = if (needsNewline) "\n" + bbcode else bbcode
-            val outcome = insertBbcodeToken(
-                token = token,
-                text = draft.text,
-                selectionStart = selection.start,
-                selectionEnd = selection.end,
-                surroundWithSpaces = false,
-            )
-            current.withDraftPreview(
-                TextFieldValue(
-                    text = outcome.text,
-                    selection = TextRange(outcome.selectionStart, outcome.selectionEnd),
-                ),
-            )
+            insertBbcodeToken(token, text, start, end, surroundWithSpaces = false)
         }
+        bodyEditedBeforeHydration = true
     }
 
     private fun handleUploadFailure(error: Throwable) {
