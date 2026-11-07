@@ -5,7 +5,8 @@ internal val PostEditorIntent.mutatesEditor: Boolean
     get() = when (this) {
         is PostEditorIntent.SubmitClicked, is PostEditorIntent.SubmitConfirmed,
         PostEditorIntent.SubmitConfirmationDismissed, PostEditorIntent.CloseRequested,
-        PostEditorIntent.ErrorDismissed, PostEditorIntent.UploadErrorDismissed,
+        PostEditorIntent.ErrorDismissed, PostEditorIntent.ReloadRequested, PostEditorIntent.PendingQuoteIgnored,
+        PostEditorIntent.UploadErrorDismissed,
         PostEditorIntent.TogglePreview -> false
         else -> true
     }
@@ -14,7 +15,7 @@ internal val TopicFormIntent.mutatesEditor: Boolean
     get() = when (this) {
         is TopicFormIntent.SubmitClicked, is TopicFormIntent.SubmitConfirmed,
         TopicFormIntent.SubmitConfirmationDismissed, TopicFormIntent.CloseRequested,
-        TopicFormIntent.ErrorDismissed, TopicFormIntent.UploadErrorDismissed,
+        TopicFormIntent.ErrorDismissed, TopicFormIntent.ReloadRequested, TopicFormIntent.UploadErrorDismissed,
         TopicFormIntent.TogglePreview -> false
         else -> true
     }

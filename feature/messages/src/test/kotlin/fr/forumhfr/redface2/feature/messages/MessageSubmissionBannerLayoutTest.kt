@@ -24,6 +24,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.width
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.editor.EditorError
+import fr.forumhfr.redface2.core.ui.editor.EditorErrorSurface
+import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -49,21 +52,25 @@ class MessageSubmissionBannerLayoutTest {
 
     @Test
     fun replyUncertainFits() =
-        assertBanner(PrivateMessageReplyError.Uncertain, composing = false, label = "Envoi incertain")
+        assertBanner(
+            EditorErrors.uncertain(EditorErrorSurface.MessageReply), composing = false, label = "Envoi incertain",
+        )
 
     @Test
     fun replyDraftWriteFailedFits() =
-        assertBanner(PrivateMessageReplyError.DraftWriteFailed, composing = false, label = "Brouillon non écrit")
+        assertBanner(EditorErrors.draftWriteFailed, composing = false, label = "Brouillon non écrit")
 
     @Test
     fun composeUncertainFits() =
-        assertBanner(PrivateMessageReplyError.Uncertain, composing = true, label = "Envoi incertain")
+        assertBanner(
+            EditorErrors.uncertain(EditorErrorSurface.MessageCompose), composing = true, label = "Envoi incertain",
+        )
 
     @Test
     fun composeDraftWriteFailedFits() =
-        assertBanner(PrivateMessageReplyError.DraftWriteFailed, composing = true, label = "Brouillon non écrit")
+        assertBanner(EditorErrors.draftWriteFailed, composing = true, label = "Brouillon non écrit")
 
-    private fun assertBanner(error: PrivateMessageReplyError, composing: Boolean, label: String) {
+    private fun assertBanner(error: EditorError, composing: Boolean, label: String) {
         compose.setContent {
             val density = LocalDensity.current
             val configuration = Configuration(LocalConfiguration.current).apply { fontScale = 1.3f }
@@ -91,8 +98,8 @@ class MessageSubmissionBannerLayoutTest {
         assertVerificationDetail(error, composing, label)
     }
 
-    private fun assertVerificationDetail(error: PrivateMessageReplyError, composing: Boolean, label: String) {
-        if (error == PrivateMessageReplyError.DraftWriteFailed) {
+    private fun assertVerificationDetail(error: EditorError, composing: Boolean, label: String) {
+        if (error == EditorErrors.draftWriteFailed) {
             // No HFR uncertainty detail when the local draft was not written (no POST).
             compose.onNodeWithText("Votre message a peut-être été envoyé", substring = true).assertDoesNotExist()
         } else {

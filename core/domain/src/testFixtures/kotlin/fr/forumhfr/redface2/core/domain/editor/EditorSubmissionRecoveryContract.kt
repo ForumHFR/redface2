@@ -28,6 +28,44 @@ abstract class EditorSubmissionRecoveryContract {
         delayedSharedRestore: Boolean,
     ): EditorSubmissionAdapter
 
+    /** All five surfaces: an autosave failure cannot turn an unknown POST into non-emission. */
+    @Test
+    fun autosaveFailurePreservesUncertaintyAfterTyping() {
+        val scenario = EditorSubmissionScenario().apply { postFailure = IOException("response lost") }
+        withReadyAdapter(scenario = scenario) { adapter ->
+            startSending(adapter)
+            adapter.completePost()
+            runCurrent()
+            val attempt = scenario.store.entries.values.single().attempt
+            scenario.store.saveFailure = IOException("disk full")
+            adapter.editBody("edited after uncertainty")
+            advanceTimeBy(751)
+            runCurrent()
+            assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
+            assertEquals("edited after uncertainty", adapter.snapshot().body)
+            assertEquals(attempt, scenario.store.entries.values.single().attempt)
+            assertEquals(1, adapter.postCalls)
+        }
+    }
+
+    /** The pre-POST attempt failure keeps its certain diagnostic despite later draft failures. */
+    @Test
+    fun autosaveFailureDoesNotReplaceAttemptWriteFailure() {
+        val scenario = EditorSubmissionScenario().apply { store.beginFailure = IOException("disk full") }
+        withReadyAdapter(scenario = scenario) { adapter ->
+            adapter.clickSubmit()
+            runCurrent()
+            assertEquals(SubmissionErrorProbe.DRAFT_WRITE_FAILED, adapter.snapshot().error)
+            scenario.store.saveFailure = IOException("still full")
+            adapter.editBody("keep this text")
+            advanceTimeBy(751)
+            runCurrent()
+            assertEquals(SubmissionErrorProbe.DRAFT_WRITE_FAILED, adapter.snapshot().error)
+            assertEquals("keep this text", adapter.snapshot().body)
+            assertEquals(0, adapter.postCalls)
+        }
+    }
+
     /** Gate Astra: accepted success stays locked while durable cleanup is suspended. */
     @Test
     fun acceptedSuccessBlocksCloseUntilCleanup() = withReadyAdapter { adapter ->

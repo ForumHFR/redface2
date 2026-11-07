@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.diagnostics.EditorSubmissionTrace
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptIdentity
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptOutcome
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptStatus
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptToken
@@ -34,6 +35,8 @@ data class EditorSubmissionCallbacks<E, F>(
     val state: (EditorSubmissionState) -> Unit,
     val error: (F?) -> Unit,
     val success: (E) -> Unit,
+    /** Called synchronously when arming, or by launch without confirmation, before any persistence or network work. */
+    val attemptPrepared: (AttemptIdentity) -> Unit = {},
 )
 
 /** ED-88: the feature supplies its existing navigation effect, after terminal state and cleanup. */
@@ -59,8 +62,12 @@ class EditorSubmissionBinding<E, F>(
     private var armExpiry: Job? = null
     private var autosave: Job? = null
     private var execution: Job? = null
+    private var preparedAttempt: PreparedAttempt? = null
     private var preference: Boolean? = null
     private var initialized = false
+    private var uncertainError = false
+    private var attemptWriteFailed = false
+    private var pendingDraftFailure = false
     var isExecuting = false
         private set
     val isInitialized: Boolean get() = initialized && !drafts.invalidated
@@ -76,20 +83,25 @@ class EditorSubmissionBinding<E, F>(
         }
     }
 
-    suspend fun restore(key: String): EditorDraftStore.DraftEntry? {
+    suspend fun restore(
+        key: String,
+        onPublished: (AttemptToken) -> Unit = {},
+    ): EditorDraftStore.DraftEntry? {
         val entry = try {
             drafts.load()
         } catch (_: IOException) {
-            callbacks.error(errors.draftWriteFailed)
+            draftSaveFailed()
             null
         }
         if (drafts.invalidated) return null
         // PUBLISHED suppresses restoration, but a deliberate new composition is allowed by CAS.
+        entry?.attempt?.takeIf { it.status == AttemptStatus.PUBLISHED }?.let { onPublished(it.token) }
         val attempt = entry?.attempt?.takeUnless { it.status == AttemptStatus.PUBLISHED }
         controller.openSession(session(drafts.owner, key), attempt)
+        preparedAttempt = null
         initialized = true
         publish()
-        if (attempt != null) callbacks.error(errors.uncertain)
+        if (attempt != null) showError(errors.uncertain)
         return entry?.takeUnless { it.attempt?.status == AttemptStatus.PUBLISHED }
     }
 
@@ -98,11 +110,14 @@ class EditorSubmissionBinding<E, F>(
         autosave?.cancel()
         armExpiry?.cancel()
         initialized = false
+        attemptWriteFailed = false
+        pendingDraftFailure = false
         isExecuting = false
         controller.openSession(session(null, controller.session.key))
+        preparedAttempt = null
         execution?.cancel()
         publish()
-        callbacks.error(null)
+        showError(null)
     }
 
     fun disarm() {
@@ -119,13 +134,18 @@ class EditorSubmissionBinding<E, F>(
         if (token == null || drafts.invalidated) {
             SubmissionRequest.Ignored
         } else {
-            controller.confirm(token).also(::requested)
+            val armedAttempt = preparedAttempt?.takeIf { it.permit == SubmissionRequest.Armed(token) }
+            controller.confirm(token).also { request ->
+                if (request is SubmissionRequest.Accepted) preparedAttempt = armedAttempt?.copy(permit = request)
+                requested(request)
+            }
         }
 
     /** ED-170: hiding uncertainty acknowledges its durable attempt before ordinary autosaves resume. */
     fun acknowledge(onAcknowledged: () -> Unit) {
         if (controller.state !is EditorSubmissionState.Uncertain) {
-            callbacks.error(null)
+            attemptWriteFailed = false
+            showPendingDraftFailure()
         } else {
             val opening = controller.session
             environment.scope.launch {
@@ -133,8 +153,12 @@ class EditorSubmissionBinding<E, F>(
                 val acknowledged = controller.acknowledgeUncertain(ports)
                 if (controller.session == opening) {
                     publish()
-                    callbacks.error(if (acknowledged) null else errors.uncertain)
-                    if (acknowledged) onAcknowledged()
+                    if (acknowledged) {
+                        showPendingDraftFailure()
+                        onAcknowledged()
+                    } else {
+                        showError(errors.uncertain)
+                    }
                 }
             }
         }
@@ -143,6 +167,8 @@ class EditorSubmissionBinding<E, F>(
     private fun requested(request: SubmissionRequest) {
         if (request is SubmissionRequest.Accepted) armExpiry?.cancel()
         if (request is SubmissionRequest.Armed) {
+            armExpiry?.cancel()
+            preparedAttempt = PreparedAttempt(request, prepareAttempt(request.token.session))
             armExpiry = environment.scope.launch {
                 val token = request.token
                 val elapsed = (environment.clock.elapsedRealtimeNanos() - token.armedAtNanos) / NANOS_PER_MILLI
@@ -165,10 +191,28 @@ class EditorSubmissionBinding<E, F>(
 
     suspend fun persist(draft: EditorDraftStore.Draft?): StoreWriteResult? {
         val result = if (draft != null && initialized && !blocksClose) drafts.save(draft) else null
+        resolveDraftFailure(result)
         if (result != null && result !is StoreWriteResult.Written && !drafts.invalidated) {
-            callbacks.error(errors.draftWriteFailed)
+            draftSaveFailed()
         }
         return result
+    }
+
+    private fun resolveDraftFailure(result: StoreWriteResult?) {
+        if (result is StoreWriteResult.Written) pendingDraftFailure = false
+    }
+
+    private fun draftSaveFailed() {
+        pendingDraftFailure = true
+        environment.diagnostics.record(DiagnosticsLog.Level.WARN, "EditorDraft", "draft_storage_failed")
+        if (!uncertainError && controller.state !is EditorSubmissionState.Uncertain && !attemptWriteFailed) {
+            showPendingDraftFailure()
+        }
+    }
+
+    private fun showPendingDraftFailure() {
+        showError(if (pendingDraftFailure) errors.draftSaveFailed else null)
+        pendingDraftFailure = false
     }
 
     suspend fun flush(draft: EditorDraftStore.Draft?): StoreWriteResult? {
@@ -181,13 +225,18 @@ class EditorSubmissionBinding<E, F>(
         draft: EditorDraftStore.Draft,
         send: suspend () -> EditorDelivery<E, F>,
     ) {
-        callbacks.error(null)
-        isExecuting = true
+        val reserved = (controller.state as? EditorSubmissionState.PersistingAttempt)?.submission
+        if (permit.token != reserved || isExecuting) return
         val opening = controller.session
+        val attemptId = (preparedAttempt?.takeIf { it.permit == permit }?.identity ?: prepareAttempt(opening)).id
+        preparedAttempt = null // Consumed by this permit even if begin later rejects it.
+        attemptWriteFailed = false
+        showError(null)
+        isExecuting = true
         val trace = EditorSubmissionTrace(environment.diagnostics)
         execution = environment.scope.launch(trace) {
             var delivery: EditorDelivery<E, F>? = null
-            val ports = ports(draft, trace) {
+            val ports = ports(draft, trace, attemptId) {
                 delivery = deliver(send)
                 checkNotNull(delivery).outcome
             }
@@ -199,7 +248,7 @@ class EditorSubmissionBinding<E, F>(
                 }
             } catch (cancelled: CancellationException) {
                 if (controller.session == opening && controller.state is EditorSubmissionState.Uncertain) {
-                    callbacks.error(errors.uncertain)
+                    showError(errors.uncertain)
                 }
                 throw cancelled
             } finally {
@@ -220,9 +269,10 @@ class EditorSubmissionBinding<E, F>(
             else -> null
         }
         if (attempt != null && controller.consumeSuccess(attempt)) {
+            pendingDraftFailure = false
             delivery?.effect?.let(callbacks.success)
         } else if (current is EditorSubmissionState.Uncertain) {
-            callbacks.error(errors.uncertain)
+            showError(errors.uncertain)
         } else {
             delivery?.error?.let(callbacks.error)
         }
@@ -277,15 +327,19 @@ class EditorSubmissionBinding<E, F>(
     private fun ports(
         draft: EditorDraftStore.Draft,
         trace: EditorSubmissionTrace = EditorSubmissionTrace(environment.diagnostics),
+        attemptId: String = UUID.randomUUID().toString(),
         send: suspend () -> EditorSendOutcome,
     ): EditorSubmissionPorts {
         val opening = controller.session
+        var writtenAttempt: AttemptToken? = null
         return object : EditorSubmissionPorts {
             override val isEditorScopeActive: Boolean get() = environment.scope.isActive
             override suspend fun beginAttempt(): EditorDraftStore.BeginAttemptResult {
                 val started = environment.clock.elapsedRealtimeNanos()
-                val result = drafts.begin(draft)
+                val result = drafts.begin(draft, attemptId)
                 if (result is EditorDraftStore.BeginAttemptResult.Started) {
+                    writtenAttempt = result.token
+                    pendingDraftFailure = false
                     trace.durable((environment.clock.elapsedRealtimeNanos() - started) / NANOS_PER_MILLI)
                 }
                 return result
@@ -305,27 +359,52 @@ class EditorSubmissionBinding<E, F>(
             }
             override suspend fun finishAttempt(attempt: AttemptToken, outcome: AttemptOutcome): StoreWriteResult {
                 if (controller.session == opening) publish()
-                return if (outcome == AttemptOutcome.CERTAIN_FAILURE) {
+                val result = if (outcome == AttemptOutcome.CERTAIN_FAILURE) {
                     withContext(NonCancellable) { drafts.finish(attempt, outcome) }
                 } else {
                     drafts.finish(attempt, outcome)
                 }
+                // Acknowledging an older attempt only changes metadata; it cannot save newer edits.
+                if (attempt == writtenAttempt) resolveDraftFailure(result)
+                return result
             }
-            override suspend fun erasePublishedContent(attempt: AttemptToken) = drafts.erase(attempt)
+            override suspend fun erasePublishedContent(attempt: AttemptToken): StoreWriteResult {
+                return drafts.erase(attempt).also(::resolveDraftFailure)
+            }
             override fun recordFailure(stage: EditorSubmissionFailure, result: StoreWriteResult) {
                 trace.storageFailure(stage, result)
                 if (stage == EditorSubmissionFailure.ATTEMPT) trace.result(
                     EditorSubmissionTrace.Result.DRAFT_WRITE_FAILED,
                 )
                 if (stage == EditorSubmissionFailure.ATTEMPT && controller.session == opening) {
-                    callbacks.error(errors.draftWriteFailed)
+                    attemptWriteFailed = true
+                    showError(errors.draftWriteFailed)
                 }
             }
         }
     }
 
-    private fun publish() = callbacks.state(controller.state)
+    private fun showError(value: F?) {
+        // Arming a deliberate retry temporarily changes Uncertain to Armed; its warning still wins.
+        uncertainError = value == errors.uncertain
+        callbacks.error(value)
+    }
+
+    private fun prepareAttempt(opening: EditorSession): AttemptIdentity =
+        AttemptIdentity(opening.owner.orEmpty(), opening.key, UUID.randomUUID().toString())
+            .also(callbacks.attemptPrepared)
+
+    private fun publish() {
+        // Disarming (typing/back/expiry) discards the UUID without ever writing it to the draft store.
+        if (controller.state !is EditorSubmissionState.Armed && preparedAttempt?.permit is SubmissionRequest.Armed) {
+            preparedAttempt = null
+        }
+        callbacks.state(controller.state)
+    }
+
     private fun session(owner: String?, key: String) = EditorSession(UUID.randomUUID().toString(), owner, key)
+
+    private data class PreparedAttempt(val permit: SubmissionRequest, val identity: AttemptIdentity)
 
     private companion object {
         const val NANOS_PER_MILLI = 1_000_000L

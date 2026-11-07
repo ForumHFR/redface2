@@ -9,7 +9,6 @@ import dagger.assisted.Assisted
 import dagger.assisted.AssistedFactory
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.lifecycle.HiltViewModel
-import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
@@ -22,10 +21,10 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorPreparationException
+import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionErrors
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionRequest
-import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.HfrFavoriteSmileyRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollections
@@ -43,6 +42,7 @@ import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.write.EditPostContext
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -50,20 +50,31 @@ import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.EditorCause
+import fr.forumhfr.redface2.core.ui.editor.EditorError
+import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.MAX_IMAGES_PER_UPLOAD
 import fr.forumhfr.redface2.core.ui.editor.SmileyFavoriteMutations
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerFavoriteSources
 import fr.forumhfr.redface2.core.ui.editor.SmileyWikiKeywordsSource
-import fr.forumhfr.redface2.core.ui.editor.UploadError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
+import fr.forumhfr.redface2.core.ui.editor.afterFormLoaded
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.decodeInlineQuoteRequest
+import fr.forumhfr.redface2.core.ui.editor.encodeInlineQuoteRequest
 import fr.forumhfr.redface2.core.ui.editor.imageInsertBbcodeOrNull
+import fr.forumhfr.redface2.core.ui.editor.inlineQuoteDeliveryKey
 import fr.forumhfr.redface2.core.ui.editor.insertBbcodeToken
 import fr.forumhfr.redface2.core.ui.editor.pickedImagesForUpload
+import fr.forumhfr.redface2.core.ui.editor.toEditorError
+import fr.forumhfr.redface2.core.ui.editor.toEditorUploadError
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -85,7 +96,7 @@ import kotlinx.coroutines.launch
  *    and emits a one-shot [PostEditorEffect.SubmitSucceeded] on success.
  *
  * ED-161/169/170: [submission] reserves synchronously, persists the immutable snapshot and
- * keeps success terminal. Errors classified by the repository remain in [SubmitError].
+ * keeps success terminal. Errors classified by the repository remain in [EditorError].
  */
 @HiltViewModel(assistedFactory = PostEditorViewModel.Factory::class)
 @Suppress("LongParameterList", "LargeClass")
@@ -125,6 +136,7 @@ class PostEditorViewModel @AssistedInject constructor(
             // (cards vs inline [quotemsg]) is decided per opening from the persisted preference,
             // which is a suspend read — see [resolveQuoteRenderingThenLoad] in init.
             quotes = emptyList(),
+            quoteFetchFailures = savedStateHandle.get<Int>(QUOTE_FAILURES_KEY) ?: 0,
         ),
     )
     val state: StateFlow<PostEditorState> = _state.asStateFlow()
@@ -203,9 +215,11 @@ class PostEditorViewModel @AssistedInject constructor(
         environment = EditorSubmissionEnvironment(viewModelScope, clock, diagnostics),
         drafts = EditorDraftSession(draftStore, draftKey),
         errors = EditorSubmissionErrors(
-            uncertain = SubmitError.Uncertain, draftWriteFailed = SubmitError.DraftWriteFailed,
-            sessionExpired = SubmitError.SessionExpired, unknown = SubmitError.Uncertain,
-            network = SubmitError.Network, preparationFailed = SubmitError.Hfr(ReplyFailureReason.Unknown),
+            uncertain = EditorErrors.uncertain, draftWriteFailed = EditorErrors.draftWriteFailed,
+            sessionExpired = EditorErrors.sessionExpired, unknown = EditorErrors.uncertain,
+            network = EditorErrors.network, preparationFailed = EditorErrors.invalidForm,
+            quoteFetchFailed = EditorErrors.quoteFetchFailed,
+            draftSaveFailed = EditorErrors.draftSaveFailed,
         ),
         callbacks = EditorSubmissionCallbacks<PostEditorEffect>(
             state = { value ->
@@ -218,8 +232,16 @@ class PostEditorViewModel @AssistedInject constructor(
                     )
                 }
             },
-            error = { value -> _state.update { it.copy(submitError = value) } },
+            error = { value ->
+                _state.update {
+                    val mapped = if (value?.cause == EditorCause.QuoteFetchFailed) {
+                        EditorErrors.quoteFetchFailed(inline = it.pendingQuotes.isNotEmpty())
+                    } else { value }
+                    it.copy(submitError = mapped)
+                }
+            },
             success = { value -> _effects.trySend(value) },
+            attemptPrepared = { identity -> savedStateHandle[LAST_ATTEMPT_KEY] = identity.savedIdentity() },
         ),
     )
 
@@ -244,6 +266,11 @@ class PostEditorViewModel @AssistedInject constructor(
 
     /** #459 PR2 — in-flight image upload job ; one at a time, cancelled on [onCleared]. */
     private var uploadJob: Job? = null
+    private var draftRestored = false
+    private var sharedDraftResumed = false
+    private var publishedCompositionRestored = false
+    private var draftRestoreDiscarding = false
+    private var inlineQuoteRendering = false
 
     init {
         submission.observePreference(userPreferencesRepository.observeConfirmBeforePosting())
@@ -277,6 +304,7 @@ class PostEditorViewModel @AssistedInject constructor(
         }
         viewModelScope.launch {
             restoreDraftIfAny()
+            draftRestored = true
             if (_state.value.draft.text.isNotBlank() && _state.value.restorableDraft == null) scheduleAutosave()
             when (request.mode) {
                 PostEditorMode.Reply -> resolveQuoteRenderingThenLoad()
@@ -299,19 +327,34 @@ class PostEditorViewModel @AssistedInject constructor(
      *   `state.quotes` stays empty → submit takes the plain path (the content is the field).
      */
     private fun resolveQuoteRenderingThenLoad() {
-        val initialQuotes = request.initialQuotes.distinctBy { it.numreponse }
+        val initialQuotes = if (publishedCompositionRestored) emptyList() else initialQuoteRequest()
         if (initialQuotes.isEmpty() || submission.state is EditorSubmissionState.Uncertain) {
+            loadReplyFormIfPossible(preserveDraft = publishedCompositionRestored)
+            return
+        }
+        val deliveryKey = initialQuotes.inlineQuoteDeliveryKey()
+        if (savedStateHandle.get<String>(IGNORED_QUOTES_KEY) == deliveryKey) {
             loadReplyFormIfPossible()
             return
         }
+        setPendingQuotes(initialQuotes)
         viewModelScope.launch {
             if (userPreferencesRepository.observeQuoteCardsEnabled().first()) {
-                if (!submission.blocksMutation) _state.update { it.copy(quotes = initialQuotes) }
+                if (!submission.blocksMutation) {
+                    setPendingQuotes(emptyList())
+                    _state.update { it.copy(quotes = initialQuotes) }
+                }
                 loadReplyFormIfPossible()
             } else {
+                inlineQuoteRendering = true
                 loadReplyFormWithInlineQuotes(initialQuotes)
             }
         }
+    }
+
+    private fun initialQuoteRequest(): List<QuoteSelection> {
+        val restored = savedStateHandle.get<IntArray>(PENDING_QUOTES_KEY)?.decodeInlineQuoteRequest().orEmpty()
+        return (restored + request.initialQuotes).distinctBy { it.numreponse }
     }
 
     /**
@@ -324,9 +367,88 @@ class PostEditorViewModel @AssistedInject constructor(
      * (réserve Codex n°5), and typing started during the fetch survives. Options still hydrate
      * through [withFormHydration] (with a content-blanked form, so the text path stays inert).
      */
-    private fun loadReplyFormWithInlineQuotes(quotes: List<QuoteSelection>) {
+    private fun setPendingQuotes(quotes: List<QuoteSelection>) {
+        val encoded = quotes.encodeInlineQuoteRequest()
+        val sameRequest = savedStateHandle.get<IntArray>(PENDING_QUOTES_KEY)?.contentEquals(encoded) == true
+        val failures = if (sameRequest) _state.value.quoteFetchFailures else 0
+        savedStateHandle[PENDING_QUOTES_KEY] = encoded
+        savedStateHandle[QUOTE_FAILURES_KEY] = failures
+        _state.update { it.copy(pendingQuotes = quotes, quoteFetchFailures = failures) }
+    }
+
+    private fun reloadForm() {
+        if (!draftRestored || submission.blocksMutation || _state.value.isLoadingForm) return
+        submission.disarm()
+        val pending = _state.value.pendingQuotes
+        when {
+            pending.isNotEmpty() -> loadReplyFormWithInlineQuotes(pending)
+            _state.value.quotes.isNotEmpty() && _state.value.submitError?.cause == EditorCause.QuoteFetchFailed ->
+                loadReplyFormWithInlineQuotes(_state.value.quotes, insertInline = false)
+            request.mode == PostEditorMode.Edit -> loadEditFormIfPossible()
+            else -> loadReplyFormIfPossible()
+        }
+    }
+
+    private fun ignorePendingQuote() {
+        val snapshot = _state.value
+        if (!snapshot.canIgnorePendingQuote || submission.blocksMutation) return
+        submission.disarm()
+        savedStateHandle[IGNORED_QUOTES_KEY] = snapshot.pendingQuotes.inlineQuoteDeliveryKey()
+        setPendingQuotes(emptyList())
+        _state.update { current ->
+            current.copy(submitError = current.submitError.takeUnless { it?.cause == EditorCause.QuoteFetchFailed })
+        }
+        // A failed quote fetch may never have yielded a hash. Warm only the plain form, with
+        // hydration disabled: ignoring a citation cannot insert content, even into a blank body.
+        if (loadedForm == null) loadReplyFormIfPossible(preserveDraft = true)
+    }
+
+    private fun loadReplyFormWithInlineQuotes(quotes: List<QuoteSelection>, insertInline: Boolean = true) {
+        if (inlineQuoteLoadBlocked(insertInline)) return
+        submission.disarm()
+        if (insertInline) setPendingQuotes(quotes)
+        // An offer is not the live body. Serialize quote GETs after its decision so accepting
+        // cannot append a second copy of a quote that a GET already inserted into the field.
+        if (insertInline && (_state.value.restorableDraft != null || draftRestoreDiscarding)) return
+        val missing = if (insertInline) missingInlineQuotes(quotes) else quotes
+        if (missing.isEmpty()) {
+            finishInlineQuoteDelivery()
+            scheduleAutosave()
+            if (loadedForm == null) loadReplyFormIfPossible(preserveDraft = true)
+        } else {
+            fetchQuoteForm(missing, quotes, insertInline)
+        }
+    }
+
+    /** Inline delivery only runs once this opening chose the inline rendering (cards ON never does). */
+    private fun inlineQuoteLoadBlocked(insertInline: Boolean): Boolean =
+        _state.value.isLoadingForm || submission.blocksMutation || (insertInline && !inlineQuoteRendering)
+
+    private fun missingInlineQuotes(quotes: List<QuoteSelection>): List<QuoteSelection> {
+        val present = QuotedNumreponses.fromBbcode(_state.value.draft.text).toSet()
+        return quotes.filterNot { it.numreponse in present }
+    }
+
+    private fun finishInlineQuoteDelivery() {
+        // Keep the request coordinates: a Bundle can outlive an insertion that never reached disk.
+        // A matching publication retires them on restore; otherwise only the applied body proves delivery.
+        // If the user saved a deletion, recreation intentionally requests the absent quote again.
+        savedStateHandle[QUOTE_FAILURES_KEY] = 0
+        _state.update {
+            it.copy(
+                pendingQuotes = emptyList(), quoteFetchFailures = 0,
+                submitError = it.submitError.afterFormLoaded(quotesResolved = true),
+            )
+        }
+    }
+
+    private fun fetchQuoteForm(
+        quotes: List<QuoteSelection>,
+        requestedQuotes: List<QuoteSelection>,
+        insertInline: Boolean,
+    ) {
         val context = buildReplyContext() ?: run {
-            _state.update { it.copy(submitError = SubmitError.MissingSubcat) }
+            _state.update { it.copy(submitError = EditorErrors.missingSubcat) }
             return
         }
         val quoteContext = context.copy(quotedNumreponse = quotes.first().numreponse, quoteRef = null)
@@ -338,14 +460,33 @@ class PostEditorViewModel @AssistedInject constructor(
                     context = quoteContext,
                     extraQuoteNumreponses = quotes.drop(1).map { it.numreponse },
                     truncate = quotes.any { it.truncate },
-                )
+                ).also { currentCoroutineContext().ensureActive() }
             }
             outcome.fold(
                 onSuccess = { form ->
+                    if (form.initialContent.isBlank()) {
+                        handleFetchFailure(IllegalStateException("empty quote prefill"), quoteFetch = true)
+                        return@fold
+                    }
                     loadedForm = form
                     smileyPicker.refreshFavorites(favoriteStamp)
                     if (submission.blocksMutation) {
                         _state.update { it.copy(isLoadingForm = false) }
+                        return@fold
+                    }
+                    if (!insertInline) {
+                        _state.update {
+                            it.withFormHydration(form.copy(initialContent = ""), it.preview).copy(
+                                submitError = it.submitError.afterFormLoaded(quotesResolved = true),
+                            )
+                        }
+                        return@fold
+                    }
+                    // Typing or draft restoration may have supplied some tags while the GET ran.
+                    // Reconcile again before insertion; fetch only what is still missing.
+                    if (missingInlineQuotes(quotes).size != quotes.size) {
+                        _state.update { it.withFormHydration(form.copy(initialContent = ""), it.preview) }
+                        loadReplyFormWithInlineQuotes(requestedQuotes)
                         return@fold
                     }
                     val prefills = form.initialContent.trimEnd()
@@ -364,9 +505,10 @@ class PostEditorViewModel @AssistedInject constructor(
                                 restorableDraft = current.restorableDraft.takeIf { it != combined },
                             )
                     }
+                    finishInlineQuoteDelivery()
                     scheduleAutosave()
                 },
-                onFailure = { error -> handleFetchFailure(error) },
+                onFailure = { error -> handleFetchFailure(error, quoteFetch = true) },
             )
         }
     }
@@ -386,11 +528,24 @@ class PostEditorViewModel @AssistedInject constructor(
      * contract, restored.
      */
     private suspend fun restoreDraftIfAny() {
-        val entry = submission.restore(draftKey.orEmpty())
+        val entry = submission.restore(draftKey.orEmpty(), onPublished = ::discardPublishedQuoteRequest)
         if (entry != null && !submission.blocksMutation) {
             if (entry.attempt != null) restoreAttempt(entry.draft) else restoreOrdinaryDraft(entry.draft)
         }
     }
+
+    private fun discardPublishedQuoteRequest(attempt: EditorDraftStore.AttemptToken) {
+        val launched = savedStateHandle.get<ArrayList<String>>(LAST_ATTEMPT_KEY)
+        if (launched != attempt.identity.savedIdentity()) return
+        // A frozen Bundle and restored route may both retain coordinates of this published body.
+        // A fresh navigation entry has no launched attempt; an unrelated publication cannot match.
+        publishedCompositionRestored = true
+        savedStateHandle[IGNORED_QUOTES_KEY] = initialQuoteRequest().inlineQuoteDeliveryKey()
+        setPendingQuotes(emptyList())
+    }
+
+    // CAS assigns the version under the draft lock; owner/key/unique UUID already identify this send.
+    private fun EditorDraftStore.AttemptIdentity.savedIdentity(): ArrayList<String> = arrayListOf(owner, key, id)
 
     private fun restoreOrdinaryDraft(draft: EditorDraftStore.Draft) {
         val body = draft.body
@@ -407,10 +562,11 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     private fun resumeSharedDraft(body: String) {
-        if (savedStateHandle.get<Boolean>(SHARED_DRAFT_RESUMED_KEY) == true || submission.blocksMutation) return
-        savedStateHandle[SHARED_DRAFT_RESUMED_KEY] = true
+        // The body lives in the draft store, not SavedStateHandle. A new instance MUST reload it.
+        if (sharedDraftResumed || submission.blocksMutation) return
+        sharedDraftResumed = true
         _state.update { current ->
-            val combined = if (current.draft.text.isBlank()) {
+            val combined = if (current.draft.text.isBlank() || current.draft.text == body) {
                 body
             } else {
                 current.draft.text.trimEnd() + "\n\n" + body
@@ -424,7 +580,7 @@ class PostEditorViewModel @AssistedInject constructor(
         if (submission.blocksMutation) return
         _state.update {
             it.withDraft(TextFieldValue(draft.body, TextRange(draft.body.length))).copy(
-                draftHydratedFromForm = true, restorableDraft = null, submitError = SubmitError.Uncertain,
+                draftHydratedFromForm = true, restorableDraft = null, submitError = EditorErrors.uncertain,
             )
         }
     }
@@ -434,7 +590,9 @@ class PostEditorViewModel @AssistedInject constructor(
             (draft.text.isBlank() || draft.text == draftHydratedContent)
 
     /** ED-170: CAS autosave clears blank content without deleting any newer generation or marker. */
-    private fun scheduleAutosave() = submission.autosave(::draftSnapshot)
+    private fun scheduleAutosave() {
+        if (draftRestored) submission.autosave(::draftSnapshot)
+    }
 
     private fun draftSnapshot(): EditorDraftStore.Draft? {
         val snapshot = _state.value
@@ -495,6 +653,8 @@ class PostEditorViewModel @AssistedInject constructor(
             is PostEditorIntent.SubmitConfirmed -> onSubmitConfirmed(intent)
             PostEditorIntent.SubmitConfirmationDismissed -> submission.disarm()
             PostEditorIntent.ErrorDismissed -> submission.acknowledge(::scheduleAutosave)
+            PostEditorIntent.ReloadRequested -> reloadForm()
+            PostEditorIntent.PendingQuoteIgnored -> ignorePendingQuote()
             is PostEditorIntent.ToggleSignature ->
                 _state.update { it.copy(signatureEnabled = intent.enabled) }
             is PostEditorIntent.ToggleSmileyDisabled ->
@@ -557,14 +717,29 @@ class PostEditorViewModel @AssistedInject constructor(
                 .copy(restorableDraft = null, draftHydratedFromForm = true)
         }
         scheduleAutosave()
+        resumePendingInlineQuotes()
     }
 
     /** #405 — discard the cached draft : delete the row and clear the banner. */
     private fun onDraftDiscardRequested() {
         val body = _state.value.restorableDraft ?: return
         markDraftRestoreOfferIgnored(body)
+        draftRestoreDiscarding = true
         _state.update { it.copy(restorableDraft = null) }
-        viewModelScope.launch { submission.flush(EditorDraftStore.Draft(body = "")) }
+        viewModelScope.launch {
+            try {
+                submission.flush(EditorDraftStore.Draft(body = ""))
+            } finally {
+                draftRestoreDiscarding = false
+            }
+            // Finish the discard before any insertion/autosave can repopulate the row.
+            resumePendingInlineQuotes()
+        }
+    }
+
+    private fun resumePendingInlineQuotes() {
+        val pending = _state.value.pendingQuotes
+        if (pending.isNotEmpty()) loadReplyFormWithInlineQuotes(pending)
     }
 
     private fun markDraftRestoreOfferIgnored(body: String) {
@@ -656,7 +831,7 @@ class PostEditorViewModel @AssistedInject constructor(
      * [ImageUploadReader]), uploads to the host of the current preference scoped to the active
      * [activeUserId] (lowercased pseudo), and on success inserts `[img]imageUrl[/img]` at the caret
      * via [insertImageUrlAtCaret] (same cursor contract as the smiley / URL paths). A typed
-     * [UploadException] is mapped onto [UploadError] ; an anonymous client (no userId) is ignored —
+     * [UploadException] is mapped onto [EditorError] ; an anonymous client (no userId) is ignored —
      * the providers require an HFR session for the trace, and surfacing « connectez-vous » here
      * would duplicate the submit-time LoginRequired surface.
      */
@@ -666,12 +841,15 @@ class PostEditorViewModel @AssistedInject constructor(
     private fun onImagePickerEvent(event: ImagePickerEvent) {
         if (submission.blocksMutation) return
         diagnostics.recordImagePickerEvent(event)
+        if (event is ImagePickerEvent.Unavailable) {
+            _state.update { it.copy(uploadError = EditorErrors.pickerAbsent) }
+        }
         if (event is ImagePickerEvent.Result) {
             val pickedImages = pickedImagesForUpload(event.contract, event.uris)
             val showEmptyPickerBanner = pickedImages.isEmpty() && uploadJob?.isActive != true
-            onImagesPicked(pickedImages)
+            onImagesPicked(event.uris)
             if (showEmptyPickerBanner) {
-                _state.update { it.copy(uploadError = UploadError.NoImageReceived) }
+                _state.update { it.copy(uploadError = EditorErrors.noImageReceived) }
             }
         }
     }
@@ -680,7 +858,7 @@ class PostEditorViewModel @AssistedInject constructor(
      * Multi-image upload — uploads the picked [uris] sequentially (one in-flight at a time, same
      * job/gate as the single path) and inserts `[img]url[/img]` at the caret for each success, in
      * pick order (each insertion advances the caret so the next lands after it). The batch stops at
-     * the first failure: the already-inserted images stay and the typed [UploadError] is surfaced —
+     * the first failure: the already-inserted images stay and the typed [EditorError] is surfaced —
      * the user fixes the cause and re-picks the rest. A blank list, an anonymous client (no userId),
      * or an upload already in flight are ignored. [PostEditorState.uploadProgress] carries an « n/N »
      * counter while more than one image is in the batch (null for a single image).
@@ -691,14 +869,15 @@ class PostEditorViewModel @AssistedInject constructor(
     private fun onImagesPicked(uris: List<String>) {
         diagnostics.recordImagesPicked(uris.size)
         val userId = activeUserId
-        val targets = uris.filter { it.isNotBlank() }
+        val received = uris.filter { it.isNotBlank() }
+        val targets = received.take(MAX_IMAGES_PER_UPLOAD)
         // One guard (ReturnCount): nothing in flight already, an authenticated owner, a non-empty pick.
         if (!canStartUpload(userId, targets)) return
         val multiple = targets.size > 1
         _state.update {
             it.copy(
                 isUploading = true,
-                uploadError = null,
+                uploadError = if (received.size > MAX_IMAGES_PER_UPLOAD) EditorErrors.imageLimit else null,
                 uploadProgress = if (multiple) UploadProgress(completed = 0, total = targets.size) else null,
             )
         }
@@ -737,7 +916,7 @@ class PostEditorViewModel @AssistedInject constructor(
                     _state.update { it.copy(uploadProgress = UploadProgress(completed, targets.size)) }
                 }
             }
-            _state.update { it.copy(isUploading = false, uploadError = null, uploadProgress = null) }
+            _state.update { it.copy(isUploading = false, uploadProgress = null) }
         }
     }
 
@@ -746,18 +925,7 @@ class PostEditorViewModel @AssistedInject constructor(
             _state.update { it.copy(isUploading = false, uploadProgress = null) }
             throw error
         }
-        val mapped = when (error) {
-            is UploadException.TooLarge -> UploadError.TooLarge
-            is UploadException.UnsupportedType -> UploadError.UnsupportedType
-            // #474 — keep Server and Malformed distinct so the banner names the host + HTTP code
-            // (Server) vs. an unreadable host response (Malformed), instead of one vague message.
-            is UploadException.Server -> UploadError.Server(code = error.code, providerId = error.providerId)
-            is UploadException.Malformed -> UploadError.Malformed(providerId = error.providerId)
-            // #474 — a config error (blank Imgur Client-ID) must point at Settings, not connectivity.
-            is UploadException.Configuration -> UploadError.Configuration
-            is UploadException.Network -> UploadError.Network
-            else -> UploadError.Network
-        }
+        val mapped = EditorErrors.stopped(error.toEditorUploadError(), _state.value.uploadProgress)
         diagnostics.record(
             DiagnosticsLog.Level.WARN,
             LOG_TAG_VM,
@@ -813,9 +981,9 @@ class PostEditorViewModel @AssistedInject constructor(
         }
     }
 
-    private fun loadReplyFormIfPossible() {
+    private fun loadReplyFormIfPossible(preserveDraft: Boolean = false) {
         val context = buildReplyContext() ?: run {
-            _state.update { it.copy(submitError = SubmitError.MissingSubcat) }
+            _state.update { it.copy(submitError = EditorErrors.missingSubcat) }
             return
         }
         // #604 lot 3 (mockup P3) — with cards ON (or no citations at all) the open-time fetch is
@@ -823,12 +991,15 @@ class PostEditorViewModel @AssistedInject constructor(
         // [quotemsg] blocks are materialised fresh at submit (see [onSubmitClicked]), exactly
         // like the quick-reply sheet. This fetch only warms the hash and hydrates the per-post
         // options. Cards OFF goes through [loadReplyFormWithInlineQuotes] instead (#805).
-        launchFormFetch { replyRepository.fetchReplyForm(context) }
+        launchFormFetch {
+            val form = replyRepository.fetchReplyForm(context)
+            if (preserveDraft) form.copy(initialContent = "") else form
+        }
     }
 
     private fun loadEditFormIfPossible() {
         val context = buildEditPostContext() ?: run {
-            _state.update { it.copy(submitError = SubmitError.MissingSubcat) }
+            _state.update { it.copy(submitError = EditorErrors.missingSubcat) }
             return
         }
         launchFormFetch { editPostRepository.fetchEditPostForm(context) }
@@ -949,15 +1120,11 @@ class PostEditorViewModel @AssistedInject constructor(
             // Anti-clobber : do not overwrite once set, so a silent `InvalidHashCheck`
             // refetch on an anonymous fallback does not erase a previously known id.
             userId = userId ?: form.userId,
-            submitError = if (submitError != SubmitError.Uncertain && form.isAnonymous) {
-                SubmitError.Hfr(ReplyFailureReason.LoginRequired)
-            } else {
-                submitError
-            },
+            submitError = submitError.afterFormLoaded() ?: EditorErrors.loginRequired.takeIf { form.isAnonymous },
         )
     }
 
-    private fun handleFetchFailure(error: Throwable) {
+    private fun handleFetchFailure(error: Throwable, quoteFetch: Boolean = false) {
         if (error is CancellationException) {
             // Symmetry with `handleSubmitFailure` : reset the in-flight flag before the throw so
             // a parent ViewModel that survives the cancellation (or any state observer reading
@@ -965,13 +1132,22 @@ class PostEditorViewModel @AssistedInject constructor(
             _state.update { it.copy(isLoadingForm = false) }
             throw error
         }
-        // Map known transport-level failures to a typed SubmitError ; classify the
+        if (quoteFetch && _state.value.pendingQuotes.isNotEmpty()) {
+            val failures = (_state.value.quoteFetchFailures + 1).coerceAtMost(2)
+            savedStateHandle[QUOTE_FAILURES_KEY] = failures
+            _state.update { it.copy(quoteFetchFailures = failures) }
+        }
+        // Map known transport-level failures to a typed EditorError ; classify the
         // rest as Unknown rather than letting the exception bubble up and crash the
         // process. The UI surfaces the same "unexpected response" message either way.
         val mapped = when (error) {
-            is SessionExpiredException -> SubmitError.SessionExpired
-            is IOException -> SubmitError.Network
-            else -> SubmitError.Hfr(ReplyFailureReason.Unknown)
+            is SessionExpiredException -> EditorErrors.sessionExpired
+            else -> when {
+                quoteFetch || _state.value.pendingQuotes.isNotEmpty() ->
+                    EditorErrors.quoteFetchFailed(inline = _state.value.pendingQuotes.isNotEmpty())
+                error is IOException -> EditorErrors.formNetwork
+                else -> EditorErrors.invalidForm
+            }
         }
         diagnostics.record(
             DiagnosticsLog.Level.WARN,
@@ -982,7 +1158,7 @@ class PostEditorViewModel @AssistedInject constructor(
         _state.update {
             it.copy(
                 isLoadingForm = false,
-                submitError = if (it.submitError == SubmitError.Uncertain) it.submitError else mapped,
+                submitError = if (it.submitError == EditorErrors.uncertain) it.submitError else mapped,
             )
         }
     }
@@ -1001,7 +1177,7 @@ class PostEditorViewModel @AssistedInject constructor(
         val form = loadedForm
         if (!snapshot.canSubmit || form == null) return
         if (form.isAnonymous) {
-            _state.update { it.copy(submitError = SubmitError.Hfr(ReplyFailureReason.LoginRequired)) }
+            _state.update { it.copy(submitError = ReplyFailureReason.LoginRequired.toEditorError()) }
         } else {
             val permit = submission.request(intent.timeoutMillis, snapshot.canSubmit && !closeRequested)
             if (permit is SubmissionRequest.Accepted) launchSubmission(permit, snapshot, form)
@@ -1059,9 +1235,9 @@ class PostEditorViewModel @AssistedInject constructor(
                     EditorSendOutcome.CERTAIN_FAILURE
                 },
                 error = if (result.reason == ReplyFailureReason.Unknown) {
-                    SubmitError.Uncertain
+                    EditorErrors.uncertain
                 } else {
-                    SubmitError.Hfr(result.reason)
+                    result.reason.toEditorError()
                 },
                 afterSettled = if (result.reason == ReplyFailureReason.InvalidHashCheck) {
                     {
@@ -1139,9 +1315,9 @@ class PostEditorViewModel @AssistedInject constructor(
         } catch (_: SessionExpiredException) {
             EditorPreparationException.Reason.SESSION_EXPIRED
         } catch (_: IOException) {
-            EditorPreparationException.Reason.NETWORK
+            EditorPreparationException.Reason.QUOTE_FETCH
         } catch (_: IllegalStateException) {
-            EditorPreparationException.Reason.INVALID_FORM
+            EditorPreparationException.Reason.QUOTE_FETCH
         }
         throw EditorPreparationException(reason)
     }
@@ -1201,10 +1377,13 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     private companion object {
+        const val PENDING_QUOTES_KEY = "postEditor.pendingQuotes"
+        const val QUOTE_FAILURES_KEY = "postEditor.quoteFailures"
+        const val IGNORED_QUOTES_KEY = "postEditor.ignoredQuotes"
+        const val LAST_ATTEMPT_KEY = "postEditor.lastAttempt"
         // Distinct from the repository's "ReplyRepository" tag so the diagnostics
         // panel makes it obvious which layer recorded an entry.
         private const val LOG_TAG_VM = "PostEditorVM"
         private const val DRAFT_RESTORE_OFFER_FINGERPRINT_KEY = "draft_restore_offer_fingerprint"
-        private const val SHARED_DRAFT_RESUMED_KEY = "shared_draft_resumed"
     }
 }

@@ -24,6 +24,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.width
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.editor.EditorError
+import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -48,12 +50,38 @@ class QuickReplyErrorBannerLayoutTest {
     val compose = createComposeRule()
 
     @Test
-    fun uncertainFits() = assertBanner(QuickReplySubmitError.Uncertain, "Envoi incertain")
+    fun `card quote failure offers a removable card without claiming submission is blocked`() {
+        compose.setContent {
+            RedfaceTheme(darkTheme = false) { QuickReplyErrorBanner(EditorErrors.quoteFetchFailed(inline = false)) }
+        }
+        compose.onNodeWithText(
+            "Citation non chargée. Réessayez l’envoi pour la charger à nouveau, " +
+                "ou retirez sa carte pour envoyer sans elle.",
+        ).assertIsDisplayed()
+        compose.onNodeWithText("Ignorer la citation").assertDoesNotExist()
+    }
 
     @Test
-    fun draftWriteFailedFits() = assertBanner(QuickReplySubmitError.DraftWriteFailed, "Brouillon non écrit")
+    fun uncertainFits() = assertBanner(EditorErrors.uncertain, "Envoi incertain")
 
-    private fun assertBanner(error: QuickReplySubmitError, label: String) {
+    @Test
+    fun draftWriteFailedFits() = assertBanner(EditorErrors.draftWriteFailed, "Brouillon non écrit")
+
+    @Test
+    fun `quote failure detail explains reciting and escalation to ignore the quote`() {
+        compose.setContent {
+            RedfaceTheme(darkTheme = false) {
+                QuickReplyErrorBanner(EditorErrors.quoteFetchFailed(inline = true, quickReply = true))
+            }
+        }
+        compose.onNodeWithText(
+            "Citation non chargée, envoi bloqué. Refaites « Citer » ou ouvrez l’éditeur complet " +
+                "pour envoyer sans la citation.",
+        ).assertIsDisplayed()
+        compose.onNodeWithText("Recharger").assertDoesNotExist()
+    }
+
+    private fun assertBanner(error: EditorError, label: String) {
         compose.setContent {
             val density = LocalDensity.current
             val configuration = Configuration(LocalConfiguration.current).apply { fontScale = 1.3f }
@@ -79,7 +107,7 @@ class QuickReplyErrorBannerLayoutTest {
         }
         assertSummary(label)
         val detail = compose.onNodeWithText("Votre message a peut-être été envoyé", substring = true)
-        if (error == QuickReplySubmitError.DraftWriteFailed) {
+        if (error == EditorErrors.draftWriteFailed) {
             detail.assertDoesNotExist()
         } else {
             val detailBounds = detail.assertIsDisplayed().getUnclippedBoundsInRoot()

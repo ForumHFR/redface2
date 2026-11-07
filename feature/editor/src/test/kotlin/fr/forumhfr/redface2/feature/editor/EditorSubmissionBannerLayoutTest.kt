@@ -24,6 +24,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.width
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.editor.EditorError
+import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -37,7 +39,7 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * #1301-ST / ED-133: real post/topic error banners at 360 dp, system fontScale 1.3 × preset L.
- * La largeur de la future barre (≈ 150 dp d'ED-133) est intenable à 1,3 × L et relève de R0b (#1456).
+ * The separate core:ui EditorErrorSummaryLayoutTest owns the 150 dp text contract of ED-133.
  */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -48,18 +50,18 @@ class EditorSubmissionBannerLayoutTest {
     val compose = createComposeRule()
 
     @Test
-    fun postUncertainFits() = assertPost(SubmitError.Uncertain, "Envoi incertain")
+    fun postUncertainFits() = assertPost(EditorErrors.uncertain, "Envoi incertain")
 
     @Test
-    fun postDraftWriteFailedFits() = assertPost(SubmitError.DraftWriteFailed, "Brouillon non écrit")
+    fun postDraftWriteFailedFits() = assertPost(EditorErrors.draftWriteFailed, "Brouillon non écrit")
 
     @Test
-    fun topicUncertainFits() = assertTopic(SubmitError.Uncertain, "Envoi incertain")
+    fun topicUncertainFits() = assertTopic(EditorErrors.uncertain, "Envoi incertain")
 
     @Test
-    fun topicDraftWriteFailedFits() = assertTopic(SubmitError.DraftWriteFailed, "Brouillon non écrit")
+    fun topicDraftWriteFailedFits() = assertTopic(EditorErrors.draftWriteFailed, "Brouillon non écrit")
 
-    private fun assertPost(error: SubmitError, label: String) {
+    private fun assertPost(error: EditorError, label: String) {
         val state = PostEditorState(
             mode = PostEditorMode.Reply,
             cat = 23,
@@ -72,7 +74,7 @@ class EditorSubmissionBannerLayoutTest {
         assertBanner("post", label) { PostEditorAlertBanners(state = state, onIntent = {}) }
     }
 
-    private fun assertTopic(error: SubmitError, label: String) {
+    private fun assertTopic(error: EditorError, label: String) {
         val state = TopicFormState(
             mode = TopicFormMode.New,
             cat = 23,

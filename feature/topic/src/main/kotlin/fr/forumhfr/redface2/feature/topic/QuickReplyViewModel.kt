@@ -16,6 +16,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorPreparationException
+import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
 import fr.forumhfr.redface2.core.domain.editor.EditorSessionResources
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionBinding
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionCallbacks
@@ -23,7 +24,6 @@ import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionEnvironment
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionErrors
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionRequest
-import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
 import fr.forumhfr.redface2.core.domain.write.QuotedNumreponses
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
@@ -33,12 +33,21 @@ import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
+import fr.forumhfr.redface2.core.ui.editor.EditorCause
+import fr.forumhfr.redface2.core.ui.editor.EditorError
+import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.decodeInlineQuoteRequest
+import fr.forumhfr.redface2.core.ui.editor.encodeInlineQuoteRequest
+import fr.forumhfr.redface2.core.ui.editor.inlineQuoteDeliveryKey
+import fr.forumhfr.redface2.core.ui.editor.toEditorError
 import java.io.IOException
 import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -65,6 +74,7 @@ data class QuickReplyUiState(
      * multi-quote basket : never persisted, the #405 row only ever carries the typed body.
      */
     val quotes: List<QuoteSelection> = emptyList(),
+    val pendingQuotes: List<QuoteSelection> = emptyList(),
     val submission: EditorSubmissionState = EditorSubmissionState.Ready,
     val isSubmitting: Boolean = false,
     /**
@@ -73,30 +83,14 @@ data class QuickReplyUiState(
      * submit and escalation wait for the insert.
      */
     val isPreparingQuotes: Boolean = false,
-    val submitError: QuickReplySubmitError? = null,
+    val submitError: EditorError? = null,
     /** #312 — « Confirmation avant publication » : the pending-confirmation dialog is showing. */
     val confirmVisible: Boolean = false,
 ) {
     /** With quote cards armed, an empty body is a valid submit (quotes-only reply). */
     val canSubmit: Boolean
         get() = (text.text.isNotBlank() || quotes.isNotEmpty()) && !isSubmitting && !isPreparingQuotes &&
-            !submission.blocksBodyMutation
-}
-
-/** Typed submit failures, the same split as the full editor's `SubmitError`. */
-sealed interface QuickReplySubmitError {
-    data class Hfr(val reason: ReplyFailureReason) : QuickReplySubmitError
-    data object Uncertain : QuickReplySubmitError
-    data object DraftWriteFailed : QuickReplySubmitError
-    data object Network : QuickReplySubmitError
-    data object SessionExpired : QuickReplySubmitError
-
-    /**
-     * #805 cards OFF — the opening-time `[quotemsg]` fetch failed : the field is untouched,
-     * nothing is lost, re-tapping « Citer » retries. Session expiry still maps to
-     * [SessionExpired] (reconnect is the actionable fix).
-     */
-    data object QuoteFetchFailed : QuickReplySubmitError
+            !submission.blocksBodyMutation && pendingQuotes.isEmpty()
 }
 
 /** One-shot events consumed by the sheet composable. */
@@ -184,10 +178,11 @@ class QuickReplyViewModel @AssistedInject constructor(
     private var confirmationPreference: Boolean? = null
     private var submission = newSubmission()
     private var hasOpened = false
+    private var sheetOpen = false
 
     /** ED-161/170: one binding per opening; old tasks keep their original session and owner. */
-    private fun newSubmission(): EditorSubmissionBinding<QuickReplyEffect, QuickReplySubmitError> {
-        val callbacks = EditorSubmissionCallbacks<QuickReplyEffect, QuickReplySubmitError>(
+    private fun newSubmission(): EditorSubmissionBinding<QuickReplyEffect, EditorError> {
+        val callbacks = EditorSubmissionCallbacks<QuickReplyEffect, EditorError>(
             state = { value ->
                 _state.update {
                     it.copy(
@@ -208,11 +203,12 @@ class QuickReplyViewModel @AssistedInject constructor(
             EditorSubmissionEnvironment(viewModelScope, sessionResources.clock, sessionResources.diagnostics),
             EditorDraftSession(draftStore, draftKey), callbacks,
             EditorSubmissionErrors(
-                QuickReplySubmitError.Uncertain, QuickReplySubmitError.DraftWriteFailed,
-                QuickReplySubmitError.SessionExpired, QuickReplySubmitError.Uncertain,
-                network = QuickReplySubmitError.Network,
-                preparationFailed = QuickReplySubmitError.QuoteFetchFailed,
-                quoteFetchFailed = QuickReplySubmitError.QuoteFetchFailed,
+                EditorErrors.uncertain, EditorErrors.draftWriteFailed,
+                EditorErrors.sessionExpired, EditorErrors.uncertain,
+                network = EditorErrors.network,
+                preparationFailed = EditorErrors.invalidForm,
+                quoteFetchFailed = EditorErrors.quoteFetchFailed(inline = false),
+                draftSaveFailed = EditorErrors.draftSaveFailed,
             ),
         ).also { it.setPreference(confirmationPreference) }
     }
@@ -248,6 +244,10 @@ class QuickReplyViewModel @AssistedInject constructor(
                     autosaveJob?.cancel()
                     openJob?.cancel()
                     sessionReady.cancel()
+                    savedStateHandle.remove<Boolean>(KEY_PENDING_TRANSFERRED)
+                    savedStateHandle.remove<IntArray>(KEY_PENDING_QUOTES)
+                    savedStateHandle.remove<String>(KEY_DELIVERED_QUOTES)
+                    _state.update { it.copy(pendingQuotes = emptyList()) }
                 }
                 previous = owner
                 observed = true
@@ -293,6 +293,7 @@ class QuickReplyViewModel @AssistedInject constructor(
         // Rotation during an active send must retain its permit and buffered success (ED-86).
         if (submission.isExecuting) return
         hasOpened = true
+        sheetOpen = true
         materializeJob?.cancel()
         autosaveJob?.cancel()
         openJob?.cancel()
@@ -300,7 +301,15 @@ class QuickReplyViewModel @AssistedInject constructor(
         sessionReady.cancel()
         submission.disarm()
         updateCurrentPage(currentPage)
-        _state.value = QuickReplyUiState()
+        // A successful handoff transfers ownership of the pending request to the full editor.
+        // Keep the current sheet blocked until it closes, then never replay that request here.
+        val transferred = savedStateHandle.remove<Boolean>(KEY_PENDING_TRANSFERRED) == true
+        val pending = if (transferred) emptyList() else _state.value.pendingQuotes.ifEmpty {
+            savedStateHandle.get<IntArray>(KEY_PENDING_QUOTES)?.decodeInlineQuoteRequest().orEmpty()
+        }
+        val requested = (pending + initialQuotes).distinctBy { it.numreponse }
+        _state.value = QuickReplyUiState(pendingQuotes = requested)
+        savedStateHandle[KEY_PENDING_QUOTES] = requested.encodeInlineQuoteRequest()
         val opening = newSubmission()
         val ready = CompletableDeferred<Unit>()
         submission = opening
@@ -312,21 +321,26 @@ class QuickReplyViewModel @AssistedInject constructor(
             ready.complete(Unit)
             prefetchForm()
             // Recovered attempts never receive a second server quote prefill (ED-81/170).
-            if (entry?.attempt != null) return@launch
-            if (initialQuotes.isEmpty()) return@launch
-            if (userPreferencesRepository.observeQuoteCardsEnabled().first()) {
+            if (entry?.attempt != null) {
+                setPendingQuotes(emptyList())
+                return@launch
+            }
+            if (!sheetOpen) return@launch
+            if (requested.isEmpty()) return@launch
+            if (pending.isEmpty() && userPreferencesRepository.observeQuoteCardsEnabled().first()) {
                 // Through onQuoteAdded : keeps the dedup + #808 cap semantics of a manual add.
-                initialQuotes.forEach(::onQuoteAdded)
+                requested.forEach(::onQuoteAdded)
+                setPendingQuotes(emptyList())
             } else {
-                val quotes = initialQuotes.distinctBy { it.numreponse }
+                val quotes = requested
                 // Process-restored delivery identity: a recreated sheet reloads the autosaved
                 // inline BBCode without fetching and appending the same quote set a second time.
-                val deliveryKey = quotes
-                    .map { it.numreponse }
-                    .sorted()
-                    .joinToString(separator = ",")
+                val deliveryKey = quotes.inlineQuoteDeliveryKey()
                 if (savedStateHandle.get<String>(KEY_DELIVERED_QUOTES) != deliveryKey) {
+                    setPendingQuotes(quotes)
                     materializeInlineQuotes(quotes, deliveryKey)
+                } else {
+                    setPendingQuotes(emptyList())
                 }
             }
         }
@@ -340,11 +354,18 @@ class QuickReplyViewModel @AssistedInject constructor(
      * « continue typing » position). The fresh quote form also warms [loadedForm] : its hash is
      * exactly what the pre-cards flow rode at submit.
      */
+    private fun setPendingQuotes(quotes: List<QuoteSelection>) {
+        savedStateHandle[KEY_PENDING_QUOTES] = quotes.encodeInlineQuoteRequest()
+        _state.update { it.copy(pendingQuotes = quotes) }
+    }
+
     private fun materializeInlineQuotes(quotes: List<QuoteSelection>, deliveryKey: String) {
-        materializeJob?.cancel()
+        if (_state.value.isPreparingQuotes || submission.blocksMutation) return
+        submission.disarm()
+        val opening = submission
         val baseContext = replyContext()
         materializeJob = viewModelScope.launch {
-            _state.update { it.copy(isPreparingQuotes = true, submitError = null) }
+            _state.update { it.copy(isPreparingQuotes = true) }
             try {
                 val quoteContext = baseContext.copy(
                     quotedNumreponse = quotes.first().numreponse,
@@ -355,7 +376,9 @@ class QuickReplyViewModel @AssistedInject constructor(
                     extraQuoteNumreponses = quotes.drop(1).map { it.numreponse },
                     truncate = quotes.any { it.truncate },
                 )
-                if (submission.blocksMutation) return@launch
+                currentCoroutineContext().ensureActive()
+                check(form.initialContent.isNotBlank()) { "empty quote prefill" }
+                if (submission !== opening || opening.blocksMutation) return@launch
                 rememberLoadedForm(form, quoteContext.page)
                 val prefills = form.initialContent.trimEnd()
                 _state.update { current ->
@@ -371,24 +394,39 @@ class QuickReplyViewModel @AssistedInject constructor(
                     )
                 }
                 savedStateHandle[KEY_DELIVERED_QUOTES] = deliveryKey
+                setPendingQuotes(emptyList())
+                _state.update { current ->
+                    current.copy(submitError = current.submitError.takeUnless {
+                        it?.cause == EditorCause.QuoteFetchFailed
+                    })
+                }
                 scheduleAutosave()
             } catch (cancelled: CancellationException) {
-                _state.update { it.copy(isPreparingQuotes = false) }
+                if (submission === opening) _state.update { it.copy(isPreparingQuotes = false) }
                 throw cancelled
             } catch (_: SessionExpiredException) {
+                if (!canCompleteQuotePreparation(opening)) return@launch
                 _state.update {
-                    it.copy(isPreparingQuotes = false, submitError = QuickReplySubmitError.SessionExpired)
+                    it.copy(isPreparingQuotes = false, submitError = EditorErrors.sessionExpired)
                 }
             } catch (_: IOException) {
-                quotePreparationFailed()
+                if (canCompleteQuotePreparation(opening)) quotePreparationFailed()
             } catch (_: IllegalStateException) {
-                quotePreparationFailed()
+                if (canCompleteQuotePreparation(opening)) quotePreparationFailed()
             }
         }
     }
 
+    private fun canCompleteQuotePreparation(opening: EditorSubmissionBinding<QuickReplyEffect, EditorError>): Boolean =
+        submission === opening && !opening.blocksMutation
+
     private fun quotePreparationFailed() {
-        _state.update { it.copy(isPreparingQuotes = false, submitError = QuickReplySubmitError.QuoteFetchFailed) }
+        _state.update {
+            it.copy(
+                isPreparingQuotes = false,
+                submitError = EditorErrors.quoteFetchFailed(inline = true, quickReply = true),
+            )
+        }
     }
 
     /** #604 lot 2 — arm a quote card ; idempotent per numreponse (re-citing a post is a no-op). */
@@ -432,7 +470,7 @@ class QuickReplyViewModel @AssistedInject constructor(
         submission.disarm()
         _state.update {
             it.copy(
-                text = value, submitError = it.submitError.takeIf { error -> error == QuickReplySubmitError.Uncertain },
+                text = value,
             )
         }
         scheduleAutosave()
@@ -462,15 +500,17 @@ class QuickReplyViewModel @AssistedInject constructor(
         // hand over a row without the citation the user just asked for.
         if (submission.blocksClose || _state.value.isPreparingQuotes) return
         submission.disarm()
+        sheetOpen = false
         autosaveJob?.cancel()
         val session = submission
         val ready = sessionReady
         val body = _state.value.text.text
-        val quotes = _state.value.quotes
+        val quotes = (_state.value.quotes + _state.value.pendingQuotes).distinctBy { it.numreponse }
         viewModelScope.launch {
             ready.await()
             val result = session.flush(EditorDraftStore.Draft(body = body))
             if (result is EditorDraftStore.StoreWriteResult.Written) {
+                savedStateHandle[KEY_PENDING_TRANSFERRED] = true
                 _effects.send(QuickReplyEffect.EscalateToFullEditor(quotes))
             }
         }
@@ -483,9 +523,9 @@ class QuickReplyViewModel @AssistedInject constructor(
      */
     fun onDismissed() {
         if (submission.blocksClose) return
+        sheetOpen = false
         submission.disarm()
-        // A pending [quotemsg] insert dies with the composition it belonged to (réserve Codex
-        // n°2) — the user abandoned it; the flush below only persists what the field showed.
+        // Cancel the GET, retain its request: closing is not an explicit quote abandonment.
         materializeJob?.cancel()
         autosaveJob?.cancel()
         // #953 F2 — owner AND body captured NOW : the flush persists what the DISMISSED session
@@ -544,7 +584,7 @@ class QuickReplyViewModel @AssistedInject constructor(
         snapshot: QuickReplyUiState,
         baseContext: ReplyContext,
         quoted: List<Int>,
-    ): EditorDelivery<QuickReplyEffect, QuickReplySubmitError> {
+    ): EditorDelivery<QuickReplyEffect, EditorError> {
         val quotes = snapshot.quotes
         val context = if (quotes.isEmpty()) baseContext else baseContext.copy(
             quotedNumreponse = quotes.first().numreponse, quoteRef = null,
@@ -562,9 +602,9 @@ class QuickReplyViewModel @AssistedInject constructor(
             )
             is ReplySubmitResult.Failure -> {
                 val error = if (result.reason == ReplyFailureReason.Unknown) {
-                    QuickReplySubmitError.Uncertain
+                    EditorErrors.uncertain
                 } else {
-                    QuickReplySubmitError.Hfr(result.reason)
+                    result.reason.toEditorError()
                 }
                 EditorDelivery(
                     outcome = if (result.reason == ReplyFailureReason.Unknown) {
@@ -605,7 +645,11 @@ class QuickReplyViewModel @AssistedInject constructor(
         }
         throw EditorPreparationException(reason)
     } catch (_: IllegalStateException) {
-        throw EditorPreparationException(EditorPreparationException.Reason.INVALID_FORM)
+        throw EditorPreparationException(if (quotes.isEmpty()) {
+            EditorPreparationException.Reason.INVALID_FORM
+        } else {
+            EditorPreparationException.Reason.QUOTE_FETCH
+        })
     }
 
     private fun updateCurrentPage(page: Int) {
@@ -642,6 +686,8 @@ class QuickReplyViewModel @AssistedInject constructor(
         const val AUTOSAVE_DEBOUNCE_MS = 750L
 
         /** Stable, process-restored identity of the inline quote set already delivered to the draft. */
+        const val KEY_PENDING_TRANSFERRED = "quickReply.pendingTransferred"
+        const val KEY_PENDING_QUOTES = "quickReply.pendingQuotes"
         const val KEY_DELIVERED_QUOTES = "quickReply.deliveredQuotes"
     }
 }

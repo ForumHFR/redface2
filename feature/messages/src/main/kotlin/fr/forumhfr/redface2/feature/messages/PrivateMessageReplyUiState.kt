@@ -5,7 +5,7 @@ import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
-import fr.forumhfr.redface2.core.ui.editor.UploadError
+import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
 /**
@@ -45,7 +45,7 @@ data class PrivateMessageReplyUiState(
     val optionsHydratedFromForm: Boolean = false,
     val submission: EditorSubmissionState = EditorSubmissionState.Ready,
     val isSubmitting: Boolean = false,
-    val submitError: PrivateMessageReplyError? = null,
+    val submitError: EditorError? = null,
     /**
      * #312 — `true` while the « Confirmation avant publication » dialog is shown. Only raised when
      * the preference is active/unknown AND the submit already passed every validation gate (mirrors
@@ -85,7 +85,7 @@ data class PrivateMessageReplyUiState(
      */
     val isUploading: Boolean = false,
     /** #459 — typed upload failure surfaced as a dismissible banner (shared `:core:ui` taxonomy). */
-    val uploadError: UploadError? = null,
+    val uploadError: EditorError? = null,
     /** #459 — « n/N » batch counter (null for a single image). */
     val uploadProgress: UploadProgress? = null,
     /** #1128 — observed continuously so the next image pick uses the current preference. */
@@ -96,26 +96,4 @@ data class PrivateMessageReplyUiState(
     val canSubmit: Boolean
         get() = formAvailable && !isLoadingForm && !isSubmitting && !isUploading &&
             !submission.blocksBodyMutation && draft.text.isNotBlank()
-}
-
-/**
- * Submit-phase errors surfaced as a banner over the editor (the draft is always preserved). HFR
- * reuses the same `bddpost.php` failure sentences for private messages as for topics, so the
- * recognised reasons map 1:1 — except [Unexpected], which is the non-destructive fallback for an
- * unrecognised response: the private-message POST success sentence is not pinned by a live fixture
- * (a real send to a third party was intentionally avoided), so the UI invites the user to verify the
- * conversation rather than claiming a hard failure.
- */
-sealed interface PrivateMessageReplyError {
-    data object Empty : PrivateMessageReplyError
-    data object UnknownRecipient : PrivateMessageReplyError
-    data object Refused : PrivateMessageReplyError
-    data object InvalidHashCheck : PrivateMessageReplyError
-    data object AntiFlood : PrivateMessageReplyError
-    data object LoginRequired : PrivateMessageReplyError
-    data object Network : PrivateMessageReplyError
-    data object SessionExpired : PrivateMessageReplyError
-    data object Uncertain : PrivateMessageReplyError
-    data object DraftWriteFailed : PrivateMessageReplyError
-    data object Unexpected : PrivateMessageReplyError
 }

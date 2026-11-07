@@ -5,7 +5,7 @@ import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
-import fr.forumhfr.redface2.core.ui.editor.UploadError
+import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
 /**
@@ -18,7 +18,7 @@ import fr.forumhfr.redface2.core.ui.editor.UploadProgress
  * - [subject] — HFR's `sujet` field, capped at [SUBJECT_MAX_LENGTH] like the web composer's
  *   `maxlength=70` (the ViewModel truncates, so the cap holds even through paste).
  *
- * Submit-phase errors reuse [PrivateMessageReplyError] : the POST rides the same `bddpost.php`
+ * Submit-phase errors reuse [EditorError] : the POST rides the same `bddpost.php`
  * family, and the non-destructive-Unknown rule (draft kept, « vérifiez vos messages » banner)
  * applies identically since the success response was never exercised live.
  */
@@ -39,7 +39,7 @@ data class PrivateMessageComposeUiState(
     val optionsHydratedFromForm: Boolean = false,
     val submission: EditorSubmissionState = EditorSubmissionState.Ready,
     val isSubmitting: Boolean = false,
-    val submitError: PrivateMessageReplyError? = null,
+    val submitError: EditorError? = null,
     val showSubmitConfirmation: Boolean = false,
     /**
      * #405 — body of a previously-cached new-conversation draft, surfaced on init when a non-empty
@@ -55,7 +55,7 @@ data class PrivateMessageComposeUiState(
      */
     val isUploading: Boolean = false,
     /** #459 — typed upload failure surfaced as a dismissible banner (shared `:core:ui` taxonomy). */
-    val uploadError: UploadError? = null,
+    val uploadError: EditorError? = null,
     /** #459 — « n/N » batch counter (null for a single image). */
     val uploadProgress: UploadProgress? = null,
     /** #1128 — observed continuously so the next image pick uses the current preference. */

@@ -15,13 +15,13 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDelivery
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionBinding
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionCallbacks
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionEnvironment
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionErrors
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionRequest
-import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.AuthState
@@ -92,11 +92,11 @@ class ReportContentViewModel @AssistedInject constructor(
         errors = EditorSubmissionErrors(
             uncertain = ReportError.UNCERTAIN, draftWriteFailed = ReportError.DRAFT_WRITE_FAILED,
             sessionExpired = ReportError.SESSION_EXPIRED, unknown = ReportError.UNCERTAIN,
-            network = ReportError.NETWORK, preparationFailed = ReportError.REFUSED,
+            network = ReportError.NETWORK, preparationFailed = ReportError.INVALID_FORM,
         ),
     ).also { it.setPreference(confirmPreference) }
 
-    // Observe successful content writes without changing the shared binding's error callbacks.
+    // Observe content-write results separately: storage and uncertain delivery can both be displayed.
     private fun reportDraftStore(): EditorDraftStore {
         val opening = generation
         return object : EditorDraftStore by dependencies.drafts {
@@ -121,8 +121,8 @@ class ReportContentViewModel @AssistedInject constructor(
     }
 
     private fun draftWritten(result: EditorDraftStore.StoreWriteResult, opening: Int) {
-        if (opening == generation && result is EditorDraftStore.StoreWriteResult.Written) {
-            _state.update { it.copy(draftWriteFailed = false) }
+        if (opening == generation) {
+            _state.update { it.copy(draftWriteFailed = result !is EditorDraftStore.StoreWriteResult.Written) }
         }
     }
 

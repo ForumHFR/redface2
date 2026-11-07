@@ -58,8 +58,13 @@ import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitActions
 import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitButton
 import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitLabels
 import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitState
+import fr.forumhfr.redface2.core.ui.editor.EditorCause
+import fr.forumhfr.redface2.core.ui.editor.EditorError
+import fr.forumhfr.redface2.core.ui.editor.EditorErrorSurface
+import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummary
-import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummaryKind
+import fr.forumhfr.redface2.core.ui.editor.bannerText
+import fr.forumhfr.redface2.core.ui.editor.hasSubmissionSummary
 
 /**
  * Building blocks shared by the two private-message editors — the conversation reply
@@ -456,41 +461,17 @@ internal fun RecipientManagerSheet(
 /** #606 — HFR's system member of a group conversation ; removing it warrants a warning, not a block. */
 private const val ADMIN_PSEUDO = "Administration"
 
-internal val PrivateMessageReplyError.bannerResId: Int
-    get() = when (this) {
-        PrivateMessageReplyError.Empty -> R.string.messages_reply_error_empty
-        PrivateMessageReplyError.UnknownRecipient -> R.string.messages_compose_error_unknown_recipient
-        PrivateMessageReplyError.Refused -> R.string.messages_reply_error_refused
-        PrivateMessageReplyError.InvalidHashCheck -> R.string.messages_reply_error_invalid_hash
-        PrivateMessageReplyError.AntiFlood -> R.string.messages_reply_error_anti_flood
-        PrivateMessageReplyError.LoginRequired -> R.string.messages_reply_error_login_required
-        PrivateMessageReplyError.Network -> R.string.messages_reply_error_network
-        PrivateMessageReplyError.SessionExpired -> R.string.messages_reply_error_session_expired
-        PrivateMessageReplyError.Uncertain, PrivateMessageReplyError.Unexpected ->
-            R.string.messages_reply_error_unexpected
-        PrivateMessageReplyError.DraftWriteFailed ->
-            fr.forumhfr.redface2.core.ui.R.string.editor_submission_draft_write_failed
-    }
-
-/** ED-112/170: shared cause, existing MP-specific verification detail; no retry invitation. */
+/** ED-112: the catalogue owns both MP verification details. */
 @Composable
-internal fun MessageSubmissionError(error: PrivateMessageReplyError, composing: Boolean) {
-    val summary = when (error) {
-        PrivateMessageReplyError.Uncertain -> EditorSubmissionSummaryKind.Uncertain
-        PrivateMessageReplyError.DraftWriteFailed -> EditorSubmissionSummaryKind.DraftWriteFailed
-        else -> null
+internal fun MessageSubmissionError(error: EditorError, composing: Boolean) {
+    val displayed = if (error.cause == EditorCause.Uncertain) {
+        EditorErrors.uncertain(if (composing) EditorErrorSurface.MessageCompose else EditorErrorSurface.MessageReply)
+    } else {
+        error
     }
-    if (summary != null) EditorSubmissionSummary(summary)
-    if (error != PrivateMessageReplyError.DraftWriteFailed) {
-        val resource = if (composing &&
-            (error == PrivateMessageReplyError.Uncertain || error == PrivateMessageReplyError.Unexpected)) {
-            R.string.messages_compose_error_unexpected
-        } else {
-            error.bannerResId
-        }
-        Text(
-            text = stringResource(resource), style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.error,
-        )
-    }
+    if (displayed.hasSubmissionSummary) EditorSubmissionSummary(displayed)
+    Text(
+        text = displayed.bannerText(), style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.error,
+    )
 }

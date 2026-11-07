@@ -9,4 +9,6 @@ data class EditorSubmissionErrors<F>(
     val network: F = unknown,
     val preparationFailed: F = unknown,
     val quoteFetchFailed: F = network,
+    // Separate ordinary draft persistence from the certain failure to record a pre-POST attempt.
+    val draftSaveFailed: F = draftWriteFailed,
 )

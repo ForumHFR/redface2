@@ -38,7 +38,6 @@ open class VersionedEditorDraftStore : EditorDraftStore {
         private set
     var finishCalls = 0
         private set
-    private var sequence = 0
 
     fun preload(key: String, draft: Draft) { entries[key] = DraftEntry(draft, 0) }
 
@@ -124,7 +123,7 @@ open class VersionedEditorDraftStore : EditorDraftStore {
     }
 
     override suspend fun beginAttempt(
-        owner: String?, key: String, snapshot: Draft, expectedVersion: Long,
+        owner: String?, key: String, snapshot: Draft, expectedVersion: Long, attemptId: String,
     ): BeginAttemptResult {
         beginCalls++
         beginGate?.await()
@@ -137,7 +136,7 @@ open class VersionedEditorDraftStore : EditorDraftStore {
             else -> null
         }
         if (rejection != null) return BeginAttemptResult.Rejected(rejection)
-        val token = AttemptToken(checkNotNull(owner), key, "attempt-${++sequence}", expectedVersion + 1)
+        val token = AttemptToken(checkNotNull(owner), key, attemptId, expectedVersion + 1)
         entries[key] = DraftEntry(snapshot, token.version, Attempt(token, AttemptStatus.IN_PROGRESS))
         writes++
         beginReturnGate?.await() // Owner was checked and the transaction committed before this suspension.

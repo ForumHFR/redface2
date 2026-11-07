@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.domain.editor
 
 import java.io.IOException
 import java.security.MessageDigest
+import java.util.UUID
 
 /**
  * Per-account local cache of in-progress editor content (#405).
@@ -57,8 +58,19 @@ interface EditorDraftStore {
     /** ED-161: explicitly start a new composition after publication, never by a late autosave. */
     suspend fun startNewComposition(owner: String?, key: String, draft: Draft, expectedVersion: Long): StoreWriteResult
 
-    /** ED-170: atomically store the complete snapshot and IN_PROGRESS before issuing any POST. */
-    suspend fun beginAttempt(owner: String?, key: String, snapshot: Draft, expectedVersion: Long): BeginAttemptResult
+    /**
+     * ED-170: atomically store the complete snapshot and IN_PROGRESS before issuing any POST.
+     * The binding preallocates [attemptId] before suspension so saved instance state can identify
+     * a later publication. Every new invocation needs a fresh UUID, including after rejection;
+     * the default keeps direct callers independent of any previously attempted identity.
+     */
+    suspend fun beginAttempt(
+        owner: String?,
+        key: String,
+        snapshot: Draft,
+        expectedVersion: Long,
+        attemptId: String = UUID.randomUUID().toString(),
+    ): BeginAttemptResult
 
     /**
      * ED-170: compare identity/version; certain failure clears only the attempt, even after an account
@@ -72,8 +84,13 @@ interface EditorDraftStore {
     /** ED-170: migrated drafts start at version 0, also used for absent rows when writing. */
     data class DraftEntry(val draft: Draft, val version: Long, val attempt: Attempt? = null)
 
+    /** Known before persistence; the UUID is never reused, even when the write is rejected. */
+    data class AttemptIdentity(val owner: String, val key: String, val id: String)
+
     /** ED-170: identity bound to an account, context and initial revision; later edits keep this version. */
-    data class AttemptToken(val owner: String, val key: String, val id: String, val version: Long)
+    data class AttemptToken(val owner: String, val key: String, val id: String, val version: Long) {
+        val identity: AttemptIdentity get() = AttemptIdentity(owner, key, id)
+    }
 
     /** ED-170: one durable attempt and the outcome currently known for it. */
     data class Attempt(val token: AttemptToken, val status: AttemptStatus)

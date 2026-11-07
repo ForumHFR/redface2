@@ -1,13 +1,5 @@
 package fr.forumhfr.redface2.feature.editor
 
-import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
-import fr.forumhfr.redface2.core.ui.editor.rememberEditorImagePicker
-import fr.forumhfr.redface2.core.ui.editor.UploadProgressLabel
-import fr.forumhfr.redface2.core.ui.editor.bannerText
-
-import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
-import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
-import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,8 +32,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummary
-import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -60,8 +50,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.domain.editor.ArmToken
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
-import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitActions
 import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitButton
 import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitLabels
@@ -70,11 +61,20 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
 import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
+import fr.forumhfr.redface2.core.ui.editor.EditorCause
+import fr.forumhfr.redface2.core.ui.editor.EditorErrorAction
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
+import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummary
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsCallbacks
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsColumn
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
+import fr.forumhfr.redface2.core.ui.editor.UploadProgressLabel
+import fr.forumhfr.redface2.core.ui.editor.bannerText
 import fr.forumhfr.redface2.core.ui.editor.editorControlsMaxHeight
-
+import fr.forumhfr.redface2.core.ui.editor.hasSubmissionSummary
+import fr.forumhfr.redface2.core.ui.editor.rememberEditorImagePicker
 
 /**
  * Post-level editor screen. Phase 2C (#145) adds a Submit button that posts the
@@ -400,18 +400,33 @@ internal fun PostEditorAlertBanners(
         )
     }
     state.submitError?.let { error ->
-        val summary = error.summaryKind
+        val summary = error.takeIf { it.hasSubmissionSummary }
         if (summary != null) {
             EditorSubmissionSummary(summary)
+            Text(
+                text = error.bannerText(), style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.error,
+            )
         } else {
             Text(
-                text = stringResource(error.bannerResId),
+                text = if (error.cause == EditorCause.QuoteFetchFailed && state.canIgnorePendingQuote) {
+                    stringResource(fr.forumhfr.redface2.core.ui.R.string.editor_error_quote_ignore)
+                } else {
+                    error.bannerText()
+                },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.error,
             )
         }
-        TextButton(onClick = { onIntent(PostEditorIntent.ErrorDismissed) }) {
-            Text(text = stringResource(R.string.editor_error_dismiss))
+        val reload = state.pendingQuotes.isNotEmpty() || error.action == EditorErrorAction.Reload
+        val (action, label) = when {
+            state.canIgnorePendingQuote -> PostEditorIntent.PendingQuoteIgnored to
+                fr.forumhfr.redface2.core.ui.R.string.editor_action_ignore_quote
+            reload -> PostEditorIntent.ReloadRequested to fr.forumhfr.redface2.core.ui.R.string.editor_action_reload
+            else -> PostEditorIntent.ErrorDismissed to R.string.editor_error_dismiss
+        }
+        TextButton(onClick = { onIntent(action) }, enabled = !state.isLoadingForm) {
+            Text(text = stringResource(label))
         }
     }
     state.uploadError?.let { error ->
@@ -653,24 +668,6 @@ private val PostEditorMode.titleResId: Int
     get() = when (this) {
         PostEditorMode.Reply -> R.string.editor_post_reply_title
         PostEditorMode.Edit -> R.string.editor_post_edit_title
-    }
-
-private val SubmitError.bannerResId: Int
-    get() = when (this) {
-        is SubmitError.Hfr -> when (reason) {
-            ReplyFailureReason.EmptyMessage -> R.string.editor_error_empty
-            ReplyFailureReason.InvalidHashCheck -> R.string.editor_error_invalid_hash
-            ReplyFailureReason.AntiFlood -> R.string.editor_error_anti_flood
-            ReplyFailureReason.TopicLocked -> R.string.editor_error_topic_locked
-            ReplyFailureReason.LoginRequired -> R.string.editor_error_login_required
-            ReplyFailureReason.Unknown -> R.string.editor_error_unknown
-            ReplyFailureReason.UnknownRecipient -> R.string.editor_error_unknown
-        }
-        SubmitError.Uncertain -> fr.forumhfr.redface2.core.ui.R.string.editor_submission_uncertain
-        SubmitError.DraftWriteFailed -> fr.forumhfr.redface2.core.ui.R.string.editor_submission_draft_write_failed
-        SubmitError.Network -> R.string.editor_error_network
-        SubmitError.SessionExpired -> R.string.editor_error_session_expired
-        SubmitError.MissingSubcat -> R.string.editor_error_missing_subcat
     }
 
 internal const val POST_EDITOR_TOOLBAR_TAG = "post-editor-toolbar"

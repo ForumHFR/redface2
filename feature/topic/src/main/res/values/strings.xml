@@ -229,15 +229,6 @@
     <string name="quick_reply_confirm_title">Publier la réponse ?</string>
     <string name="quick_reply_confirm_action">Publier</string>
     <string name="quick_reply_confirm_cancel">Annuler</string>
-    <string name="quick_reply_error_empty">Message vide. HFR refuse les réponses sans contenu.</string>
-    <string name="quick_reply_error_invalid_hash">Session HFR expirée pendant la saisie. Réessayez ; le formulaire est rechargé en arrière-plan.</string>
-    <string name="quick_reply_error_anti_flood">Anti-flood HFR : pas plus de 3 réponses consécutives par tranche de 10 minutes. Réessayez plus tard.</string>
-    <string name="quick_reply_error_topic_locked">Ce sujet a été fermé. Impossible de poster une réponse.</string>
-    <string name="quick_reply_error_login_required">Vous devez être connecté pour répondre. Reconnectez-vous depuis l\'onglet Messages.</string>
-    <string name="quick_reply_error_unknown">HFR a renvoyé une réponse inattendue. Réessayez ou actualisez l\'app.</string>
-    <string name="quick_reply_error_network">Erreur réseau. Vérifiez votre connexion et réessayez.</string>
-    <string name="quick_reply_error_session_expired">Votre session HFR a expiré. Reconnectez-vous.</string>
-    <string name="quick_reply_error_quote_fetch">Impossible de récupérer la citation. Réessayez depuis « Citer ».</string>
     <string name="quick_reply_preparing_quote">Insertion de la citation…</string>
 
     <!-- #293 — explicit moderation alert -->
@@ -262,5 +253,4 @@
     <string name="topic_alert_link_view_post">Voir le message</string>
     <string name="topic_alert_link_topic_page">%1$s, page %2$d</string>
     <string name="topic_alert_link_post_fallback">Message n° %1$d du sujet %2$d, page %3$d</string>
-    <string name="quick_reply_error_uncertain">Votre message a peut-être été envoyé : vérifiez le sujet.</string>
 </resources>

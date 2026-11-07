@@ -1,64 +1,49 @@
 package fr.forumhfr.redface2.feature.editor
 
-import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
-import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollectionSnapshot
-import fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS
-import fr.forumhfr.redface2.core.model.SmileyUsageEntry
-import fr.forumhfr.redface2.core.model.SmileyWikiKeywordsResult
-import fr.forumhfr.redface2.core.model.EditorSmileySource
-import fr.forumhfr.redface2.core.model.HfrFavoriteSmileyMutationResult
-import fr.forumhfr.redface2.core.ui.editor.UploadError
-import fr.forumhfr.redface2.core.ui.editor.UploadProgress
-
-import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import app.cash.turbine.test
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
-import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionScenario
-import fr.forumhfr.redface2.core.domain.editor.SubmissionErrorProbe
-import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionAdapter
-import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
-import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
-import fr.forumhfr.redface2.core.domain.editor.SubmissionBodyMutation
-import fr.forumhfr.redface2.core.domain.editor.SubmissionProbe
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionScenario
 import fr.forumhfr.redface2.core.domain.editor.EditorWriteOwner
+import fr.forumhfr.redface2.core.domain.editor.SubmissionBodyMutation
+import fr.forumhfr.redface2.core.domain.editor.SubmissionErrorProbe
+import fr.forumhfr.redface2.core.domain.editor.SubmissionProbe
+import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
-import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
-import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
-import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
-import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
-import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
-import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.AvatarAppearance
+import fr.forumhfr.redface2.core.domain.preferences.CategoryBandStyle
 import fr.forumhfr.redface2.core.domain.preferences.CategoryFlagFilter
+import fr.forumhfr.redface2.core.domain.preferences.DisplayDensity
+import fr.forumhfr.redface2.core.domain.preferences.FlagGlyphStyle
 import fr.forumhfr.redface2.core.domain.preferences.FlagsViewSettings
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.domain.preferences.ImmersiveNavBarReveal
+import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
+import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
+import fr.forumhfr.redface2.core.domain.preferences.PostImageCorners
+import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.domain.preferences.ProxyConfig
+import fr.forumhfr.redface2.core.domain.preferences.SmileyPickerDecoration
 import fr.forumhfr.redface2.core.domain.preferences.StartScreenPreference
 import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
-import fr.forumhfr.redface2.core.domain.auth.AuthRepository
-import fr.forumhfr.redface2.core.domain.preferences.MarkerStyle
-import fr.forumhfr.redface2.core.domain.preferences.PlusLusIndicatorStyle
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
+import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollectionSnapshot
 import fr.forumhfr.redface2.core.domain.upload.ImageUpload
 import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadException
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
-import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
-import fr.forumhfr.redface2.core.model.editor.ImagePickerContract
-import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
-import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
-import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadedImage
 import fr.forumhfr.redface2.core.domain.upload.UploadedImageRecord
@@ -66,10 +51,22 @@ import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.domain.write.truncateQuote
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.BUILTIN_HFR_SMILEYS
+import fr.forumhfr.redface2.core.model.EditorSmiley
+import fr.forumhfr.redface2.core.model.EditorSmileySource
 import fr.forumhfr.redface2.core.model.FlagType
+import fr.forumhfr.redface2.core.model.HfrFavoriteSmileyMutationResult
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
+import fr.forumhfr.redface2.core.model.SmileyUsageEntry
+import fr.forumhfr.redface2.core.model.SmileyWikiKeywordsResult
+import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.ImagePickerContract
+import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
+import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
+import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyContext
@@ -77,23 +74,28 @@ import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.EditorError
+import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
+import fr.forumhfr.redface2.core.ui.editor.UploadProgress
+import fr.forumhfr.redface2.core.ui.editor.toEditorError
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
-import kotlinx.coroutines.currentCoroutineContext
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -102,7 +104,6 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
-import fr.forumhfr.redface2.core.model.EditorSmiley
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @Suppress("LargeClass") // One class per ViewModel keeps every code path co-located with its
@@ -130,6 +131,239 @@ class PostEditorViewModelTest {
     @After
     fun tearDown() {
         Dispatchers.resetMain()
+    }
+
+    @Test
+    fun `successful reload clears only loading errors and keeps an uncertain send`() = runTest {
+        replyRepository.formException = IOException("offline")
+        val vm = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+        assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
+        replyRepository.formException = null
+        vm.submit(PostEditorIntent.ReloadRequested)
+        testScheduler.advanceUntilIdle()
+        assertNull(vm.state.value.submitError)
+        replyRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("body")))
+        vm.submit(PostEditorIntent.SubmitClicked())
+        testScheduler.advanceUntilIdle()
+        vm.submit(PostEditorIntent.ReloadRequested)
+        testScheduler.advanceUntilIdle()
+        assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
+        assertEquals(1, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `new upload replaces the previous failure but an ignored pick preserves the current error`() = runTest {
+        uploadRepository.uploadException = UploadException.TooLarge(1)
+        val vm = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+        vm.submit(PostEditorIntent.ImagesPicked(listOf("content://first")))
+        testScheduler.advanceUntilIdle()
+        assertEquals(EditorErrors.tooLarge, vm.state.value.uploadError)
+        uploadRepository.uploadException = null
+        val gate = CompletableDeferred<Unit>()
+        uploadRepository.uploadGate = gate
+        vm.submit(PostEditorIntent.ImagesPicked(listOf("content://second")))
+        assertNull(vm.state.value.uploadError)
+        vm.submit(PostEditorIntent.ImagePickerEventReceived(
+            ImagePickerEvent.Unavailable(ImagePickerMode.PHOTO_PICKER, ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA),
+        ))
+        vm.submit(PostEditorIntent.ImagesPicked(List(11) { "content://ignored/$it" }))
+        assertEquals(EditorErrors.pickerAbsent, vm.state.value.uploadError)
+        gate.complete(Unit)
+        testScheduler.advanceUntilIdle()
+        vm.submit(PostEditorIntent.ImagesPicked(listOf("content://third")))
+        testScheduler.advanceUntilIdle()
+        assertNull(vm.state.value.uploadError)
+        assertEquals(3, uploadRepository.uploadCalls)
+    }
+
+    @Test
+    fun `ED131 submit and picker errors survive typing selection options and programmatic insertion`() = runTest {
+        replyRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.EmptyMessage)
+        val vm = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("body")))
+        vm.submit(PostEditorIntent.SubmitClicked())
+        testScheduler.advanceUntilIdle()
+        vm.submit(PostEditorIntent.ImagePickerEventReceived(
+            ImagePickerEvent.Unavailable(ImagePickerMode.PHOTO_PICKER, ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA),
+        ))
+        listOf(
+            PostEditorIntent.ContentChanged(TextFieldValue("changed")),
+            PostEditorIntent.ContentChanged(TextFieldValue("changed", TextRange(1, 3))),
+            PostEditorIntent.ToggleSignature(true),
+            PostEditorIntent.ToolbarActionClicked(BbcodeAction.Bold),
+            PostEditorIntent.SmileySelected(":jap:"),
+        ).forEach { intent ->
+            vm.submit(intent)
+            assertEquals(intent.toString(), EditorErrors.empty, vm.state.value.submitError)
+            assertEquals(intent.toString(), EditorErrors.pickerAbsent, vm.state.value.uploadError)
+        }
+    }
+
+    @Test
+    fun `ED132 retry fetches pending quotes once in order and preserves concurrent typing without POST`() = runTest {
+        replyRepository.formResultsByNumrep = mapOf(202 to Result.failure(IOException("offline")))
+        val vm = newReplyViewModel(
+            initialQuotes = listOf(card(202), card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        testScheduler.advanceUntilIdle()
+        assertEquals(EditorErrors.quoteFetchFailed, vm.state.value.submitError)
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("before")))
+        vm.submit(PostEditorIntent.ErrorDismissed)
+        vm.submit(PostEditorIntent.SubmitClicked())
+        vm.submit(PostEditorIntent.SubmitConfirmed(null))
+        assertFalse(vm.state.value.canSubmit)
+        assertEquals(0, replyRepository.submitCalls)
+        assertEquals(listOf(202, 101), vm.state.value.pendingQuotes.map { it.numreponse })
+
+        replyRepository.formResultsByNumrep = mapOf(
+            202 to Result.success(authenticatedForm("[quotemsg=202]first[/quotemsg]")),
+            101 to Result.success(authenticatedForm("[quotemsg=101]second[/quotemsg]")),
+        )
+        val gate = CompletableDeferred<Unit>()
+        replyRepository.formGate = gate
+        vm.submit(PostEditorIntent.ReloadRequested)
+        vm.submit(PostEditorIntent.ReloadRequested)
+        testScheduler.runCurrent()
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("typed during retry")))
+        vm.submit(PostEditorIntent.SubmitClicked())
+        gate.complete(Unit)
+        testScheduler.advanceUntilIdle()
+        val body = vm.state.value.draft.text
+        assertEquals(1, Regex("first").findAll(body).count())
+        assertEquals(1, Regex("second").findAll(body).count())
+        assertTrue(body.indexOf("first") < body.indexOf("second"))
+        assertTrue(body.endsWith("typed during retry"))
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        assertEquals(3, replyRepository.formFetches)
+        assertTrue(vm.state.value.canSubmit)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `ED132 quote alone with empty prefill stays pending and never submits (#1033)`() = runTest {
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.success(authenticatedForm("")))
+        val vm = newReplyViewModel(
+            initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        testScheduler.advanceUntilIdle()
+        vm.submit(PostEditorIntent.SubmitClicked())
+        vm.submit(PostEditorIntent.ReloadRequested)
+        testScheduler.advanceUntilIdle()
+        assertEquals(EditorErrors.quoteFetchFailed, vm.state.value.submitError)
+        assertEquals("", vm.state.value.draft.text)
+        assertEquals(listOf(101), vm.state.value.pendingQuotes.map { it.numreponse })
+        assertFalse(vm.state.value.canSubmit)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `ED132 repeated quote failure permits explicit abandonment without editing or POST`() = runTest {
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.failure(IOException("offline")))
+        val vm = newReplyViewModel(
+            initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        testScheduler.advanceUntilIdle()
+        val typed = TextFieldValue("keep this text", TextRange(2, 5))
+        vm.submit(PostEditorIntent.ContentChanged(typed))
+        assertEquals(1, vm.state.value.quoteFetchFailures)
+        vm.submit(PostEditorIntent.PendingQuoteIgnored)
+        assertFalse(vm.state.value.canIgnorePendingQuote)
+        assertEquals(listOf(101), vm.state.value.pendingQuotes.map { it.numreponse })
+
+        vm.submit(PostEditorIntent.ReloadRequested)
+        testScheduler.advanceUntilIdle()
+        assertEquals(2, vm.state.value.quoteFetchFailures)
+        assertTrue(vm.state.value.canIgnorePendingQuote)
+        assertFalse(vm.state.value.canSubmit)
+        vm.submit(PostEditorIntent.ErrorDismissed)
+        assertNull(vm.state.value.submitError)
+        assertFalse("acknowledgement alone cannot abandon", vm.state.value.canSubmit)
+        assertEquals(listOf(101), vm.state.value.pendingQuotes.map { it.numreponse })
+        // Show the banner again; another reload is harmless and the count stays saturated.
+        vm.submit(PostEditorIntent.ReloadRequested)
+        testScheduler.advanceUntilIdle()
+        assertEquals(2, vm.state.value.quoteFetchFailures)
+        vm.submit(PostEditorIntent.PendingQuoteIgnored)
+        testScheduler.advanceUntilIdle()
+        assertEquals(typed, vm.state.value.draft)
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        assertNull(vm.state.value.submitError)
+        assertEquals(0, vm.state.value.quoteFetchFailures)
+        assertFalse(vm.state.value.canIgnorePendingQuote)
+        assertTrue(vm.state.value.isSubmitEnabled)
+        assertEquals(0, replyRepository.submitCalls)
+        assertNull("abandonment warms the plain form only", replyRepository.lastFetchedContext?.quotedNumreponse)
+        // A later explicit submit really works: enabled must not hide a missing form/hash.
+        replyRepository.submitResult = ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        vm.submit(PostEditorIntent.SubmitClicked())
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, replyRepository.submitCalls)
+        assertEquals(typed.text, replyRepository.lastSubmittedBbcode)
+    }
+
+    @Test
+    fun `ED132 ignoring a quote cannot insert a plain form prefill into an empty body`() = runTest {
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.success(authenticatedForm("")))
+        replyRepository.formResult = Result.success(authenticatedForm("unexpected plain prefill"))
+        val vm = newReplyViewModel(
+            initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        testScheduler.advanceUntilIdle()
+        vm.submit(PostEditorIntent.ReloadRequested)
+        testScheduler.advanceUntilIdle()
+        vm.submit(PostEditorIntent.PendingQuoteIgnored)
+        testScheduler.advanceUntilIdle()
+        assertEquals(TextFieldValue(), vm.state.value.draft)
+        assertNull(vm.state.value.submitError)
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        assertFalse("an empty reply remains unsendable", vm.state.value.canSubmit)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `ED132 failure count survives process recreation and ignored request is never replayed`() = runTest {
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.failure(IOException("offline")))
+        val saved = SavedStateHandle()
+        val first = newReplyViewModel(
+            initialQuotes = listOf(card(101)), savedStateHandle = saved,
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, first.state.value.quoteFetchFailures)
+        first.viewModelScope.cancel()
+        val restored = SavedStateHandle(saved.keys().associateWith { saved.get<Any?>(it) })
+        // No route handoff survives process death; only coordinates + count from SavedStateHandle.
+        val second = newReplyViewModel(
+            savedStateHandle = restored,
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        testScheduler.advanceUntilIdle()
+        assertEquals(2, second.state.value.quoteFetchFailures)
+        assertTrue(second.state.value.canIgnorePendingQuote)
+        second.submit(PostEditorIntent.ContentChanged(TextFieldValue("still here")))
+        second.submit(PostEditorIntent.PendingQuoteIgnored)
+        testScheduler.advanceUntilIdle()
+        assertTrue(second.state.value.canSubmit)
+        second.viewModelScope.cancel()
+        val afterIgnore = SavedStateHandle(restored.keys().associateWith { restored.get<Any?>(it) })
+        val quoteFetches = replyRepository.fetchedContexts.count { it.isQuote }
+        val third = newReplyViewModel(
+            initialQuotes = listOf(card(101)), savedStateHandle = afterIgnore,
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        testScheduler.advanceUntilIdle()
+        assertTrue(third.state.value.pendingQuotes.isEmpty())
+        assertEquals(0, third.state.value.quoteFetchFailures)
+        assertEquals(quoteFetches, replyRepository.fetchedContexts.count { it.isQuote })
+        assertEquals(0, replyRepository.submitCalls)
     }
 
     @Test
@@ -217,7 +451,7 @@ class PostEditorViewModelTest {
         viewModel.state.test {
             val settled = expectMostRecentItem()
             assertEquals(
-                SubmitError.Hfr(ReplyFailureReason.LoginRequired),
+                ReplyFailureReason.LoginRequired.toEditorError(),
                 settled.submitError,
             )
             cancelAndIgnoreRemainingEvents()
@@ -261,7 +495,7 @@ class PostEditorViewModelTest {
             val settled = expectMostRecentItem()
             assertFalse(settled.isSubmitting)
             assertEquals(
-                SubmitError.Hfr(ReplyFailureReason.AntiFlood),
+                ReplyFailureReason.AntiFlood.toEditorError(),
                 settled.submitError,
             )
             // Draft survives.
@@ -280,7 +514,7 @@ class PostEditorViewModelTest {
         viewModel.state.test {
             val settled = expectMostRecentItem()
             assertFalse(settled.isSubmitting)
-            assertEquals(SubmitError.Uncertain, settled.submitError)
+            assertEquals(EditorErrors.uncertain, settled.submitError)
             assertEquals("Hello!", settled.draft.text)
             cancelAndIgnoreRemainingEvents()
         }
@@ -312,7 +546,7 @@ class PostEditorViewModelTest {
         val viewModel = newReplyViewModel(subcat = null)
         viewModel.state.test {
             val settled = expectMostRecentItem()
-            assertEquals(SubmitError.MissingSubcat, settled.submitError)
+            assertEquals(EditorErrors.missingSubcat, settled.submitError)
             cancelAndIgnoreRemainingEvents()
         }
         // No fetch attempted because we never had a valid ReplyContext.
@@ -326,7 +560,7 @@ class PostEditorViewModelTest {
         val viewModel = newReplyViewModel(subcat = -1)
         viewModel.state.test {
             val settled = expectMostRecentItem()
-            assertEquals(SubmitError.MissingSubcat, settled.submitError)
+            assertEquals(EditorErrors.missingSubcat, settled.submitError)
             cancelAndIgnoreRemainingEvents()
         }
         assertEquals(0, replyRepository.formFetches)
@@ -360,7 +594,7 @@ class PostEditorViewModelTest {
         viewModel.state.test {
             val settled = expectMostRecentItem()
             assertFalse(settled.isLoadingForm)
-            assertEquals(SubmitError.SessionExpired, settled.submitError)
+            assertEquals(EditorErrors.sessionExpired, settled.submitError)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -372,7 +606,7 @@ class PostEditorViewModelTest {
         viewModel.state.test {
             val settled = expectMostRecentItem()
             assertFalse(settled.isLoadingForm)
-            assertEquals(SubmitError.Network, settled.submitError)
+            assertEquals(EditorErrors.formNetwork, settled.submitError)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -384,7 +618,7 @@ class PostEditorViewModelTest {
         viewModel.state.test {
             val settled = expectMostRecentItem()
             assertFalse(settled.isLoadingForm)
-            assertEquals(SubmitError.Hfr(ReplyFailureReason.Unknown), settled.submitError)
+            assertEquals(EditorErrors.invalidForm, settled.submitError)
             cancelAndIgnoreRemainingEvents()
         }
     }
@@ -478,7 +712,7 @@ class PostEditorViewModelTest {
         viewModel.state.test {
             val settled = expectMostRecentItem()
             assertFalse(settled.isSubmitting)
-            assertEquals(SubmitError.Network, settled.submitError)
+            assertEquals(EditorErrors.quoteFetchFailed(inline = false), settled.submitError)
             assertEquals("cards intact", listOf(101, 303), settled.quotes.map { it.numreponse })
             assertEquals("body intact", "Reply", settled.draft.text)
             cancelAndIgnoreRemainingEvents()
@@ -505,7 +739,7 @@ class PostEditorViewModelTest {
         viewModel.state.test {
             val settled = expectMostRecentItem()
             assertFalse(settled.isSubmitting)
-            assertEquals(SubmitError.Hfr(ReplyFailureReason.Unknown), settled.submitError)
+            assertEquals(EditorErrors.quoteFetchFailed(inline = false), settled.submitError)
             assertEquals("cards intact", listOf(101, 303), settled.quotes.map { it.numreponse })
             assertEquals("body intact", "Reply", settled.draft.text)
             cancelAndIgnoreRemainingEvents()
@@ -525,9 +759,27 @@ class PostEditorViewModelTest {
         testScheduler.advanceUntilIdle()
 
         assertEquals(0, replyRepository.submitCalls)
-        assertEquals(SubmitError.Hfr(ReplyFailureReason.Unknown), viewModel.state.value.submitError)
+        assertEquals(EditorErrors.quoteFetchFailed(inline = false), viewModel.state.value.submitError)
         assertEquals("Reply", viewModel.state.value.draft.text)
         assertEquals(listOf(101), viewModel.state.value.quotes.map { it.numreponse })
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm("[quotemsg=101]loaded[/quotemsg]")),
+        )
+        viewModel.submit(PostEditorIntent.ReloadRequested)
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, replyRepository.submitCalls)
+        assertEquals("Reply", viewModel.state.value.draft.text)
+        assertEquals(listOf(101), viewModel.state.value.quotes.map { it.numreponse })
+        assertNull(viewModel.state.value.submitError)
+        assertFalse(viewModel.state.value.canIgnorePendingQuote)
+        assertTrue(viewModel.state.value.canSubmit)
+        viewModel.submit(PostEditorIntent.QuoteRemoved(101))
+        assertTrue(viewModel.state.value.canSubmit)
+        replyRepository.submitResult = ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        viewModel.submit(PostEditorIntent.SubmitClicked())
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, replyRepository.submitCalls)
+        assertEquals("Reply", replyRepository.lastSubmittedBbcode)
     }
 
     @Test
@@ -880,7 +1132,7 @@ class PostEditorViewModelTest {
             assertEquals("user text must survive the silent refetch", "Reply", settled.draft.text)
             assertEquals("cards must survive too", listOf(2784595), settled.quotes.map { it.numreponse })
             assertEquals(
-                SubmitError.Hfr(ReplyFailureReason.InvalidHashCheck),
+                ReplyFailureReason.InvalidHashCheck.toEditorError(),
                 settled.submitError,
             )
             cancelAndIgnoreRemainingEvents()
@@ -1038,11 +1290,12 @@ class PostEditorViewModelTest {
                     it.draft.text, it.canSubmit, it.isSubmitting, it.isUploading, it.showSubmitConfirmation,
                     armId = it.armToken?.id,
                     error = when (it.submitError) {
-                        SubmitError.Network -> SubmissionErrorProbe.NETWORK
-                        SubmitError.SessionExpired -> SubmissionErrorProbe.SESSION_EXPIRED
-                        SubmitError.Uncertain -> SubmissionErrorProbe.UNCERTAIN
-                        SubmitError.DraftWriteFailed -> SubmissionErrorProbe.DRAFT_WRITE_FAILED
-                        SubmitError.Hfr(ReplyFailureReason.Unknown) -> SubmissionErrorProbe.PREPARATION_FAILED
+                        EditorErrors.network -> SubmissionErrorProbe.NETWORK
+                        EditorErrors.sessionExpired -> SubmissionErrorProbe.SESSION_EXPIRED
+                        EditorErrors.uncertain -> SubmissionErrorProbe.UNCERTAIN
+                        EditorErrors.draftWriteFailed -> SubmissionErrorProbe.DRAFT_WRITE_FAILED
+                        EditorErrors.invalidForm, EditorErrors.quoteFetchFailed(inline = false) ->
+                            SubmissionErrorProbe.PREPARATION_FAILED
                         else -> null
                     },
                     restoreOffered = it.restorableDraft != null,
@@ -1379,7 +1632,7 @@ class PostEditorViewModelTest {
             testScheduler.advanceUntilIdle()
 
             assertEquals(
-                stateBefore.copy(uploadError = UploadError.NoImageReceived),
+                stateBefore.copy(uploadError = EditorErrors.noImageReceived),
                 viewModel.state.value,
             )
             assertFalse(viewModel.state.value.isUploading)
@@ -1422,7 +1675,7 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `photo picker result logs safe sources and uploads all eleven callback uris`() = runTest {
+    fun `photo picker result logs eleven raw uris and keeps the first ten`() = runTest {
         val diagnostics = DiagnosticsLog()
         val viewModel = newReplyViewModel(
             diagnostics = diagnostics,
@@ -1443,8 +1696,9 @@ class PostEditorViewModelTest {
         )
         testScheduler.advanceUntilIdle()
 
-        assertEquals(uris, imageUploadReader.readUris)
-        assertEquals(11, uploadRepository.uploadCalls)
+        assertEquals(uris.take(10), imageUploadReader.readUris)
+        assertEquals(10, uploadRepository.uploadCalls)
+        assertEquals(EditorErrors.imageLimit, viewModel.state.value.uploadError)
         val messages = diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message }
         assertEquals(
             listOf(
@@ -1507,7 +1761,7 @@ class PostEditorViewModelTest {
             // banner can name « diberie » and « HTTP 503 » instead of one vague « erreur de l'hébergeur ».
             assertEquals(
                 "Server failure maps to a Server upload error with the code + provider",
-                UploadError.Server(code = 503, providerId = UploadProviderId.DIBERIE),
+                EditorErrors.server(code = 503, providerId = UploadProviderId.DIBERIE),
                 state.uploadError,
             )
             assertFalse("upload flag cleared on failure", state.isUploading)
@@ -1533,14 +1787,14 @@ class PostEditorViewModelTest {
         assertEquals("draft is untouched on a malformed response", "photo: ", state.draft.text)
         assertEquals(
             "Malformed maps to a distinct Malformed upload error carrying the provider",
-            UploadError.Malformed(providerId = UploadProviderId.IMGUR),
+            EditorErrors.malformed(providerId = UploadProviderId.IMGUR),
             state.uploadError,
         )
         assertFalse("upload flag cleared on failure", state.isUploading)
     }
 
     @Test
-    fun `ImagePicked maps TooLarge UnsupportedType and Network onto distinct UploadError variants`() = runTest {
+    fun `ImagePicked maps TooLarge UnsupportedType and Network onto distinct EditorError variants`() = runTest {
         val authRepository = FakeAuthRepository(AuthState.Authenticated("alice"))
         imageUploadReader.result = ImageUpload(bytes = byteArrayOf(1), mimeType = "image/gif", displayName = null)
 
@@ -1549,21 +1803,21 @@ class PostEditorViewModelTest {
         testScheduler.advanceUntilIdle()
         tooLarge.submit(PostEditorIntent.ImagePicked("content://x/1"))
         testScheduler.advanceUntilIdle()
-        assertEquals(UploadError.TooLarge, tooLarge.state.value.uploadError)
+        assertEquals(EditorErrors.tooLarge, tooLarge.state.value.uploadError)
 
         uploadRepository.uploadException = UploadException.UnsupportedType(mimeType = "image/gif")
         val unsupported = newReplyViewModel(authRepository = authRepository)
         testScheduler.advanceUntilIdle()
         unsupported.submit(PostEditorIntent.ImagePicked("content://x/2"))
         testScheduler.advanceUntilIdle()
-        assertEquals(UploadError.UnsupportedType, unsupported.state.value.uploadError)
+        assertEquals(EditorErrors.unsupportedType, unsupported.state.value.uploadError)
 
         uploadRepository.uploadException = UploadException.Network(java.io.IOException("offline"))
         val network = newReplyViewModel(authRepository = authRepository)
         testScheduler.advanceUntilIdle()
         network.submit(PostEditorIntent.ImagePicked("content://x/3"))
         testScheduler.advanceUntilIdle()
-        assertEquals(UploadError.Network, network.state.value.uploadError)
+        assertEquals(EditorErrors.uploadNetwork, network.state.value.uploadError)
     }
 
     @Test
@@ -1582,7 +1836,7 @@ class PostEditorViewModelTest {
         assertEquals("a failed read must not reach the upload", 0, uploadRepository.uploadCalls)
         val state = viewModel.state.value
         assertEquals("draft untouched when the read fails", "photo: ", state.draft.text)
-        assertEquals(UploadError.Network, state.uploadError)
+        assertEquals(EditorErrors.uploadNetwork, state.uploadError)
         assertFalse(state.isUploading)
     }
 
@@ -1651,7 +1905,7 @@ class PostEditorViewModelTest {
         testScheduler.advanceUntilIdle()
         viewModel.submit(PostEditorIntent.ImagePicked("content://x/1"))
         testScheduler.advanceUntilIdle()
-        assertEquals(UploadError.Network, viewModel.state.value.uploadError)
+        assertEquals(EditorErrors.uploadNetwork, viewModel.state.value.uploadError)
 
         viewModel.submit(PostEditorIntent.UploadErrorDismissed)
 
@@ -1750,7 +2004,9 @@ class PostEditorViewModelTest {
         )
         assertEquals(
             "the typed error from the failing upload surfaces",
-            UploadError.Server(code = 500, providerId = UploadProviderId.DIBERIE),
+            EditorErrors.stopped(
+                EditorErrors.server(code = 500, providerId = UploadProviderId.DIBERIE), UploadProgress(1, 3),
+            ),
             state.uploadError,
         )
         assertFalse("upload flag cleared on failure", state.isUploading)
@@ -2418,7 +2674,7 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `resumeSharedDraft is applied only once across ViewModel recreation`() = runTest {
+    fun `resumeSharedDraft rehydrates each new ViewModel without duplicating the stored text`() = runTest {
         val savedStateHandle = SavedStateHandle()
         draftStore.preload(
             EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID),
@@ -2431,6 +2687,7 @@ class PostEditorViewModelTest {
         )
         testScheduler.advanceUntilIdle()
         assertEquals("texte de la sheet", first.state.value.draft.text)
+        first.viewModelScope.cancel()
 
         val recreated = newReplyViewModel(
             resumeSharedDraft = true,
@@ -2438,7 +2695,8 @@ class PostEditorViewModelTest {
         )
         testScheduler.advanceUntilIdle()
 
-        assertEquals("", recreated.state.value.draft.text)
+        assertEquals("texte de la sheet", recreated.state.value.draft.text)
+        assertEquals("texte de la sheet", draftStore.saved[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)]?.body)
         assertNull(recreated.state.value.restorableDraft)
     }
 

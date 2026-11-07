@@ -51,12 +51,12 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         }
     }
 
-    suspend fun begin(draft: Draft): BeginAttemptResult = writes.withLock {
+    suspend fun begin(draft: Draft, attemptId: String): BeginAttemptResult = writes.withLock {
         if (!canWrite()) return@withLock BeginAttemptResult.Rejected(StoreWriteResult.OwnerChanged)
         val prepared = if (published) writeComposition(draft) else StoreWriteResult.Written(version)
         adopt(prepared)
         if (prepared !is StoreWriteResult.Written) return@withLock BeginAttemptResult.Rejected(prepared)
-        store.beginAttempt(owner, checkNotNull(key), draft, version).also { result ->
+        store.beginAttempt(owner, checkNotNull(key), draft, version, attemptId).also { result ->
             if (result is BeginAttemptResult.Started) {
                 version = result.token.version
                 unresolved = result.token

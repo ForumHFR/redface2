@@ -8,6 +8,7 @@ import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.editor.EditorPreparationException
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
@@ -21,6 +22,7 @@ import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollectionSnapshot
 import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
+import fr.forumhfr.redface2.core.domain.upload.UploadException
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.EditorSmiley
@@ -40,8 +42,10 @@ import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.EditorErrorSurface
+import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
-import fr.forumhfr.redface2.core.ui.editor.UploadError
+import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -155,6 +159,123 @@ class PrivateMessageReplyViewModelTest {
     )
 
     @Test
+    fun `successful form retry clears preparation errors and preserves uncertain delivery`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val vm = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(), submissionClock,
+            smileyRepository(), favoriteRepository, localCollections,
+        )
+        advanceUntilIdle()
+        vm.onContentChanged(TextFieldValue("body"))
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } throws
+            EditorPreparationException(EditorPreparationException.Reason.INVALID_FORM)
+        vm.onSubmit()
+        advanceUntilIdle()
+        assertEquals(EditorErrors.invalidForm, vm.state.value.submitError)
+        vm.retryFormLoad()
+        advanceUntilIdle()
+        assertNull(vm.state.value.submitError)
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        vm.onSubmit()
+        advanceUntilIdle()
+        val uncertain = vm.state.value.submitError
+        assertEquals(EditorErrors.uncertain(EditorErrorSurface.MessageReply), uncertain)
+        vm.retryFormLoad()
+        advanceUntilIdle()
+        assertEquals(uncertain, vm.state.value.submitError)
+    }
+
+    @Test
+    fun `new upload clears the old failure only after passing the upload guard`() = runTest {
+        val uploads = FakeUploadRepository().apply { uploadException = UploadException.TooLarge(1) }
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val vm = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), uploads, FakeImageUploadReader(), DiagnosticsLog(), submissionClock,
+            smileyRepository(), favoriteRepository, localCollections,
+        )
+        advanceUntilIdle()
+        vm.onImagesPicked(listOf("content://first"))
+        advanceUntilIdle()
+        assertEquals(EditorErrors.tooLarge, vm.state.value.uploadError)
+        uploads.uploadException = null
+        val gate = CompletableDeferred<Unit>()
+        uploads.uploadGate = gate
+        vm.onImagesPicked(listOf("content://second"))
+        assertNull(vm.state.value.uploadError)
+        vm.onImagePickerEvent(
+            ImagePickerEvent.Unavailable(ImagePickerMode.PHOTO_PICKER, ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA),
+        )
+        vm.onImagesPicked(List(11) { "content://ignored/$it" })
+        assertEquals(EditorErrors.pickerAbsent, vm.state.value.uploadError)
+        gate.complete(Unit)
+        advanceUntilIdle()
+        vm.onImagesPicked(listOf("content://third"))
+        advanceUntilIdle()
+        assertNull(vm.state.value.uploadError)
+        assertEquals(3, uploads.uploadCalls)
+    }
+
+    @Test
+    fun `partial upload retains count failure and inserted image after typing`() = runTest {
+        val uploads = FakeUploadRepository().apply {
+            uploadException = UploadException.TooLarge(1)
+            failOnCall = 2
+        }
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val vm = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), uploads, FakeImageUploadReader(), DiagnosticsLog(), submissionClock,
+            smileyRepository(), favoriteRepository, localCollections,
+        )
+        advanceUntilIdle()
+        vm.onImagesPicked(listOf("content://pick/1", "content://pick/2", "content://pick/3"))
+        advanceUntilIdle()
+        assertEquals(2, uploads.uploadCalls)
+        assertEquals(1, Regex("\\[img]").findAll(vm.state.value.draft.text).count())
+        val expected = EditorErrors.stopped(EditorErrors.tooLarge, UploadProgress(1, 3))
+        assertEquals(expected, vm.state.value.uploadError)
+        vm.onContentChanged(TextFieldValue(vm.state.value.draft.text + "typed"))
+        assertEquals(expected, vm.state.value.uploadError)
+        assertFalse(vm.state.value.isUploading)
+    }
+
+    @Test
+    fun `ED131 reply errors survive typing selection recipients options and insertion`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns ownerForm()
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.EmptyMessage)
+        val vm = PrivateMessageReplyViewModel(
+            request, repository, previewParser, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(), submissionClock,
+            smileyRepository(), favoriteRepository, localCollections,
+        )
+        vm.onContentChanged(TextFieldValue("body"))
+        vm.onSubmit()
+        advanceUntilIdle()
+        vm.onImagePickerEvent(
+            ImagePickerEvent.Unavailable(ImagePickerMode.PHOTO_PICKER, ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA),
+        )
+        listOf<() -> Unit>(
+            { vm.onContentChanged(TextFieldValue("changed")) },
+            { vm.onContentChanged(TextFieldValue("changed", TextRange(1, 3))) },
+            { vm.onAddRecipient("extra") },
+            { vm.onToggleSignature(true) },
+            { vm.onToolbarAction(BbcodeAction.Bold) },
+        ).forEach { mutate ->
+            mutate()
+            assertEquals(EditorErrors.empty, vm.state.value.submitError)
+            assertEquals(EditorErrors.pickerAbsent, vm.state.value.uploadError)
+        }
+    }
+
+    @Test
     fun `picked images upload and insert one img per success (#459)`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } returns form()
@@ -207,7 +328,7 @@ class PrivateMessageReplyViewModelTest {
             advanceUntilIdle()
 
             assertEquals(
-                stateBefore.copy(uploadError = UploadError.NoImageReceived),
+                stateBefore.copy(uploadError = EditorErrors.noImageReceived),
                 viewModel.state.value,
             )
             assertFalse(viewModel.state.value.isUploading)
@@ -619,7 +740,7 @@ class PrivateMessageReplyViewModelTest {
         viewModel.onSubmit()
 
         val state = viewModel.state.value
-        assertEquals(PrivateMessageReplyError.Empty, state.submitError)
+        assertEquals(EditorErrors.empty, state.submitError)
         assertEquals("non-blank", state.draft.text)
         assertFalse(state.isSubmitting)
     }
@@ -644,8 +765,10 @@ class PrivateMessageReplyViewModelTest {
         }
 
         val state = viewModel.state.value
-        assertEquals(PrivateMessageReplyError.Refused, state.submitError)
-        assertEquals(R.string.messages_reply_error_refused, state.submitError?.bannerResId)
+        assertEquals(EditorErrors.refused, state.submitError)
+        assertEquals(
+            fr.forumhfr.redface2.core.ui.R.string.messages_reply_error_refused, state.submitError?.detail?.resourceId,
+        )
         assertEquals("Private reply", state.draft.text)
         assertNull(draftStore.entries.values.single().attempt)
         assertFalse(state.isSubmitting)
@@ -668,7 +791,7 @@ class PrivateMessageReplyViewModelTest {
         viewModel.onSubmit()
         runCurrent() // Wait for the form refresh after the certain failure.
 
-        assertEquals(PrivateMessageReplyError.InvalidHashCheck, viewModel.state.value.submitError)
+        assertEquals(EditorErrors.invalidHashCheck, viewModel.state.value.submitError)
         // init fetch + the silent refetch after the expired hash_check.
         coVerify(exactly = 2) { repository.fetchReplyForm(any(), any()) }
     }
@@ -718,7 +841,7 @@ class PrivateMessageReplyViewModelTest {
         viewModel.onSubmit()
 
         val state = viewModel.state.value
-        assertEquals(PrivateMessageReplyError.Uncertain, state.submitError)
+        assertEquals(EditorErrors.uncertain(EditorErrorSurface.MessageReply), state.submitError)
         // Non-destructive: the draft survives so the user can verify and retry.
         assertEquals("hello", state.draft.text)
     }
@@ -1695,11 +1818,11 @@ class PrivateMessageReplyViewModelTest {
                     it.draft.text, it.canSubmit, it.isSubmitting, it.isUploading, it.showSubmitConfirmation,
                     armId = it.armToken?.id,
                     error = when (it.submitError) {
-                        PrivateMessageReplyError.Network -> SubmissionErrorProbe.NETWORK
-                        PrivateMessageReplyError.SessionExpired -> SubmissionErrorProbe.SESSION_EXPIRED
-                        PrivateMessageReplyError.Uncertain -> SubmissionErrorProbe.UNCERTAIN
-                        PrivateMessageReplyError.DraftWriteFailed -> SubmissionErrorProbe.DRAFT_WRITE_FAILED
-                        PrivateMessageReplyError.Unexpected -> SubmissionErrorProbe.PREPARATION_FAILED
+                        EditorErrors.network -> SubmissionErrorProbe.NETWORK
+                        EditorErrors.sessionExpired -> SubmissionErrorProbe.SESSION_EXPIRED
+                        EditorErrors.uncertain(EditorErrorSurface.MessageReply) -> SubmissionErrorProbe.UNCERTAIN
+                        EditorErrors.draftWriteFailed -> SubmissionErrorProbe.DRAFT_WRITE_FAILED
+                        EditorErrors.invalidForm -> SubmissionErrorProbe.PREPARATION_FAILED
                         else -> null
                     },
                     restoreOffered = it.restorableDraft != null,
