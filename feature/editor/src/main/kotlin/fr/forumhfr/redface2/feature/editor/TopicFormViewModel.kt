@@ -504,6 +504,7 @@ class TopicFormViewModel @AssistedInject constructor(
      */
     private fun onDraftRestoreRequested() {
         val snapshot = _state.value
+        if (snapshot.isLoadingForm) return
         val offeredBody = snapshot.restorableDraft ?: return
         val liveBody = bodyFieldState.text.toString()
         val seed = snapshot.draftHydratedContent

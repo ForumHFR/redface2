@@ -1498,7 +1498,7 @@ class TopicFormViewModelTest {
 
     @Test
     @OptIn(ExperimentalFoundationApi::class)
-    fun restoreBeforeFormArrivalKeepsBodyAndEmptySeed() = runTest {
+    fun restoreDisabledWhileSeedFormLoads() = runTest {
         val gate = CompletableDeferred<Unit>()
         topicFormRepository.formGate = gate
         draftStore.preload(
@@ -1506,15 +1506,66 @@ class TopicFormViewModelTest {
             EditorDraftStore.Draft(body = "draft", subject = "draft title"),
         )
         val vm = newViewModel()
+        val loading = vm.state.value
+        val initialSelection = vm.bodyFieldState.selection
+        assertTrue(loading.isLoadingForm)
+        assertFalse(loading.draftHydratedFromServer)
+        assertFalse(loading.subjectHydratedFromServer)
+        assertEquals("draft", loading.restorableDraft)
+        assertEquals("draft title", loading.restorableSubject)
+
         vm.submit(TopicFormIntent.DraftRestoreRequested)
+        syncBody()
+        assertEquals(loading, vm.state.value)
+        assertEquals("", vm.bodyFieldState.text.toString())
+        assertEquals(initialSelection, vm.bodyFieldState.selection)
+        assertFalse(vm.bodyFieldState.undoState.canUndo)
+        assertEquals(0, draftStore.saveCount)
+
         gate.complete(Unit)
         syncBody()
+        val seed = topicFormRepository.formResult.initialContent
+        assertFalse(vm.state.value.isLoadingForm)
+        assertTrue(vm.state.value.draftHydratedFromServer)
+        assertTrue(vm.state.value.subjectHydratedFromServer)
+        assertEquals(seed, vm.bodyFieldState.text.toString())
+        assertEquals(seed, vm.state.value.draftHydratedContent)
+        assertEquals("draft", vm.state.value.restorableDraft)
+        assertEquals("draft title", vm.state.value.restorableSubject)
+        val hydratedSelection = vm.bodyFieldState.selection
+
+        vm.submit(TopicFormIntent.DraftRestoreRequested)
+        syncBody()
         assertEquals("draft", vm.bodyFieldState.text.toString())
-        assertEquals("draft title", vm.state.value.subject.text)
-        assertEquals("", vm.state.value.draftHydratedContent)
+        assertEquals(topicFormRepository.formResult.subject, vm.state.value.subject.text)
+        assertEquals(seed, vm.state.value.draftHydratedContent)
+        assertNull(vm.state.value.restorableDraft)
         assertEquals(TextRange(5), vm.bodyFieldState.selection)
         vm.bodyFieldState.undoState.undo()
+        assertEquals(seed, vm.bodyFieldState.text.toString())
+        assertEquals(hydratedSelection, vm.bodyFieldState.selection)
+    }
+
+    @Test
+    fun restoreAllowedWithEmptySeedAfterFormFailure() = runTest {
+        topicFormRepository.formFailure = java.io.IOException("offline")
+        draftStore.preload(
+            EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE),
+            EditorDraftStore.Draft(body = "D"),
+        )
+        val vm = newViewModel()
+        assertFalse(vm.state.value.isLoadingForm)
+        assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
+        assertEquals("", vm.state.value.draftHydratedContent)
         assertEquals("", vm.bodyFieldState.text.toString())
+        assertEquals("D", vm.state.value.restorableDraft)
+
+        vm.submit(TopicFormIntent.DraftRestoreRequested)
+        syncBody()
+        assertEquals("D", vm.bodyFieldState.text.toString())
+        assertEquals("", vm.state.value.draftHydratedContent)
+        assertNull(vm.state.value.restorableDraft)
+        assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
     }
 
     @Test
