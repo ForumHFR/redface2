@@ -16,6 +16,13 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.69.3` — `internal` (dev) — 2026-11-07
+
+Offre « Dernière page » après envoi ([#1437](https://github.com/ForumHFR/redface2/issues/1437) ; [#1546](https://github.com/ForumHFR/redface2/pull/1546)) : après une réponse ou une citation depuis une page qui n'est pas la dernière, l'offre apparaît aussi quand le rechargement prend plus d'une seconde.
+
+- La confirmation « Message publié » reste immédiate ; l'offre la complète sans doublon.
+- Régression de `0.67.0` ([#1525](https://github.com/ForumHFR/redface2/pull/1525)), signalée par **nicko** sur le topic DEV (post #2805459).
+
 ## `0.69.2` — `internal` (dev) — 2026-11-06
 
 Refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)), lot R0m ([#1509](https://github.com/ForumHFR/redface2/issues/1509) ; [#1524](https://github.com/ForumHFR/redface2/pull/1524)) : `material3` passe en **1.5.0-beta02**, épinglé sur la BOM Compose stable 2026.09.00 (foundation, ui et runtime restent en 1.12.1). Prérequis de la refonte ; l'interface ne change pas, sauf sur un point.
