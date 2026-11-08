@@ -1,6 +1,5 @@
 package fr.forumhfr.redface2.core.ui.editor
 
-import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptIdentity
 import fr.forumhfr.redface2.core.domain.editor.EditorSession
 import fr.forumhfr.redface2.core.domain.editor.EditorUploadToken
 import fr.forumhfr.redface2.core.domain.editor.SubmissionToken
@@ -8,25 +7,11 @@ import fr.forumhfr.redface2.core.domain.editor.SubmissionToken
 /** Host identities; sequences increase within each operation kind for the lifetime of a session. */
 sealed interface OperationRef {
     /**
-     * Matched by token; attempt metadata is attached only if the session owner is known (non-null).
-     * Anonymous arming can prepare an identity with an empty owner; construction and copy discard it.
-     * After observation, metadata is learned from deliveries (OperationStarted/Received), not re-observation.
+     * The accepted submission token exists before storage and distinguishes retries within a session.
+     * Its session binds the opening, owner (including null) and context; no durable attempt is needed.
+     * The host retains this token through Sending/Uncertain, including when beginAttempt is rejected.
      */
-    class Submission(val token: SubmissionToken, attempt: AttemptIdentity? = null) : OperationRef {
-        val attempt: AttemptIdentity? = attempt?.takeIf { token.session.owner != null }?.also {
-            require(it.owner == token.session.owner && it.key == token.session.key)
-        }
-
-        fun copy(token: SubmissionToken = this.token, attempt: AttemptIdentity? = this.attempt): Submission =
-            Submission(token, attempt)
-
-        override fun equals(other: Any?): Boolean =
-            other is Submission && token == other.token && attempt == other.attempt
-
-        override fun hashCode(): Int = 31 * token.hashCode() + (attempt?.hashCode() ?: 0)
-
-        override fun toString(): String = "Submission(token=$token, attempt=$attempt)"
-    }
+    data class Submission(val token: SubmissionToken) : OperationRef
     data class Upload(val token: EditorUploadToken) : OperationRef
     data class Local(val kind: EditorLocalOperation, val sequence: Long) : OperationRef {
         init { require(sequence >= 0) }
@@ -43,7 +28,12 @@ data class EventKey(val session: EditorSession, val operation: OperationRef, val
 sealed interface EditorEventContent {
     data class Problem(val error: EditorError) : EditorEventContent
     data class InProgress(val summary: EditorText, val uploadProgress: UploadProgress? = null) : EditorEventContent
-    data class Finished(val summary: EditorText, val detail: EditorText? = null) : EditorEventContent
+    /** ED-43: the host supplies short visual and full accessible upload summaries explicitly. */
+    data class Finished(
+        val summary: EditorText,
+        val detail: EditorText? = null,
+        val accessibleSummary: EditorText = summary,
+    ) : EditorEventContent
     data class Information(val summary: EditorText, val detail: EditorText? = null) : EditorEventContent
 }
 
@@ -81,7 +71,10 @@ data class EditorEvent(val key: EventKey, val content: EditorEventContent, val a
             is EditorEventContent.Information -> value.detail
         }
 
-    /** ED-45: catalogue Reload and Dismiss are not necessarily the event control's action. */
+    val accessibleSummary: EditorText
+        get() = (content as? EditorEventContent.Finished)?.accessibleSummary ?: summary
+
+    /** ED-45: the tap can only complete, show details or dismiss; remedies belong to the detail. */
     val action: EditorEventAction?
         get() = when {
             content is EditorEventContent.InProgress -> null
@@ -112,7 +105,7 @@ data class EditorEventState(
     val visibleEvent: EditorEvent? get() = selectEditorEventFifo(events)
 }
 
-/** Pending maintainer arbitration: equal ranks use FIFO. Replacement is in [replaceEditorEventsByKind]. */
+/** ED-43/45: equal ranks use FIFO; [replaceEditorEventsForOperation] assigns replacements their new place. */
 fun selectEditorEventFifo(events: List<EditorEvent>): EditorEvent? = events.minWithOrNull(
     compareByDescending<EditorEvent> { it.rank.priority }.thenBy { it.arrivalOrder },
 )
@@ -136,11 +129,7 @@ internal fun OperationRef.sameKind(other: OperationRef): Boolean = when (this) {
     is OperationRef.Local -> other is OperationRef.Local && kind == other.kind
 }
 
-/** Structural equality includes metadata; operation matching must not depend on when it was learned. */
-internal fun OperationRef.sameOperation(other: OperationRef): Boolean = when (this) {
-    is OperationRef.Submission -> other is OperationRef.Submission && token == other.token
-    is OperationRef.Upload, is OperationRef.Local -> this == other
-}
+internal fun OperationRef.sameOperation(other: OperationRef): Boolean = this == other
 
 internal val EditorEvent.isAmbiguous: Boolean
     get() = (content as? EditorEventContent.Problem)?.error?.errorClass == EditorErrorClass.Ambiguous

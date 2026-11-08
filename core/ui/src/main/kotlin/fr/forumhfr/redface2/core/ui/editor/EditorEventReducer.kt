@@ -26,13 +26,12 @@ sealed interface EditorEventInput {
     ) : EditorEventInput
     data class DurableWriteSucceeded(val session: EditorSession, val operation: OperationRef) : EditorEventInput
     /**
-     * A discrete gesture, excluding typing, selection, and activation of the event itself.
-     * Pending maintainer decision for ED-44: arm taps are excluded, preserving even information until
-     * another gesture or effective launch; ED-44 does not explicitly exclude them for information.
+     * Before any tool, arm or send gesture, excluding typing, selection and event activation.
+     * The host must stop dispatching that gesture when the transition consumes it (ED-44).
      */
     data class NextGesture(val session: EditorSession) : EditorEventInput
     data class Activate(val key: EventKey) : EditorEventInput
-    /** Visual only: the host must not resolve a durable attempt or abandon a pending quote. */
+    /** Programmatic visual acknowledgement; gestures use Activate/NextGesture/CloseDetails. No durable write. */
     data class Acknowledge(val key: EventKey) : EditorEventInput
     /** Close the sole open panel and return to the body; acknowledge only if its detail key matches. */
     data class CloseDetails(val key: EventKey) : EditorEventInput
@@ -48,6 +47,8 @@ sealed interface EditorEventCommand {
 data class EditorEventTransition(
     val state: EditorEventState,
     val commands: List<EditorEventCommand> = emptyList(),
+    /** Consume through gesture end, even if tools reappear under the pointer (ED-40/44/45). */
+    val gestureConsumed: Boolean = false,
 )
 
 /** Pure ED-41/43–45 transitions. No text/selection mapping, clock, persistence, or generated identity. */
@@ -63,7 +64,7 @@ fun reduceEditorEvents(state: EditorEventState, input: EditorEventInput): Editor
     is EditorEventInput.UploadAdvanced -> EditorEventTransition(advanceUpload(state, input))
     is EditorEventInput.FormLoaded -> EditorEventTransition(formLoaded(state, input))
     is EditorEventInput.DurableWriteSucceeded -> EditorEventTransition(durableWriteSucceeded(state, input))
-    is EditorEventInput.NextGesture -> EditorEventTransition(nextGesture(state, input.session))
+    is EditorEventInput.NextGesture -> nextGesture(state, input.session)
     is EditorEventInput.Activate -> activateEvent(state, input.key)
     is EditorEventInput.Acknowledge -> EditorEventTransition(acknowledgeEvent(state, input.key))
     is EditorEventInput.CloseDetails -> closeDetails(state, input.key)
@@ -86,16 +87,15 @@ private fun registerOperation(
 }
 
 /**
- * Delivery replaces events of the same kind; observation alone preserves them until resolution or launch.
- * Ambiguity requires an acknowledgement or effective submission launch.
+ * Delivery replaces only the same operation; distinct operations of one kind retain their events.
+ * Launch cleanup and uncertainty's own lifecycle are handled separately.
  * New deliveries keep their own FIFO arrival order.
  */
-internal fun replaceEditorEventsByKind(
+internal fun replaceEditorEventsForOperation(
     events: List<EditorEvent>,
-    ref: OperationRef,
     replacement: EditorEvent,
 ): List<EditorEvent> = events.filterNot {
-    it.key.operation.sameKind(ref) && !it.isAmbiguous
+    it.key.session == replacement.key.session && it.key.operation.sameOperation(replacement.key.operation)
 } + replacement
 
 private fun startOperation(state: EditorEventState, event: EditorEvent): EditorEventState {
@@ -120,15 +120,13 @@ private fun receiveEvent(state: EditorEventState, event: EditorEvent): EditorEve
         ?.takeUnless { it.finished }
         ?.takeIf { event.key.occurrence > it.lastOccurrence }
         ?: return state
-    val ref = event.key.operation
     val updated = operation.copy(
-        ref = if (ref is OperationRef.Submission && ref.attempt != null) ref else operation.ref,
         lastOccurrence = event.key.occurrence,
         finished = event.content !is EditorEventContent.InProgress,
     )
     return registered.copy(
         currentOperations = registered.currentOperations.map { if (it == operation) updated else it },
-        events = replaceEditorEventsByKind(registered.events, ref, event),
+        events = replaceEditorEventsForOperation(registered.events, event),
     )
 }
 
@@ -181,11 +179,15 @@ private fun durableWriteSucceeded(
     )
 }
 
-private fun nextGesture(state: EditorEventState, session: EditorSession): EditorEventState {
-    val visible = state.visibleEvent?.takeIf { session == state.session } ?: return state
+private fun nextGesture(state: EditorEventState, session: EditorSession): EditorEventTransition {
+    val visible = state.visibleEvent?.takeIf { session == state.session } ?: return EditorEventTransition(state)
     val isInformation = visible.content is EditorEventContent.Information ||
         (visible.content as? EditorEventContent.Problem)?.error?.errorClass == EditorErrorClass.Information
-    return if (isInformation) acknowledgeEvent(state, visible.key) else state
+    return if (isInformation) {
+        EditorEventTransition(acknowledgeEvent(state, visible.key), gestureConsumed = true)
+    } else {
+        EditorEventTransition(state)
+    }
 }
 
 private fun activateEvent(state: EditorEventState, key: EventKey): EditorEventTransition {
@@ -195,12 +197,13 @@ private fun activateEvent(state: EditorEventState, key: EventKey): EditorEventTr
             val error = (event.content as EditorEventContent.Problem).error
             EditorEventTransition(
                 acknowledgeEvent(state, key), listOf(EditorEventCommand.CompleteHeader(key, error.cause)),
+                gestureConsumed = true,
             )
         }
         EditorEventAction.Details -> EditorEventTransition(
-            state.copy(detailKey = key), listOf(EditorEventCommand.OpenDetails(event)),
+            state.copy(detailKey = key), listOf(EditorEventCommand.OpenDetails(event)), gestureConsumed = true,
         )
-        EditorEventAction.Dismiss -> EditorEventTransition(acknowledgeEvent(state, key))
+        EditorEventAction.Dismiss -> EditorEventTransition(acknowledgeEvent(state, key), gestureConsumed = true)
         null -> EditorEventTransition(state)
     }
 }
@@ -218,5 +221,6 @@ private fun closeDetails(state: EditorEventState, key: EventKey): EditorEventTra
     return EditorEventTransition(
         acknowledged.copy(detailKey = null),
         listOf(EditorEventCommand.ReturnToBody),
+        gestureConsumed = true,
     )
 }

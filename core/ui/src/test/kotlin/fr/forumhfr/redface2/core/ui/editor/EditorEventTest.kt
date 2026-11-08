@@ -1,11 +1,11 @@
 package fr.forumhfr.redface2.core.ui.editor
 
-import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptIdentity
 import fr.forumhfr.redface2.core.domain.editor.EditorSession
 import fr.forumhfr.redface2.core.domain.editor.SubmissionToken
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class EditorEventTest {
@@ -13,33 +13,37 @@ class EditorEventTest {
     private val key = EventKey(session, OperationRef.Local(EditorLocalOperation.Notice, 1), 1)
 
     @Test
-    fun `attached attempt metadata requires an exact known owner and context`() {
-        val identity = AttemptIdentity("alice", session.key, "attempt-1")
-        val ref = OperationRef.Submission(SubmissionToken(1, session), identity)
-        assertEquals(identity, ref.attempt)
-        val anonymous = SubmissionToken(1, session.copy(owner = null))
-        assertNull(OperationRef.Submission(anonymous).attempt)
-        assertThrows(IllegalArgumentException::class.java) { ref.copy(attempt = identity.copy(owner = "bob")) }
-        assertThrows(IllegalArgumentException::class.java) { ref.copy(attempt = identity.copy(key = "other")) }
-        val emptyOwner = anonymous.copy(session = anonymous.session.copy(owner = ""))
-        assertEquals("", OperationRef.Submission(emptyOwner, identity.copy(owner = "")).attempt?.owner)
+    fun `submission identity uses the accepted token and its exact session without durable metadata`() {
+        val ref = OperationRef.Submission(SubmissionToken(1, session))
+        val equivalent = OperationRef.Submission(SubmissionToken(1, session.copy()))
+        assertTrue(ref.sameOperation(equivalent))
+        assertEquals(ref.hashCode(), equivalent.hashCode())
+        assertFalse(ref.sameOperation(ref.copy(token = SubmissionToken(2, session))))
+        listOf(session.copy(id = "reopened"), session.copy(owner = "bob"), session.copy(key = "other")).forEach {
+            assertFalse(ref.belongsTo(it))
+            assertFalse(ref.sameOperation(OperationRef.Submission(SubmissionToken(1, it))))
+        }
     }
 
     @Test
-    fun `anonymous arming accepts a prepared attempt without attaching an identity`() {
+    fun `anonymous submission is representable and never aliases an empty or known owner`() {
         val anonymous = SubmissionToken(1, session.copy(owner = null))
-        val prepared = AttemptIdentity("", anonymous.session.key, "prepared-at-arm")
-        val ref = OperationRef.Submission(anonymous, attempt = prepared)
-        assertNull(ref.attempt)
+        val ref = OperationRef.Submission(anonymous)
         assertEquals(OperationRef.Submission(anonymous), ref)
-        assertEquals(OperationRef.Submission(anonymous).hashCode(), ref.hashCode())
-        val known = OperationRef.Submission(SubmissionToken(1, session), prepared.copy(owner = "alice"))
-        assertEquals(ref, known.copy(token = anonymous))
-        assertNull(known.copy(token = anonymous).attempt)
+        listOf("", "alice").forEach { owner ->
+            val known = ref.copy(token = anonymous.copy(session = session.copy(owner = owner)))
+            assertFalse(ref.sameOperation(known))
+            assertFalse(known.belongsTo(anonymous.session))
+            assertEquals(ref, known.copy(token = anonymous))
+        }
     }
 
     @Test
     fun `invariant 4 - Complete precedes detail and Reload and Dismiss with details open details`() {
+        assertEquals(
+            setOf(EditorEventAction.Complete, EditorEventAction.Details, EditorEventAction.Dismiss),
+            EditorEventAction.entries.toSet(),
+        )
         val cases = listOf(
             EditorErrors.missingTitle to EditorEventAction.Complete,
             EditorErrors.missingSubcategory to EditorEventAction.Complete,
@@ -65,6 +69,18 @@ class EditorEventTest {
     }
 
     @Test
+    fun `ED43 - finished summaries carry visual and accessible texts independently`() {
+        val visual = EditorErrors.network.summary
+        val full = requireNotNull(EditorErrors.network.detail)
+        val finished = event(EditorEventContent.Finished(visual, accessibleSummary = full))
+        assertEquals(visual, finished.summary)
+        assertEquals(full, finished.accessibleSummary)
+        assertNull(finished.detail)
+        assertEquals(EditorEventAction.Dismiss, finished.action)
+        assertEquals(visual, event(EditorEventContent.Information(visual)).accessibleSummary)
+    }
+
+    @Test
     fun `presentation rank keeps the catalogue classification and full text`() {
         editorErrorSamples.forEach { error ->
             val event = event(EditorEventContent.Problem(error))
@@ -77,6 +93,7 @@ class EditorEventTest {
             assertEquals(error.summary, event.summary)
             assertEquals(error.detail, event.detail)
             assertEquals(error, (event.content as EditorEventContent.Problem).error)
+            assertTrue(error.cause.toString(), event.action in EditorEventAction.entries)
         }
         assertEquals(EditorEventRank.Information, event(EditorEventContent.Finished(EditorErrors.empty.summary)).rank)
         assertEquals(EditorEventRank.InProgress, event(EditorEventContent.InProgress(EditorErrors.empty.summary)).rank)
