@@ -281,7 +281,7 @@ internal fun ReplyEditorBody(
                     MessageDraftRestoreBanner(
                         onRestore = onDraftRestore,
                         onDiscard = onDraftDiscard,
-                        restoreEnabled = !state.isUploading && !state.isLoadingForm,
+                        restoreEnabled = state.restoreEnabled,
                     )
                 }
 
@@ -363,6 +363,10 @@ internal fun ReplyEditorBody(
     }
 }
 
+/** Same refusals as the ViewModel: unknown seed while the form loads, upload, body locked by the submission. */
+private val PrivateMessageReplyUiState.restoreEnabled: Boolean
+    get() = !isUploading && !isLoadingForm && !submission.blocksBodyMutation
+
 /** Keep the offer visible while the form replaces the editor, including an offline failure. */
 private val PrivateMessageReplyUiState.restoreOfferReplacesEditor: Boolean
     get() = restorableDraft != null && (formError || isLoadingForm && !formAvailable)
@@ -378,7 +382,7 @@ private fun ReplyRestoreOfferOverForm(
         MessageDraftRestoreBanner(
             onRestore = onRestore,
             onDiscard = onDiscard,
-            restoreEnabled = !state.isUploading && !state.isLoadingForm,
+            restoreEnabled = state.restoreEnabled,
         )
     }
 }

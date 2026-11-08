@@ -18,6 +18,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptToken
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
@@ -146,6 +148,14 @@ class PrivateMessageEditorLayoutTest {
 
         compose.runOnIdle { state.value = state.value.copy(isUploading = false) }
         compose.onNodeWithText("Restaurer").assertIsEnabled()
+
+        // The submission locks the body (accepted uncertain attempt): Restore follows the ViewModel refusal.
+        compose.runOnIdle {
+            state.value = state.value.copy(
+                submission = EditorSubmissionState.Uncertain(AttemptToken("tester", "key", "id", 1), accepted = true),
+            )
+        }
+        compose.onNodeWithText("Restaurer").assertIsNotEnabled()
     }
 
     @Test

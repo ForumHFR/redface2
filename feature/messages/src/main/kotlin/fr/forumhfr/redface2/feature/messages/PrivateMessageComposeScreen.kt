@@ -263,7 +263,7 @@ internal fun ComposeEditorBody(
                     MessageDraftRestoreBanner(
                         onRestore = onDraftRestore,
                         onDiscard = onDraftDiscard,
-                        restoreEnabled = !state.isUploading,
+                        restoreEnabled = !state.isUploading && !state.submission.blocksBodyMutation,
                     )
                 }
 
