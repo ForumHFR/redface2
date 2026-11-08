@@ -1,4 +1,4 @@
-Redface 2 v0.69.6 — dev.
-- Réponse MP : champ de texte refondu (une annulation par action, aperçu calculé hors du fil principal).
-- Réponse MP : « Restaurer » tient compte de la citation ; inactif tant que le formulaire charge, disponible hors ligne.
-- Réponse MP : un texte tapé avant l'arrivée du formulaire est combiné à la citation et sauvegardé.
+Redface 2 v0.69.7 — dev.
+- Citations : la demande survit à la fermeture de l'app ; « Recharger » et « Ignorer la citation » dans la réponse rapide.
+- Post : « Restaurer » suit la règle commune des éditeurs.
+- Nouveau sujet et modification du premier post : champ de texte refondu (une annulation par action) et « Restaurer » aligné, inactif pendant le chargement.

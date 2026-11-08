@@ -1,4 +1,4 @@
-Redface 2 v0.69.6 — dev.
-- PM reply: rebuilt text field (one undo step per action, preview computed off the main thread).
-- PM reply: "Restore" takes the quote into account; disabled while the form loads, available offline.
-- PM reply: text typed before the form arrives is combined with the quote and saved.
+Redface 2 v0.69.7 — dev.
+- Quotes: a quote request survives the app being closed; "Reload" and "Ignore quote" in the quick reply.
+- Post: "Restore" follows the shared editor rule.
+- New topic and first-post edit: rebuilt text field (one undo step per action) and aligned "Restore", disabled while loading.
