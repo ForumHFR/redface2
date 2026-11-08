@@ -289,9 +289,7 @@ private fun TopicFormControlsZone(
             DraftRestoreBanner(
                 onRestore = { onIntent(TopicFormIntent.DraftRestoreRequested) },
                 onDiscard = { onIntent(TopicFormIntent.DraftDiscardRequested) },
-                // Same refusals as the ViewModel: unknown seed while the form loads, body locked during an upload
-                // or by the submission (sending, accepted uncertain attempt).
-                restoreEnabled = !state.isUploading && !state.isLoadingForm && !state.submission.blocksBodyMutation,
+                restoreEnabled = state.restoreEnabled,
             )
         }
         TopicFormErrorBanners(state = state, onIntent = onIntent)
@@ -538,3 +536,10 @@ private val TopicFormMode.titleResId: Int
         TopicFormMode.New -> R.string.editor_topic_new_title
         TopicFormMode.EditFirstPost -> R.string.editor_topic_edit_first_post_title
     }
+
+/**
+ * Same refusals as the ViewModel: unknown seed while the form loads, body locked during an upload or by the
+ * submission (sending, accepted uncertain attempt). Kept out of [TopicFormControlsZone] for detekt.
+ */
+private val TopicFormState.restoreEnabled: Boolean
+    get() = !isUploading && !isLoadingForm && !submission.blocksBodyMutation
