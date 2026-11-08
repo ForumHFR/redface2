@@ -280,6 +280,62 @@ class EditorSubmissionBindingTest {
         assertNull(failures.last())
     }
 
+    @Test
+    fun `successful fresh attempt outcome purges draft information without hiding uncertainty`() = runTest {
+        val store = VersionedEditorDraftStore().apply { finishGate = CompletableDeferred() }
+        val failures = mutableListOf<String?>()
+        val binding = binding(store, failures = failures)
+        binding.restore("key")
+        binding.setPreference(false)
+        val permit = binding.request(4_000, true) as SubmissionRequest.Accepted
+        binding.launch(permit, Draft("body")) { EditorDelivery(outcome = EditorSendOutcome.UNCERTAIN) }
+        runCurrent()
+        binding.resolveDraftWrite(EditorDraftStore.StoreWriteResult.Failed(IOException("disk")))
+        assertEquals("save", failures.last())
+        store.finishGate?.complete(Unit)
+        runCurrent()
+        assertEquals(listOf<String?>(null, "uncertain"), failures.takeLast(2))
+        binding.acknowledge {}
+        runCurrent()
+        assertNull(failures.last())
+    }
+
+    @Test
+    fun `successful published cleanup purges draft information through the same resolver`() = runTest {
+        val store = VersionedEditorDraftStore().apply { cleanupGate = CompletableDeferred() }
+        val failures = mutableListOf<String?>()
+        val binding = binding(store, failures = failures)
+        binding.restore("key")
+        binding.setPreference(false)
+        val permit = binding.request(4_000, true) as SubmissionRequest.Accepted
+        binding.launch(permit, Draft("body")) { EditorDelivery(effect = Unit) }
+        runCurrent()
+        binding.resolveDraftWrite(EditorDraftStore.StoreWriteResult.Failed(IOException("disk")))
+        assertEquals("save", failures.last())
+        store.cleanupGate?.complete(Unit)
+        runCurrent()
+        assertNull(failures.last())
+        assertEquals("", store.saved["key"]?.body)
+    }
+
+    @Test
+    fun `failed outcome keeps uncertainty without inventing a draft save failure`() = runTest {
+        val store = VersionedEditorDraftStore().apply { finishFailure = IOException("disk") }
+        val failures = mutableListOf<String?>()
+        val binding = binding(store, failures = failures)
+        binding.restore("key")
+        binding.setPreference(false)
+        val permit = binding.request(4_000, true) as SubmissionRequest.Accepted
+        binding.launch(permit, Draft("body")) { EditorDelivery(outcome = EditorSendOutcome.UNCERTAIN) }
+        runCurrent()
+        assertEquals("uncertain", failures.last())
+        assertFalse(failures.contains("save"))
+        store.finishFailure = null
+        binding.acknowledge {}
+        runCurrent()
+        assertNull(failures.last())
+    }
+
     private suspend fun TestScope.retryRejectedBegin(confirmation: Boolean) {
         val store = VersionedEditorDraftStore().apply { beginFailure = IOException("disk") }
         val binding = binding(store)

@@ -5,7 +5,6 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import fr.forumhfr.redface2.core.database.RedfaceDatabase
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
-import fr.forumhfr.redface2.core.domain.editor.EditorDraftOfferInput
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptOutcome
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptStatus
@@ -330,20 +329,18 @@ class RoomEditorDraftQuoteTransactionTest {
     }
 
     @Test
-    fun `M5 Room restores staged typing separately without changing the offered body or request`() = runTest {
-        val offered = Draft("D", pendingInlineQuoteRequest = request)
-        store.saveIfVersion("alice", key, offered, 0)
-        val before = store.loadEntry("alice", key)
-        val input = EditorDraftOfferInput.load(store, key, "alice", "D")
-        assertTrue(input.save("C") is StoreWriteResult.Written)
-        assertEquals(before, store.loadEntry("alice", key))
-        val reopened = EditorDraftOfferInput.load(newStore(), key, "alice", "D")
-        assertTrue(reopened.isPending)
-        assertEquals("C", reopened.body)
-        reopened.clear()
-        assertEquals(StoreWriteResult.Conflict, input.save("stale C"))
-        assertFalse(EditorDraftOfferInput.load(newStore(), key, "alice", "D").isPending)
-        assertEquals(before, store.loadEntry("alice", key))
+    fun `405 saving C in the main row refreshes retention while the offered D stays in memory`() = runTest {
+        val day = 86_400_000L
+        val oldStore = newStore(Clock.fixed(Instant.ofEpochMilli(clock.millis() - 31 * day), ZoneOffset.UTC))
+        oldStore.saveIfVersion("alice", key, Draft("D"), 0)
+        val session = EditorDraftSession(store, key)
+        val offered = checkNotNull(session.load()).draft.body
+        assertTrue(session.save(Draft("C")) is StoreWriteResult.Written)
+        database.editorDraftDao().deleteOlderThan(clock.millis() - 30 * day)
+        val retained = checkNotNull(newStore().loadEntry("alice", key))
+        assertEquals("D", offered)
+        assertEquals("C", retained.draft.body)
+        assertEquals(clock.millis(), retained.draft.updatedAt)
     }
 
     private fun newStore(writeClock: Clock = clock) = RoomEditorDraftStore(

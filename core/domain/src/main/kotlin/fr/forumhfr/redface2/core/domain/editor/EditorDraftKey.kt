@@ -2,8 +2,8 @@ package fr.forumhfr.redface2.core.domain.editor
 
 /**
  * Builds the stable, content-free context key under which an editor's draft is cached (#405).
- * Composition keys encode routing identity (mode + ids). Offer inputs add the offer's opaque
- * fingerprint — never any raw message body, subject or recipient. The owning account is prepended
+ * Composition keys encode routing identity (mode + ids), never any raw message body, subject or
+ * recipient. The owning account is prepended
  * by the store, not here. `numreponse` is unique per category, so edit keys carry `cat` to stay globally unique.
  *
  * The reply key intentionally does NOT carry the quoted `numreponse`: per #405 a quote is appended
@@ -14,9 +14,6 @@ object EditorDraftKey {
     private const val REPORT_KEY = "report"
 
     fun reply(cat: Int, topicId: Int): String = "reply:$cat:$topicId"
-    /** Separate scratch text under an offer; the fingerprint contains no raw body or coordinates. */
-    fun offerInput(key: String, fingerprint: String): String = "$key:offer-input:$fingerprint"
-
     fun newTopic(cat: Int): String = "newtopic:$cat"
     fun editPost(cat: Int, numreponse: Int): String = "edit:$cat:$numreponse"
     fun editFirstPost(cat: Int, numreponse: Int): String = "editfp:$cat:$numreponse"

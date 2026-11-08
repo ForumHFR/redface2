@@ -11,7 +11,6 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
-import fr.forumhfr.redface2.core.domain.editor.EditorDraftOfferInput
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.UnreadableInlineQuoteRequestException
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
@@ -221,41 +220,55 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `Astra3 escalated undecided offer retains the current field and waits for its decision`() = runTest {
+    fun `405 post autosaves C in the main row and keeps D in memory until Restore`() = runTest {
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
         draftStore.preload(key, EditorDraftStore.Draft("offered D"))
-        val staged = EditorDraftOfferInput.load(draftStore, key, "tester", "offered D")
-        staged.save("current C") // The sheet's awaited escalation boundary, with no D applied.
         replyRepository.formResult = Result.success(authenticatedForm("[quotemsg=101]quote[/quotemsg]"))
-        val vm = newReplyViewModel(resumeSharedDraft = true, initialQuotes = listOf(card(101)),
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
             userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("current C")))
+        testScheduler.advanceTimeBy(751)
         testScheduler.runCurrent()
-        assertEquals("current C", vm.state.value.draft.text)
+        assertEquals("current C", draftStore.saved[key]?.body)
+        assertEquals(setOf(key), draftStore.entries.keys)
         assertEquals("offered D", vm.state.value.restorableDraft)
-        assertEquals("offered D", draftStore.saved[key]?.body)
+        assertNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
         assertEquals(0, replyRepository.formFetches)
         vm.submit(PostEditorIntent.DraftRestoreRequested)
         testScheduler.advanceUntilIdle()
-        assertTrue(vm.state.value.draft.text.contains("current C\n\noffered D"))
+        assertEquals("[quotemsg=101]quote[/quotemsg]\n\ncurrent C\n\noffered D", draftStore.saved[key]?.body)
+        assertNull(vm.state.value.restorableDraft)
         assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
         assertEquals(1, replyRepository.formFetches)
+        assertEquals(0, replyRepository.submitCalls)
     }
 
     @Test
-    fun `Astra3 ignoring an escalated offer keeps C and delivers Q without silently applying D`() = runTest {
+    fun `405 post autosaves C in the main row and keeps D in memory until Ignore`() = runTest {
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
         draftStore.preload(key, EditorDraftStore.Draft("offered D"))
-        EditorDraftOfferInput.load(draftStore, key, "tester", "offered D").save("current C")
         replyRepository.formResult = Result.success(authenticatedForm("[quotemsg=101]quote[/quotemsg]"))
-        val vm = newReplyViewModel(resumeSharedDraft = true, initialQuotes = listOf(card(101)),
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
             userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("current C")))
+        testScheduler.advanceTimeBy(751)
         testScheduler.runCurrent()
+        assertEquals("current C", draftStore.saved[key]?.body)
+        assertEquals(setOf(key), draftStore.entries.keys)
+        assertEquals("offered D", vm.state.value.restorableDraft)
+        assertNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
         assertEquals(0, replyRepository.formFetches)
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
         vm.submit(PostEditorIntent.DraftDiscardRequested)
+        testScheduler.runCurrent()
+        assertEquals("current C", draftStore.saved[key]?.body)
+        assertNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        get.complete(Unit)
         testScheduler.advanceUntilIdle()
         assertEquals("[quotemsg=101]quote[/quotemsg]\n\ncurrent C", draftStore.saved[key]?.body)
         assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
-        assertFalse(vm.state.value.draft.text.contains("offered D"))
+        assertNull(vm.state.value.restorableDraft)
         assertEquals(0, replyRepository.submitCalls)
     }
 
@@ -285,32 +298,96 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `Astra3 unreadable offer input cannot silently accept D during escalation`() = runTest {
-        var failInputRead = false
-        draftStore = object : VersionedEditorDraftStore() {
-            override suspend fun loadEntry(owner: String?, key: String): EditorDraftStore.DraftEntry? {
-                if (failInputRead && key.contains(":offer-input:")) throw IOException("disk")
-                return super.loadEntry(owner, key)
-            }
-        }
+    fun `m2 ordinary draft read failure does not block publication`() = runTest {
+        draftStore.loadFailure = IOException("disk")
+        replyRepository.submitResult = ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        val vm = newReplyViewModel()
+        testScheduler.runCurrent()
+        assertFalse(vm.state.value.quoteStorageUnavailable)
+        assertEquals(EditorErrors.draftSaveFailed, vm.state.value.submitError)
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("current C")))
+        assertTrue(vm.state.value.canSubmit)
+        vm.submit(PostEditorIntent.SubmitClicked())
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, replyRepository.submitCalls)
+        assertEquals(EditorDraftStore.AttemptStatus.PUBLISHED,
+            draftStore.entries[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)]?.attempt?.status)
+    }
+
+    @Test
+    fun `m4 conflict reconcile does not offer a body identical to the live field`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val body = "[quotemsg=101]quote[/quotemsg]\n"
+        replyRepository.formResult = Result.success(authenticatedForm(body))
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        val other = EditorDraftSession(draftStore, key)
+        other.load()
+        other.save(EditorDraftStore.Draft(body))
+        get.complete(Unit)
+        testScheduler.runCurrent()
+        assertTrue(vm.state.value.quoteStorageUnavailable)
+        assertEquals(body, vm.state.value.draft.text)
+        vm.submit(PostEditorIntent.ReloadRequested)
+        testScheduler.advanceUntilIdle()
+        assertNull(vm.state.value.restorableDraft)
+        assertEquals(body, vm.state.value.draft.text)
+        assertFalse(vm.state.value.quoteStorageUnavailable)
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        assertEquals(1, replyRepository.formFetches)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `B discarding an unreadable request without attempt clears the obsolete error`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val pending = PendingInlineQuoteRequest(SAMPLE_CAT, SAMPLE_TOPIC_ID,
+            listOf(PendingInlineQuoteRequest.Quote(101, 1)))
+        draftStore.preload(key, EditorDraftStore.Draft("ordinary body", pendingInlineQuoteRequest = pending))
+        draftStore.loadFailure = UnreadableInlineQuoteRequestException()
+        val vm = newReplyViewModel()
+        testScheduler.runCurrent()
+        assertNull(draftStore.entries[key]?.attempt)
+        assertEquals(EditorErrors.unreadableQuoteRequest, vm.state.value.submitError)
+        assertEquals(0, replyRepository.formFetches)
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("current C")))
+        vm.submit(PostEditorIntent.PendingQuoteIgnored)
+        testScheduler.runCurrent()
+        assertNull(vm.state.value.submitError)
+        assertFalse(vm.state.value.unreadableQuoteRequest)
+        assertFalse(vm.state.value.canIgnorePendingQuote)
+        assertTrue(vm.state.value.canSubmit)
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        assertNull(draftStore.entries[key]?.attempt)
+        assertEquals("ordinary body", draftStore.saved[key]?.body)
+        assertEquals(1, replyRepository.formFetches)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `publication under an undecided ordinary offer leaves only the erased main row`() = runTest {
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
         draftStore.preload(key, EditorDraftStore.Draft("offered D"))
-        EditorDraftOfferInput.load(draftStore, key, "tester", "offered D").save("current C")
-        failInputRead = true
-        val vm = newReplyViewModel(resumeSharedDraft = true, initialQuotes = listOf(card(101)),
-            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        replyRepository.submitResult = ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        val vm = newReplyViewModel()
         testScheduler.runCurrent()
-        assertEquals("", vm.state.value.draft.text)
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("published C")))
         assertEquals("offered D", vm.state.value.restorableDraft)
-        assertTrue(vm.state.value.quoteStorageUnavailable)
-        assertEquals(0, replyRepository.formFetches)
-        failInputRead = false
-        vm.submit(PostEditorIntent.ReloadRequested)
-        testScheduler.runCurrent()
-        assertEquals("current C", vm.state.value.draft.text)
-        assertEquals("offered D", vm.state.value.restorableDraft)
-        assertFalse(vm.state.value.quoteStorageUnavailable)
-        assertEquals(0, replyRepository.formFetches)
+        assertTrue(vm.state.value.canSubmit)
+        vm.submit(PostEditorIntent.SubmitClicked())
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, replyRepository.submitCalls)
+        assertEquals("published C", replyRepository.lastSubmittedBbcode)
+        assertEquals(setOf(key), draftStore.entries.keys)
+        assertEquals("", draftStore.saved[key]?.body)
+        val writes = draftStore.writes
+        vm.submit(PostEditorIntent.CloseRequested)
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("late callback")))
+        testScheduler.advanceUntilIdle()
+        assertEquals(writes, draftStore.writes)
+        assertEquals("", draftStore.saved[key]?.body)
     }
 
     @Test
@@ -2800,8 +2877,8 @@ class PostEditorViewModelTest {
         recreated.submit(PostEditorIntent.ContentChanged(TextFieldValue("new live text")))
         testScheduler.advanceTimeBy(800L)
         testScheduler.runCurrent()
-        assertEquals("rescued text", draftStore.saved[key]?.body)
-        assertEquals("new live text", EditorDraftOfferInput.load(draftStore, key, "tester", "rescued text").body)
+        assertEquals("new live text", draftStore.saved[key]?.body)
+        assertEquals("rescued text", recreated.state.value.restorableDraft)
         assertEquals("tester", draftStore.lastSavedOwner)
 
         recreated.submit(PostEditorIntent.DraftRestoreRequested)
@@ -2824,7 +2901,12 @@ class PostEditorViewModelTest {
         testScheduler.advanceUntilIdle()
         assertEquals("first offered version", first.state.value.restorableDraft)
 
-        draftStore.preload(key, EditorDraftStore.Draft(body = "newer autosaved version"))
+        first.submit(PostEditorIntent.ContentChanged(TextFieldValue("newer autosaved version")))
+        testScheduler.advanceTimeBy(751)
+        testScheduler.runCurrent()
+        assertEquals("newer autosaved version", draftStore.saved[key]?.body)
+        assertEquals("first offered version", first.state.value.restorableDraft)
+        first.viewModelScope.cancel()
         val recreated = newReplyViewModel(savedStateHandle = savedStateHandle)
         testScheduler.advanceUntilIdle()
 

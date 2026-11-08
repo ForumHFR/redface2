@@ -14,12 +14,17 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
@@ -57,6 +62,27 @@ import org.robolectric.annotation.GraphicsMode
 class QuickReplyErrorBannerLayoutTest {
     @get:Rule
     val compose = createComposeRule()
+
+    @Test
+    fun `Astra3 fullscreen control explains its disabled state until the offer decision`() {
+        var state by mutableStateOf(QuickReplyUiState(restorableDraft = "D", quoteStorageUnavailable = false))
+        var escalated = false
+        compose.setContent {
+            RedfaceTheme(darkTheme = false) {
+                QuickReplyHeader(state, "Ouvrir l’éditeur plein écran") { escalated = true }
+            }
+        }
+        compose.onNodeWithContentDescription("Ouvrir l’éditeur plein écran")
+            .assertIsNotEnabled()
+            .assert(SemanticsMatcher.expectValue(
+                SemanticsProperties.StateDescription,
+                "Choisissez « Restaurer » ou « Ignorer le brouillon » avant d’ouvrir l’éditeur plein écran.",
+            ))
+        assertFalse(escalated)
+        compose.runOnIdle { state = state.copy(restorableDraft = null) }
+        compose.onNodeWithContentDescription("Ouvrir l’éditeur plein écran").assertIsEnabled().performClick()
+        assertTrue(escalated)
+    }
 
     @Test
     fun `card quote failure offers a removable card without claiming submission is blocked`() {

@@ -226,6 +226,7 @@
     <string name="quick_reply_hint">Votre message…</string>
     <string name="quick_reply_send">Envoyer</string>
     <string name="quick_reply_fullscreen">Ouvrir l\'éditeur plein écran</string>
+    <string name="quick_reply_fullscreen_pending_draft">Choisissez « Restaurer » ou « Ignorer le brouillon » avant d’ouvrir l’éditeur plein écran.</string>
     <string name="quick_reply_confirm_title">Publier la réponse ?</string>
     <string name="quick_reply_confirm_action">Publier</string>
     <string name="quick_reply_confirm_cancel">Annuler</string>

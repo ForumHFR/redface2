@@ -5,7 +5,6 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
-import fr.forumhfr.redface2.core.domain.editor.EditorDraftOfferInput
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptOutcome
@@ -205,7 +204,8 @@ class QuickReplyDurableQuoteTest {
         val sheet = scenario.open()
         sheet.onTextChanged(TextFieldValue("live body"))
         advanceUntilIdle()
-        assertEquals("older body", scenario.body)
+        assertEquals("live body", scenario.body)
+        assertEquals("older body", sheet.state.value.restorableDraft)
         assertTrue(scenario.fetches.isEmpty())
         assertFalse(sheet.state.value.canSubmit)
         sheet.onDraftRestoreRequested()
@@ -459,7 +459,7 @@ class QuickReplyDurableQuoteTest {
     }
 
     @Test
-    fun `Astra3 undecided escalation durably hands over only the live field without serving Q`() = runTest {
+    fun `Astra3 escalation is refused under an offer and allowed after its Restore decision`() = runTest {
         val scenario = Scenario()
         scenario.store.preload(scenario.key, Draft("offered D"))
         scenario.enqueue()
@@ -468,16 +468,45 @@ class QuickReplyDurableQuoteTest {
         val effect = async { sheet.effects.first() }
         sheet.onEscalateRequested()
         runCurrent()
-        assertTrue(effect.await() is QuickReplyEffect.EscalateToFullEditor)
+        assertFalse(effect.isCompleted)
         assertEquals("offered D", scenario.body)
+        assertEquals("offered D", sheet.state.value.restorableDraft)
         assertEquals(scenario.request, scenario.pending)
         assertEquals(0, scenario.formFetches)
-        val input = EditorDraftOfferInput.load(scenario.store, scenario.key, "tester", "offered D")
-        assertEquals("current C", input.body)
-        assertTrue(input.isPending)
-        sheet.onDismissed() // Disposal after escalation must not write D over the handoff.
+        sheet.onDraftRestoreRequested()
+        advanceUntilIdle()
+        assertNull(sheet.state.value.restorableDraft)
+        assertNull(scenario.pending)
+        sheet.onEscalateRequested()
         runCurrent()
-        assertEquals("offered D", scenario.body)
+        assertTrue(effect.await() is QuickReplyEffect.EscalateToFullEditor)
+        assertEquals("current C\n\noffered D\n\n[quotemsg=101]quote[/quotemsg]\n", scenario.body)
+        val writes = scenario.store.writes
+        sheet.onDismissed() // Disposal after escalation must not perform another flush.
+        runCurrent()
+        assertEquals(writes, scenario.store.writes)
+    }
+
+    @Test
+    fun `publication under an undecided sheet offer is refused without losing C or Q`() = runTest {
+        val scenario = Scenario()
+        scenario.store.preload(scenario.key, Draft("offered D"))
+        scenario.enqueue()
+        val sheet = scenario.open()
+        sheet.onTextChanged(TextFieldValue("current C"))
+        advanceTimeBy(751)
+        runCurrent()
+        assertFalse(sheet.state.value.canSubmit)
+        sheet.onSubmitClicked()
+        sheet.onSubmitConfirmed(null)
+        runCurrent()
+        assertEquals(0, scenario.posts)
+        assertEquals(0, scenario.store.beginCalls)
+        assertEquals(0, scenario.formFetches)
+        assertEquals("current C", scenario.body)
+        assertEquals("offered D", sheet.state.value.restorableDraft)
+        assertEquals(scenario.request, scenario.pending)
+        assertEquals(setOf(scenario.key), scenario.store.entries.keys)
     }
 
     @Test
@@ -540,7 +569,7 @@ class QuickReplyDurableQuoteTest {
     }
 
     @Test
-    fun `M5 typing under the offer survives process death without overwriting D or serving Q`() = runTest {
+    fun `405 M5 sheet autosaves C in the main row and keeps D in memory until Restore`() = runTest {
         val scenario = Scenario()
         scenario.store.preload(scenario.key, Draft("offered D"))
         scenario.enqueue()
@@ -548,19 +577,67 @@ class QuickReplyDurableQuoteTest {
         sheet.onTextChanged(TextFieldValue("current C"))
         advanceTimeBy(751)
         runCurrent()
-        assertEquals("offered D", scenario.body)
+        assertEquals("current C", scenario.body)
+        assertEquals(setOf(scenario.key), scenario.store.entries.keys)
+        assertEquals("offered D", sheet.state.value.restorableDraft)
         assertEquals(scenario.request, scenario.pending)
-        sheet.viewModelScope.cancel()
-        val restored = scenario.open()
-        runCurrent()
-        assertEquals("current C", restored.state.value.text.text)
-        assertEquals("offered D", restored.state.value.restorableDraft)
         assertEquals(0, scenario.formFetches)
-        restored.onDraftDiscardRequested()
+        sheet.onDraftRestoreRequested()
+        advanceUntilIdle()
+        assertEquals("current C\n\noffered D\n\n[quotemsg=101]quote[/quotemsg]\n", scenario.body)
+        assertNull(sheet.state.value.restorableDraft)
+        assertNull(scenario.pending)
+        assertEquals(0, scenario.posts)
+    }
+
+    @Test
+    fun `405 M5 sheet autosaves C in the main row and keeps D in memory until Ignore`() = runTest {
+        val scenario = Scenario()
+        scenario.store.preload(scenario.key, Draft("offered D"))
+        scenario.enqueue()
+        val sheet = scenario.open()
+        sheet.onTextChanged(TextFieldValue("current C"))
+        advanceTimeBy(751)
+        runCurrent()
+        assertEquals("current C", scenario.body)
+        assertEquals("offered D", sheet.state.value.restorableDraft)
+        assertEquals(scenario.request, scenario.pending)
+        assertEquals(0, scenario.formFetches)
+        scenario.quoteGate = CompletableDeferred()
+        sheet.onDraftDiscardRequested()
+        runCurrent()
+        assertEquals("current C", scenario.body) // Ignore flushes C before the quote GET completes.
+        assertEquals(scenario.request, scenario.pending)
+        assertNull(sheet.state.value.restorableDraft)
+        scenario.quoteGate?.complete(Unit)
         advanceUntilIdle()
         assertEquals("current C\n\n[quotemsg=101]quote[/quotemsg]\n", scenario.body)
         assertNull(scenario.pending)
-        assertFalse(EditorDraftOfferInput.load(scenario.store, scenario.key, "tester", "offered D").isPending)
+        assertEquals(setOf(scenario.key), scenario.store.entries.keys)
+        assertEquals(0, scenario.posts)
+    }
+
+    @Test
+    fun `M5 process recreation reoffers the newer C from the main row and does not recover in-memory D`() = runTest {
+        val scenario = Scenario()
+        scenario.store.preload(scenario.key, Draft("offered D"))
+        scenario.enqueue()
+        val sheet = scenario.open()
+        sheet.onTextChanged(TextFieldValue("current C"))
+        advanceTimeBy(751)
+        runCurrent()
+        sheet.viewModelScope.cancel()
+        val restored = scenario.open()
+        runCurrent()
+        assertEquals("", restored.state.value.text.text)
+        assertEquals("current C", restored.state.value.restorableDraft)
+        assertEquals(scenario.request, scenario.pending)
+        assertEquals(0, scenario.formFetches)
+        restored.onDraftRestoreRequested()
+        advanceUntilIdle()
+        assertEquals("current C\n\n[quotemsg=101]quote[/quotemsg]\n", scenario.body)
+        assertNull(scenario.pending)
+        assertEquals(setOf(scenario.key), scenario.store.entries.keys)
     }
 
     @Test

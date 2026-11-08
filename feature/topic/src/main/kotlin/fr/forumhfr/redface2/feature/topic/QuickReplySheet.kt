@@ -44,6 +44,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -232,7 +233,8 @@ internal fun QuickReplySheet(
 }
 
 @Composable
-private fun QuickReplyHeader(state: QuickReplyUiState, fullScreenLabel: String, onEscalate: () -> Unit) {
+internal fun QuickReplyHeader(state: QuickReplyUiState, fullScreenLabel: String, onEscalate: () -> Unit) {
+    val offerReason = stringResource(R.string.quick_reply_fullscreen_pending_draft)
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
             text = stringResource(R.string.quick_reply_title),
@@ -245,8 +247,11 @@ private fun QuickReplyHeader(state: QuickReplyUiState, fullScreenLabel: String, 
             // Gate #788 — no escalation while a POST is in flight (submit vs navigation
             // race) ; #805 — nor while a [quotemsg] insert is being fetched.
             enabled = !state.isSubmitting && !state.isPreparingQuotes && !state.isDiscardingDraft &&
-                !state.quoteStorageUnavailable,
-            modifier = Modifier.semantics { contentDescription = fullScreenLabel },
+                !state.quoteStorageUnavailable && state.restorableDraft == null,
+            modifier = Modifier.semantics {
+                contentDescription = fullScreenLabel
+                if (state.restorableDraft != null) stateDescription = offerReason
+            },
         ) {
             RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_ms_open_in_new)
         }

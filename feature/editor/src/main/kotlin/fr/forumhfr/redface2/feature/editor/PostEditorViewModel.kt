@@ -17,7 +17,6 @@ import fr.forumhfr.redface2.core.domain.diagnostics.SmileyPickerCloseCause
 import fr.forumhfr.redface2.core.domain.diagnostics.recordImagePickerEvent
 import fr.forumhfr.redface2.core.domain.diagnostics.recordImagesPicked
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
-import fr.forumhfr.redface2.core.domain.editor.EditorDraftOfferInput
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
@@ -73,7 +72,6 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -269,9 +267,6 @@ class PostEditorViewModel @AssistedInject constructor(
     private var draftRestored = false
     private var sharedDraftResumed = false
     private var draftRestoreDiscarding = false
-    private var offerInput: EditorDraftOfferInput? = null
-    private var offerAutosave: Job? = null
-    private var offerInputReadFailed = false
 
     init {
         submission.observePreference(userPreferencesRepository.observeConfirmBeforePosting())
@@ -532,7 +527,6 @@ class PostEditorViewModel @AssistedInject constructor(
         )
         if (result is EditorDraftStore.StoreWriteResult.Written && !submission.drafts.invalidated) {
             submission.resolveDraftWrite(result)
-            clearOfferInput()
             finishInlineQuoteDelivery()
             // Preserve keystrokes made while the CAS was suspended.
             scheduleAutosave()
@@ -553,8 +547,7 @@ class PostEditorViewModel @AssistedInject constructor(
      * the escalation continues the same composition act. With cards OFF (#805 default) the
      * open-time quote form DOES carry a `[quotemsg]` prefill again : this append and the form
      * hydration prepend are commutative, guarded against double-hydration — the original #790
-     * contract, restored. An undecided offer keeps D in this row and its current field in a
-     * separate Room scratch row; it is still offered before any inline delivery.
+     * contract, restored. The sheet requires a decision on its offer before escalation.
      */
     private suspend fun restoreDraftIfAny(reconcile: Boolean = false) {
         // v20 coordinates are deliberately never decoded or imported (ED-132).
@@ -562,12 +555,9 @@ class PostEditorViewModel @AssistedInject constructor(
         _state.update {
             it.copy(legacyQuoteRequestDropped = it.legacyQuoteRequestDropped || legacy?.isNotEmpty() == true)
         }
-        offerAutosave?.cancel()
         if (reconcile) {
-            offerInput = null
             _state.update { it.copy(restorableDraft = null) }
         }
-        offerInputReadFailed = false
         val entry = submission.restore(draftKey.orEmpty())
         if (entry != null && !submission.blocksMutation) {
             if (entry.attempt != null) {
@@ -579,40 +569,29 @@ class PostEditorViewModel @AssistedInject constructor(
         _state.update {
             val unreadable = submission.drafts.hasUnreadableInlineQuoteRequest
             it.copy(
-                quoteStorageUnavailable = !submission.isInitialized || offerInputReadFailed, isLoadingForm = false,
+                quoteStorageUnavailable = !submission.isInitialized, isLoadingForm = false,
                 unreadableQuoteRequest = unreadable,
-                submitError = if (unreadable) EditorErrors.unreadableQuoteRequest else it.submitError,
+                submitError = when {
+                    unreadable -> EditorErrors.unreadableQuoteRequest
+                    it.submitError == EditorErrors.unreadableQuoteRequest -> null
+                    else -> it.submitError
+                },
             )
         }
     }
 
-    @Suppress("ComplexCondition") // Resume vs offer: one clause per reconcile / pending offer / ignored state.
-    private suspend fun restoreOrdinaryDraft(draft: EditorDraftStore.Draft, reconcile: Boolean) {
+    private fun restoreOrdinaryDraft(draft: EditorDraftStore.Draft, reconcile: Boolean) {
         val body = draft.body
         if (body.isBlank()) return
-        val input = try {
-            EditorDraftOfferInput.load(draftStore, checkNotNull(draftKey), submission.drafts.owner, body)
-        } catch (error: IOException) {
-            offerInputReadFailed = true
-            submission.resolveDraftWrite(EditorDraftStore.StoreWriteResult.Failed(error))
-            null
-        }
-        // An undecided sheet offer remains an offer; only its current field was handed off.
-        if (request.resumeSharedDraft && !reconcile && input != null && !input.isPending) {
+        if (request.resumeSharedDraft && !reconcile) {
             resumeSharedDraft(body)
         } else {
             val fingerprint = draft.restoreOfferFingerprint()
             val ignored = savedStateHandle.get<String>(DRAFT_RESTORE_OFFER_FINGERPRINT_KEY) == fingerprint
-            if (reconcile || input?.isPending == true || (!ignored && _state.value.canOfferDraftRestore(body))) {
-                offerInput = input
-                val inputBody = input?.body.orEmpty()
-                _state.update {
-                    val value = if (it.draft.text.isEmpty() && inputBody.isNotEmpty()) {
-                        it.withDraft(TextFieldValue(inputBody, TextRange(inputBody.length)))
-                    } else { it }
-                    value.copy(restorableDraft = body)
-                }
+            val shouldOffer = if (reconcile) _state.value.draft.text != body else {
+                !ignored && _state.value.canOfferDraftRestore(body)
             }
+            if (shouldOffer) _state.update { it.copy(restorableDraft = body) }
         }
     }
 
@@ -648,21 +627,13 @@ class PostEditorViewModel @AssistedInject constructor(
     /** ED-170: CAS autosave clears blank content without deleting any newer generation or marker. */
     private fun scheduleAutosave() {
         if (!draftRestored) return
-        offerAutosave?.cancel()
-        if (_state.value.restorableDraft != null) {
-            val input = offerInput ?: return
-            offerAutosave = viewModelScope.launch {
-                delay(750L)
-                submission.resolveDraftWrite(input.save(_state.value.draft.text))
-            }
-        } else {
-            submission.autosave(::draftSnapshot)
-        }
+        submission.autosave(::draftSnapshot)
     }
 
     private fun draftSnapshot(): EditorDraftStore.Draft? {
         val snapshot = _state.value
-        if (snapshot.restorableDraft != null) return null
+        // #405: C is durable in the main row; the undecided D stays only in restorableDraft.
+        if (snapshot.draft.text.isBlank() && snapshot.restorableDraft != null) return null
         return EditorDraftStore.Draft(body = snapshot.draft.text)
     }
 
@@ -697,17 +668,7 @@ class PostEditorViewModel @AssistedInject constructor(
             // autosave already persisted the rest) while a rethrow would leave the screen
             // unclosable. CancellationException still propagates (scope teardown is not an error).
             try {
-                offerAutosave?.cancel()
-                val input = offerInput
-                if (_state.value.restorableDraft != null && input != null) {
-                    if (_state.value.draft.text.isNotEmpty() || input.isPending) {
-                        submission.resolveDraftWrite(input.save(_state.value.draft.text))
-                    }
-                } else {
-                    if (submission.flush(draftSnapshot()) is EditorDraftStore.StoreWriteResult.Written) {
-                        clearOfferInput()
-                    }
-                }
+                submission.flush(draftSnapshot())
             } catch (e: CancellationException) {
                 throw e
             } catch (_: IOException) {
@@ -789,7 +750,6 @@ class PostEditorViewModel @AssistedInject constructor(
     private fun onDraftRestoreRequested() {
         val snapshot = _state.value
         if (!snapshot.canRestoreDraft || snapshot.isUploading) return
-        offerAutosave?.cancel()
         val offeredBody = snapshot.restorableDraft ?: return
         val seed = snapshot.draftRestoreSeed.orEmpty()
         _state.update { current ->
@@ -806,7 +766,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 .copy(restorableDraft = null, draftHydratedFromForm = true)
         }
         viewModelScope.launch {
-            if (submission.flush(draftSnapshot()) is EditorDraftStore.StoreWriteResult.Written) clearOfferInput()
+            submission.flush(draftSnapshot())
             resumePendingInlineQuotes()
         }
     }
@@ -814,7 +774,6 @@ class PostEditorViewModel @AssistedInject constructor(
     /** Discard only the offered body; retain current typing and the session-owned request. */
     private fun onDraftDiscardRequested() {
         val body = _state.value.restorableDraft ?: return
-        offerAutosave?.cancel()
         draftRestoreDiscarding = true
         _state.update { it.copy(restorableDraft = null) }
         viewModelScope.launch {
@@ -824,7 +783,6 @@ class PostEditorViewModel @AssistedInject constructor(
                     _state.update { it.copy(restorableDraft = body) }
                     return@launch
                 }
-                clearOfferInput()
                 markDraftRestoreOfferIgnored(body)
             } finally {
                 draftRestoreDiscarding = false
@@ -832,13 +790,6 @@ class PostEditorViewModel @AssistedInject constructor(
             // Finish the discard before any insertion/autosave can repopulate the row.
             resumePendingInlineQuotes()
         }
-    }
-
-    private suspend fun clearOfferInput() {
-        val input = offerInput ?: return
-        val cleared = !input.isPending ||
-            input.clear().also(submission::resolveDraftWrite) is EditorDraftStore.StoreWriteResult.Written
-        if (cleared && offerInput === input) offerInput = null
     }
 
     private fun resumePendingInlineQuotes() {

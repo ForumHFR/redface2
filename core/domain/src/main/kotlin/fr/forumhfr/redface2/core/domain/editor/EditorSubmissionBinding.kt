@@ -198,15 +198,11 @@ class EditorSubmissionBinding<E, F>(
 
     /** ED-44 also applies to awaited quote mutations outside persist(). */
     fun resolveDraftWrite(result: StoreWriteResult?) {
-        resolveDraftFailure(result)
-        reportDraftWriteFailure(result)
-    }
-
-    private fun resolveDraftFailure(result: StoreWriteResult?) {
         if (result is StoreWriteResult.Written) {
             pendingDraftFailure = false
             callbacks.clearError(errors.draftSaveFailed)
         }
+        reportDraftWriteFailure(result)
     }
 
     private fun draftSaveFailed() {
@@ -371,11 +367,15 @@ class EditorSubmissionBinding<E, F>(
                     drafts.finish(attempt, outcome)
                 }
                 // Acknowledging an older attempt only changes metadata; it cannot save newer edits.
-                if (attempt == writtenAttempt) resolveDraftFailure(result)
+                // Outcome failures belong to the controller, not the draft-save information.
+                if (attempt == writtenAttempt && result is StoreWriteResult.Written) resolveDraftWrite(result)
                 return result
             }
             override suspend fun erasePublishedContent(attempt: AttemptToken): StoreWriteResult {
-                return drafts.erase(attempt).also(::resolveDraftFailure)
+                return drafts.erase(attempt).also { result ->
+                    // Cleanup failures are diagnosed by the controller; publication already succeeded.
+                    if (result is StoreWriteResult.Written) resolveDraftWrite(result)
+                }
             }
             override fun recordFailure(stage: EditorSubmissionFailure, result: StoreWriteResult) {
                 trace.storageFailure(stage, result)
