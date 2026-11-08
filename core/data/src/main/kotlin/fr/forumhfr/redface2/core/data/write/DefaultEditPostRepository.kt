@@ -72,7 +72,7 @@ class DefaultEditPostRepository @Inject constructor(
                     page = context.page,
                     numreponse = context.numreponse,
                 )
-                replyFormParser.parse(html).fold(
+                replyFormParser.parseEditPost(html).fold(
                     onSuccess = { form ->
                         diagnostics.record(
                             DiagnosticsLog.Level.DEBUG,
