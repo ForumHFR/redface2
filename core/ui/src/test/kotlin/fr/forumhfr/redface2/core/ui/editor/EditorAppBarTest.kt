@@ -2,10 +2,12 @@ package fr.forumhfr.redface2.core.ui.editor
 
 import android.view.View
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
@@ -27,14 +29,17 @@ import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.PlatformTextStyle
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.DpRect
@@ -54,6 +59,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction as Action
 
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -63,7 +69,7 @@ class EditorAppBarTest {
     @get:Rule val compose = createComposeRule()
 
     @Test
-    fun `ED10 rendered 24 plus 20 dp lines fit and 32 plus 32 dp lines hide context at both scales`() {
+    fun `ED10 context is shown only when both rendered lines fit at both scales`() {
         val scale = mutableStateOf(1f)
         val tallLines = mutableStateOf(false)
         compose.setContent {
@@ -72,8 +78,8 @@ class EditorAppBarTest {
                 val preset = if (scale.value == 1f) FontScalePreference.M else FontScalePreference.L
                 RedfaceTheme(reading = ReadingDisplaySettings(fontScale = preset)) {
                     val typography = MaterialTheme.typography
-                    val titleHeight = with(LocalDensity.current) { (if (tallLines.value) 32.dp else 24.dp).toSp() }
-                    val contextHeight = with(LocalDensity.current) { (if (tallLines.value) 32.dp else 20.dp).toSp() }
+                    val titleHeight = with(LocalDensity.current) { (if (tallLines.value) 32.dp else 20.dp).toSp() }
+                    val contextHeight = with(LocalDensity.current) { (if (tallLines.value) 32.dp else 16.dp).toSp() }
                     val lineStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None)
                     MaterialTheme(typography = typography.copy(
                         titleSmall = typography.titleSmall.copy(lineHeight = titleHeight, lineHeightStyle = lineStyle,
@@ -81,23 +87,33 @@ class EditorAppBarTest {
                         labelMedium = typography.labelMedium.copy(lineHeight = contextHeight, lineHeightStyle = lineStyle,
                             platformStyle = PlatformTextStyle(includeFontPadding = false)),
                     )) {
-                        EditorAppBar("Répondre", "Contexte", {}, {}, Modifier.width(360.dp).testTag("bar"))
+                        Column(Modifier.width(360.dp)) {
+                            EditorAppBar("Répondre", "Contexte", {}, {}, Modifier.testTag("bar"))
+                            // Render independently of the bar's height limit and visibility decision.
+                            Text("Répondre", style = MaterialTheme.typography.titleSmall,
+                                maxLines = 1, modifier = Modifier.testTag("reference-title"))
+                            Text("Contexte", style = MaterialTheme.typography.labelMedium,
+                                maxLines = 1, modifier = Modifier.testTag("reference-context"))
+                        }
                     }
                 }
             }
         }
-        // Independent cases: 44 dp fits, 64 dp cannot. Inspect the rendered lines, never remeasure them.
         listOf(1f, 1.3f).forEach { fontScale ->
             listOf(false, true).forEach { tall ->
                 compose.runOnIdle { scale.value = fontScale; tallLines.value = tall }
                 val bar = compose.onNodeWithTag("bar").getUnclippedBoundsInRoot()
                 assertEquals(48f, bar.height.value, 0.5f)
+                val title = compose.onNodeWithTag("reference-title").getUnclippedBoundsInRoot()
+                val context = compose.onNodeWithTag("reference-context").getUnclippedBoundsInRoot()
+                val fits = title.height + context.height <= bar.height
+                assertEquals("Exercise both fitting and overflowing rendered lines at scale $fontScale", !tall, fits)
                 val first = assertRenderedLineFits(EDITOR_APP_BAR_LINE_ONE, bar)
-                assertEquals(if (tall) 32f else 24f, first.height.value, 0.5f)
-                if (tall) compose.onNodeWithTag(EDITOR_APP_BAR_LINE_TWO, true).assertDoesNotExist()
+                assertEquals(title.height.value, first.height.value, 0.5f)
+                if (!fits) compose.onNodeWithTag(EDITOR_APP_BAR_LINE_TWO, true).assertDoesNotExist()
                 else {
                     val second = assertRenderedLineFits(EDITOR_APP_BAR_LINE_TWO, bar)
-                    assertEquals(20f, second.height.value, 0.5f)
+                    assertEquals(context.height.value, second.height.value, 0.5f)
                     assertTrue("Text lines must not overlap", first.bottom <= second.top)
                 }
                 val layout = textLayout(EDITOR_APP_BAR_LINE_ONE)
@@ -172,13 +188,27 @@ class EditorAppBarTest {
             }
         }
         val live = SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite)
-        val ids = compose.onAllNodes(live).fetchSemanticsNodes().map { it.id }
+        // Track PR 2's permanent anchors directly, including while they have no name or action.
+        val ids = compose.onAllNodes(live, useUnmergedTree = true).fetchSemanticsNodes().map { it.id }
         assertEquals(2, ids.size)
         // The second slot arrives first: inserting/removing its neighbour must never change its identity.
         listOf(false to false, false to true, true to true, true to false, false to false).forEach { (a, b) ->
             compose.runOnIdle { first.value = a; second.value = b }
             val visible = listOf(a, b)
-            assertEquals(ids, compose.onAllNodes(live).fetchSemanticsNodes().map { it.id })
+            listOf(false, true).forEach { unmerged ->
+                val nodes = compose.onAllNodes(live, useUnmergedTree = unmerged).fetchSemanticsNodes()
+                assertEquals(ids, nodes.map { it.id })
+                nodes.forEachIndexed { index, node ->
+                    assertFalse("A status must remain a non-merging leaf", node.config.isMergingSemanticsOfDescendants)
+                    if (!visible[index]) {
+                        listOf(SemanticsProperties.ContentDescription, SemanticsProperties.Text,
+                            SemanticsProperties.Focused, SemanticsProperties.Role, SemanticsActions.OnClick,
+                            SemanticsActions.OnLongClick, SemanticsActions.RequestFocus).forEach { property ->
+                            assertFalse("Absent status must not expose $property", node.config.contains(property))
+                        }
+                    }
+                }
+            }
             compose.onAllNodes(hasClickAction()).assertCountEquals(2 + visible.count { it })
             labels.forEachIndexed { index, label ->
                 listOf(false, true).forEach { unmerged ->
@@ -191,11 +221,27 @@ class EditorAppBarTest {
                     assertTrue(info.isVisibleToUser && info.isImportantForAccessibility)
                     assertEquals(if (visible[index]) label else "", info.contentDescription?.toString().orEmpty())
                     assertEquals("Absent states must not add a readable target", visible[index], info.isScreenReaderFocusable)
+                    assertEquals(0, info.childCount)
+                    if (!visible[index]) {
+                        assertFalse(info.isFocusable)
+                        assertTrue(info.actionList.all { it == Action.ACTION_ACCESSIBILITY_FOCUS ||
+                            it == Action.ACTION_CLEAR_ACCESSIBILITY_FOCUS })
+                    }
                 }
                 if (visible[index]) compose.onNodeWithContentDescription(label).performClick()
             }
         }
         assertEquals(4, clicks)
+        compose.runOnIdle { second.value = true }
+        compose.onNodeWithContentDescription(labels[1]).performTouchInput { longClick() }
+        compose.onNodeWithText(labels[1], useUnmergedTree = true).assertIsDisplayed()
+        compose.onAllNodes(isRoot(), useUnmergedTree = true).assertCountEquals(2)
+        compose.runOnIdle { second.value = false }
+        compose.onNodeWithText(labels[1], useUnmergedTree = true).assertDoesNotExist()
+        compose.onAllNodes(isRoot(), useUnmergedTree = true).assertCountEquals(1)
+        assertEquals(ids, compose.onAllNodes(live, useUnmergedTree = true).fetchSemanticsNodes().map { it.id })
+        compose.onAllNodes(hasClickAction()).assertCountEquals(2)
+        compose.onAllNodes(hasContentDescription(labels[1]), useUnmergedTree = true).assertCountEquals(0)
     }
 
     @Test
@@ -267,19 +313,33 @@ class EditorAppBarTest {
             CompositionLocalProvider(LocalDensity provides Density(density.density, 1.3f)) {
                 RedfaceTheme(reading = ReadingDisplaySettings(fontScale = FontScalePreference.L)) {
                     val typography = MaterialTheme.typography
-                    // Two 32 dp lines cannot share the 48 dp app bar, even if 1.3x + L would fit.
+                    // Keep the extra line spacing: default Trim.Both can make two single lines fit.
                     val lineHeight = with(LocalDensity.current) { 32.dp.toSp() }
+                    val lineStyle = LineHeightStyle(LineHeightStyle.Alignment.Center, LineHeightStyle.Trim.None)
                     MaterialTheme(typography = typography.copy(
-                        titleSmall = typography.titleSmall.copy(lineHeight = lineHeight),
-                        labelMedium = typography.labelMedium.copy(lineHeight = lineHeight),
+                        titleSmall = typography.titleSmall.copy(lineHeight = lineHeight, lineHeightStyle = lineStyle,
+                            platformStyle = PlatformTextStyle(includeFontPadding = false)),
+                        labelMedium = typography.labelMedium.copy(lineHeight = lineHeight, lineHeightStyle = lineStyle,
+                            platformStyle = PlatformTextStyle(includeFontPadding = false)),
                     )) {
-                        EditorAppBar("Nouveau MP", "Alice et Bob", { closes++ }, { previews++ },
-                            onOpenHeader = { headers++ }, closeEnabled = closeEnabled.value,
-                            headerActionLabel = stringResource(R.string.editor_app_bar_open_message_header))
+                        Column {
+                            EditorAppBar("Nouveau MP", "Alice et Bob", { closes++ }, { previews++ },
+                                Modifier.testTag("bar"), onOpenHeader = { headers++ }, closeEnabled = closeEnabled.value,
+                                headerActionLabel = stringResource(R.string.editor_app_bar_open_message_header))
+                            Text("Nouveau MP", style = MaterialTheme.typography.titleSmall,
+                                maxLines = 1, modifier = Modifier.testTag("reference-title"))
+                            Text("Alice et Bob", style = MaterialTheme.typography.labelMedium,
+                                maxLines = 1, modifier = Modifier.testTag("reference-context"))
+                        }
                     }
                 }
             }
         }
+        val bar = compose.onNodeWithTag("bar").getUnclippedBoundsInRoot()
+        val title = compose.onNodeWithTag("reference-title").getUnclippedBoundsInRoot()
+        val context = compose.onNodeWithTag("reference-context").getUnclippedBoundsInRoot()
+        assertTrue("The rendered lines must exceed the app bar height", title.height + context.height > bar.height)
+        assertRenderedLineFits(EDITOR_APP_BAR_LINE_ONE, bar)
         compose.onNodeWithTag(EDITOR_APP_BAR_LINE_TWO, true).assertDoesNotExist()
         compose.onNodeWithTag(EDITOR_APP_BAR_TITLE)
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
