@@ -1,6 +1,5 @@
 package fr.forumhfr.redface2.feature.editor
 
-import androidx.compose.ui.text.input.TextFieldValue
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -20,7 +19,7 @@ class PostEditorStateTest {
             numreponse = null,
             page = 1,
             subcat = subcat,
-            draft = TextFieldValue("Hello!"),
+            bodyText = "Hello!",
             isUploading = isUploading,
         )
 

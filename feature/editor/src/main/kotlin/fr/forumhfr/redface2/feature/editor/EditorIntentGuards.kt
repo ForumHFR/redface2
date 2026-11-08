@@ -12,6 +12,15 @@ internal val PostEditorIntent.mutatesEditor: Boolean
         else -> true
     }
 
+/** Upload callbacks alone may insert a body while an upload is in flight. */
+internal val PostEditorIntent.mutatesBody: Boolean
+    get() = when (this) {
+        is PostEditorIntent.ToolbarActionClicked, is PostEditorIntent.SmileySelected,
+        is PostEditorIntent.ImageUrlInserted, is PostEditorIntent.ImagePicked,
+        is PostEditorIntent.ImagesPicked, PostEditorIntent.DraftRestoreRequested -> true
+        else -> false
+    }
+
 internal val TopicFormIntent.mutatesEditor: Boolean
     get() = when (this) {
         is TopicFormIntent.SubmitClicked, is TopicFormIntent.SubmitConfirmed,

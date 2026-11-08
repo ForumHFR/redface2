@@ -1,6 +1,5 @@
 package fr.forumhfr.redface2.feature.editor
 
-import androidx.compose.ui.text.input.TextFieldValue
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
@@ -11,7 +10,6 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
  * surface ; quote / edit / create-topic surface in #146 / #147 / #148 / #149.
  */
 sealed interface PostEditorIntent {
-    data class ContentChanged(val value: TextFieldValue) : PostEditorIntent
     data class ToolbarActionClicked(val action: BbcodeAction) : PostEditorIntent
     data object TogglePreview : PostEditorIntent
 

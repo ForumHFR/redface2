@@ -308,7 +308,6 @@ data class PostEditorState(
 )
 
 sealed interface PostEditorIntent {
-    data class ContentChanged(val value: TextFieldValue) : PostEditorIntent
     data class ToolbarActionClicked(val action: BbcodeAction) : PostEditorIntent
     data object TogglePreview : PostEditorIntent
     data object SubmitClicked : PostEditorIntent       // Phase 2C (Reply / Quote) + Phase 2D (Edit)

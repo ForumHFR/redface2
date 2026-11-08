@@ -44,6 +44,8 @@ class EditorSubmitCallbackRestorationTest {
             PostEditorState(PostEditorMode.Reply, 23, 35421, null, 2, 401),
         )
         every { model.effects } returns effects.receiveAsFlow()
+        every { model.bodyFieldState } returns TextFieldState()
+        every { model.bodyInputTransformation } returns InputTransformation {}
         val received = mutableListOf<PostEditorEffect.SubmitSucceeded>()
         restoration.setContent {
             val owner = rememberSubmitAccount(account.value)
