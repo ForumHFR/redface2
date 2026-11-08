@@ -550,7 +550,8 @@ class PostEditorViewModel @AssistedInject constructor(
                     loadedForm = form
                     smileyPicker.refreshFavorites(favoriteStamp)
                     if (!acceptMutation(blockDuringUpload = true)) {
-                        inlineQuoteDeferredByUpload = insertInline && _state.value.isUploading && !submission.blocksMutation
+                        inlineQuoteDeferredByUpload =
+                            insertInline && _state.value.isUploading && !submission.blocksMutation
                         _state.update { it.copy(isLoadingForm = false) }
                         return@fold
                     }
@@ -1118,7 +1119,11 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     /** Pure metadata reduction; refetches preserve the live field and the user's option choices. */
-    private fun PostEditorState.withFormHydration(form: ReplyForm, hydrate: Boolean, liveBody: String): PostEditorState {
+    private fun PostEditorState.withFormHydration(
+        form: ReplyForm,
+        hydrate: Boolean,
+        liveBody: String,
+    ): PostEditorState {
         if (this@PostEditorViewModel.submission.blocksMutation) return copy(isLoadingForm = false)
         val hydrateOptions = !optionsHydratedFromForm
         return copy(

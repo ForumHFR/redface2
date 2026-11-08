@@ -256,7 +256,9 @@ class PostEditorViewModelTest {
 
     @Test
     fun selectionDisarmsWithoutAutosaveOrBodyEdit() = runTest {
-        val vm = newEditViewModel(userPreferencesRepository = FakeUserPreferencesRepository(confirmBeforePosting = true))
+        val vm = newEditViewModel(
+            userPreferencesRepository = FakeUserPreferencesRepository(confirmBeforePosting = true),
+        )
         vm.submit(PostEditorIntent.SubmitClicked())
         assertNotNull(vm.state.value.armToken)
         val saves = draftStore.saveCount
@@ -366,6 +368,7 @@ class PostEditorViewModelTest {
         assertTrue(lateEditHydrationIsUndoable(typedThenErased = true))
     }
 
+    @OptIn(ExperimentalFoundationApi::class)
     private fun lateEditHydrationIsUndoable(typedThenErased: Boolean): Boolean {
         val gate = CompletableDeferred<Unit>()
         editPostRepository.formGate = gate
@@ -2633,7 +2636,11 @@ class PostEditorViewModelTest {
             val state = expectMostRecentItem()
             val expected = "photo: [img]https://rehost.diberie.com/Picture/Get/f/42[/img]"
             assertEquals("img token inserted at the caret on success", expected, state.bodyText)
-            assertEquals("caret lands after the inserted token", expected.length, viewModel.bodyFieldState.selection.start)
+            assertEquals(
+                "caret lands after the inserted token",
+                expected.length,
+                viewModel.bodyFieldState.selection.start,
+            )
             assertFalse("upload flag cleared on success", state.isUploading)
             assertNull("no error on success", state.uploadError)
             cancelAndIgnoreRemainingEvents()

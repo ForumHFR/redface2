@@ -130,6 +130,7 @@ fun PostEditorScreen(
 }
 
 @Composable
+@Suppress("LongParameterList") // Live body and its synchronous guard accompany the UI projection.
 internal fun PostEditorContent(
     state: PostEditorState,
     bodyFieldState: TextFieldState,

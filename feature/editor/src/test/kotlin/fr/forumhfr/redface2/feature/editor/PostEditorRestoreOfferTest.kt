@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.editor
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.text.TextRange
@@ -238,6 +239,7 @@ class PostEditorRestoreOfferTest {
     }
 
     @Test
+    @OptIn(ExperimentalFoundationApi::class)
     fun restoreEmitsOneBodyMutationWithCollapsedCaretForEveryRule() = runTest(dispatcher) {
         for ((mode, live, expected) in listOf(
             Triple(PostEditorMode.Edit, SEED, OFFER),

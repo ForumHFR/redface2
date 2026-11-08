@@ -117,6 +117,7 @@ class PostEditorInputTest {
     }
 
     @Test
+    @OptIn(ExperimentalFoundationApi::class)
     fun selectionOnlyDisarmsLikeAnyFieldInteractionAndAddsNoHistory() {
         setFieldContent(confirmBeforePosting = true, editing = true)
         compose.runOnIdle {
