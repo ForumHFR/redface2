@@ -26,12 +26,14 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         private set
     var hasUnreadableInlineQuoteRequest = false
         private set
+    private var unreadableVersion: Long? = null
     var invalidated = false
         private set
 
     suspend fun load(): DraftEntry? {
         readable = false
         hasUnreadableInlineQuoteRequest = false
+        unreadableVersion = null
         val entry = try {
             owner = store.currentOwner()
             key?.let { store.loadEntry(owner, it) }
@@ -39,6 +41,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
             // Only an unreadable inline request seals the session until a reload.
             readable = false
             hasUnreadableInlineQuoteRequest = true
+            unreadableVersion = error.contentVersion
             throw error
         } catch (error: IOException) {
             // Preserve the ordinary best-effort restore contract. Versioned writes still guard the row.
@@ -105,11 +108,12 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
     /** The raw row stays sealed until this explicit abandonment succeeds and the binding reloads. */
     suspend fun discardUnreadableInlineQuoteRequest(): StoreWriteResult = writes.withLock {
         withContext(NonCancellable) {
-            if (!hasUnreadableInlineQuoteRequest || invalidated || key == null) {
+            val expectedVersion = unreadableVersion
+            if (!hasUnreadableInlineQuoteRequest || invalidated || key == null || expectedVersion == null) {
                 StoreWriteResult.Conflict
             } else {
                 try {
-                    store.discardUnreadableInlineQuoteRequest(owner, key)
+                    store.discardUnreadableInlineQuoteRequest(owner, key, expectedVersion)
                 } catch (error: IOException) {
                     StoreWriteResult.Failed(error)
                 }

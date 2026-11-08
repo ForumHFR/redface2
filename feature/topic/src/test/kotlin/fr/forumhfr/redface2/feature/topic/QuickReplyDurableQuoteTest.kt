@@ -308,6 +308,34 @@ class QuickReplyDurableQuoteTest {
     }
 
     @Test
+    fun `sheet Q consumed elsewhere during GET then Conflict and Reload clears request and unlocks send`() = runTest {
+        val scenario = Scenario()
+        scenario.enqueue()
+        scenario.quoteGate = CompletableDeferred()
+        val sheet = scenario.open()
+        sheet.onTextChanged(TextFieldValue("typed during GET"))
+        val other = EditorDraftSession(scenario.store, scenario.key)
+        other.load()
+        assertTrue(other.consumeInlineQuoteRequest(scenario.request) is StoreWriteResult.Written)
+        scenario.quoteGate?.complete(Unit)
+        runCurrent()
+        val current = sheet.state.value.text
+        assertEquals("typed during GET\n\n[quotemsg=101]quote[/quotemsg]\n", current.text)
+        assertTrue(sheet.state.value.quoteStorageUnavailable)
+        assertFalse(sheet.state.value.canSubmit)
+        sheet.onQuoteReloadRequested()
+        runCurrent()
+        assertTrue(sheet.state.value.pendingQuotes.isEmpty())
+        assertEquals(current, sheet.state.value.text)
+        assertFalse(sheet.state.value.quoteStorageUnavailable)
+        assertNull(sheet.state.value.submitError)
+        assertTrue(sheet.state.value.canSubmit)
+        assertNull(scenario.pending)
+        assertEquals(listOf(101), scenario.fetches)
+        assertEquals(0, scenario.posts)
+    }
+
+    @Test
     fun `typing while the committed delivery returns cannot restore the consumed request`() = runTest {
         val scenario = Scenario()
         scenario.enqueue()
@@ -554,18 +582,54 @@ class QuickReplyDurableQuoteTest {
     }
 
     @Test
+    fun `rotation under an undecided offer after autosave retains C D and Q without GET or escalation`() = runTest {
+        val scenario = Scenario()
+        scenario.store.preload(scenario.key, Draft("offered D"))
+        scenario.enqueue()
+        val sheet = scenario.open()
+        sheet.onTextChanged(TextFieldValue("current C"))
+        advanceTimeBy(751)
+        runCurrent()
+        val reads = scenario.store.loadCalls
+        val writes = scenario.store.writes
+        // Rotation remounts the sheet with the retained navigation-entry ViewModel.
+        sheet.onSheetAttached(currentPage = 1, initialQuotes = emptyList(), restored = true)
+        runCurrent()
+        assertEquals(reads, scenario.store.loadCalls)
+        assertEquals(writes, scenario.store.writes)
+        assertEquals("current C", sheet.state.value.text.text)
+        assertEquals("current C", scenario.body)
+        assertEquals("offered D", sheet.state.value.restorableDraft)
+        assertEquals(scenario.request, scenario.pending)
+        assertEquals(listOf(101), sheet.state.value.pendingQuotes.map { it.numreponse })
+        val effect = async { sheet.effects.first() }
+        sheet.onEscalateRequested()
+        runCurrent()
+        assertFalse(effect.isCompleted)
+        effect.cancel()
+        assertEquals(writes, scenario.store.writes)
+        assertEquals(0, scenario.formFetches)
+        assertEquals(0, scenario.posts)
+    }
+
+    @Test
     fun `M4 initial draft read remains loading and reload cannot start a second restore`() = runTest {
         val scenario = Scenario()
         val gate = CompletableDeferred<Unit>()
         scenario.store.loadGate = gate
         val sheet = scenario.open()
         assertTrue(sheet.state.value.isLoadingDraft)
+        val reads = scenario.store.loadCalls
+        assertTrue(reads > 0)
         sheet.onQuoteReloadRequested()
+        runCurrent()
+        assertEquals(reads, scenario.store.loadCalls)
         assertTrue(sheet.state.value.isLoadingDraft)
         gate.complete(Unit)
         runCurrent()
         assertFalse(sheet.state.value.isLoadingDraft)
         assertFalse(sheet.state.value.quoteStorageUnavailable)
+        assertEquals(reads, scenario.store.loadCalls)
     }
 
     @Test

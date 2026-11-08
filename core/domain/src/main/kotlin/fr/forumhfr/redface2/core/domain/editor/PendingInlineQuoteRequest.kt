@@ -38,5 +38,8 @@ class PendingInlineQuoteRequest(val cat: Int, val topicId: Int, quotes: List<Quo
     }
 }
 
-/** A corrupt/unknown durable request must never be mistaken for an absent draft. */
-class UnreadableInlineQuoteRequestException : IOException("Invalid pending inline quote request")
+/** A corrupt/unknown request seals the row; storage attaches the observed revision for explicit discard. */
+class UnreadableInlineQuoteRequestException(
+    val contentVersion: Long? = null,
+    cause: UnreadableInlineQuoteRequestException? = null,
+) : IOException("Invalid pending inline quote request", cause)

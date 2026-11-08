@@ -566,14 +566,23 @@ class PostEditorViewModel @AssistedInject constructor(
                 restoreOrdinaryDraft(entry.draft, reconcile)
             }
         }
+        val pending = submission.drafts.pendingInlineQuoteRequest
+        val requestResolved = submission.isInitialized && pending == null
+        if (requestResolved) savedStateHandle[QUOTE_FAILURES_KEY] = 0
         _state.update {
             val unreadable = submission.drafts.hasUnreadableInlineQuoteRequest
             it.copy(
                 quoteStorageUnavailable = !submission.isInitialized, isLoadingForm = false,
                 unreadableQuoteRequest = unreadable,
+                // A successful Room reread is authoritative, including a request consumed elsewhere.
+                pendingQuotes = if (submission.isInitialized) pending?.quotes?.map { quote ->
+                    QuoteSelection(QuoteLocator(quote.page, quote.numreponse, quote.ref), "", "", quote.truncate)
+                }.orEmpty() else it.pendingQuotes,
+                quoteFetchFailures = if (requestResolved) 0 else it.quoteFetchFailures,
                 submitError = when {
                     unreadable -> EditorErrors.unreadableQuoteRequest
                     it.submitError == EditorErrors.unreadableQuoteRequest -> null
+                    requestResolved && it.submitError?.cause == EditorCause.QuoteFetchFailed -> null
                     else -> it.submitError
                 },
             )

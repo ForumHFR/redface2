@@ -585,6 +585,55 @@ class PendingQuoteHandoffTest {
     }
 
     @Test
+    fun `Ignore offer then escalate opens the real post with Q still pending until delivery`() = runTest {
+        val scenario = Scenario()
+        scenario.drafts.preload(scenario.key, Draft("offered D"))
+        scenario.enqueue()
+        val sheet = scenario.sheet()
+        sheet.onSheetOpened()
+        sheet.onTextChanged(TextFieldValue("current C"))
+        advanceTimeBy(751)
+        runCurrent()
+        assertEquals("offered D", sheet.state.value.restorableDraft)
+        assertTrue(scenario.fetchedQuotes.isEmpty())
+        // The quote fetch fails after Ignore, leaving the durable request available for escalation.
+        scenario.quoteAvailable = false
+        sheet.onDraftDiscardRequested()
+        advanceUntilIdle()
+        assertNull(sheet.state.value.restorableDraft)
+        assertEquals("current C", scenario.body)
+        assertEquals(scenario.request, scenario.pending)
+        sheet.onEscalateRequested()
+        runCurrent()
+        val handoff = sheet.effects.first() as QuickReplyEffect.EscalateToFullEditor
+        assertTrue(handoff.quotes.isEmpty())
+        val writes = scenario.drafts.writes
+        sheet.onDismissed()
+        runCurrent()
+        assertEquals(writes, scenario.drafts.writes)
+        assertEquals(scenario.request, scenario.pending)
+        scenario.quoteAvailable = true
+        scenario.quoteGate = CompletableDeferred()
+        val editor = scenario.editor(cards = handoff.quotes)
+        runCurrent()
+        assertEquals("current C", editor.state.value.draft.text)
+        assertNull(editor.state.value.restorableDraft)
+        assertEquals(listOf(101), editor.state.value.pendingQuotes.map { it.numreponse })
+        assertEquals(scenario.request, scenario.pending)
+        assertFalse(editor.state.value.canSubmit)
+        scenario.quoteGate?.complete(Unit)
+        advanceUntilIdle()
+        assertEquals("[quotemsg=101]quote[/quotemsg]\n\ncurrent C", editor.state.value.draft.text)
+        assertEquals(editor.state.value.draft.text, scenario.body)
+        assertNull(scenario.pending)
+        assertTrue(editor.state.value.pendingQuotes.isEmpty())
+        assertEquals(listOf(101, 101), scenario.fetchedQuotes)
+        scenario.noPost()
+        editor.viewModelScope.cancel()
+        sheet.viewModelScope.cancel()
+    }
+
+    @Test
     fun `card escalation keeps the previews in memory and creates no durable request`() = runTest {
         val scenario = Scenario()
         val cards = listOf(QuoteSelection(QuoteLocator(1, 101, null), "alice", "preview"))

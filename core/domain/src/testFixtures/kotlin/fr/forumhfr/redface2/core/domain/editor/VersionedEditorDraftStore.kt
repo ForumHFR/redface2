@@ -40,6 +40,8 @@ open class VersionedEditorDraftStore : EditorDraftStore {
         private set
     var finishCalls = 0
         private set
+    var loadCalls = 0
+        private set
 
     fun preload(key: String, draft: Draft) { entries[key] = DraftEntry(draft, 0) }
 
@@ -65,7 +67,13 @@ open class VersionedEditorDraftStore : EditorDraftStore {
     override suspend fun load(owner: String?, key: String): Draft? =
         loadEntry(owner, key)?.takeUnless { it.attempt?.status == AttemptStatus.PUBLISHED }?.draft
     override suspend fun loadEntry(owner: String?, key: String): DraftEntry? {
-        loadFailure?.let { throw it }
+        loadCalls++
+        loadFailure?.let {
+            if (it is UnreadableInlineQuoteRequestException) {
+                throw UnreadableInlineQuoteRequestException(entries[key]?.version, it)
+            }
+            throw it
+        }
         loadGate?.await()
         return entries[key].takeIf { owner != null && owner == activeOwner }
     }
@@ -178,11 +186,14 @@ open class VersionedEditorDraftStore : EditorDraftStore {
         }
     }
 
-    @Suppress("ReturnCount") // Guards (owner / injected failure / missing row) + the written tail.
-    override suspend fun discardUnreadableInlineQuoteRequest(owner: String?, key: String): StoreWriteResult {
+    @Suppress("ReturnCount") // Guards (owner / injected failure / row revision) + the written tail.
+    override suspend fun discardUnreadableInlineQuoteRequest(
+        owner: String?, key: String, expectedVersion: Long,
+    ): StoreWriteResult {
         if (owner == null || owner != activeOwner) return StoreWriteResult.OwnerChanged
         saveFailure?.let { return StoreWriteResult.Failed(it) }
         val entry = entries[key] ?: return StoreWriteResult.Conflict
+        if (entry.version != expectedVersion) return StoreWriteResult.Conflict
         entries[key] = entry.copy(
             draft = entry.draft.copy(pendingInlineQuoteRequest = null), version = entry.version + 1,
         )

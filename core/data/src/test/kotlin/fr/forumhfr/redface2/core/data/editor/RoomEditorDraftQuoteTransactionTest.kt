@@ -12,6 +12,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.BeginAttemptResu
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.Draft
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.StoreWriteResult
 import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
+import fr.forumhfr.redface2.core.domain.editor.UnreadableInlineQuoteRequestException
 import fr.forumhfr.redface2.core.model.AuthState
 import io.mockk.every
 import io.mockk.mockk
@@ -293,7 +294,7 @@ class RoomEditorDraftQuoteTransactionTest {
         dao.upsert(raw)
         assertTrue(runCatching { store.loadEntry("alice", key) }.isFailure)
         assertEquals(StoreWriteResult.Written(raw.contentVersion + 1),
-            store.discardUnreadableInlineQuoteRequest("alice", key))
+            store.discardUnreadableInlineQuoteRequest("alice", key, raw.contentVersion))
         assertEquals(raw.copy(pendingInlineQuoteRequest = null, contentVersion = raw.contentVersion + 1),
             dao.get("alice|$key"))
         val reopened = checkNotNull(store.loadEntry("alice", key))
@@ -307,13 +308,43 @@ class RoomEditorDraftQuoteTransactionTest {
         val dao = database.editorDraftDao()
         val raw = checkNotNull(dao.get("alice|$key")).copy(pendingInlineQuoteRequest = "unreadable")
         dao.upsert(raw)
-        assertEquals(StoreWriteResult.OwnerChanged, store.discardUnreadableInlineQuoteRequest("bob", key))
+        assertEquals(StoreWriteResult.OwnerChanged,
+            store.discardUnreadableInlineQuoteRequest("bob", key, raw.contentVersion))
         database.openHelper.writableDatabase.execSQL(
             """CREATE TRIGGER reject_raw_discard BEFORE UPDATE ON editor_drafts
                 BEGIN SELECT RAISE(ABORT, 'disk failure'); END""".trimIndent(),
         )
-        assertTrue(store.discardUnreadableInlineQuoteRequest("alice", key) is StoreWriteResult.Failed)
+        assertTrue(
+            store.discardUnreadableInlineQuoteRequest("alice", key, raw.contentVersion) is StoreWriteResult.Failed,
+        )
         assertEquals(raw, dao.get("alice|$key"))
+    }
+
+    @Test
+    fun `unreadable row replaced by Q2 before Ignore preserves Q2 and requires a reload`() = runTest {
+        store.enqueueInlineQuoteRequest("alice", key, request, 0)
+        val dao = database.editorDraftDao()
+        val raw = checkNotNull(dao.get("alice|$key")).copy(pendingInlineQuoteRequest = "unreadable")
+        dao.upsert(raw)
+        val stale = EditorDraftSession(store, key)
+        val failure = runCatching { stale.load() }.exceptionOrNull()
+        assertTrue(failure is UnreadableInlineQuoteRequestException)
+        assertEquals(raw.contentVersion, (failure as UnreadableInlineQuoteRequestException).contentVersion)
+        // Another session repairs the row and records a new explicit quote action.
+        dao.upsert(raw.copy(pendingInlineQuoteRequest = null, contentVersion = raw.contentVersion + 1))
+        val other = EditorDraftSession(newStore(), key)
+        other.load()
+        val q2 = PendingInlineQuoteRequest(23, 35421, listOf(PendingInlineQuoteRequest.Quote(202, 2)))
+        assertTrue(other.enqueueInlineQuoteRequest(q2) is StoreWriteResult.Written)
+        val replacement = dao.get("alice|$key")
+        assertEquals(StoreWriteResult.Conflict, stale.discardUnreadableInlineQuoteRequest())
+        assertEquals(replacement, dao.get("alice|$key"))
+        assertTrue(stale.hasUnreadableInlineQuoteRequest)
+        stale.load()
+        assertEquals(q2, stale.pendingInlineQuoteRequest)
+        assertFalse(stale.hasUnreadableInlineQuoteRequest)
+        assertEquals(StoreWriteResult.Conflict, stale.discardUnreadableInlineQuoteRequest())
+        assertEquals(replacement, dao.get("alice|$key"))
     }
 
     @Test

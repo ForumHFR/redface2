@@ -15,6 +15,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.Draft
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.DraftEntry
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.StoreWriteResult
 import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
+import fr.forumhfr.redface2.core.domain.editor.UnreadableInlineQuoteRequestException
 import fr.forumhfr.redface2.core.model.AuthState
 import java.io.IOException
 import java.time.Clock
@@ -58,7 +59,12 @@ class RoomEditorDraftStore @Inject constructor(
                     AttemptStatus.valueOf(checkNotNull(entity.attemptState)),
                 )
             }
-            DraftEntry(entity.toDraft(key), entity.contentVersion, attempt)
+            val draft = try {
+                entity.toDraft(key)
+            } catch (error: UnreadableInlineQuoteRequestException) {
+                throw UnreadableInlineQuoteRequestException(entity.contentVersion, error)
+            }
+            DraftEntry(draft, entity.contentVersion, attempt)
         }
     }
 
@@ -162,10 +168,13 @@ class RoomEditorDraftStore @Inject constructor(
         editorDraftDao.mutateInlineQuoteRequest(next, previous).result(next.contentVersion)
     }
 
-    override suspend fun discardUnreadableInlineQuoteRequest(owner: String?, key: String): StoreWriteResult =
+    override suspend fun discardUnreadableInlineQuoteRequest(
+        owner: String?, key: String, expectedVersion: Long,
+    ): StoreWriteResult =
         write(owner) {
             val previous = editorDraftDao.get(rowKey(checkNotNull(owner), key))
                 ?: return@write StoreWriteResult.Conflict
+            if (previous.contentVersion != expectedVersion) return@write StoreWriteResult.Conflict
             // No decoding: preserve even unknown payloads until the user explicitly discards them.
             val next = previous.copy(
                 pendingInlineQuoteRequest = null,
