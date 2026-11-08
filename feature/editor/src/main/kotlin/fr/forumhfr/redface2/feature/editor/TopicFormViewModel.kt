@@ -314,6 +314,12 @@ class TopicFormViewModel @AssistedInject constructor(
         }
         viewModelScope.launch {
             restoreDraftIfAny()
+            // The body mirror may have consumed user input while the initial draft read was suspended.
+            // Retry user edits before loading the form; an automatic attempt restore must not resave itself.
+            if (bodyEditedBeforeHydration && bodyFieldState.text.isNotBlank() &&
+                _state.value.restorableDraft == null) {
+                scheduleAutosave()
+            }
             when (request.mode) {
                 TopicFormMode.EditFirstPost -> loadEditFirstPostFormIfPossible()
                 TopicFormMode.New -> loadNewTopicFormIfPossible()
@@ -500,37 +506,43 @@ class TopicFormViewModel @AssistedInject constructor(
     }
 
     /**
-     * Replace a blank field or the untouched seed (a blank suffix counts as untouched), keep text typed after the
-     * seed after the draft, or append the draft after the trimmed field otherwise.
+     * Preserve the live body for a title-only offer. Otherwise replace a blank field or the untouched seed
+     * (a blank suffix counts as untouched), keep text typed after the seed after the draft, or append the
+     * draft after the trimmed field otherwise.
      * Same rule as the post editor and the private message editors (R0c, #1512 / #1553).
      */
     private fun onDraftRestoreRequested() {
         val snapshot = _state.value
         if (snapshot.isLoadingForm) return
         val offeredBody = snapshot.restorableDraft ?: return
-        val liveBody = bodyFieldState.text.toString()
-        val seed = snapshot.draftHydratedContent
-        val typedAfterSeed = liveBody.takeIf { seed.isNotEmpty() && it.startsWith(seed) }?.substring(seed.length)
-        val body = when {
-            liveBody.isBlank() || liveBody == offeredBody || liveBody == seed -> offeredBody
-            typedAfterSeed != null && typedAfterSeed.isBlank() -> offeredBody
-            typedAfterSeed != null -> offeredBody + "\n\n" + typedAfterSeed.trimStart()
-            else -> liveBody.trimEnd() + "\n\n" + offeredBody
-        }
-        replaceBody(body)
+        val body = restoredBody(bodyFieldState.text.toString(), offeredBody, snapshot.draftHydratedContent)
+        // A title-only offer leaves the body (and its caret) alone; any other restore is one edit, caret at the end.
+        if (offeredBody.isNotBlank()) replaceBody(body)
         _state.update { current ->
-            // A live subject wins; a title-only offer keeps the identical-body shortcut above.
+            // A live subject wins, including for a title-only offer.
             val subject = current.subject.text.ifBlank { current.restorableSubject.orEmpty() }
             current.copy(
                 subject = TextFieldValue(text = subject, selection = TextRange(subject.length)),
                 restorableDraft = null,
                 restorableSubject = null,
-                draftHydratedFromServer = true,
+                draftHydratedFromServer = current.draftHydratedFromServer || body.isNotBlank(),
                 // A blank title after a restore (offline form failure) stays open to the server title on reload.
                 subjectHydratedFromServer = current.subjectHydratedFromServer || subject.isNotBlank(),
             )
         }
         scheduleAutosave()
+    }
+
+    /** ED-89 body rule, extracted from [onDraftRestoreRequested] to keep it under the detekt complexity threshold. */
+    private fun restoredBody(liveBody: String, offeredBody: String, seed: String): String {
+        val typedAfterSeed = liveBody.takeIf { seed.isNotEmpty() && it.startsWith(seed) }?.substring(seed.length)
+        return when {
+            offeredBody.isBlank() -> liveBody
+            liveBody.isBlank() || liveBody == offeredBody || liveBody == seed -> offeredBody
+            typedAfterSeed != null && typedAfterSeed.isBlank() -> offeredBody
+            typedAfterSeed != null -> offeredBody + "\n\n" + typedAfterSeed.trimStart()
+            else -> liveBody.trimEnd() + "\n\n" + offeredBody
+        }
     }
 
     /** Explicit restore/hydration is one undoable edit, independent of the current selection. */

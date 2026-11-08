@@ -1413,7 +1413,7 @@ class TopicFormViewModelTest {
     }
 
     @Test
-    fun restoreIdenticalBodyKeepsTitleOnlyShortcut() = runTest {
+    fun restoreIdenticalOfferedBodyRestoresTitleWithoutDuplication() = runTest {
         topicFormRepository.formResult = topicFormRepository.formResult.copy(subject = "", initialContent = "seed")
         draftStore.preload(
             EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE),
@@ -1432,16 +1432,65 @@ class TopicFormViewModelTest {
         topicFormRepository.formResult = topicFormRepository.formResult.copy(
             subject = "live title", initialContent = "seed",
         )
-        draftStore.preload(
-            EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE),
-            EditorDraftStore.Draft(body = "seed", subject = "stored title"),
-        )
-        val vm = newViewModel()
-        assertEquals("seed", vm.state.value.restorableDraft)
-        vm.submit(TopicFormIntent.DraftRestoreRequested)
-        assertEquals("seed", vm.bodyFieldState.text.toString())
-        assertEquals("live title", vm.state.value.subject.text)
-        assertNull(vm.state.value.restorableDraft)
+        for (offeredBody in listOf("", "   ")) {
+            draftStore = FakeEditorDraftStore()
+            draftStore.preload(
+                EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE),
+                EditorDraftStore.Draft(body = offeredBody, subject = "stored title"),
+            )
+            val vm = newViewModel()
+            vm.editBody(TextFieldValue("seed", TextRange(1, 3)))
+            assertEquals(offeredBody, vm.state.value.restorableDraft)
+            vm.submit(TopicFormIntent.DraftRestoreRequested)
+            assertEquals("seed", vm.bodyFieldState.text.toString())
+            assertEquals(TextRange(1, 3), vm.bodyFieldState.selection)
+            assertEquals("live title", vm.state.value.subject.text)
+            assertNull(vm.state.value.restorableDraft)
+            vm.viewModelScope.cancel()
+        }
+    }
+
+    @Test
+    @OptIn(ExperimentalFoundationApi::class)
+    fun titleOnlyRestoreAfterHydrationKeepsBodyAndSingleUndoInBothModes() = runTest {
+        topicFormRepository.formResult = topicFormRepository.formResult.copy(subject = "", initialContent = "seed")
+        for (creating in listOf(false, true)) {
+            for (offeredBody in listOf("", "   ")) {
+                draftStore = FakeEditorDraftStore()
+                val key = if (creating) {
+                    EditorDraftKey.newTopic(SAMPLE_CAT)
+                } else {
+                    EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE)
+                }
+                draftStore.preload(key, EditorDraftStore.Draft(body = offeredBody, subject = "restored title"))
+                val vm = if (creating) newTopicViewModel(entrySubcat = SAMPLE_SUBCAT) else newViewModel()
+                val seed = if (creating) "" else "seed"
+                assertFalse(vm.state.value.isLoadingForm)
+                assertTrue(vm.state.value.draftHydratedFromServer)
+                assertEquals(seed, vm.bodyFieldState.text.toString())
+                assertEquals(offeredBody, vm.state.value.restorableDraft)
+                assertFalse(vm.bodyFieldState.undoState.canUndo)
+                val typed = TextFieldValue("$seed suffix", TextRange(1, 3))
+                vm.editBody(typed)
+                assertTrue(vm.bodyFieldState.undoState.canUndo)
+
+                vm.submit(TopicFormIntent.DraftRestoreRequested)
+                syncBody()
+                assertEquals(typed.text, vm.bodyFieldState.text.toString())
+                assertEquals(typed.selection, vm.bodyFieldState.selection)
+                assertEquals(seed, vm.state.value.draftHydratedContent)
+                assertTrue(vm.state.value.draftHydratedFromServer)
+                assertEquals("restored title", vm.state.value.subject.text)
+                assertNull(vm.state.value.restorableDraft)
+                assertNull(vm.state.value.restorableSubject)
+                assertTrue(vm.bodyFieldState.undoState.canUndo)
+                vm.bodyFieldState.undoState.undo()
+                assertEquals(seed, vm.bodyFieldState.text.toString())
+                assertEquals(TextRange(seed.length), vm.bodyFieldState.selection)
+                assertFalse(vm.bodyFieldState.undoState.canUndo)
+                vm.viewModelScope.cancel()
+            }
+        }
     }
 
     @Test
@@ -1564,20 +1613,71 @@ class TopicFormViewModelTest {
         syncBody()
         assertEquals("D", vm.bodyFieldState.text.toString())
         assertEquals("", vm.state.value.draftHydratedContent)
+        assertTrue(vm.state.value.draftHydratedFromServer)
         assertNull(vm.state.value.restorableDraft)
         assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
 
-        // Restoring after a failure is a decision: the reloaded form hydrates the blank title, never the body.
+        // The restore decision survives erasure: only the blank title may hydrate on reload.
+        vm.editBody(TextFieldValue(""))
+        assertEquals("", vm.bodyFieldState.text.toString())
         topicFormRepository.formFailure = null
         vm.submit(TopicFormIntent.ReloadRequested)
         syncBody()
         testScheduler.advanceUntilIdle()
         assertFalse(vm.state.value.isLoadingForm)
         assertNull(vm.state.value.submitError)
-        assertEquals("D", vm.bodyFieldState.text.toString())
+        assertEquals("", vm.bodyFieldState.text.toString())
         assertEquals("", vm.state.value.draftHydratedContent)
+        assertTrue(vm.state.value.draftHydratedFromServer)
         assertEquals("Sample first post title", vm.state.value.subject.text)
         assertNull(vm.state.value.restorableDraft)
+    }
+
+    @Test
+    fun titleOnlyRestoreAfterFormFailurePreservesHydrationPolicyInBothModes() = runTest {
+        for (creating in listOf(false, true)) {
+            for (offeredBody in listOf("", "   ")) {
+                topicFormRepository.formFailure = java.io.IOException("offline")
+                draftStore = FakeEditorDraftStore()
+                val key = if (creating) {
+                    EditorDraftKey.newTopic(SAMPLE_CAT)
+                } else {
+                    EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE)
+                }
+                draftStore.preload(key, EditorDraftStore.Draft(body = offeredBody, subject = "restored title"))
+                val vm = if (creating) newTopicViewModel(entrySubcat = SAMPLE_SUBCAT) else newViewModel()
+                assertFalse(vm.state.value.isLoadingForm)
+                assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
+                assertEquals(offeredBody, vm.state.value.restorableDraft)
+                assertEquals("", vm.bodyFieldState.text.toString())
+                // New topics start with hydration disabled; edit-first-post still awaits its server body.
+                assertEquals(creating, vm.state.value.draftHydratedFromServer)
+
+                vm.submit(TopicFormIntent.DraftRestoreRequested)
+                syncBody()
+                assertEquals("restored title", vm.state.value.subject.text)
+                assertEquals("", vm.bodyFieldState.text.toString())
+                assertEquals(TextRange(0), vm.bodyFieldState.selection)
+                assertEquals("", vm.state.value.draftHydratedContent)
+                assertEquals(creating, vm.state.value.draftHydratedFromServer)
+                assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
+                assertNull(vm.state.value.restorableDraft)
+                assertNull(vm.state.value.restorableSubject)
+
+                topicFormRepository.formFailure = null
+                vm.submit(TopicFormIntent.ReloadRequested)
+                syncBody()
+                testScheduler.advanceUntilIdle()
+                val expectedBody = if (creating) "" else topicFormRepository.formResult.initialContent
+                assertEquals(expectedBody, vm.bodyFieldState.text.toString())
+                assertEquals(expectedBody, vm.state.value.draftHydratedContent)
+                assertTrue(vm.state.value.draftHydratedFromServer)
+                assertEquals("restored title", vm.state.value.subject.text)
+                assertFalse(vm.state.value.isLoadingForm)
+                assertNull(vm.state.value.submitError)
+                vm.viewModelScope.cancel()
+            }
+        }
     }
 
     @Test
@@ -1595,6 +1695,40 @@ class TopicFormViewModelTest {
         assertNull(vm.state.value.restorableDraft)
         assertEquals("typed before load", vm.bodyFieldState.text.toString())
         assertEquals("", vm.state.value.draftHydratedContent)
+    }
+
+    @Test
+    fun typingConsumedBeforeInitialDraftReadCompletesIsAutosavedInBothModes() = runTest {
+        for (creating in listOf(false, true)) {
+            val gate = CompletableDeferred<Unit>()
+            draftStore = FakeEditorDraftStore().apply { loadGate = gate }
+            val key = if (creating) {
+                EditorDraftKey.newTopic(SAMPLE_CAT)
+            } else {
+                EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE)
+            }
+            draftStore.preload(key, EditorDraftStore.Draft(body = "stored body", subject = "stored title"))
+            val vm = if (creating) newTopicViewModel(entrySubcat = SAMPLE_SUBCAT) else newViewModel()
+            assertEquals(1, draftStore.loadCalls)
+            vm.editBody(TextFieldValue("typed before load"))
+            syncBody()
+            // The mirror already advanced previousBody, but the submission binding is not initialized yet.
+            assertEquals("typed before load", vm.state.value.bodyText)
+            assertFalse(gate.isCompleted)
+            assertEquals(0, draftStore.saveCount)
+            assertEquals("stored body", draftStore.saved[key]?.body)
+
+            gate.complete(Unit)
+            syncBody()
+            assertNull(vm.state.value.restorableDraft)
+            assertEquals("typed before load", vm.bodyFieldState.text.toString())
+            assertEquals("", vm.state.value.draftHydratedContent)
+            testScheduler.advanceTimeBy(800)
+            testScheduler.runCurrent()
+            assertEquals("typed before load", draftStore.saved[key]?.body)
+            assertEquals(1, draftStore.saveCount)
+            vm.viewModelScope.cancel()
+        }
     }
 
     @Test
