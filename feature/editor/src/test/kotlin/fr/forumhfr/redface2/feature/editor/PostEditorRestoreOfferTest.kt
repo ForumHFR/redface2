@@ -92,6 +92,18 @@ class PostEditorRestoreOfferTest {
     }
 
     @Test
+    fun draftRereadRemovesQuoteFailureKeyWhenResettingCounter() = runTest(dispatcher) {
+        val key = "postEditor.quoteFailures"
+        val saved = SavedStateHandle(mapOf(key to 2))
+        val editor = open(saved = saved)
+        assertEquals(2, editor.state.value.quoteFetchFailures)
+        runCurrent()
+        assertEquals(0, editor.state.value.quoteFetchFailures)
+        assertFalse(saved.contains(key))
+        assertEquals(0, open(saved = saved).state.value.quoteFetchFailures)
+    }
+
+    @Test
     fun restoreKeepsTextTypedAfterSeed() = runTest(dispatcher) {
         val editor = open()
         runCurrent()

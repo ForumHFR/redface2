@@ -324,7 +324,7 @@ class PostEditorViewModel @AssistedInject constructor(
             })
             if (!_state.value.hasDormantQuote) loadReplyFormWithInlineQuotes(_state.value.pendingQuotes)
         } else {
-            savedStateHandle[QUOTE_FAILURES_KEY] = 0
+            savedStateHandle.remove<Int>(QUOTE_FAILURES_KEY)
             _state.update { it.copy(quoteFetchFailures = 0) }
             loadReplyFormIfPossible()
         }
@@ -438,7 +438,7 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     private fun finishInlineQuoteDelivery() {
-        savedStateHandle[QUOTE_FAILURES_KEY] = 0
+        savedStateHandle.remove<Int>(QUOTE_FAILURES_KEY)
         _state.update {
             it.copy(
                 pendingQuotes = emptyList(), quoteFetchFailures = 0, isLoadingForm = false,
@@ -569,7 +569,7 @@ class PostEditorViewModel @AssistedInject constructor(
         }
         val pending = submission.drafts.pendingInlineQuoteRequest
         val requestResolved = submission.isInitialized && pending == null
-        if (requestResolved) savedStateHandle[QUOTE_FAILURES_KEY] = 0
+        if (requestResolved) savedStateHandle.remove<Int>(QUOTE_FAILURES_KEY)
         _state.update {
             val unreadable = submission.drafts.hasUnreadableInlineQuoteRequest
             it.copy(
