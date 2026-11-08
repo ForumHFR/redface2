@@ -1,0 +1,10 @@
+<resources>
+    <string name="editor_bar_image">Image</string>
+    <string name="editor_bar_upload">Uploader une image</string>
+    <string name="editor_bar_image_url">Insérer par URL</string>
+    <string name="editor_bar_image_selection">Baliser la sélection en [img]</string>
+    <string name="editor_bar_send">Envoyer</string>
+    <string name="editor_bar_confirm">Confirmer</string>
+    <string name="editor_bar_armed">Confirmation requise</string>
+    <string name="editor_bar_unarmed">Prêt à envoyer</string>
+</resources>

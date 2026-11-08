@@ -1,0 +1,237 @@
+package fr.forumhfr.redface2.core.ui.editor
+
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertHasNoClickAction
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
+import androidx.compose.ui.text.TextRange
+import fr.forumhfr.redface2.core.ui.R
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+@OptIn(ExperimentalTestApi::class)
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34], qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
+class EditorActionBarTest {
+    @get:Rule val compose = createComposeRule()
+    private val host = EditorActionBarFixture()
+    private fun click(label: String) = compose.onNodeWithContentDescription(label).performClick()
+
+    @Test
+    fun `ED20 ED21 ED22 ED27 opening and scrolling preserve selection and commands use keep`() {
+        compose.setContent { host.Content() }
+        click("Mise en forme")
+        compose.onNodeWithContentDescription("Mise en forme").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Développé"))
+        compose.runOnIdle { assertEquals(TextRange(3, 8), host.body.selection) }
+        compose.onNodeWithContentDescription("Lien").performScrollTo()
+        compose.runOnIdle { assertEquals(TextRange(3, 8), host.body.selection); assertTrue(host.calls.isEmpty()) }
+        click("Gras")
+        compose.runOnIdle {
+            assertEquals("Un [b]texte[/b] choisi", host.body.text.toString())
+            assertEquals(TextRange(6, 11), host.body.selection)
+            assertEquals(EditorBarMode.Format, host.bar.value.mode)
+        }
+        listOf("Gras", "Italique", "Souligné", "Barré", "Citation", "Code", "Bloc fixé", "Spoiler", "Lien")
+            .forEach { name ->
+                val node = compose.onNodeWithContentDescription(name).performScrollTo()
+                node.assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Selected)).performClick()
+            }
+        assertEquals(10, host.calls.count { it == "bbcode" })
+    }
+
+    @Test
+    fun `ED23 ED26 ED90 ED93 keyboard insertion returns focus and fifty keystrokes never send`() {
+        host.bar.value = EditorBarState(EditorBarMode.Format)
+        compose.setContent { host.Content() }
+        compose.runOnIdle { assertTrue(host.inputMode.requestInputMode(InputMode.Keyboard)) }
+        compose.onNodeWithContentDescription("Gras").requestFocus().performKeyInput { pressKey(Key.Enter) }
+        compose.onNodeWithTag("body").assertIsFocused()
+        val geometry = compose.onNodeWithTag("bar").getUnclippedBoundsInRoot()
+        repeat(50) { compose.onNodeWithTag("body").performTextInput("a") }
+        assertEquals(geometry, compose.onNodeWithTag("bar").getUnclippedBoundsInRoot())
+        compose.onNodeWithTag("body").performKeyInput { pressKey(Key.Tab) }
+        compose.onNodeWithContentDescription("Mise en forme").assertIsFocused()
+            .performKeyInput { pressKey(Key.Tab) }
+        compose.onNodeWithContentDescription("Gras").assertIsFocused().performKeyInput {
+            keyDown(Key.ShiftLeft); pressKey(Key.Tab); keyUp(Key.ShiftLeft)
+        }
+        compose.onNodeWithContentDescription("Mise en forme").assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(EditorBarMode.Format, host.bar.value.mode)
+            assertEquals(listOf("bbcode"), host.calls)
+        }
+    }
+
+    @Test
+    fun `ED24 ED85 color and image return one level and color inserts without opening a surface`() {
+        compose.setContent { host.Content() }
+        click("Mise en forme"); click("Couleur")
+        click("Retour")
+        assertEquals(EditorBarMode.Format, host.bar.value.mode)
+        click("Couleur")
+        click("Bleu")
+        assertEquals(EditorBarMode.Format, host.bar.value.mode)
+        assertTrue(host.body.text.contains("[#0000FF]texte[/#0000FF]"))
+        click("Mise en forme"); click("Image"); click("Retour")
+        assertEquals(EditorBarMode.Normal, host.bar.value.mode)
+        assertEquals(listOf("bbcode"), host.calls)
+    }
+
+    @Test
+    fun `ED31 image capabilities keep upload URL and MP tags distinct and close the level`() {
+        compose.setContent { host.Content() }
+        click("Image"); click("Uploader une image")
+        assertEquals(EditorBarMode.Normal, host.bar.value.mode)
+        assertEquals(listOf("upload"), host.calls)
+        // No picker result is synthesized by the bar, including after the host closes the picker.
+        assertTrue(host.eventActions.isEmpty())
+        compose.onNodeWithTag("body").assertExists()
+        click("Image"); click("Insérer par URL")
+        assertEquals(EditorBarMode.Normal, host.bar.value.mode)
+        compose.onNodeWithContentDescription("Baliser la sélection en [img]").assertDoesNotExist()
+        compose.runOnIdle { host.imageUrl.value = false }
+        click("Image")
+        compose.onNodeWithContentDescription("Insérer par URL").assertDoesNotExist()
+        click("Baliser la sélection en [img]")
+        assertEquals(EditorBarMode.Normal, host.bar.value.mode)
+        assertEquals("Un [img]texte[/img] choisi", host.body.text.toString())
+        assertEquals(listOf("upload", "url", "bbcode"), host.calls)
+    }
+
+    @Test
+    fun `ED23 opening a surface closes format and arm masking restores the stored mode`() {
+        host.compact.value = true
+        host.width.value = androidx.compose.ui.unit.Dp(760f)
+        compose.setContent { host.Content() }
+        click("Mise en forme"); click("Afficher l’aperçu")
+        assertEquals(EditorBarMode.Normal, host.bar.value.mode)
+        compose.runOnIdle { host.bar.value = EditorBarState(EditorBarMode.Format, host.arm) }
+        compose.onNodeWithContentDescription("Gras").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Mise en forme").assertDoesNotExist()
+        compose.onNodeWithText("Confirmer").assertExists()
+        compose.runOnIdle { host.bar.value = host.bar.value.copy(arm = null) }
+        compose.onNodeWithContentDescription("Gras").assertExists()
+        assertFalse(host.calls.contains("disarm"))
+    }
+
+    @Test
+    fun `ED38 shortcut is third only in normal mode and does not own a preference`() {
+        host.shortcut.value = EditorBarShortcut(R.drawable.ic_editor_bold, "Gras", { host.calls += "shortcut" })
+        compose.setContent { host.Content() }
+        click("Gras")
+        assertEquals(listOf("shortcut"), host.calls)
+        click("Mise en forme")
+        click("Gras")
+        assertEquals(listOf("shortcut", "bbcode"), host.calls)
+        compose.runOnIdle { host.bar.value = EditorBarState(arm = host.arm) }
+        compose.onNodeWithContentDescription("Gras").assertDoesNotExist()
+        compose.runOnIdle { host.bar.value = EditorBarState(); host.uploading.value = true }
+        compose.onNodeWithContentDescription("Gras").assertIsNotEnabled()
+        compose.onNodeWithContentDescription("Mise en forme").assertIsNotEnabled()
+    }
+
+    @Test
+    fun `ED40 ED45 ED95 terminal gesture dispatches its exact key once without opening Options`() {
+        val terminal = host.finished()
+        host.event.value = terminal
+        compose.setContent { host.Content() }
+        compose.onNodeWithContentDescription("Options").assertDoesNotExist()
+        compose.onNode(hasClickAction() and hasContentDescription("3 images insérées, Masquer"))
+            .performTouchInput { click() }
+        compose.onNodeWithContentDescription("Options").assertExists()
+        assertEquals(listOf(terminal.key to EditorEventAction.Dismiss), host.eventActions)
+        assertTrue(host.calls.isEmpty())
+    }
+
+    @Test
+    fun `ED40 ED44 information consumes Send before any arming validation or submission`() {
+        host.event.value = controlEvent(EditorEventContent.Information(EditorText(R.string.editor_event_already_quoted)))
+        val key = host.event.value!!.key
+        compose.setContent { host.Content() }
+        compose.onNodeWithText("Envoyer").performTouchInput { click() }
+        assertTrue(host.calls.isEmpty())
+        assertEquals(listOf(key to EditorEventAction.Dismiss), host.eventActions)
+        compose.onNodeWithText("Envoyer").performTouchInput { click() }
+        assertEquals(listOf("send"), host.calls)
+    }
+
+    @Test
+    fun `ED23 ED40 ED41 ED82 acknowledging an event restores format and its selection`() {
+        host.bar.value = EditorBarState(EditorBarMode.Format)
+        compose.setContent { host.Content() }
+        val geometry = compose.onNodeWithTag("bar").getUnclippedBoundsInRoot()
+        compose.runOnIdle {
+            host.event.value = controlEvent(EditorEventContent.Information(EditorText(R.string.editor_event_already_quoted)))
+        }
+        compose.onNodeWithContentDescription("Gras").assertDoesNotExist()
+        compose.onNode(hasClickAction() and hasContentDescription("Déjà citée, Masquer")).performTouchInput { click() }
+        compose.onNodeWithContentDescription("Gras").assertExists()
+        assertEquals(EditorBarMode.Format, host.bar.value.mode)
+        assertEquals(TextRange(3, 8), host.body.selection)
+        assertEquals(geometry, compose.onNodeWithTag("bar").getUnclippedBoundsInRoot())
+        assertTrue(host.calls.isEmpty())
+    }
+
+    @Test
+    fun `ED40 ED45 complete details and dismiss never dispatch a tool or a remedy`() {
+        compose.setContent { host.Content() }
+        listOf(EditorErrors.missingTitle to "Titre manquant, Compléter",
+            EditorErrors.network to "Hors connexion, Afficher les détails").forEach { (error, label) ->
+            val event = controlEvent(EditorEventContent.Problem(error))
+            compose.runOnIdle { host.event.value = event }
+            compose.onNode(hasClickAction() and hasContentDescription(label)).performTouchInput { click() }
+            assertEquals(event.key to event.action, host.eventActions.last())
+            compose.onNodeWithContentDescription("Options").assertExists()
+            assertTrue(host.calls.isEmpty())
+        }
+        assertEquals(2, host.eventActions.size)
+    }
+
+    @Test
+    fun `ED40 ED46 progress is non actionable under an error and form load creates no event`() {
+        host.loading.value = true
+        compose.setContent { host.Content() }
+        compose.onNodeWithTag("editor-bar-progress").assertExists()
+        compose.onNodeWithContentDescription("Mise en forme").assertExists()
+        compose.onNodeWithText("Envoyer").assertIsNotEnabled()
+        compose.runOnIdle {
+            host.loading.value = false; host.uploading.value = true; host.progress.value = UploadProgress(1, 3)
+            host.event.value = controlEvent(EditorEventContent.Problem(EditorErrors.network))
+        }
+        compose.onNodeWithTag("editor-bar-progress").assertHasNoClickAction()
+        compose.onNodeWithText("Envoyer").assertIsNotEnabled()
+        compose.onNodeWithContentDescription("Options").assertDoesNotExist()
+        compose.runOnIdle { host.event.value = controlEvent(EditorEventContent.InProgress(uploadText(2))) }
+        compose.onAllNodes(hasClickAction()).assertCountEquals(1) // disabled Send only
+        compose.onNodeWithContentDescription("Image 2/3…").assertHasNoClickAction()
+        assertTrue(host.calls.isEmpty())
+    }
+}
