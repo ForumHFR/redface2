@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -27,7 +29,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -89,7 +90,8 @@ fun PrivateMessageReplyScreen(
         // #618 — auto-open the recipient-manager sheet when entered from the Participants sheet.
         autoOpenRecipientManager = request.openRecipientManager,
         onBack = viewModel::onCloseRequested,
-        onContentChanged = viewModel::onContentChanged,
+        bodyFieldState = viewModel.bodyFieldState,
+        bodyInputTransformation = viewModel.bodyInputTransformation,
         onToolbarAction = viewModel::onToolbarAction,
         onTogglePreview = viewModel::onTogglePreview,
         onToggleSignature = viewModel::onToggleSignature,
@@ -114,11 +116,12 @@ fun PrivateMessageReplyScreen(
 
 @Composable
 @Suppress("LongParameterList") // One callback per editor action — each is wired to a distinct VM method.
-private fun PrivateMessageReplyContent(
+internal fun PrivateMessageReplyContent(
     state: PrivateMessageReplyUiState,
     autoOpenRecipientManager: Boolean,
     onBack: () -> Unit,
-    onContentChanged: (TextFieldValue) -> Unit,
+    bodyFieldState: TextFieldState,
+    bodyInputTransformation: InputTransformation,
     onToolbarAction: (BbcodeAction) -> Unit,
     onTogglePreview: () -> Unit,
     onToggleSignature: (Boolean) -> Unit,
@@ -158,13 +161,15 @@ private fun PrivateMessageReplyContent(
     Surface(modifier = modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
             MessageEditorHeader(title = stringResource(R.string.messages_reply_title), onBack = onBack)
+            ReplyRestoreOfferOverForm(state = state, onRestore = onDraftRestore, onDiscard = onDraftDiscard)
             when {
                 state.formError -> MessageFormErrorState(onRetry = onRetryFormLoad)
                 state.isLoadingForm && !state.formAvailable -> MessageFormLoadingState()
                 else -> {
                     ReplyEditorBody(
                         state = state,
-                        onContentChanged = onContentChanged,
+                        bodyFieldState = bodyFieldState,
+                        bodyInputTransformation = bodyInputTransformation,
                         onToolbarAction = onToolbarAction,
                         onTogglePreview = onTogglePreview,
                         onErrorDismissed = onErrorDismissed,
@@ -232,7 +237,8 @@ private fun PrivateMessageReplyContent(
 @Suppress("LongParameterList") // Editor body mirrors the post editor surface; each callback is distinct.
 internal fun ReplyEditorBody(
     state: PrivateMessageReplyUiState,
-    onContentChanged: (TextFieldValue) -> Unit,
+    bodyFieldState: TextFieldState,
+    bodyInputTransformation: InputTransformation,
     onToolbarAction: (BbcodeAction) -> Unit,
     onTogglePreview: () -> Unit,
     onErrorDismissed: () -> Unit,
@@ -272,7 +278,11 @@ internal fun ReplyEditorBody(
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 if (state.restorableDraft != null) {
-                    MessageDraftRestoreBanner(onRestore = onDraftRestore, onDiscard = onDraftDiscard)
+                    MessageDraftRestoreBanner(
+                        onRestore = onDraftRestore,
+                        onDiscard = onDraftDiscard,
+                        restoreEnabled = !state.isUploading && !state.isLoadingForm,
+                    )
                 }
 
                 state.submitError?.let { error ->
@@ -341,8 +351,8 @@ internal fun ReplyEditorBody(
             }
 
             BbcodeTextField(
-                value = state.draft,
-                onValueChange = onContentChanged,
+                state = bodyFieldState,
+                inputTransformation = bodyInputTransformation,
                 label = stringResource(R.string.messages_reply_field_label),
                 placeholder = stringResource(R.string.messages_reply_field_placeholder),
                 modifier = Modifier.weight(1f),
@@ -350,5 +360,25 @@ internal fun ReplyEditorBody(
                 readOnly = state.isUploading || state.submission.blocksBodyMutation,
             )
         }
+    }
+}
+
+/** Keep the offer visible while the form replaces the editor, including an offline failure. */
+private val PrivateMessageReplyUiState.restoreOfferReplacesEditor: Boolean
+    get() = restorableDraft != null && (formError || isLoadingForm && !formAvailable)
+
+@Composable
+private fun ReplyRestoreOfferOverForm(
+    state: PrivateMessageReplyUiState,
+    onRestore: () -> Unit,
+    onDiscard: () -> Unit,
+) {
+    if (!state.restoreOfferReplacesEditor) return
+    Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+        MessageDraftRestoreBanner(
+            onRestore = onRestore,
+            onDiscard = onDiscard,
+            restoreEnabled = !state.isUploading && !state.isLoadingForm,
+        )
     }
 }
