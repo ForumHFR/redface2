@@ -22,7 +22,8 @@ La mise à jour des références reste un enregistrement explicite dans l'enviro
 épinglé, pour un changement visuel voulu, avec relecture des PNG avant/après dans la PR.
 La CI ne régénère jamais les références. Le mode opératoire canonique est dans
 [contributing.md]({{ site.baseurl }}/guides/contributing#tests).
-L'activation nécessite encore l'enregistrement initial sur box et les preuves de garde/répétabilité.
+Références initiales enregistrées et garde prouvée sur box le 8 novembre 2026 (#1571) ; tout
+assouplissement de tolérance exige d'abord la répétabilité sur une seconde box et en CI.
 Cette évolution remplace le report du gate CI et des références versionnées décidé initialement.
 
 ## Contexte

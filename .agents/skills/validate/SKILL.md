@@ -61,8 +61,8 @@ Itératif (modules touchés seulement, plus rapide) :
   Relire les PNG **avant/après dans la PR**, puis relancer la validation en verify ; `/roborazzi`
   détaille la procédure. L'enregistrement initial des six modules et les preuves de garde sont
   documentés dans `docs/guides/contributing.md` § « Rendu visuel (Roborazzi) ».
-- Le wrapper local `~/bin/rf2-validate` est hors dépôt : y ajouter
-  `verifyRoborazziDebug -Proborazzi.mode=verify` à l'invocation des tests et propager son échec.
+- Le wrapper local `~/bin/rf2-validate` (hors dépôt) n'a rien à ajouter : verify étant le mode par
+  défaut, ses `testDebugUnitTest` comparent déjà les six modules aux références.
 - Ne jamais conclure « vert » sans avoir lu `BUILD SUCCESSFUL` / `BUILD FAILED` dans le log (un `; echo "$?"` en arrière-plan masque l'exit code de Gradle).
 
 ## Format de sortie

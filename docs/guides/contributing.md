@@ -311,10 +311,10 @@ expose `CompareOptions(changeThreshold, imageComparator)`. Le plugin amont n'est
 ./scripts/docker-dev.sh ./gradlew verifyRoborazziDebug -Proborazzi.mode=verify --rerun-tasks
 ```
 
-À l'introduction de la garde, l'orchestrateur doit encore enregistrer les références sur box,
-relire les PNG et prouver : référence absente → échec ; changement visuel sans mise à jour → échec
-avec diff ; références approuvées → succès. Répéter avec le cache activé, puis sur une seconde box
-et en CI pour établir la répétabilité avant tout assouplissement de tolérance.
+Garde prouvée à son introduction (#1571, box socadisc, image Docker épinglée) : référence absente →
+échec ; un pixel changé sans mise à jour → échec avec diff ; références approuvées → succès, sur deux
+passes identiques. Toute proposition d'assouplir la tolérance doit d'abord montrer la répétabilité sur
+une seconde box et en CI.
 
 **Smoke test mensuel HFR (fin de phase de lecture) :**
 
