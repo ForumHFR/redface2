@@ -117,7 +117,9 @@ class EditorBaselineRoborazziTest {
                     SmileyPickerController(scope = scope, searchWiki = { _, _ -> emptyList() })
                 }
                 PostEditorContent(
-                    bodyFieldState = remember { TextFieldState(draft.text) },
+                    bodyFieldState = remember(scenario) {
+                        TextFieldState(initialText = draft.text, initialSelection = draft.selection)
+                    },
                     bodyInputTransformation = null,
                     state = PostEditorState(
                         mode = PostEditorMode.Reply,
