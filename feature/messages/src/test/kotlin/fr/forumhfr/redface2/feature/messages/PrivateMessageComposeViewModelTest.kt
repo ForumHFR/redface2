@@ -1360,6 +1360,27 @@ class PrivateMessageComposeViewModelTest {
     }
 
     @Test
+    fun routingOnlyRestoreKeepsLiveBodyAndCaret() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        draftStore.preload(
+            EditorDraftKey.mpCompose(),
+            EditorDraftStore.Draft(body = "", subject = "subject", recipients = "alice", isPrivate = true),
+        )
+        val vm = viewModel(repository)
+        assertEquals("", vm.state.value.restorableDraft)
+        vm.bodyFieldState.edit {
+            append("typed")
+            selection = TextRange(2)
+        }
+        vm.onDraftRestoreRequested()
+        assertEquals("typed", vm.bodyFieldState.text.toString())
+        assertEquals(TextRange(2), vm.bodyFieldState.selection)
+        assertEquals("subject", vm.state.value.subject)
+        assertNull(vm.state.value.restorableDraft)
+    }
+
+    @Test
     fun delayedDraftOfferDoesNotOverwriteLiveTyping() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchComposeForm(any()) } returns composeForm()
