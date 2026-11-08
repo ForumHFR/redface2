@@ -22,6 +22,7 @@ import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 
 /** Insertions have no selected state. Only the Format mode trigger supplies [expanded]. */
 @Composable
+@Suppress("LongParameterList") // Icon + label + click, then Compose modifier and two defaulted states.
 fun EditorActionIcon(
     @DrawableRes iconRes: Int,
     label: String,
