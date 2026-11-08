@@ -179,7 +179,8 @@ class EditorActionBarTest {
 
     @Test
     fun `ED40 ED44 information consumes Send before any arming validation or submission`() {
-        host.event.value = controlEvent(EditorEventContent.Information(EditorText(R.string.editor_event_already_quoted)))
+        host.event.value = controlEvent(
+            EditorEventContent.Information(EditorText(R.string.editor_event_already_quoted)))
         val key = host.event.value!!.key
         compose.setContent { host.Content() }
         compose.onNodeWithText("Envoyer").performTouchInput { click() }
@@ -195,7 +196,8 @@ class EditorActionBarTest {
         compose.setContent { host.Content() }
         val geometry = compose.onNodeWithTag("bar").getUnclippedBoundsInRoot()
         compose.runOnIdle {
-            host.event.value = controlEvent(EditorEventContent.Information(EditorText(R.string.editor_event_already_quoted)))
+            host.event.value = controlEvent(
+                EditorEventContent.Information(EditorText(R.string.editor_event_already_quoted)))
         }
         compose.onNodeWithContentDescription("Gras").assertDoesNotExist()
         compose.onNode(hasClickAction() and hasContentDescription("Déjà citée, Masquer")).performTouchInput { click() }
