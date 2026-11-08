@@ -73,7 +73,9 @@ class EditorControlLayoutTest {
             )
         } + (2..10).flatMap { total ->
             (0 until total).map { completed ->
-                EditorEventContent.Problem(EditorErrors.stopped(EditorErrors.tooLarge, UploadProgress(completed, total)))
+                EditorEventContent.Problem(
+                    EditorErrors.stopped(EditorErrors.tooLarge, UploadProgress(completed, total)),
+                )
             }
         }
         listOf(56.dp, 48.dp).forEach { injectedHeight ->
