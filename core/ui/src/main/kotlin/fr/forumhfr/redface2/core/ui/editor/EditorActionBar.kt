@@ -86,9 +86,8 @@ fun EditorActionBar(
     loadingForm: Boolean = false,
 ) {
     require(statuses.size <= 2)
-    val armed = submitState.armed || state.arm != null
-    val buttonState = submitState.copy(armed = armed, armToken = state.arm ?: submitState.armToken,
-        enabled = submitState.enabled && !uploading && !loadingForm && !submitState.showProgress)
+    val buttonState = editorBarSubmitState(state, submitState, uploading, loadingForm)
+    val armed = buttonState.armed
     val mode = if (armed) EditorBarMode.Normal else state.visibleMode
     val height = EditorChromeMetrics(compactHeight).actionBarHeight
     val normalScroll = rememberScrollState()
@@ -120,21 +119,16 @@ fun EditorActionBar(
             previewVisible, controlsEnabled, external)
     }
     val format: @Composable () -> Unit = {
-        val expanded = mode == EditorBarMode.Format
-        EditorBarIcon(R.drawable.ic_editor_format, stringResource(R.string.editor_format),
-            { actions.onGesture(EditorBarGesture.ToggleFormat) }, Modifier.clip(MaterialTheme.shapes.small)
-                .background(if (expanded) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
-                .semantics { selected = expanded }, enabled = enabled, expanded = expanded)
+        EditorBarFormatToggle(mode == EditorBarMode.Format, enabled) {
+            actions.onGesture(EditorBarGesture.ToggleFormat)
+        }
     }
     Surface(modifier.fillMaxWidth().height(height), color = MaterialTheme.colorScheme.surfaceContainer) {
         Box {
             EditorBarEnvelope(height, compactHeight, onOpenHeader != null, statusWidths, mode, event,
                 submit = {
                     EditorBarSubmit(buttonState, submitActions) {
-                        val information = event?.content is EditorEventContent.Information ||
-                            (event?.content as? EditorEventContent.Problem)?.error?.errorClass == EditorErrorClass.Information
-                        if (information && event != null) actions.onEvent(event.key, EditorEventAction.Dismiss)
-                        information
+                        consumeEditorBarInformation(event, actions.onEvent)
                     }
                 },
                 content = { allocation ->
@@ -147,6 +141,35 @@ fun EditorActionBar(
                 Modifier.align(Alignment.TopStart))
         }
     }
+}
+
+private fun editorBarSubmitState(
+    state: EditorBarState,
+    submit: ArmedSubmitState,
+    uploading: Boolean,
+    loadingForm: Boolean,
+): ArmedSubmitState = submit.copy(
+    armed = submit.armed || state.arm != null,
+    armToken = state.arm ?: submit.armToken,
+    enabled = submit.enabled && !uploading && !loadingForm && !submit.showProgress,
+)
+
+private fun consumeEditorBarInformation(
+    event: EditorEvent?,
+    onEvent: (EventKey, EditorEventAction) -> Unit,
+): Boolean {
+    val information = event?.content is EditorEventContent.Information ||
+        (event?.content as? EditorEventContent.Problem)?.error?.errorClass == EditorErrorClass.Information
+    if (information && event != null) onEvent(event.key, EditorEventAction.Dismiss)
+    return information
+}
+
+@Composable
+private fun EditorBarFormatToggle(expanded: Boolean, enabled: Boolean, onToggle: () -> Unit) {
+    EditorBarIcon(R.drawable.ic_editor_format, stringResource(R.string.editor_format), onToggle,
+        Modifier.clip(MaterialTheme.shapes.small)
+            .background(if (expanded) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+            .semantics { selected = expanded }, enabled = enabled, expanded = expanded)
 }
 
 @Composable

@@ -79,13 +79,30 @@ class EditorActionBarLayoutTest {
         preview.revealEditorControl()
         compose.onNodeWithContentDescription("12 citations").revealEditorControl()
         compose.onNodeWithContentDescription("Brouillon retrouvé").performScrollTo().assertIsDisplayed()
-        compose.runOnIdle { host.event.value = controlEvent(EditorEventContent.Problem(EditorErrors.missingTitle)) }
+        // Cross the ED-25/92 boundary using measured Send, not an assumed font-dependent width.
+        // ERROR's 4 dp gutter extension increases both available width and event reserve equally.
+        val headerBoundary = bounds("editor-bar-submit").width + 32.dp + 48.dp + 189.dp
+        // Stay 1 dp either side to avoid pixel/Dp rounding at the exact boundary.
+        compose.runOnIdle {
+            host.width.value = headerBoundary + 1.dp
+            host.event.value = controlEvent(EditorEventContent.Problem(EditorErrors.missingTitle))
+        }
         preview.assertDoesNotExist()
-        compose.onNodeWithContentDescription("Titre et sous-catégorie").assertDoesNotExist()
-        val event = compose.onNode(hasClickAction() and hasContentDescription("Titre manquant, Compléter"))
-            .getUnclippedBoundsInRoot()
+        val header = compose.onNodeWithContentDescription("Titre et sous-catégorie").assertIsDisplayed()
+        val eventControl = compose.onNode(hasClickAction() and hasContentDescription("Titre manquant, Compléter"))
+        val retainedEvent = eventControl.getUnclippedBoundsInRoot()
+        assertTrue(header.getUnclippedBoundsInRoot().right <= retainedEvent.left)
+        assertTrue(retainedEvent.width >= 185.dp)
+        assertTrue(bounds("editor-bar-submit").left - retainedEvent.right >= 7.9.dp)
+        compose.runOnIdle { host.width.value = headerBoundary - 1.dp }
+        header.assertDoesNotExist()
+        preview.assertDoesNotExist()
+        compose.onNodeWithContentDescription("12 citations").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Brouillon retrouvé").assertDoesNotExist()
+        val event = eventControl.getUnclippedBoundsInRoot()
         val send = bounds("editor-bar-submit")
         assertEquals(12f, event.left.value, 0.5f)
+        assertTrue(event.width >= 185.dp)
         assertTrue(send.left - event.right >= 7.9.dp)
         assertEquals(48f, event.height.value, 0.5f)
         assertEquals(48f, bounds("bar").height.value, 0.5f)
@@ -114,7 +131,8 @@ class EditorActionBarLayoutTest {
             host.event.value = controlEvent(EditorEventContent.Problem(EditorErrors.network))
         }
         assertEquals(liveId, compose.onNode(live).fetchSemanticsNode().id)
-        compose.onNode(live).assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Assertive))
+        compose.onNode(live).assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Assertive))
         val progress = bounds("editor-bar-progress")
         assertEquals(bounds("bar").top, progress.top)
         assertEquals(2f, progress.height.value, 0.5f)
@@ -129,7 +147,8 @@ class EditorActionBarLayoutTest {
         host.width.value = 240.dp; host.scale.value = 1.3f
         host.event.value = controlEvent(EditorEventContent.Problem(EditorErrors.draftWriteFailed))
         compose.setContent { host.Content() }
-        val event = compose.onNode(hasClickAction() and hasContentDescription("Brouillon non écrit, Afficher les détails"))
+        val event = compose.onNode(
+            hasClickAction() and hasContentDescription("Brouillon non écrit, Afficher les détails"))
             .getUnclippedBoundsInRoot()
         assertTrue(event.width >= 48.dp && event.height >= 48.dp)
         assertTrue(bounds("editor-bar-submit").left - event.right >= 7.9.dp)
@@ -140,7 +159,10 @@ class EditorActionBarLayoutTest {
     fun `ED85 system back closes color format and image without invoking a surface or send`() {
         lateinit var back: OnBackPressedDispatcher
         host.bar.value = EditorBarState(EditorBarMode.Color)
-        compose.setContent { back = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher; host.Content() }
+        compose.setContent {
+            back = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+            host.Content()
+        }
         compose.runOnIdle { back.onBackPressed() }
         compose.runOnIdle { assertEquals(EditorBarMode.Format, host.bar.value.mode) }
         compose.runOnIdle { back.onBackPressed() }
