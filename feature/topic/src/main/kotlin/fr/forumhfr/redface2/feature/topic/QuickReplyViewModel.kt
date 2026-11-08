@@ -319,6 +319,7 @@ class QuickReplyViewModel @AssistedInject constructor(
         openSheet(currentPage, initialQuotes)
     }
 
+    @Suppress("CyclomaticComplexMethod") // One opening sequence: reset, Room read, restore offer, then state seed.
     private fun openSheet(
         currentPage: Int, initialQuotes: List<QuoteSelection>, retainedText: TextFieldValue? = null,
     ) {
