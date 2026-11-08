@@ -263,7 +263,7 @@ internal fun ComposeEditorBody(
                     MessageDraftRestoreBanner(
                         onRestore = onDraftRestore,
                         onDiscard = onDraftDiscard,
-                        restoreEnabled = !state.isUploading && !state.submission.blocksBodyMutation,
+                        restoreEnabled = state.restoreEnabled,
                     )
                 }
 
@@ -384,3 +384,7 @@ private fun ComposeEditorControls(
         }
     }
 }
+
+/** Same refusals as the ViewModel: upload in flight, body locked by the submission. */
+private val PrivateMessageComposeUiState.restoreEnabled: Boolean
+    get() = !isUploading && !submission.blocksBodyMutation
