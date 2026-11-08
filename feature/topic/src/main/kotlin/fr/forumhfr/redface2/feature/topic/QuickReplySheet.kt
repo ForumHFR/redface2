@@ -65,6 +65,7 @@ import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
  * route ; the ViewModel is scoped to the topic's nav entry, so the field survives an
  * accidental dismiss, and the #405 draft row survives everything else.
  */
+@Suppress("LongParameterList") // Request, three outcome callbacks and the two opening seeds of the topic surface.
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 internal fun QuickReplySheet(
@@ -261,6 +262,7 @@ internal data class QuickReplyQuoteCallbacks(
     val onDismissLegacy: () -> Unit,
 )
 
+@Suppress("CyclomaticComplexMethod") // One flat `if` per independent status row of the sheet.
 @Composable
 internal fun QuickReplyStatus(state: QuickReplyUiState, callbacks: QuickReplyQuoteCallbacks) {
     if (state.legacyQuoteRequestDropped) {
