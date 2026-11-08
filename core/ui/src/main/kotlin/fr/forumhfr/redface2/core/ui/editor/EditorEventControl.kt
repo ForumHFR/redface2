@@ -38,6 +38,7 @@ import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
  * [onAction] receives the exact displayed key; acknowledgement remains the host reducer's job.
  */
 @Composable
+@Suppress("LongParameterList") // Event + host width + action, then modifier and two defaulted test seams.
 fun EditorEventControl(
     event: EditorEvent?,
     width: Dp,
