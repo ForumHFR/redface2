@@ -16,6 +16,14 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.69.6` — `internal` (dev) — 2026-11-08
+
+Refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)), lot R0c, partie 4 ([#1512](https://github.com/ForumHFR/redface2/issues/1512) ; [#1560](https://github.com/ForumHFR/redface2/pull/1560)).
+
+- **Réponse MP** : le champ de texte appartient désormais au ViewModel, comme pour le nouveau MP. Chaque action de la barre d'outils, chaque smiley ou citation s'annule en un pas ; l'aperçu est calculé hors du fil principal ; une frappe pendant un envoi armé le désarme.
+- **Réponse MP, brouillon** : « Restaurer » tient compte de la citation préremplie. Une citation intacte est remplacée par le brouillon, le texte tapé après elle est gardé après le brouillon, sinon le brouillon est ajouté à la fin ; une seule annulation suffit à revenir en arrière. Tant que le formulaire charge, « Restaurer » est inactif ; hors ligne, le bandeau reste visible au-dessus de l'erreur et le brouillon peut être repris.
+- **Réponse MP, saisie précoce** : un texte tapé avant l'arrivée du formulaire est combiné à la citation, puis sauvegardé dans le brouillon.
+
 ## `0.69.5` — `internal` (dev) — 2026-11-07
 
 Deux correctifs de la visionneuse ([#1411](https://github.com/ForumHFR/redface2/issues/1411) ; [#1556](https://github.com/ForumHFR/redface2/pull/1556)), ([#1309](https://github.com/ForumHFR/redface2/issues/1309) ; [#1557](https://github.com/ForumHFR/redface2/pull/1557)) et refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)), lot R0c, parties 0 et 1 ([#1512](https://github.com/ForumHFR/redface2/issues/1512) ; [#1555](https://github.com/ForumHFR/redface2/pull/1555), [#1558](https://github.com/ForumHFR/redface2/pull/1558)).
