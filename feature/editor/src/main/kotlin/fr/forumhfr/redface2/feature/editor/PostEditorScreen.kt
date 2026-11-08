@@ -23,6 +23,8 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
@@ -117,6 +119,8 @@ fun PostEditorScreen(
     }
     PostEditorContent(
         state = state,
+        bodyFieldState = viewModel.bodyFieldState,
+        bodyInputTransformation = viewModel.bodyInputTransformation,
         onIntent = remember(viewModel) { { intent: PostEditorIntent -> viewModel.submit(intent) } },
         // #441 — the picker is driven by the shared controller (same wiring as the MP
         // composers, cf. PrivateMessageReplyScreen) ; only SmileySelected stays an intent.
@@ -128,6 +132,8 @@ fun PostEditorScreen(
 @Composable
 internal fun PostEditorContent(
     state: PostEditorState,
+    bodyFieldState: TextFieldState,
+    bodyInputTransformation: InputTransformation?,
     onIntent: (PostEditorIntent) -> Unit,
     smileyPicker: SmileyPickerController,
     modifier: Modifier = Modifier,
@@ -174,8 +180,8 @@ internal fun PostEditorContent(
                         showSubmitBar = showSubmitBar,
                     )
                     BbcodeTextField(
-                        value = state.draft,
-                        onValueChange = { value -> onIntent(PostEditorIntent.ContentChanged(value)) },
+                        state = bodyFieldState,
+                        inputTransformation = bodyInputTransformation,
                         label = stringResource(R.string.editor_field_label),
                         placeholder = stringResource(R.string.editor_field_placeholder),
                         modifier = Modifier.weight(1f),

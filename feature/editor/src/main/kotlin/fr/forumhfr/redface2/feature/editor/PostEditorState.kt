@@ -1,10 +1,8 @@
 package fr.forumhfr.redface2.feature.editor
 
-import androidx.compose.ui.text.input.TextFieldValue
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
-import fr.forumhfr.redface2.core.domain.editor.validateBbcodeDraft
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
@@ -44,7 +42,8 @@ data class PostEditorState(
     /** Invalid/unreadable durable content cannot authorize submission. */
     val quoteStorageUnavailable: Boolean = false,
     val unreadableQuoteRequest: Boolean = false,
-    val draft: TextFieldValue = TextFieldValue(),
+    /** Display-only mirror of the ViewModel-owned body field. */
+    val bodyText: String = "",
     val preview: PostContent = PostContent(blocks = emptyList()),
     val isPreviewVisible: Boolean = false,
     val validation: BbcodeValidation = BbcodeValidation.Idle,
@@ -57,7 +56,7 @@ data class PostEditorState(
     /** Surfaces an HFR-classified failure to the UI. Null means "no error to show". */
     val submitError: EditorError? = null,
     /**
-     * Tracks whether we already prefilled [draft] from `ReplyForm.initialContent`.
+     * Tracks whether we already prefilled [bodyText] from `ReplyForm.initialContent`.
      * Used by the ViewModel to make sure a stale form refetch (e.g. after
      * `InvalidHashCheck`) does not overwrite the user's in-progress edit.
      */
@@ -150,7 +149,7 @@ data class PostEditorState(
             // #604 lot 3 — a quotes-only reply is sendable (same rule as the quick-reply
             // sheet : the materialised [quotemsg] blocks ARE the content). Edit keeps
             // requiring a non-blank body — its cards list is always empty.
-            (draft.text.isNotBlank() || (mode == PostEditorMode.Reply && quotes.isNotEmpty())) &&
+            (bodyText.isNotBlank() || (mode == PostEditorMode.Reply && quotes.isNotEmpty())) &&
             !isSubmitting &&
             !submission.blocksBodyMutation &&
             !isLoadingForm && !quoteStorageUnavailable && pendingQuotes.isEmpty() &&
@@ -171,10 +170,3 @@ data class PostEditorState(
 
     val isSubmitEnabled: Boolean get() = canSubmit
 }
-
-internal fun PostEditorState.withDraft(updated: TextFieldValue): PostEditorState =
-    copy(
-        draft = updated,
-        validation = validateBbcodeDraft(updated.text),
-        // ED-131: text and selection mutations retain both error slots.
-    )

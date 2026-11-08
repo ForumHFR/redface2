@@ -1,7 +1,8 @@
 package fr.forumhfr.redface2.feature.editor
 
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
@@ -24,14 +25,14 @@ import io.mockk.every
 import io.mockk.mockk
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.test.UnconfinedTestDispatcher
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runCurrent
@@ -82,7 +83,7 @@ class PostEditorRestoreOfferTest {
         val saved = SavedStateHandle()
         val editor = open(saved = saved)
         runCurrent()
-        assertEquals(SEED, editor.state.value.draft.text)
+        assertEquals(SEED, editor.bodyFieldState.text.toString())
         assertEquals(SEED, editor.state.value.draftRestoreSeed)
         editor.submit(PostEditorIntent.DraftRestoreRequested)
         assertRestored(editor, OFFER)
@@ -144,7 +145,7 @@ class PostEditorRestoreOfferTest {
 
         val reopened = open()
         runCurrent()
-        assertEquals(SEED, reopened.state.value.draft.text)
+        assertEquals(SEED, reopened.bodyFieldState.text.toString())
         assertEquals("server body with local edits", reopened.state.value.restorableDraft)
         reopened.submit(PostEditorIntent.DraftRestoreRequested)
         assertRestored(reopened, "server body with local edits")
@@ -190,7 +191,7 @@ class PostEditorRestoreOfferTest {
         assertFalse(editor.state.value.canRestoreDraft)
         editor.submit(PostEditorIntent.DraftRestoreRequested)
         assertEquals(OFFER, editor.state.value.restorableDraft)
-        assertEquals("", editor.state.value.draft.text)
+        assertEquals("", editor.bodyFieldState.text.toString())
         gate.complete(form(SEED))
         runCurrent()
         assertTrue(editor.state.value.canRestoreDraft)
@@ -253,10 +254,12 @@ class PostEditorRestoreOfferTest {
             val collector = backgroundScope.launch(
                 UnconfinedTestDispatcher(testScheduler), start = CoroutineStart.UNDISPATCHED,
             ) {
-                editor.state.collect { bodies += it.draft.text }
+                snapshotFlow { editor.bodyFieldState.text.toString() }.collect { bodies += it }
             }
             val before = bodies.size
             editor.submit(PostEditorIntent.DraftRestoreRequested)
+            Snapshot.sendApplyNotifications()
+            runCurrent()
             val mutations = bodies.drop(before).fold(live to 0) { (previous, count), body ->
                 body to (count + if (body != previous) 1 else 0)
             }.second
@@ -271,14 +274,19 @@ class PostEditorRestoreOfferTest {
     }
 
     private fun type(editor: PostEditorViewModel, text: String) {
-        editor.submit(PostEditorIntent.ContentChanged(TextFieldValue(text, TextRange(0, text.length))))
+        // Deliberately leave the display mirror behind before restoration.
+        editor.bodyFieldState.edit {
+            replace(0, length, text)
+            selection = TextRange(0, text.length)
+            with(editor.bodyInputTransformation) { transformInput() }
+        }
     }
 
     private fun assertRestored(editor: PostEditorViewModel, expected: String) {
         val state = editor.state.value
-        assertEquals(expected, state.draft.text)
-        assertEquals(TextRange(expected.length), state.draft.selection)
-        assertNull(state.draft.composition)
+        assertEquals(expected, editor.bodyFieldState.text.toString())
+        assertEquals(TextRange(expected.length), editor.bodyFieldState.selection)
+        assertNull(editor.bodyFieldState.composition)
         assertNull(state.restorableDraft)
         coVerify(exactly = 0) { editRepository.submitEditPost(any(), any(), any(), any()) }
         coVerify(exactly = 0) { replyRepository.submitReply(any(), any(), any(), any()) }
@@ -290,6 +298,7 @@ class PostEditorRestoreOfferTest {
     ): PostEditorViewModel = PostEditorViewModel(
         request = PostEditorRequest(mode, 23, 35421, if (mode == PostEditorMode.Edit) 101 else null, 1, 0),
         previewParser = mockk(relaxed = true),
+        defaultDispatcher = dispatcher,
         replyRepository = replyRepository,
         editPostRepository = editRepository,
         smileyRepository = mockk(relaxed = true),

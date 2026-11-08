@@ -54,6 +54,8 @@ class EditorScreenLayoutTest {
                     SmileyPickerController(scope = scope, searchWiki = { _, _ -> emptyList() })
                 }
                 PostEditorContent(
+                    bodyFieldState = remember { TextFieldState() },
+                    bodyInputTransformation = null,
                     state = postState(restorableDraft = "Brouillon à restaurer"),
                     onIntent = {},
                     smileyPicker = picker,
@@ -76,6 +78,8 @@ class EditorScreenLayoutTest {
                     SmileyPickerController(scope = scope, searchWiki = { _, _ -> emptyList() })
                 }
                 PostEditorContent(
+                    bodyFieldState = remember { TextFieldState() },
+                    bodyInputTransformation = null,
                     state = postState(),
                     onIntent = {},
                     smileyPicker = picker,
@@ -162,6 +166,8 @@ class EditorScreenLayoutTest {
                     SmileyPickerController(scope = scope, searchWiki = { _, _ -> emptyList() })
                 }
                 PostEditorContent(
+                    bodyFieldState = remember { TextFieldState() },
+                    bodyInputTransformation = null,
                     state = postState(restorableDraft = "Brouillon à restaurer"),
                     onIntent = {},
                     smileyPicker = picker,
@@ -183,6 +189,8 @@ class EditorScreenLayoutTest {
                     SmileyPickerController(scope = scope, searchWiki = { _, _ -> emptyList() })
                 }
                 PostEditorContent(
+                    bodyFieldState = remember { TextFieldState() },
+                    bodyInputTransformation = null,
                     state = postState(),
                     onIntent = {},
                     smileyPicker = picker,

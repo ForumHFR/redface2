@@ -117,6 +117,8 @@ class EditorBaselineRoborazziTest {
                     SmileyPickerController(scope = scope, searchWiki = { _, _ -> emptyList() })
                 }
                 PostEditorContent(
+                    bodyFieldState = remember { TextFieldState(draft.text) },
+                    bodyInputTransformation = null,
                     state = PostEditorState(
                         mode = PostEditorMode.Reply,
                         cat = 23,
@@ -124,7 +126,7 @@ class EditorBaselineRoborazziTest {
                         numreponse = null,
                         page = 1,
                         subcat = 0,
-                        draft = draft,
+                        bodyText = draft.text,
                     ),
                     onIntent = {},
                     smileyPicker = picker,

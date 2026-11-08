@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.editor
 
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
@@ -70,9 +71,38 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class PendingQuoteHandoffTest {
     private val dispatcher = UnconfinedTestDispatcher()
+    private val editors = mutableListOf<PostEditorViewModel>()
 
     @Before fun setUp() { Dispatchers.setMain(dispatcher) }
-    @After fun tearDown() { Dispatchers.resetMain() }
+    @After fun tearDown() {
+        editors.forEach { it.viewModelScope.cancel() }
+        Dispatchers.resetMain()
+    }
+
+    private fun TestScope.syncBody() {
+        Snapshot.sendApplyNotifications()
+        runCurrent()
+        Snapshot.sendApplyNotifications()
+        runCurrent()
+    }
+
+    private fun TestScope.settleBody() {
+        Snapshot.sendApplyNotifications()
+        advanceUntilIdle()
+        Snapshot.sendApplyNotifications()
+        advanceUntilIdle()
+    }
+
+    /** Real field and synchronous guard; keep quote/CAS races in the tests below unchanged. */
+    private fun PostEditorViewModel.editBody(value: TextFieldValue) {
+        bodyFieldState.edit {
+            replace(0, length, value.text)
+            selection = value.selection
+            with(bodyInputTransformation) { transformInput() }
+        }
+        Snapshot.sendApplyNotifications()
+        dispatcher.scheduler.runCurrent()
+    }
 
     @Test
     fun `delivery commits body and request removal before autosave and never replays an old Bundle`() = runTest {
@@ -81,11 +111,11 @@ class PendingQuoteHandoffTest {
         val saved = SavedStateHandle()
         scenario.quoteGate = CompletableDeferred()
         var editor = scenario.editor(saved)
-        runCurrent()
-        editor.submit(PostEditorIntent.ContentChanged(TextFieldValue("typed during GET")))
+        syncBody()
+        editor.editBody(TextFieldValue("typed during GET"))
         val frozen = snapshot(saved)
         scenario.quoteGate?.complete(Unit)
-        runCurrent() // No autosave debounce has elapsed.
+        syncBody() // No autosave debounce has elapsed.
         val expected = "[quotemsg=101]quote[/quotemsg]\n\ntyped during GET"
         assertEquals(expected, scenario.body)
         assertNull(scenario.pending)
@@ -93,8 +123,8 @@ class PendingQuoteHandoffTest {
         scenario.quoteGate = null
         val fetches = scenario.fetchedQuotes.size
         editor = scenario.editor(SavedStateHandle(frozen))
-        advanceUntilIdle()
-        assertEquals(expected, editor.state.value.draft.text)
+        settleBody()
+        assertEquals(expected, editor.bodyFieldState.text.toString())
         assertEquals(fetches, scenario.fetchedQuotes.size)
         scenario.noPost()
         editor.viewModelScope.cancel()
@@ -106,12 +136,12 @@ class PendingQuoteHandoffTest {
         scenario.enqueue()
         scenario.quoteGate = CompletableDeferred()
         var editor = scenario.editor()
-        runCurrent()
+        syncBody()
         assertEquals(scenario.request, scenario.pending)
         editor.viewModelScope.cancel()
         scenario.quoteGate = null
         editor = scenario.editor()
-        advanceUntilIdle()
+        settleBody()
         assertEquals("[quotemsg=101]quote[/quotemsg]\n", scenario.body)
         assertNull(scenario.pending)
         assertEquals(listOf(101, 101), scenario.fetchedQuotes)
@@ -129,10 +159,10 @@ class PendingQuoteHandoffTest {
         )))
         scenario.quoteGate = CompletableDeferred()
         val editor = scenario.editor()
-        runCurrent()
-        editor.submit(PostEditorIntent.ContentChanged(TextFieldValue("[quotemsg=101]typed[/quotemsg]\nmy text")))
+        syncBody()
+        editor.editBody(TextFieldValue("[quotemsg=101]typed[/quotemsg]\nmy text"))
         scenario.quoteGate?.complete(Unit)
-        advanceUntilIdle()
+        settleBody()
         assertEquals(1, Regex("\\[quotemsg=101").findAll(scenario.body.orEmpty()).count())
         assertEquals(1, Regex("\\[quotemsg=202").findAll(scenario.body.orEmpty()).count())
         assertTrue(scenario.body.orEmpty().endsWith("my text"))
@@ -147,17 +177,17 @@ class PendingQuoteHandoffTest {
         scenario.enqueue()
         scenario.quoteGate = CompletableDeferred()
         val editor = scenario.editor()
-        runCurrent()
+        syncBody()
         scenario.drafts.saveFailure = IOException("disk")
         scenario.quoteGate?.complete(Unit)
-        runCurrent()
+        syncBody()
         assertEquals(scenario.request, scenario.pending)
         assertFalse(editor.state.value.canSubmit)
         editor.submit(PostEditorIntent.SubmitClicked())
         scenario.noPost()
         scenario.drafts.saveFailure = null
         editor.submit(PostEditorIntent.ReloadRequested)
-        advanceUntilIdle()
+        settleBody()
         assertNull(scenario.pending)
         assertEquals(listOf(101), scenario.fetchedQuotes)
         assertEquals(1, Regex("\\[quotemsg=101").findAll(scenario.body.orEmpty()).count())
@@ -171,17 +201,17 @@ class PendingQuoteHandoffTest {
         scenario.enqueue()
         scenario.quoteGate = CompletableDeferred()
         val editor = scenario.editor()
-        runCurrent()
+        syncBody()
         val commitReturn = CompletableDeferred<Unit>()
         scenario.drafts.saveReturnGate = commitReturn
         scenario.quoteGate?.complete(Unit)
-        runCurrent()
+        syncBody()
         assertNull(scenario.pending)
         assertFalse(editor.state.value.canSubmit)
-        val updated = editor.state.value.draft.text + "continued while saving"
-        editor.submit(PostEditorIntent.ContentChanged(TextFieldValue(updated)))
+        val updated = editor.bodyFieldState.text.toString() + "continued while saving"
+        editor.editBody(TextFieldValue(updated))
         commitReturn.complete(Unit)
-        advanceUntilIdle()
+        settleBody()
         assertEquals(updated, scenario.body)
         assertNull(scenario.pending)
         scenario.noPost()
@@ -194,15 +224,15 @@ class PendingQuoteHandoffTest {
         scenario.enqueue()
         val saved = SavedStateHandle()
         var editor = scenario.editor(saved)
-        advanceUntilIdle()
+        settleBody()
         val frozen = snapshot(saved)
-        editor.submit(PostEditorIntent.ContentChanged(TextFieldValue("quote deliberately removed")))
-        advanceUntilIdle()
+        editor.editBody(TextFieldValue("quote deliberately removed"))
+        settleBody()
         editor.viewModelScope.cancel()
         val fetches = scenario.fetchedQuotes.size
         editor = scenario.editor(SavedStateHandle(frozen))
-        advanceUntilIdle()
-        assertEquals("quote deliberately removed", editor.state.value.draft.text)
+        settleBody()
+        assertEquals("quote deliberately removed", editor.bodyFieldState.text.toString())
         assertEquals(fetches, scenario.fetchedQuotes.size)
         assertNull(scenario.pending)
         editor.viewModelScope.cancel()
@@ -214,19 +244,19 @@ class PendingQuoteHandoffTest {
         scenario.enqueue()
         val saved = SavedStateHandle()
         var editor = scenario.editor(saved, resumeSharedDraft = false)
-        advanceUntilIdle()
+        settleBody()
         val delivered = scenario.body
         val frozen = snapshot(saved)
         editor.viewModelScope.cancel()
         val fetches = scenario.fetchedQuotes.size
         editor = scenario.editor(SavedStateHandle(frozen), resumeSharedDraft = false)
-        advanceUntilIdle()
-        assertEquals("", editor.state.value.draft.text)
+        settleBody()
+        assertEquals("", editor.bodyFieldState.text.toString())
         assertEquals(delivered, editor.state.value.restorableDraft)
         assertTrue(editor.state.value.pendingQuotes.isEmpty())
         editor.submit(PostEditorIntent.DraftRestoreRequested)
-        advanceUntilIdle()
-        assertEquals(delivered, editor.state.value.draft.text)
+        settleBody()
+        assertEquals(delivered, editor.bodyFieldState.text.toString())
         assertEquals(fetches, scenario.fetchedQuotes.size)
         scenario.noPost()
         editor.viewModelScope.cancel()
@@ -240,26 +270,26 @@ class PendingQuoteHandoffTest {
         scenario.quoteAvailable = false
         val oldBundle = SavedStateHandle(mapOf("postEditor.pendingQuotes" to intArrayOf(1, 101, -1, 0)))
         var editor = scenario.editor(oldBundle)
-        advanceUntilIdle()
+        settleBody()
         editor.submit(PostEditorIntent.ReloadRequested)
-        advanceUntilIdle()
+        settleBody()
         assertTrue(editor.state.value.canIgnorePendingQuote)
         scenario.drafts.saveFailure = IOException("disk")
         editor.submit(PostEditorIntent.PendingQuoteIgnored)
-        advanceUntilIdle()
+        settleBody()
         assertEquals(scenario.request, scenario.pending)
         assertFalse(editor.state.value.canSubmit)
         scenario.drafts.saveFailure = null
         editor.submit(PostEditorIntent.PendingQuoteIgnored)
-        advanceUntilIdle()
+        settleBody()
         assertEquals("kept body", scenario.body)
         assertNull(scenario.pending)
         editor.viewModelScope.cancel()
         val fetches = scenario.fetchedQuotes.size
         editor = scenario.editor(SavedStateHandle(mapOf("postEditor.pendingQuotes" to intArrayOf(1, 101, -1, 0))))
-        advanceUntilIdle()
+        settleBody()
         assertEquals(fetches, scenario.fetchedQuotes.size)
-        assertEquals("kept body", editor.state.value.draft.text)
+        assertEquals("kept body", editor.bodyFieldState.text.toString())
         scenario.noPost()
         editor.viewModelScope.cancel()
     }
@@ -270,17 +300,17 @@ class PendingQuoteHandoffTest {
         scenario.drafts.preload(scenario.key, Draft("offered draft"))
         scenario.enqueue()
         val editor = scenario.editor(resumeSharedDraft = false)
-        advanceUntilIdle()
+        settleBody()
         assertTrue(scenario.fetchedQuotes.isEmpty())
         val discardReturn = CompletableDeferred<Unit>()
         scenario.drafts.saveReturnGate = discardReturn
         editor.submit(PostEditorIntent.DraftDiscardRequested)
-        runCurrent()
+        syncBody()
         assertEquals("", scenario.body)
         assertEquals(scenario.request, scenario.pending)
         assertTrue(scenario.fetchedQuotes.isEmpty())
         discardReturn.complete(Unit)
-        advanceUntilIdle()
+        settleBody()
         assertEquals(listOf(101), scenario.fetchedQuotes)
         assertNull(scenario.pending)
         assertEquals("[quotemsg=101]quote[/quotemsg]\n", scenario.body)
@@ -295,9 +325,9 @@ class PendingQuoteHandoffTest {
         scenario.drafts.preload(scenario.key, Draft(offered))
         scenario.enqueue()
         val editor = scenario.editor(resumeSharedDraft = false)
-        advanceUntilIdle()
+        settleBody()
         editor.submit(PostEditorIntent.DraftRestoreRequested)
-        advanceUntilIdle()
+        settleBody()
         assertEquals(offered, scenario.body)
         assertNull(scenario.pending)
         assertTrue(scenario.fetchedQuotes.isEmpty())
@@ -319,16 +349,16 @@ class PendingQuoteHandoffTest {
         scenario.drafts.preload(scenario.key, Draft("offered body"))
         scenario.enqueue()
         var editor = scenario.editor(resumeSharedDraft = false)
-        advanceUntilIdle()
+        settleBody()
         assertEquals("offered body", editor.state.value.restorableDraft)
         editor.viewModelScope.cancel()
         editor = scenario.editor(resumeSharedDraft = false)
-        advanceUntilIdle()
+        settleBody()
         assertEquals("offered body", editor.state.value.restorableDraft)
         assertEquals(scenario.request, scenario.pending)
         assertTrue(scenario.fetchedQuotes.isEmpty())
         editor.submit(if (discard) PostEditorIntent.DraftDiscardRequested else PostEditorIntent.DraftRestoreRequested)
-        advanceUntilIdle()
+        settleBody()
         val expected = "[quotemsg=101]quote[/quotemsg]\n" + if (discard) "" else "\noffered body"
         assertEquals(expected, scenario.body)
         assertNull(scenario.pending)
@@ -342,25 +372,25 @@ class PendingQuoteHandoffTest {
         val attempt = scenario.unresolved()
         scenario.enqueue()
         val editor = scenario.editor()
-        advanceUntilIdle()
+        settleBody()
         assertTrue(editor.state.value.hasDormantQuote)
         assertTrue(scenario.fetchedQuotes.isEmpty())
-        assertEquals("uncertain body", editor.state.value.draft.text)
+        assertEquals("uncertain body", editor.bodyFieldState.text.toString())
         editor.submit(PostEditorIntent.SubmitClicked())
         editor.submit(PostEditorIntent.ReloadRequested)
         editor.submit(PostEditorIntent.ErrorDismissed)
-        advanceUntilIdle()
+        settleBody()
         assertEquals(attempt, scenario.drafts.entries[scenario.key]?.attempt?.token)
         assertTrue(scenario.fetchedQuotes.isEmpty())
         scenario.drafts.finishFailure = IOException("disk")
         editor.submit(PostEditorIntent.PendingQuoteResumed)
-        advanceUntilIdle()
+        settleBody()
         assertTrue(editor.state.value.hasDormantQuote)
         assertEquals(scenario.request, scenario.pending)
         assertTrue(scenario.fetchedQuotes.isEmpty())
         scenario.drafts.finishFailure = null
         editor.submit(PostEditorIntent.PendingQuoteResumed)
-        advanceUntilIdle()
+        settleBody()
         assertNull(scenario.drafts.entries[scenario.key]?.attempt)
         assertNull(scenario.pending)
         assertEquals("[quotemsg=101]quote[/quotemsg]\n\nuncertain body", scenario.body)
@@ -374,9 +404,9 @@ class PendingQuoteHandoffTest {
         val attempt = scenario.unresolved()
         scenario.enqueue()
         val editor = scenario.editor()
-        advanceUntilIdle()
+        settleBody()
         editor.submit(PostEditorIntent.PendingQuoteIgnored)
-        advanceUntilIdle()
+        settleBody()
         assertNull(scenario.pending)
         assertEquals(attempt, scenario.drafts.entries[scenario.key]?.attempt?.token)
         assertEquals(AttemptStatus.UNCERTAIN, scenario.drafts.entries[scenario.key]?.attempt?.status)
@@ -397,11 +427,11 @@ class PendingQuoteHandoffTest {
             "postEditor.lastAttempt" to arrayListOf("tester", scenario.key, "old-id"),
         ))
         val editor = scenario.editor(saved)
-        advanceUntilIdle()
+        settleBody()
         assertTrue(editor.state.value.legacyQuoteRequestDropped)
         assertTrue(scenario.fetchedQuotes.isEmpty())
         assertNull(scenario.pending)
-        assertEquals("ordinary v20 draft", editor.state.value.draft.text)
+        assertEquals("ordinary v20 draft", editor.bodyFieldState.text.toString())
         assertFalse(saved.contains("postEditor.pendingQuotes"))
         scenario.noPost()
         editor.viewModelScope.cancel()
@@ -413,9 +443,9 @@ class PendingQuoteHandoffTest {
         scenario.enqueue()
         scenario.drafts.loadFailure = UnreadableInlineQuoteRequestException()
         val editor = scenario.editor()
-        advanceUntilIdle()
+        settleBody()
         assertTrue(editor.state.value.quoteStorageUnavailable)
-        editor.submit(PostEditorIntent.ContentChanged(TextFieldValue("typed while storage failed")))
+        editor.editBody(TextFieldValue("typed while storage failed"))
         editor.submit(PostEditorIntent.SubmitClicked())
         assertFalse(editor.state.value.canSubmit)
         coVerify(exactly = 0) { scenario.repository.fetchReplyForm(any()) }
@@ -423,7 +453,7 @@ class PendingQuoteHandoffTest {
         assertEquals(scenario.request, scenario.pending)
         scenario.drafts.loadFailure = null
         editor.submit(PostEditorIntent.ReloadRequested)
-        advanceUntilIdle()
+        settleBody()
         assertFalse(editor.state.value.quoteStorageUnavailable)
         assertNull(scenario.pending)
         assertEquals("[quotemsg=101]quote[/quotemsg]\n\ntyped while storage failed", scenario.body)
@@ -451,13 +481,13 @@ class PendingQuoteHandoffTest {
         scenario.enqueue()
         val saved = SavedStateHandle()
         var editor = scenario.editor(saved)
-        advanceUntilIdle()
+        settleBody()
         val gate = CompletableDeferred<Unit>()
         if (!whileArmed) {
             if (beforeBeginReturns) scenario.drafts.beginReturnGate = gate else scenario.drafts.beginGate = gate
         }
         editor.submit(PostEditorIntent.SubmitClicked())
-        runCurrent()
+        syncBody()
         val frozen = snapshot(saved)
         assertFalse(saved.contains("postEditor.lastAttempt"))
         if (whileArmed) {
@@ -466,13 +496,13 @@ class PendingQuoteHandoffTest {
         } else {
             gate.complete(Unit)
         }
-        advanceUntilIdle()
+        settleBody()
         assertEquals(AttemptStatus.PUBLISHED, scenario.drafts.entries[scenario.key]?.attempt?.status)
         val fetches = scenario.fetchedQuotes.size
         editor.viewModelScope.cancel()
         editor = scenario.editor(SavedStateHandle(frozen))
-        advanceUntilIdle()
-        assertEquals("", editor.state.value.draft.text)
+        settleBody()
+        assertEquals("", editor.bodyFieldState.text.toString())
         assertNull(editor.state.value.restorableDraft)
         assertNull(scenario.pending)
         assertEquals(fetches, scenario.fetchedQuotes.size)
@@ -488,9 +518,9 @@ class PendingQuoteHandoffTest {
         scenario.submitGate = CompletableDeferred()
         val saved = SavedStateHandle()
         var editor = scenario.editor(saved)
-        advanceUntilIdle()
+        settleBody()
         editor.submit(PostEditorIntent.SubmitClicked())
-        runCurrent()
+        syncBody()
         val earlier = (editor.state.value.submission as EditorSubmissionState.Sending).attempt
         val frozen = snapshot(saved)
         editor.viewModelScope.cancel()
@@ -501,8 +531,8 @@ class PendingQuoteHandoffTest {
         scenario.drafts.erasePublishedContent(published)
         val fetches = scenario.fetchedQuotes.size
         editor = scenario.editor(SavedStateHandle(frozen))
-        advanceUntilIdle()
-        assertEquals("", editor.state.value.draft.text)
+        settleBody()
+        assertEquals("", editor.bodyFieldState.text.toString())
         assertNull(editor.state.value.restorableDraft)
         assertNull(scenario.pending)
         assertEquals(fetches, scenario.fetchedQuotes.size)
@@ -516,7 +546,7 @@ class PendingQuoteHandoffTest {
         scenario.unresolved().let { scenario.drafts.finishAttempt(it, AttemptOutcome.PUBLISHED) }
         scenario.enqueue()
         val editor = scenario.editor()
-        advanceUntilIdle()
+        settleBody()
         assertEquals("[quotemsg=101]quote[/quotemsg]\n", scenario.body)
         assertNull(scenario.drafts.entries[scenario.key]?.attempt)
         assertNull(scenario.pending)
@@ -530,10 +560,10 @@ class PendingQuoteHandoffTest {
         scenario.enqueue()
         scenario.quoteGate = CompletableDeferred()
         val editor = scenario.editor()
-        runCurrent()
+        syncBody()
         scenario.drafts.activeOwner = "other"
         scenario.quoteGate?.complete(Unit)
-        advanceUntilIdle()
+        settleBody()
         assertTrue(scenario.drafts.entries.isEmpty())
         assertFalse(editor.state.value.canSubmit)
         scenario.drafts.activeOwner = "tester"
@@ -553,30 +583,30 @@ class PendingQuoteHandoffTest {
         )
         val sheet = scenario.sheet(SavedStateHandle(frozen))
         sheet.onSheetOpened()
-        advanceUntilIdle()
+        settleBody()
         sheet.onTextChanged(TextFieldValue("text from the sheet"))
         sheet.onEscalateRequested()
-        advanceUntilIdle()
+        settleBody()
         val handoff = sheet.effects.first() as QuickReplyEffect.EscalateToFullEditor
         assertTrue(handoff.quotes.isEmpty())
         assertEquals(scenario.request, scenario.pending)
         // A new editor instance reads Room; no inline coordinates travel through the handoff.
         scenario.quoteAvailable = true
         val editor = scenario.editor(cards = handoff.quotes)
-        advanceUntilIdle()
-        assertEquals("[quotemsg=101]quote[/quotemsg]\n\ntext from the sheet", editor.state.value.draft.text)
+        settleBody()
+        assertEquals("[quotemsg=101]quote[/quotemsg]\n\ntext from the sheet", editor.bodyFieldState.text.toString())
         assertTrue(editor.state.value.quotes.isEmpty())
         assertNull(scenario.pending)
         editor.viewModelScope.cancel()
         val fetches = scenario.fetchedQuotes.size
         sheet.onSheetOpened() // Return to the retained sheet VM before recreating it.
-        advanceUntilIdle()
+        settleBody()
         assertTrue(sheet.state.value.pendingQuotes.isEmpty())
         assertEquals(fetches, scenario.fetchedQuotes.size)
         sheet.viewModelScope.cancel()
         val restoredSheet = scenario.sheet(SavedStateHandle(frozen))
         restoredSheet.onSheetOpened()
-        advanceUntilIdle()
+        settleBody()
         assertTrue(restoredSheet.state.value.pendingQuotes.isEmpty())
         assertEquals(fetches, scenario.fetchedQuotes.size)
         assertEquals(scenario.body, restoredSheet.state.value.text.text)
@@ -593,38 +623,38 @@ class PendingQuoteHandoffTest {
         sheet.onSheetOpened()
         sheet.onTextChanged(TextFieldValue("current C"))
         advanceTimeBy(751)
-        runCurrent()
+        syncBody()
         assertEquals("offered D", sheet.state.value.restorableDraft)
         assertTrue(scenario.fetchedQuotes.isEmpty())
         // The quote fetch fails after Ignore, leaving the durable request available for escalation.
         scenario.quoteAvailable = false
         sheet.onDraftDiscardRequested()
-        advanceUntilIdle()
+        settleBody()
         assertNull(sheet.state.value.restorableDraft)
         assertEquals("current C", scenario.body)
         assertEquals(scenario.request, scenario.pending)
         sheet.onEscalateRequested()
-        runCurrent()
+        syncBody()
         val handoff = sheet.effects.first() as QuickReplyEffect.EscalateToFullEditor
         assertTrue(handoff.quotes.isEmpty())
         val writes = scenario.drafts.writes
         sheet.onDismissed()
-        runCurrent()
+        syncBody()
         assertEquals(writes, scenario.drafts.writes)
         assertEquals(scenario.request, scenario.pending)
         scenario.quoteAvailable = true
         scenario.quoteGate = CompletableDeferred()
         val editor = scenario.editor(cards = handoff.quotes)
-        runCurrent()
-        assertEquals("current C", editor.state.value.draft.text)
+        syncBody()
+        assertEquals("current C", editor.bodyFieldState.text.toString())
         assertNull(editor.state.value.restorableDraft)
         assertEquals(listOf(101), editor.state.value.pendingQuotes.map { it.numreponse })
         assertEquals(scenario.request, scenario.pending)
         assertFalse(editor.state.value.canSubmit)
         scenario.quoteGate?.complete(Unit)
-        advanceUntilIdle()
-        assertEquals("[quotemsg=101]quote[/quotemsg]\n\ncurrent C", editor.state.value.draft.text)
-        assertEquals(editor.state.value.draft.text, scenario.body)
+        settleBody()
+        assertEquals("[quotemsg=101]quote[/quotemsg]\n\ncurrent C", editor.bodyFieldState.text.toString())
+        assertEquals(editor.bodyFieldState.text.toString(), scenario.body)
         assertNull(scenario.pending)
         assertTrue(editor.state.value.pendingQuotes.isEmpty())
         assertEquals(listOf(101, 101), scenario.fetchedQuotes)
@@ -642,14 +672,14 @@ class PendingQuoteHandoffTest {
         sheet.onSheetOpened(cards)
         sheet.onTextChanged(TextFieldValue("body"))
         sheet.onEscalateRequested()
-        advanceUntilIdle()
+        settleBody()
         val handoff = sheet.effects.first() as QuickReplyEffect.EscalateToFullEditor
         assertEquals(cards, handoff.quotes)
         assertNull(scenario.pending)
         val editor = scenario.editor(cards = handoff.quotes)
-        advanceUntilIdle()
+        settleBody()
         assertEquals(cards, editor.state.value.quotes)
-        assertEquals("body", editor.state.value.draft.text)
+        assertEquals("body", editor.bodyFieldState.text.toString())
         assertTrue(scenario.fetchedQuotes.isEmpty())
         scenario.noPost()
         editor.viewModelScope.cancel()
@@ -723,13 +753,13 @@ class PendingQuoteHandoffTest {
         ) = PostEditorViewModel(
             request = PostEditorRequest(PostEditorMode.Reply, 23, 35421, null, 1, 0,
                 initialQuotes = cards, resumeSharedDraft = resumeSharedDraft),
-            previewParser = mockk(relaxed = true), replyRepository = repository,
+            previewParser = mockk(relaxed = true), defaultDispatcher = dispatcher, replyRepository = repository,
             editPostRepository = mockk(relaxed = true), smileyRepository = mockk(relaxed = true),
             userPreferencesRepository = preferences, draftStore = drafts, diagnostics = DiagnosticsLog(),
             uploadRepository = mockk(relaxed = true), imageUploadReader = mockk(relaxed = true),
             authRepository = auth, quoteMaterializer = TopicReplyQuoteMaterializer(repository),
             hfrFavoriteSmileyRepository = mockk(relaxed = true), smileyLocalCollections = localSmileys,
             clock = DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L }, savedStateHandle = saved,
-        )
+        ).also(editors::add)
     }
 }
