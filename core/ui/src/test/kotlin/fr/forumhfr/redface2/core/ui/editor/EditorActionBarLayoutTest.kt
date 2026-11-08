@@ -9,8 +9,10 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -74,8 +76,9 @@ class EditorActionBarLayoutTest {
         assertTrue(preview.getUnclippedBoundsInRoot().right <= bounds("editor-bar-scroll").left)
         compose.runOnIdle { host.width.value = 360.dp }
         assertTrue(bounds("editor-bar-scroll").width >= 48.dp)
-        preview.performScrollTo().assertIsDisplayed()
-        compose.onNodeWithContentDescription("12 citations").performScrollTo().assertIsDisplayed()
+        preview.revealEditorControl()
+        compose.onNodeWithContentDescription("12 citations").revealEditorControl()
+        compose.onNodeWithContentDescription("Brouillon retrouvé").performScrollTo().assertIsDisplayed()
         compose.runOnIdle { host.event.value = controlEvent(EditorEventContent.Problem(EditorErrors.missingTitle)) }
         preview.assertDoesNotExist()
         compose.onNodeWithContentDescription("Titre et sous-catégorie").assertDoesNotExist()
@@ -91,7 +94,8 @@ class EditorActionBarLayoutTest {
     @Test
     fun `ED41 ED46 ED95 modes events arm and progress keep geometry and a permanent live node`() {
         compose.setContent { host.Content() }
-        val live = SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion) and !hasClickAction()
+        val live = SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion) and
+            hasAnyAncestor(hasTestTag("bar")) and !hasTestTag("editor-bar-submit")
         val liveId = compose.onNode(live).fetchSemanticsNode().id
         val body = bounds("body")
         val send = bounds("editor-bar-submit")

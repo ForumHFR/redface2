@@ -25,6 +25,11 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasScrollAction
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
@@ -108,4 +113,10 @@ internal class EditorActionBarFixture {
             }
         }
     }
+}
+
+/** Reveal scrolling tools before touch injection; fixed controls have no scrolling ancestor. */
+internal fun SemanticsNodeInteraction.revealEditorControl(): SemanticsNodeInteraction {
+    if (hasAnyAncestor(hasScrollAction()).matches(fetchSemanticsNode())) performScrollTo()
+    return assertIsDisplayed()
 }

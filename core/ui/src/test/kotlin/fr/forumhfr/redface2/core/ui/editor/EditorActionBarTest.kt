@@ -2,18 +2,23 @@ package fr.forumhfr.redface2.core.ui.editor
 
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertAll
+import androidx.compose.ui.test.assertAny
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -42,7 +47,8 @@ import org.robolectric.annotation.Config
 class EditorActionBarTest {
     @get:Rule val compose = createComposeRule()
     private val host = EditorActionBarFixture()
-    private fun click(label: String) = compose.onNodeWithContentDescription(label).performClick()
+    private fun click(label: String) = compose.onNode(hasContentDescription(label) and
+        SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button)).revealEditorControl().performClick()
 
     @Test
     fun `ED20 ED21 ED22 ED27 opening and scrolling preserve selection and commands use keep`() {
@@ -230,8 +236,11 @@ class EditorActionBarTest {
         compose.onNodeWithText("Envoyer").assertIsNotEnabled()
         compose.onNodeWithContentDescription("Options").assertDoesNotExist()
         compose.runOnIdle { host.event.value = controlEvent(EditorEventContent.InProgress(uploadText(2))) }
-        compose.onAllNodes(hasClickAction()).assertCountEquals(1) // disabled Send only
-        compose.onNodeWithContentDescription("Image 2/3…").assertHasNoClickAction()
+        compose.onAllNodes(hasClickAction() and hasAnyAncestor(hasTestTag("bar")))
+            .assertCountEquals(1) // disabled Send only; the body is outside the bar
+        compose.onNodeWithTag("editor-bar-submit").assertIsNotEnabled()
+        compose.onAllNodes(hasContentDescription("Image 2/3…") and hasAnyAncestor(hasTestTag("bar")))
+            .assertAny(!hasClickAction()).assertAll(!hasClickAction())
         assertTrue(host.calls.isEmpty())
     }
 }
