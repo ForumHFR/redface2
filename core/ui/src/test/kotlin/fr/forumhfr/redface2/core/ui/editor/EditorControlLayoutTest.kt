@@ -64,10 +64,18 @@ class EditorControlLayoutTest {
         }
         val contents = editorErrorSamples.map { EditorEventContent.Problem(it) } + listOf(
             EditorEventContent.InProgress(EditorText(R.string.editor_event_sending)),
-            EditorEventContent.InProgress(EditorText(R.string.editor_event_uploading, listOf(10, 10))),
-            EditorEventContent.Finished(EditorText(R.plurals.editor_event_images_inserted, listOf(10), quantity = 10)),
             EditorEventContent.Information(EditorText(R.string.editor_event_already_quoted)),
-        )
+        ) + (1..10).flatMap { total ->
+            (1..total).map { index ->
+                EditorEventContent.InProgress(EditorText(R.string.editor_event_uploading, listOf(index, total)))
+            } + EditorEventContent.Finished(
+                EditorText(R.plurals.editor_event_images_inserted, listOf(total), quantity = total),
+            )
+        } + (2..10).flatMap { total ->
+            (0 until total).map { completed ->
+                EditorEventContent.Problem(EditorErrors.stopped(EditorErrors.tooLarge, UploadProgress(completed, total)))
+            }
+        }
         listOf(56.dp, 48.dp).forEach { injectedHeight ->
             compose.runOnIdle { height.value = injectedHeight }
             contents.forEach { content ->
@@ -81,6 +89,16 @@ class EditorControlLayoutTest {
                 assertEquals(result.layoutInput.text.length, result.getLineEnd(0))
                 val pixelsPerDp = result.layoutInput.density.density
                 assertTrue(result.size.width / pixelsPerDp <= EDITOR_SUMMARY_TEXT_WIDTH_DP + 0.5f)
+                val intrinsic = result.multiParagraph.intrinsics.maxIntrinsicWidth / pixelsPerDp
+                println("ED-133 ${result.layoutInput.text}: intrinsic=${intrinsic}dp, height=$injectedHeight")
+                assertTrue(content.toString(), intrinsic <= EDITOR_SUMMARY_TEXT_WIDTH_DP)
+                if (content is EditorEventContent.Finished) {
+                    val count = requireNotNull(content.summary.quantity)
+                    assertEquals(if (count == 1) "1 insérée" else "$count insérées", result.layoutInput.text.text)
+                    compose.onNode(hasClickAction()).assert(hasContentDescription(
+                        if (count == 1) "1 image insérée, Masquer" else "$count images insérées, Masquer",
+                    ))
+                }
                 val bounds = compose.onNodeWithTag("control").getUnclippedBoundsInRoot()
                 assertEquals(181f, bounds.width.value, 0.5f)
                 assertEquals(48f, bounds.height.value, 0.5f)

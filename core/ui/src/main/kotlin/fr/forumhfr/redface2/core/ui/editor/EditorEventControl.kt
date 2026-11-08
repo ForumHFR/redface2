@@ -49,6 +49,12 @@ fun EditorEventControl(
 ) {
     require(width >= 48.dp && summaryTextWidth > 0.dp)
     val summary = event?.summary?.resolve().orEmpty()
+    // ED-133: keep labelSmall and the 150 dp net budget; speech retains the full image summary.
+    // Short visual wording pending maintainer arbitration in spec v0.7.3.
+    val visualSummary = if (event?.content is EditorEventContent.Finished &&
+        event.summary.resourceId == R.plurals.editor_event_images_inserted) {
+        event.summary.copy(resourceId = R.plurals.editor_event_images_inserted_summary).resolve()
+    } else summary
     val action = event?.action
     val actionName = action?.controlLabel()
     val name = if (actionName == null) summary else "$summary, $actionName"
@@ -78,7 +84,7 @@ fun EditorEventControl(
         ) {
             RedfaceVectorIcon(event.controlIcon(), tint = tint, size = 16.dp)
             Text(
-                text = summary,
+                text = visualSummary,
                 modifier = Modifier.weight(1f, fill = false)
                     .widthIn(max = minOf(summaryTextWidth, EDITOR_SUMMARY_TEXT_WIDTH_DP.dp)).clearAndSetSemantics {},
                 style = MaterialTheme.typography.labelSmall,

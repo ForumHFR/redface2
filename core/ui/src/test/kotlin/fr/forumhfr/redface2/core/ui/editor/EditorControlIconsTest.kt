@@ -6,7 +6,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.input.InputModeManager
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -92,8 +95,10 @@ class EditorControlIconsTest {
     fun `ED32 action name and tooltip agree while only the mode trigger has a state`() {
         val expanded = mutableStateOf(false)
         val focus = FocusRequester()
+        lateinit var inputModeManager: InputModeManager
         var clicks = 0
         compose.setContent {
+            inputModeManager = LocalInputModeManager.current
             RedfaceTheme {
                 EditorActionIcon(R.drawable.ic_editor_format, stringResource(R.string.editor_format),
                     { clicks++ }, Modifier.focusRequester(focus), expanded = expanded.value)
@@ -105,6 +110,8 @@ class EditorControlIconsTest {
         assertTarget(button.getUnclippedBoundsInRoot().width.value, button.getUnclippedBoundsInRoot().height.value)
         compose.runOnIdle { expanded.value = true }
         button.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Développé"))
+        // IconButton accepts keyboard focus only outside touch mode.
+        compose.runOnIdle { assertTrue(inputModeManager.requestInputMode(InputMode.Keyboard)) }
         compose.runOnIdle { focus.requestFocus() }
         button.performTouchInput { longClick() }
         compose.onNodeWithText("Mise en forme", useUnmergedTree = true).assertIsDisplayed()
@@ -117,8 +124,10 @@ class EditorControlIconsTest {
     fun `ED90 and ED93 icons follow visual keyboard order and disabled insertions cannot run`() {
         val first = FocusRequester()
         val enabled = mutableStateOf(true)
+        lateinit var inputModeManager: InputModeManager
         var clicks = 0
         compose.setContent {
+            inputModeManager = LocalInputModeManager.current
             RedfaceTheme {
                 Row {
                     EditorActionIcon(R.drawable.ic_editor_bold, "Gras", { clicks++ },
@@ -131,6 +140,7 @@ class EditorControlIconsTest {
         val italic = compose.onNode(hasContentDescription("Italique"))
         bold.assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Selected))
             .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
+        compose.runOnIdle { assertTrue(inputModeManager.requestInputMode(InputMode.Keyboard)) }
         compose.runOnIdle { first.requestFocus() }
         bold.assertIsFocused().performKeyInput { pressKey(Key.Enter) }
         assertEquals(1, clicks)

@@ -28,4 +28,9 @@
         <item quantity="one">%1$d image insérée</item>
         <item quantity="other">%1$d images insérées</item>
     </plurals>
+    <!-- Visual summary only; the full name above remains accessible and announced. -->
+    <plurals name="editor_event_images_inserted_summary">
+        <item quantity="one">%1$d insérée</item>
+        <item quantity="other">%1$d insérées</item>
+    </plurals>
 </resources>
