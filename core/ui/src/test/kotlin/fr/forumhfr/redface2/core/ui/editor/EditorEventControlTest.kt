@@ -1,6 +1,8 @@
 package fr.forumhfr.redface2.core.ui.editor
 
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
@@ -14,6 +16,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
@@ -92,8 +95,10 @@ class EditorEventControlTest {
         compose.onNode(hasContentDescription("Image 2/3…")).assertHasNoClickAction()
             .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Focused))
         compose.onAllNodes(hasClickAction()).assertCountEquals(0)
+        compose.runOnIdle { current.value = update.copy(key = update.key.copy(occurrence = 2)) }
+        assertLive(id, "Image 2/3…", LiveRegionMode.Polite)
         compose.runOnIdle { injectedWidth.value = 170.dp }
-        assertLive(id, "Image 1/3…", LiveRegionMode.Polite)
+        assertLive(id, "Image 2/3…", LiveRegionMode.Polite)
         compose.runOnIdle {
             current.value = start.copy(content = EditorEventContent.Problem(EditorErrors.uncertain))
         }
@@ -110,19 +115,37 @@ class EditorEventControlTest {
     }
 
     @Test
-    fun `ED49 information problems stay polite and every delivered error remains fully named`() {
+    fun `ED49 states keep their icon tint live mode and full accessible name`() {
         val current = mutableStateOf<EditorEvent?>(null)
-        compose.setContent { RedfaceTheme { EditorEventControl(current.value, 181.dp, { _, _ -> }) } }
-        editorErrorSamples.forEach { error ->
-            val event = controlEvent(EditorEventContent.Problem(error))
+        var tints = emptyList<Color>()
+        compose.setContent {
+            RedfaceTheme {
+                tints = with(MaterialTheme.colorScheme) { listOf(error, onSecondaryContainer, onSurfaceVariant) }
+                EditorEventControl(current.value, 181.dp, { _, _ -> })
+            }
+        }
+        val cases = editorErrorSamples.map { error ->
+            val isError = error.errorClass != EditorErrorClass.Information
+            Triple(EditorEventContent.Problem(error),
+                if (isError) R.drawable.ic_editor_submission_warning else R.drawable.ic_editor_info,
+                if (isError) 0 else 1)
+        } + listOf(
+            Triple(EditorEventContent.InProgress(uploadText(1)), R.drawable.ic_editor_progress, 2),
+            Triple(EditorEventContent.Finished(EditorText(R.string.editor_event_sending)),
+                R.drawable.ic_editor_done, 1),
+            Triple(EditorEventContent.Information(EditorText(R.string.editor_event_already_quoted)),
+                R.drawable.ic_editor_info, 1),
+        )
+        cases.forEach { (content, icon, tint) ->
+            val event = controlEvent(content)
             compose.runOnIdle { current.value = event }
-            val expectedMode = if (error.errorClass == EditorErrorClass.Information) {
-                LiveRegionMode.Polite
-            } else LiveRegionMode.Assertive
+            val expectedMode = if (tint == 0) LiveRegionMode.Assertive else LiveRegionMode.Polite
             compose.onNode(live).assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, expectedMode))
-            compose.onAllNodes(hasClickAction()).assertCountEquals(1)
-            compose.onNode(hasClickAction()).assert(hasContentDescription(
-                error.summary.resolve(context) + ", " + actionLabel(requireNotNull(event.action)),
+            compose.onNodeWithTag("editor-event-icon-$icon", useUnmergedTree = true)
+                .assert(SemanticsMatcher.expectValue(EditorEventIconTintKey, tints[tint]))
+            compose.onAllNodes(hasClickAction()).assertCountEquals(if (event.action == null) 0 else 1)
+            if (event.action != null) compose.onNode(hasClickAction()).assert(hasContentDescription(
+                event.summary.resolve(context) + ", " + actionLabel(requireNotNull(event.action)),
             ))
         }
     }

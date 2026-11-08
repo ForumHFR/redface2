@@ -6,9 +6,12 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.R
@@ -27,7 +30,17 @@ fun EditorRecipientChip(
         selected = false,
         onClick = onRemove,
         enabled = enabled,
-        modifier = modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).semantics { contentDescription = label },
+        // InputChip's Checkbox/Selected semantics do not describe a removal action.
+        // M3 reserves the minimum interactive height around its compact visual container.
+        modifier = modifier.sizeIn(minWidth = 48.dp).clearAndSetSemantics {
+            role = Role.Button
+            contentDescription = label
+            onClick(label = label) {
+                if (enabled) onRemove()
+                enabled
+            }
+            if (!enabled) disabled()
+        },
         label = { Text(recipient, Modifier.clearAndSetSemantics {}, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         trailingIcon = { RedfaceVectorIcon(R.drawable.ic_close) },
     )

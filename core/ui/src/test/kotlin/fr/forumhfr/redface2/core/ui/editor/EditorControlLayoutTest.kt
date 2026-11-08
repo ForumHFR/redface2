@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.ui.editor
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
@@ -18,6 +19,7 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
@@ -116,6 +118,37 @@ class EditorControlLayoutTest {
     }
 
     @Test
+    fun `ED133 a 155 dp intrinsic text is not ellipsized in the 161 dp slot`() {
+        val width = mutableStateOf(181.dp)
+        var layout: TextLayoutResult? = null
+        compose.setContent {
+            RedfaceTheme {
+                val density = LocalDensity.current
+                val reference = rememberTextMeasurer().measure(
+                    EditorErrors.draftWriteFailed.summary.resolve(), style = MaterialTheme.typography.labelSmall,
+                ).multiParagraph.intrinsics.maxIntrinsicWidth
+                // Simulate a font/device variation without weakening the catalogue's 150 dp assertion.
+                val scale = density.fontScale * with(density) { 155.dp.toPx() } / reference
+                CompositionLocalProvider(LocalDensity provides Density(density.density, scale)) {
+                    EditorEventControl(controlEvent(EditorEventContent.Problem(EditorErrors.draftWriteFailed)),
+                        width.value, { _, _ -> }, onSummaryTextLayout = { layout = it })
+                }
+            }
+        }
+        listOf(181.dp, 90.dp).forEach { injectedWidth ->
+            compose.runOnIdle { width.value = injectedWidth }
+            compose.waitForIdle()
+            val result = requireNotNull(layout)
+            val pixelsPerDp = result.layoutInput.density.density
+            assertEquals(155f, result.multiParagraph.intrinsics.maxIntrinsicWidth / pixelsPerDp, 1f)
+            assertEquals(injectedWidth.value - 20f, result.layoutInput.constraints.maxWidth / pixelsPerDp, 0.5f)
+            assertEquals(1, result.lineCount)
+            assertEquals(injectedWidth == 90.dp, result.isLineEllipsized(0))
+            if (injectedWidth == 181.dp) assertEquals(result.layoutInput.text.length, result.getLineEnd(0))
+        }
+    }
+
+    @Test
     fun `ED91 narrow fallback ellipsizes visually while preserving the full accessible name`() {
         var layout: TextLayoutResult? = null
         compose.setContent {
@@ -137,7 +170,7 @@ class EditorControlLayoutTest {
     }
 
     @Test
-    fun `ED40 event states keep their envelope and record light dark normal compact samples`() {
+    fun `ED40 absent events keep only the live footprint and visible targets center in injected heights`() {
         val event = mutableStateOf<EditorEvent?>(null)
         val dark = mutableStateOf(false)
         val height = mutableStateOf(56.dp)
@@ -145,7 +178,8 @@ class EditorControlLayoutTest {
             RedfaceTheme(darkTheme = dark.value) {
                 Surface {
                     Box(Modifier.width(181.dp).height(height.value).testTag("sample")) {
-                        EditorEventControl(event.value, 181.dp, { _, _ -> })
+                        EditorEventControl(event.value, 181.dp, { _, _ -> }, Modifier.testTag("control")
+                            .then(if (event.value == null) Modifier else Modifier.height(height.value)))
                     }
                 }
             }
@@ -173,6 +207,14 @@ class EditorControlLayoutTest {
                     val bounds = compose.onNodeWithTag("sample").getUnclippedBoundsInRoot()
                     assertEquals(181f, bounds.width.value, 0.5f)
                     assertEquals(injectedHeight.value, bounds.height.value, 0.5f)
+                    val control = compose.onNodeWithTag("control").getUnclippedBoundsInRoot()
+                    assertEquals(if (sample == null) 1f else 181f, control.width.value, 0.5f)
+                    assertEquals(if (sample == null) 1f else injectedHeight.value, control.height.value, 0.5f)
+                    if (sample?.action != null) {
+                        val target = compose.onNode(hasClickAction()).getUnclippedBoundsInRoot()
+                        assertEquals(48f, target.height.value, 0.5f)
+                        assertEquals((injectedHeight.value - 48f) / 2, (target.top - control.top).value, 0.5f)
+                    }
                     compose.onNodeWithTag("sample").captureRoboImage(
                         "build/outputs/roborazzi/editor_event_${index}_${isDark}_${injectedHeight.value}.png",
                     )

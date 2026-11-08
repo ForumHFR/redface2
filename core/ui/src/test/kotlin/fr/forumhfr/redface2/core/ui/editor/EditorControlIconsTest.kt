@@ -11,6 +11,8 @@ import androidx.compose.ui.input.InputModeManager
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
@@ -195,22 +197,32 @@ class EditorControlIconsTest {
     }
 
     @Test
-    fun `recipient InputChip has one removal target and obeys disabled state`() {
+    fun `recipient InputChip has one removal button without checked state and obeys disabled state`() {
         var removals = 0
         val enabled = mutableStateOf(true)
         compose.setContent {
             RedfaceTheme { Surface { EditorRecipientChip("Alice", { removals++ }, enabled = enabled.value) } }
         }
         val chip = compose.onNode(hasClickAction())
-        compose.onAllNodes(hasClickAction()).assertCountEquals(1)
-        chip.assert(hasContentDescription("Retirer le destinataire Alice")).performClick()
-        assertEquals(1, removals)
-        assertTarget(chip.getUnclippedBoundsInRoot().width.value, chip.getUnclippedBoundsInRoot().height.value)
-        chip.captureRoboImage("build/outputs/roborazzi/editor_recipient_enabled.png")
-        compose.runOnIdle { enabled.value = false }
-        chip.assertIsNotEnabled().performTouchInput { click() }
-        assertEquals(1, removals)
-        chip.captureRoboImage("build/outputs/roborazzi/editor_recipient_disabled.png")
+        listOf(true, false).forEach { active ->
+            compose.runOnIdle { enabled.value = active }
+            compose.onAllNodes(hasClickAction()).assertCountEquals(1)
+            chip.assert(hasContentDescription("Retirer le destinataire Alice"))
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
+                .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Selected))
+                .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.ToggleableState))
+            val removal = chip.fetchSemanticsNode().config[SemanticsActions.OnClick]
+            assertEquals("Retirer le destinataire Alice", removal.label)
+            if (active) chip.performClick() else {
+                chip.assertIsNotEnabled().performTouchInput { click() }
+                compose.runOnIdle { assertEquals(false, removal.action?.invoke()) }
+            }
+            assertEquals(1, removals)
+            assertTarget(chip.getUnclippedBoundsInRoot().width.value, chip.getUnclippedBoundsInRoot().height.value)
+            assertEquals(48f, chip.getUnclippedBoundsInRoot().height.value, 0.5f)
+            val state = if (active) "enabled" else "disabled"
+            chip.captureRoboImage("build/outputs/roborazzi/editor_recipient_$state.png")
+        }
     }
 
     private fun assertTarget(width: Float, height: Float) {

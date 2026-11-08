@@ -9,7 +9,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -18,9 +17,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
@@ -34,22 +35,22 @@ import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 
 /**
  * Always compose this control, including when [event] is null; never key it by event identity.
+ * Without an event only the 1 dp live node remains; no event slot is reserved.
  * The host allocates [width] and the gap to Submit. No window or bar policy lives here.
+ * When the host supplies a taller height via [modifier], the 48 dp target is centered vertically.
  * [onAction] receives the exact displayed key; acknowledgement remains the host reducer's job.
  */
 @Composable
-@Suppress("LongParameterList") // Event + host width + action, then modifier and two defaulted test seams.
 fun EditorEventControl(
     event: EditorEvent?,
     width: Dp,
     onAction: (EventKey, EditorEventAction) -> Unit,
     modifier: Modifier = Modifier,
-    summaryTextWidth: Dp = EDITOR_SUMMARY_TEXT_WIDTH_DP.dp,
     onSummaryTextLayout: ((TextLayoutResult) -> Unit)? = null,
 ) {
-    require(width >= 48.dp && summaryTextWidth > 0.dp)
+    require(width >= 48.dp)
     val summary = event?.summary?.resolve().orEmpty()
-    // ED-133: keep labelSmall and the 150 dp net budget; speech retains the full image summary.
+    // ED-133: 150 dp is the catalogue's intrinsic budget; layout uses the whole remaining slot.
     // Short visual wording pending maintainer arbitration in spec v0.7.3.
     val visualSummary = if (event?.content is EditorEventContent.Finished &&
         event.summary.resourceId == R.plurals.editor_event_images_inserted) {
@@ -69,7 +70,10 @@ fun EditorEventControl(
         action != null -> MaterialTheme.colorScheme.onSecondaryContainer
         else -> MaterialTheme.colorScheme.onSurfaceVariant
     }
-    Box(modifier.width(width).heightIn(min = 48.dp)) {
+    Box(
+        modifier = if (event == null) modifier else modifier.width(width).heightIn(min = 48.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
         EditorLiveAnnouncement(announcement, isError)
         if (event != null) Row(
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
@@ -82,11 +86,13 @@ fun EditorEventControl(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            RedfaceVectorIcon(event.controlIcon(), tint = tint, size = 16.dp)
+            val icon = event.controlIcon()
+            RedfaceVectorIcon(icon,
+                Modifier.testTag("editor-event-icon-$icon")
+                    .semantics { this[EditorEventIconTintKey] = tint }, tint = tint, size = 16.dp)
             Text(
                 text = visualSummary,
-                modifier = Modifier.weight(1f, fill = false)
-                    .widthIn(max = minOf(summaryTextWidth, EDITOR_SUMMARY_TEXT_WIDTH_DP.dp)).clearAndSetSemantics {},
+                modifier = Modifier.weight(1f, fill = false).clearAndSetSemantics {},
                 style = MaterialTheme.typography.labelSmall,
                 color = tint,
                 maxLines = 1,
@@ -96,6 +102,9 @@ fun EditorEventControl(
         }
     }
 }
+
+/** Internal visual diagnostic, ignored by accessibility services. */
+internal val EditorEventIconTintKey = SemanticsPropertyKey<Color>("EditorEventIconTint")
 
 @Composable
 private fun EditorEventAction.controlLabel(): String = stringResource(when (this) {
