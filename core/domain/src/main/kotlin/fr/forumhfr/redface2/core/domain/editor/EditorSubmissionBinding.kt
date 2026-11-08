@@ -198,11 +198,15 @@ class EditorSubmissionBinding<E, F>(
 
     /** ED-44 also applies to awaited quote mutations outside persist(). */
     fun resolveDraftWrite(result: StoreWriteResult?) {
+        resolveDraftFailure(result)
+        reportDraftWriteFailure(result)
+    }
+
+    private fun resolveDraftFailure(result: StoreWriteResult?) {
         if (result is StoreWriteResult.Written) {
             pendingDraftFailure = false
             callbacks.clearError(errors.draftSaveFailed)
         }
-        reportDraftWriteFailure(result)
     }
 
     private fun draftSaveFailed() {
