@@ -289,6 +289,8 @@ private fun TopicFormControlsZone(
             DraftRestoreBanner(
                 onRestore = { onIntent(TopicFormIntent.DraftRestoreRequested) },
                 onDiscard = { onIntent(TopicFormIntent.DraftDiscardRequested) },
+                // Same refusals as the ViewModel: unknown seed while the form loads, body locked during an upload.
+                restoreEnabled = !state.isUploading && !state.isLoadingForm,
             )
         }
         TopicFormErrorBanners(state = state, onIntent = onIntent)

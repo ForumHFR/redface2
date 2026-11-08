@@ -464,6 +464,8 @@ class TopicFormViewModel @AssistedInject constructor(
 
     @Suppress("CyclomaticComplexMethod") // MVI when-dispatch over the TopicFormIntent variants ; flat by design.
     fun submit(intent: TopicFormIntent) {
+        // Unknown seed: refuse the restore before any guard side effect (same order as the PM reply).
+        if (intent == TopicFormIntent.DraftRestoreRequested && _state.value.isLoadingForm) return
         if (intent.mutatesEditor && !acceptMutation(blockDuringUpload = intent.mutatesBody)) return
         when (intent) {
             is TopicFormIntent.SubjectChanged -> onSubjectChanged(intent.value)

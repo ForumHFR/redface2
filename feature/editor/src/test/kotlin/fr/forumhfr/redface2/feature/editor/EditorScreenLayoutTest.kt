@@ -3,11 +3,14 @@ package fr.forumhfr.redface2.feature.editor
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
@@ -113,6 +116,31 @@ class EditorScreenLayoutTest {
         compose.onAllNodes(hasSetTextAction())[1]
             .assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT - FIELD_LABEL_HEADROOM)
         assertDraftActionsFullyVisible()
+    }
+
+    @Test
+    fun `topic restore is disabled while the seed form loads and during an upload`() {
+        val state = mutableStateOf(topicState(restorableDraft = "Brouillon à restaurer").copy(isLoadingForm = true))
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                TopicFormContent(
+                    state = state.value,
+                    bodyFieldState = remember { TextFieldState() },
+                    bodyInputTransformation = InputTransformation {},
+                    onIntent = {},
+                    onOpenSmileys = {},
+                    modifier = Modifier.fillMaxSize(),
+                )
+            }
+        }
+
+        compose.onNodeWithText("Restaurer").assertIsNotEnabled()
+        compose.onNodeWithText("Ignorer").assertIsEnabled()
+        compose.runOnIdle { state.value = state.value.copy(isLoadingForm = false) }
+        compose.onNodeWithText("Restaurer").assertIsEnabled()
+        compose.runOnIdle { state.value = state.value.copy(isUploading = true) }
+        compose.onNodeWithText("Restaurer").assertIsNotEnabled()
+        compose.onNodeWithText("Ignorer").assertIsEnabled()
     }
 
     @Test
