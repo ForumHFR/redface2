@@ -23,17 +23,22 @@ class EditorEventReducerTest {
     private val text = EditorErrors.network.summary
 
     @Test
-    fun `invariant 1 - projection and replay never recreate or expire an event`() {
+    fun `invariant 1 - session and operation replay preserve received and acknowledged terminals`() {
         val error = problem(validation, EditorErrors.empty, 1)
         val state = containing(error)
-        // Text, selection, recomposition and elapsed time have no event input and cannot expire it.
-        repeat(50) {
-            assertEquals(error, state.visibleEvent)
-            assertEquals(state, state.step(EditorEventInput.Received(error)))
-        }
         val acknowledged = state.step(EditorEventInput.Acknowledge(error.key))
-        assertEquals(acknowledged, acknowledged.step(EditorEventInput.Received(error.copy(arrivalOrder = 99))))
-        assertEquals(state, state.step(EditorEventInput.OpenSession(session)))
+        assertEquals(state.copy(events = emptyList()), acknowledged)
+        val replays = listOf(
+            EditorEventInput.OpenSession(session),
+            EditorEventInput.ObserveOperation(session, validation),
+            EditorEventInput.Received(error),
+            EditorEventInput.Received(error.copy(arrivalOrder = 99)),
+            EditorEventInput.Received(error.copy(key = error.key.copy(occurrence = 99))),
+        )
+        // No typing/selection/time inputs exist: their lack of effects is structural, not exercised here.
+        listOf(state, acknowledged).forEach { stable ->
+            replays.forEach { assertEquals(EditorEventTransition(stable), reduceEditorEvents(stable, it)) }
+        }
     }
 
     @Test
@@ -104,6 +109,48 @@ class EditorEventReducerTest {
     }
 
     @Test
+    fun `observing before effective launch preserves the launch and rejects subsequent starts`() {
+        val error = problem(validation, EditorErrors.missingTitle, 1)
+        val observed = containing(error).observe(submission)
+        assertEquals(-1L, observed.currentOperations.last().lastOccurrence)
+        val sending = event(submission, EditorEventContent.InProgress(text), 2)
+        val started = observed.step(EditorEventInput.OperationStarted(sending))
+        assertEquals(listOf(sending), started.events)
+        val repeated = sending.copy(key = sending.key.copy(occurrence = 3), arrivalOrder = 3)
+        assertEquals(started, started.step(EditorEventInput.OperationStarted(repeated)))
+    }
+
+    @Test
+    fun `first Received registers an unobserved operation without applying launch cleanup`() {
+        val error = problem(validation, EditorErrors.missingTitle, 1)
+        val state = containing(error)
+        listOf(EditorEventContent.InProgress(text), EditorEventContent.Problem(EditorErrors.tooLarge)).forEach {
+            val incoming = event(upload, it, 2)
+            val received = state.step(EditorEventInput.Received(incoming))
+            assertEquals(listOf(error, incoming), received.events)
+            assertEquals(2L, received.currentOperations.last().lastOccurrence)
+            assertEquals(received, received.step(EditorEventInput.Received(incoming)))
+        }
+    }
+
+    @Test
+    fun `submission token matches before and after learning its durable attempt identity`() {
+        val identity = AttemptIdentity("alice", session.key, "attempt-1")
+        val known = submission.copy(attempt = identity)
+        val sending = event(known, EditorEventContent.InProgress(text), 1)
+        val started = EditorEventState(session).observe(submission).step(EditorEventInput.OperationStarted(sending))
+        assertEquals(listOf(sending), started.events)
+        val uncertain = problem(submission, EditorErrors.uncertain, 2)
+        val received = started.step(EditorEventInput.Received(uncertain))
+        assertEquals(listOf(uncertain), received.events)
+        assertEquals(known, received.currentOperations.single().ref)
+        val save = OperationRef.Local(EditorLocalOperation.DraftSave, 1)
+        val withSave = received.step(EditorEventInput.Received(problem(save, EditorErrors.draftSaveFailed, 3)))
+        val written = withSave.step(EditorEventInput.DurableWriteSucceeded(session, submission))
+        assertEquals(listOf(uncertain), written.events)
+    }
+
+    @Test
     fun `invariant 2 - changing account clears all visual state and rejects old session callbacks`() {
         val error = problem(upload, EditorErrors.tooLarge, 1)
         val opened = containing(error).step(EditorEventInput.Activate(error.key))
@@ -138,12 +185,50 @@ class EditorEventReducerTest {
         assertEquals(state, state.step(EditorEventInput.NextGesture(session)))
         val sending = event(submission, EditorEventContent.InProgress(text), 3)
         val started = state.step(EditorEventInput.OperationStarted(sending))
-        assertEquals(listOf(information, sending), started.events)
+        assertEquals(listOf(sending), started.events)
         assertEquals(sending, started.visibleEvent)
     }
 
     @Test
-    fun `invariant 3 - successful GET removes only its own error and no send or validation error`() {
+    fun `invariant 3 - launch clears a hidden validation error behind upload failure and every other terminal`() {
+        val failedUpload = problem(upload, EditorErrors.tooLarge, 1)
+        val hiddenValidation = problem(validation, EditorErrors.missingTitle, 2)
+        val information = event(notice, EditorEventContent.Information(text), 3)
+        val insertion = OperationRef.Local(EditorLocalOperation.QuoteInsertion, 1)
+        val finished = event(insertion, EditorEventContent.Finished(text), 4)
+        val state = containing(failedUpload, hiddenValidation, information, finished)
+        assertEquals(failedUpload, state.visibleEvent)
+        val sending = event(submission, EditorEventContent.InProgress(text), 6)
+        val started = state.step(EditorEventInput.OperationStarted(sending))
+        assertEquals(listOf(sending), started.events)
+        assertEquals(sending, started.visibleEvent)
+        val save = OperationRef.Local(EditorLocalOperation.DraftSave, 1)
+        val progress = event(save, EditorEventContent.InProgress(text), 5)
+        val withProgress = state.step(EditorEventInput.Received(progress))
+            .step(EditorEventInput.OperationStarted(sending))
+        assertEquals(listOf(progress, sending), withProgress.events)
+    }
+
+    @Test
+    fun `invariant 3 - uncertainty survives upload and other launches until acknowledgement or send launch`() {
+        val uncertain = problem(submission, EditorErrors.uncertain, 1)
+        val nextSend = submission.copy(token = SubmissionToken(2, session))
+        val state = containing(uncertain).observe(nextSend)
+        assertEquals(listOf(uncertain), state.events)
+        val insertion = OperationRef.Local(EditorLocalOperation.QuoteInsertion, 1)
+        listOf(upload, insertion).forEach { ref ->
+            val running = event(ref, EditorEventContent.InProgress(text), 2)
+            val started = state.step(EditorEventInput.OperationStarted(running))
+            assertEquals(listOf(uncertain, running), started.events)
+            assertEquals(uncertain, started.visibleEvent)
+            assertEquals(listOf(running), started.step(EditorEventInput.Acknowledge(uncertain.key)).events)
+        }
+        val sending = event(nextSend, EditorEventContent.InProgress(text), 3)
+        assertEquals(listOf(sending), state.step(EditorEventInput.OperationStarted(sending)).events)
+    }
+
+    @Test
+    fun `invariant 3 - successful form or quote GET with defaults removes only its own error`() {
         val own = problem(form, EditorErrors.formNetwork, 1)
         val others = listOf(
             problem(quote, EditorErrors.quoteFetchFailed, 2),
@@ -156,11 +241,11 @@ class EditorEventReducerTest {
         val loading = before.observe(retry)
         assertTrue(loading.events.contains(own))
         assertEquals(loading, loading.step(EditorEventInput.FormLoaded(session, form)))
-        val loaded = loading.step(EditorEventInput.FormLoaded(session, retry, quotesResolved = true))
+        val loaded = loading.step(EditorEventInput.FormLoaded(session, retry))
         assertEquals(others, loaded.events)
         assertEquals(loaded, loaded.step(EditorEventInput.Received(problem(form, EditorErrors.invalidForm, 99))))
         val quoteRetry = quote.copy(sequence = 2)
-        val quoted = loaded.observe(quoteRetry).step(EditorEventInput.FormLoaded(session, quoteRetry, true))
+        val quoted = loaded.observe(quoteRetry).step(EditorEventInput.FormLoaded(session, quoteRetry))
         assertEquals(others.drop(1), quoted.events)
         val lateFailure = EditorEventInput.Received(problem(quoteRetry, EditorErrors.quoteFetchFailed, 99))
         assertEquals(quoted, quoted.step(lateFailure))
@@ -207,14 +292,14 @@ class EditorEventReducerTest {
         assertEquals(
             listOf(EditorEventCommand.CompleteHeader(complete.key, EditorCause.UnknownRecipient)), completed.commands,
         )
-        assertTrue(completed.state.acknowledgedKeys.contains(complete.key))
+        assertEquals(containing(complete).currentOperations, completed.state.currentOperations)
         assertNull(completed.state.visibleEvent)
         val detail = problem(quote, EditorErrors.quoteFetchFailed, 2)
         val opened = reduceEditorEvents(containing(detail), EditorEventInput.Activate(detail.key))
         assertEquals(listOf(EditorEventCommand.OpenDetails(detail)), opened.commands)
         assertEquals(detail.key, opened.state.detailKey)
         assertEquals(detail, opened.state.visibleEvent)
-        assertTrue(opened.state.acknowledgedKeys.isEmpty())
+        assertEquals(containing(detail).events, opened.state.events)
         val plain = event(notice, EditorEventContent.Information(text), 3)
         val dismissed = reduceEditorEvents(containing(plain), EditorEventInput.Activate(plain.key))
         assertNull(dismissed.state.visibleEvent)
@@ -232,13 +317,24 @@ class EditorEventReducerTest {
             .step(EditorEventInput.Received(replacement))
         val closed = reduceEditorEvents(replaced, EditorEventInput.CloseDetails(error.key))
         assertEquals(listOf(replacement), closed.state.events)
-        assertTrue(closed.state.acknowledgedKeys.contains(error.key))
-        assertFalse(closed.state.acknowledgedKeys.contains(replacement.key))
+        assertEquals(replaced.currentOperations, closed.state.currentOperations)
+        assertEquals(closed.state, closed.state.step(EditorEventInput.Received(replacement)))
         assertNull(closed.state.detailKey)
         assertEquals(listOf(EditorEventCommand.ReturnToBody), closed.commands)
-        val newerDetail = replaced.step(EditorEventInput.Activate(replacement.key))
-        assertEquals(newerDetail, newerDetail.step(EditorEventInput.CloseDetails(error.key)))
         assertEquals(replaced, replaced.step(EditorEventInput.Activate(error.key)))
+    }
+
+    @Test
+    fun `stale detail closure returns focus without acknowledging a newer event`() {
+        val error = problem(upload, EditorErrors.tooLarge, 2)
+        val opened = containing(error).step(EditorEventInput.Activate(error.key))
+        val stale = error.key.copy(occurrence = 1)
+        val closed = reduceEditorEvents(opened, EditorEventInput.CloseDetails(stale))
+        assertEquals(
+            EditorEventTransition(opened.copy(detailKey = null), listOf(EditorEventCommand.ReturnToBody)), closed,
+        )
+        val alreadyClosed = reduceEditorEvents(closed.state, EditorEventInput.CloseDetails(stale))
+        assertEquals(EditorEventTransition(closed.state), alreadyClosed)
     }
 
     @Test
@@ -261,14 +357,20 @@ class EditorEventReducerTest {
     }
 
     @Test
-    fun `invariant 6 - acknowledging quote failure keeps its operation and issues only UI commands`() {
+    fun `invariant 6 - quote acknowledgement preserves watermarks rejects replay and permits a real retry`() {
         val error = problem(quote, EditorErrors.quoteFetchFailed, 1)
         val opened = containing(error).step(EditorEventInput.Activate(error.key))
         val closed = reduceEditorEvents(opened, EditorEventInput.CloseDetails(error.key))
-        assertNull(closed.state.visibleEvent)
-        assertEquals(quote, closed.state.currentOperations.single().ref)
+        assertEquals(opened.copy(events = emptyList(), detailKey = null), closed.state)
         assertEquals(listOf(EditorEventCommand.ReturnToBody), closed.commands)
-        assertTrue(closed.state.acknowledgedKeys.contains(error.key))
+        val replayed = reduceEditorEvents(closed.state, EditorEventInput.Received(error))
+        assertEquals(EditorEventTransition(closed.state), replayed)
+        val direct = reduceEditorEvents(containing(error), EditorEventInput.Acknowledge(error.key))
+        assertEquals(EditorEventTransition(closed.state), direct)
+        val retry = quote.copy(sequence = 2)
+        val retried = closed.state.observe(retry).step(EditorEventInput.FormLoaded(session, retry))
+        assertTrue(retried.currentOperations.single().finished)
+        assertNull(retried.visibleEvent)
     }
 
     @Test
@@ -278,10 +380,15 @@ class EditorEventReducerTest {
         val error = problem(ref, EditorErrors.uncertain, 1)
         val opened = containing(error).step(EditorEventInput.Activate(error.key))
         val closed = reduceEditorEvents(opened, EditorEventInput.CloseDetails(error.key))
-        assertNull(closed.state.visibleEvent)
-        assertEquals(ref, closed.state.currentOperations.single().ref)
+        assertEquals(opened.copy(events = emptyList(), detailKey = null), closed.state)
         assertEquals(identity, (closed.state.currentOperations.single().ref as OperationRef.Submission).attempt)
         assertEquals(listOf(EditorEventCommand.ReturnToBody), closed.commands)
+        val freshKey = error.copy(key = error.key.copy(occurrence = 99), arrivalOrder = 99)
+        val replayed = reduceEditorEvents(closed.state, EditorEventInput.Received(freshKey))
+        assertEquals(EditorEventTransition(closed.state), replayed)
+        val direct = reduceEditorEvents(containing(error), EditorEventInput.Acknowledge(error.key))
+        assertEquals(closed.state, direct.state)
+        assertTrue(direct.commands.isEmpty())
     }
 
     private fun event(ref: OperationRef, content: EditorEventContent, order: Long) =

@@ -1,13 +1,32 @@
 package fr.forumhfr.redface2.core.ui.editor
 
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptIdentity
 import fr.forumhfr.redface2.core.domain.editor.EditorSession
+import fr.forumhfr.redface2.core.domain.editor.SubmissionToken
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class EditorEventTest {
     private val session = EditorSession("session", "alice", "topic:23:42")
     private val key = EventKey(session, OperationRef.Local(EditorLocalOperation.Notice, 1), 1)
+
+    @Test
+    fun `attempt metadata requires an exact known owner and context without mapping absent owner to empty`() {
+        val identity = AttemptIdentity("alice", session.key, "attempt-1")
+        val ref = OperationRef.Submission(SubmissionToken(1, session), identity)
+        assertEquals(identity, ref.attempt)
+        val anonymous = SubmissionToken(1, session.copy(owner = null))
+        assertNull(OperationRef.Submission(anonymous).attempt)
+        assertThrows(IllegalArgumentException::class.java) {
+            OperationRef.Submission(anonymous, identity.copy(owner = ""))
+        }
+        assertThrows(IllegalArgumentException::class.java) { ref.copy(attempt = identity.copy(owner = "bob")) }
+        assertThrows(IllegalArgumentException::class.java) { ref.copy(attempt = identity.copy(key = "other")) }
+        val emptyOwner = anonymous.copy(session = anonymous.session.copy(owner = ""))
+        assertEquals("", OperationRef.Submission(emptyOwner, identity.copy(owner = "")).attempt?.owner)
+    }
 
     @Test
     fun `invariant 4 - Complete precedes detail and Reload and Dismiss with details open details`() {

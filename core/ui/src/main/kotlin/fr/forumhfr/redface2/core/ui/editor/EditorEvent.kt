@@ -7,9 +7,13 @@ import fr.forumhfr.redface2.core.domain.editor.SubmissionToken
 
 /** Host identities; sequences increase within each operation kind for the lifetime of a session. */
 sealed interface OperationRef {
+    /** Matched by token; attempt is metadata learned later, bound to an explicitly known owner. */
     data class Submission(val token: SubmissionToken, val attempt: AttemptIdentity? = null) : OperationRef {
         init {
-            require(attempt == null || attempt.owner == token.session.owner && attempt.key == token.session.key)
+            if (attempt != null) {
+                val owner = requireNotNull(token.session.owner)
+                require(attempt.owner == owner && attempt.key == token.session.key)
+            }
         }
     }
     data class Upload(val token: EditorUploadToken) : OperationRef
@@ -84,18 +88,20 @@ data class EditorEventOperation(
     val finished: Boolean = false,
 )
 
-/** Visual state only: pending quotes and durable attempts remain owned by the host. */
+/**
+ * Visual state only: pending quotes and durable attempts remain owned by the host.
+ * Occurrence watermarks and finished operations reject replay, including after visual acknowledgement.
+ */
 data class EditorEventState(
     val session: EditorSession,
     val currentOperations: List<EditorEventOperation> = emptyList(),
     val events: List<EditorEvent> = emptyList(),
-    val acknowledgedKeys: Set<EventKey> = emptySet(),
     val detailKey: EventKey? = null,
 ) {
     val visibleEvent: EditorEvent? get() = selectEditorEventFifo(events)
 }
 
-/** Pending maintainer arbitration: equal ranks use FIFO; replacement gets its own arrival order. */
+/** Pending maintainer arbitration: equal ranks use FIFO. Replacement is in [replaceEditorEventsByKind]. */
 fun selectEditorEventFifo(events: List<EditorEvent>): EditorEvent? = events.minWithOrNull(
     compareByDescending<EditorEvent> { it.rank.priority }.thenBy { it.arrivalOrder },
 )
@@ -118,6 +124,15 @@ internal fun OperationRef.sameKind(other: OperationRef): Boolean = when (this) {
     is OperationRef.Upload -> other is OperationRef.Upload
     is OperationRef.Local -> other is OperationRef.Local && kind == other.kind
 }
+
+/** Structural equality includes metadata; operation matching must not depend on when it was learned. */
+internal fun OperationRef.sameOperation(other: OperationRef): Boolean = when (this) {
+    is OperationRef.Submission -> other is OperationRef.Submission && token == other.token
+    is OperationRef.Upload, is OperationRef.Local -> this == other
+}
+
+internal val EditorEvent.isAmbiguous: Boolean
+    get() = (content as? EditorEventContent.Problem)?.error?.errorClass == EditorErrorClass.Ambiguous
 
 internal val OperationRef.isRead: Boolean
     get() = this is OperationRef.Local && kind in setOf(EditorLocalOperation.FormLoad, EditorLocalOperation.QuoteFetch)

@@ -8,25 +8,27 @@ import org.junit.Test
 
 class EditorBarStateTest {
     @Test
-    fun `ED23 - format survives body editing disarm and event acknowledgement`() {
+    fun `ED23 - arming masks format ignores ToggleFormat and disarming restores it`() {
         val session = EditorSession("session", "alice", "topic:23:42")
         val format = reduceEditorBar(EditorBarState(), EditorBarGesture.ToggleFormat)
         val armed = format.withSubmission(EditorSubmissionState.Armed(ArmToken(1, session, 0, 5_000)))
         assertEquals(EditorBarMode.Format, armed.mode)
         assertEquals(EditorBarMode.Normal, armed.visibleMode)
         assertEquals(armed, reduceEditorBar(armed, EditorBarGesture.ToggleFormat))
-        // The controller reports Ready after editing or timeout; the bar does not own either cause.
-        val edited = armed.withSubmission(EditorSubmissionState.Ready)
-        assertEquals(format, edited)
-        val key = EventKey(session, OperationRef.Local(EditorLocalOperation.Validation, 1), 1)
-        val error = EditorEvent(key, EditorEventContent.Problem(EditorErrors.empty), 1)
-        val state = EditorEventState(session)
-        val observed = reduceEditorEvents(state, EditorEventInput.ObserveOperation(session, key.operation)).state
-        val received = reduceEditorEvents(observed, EditorEventInput.Received(error)).state
-        val acknowledged = reduceEditorEvents(received, EditorEventInput.Acknowledge(key)).state
-        assertEquals(emptyList<EditorEvent>(), acknowledged.events)
-        assertEquals(EditorBarMode.Format, edited.visibleMode)
-        assertEquals(EditorBarMode.Normal, reduceEditorBar(edited, EditorBarGesture.ToggleFormat).mode)
+        val disarmed = armed.withSubmission(EditorSubmissionState.Ready)
+        assertEquals(format, disarmed)
+        assertEquals(EditorBarMode.Format, disarmed.visibleMode)
+        assertEquals(EditorBarMode.Normal, reduceEditorBar(disarmed, EditorBarGesture.ToggleFormat).mode)
+    }
+
+    @Test
+    fun `ED23 - opening a surface while armed closes saved format so disarming cannot reopen it`() {
+        val session = EditorSession("session", "alice", "topic:23:42")
+        val arm = ArmToken(1, session, 0, 5_000)
+        val armed = EditorBarState(EditorBarMode.Format, arm)
+        val closed = reduceEditorBar(armed, EditorBarGesture.OpenSurface)
+        assertEquals(EditorBarState(EditorBarMode.Normal, arm), closed)
+        assertEquals(EditorBarState(), closed.withSubmission(EditorSubmissionState.Ready))
     }
 
     @Test

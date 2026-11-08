@@ -29,7 +29,10 @@ sealed interface EditorBackAction {
     data class Leave(val saveDraft: Boolean) : EditorBackAction
 }
 
-/** ED-85, in priority order. Masked format/sublevels do not consume Back ahead of the visible arm. */
+/**
+ * ED-85, in priority order. Pending maintainer decision: "open" means visibly open, so masked
+ * format/sublevels do not consume Back ahead of the arm, despite ED-85's literal order.
+ */
 fun resolveEditorBack(state: EditorBackState): EditorBackAction = when {
     state.sheet == EditorSheet.Smileys && state.smileyDetailOpen -> EditorBackAction.ReturnToSmileyGrid
     state.sheet != null -> EditorBackAction.CloseSheet(state.sheet)
