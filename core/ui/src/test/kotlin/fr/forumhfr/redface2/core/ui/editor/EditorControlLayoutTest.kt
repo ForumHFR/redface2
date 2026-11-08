@@ -121,20 +121,18 @@ class EditorControlLayoutTest {
     fun `ED133 a 155 dp intrinsic text is not ellipsized in the 161 dp slot`() {
         val width = mutableStateOf(185.dp)
         var layout: TextLayoutResult? = null
-        compose.setContent {
-            RedfaceTheme {
-                val density = LocalDensity.current
-                val reference = rememberTextMeasurer().measure(
-                    EditorErrors.draftWriteFailed.summary.resolve(), style = MaterialTheme.typography.labelSmall,
-                ).multiParagraph.intrinsics.maxIntrinsicWidth
-                // Simulate a font/device variation without weakening the catalogue's 150 dp assertion.
-                val scale = density.fontScale * with(density) { 155.dp.toPx() } / reference
-                CompositionLocalProvider(LocalDensity provides Density(density.density, scale)) {
-                    EditorEventControl(controlEvent(EditorEventContent.Problem(EditorErrors.draftWriteFailed)),
-                        width.value, { _, _ -> }, onSummaryTextLayout = { layout = it })
-                }
+        compose.setContent { RedfaceTheme {
+            val density = LocalDensity.current
+            val reference = rememberTextMeasurer().measure(
+                EditorErrors.draftWriteFailed.summary.resolve(), style = MaterialTheme.typography.labelSmall,
+            ).multiParagraph.intrinsics.maxIntrinsicWidth
+            // Simulate a font/device variation without weakening the catalogue's 150 dp assertion.
+            val scale = density.fontScale * with(density) { 155.dp.toPx() } / reference
+            CompositionLocalProvider(LocalDensity provides Density(density.density, scale)) {
+                EditorEventControl(controlEvent(EditorEventContent.Problem(EditorErrors.draftWriteFailed)),
+                    width.value, { _, _ -> }, onSummaryTextLayout = { layout = it })
             }
-        }
+        } }
         listOf(185.dp, 90.dp).forEach { injectedWidth ->
             compose.runOnIdle { width.value = injectedWidth }
             compose.waitForIdle()
@@ -151,12 +149,10 @@ class EditorControlLayoutTest {
     @Test
     fun `ED91 narrow fallback ellipsizes visually while preserving the full accessible name`() {
         var layout: TextLayoutResult? = null
-        compose.setContent {
-            RedfaceTheme { Surface {
-                EditorEventControl(controlEvent(EditorEventContent.Problem(EditorErrors.draftWriteFailed)),
-                    width = 90.dp, onAction = { _, _ -> }, onSummaryTextLayout = { layout = it })
-            } }
-        }
+        compose.setContent { RedfaceTheme { Surface {
+            EditorEventControl(controlEvent(EditorEventContent.Problem(EditorErrors.draftWriteFailed)),
+                width = 90.dp, onAction = { _, _ -> }, onSummaryTextLayout = { layout = it })
+        } } }
         compose.waitForIdle()
         assertTrue(requireNotNull(layout).isLineEllipsized(0))
         compose.onNode(hasClickAction()).assert(hasContentDescription("Brouillon non écrit, Afficher les détails"))
@@ -172,19 +168,17 @@ class EditorControlLayoutTest {
         val event = mutableStateOf<EditorEvent?>(null)
         val dark = mutableStateOf(false)
         val height = mutableStateOf(56.dp)
-        compose.setContent {
-            RedfaceTheme(darkTheme = dark.value) { Surface {
-                Row(Modifier.width(360.dp).height(height.value).testTag("sample")
-                    .padding(start = 12.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.width(185.dp)) {
-                        EditorEventControl(event.value, 185.dp, { _, _ -> }, Modifier.testTag("control")
-                            .then(if (event.value == null) Modifier else Modifier.height(height.value)))
-                    }
-                    Spacer(Modifier.width(8.dp))
-                    Box(Modifier.width(139.dp).height(48.dp).testTag("submit-slot"))
+        compose.setContent { RedfaceTheme(darkTheme = dark.value) { Surface {
+            Row(Modifier.width(360.dp).height(height.value).testTag("sample")
+                .padding(start = 12.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.width(185.dp)) {
+                    EditorEventControl(event.value, 185.dp, { _, _ -> }, Modifier.testTag("control")
+                        .then(if (event.value == null) Modifier else Modifier.height(height.value)))
                 }
-            } }
-        }
+                Spacer(Modifier.width(8.dp))
+                Box(Modifier.width(139.dp).height(48.dp).testTag("submit-slot"))
+            }
+        } } }
         val cases = listOf(
             null,
             controlEvent(EditorEventContent.Problem(EditorErrors.uncertain)),

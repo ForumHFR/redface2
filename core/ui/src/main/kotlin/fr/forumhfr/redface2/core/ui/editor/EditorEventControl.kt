@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -31,6 +32,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.domain.editor.EditorSession
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 
@@ -57,11 +59,15 @@ fun EditorEventControl(
     val action = event?.action
     val actionName = action?.controlLabel()
     val name = if (actionName == null) summary else "$summary, $actionName"
-    // Keep intermediate upload counts consultable, but announce only the operation's start.
-    // Its Finished/Problem replacement supplies the terminal announcement, even with the same key.
-    val announcement = if (event?.content is EditorEventContent.InProgress) {
-        remember(event.key) { name }
-    } else name
+    // Track operations outside the progress branch: masking, occurrences and null must not replay a start.
+    val announced = remember { mutableSetOf<Pair<EditorSession, OperationRef>>() }
+    val operation = event?.key?.let { it.session to it.operation }
+    val inProgress = event?.content is EditorEventContent.InProgress
+    val progressAnnouncement = remember(operation, inProgress) {
+        if (inProgress && operation !in announced) name else ""
+    }
+    SideEffect { if (inProgress) announced.add(requireNotNull(operation)) }
+    val announcement = if (inProgress) progressAnnouncement else name
     val isError = event?.rank == EditorEventRank.Error
     val tint = when {
         isError -> MaterialTheme.colorScheme.error
@@ -72,7 +78,6 @@ fun EditorEventControl(
         modifier = if (event == null) modifier else modifier.width(width).heightIn(min = 48.dp),
         contentAlignment = Alignment.CenterStart,
     ) {
-        EditorLiveAnnouncement(announcement, isError)
         if (event != null) Row(
             modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
                 .clip(MaterialTheme.shapes.small)
@@ -99,6 +104,7 @@ fun EditorEventControl(
                 onTextLayout = { onSummaryTextLayout?.invoke(it) },
             )
         }
+        EditorLiveAnnouncement(announcement, isError)
     }
 }
 
@@ -119,7 +125,7 @@ private fun EditorEvent.controlIcon(): Int = when {
     else -> R.drawable.ic_editor_info
 }
 
-/** Separate from the consultable control so progress updates cannot cause repeated speech. */
+/** Compose last: covered siblings are pruned from Android accessibility, even when transparent. */
 @Composable
 internal fun EditorLiveAnnouncement(text: String, assertive: Boolean = false) {
     Box(Modifier.size(1.dp).semantics {

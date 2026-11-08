@@ -10,7 +10,9 @@ import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.InputModeManager
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.LocalInputModeManager
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -76,13 +78,9 @@ class EditorControlIconsTest {
             R.drawable.ic_arrow_back to R.string.editor_return,
         )
         val index = mutableStateOf(0)
-        compose.setContent {
-            RedfaceTheme {
-                Surface {
-                    EditorActionIcon(icons[index.value].first, stringResource(icons[index.value].second), {})
-                }
-            }
-        }
+        compose.setContent { RedfaceTheme { Surface {
+            EditorActionIcon(icons[index.value].first, stringResource(icons[index.value].second), {})
+        } } }
         val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
         icons.forEachIndexed { position, (_, label) ->
             compose.runOnIdle { index.value = position }
@@ -101,10 +99,8 @@ class EditorControlIconsTest {
         var clicks = 0
         compose.setContent {
             inputModeManager = LocalInputModeManager.current
-            RedfaceTheme {
-                EditorActionIcon(R.drawable.ic_editor_format, stringResource(R.string.editor_format),
-                    { clicks++ }, Modifier.focusRequester(focus), expanded = expanded.value)
-            }
+            RedfaceTheme { EditorActionIcon(R.drawable.ic_editor_format, stringResource(R.string.editor_format),
+                { clicks++ }, Modifier.focusRequester(focus), expanded = expanded.value) }
         }
         val button = compose.onNode(hasClickAction())
         button.assert(hasContentDescription("Mise en forme"))
@@ -130,13 +126,11 @@ class EditorControlIconsTest {
         var clicks = 0
         compose.setContent {
             inputModeManager = LocalInputModeManager.current
-            RedfaceTheme {
-                Row {
-                    EditorActionIcon(R.drawable.ic_editor_bold, "Gras", { clicks++ },
-                        Modifier.focusRequester(first), enabled = enabled.value)
-                    EditorActionIcon(R.drawable.ic_editor_italic, "Italique", {})
-                }
-            }
+            RedfaceTheme { Row {
+                EditorActionIcon(R.drawable.ic_editor_bold, "Gras", { clicks++ },
+                    Modifier.focusRequester(first), enabled = enabled.value)
+                EditorActionIcon(R.drawable.ic_editor_italic, "Italique", {})
+            } }
         }
         val bold = compose.onNode(hasContentDescription("Gras"))
         val italic = compose.onNode(hasContentDescription("Italique"))
@@ -162,23 +156,21 @@ class EditorControlIconsTest {
     fun `ED40 status arrival uses a permanent polite region and one named count target`() {
         val visible = mutableStateOf(false)
         val dark = mutableStateOf(false)
+        lateinit var view: android.view.View
         var clicks = 0
         compose.setContent {
-            RedfaceTheme(darkTheme = dark.value) {
-                Surface {
-                    EditorStatusIcon(R.drawable.ic_editor_quote, "3 citations, ouvrir le panneau citations",
-                        { clicks++ }, badgeCount = 3, visible = visible.value)
-                }
-            }
+            view = LocalView.current
+            RedfaceTheme(darkTheme = dark.value) { Surface {
+                EditorStatusIcon(R.drawable.ic_editor_quote, "3 citations, ouvrir le panneau citations",
+                    { clicks++ }, badgeCount = 3, visible = visible.value)
+            } }
         }
         val live = SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion)
         val id = compose.onNode(live).fetchSemanticsNode().id
+        compose.assertLiveNode(id, "", LiveRegionMode.Polite, view)
         compose.onAllNodes(hasClickAction()).assertCountEquals(0)
         compose.runOnIdle { visible.value = true }
-        assertEquals(id, compose.onNode(live).fetchSemanticsNode().id)
-        compose.onNode(live).assert(SemanticsMatcher.expectValue(
-            SemanticsProperties.LiveRegion, androidx.compose.ui.semantics.LiveRegionMode.Polite,
-        ))
+        compose.assertLiveNode(id, "3 citations, ouvrir le panneau citations", LiveRegionMode.Polite, view)
         val button = compose.onNode(hasClickAction())
         button.assert(hasContentDescription("3 citations, ouvrir le panneau citations")).performClick()
         assertEquals(1, clicks)
@@ -193,16 +185,16 @@ class EditorControlIconsTest {
         }
         compose.runOnIdle { visible.value = false }
         compose.onAllNodes(hasClickAction()).assertCountEquals(0)
-        assertEquals(id, compose.onNode(live).fetchSemanticsNode().id)
+        compose.assertLiveNode(id, "", LiveRegionMode.Polite, view)
     }
 
     @Test
     fun `recipient InputChip has one removal button without checked state and obeys disabled state`() {
         var removals = 0
         val enabled = mutableStateOf(true)
-        compose.setContent {
-            RedfaceTheme { Surface { EditorRecipientChip("Alice", { removals++ }, enabled = enabled.value) } }
-        }
+        compose.setContent { RedfaceTheme { Surface {
+            EditorRecipientChip("Alice", { removals++ }, enabled = enabled.value)
+        } } }
         val chip = compose.onNode(hasClickAction())
         listOf(true, false).forEach { active ->
             compose.runOnIdle { enabled.value = active }

@@ -42,7 +42,6 @@ fun EditorStatusIcon(
         24.dp + maxOf(16.dp, with(density) { badgeSize.height.toDp() })
     }
     Box(modifier) {
-        EditorLiveAnnouncement(if (visible) label else "")
         if (visible) EditorIconTooltip(label) {
             IconButton(
                 onClick = onClick,
@@ -63,6 +62,7 @@ fun EditorStatusIcon(
                 }
             }
         }
+        EditorLiveAnnouncement(if (visible) label else "")
     }
 }
 
