@@ -549,6 +549,7 @@ class PostEditorViewModel @AssistedInject constructor(
      * hydration prepend are commutative, guarded against double-hydration — the original #790
      * contract, restored. The sheet requires a decision on its offer before escalation.
      */
+    @Suppress("CyclomaticComplexMethod") // One restore pass: legacy drop, Room reread, then quote projection.
     private suspend fun restoreDraftIfAny(reconcile: Boolean = false) {
         // v20 coordinates are deliberately never decoded or imported (ED-132).
         val legacy = savedStateHandle.remove<IntArray>("postEditor.pendingQuotes")
