@@ -44,10 +44,12 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class EditorAppBarTest {
     @get:Rule val compose = createComposeRule()
 
@@ -78,18 +80,24 @@ class EditorAppBarTest {
                 }
             }
         }
-        listOf(Triple(1f, 1f, true), Triple(1.3f, 1f, false),
-            Triple(1f, 2f, false), Triple(1.3f, 0.5f, true)).forEach { (fontScale, factor, visible) ->
-            compose.runOnIdle { scale.value = fontScale; lineHeightFactor.value = factor }
-            compose.waitForIdle()
-            assertEquals(visible, measuredHeight <= availableHeight)
-            if (visible) compose.onNodeWithTag(EDITOR_APP_BAR_LINE_TWO, true).assertExists()
-            else compose.onNodeWithTag(EDITOR_APP_BAR_LINE_TWO, true).assertDoesNotExist()
-            val layout = textLayout(EDITOR_APP_BAR_LINE_ONE)
-            assertEquals(fontScale, layout.layoutInput.density.fontScale, 0.001f)
-            val preset = if (fontScale == 1f) FontScalePreference.M else FontScalePreference.L
-            assertEquals(14f * preset.factor, layout.layoutInput.style.fontSize.value, 0.001f)
-            assertEquals(48f, compose.onNodeWithTag("bar").getUnclippedBoundsInRoot().height.value, 0.5f)
+        // The font metrics decide visibility; neither 1.3x nor the reading preset is a cutoff.
+        listOf(1f, 1.3f).forEach { fontScale ->
+            val observed = mutableSetOf<Boolean>()
+            listOf(0.5f, 1f, 4f).forEach { factor ->
+                compose.runOnIdle { scale.value = fontScale; lineHeightFactor.value = factor }
+                compose.waitForIdle()
+                val visible = measuredHeight <= availableHeight
+                observed.add(visible)
+                if (visible) compose.onNodeWithTag(EDITOR_APP_BAR_LINE_TWO, true).assertExists()
+                else compose.onNodeWithTag(EDITOR_APP_BAR_LINE_TWO, true).assertDoesNotExist()
+                val layout = textLayout(EDITOR_APP_BAR_LINE_ONE)
+                assertEquals(fontScale, layout.layoutInput.density.fontScale, 0.001f)
+                val preset = if (fontScale == 1f) FontScalePreference.M else FontScalePreference.L
+                assertEquals(14f * preset.factor, layout.layoutInput.style.fontSize.value, 0.001f)
+                assertEquals(48f, compose.onNodeWithTag("bar").getUnclippedBoundsInRoot().height.value, 0.5f)
+            }
+            // At each system scale, exercise both branches by changing typography alone.
+            assertEquals("Both visibility cases at fontScale=$fontScale", setOf(false, true), observed)
         }
     }
 
@@ -102,7 +110,7 @@ class EditorAppBarTest {
                 RedfaceTheme(reading = ReadingDisplaySettings(fontScale = FontScalePreference.L)) {
                     val sides = WindowInsets(left = inset.value, right = inset.value)
                     Box(Modifier.width(360.dp).windowInsetsPadding(sides)) {
-                        EditorAppBar("Nouveau sujet", "Un titre de sujet suffisamment long pour être tronqué", {}, {},
+                        EditorAppBar("Nouveau sujet au titre suffisamment long pour être tronqué", "Contexte", {}, {},
                             Modifier.testTag("bar"), statuses = listOf(
                                 EditorAppBarStatus(R.drawable.ic_editor_quote, "Citations", {}, badgeCount = 123456),
                                 EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon", {}),
@@ -116,11 +124,13 @@ class EditorAppBarTest {
             val bar = compose.onNodeWithTag("bar").getUnclippedBoundsInRoot()
             assertEquals(360f - 2 * side.value, bar.width.value, 0.5f)
             val targets = listOf("Retour", "Citations", "Brouillon", "Afficher l’aperçu").map { label ->
-                compose.onNodeWithContentDescription(label).getUnclippedBoundsInRoot().also {
-                    assertTrue(it.width >= 48.dp)
-                    assertEquals(48f, it.height.value, 0.5f)
-                    assertTrue(it.left >= bar.left && it.right <= bar.right)
-                }
+                compose.onNode(hasContentDescription(label) and
+                    SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
+                    .getUnclippedBoundsInRoot().also {
+                        assertTrue(it.width >= 48.dp)
+                        assertEquals(48f, it.height.value, 0.5f)
+                        assertTrue(it.left >= bar.left && it.right <= bar.right)
+                    }
             }
             val title = compose.onNodeWithTag(EDITOR_APP_BAR_TITLE).getUnclippedBoundsInRoot()
             val reserved = targets.sumOf { it.width.value.toDouble() }.toFloat()
@@ -147,8 +157,16 @@ class EditorAppBarTest {
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, 1.3f)) {
                 RedfaceTheme(reading = ReadingDisplaySettings(fontScale = FontScalePreference.L)) {
-                    EditorAppBar("Nouveau MP", "Alice et Bob", { closes++ }, { previews++ },
-                        onOpenHeader = { headers++ }, closeEnabled = closeEnabled.value)
+                    val typography = MaterialTheme.typography
+                    // Two 32 dp lines cannot share the 48 dp app bar, even if 1.3x + L would fit.
+                    val lineHeight = with(LocalDensity.current) { 32.dp.toSp() }
+                    MaterialTheme(typography = typography.copy(
+                        titleSmall = typography.titleSmall.copy(lineHeight = lineHeight),
+                        labelMedium = typography.labelMedium.copy(lineHeight = lineHeight),
+                    )) {
+                        EditorAppBar("Nouveau MP", "Alice et Bob", { closes++ }, { previews++ },
+                            onOpenHeader = { headers++ }, closeEnabled = closeEnabled.value)
+                    }
                 }
             }
         }
@@ -169,13 +187,16 @@ class EditorAppBarTest {
     @Test
     fun `ED10 context ellipsizes on one line and ED05 compact has no app bar`() {
         val compact = mutableStateOf(false)
-        val context = mutableStateOf("Un contexte de rédaction très long qui ne doit jamais passer sur deux lignes")
+        val context = mutableStateOf("Un contexte de rédaction très long ".repeat(20))
         compose.setContent {
-            RedfaceTheme { EditorAppBar("Modifier", context.value, {}, {}, compactHeight = compact.value) }
+            RedfaceTheme {
+                EditorAppBar("Modifier", context.value, {}, {}, Modifier.width(240.dp), compactHeight = compact.value)
+            }
         }
         compose.onNodeWithTag(EDITOR_APP_BAR_LINE_ONE, true).assertExists()
         val layout = textLayout(EDITOR_APP_BAR_LINE_TWO)
         assertEquals(1, layout.lineCount)
+        assertTrue(layout.multiParagraph.intrinsics.maxIntrinsicWidth > layout.layoutInput.constraints.maxWidth)
         assertTrue(layout.isLineEllipsized(0))
         compose.runOnIdle { context.value = "" }
         compose.onNodeWithTag(EDITOR_APP_BAR_LINE_TWO, true).assertDoesNotExist()
