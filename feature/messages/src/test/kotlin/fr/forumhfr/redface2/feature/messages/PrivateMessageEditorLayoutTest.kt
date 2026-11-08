@@ -148,14 +148,42 @@ class PrivateMessageEditorLayoutTest {
 
         compose.runOnIdle { state.value = state.value.copy(isUploading = false) }
         compose.onNodeWithText("Restaurer").assertIsEnabled()
+    }
 
-        // The submission locks the body (accepted uncertain attempt): Restore follows the ViewModel refusal.
-        compose.runOnIdle {
-            state.value = state.value.copy(
-                submission = EditorSubmissionState.Uncertain(AttemptToken("tester", "key", "id", 1), accepted = true),
+    @Test
+    fun replyRestoreDisabledForAcceptedUncertainSubmission() {
+        setReplyContent {
+            PrivateMessageReplyUiState(
+                isLoadingForm = false,
+                formAvailable = true,
+                restorableDraft = "Brouillon à restaurer",
+                isUploading = false,
+                submission = EditorSubmissionState.Uncertain(
+                    AttemptToken("tester", "key", "id", 1),
+                    accepted = true,
+                ),
             )
         }
+
         compose.onNodeWithText("Restaurer").assertIsNotEnabled()
+    }
+
+    @Test
+    fun replyRestoreEnabledForUnacceptedUncertainSubmission() {
+        setReplyContent {
+            PrivateMessageReplyUiState(
+                isLoadingForm = false,
+                formAvailable = true,
+                restorableDraft = "Brouillon à restaurer",
+                isUploading = false,
+                submission = EditorSubmissionState.Uncertain(
+                    AttemptToken("tester", "key", "id", 1),
+                    accepted = false,
+                ),
+            )
+        }
+
+        compose.onNodeWithText("Restaurer").assertIsEnabled()
     }
 
     @Test
@@ -187,6 +215,30 @@ class PrivateMessageEditorLayoutTest {
 
         compose.onNodeWithText("Restaurer").assertIsEnabled()
         compose.onNodeWithText("Ignorer").assertIsEnabled()
+    }
+
+    @Test
+    fun `new message disables draft restore for accepted uncertain submission`() {
+        setComposeContent(
+            submission = EditorSubmissionState.Uncertain(
+                AttemptToken("tester", "key", "id", 1),
+                accepted = true,
+            ),
+        )
+
+        compose.onNodeWithText("Restaurer").assertIsNotEnabled()
+    }
+
+    @Test
+    fun `new message enables draft restore for unaccepted uncertain submission`() {
+        setComposeContent(
+            submission = EditorSubmissionState.Uncertain(
+                AttemptToken("tester", "key", "id", 1),
+                accepted = false,
+            ),
+        )
+
+        compose.onNodeWithText("Restaurer").assertIsEnabled()
     }
 
     private fun setReplyContent(state: () -> PrivateMessageReplyUiState) {
@@ -224,7 +276,10 @@ class PrivateMessageEditorLayoutTest {
         }
     }
 
-    private fun setComposeContent(isUploading: Boolean = false) {
+    private fun setComposeContent(
+        isUploading: Boolean = false,
+        submission: EditorSubmissionState = EditorSubmissionState.Ready,
+    ) {
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                 ComposeEditorBody(
@@ -233,6 +288,7 @@ class PrivateMessageEditorLayoutTest {
                         formAvailable = true,
                         restorableDraft = "Brouillon à restaurer",
                         isUploading = isUploading,
+                        submission = submission,
                     ),
                     bodyFieldState = remember { TextFieldState() },
                     bodyInputTransformation = InputTransformation {},
