@@ -1,5 +1,4 @@
-Redface 2 v0.69.5 — dev.
-- Viewer: animated GIFs are decoded one at a time; no more freezes or missing images after a zoomed GIF.
-- Viewer: a vertical swipe no longer brings the action bar back.
-- Editor: no more background crash after many insertions in a long message.
-- New PM: rebuilt text field (one undo step per action, preview computed off the main thread).
+Redface 2 v0.69.6 — dev.
+- PM reply: rebuilt text field (one undo step per action, preview computed off the main thread).
+- PM reply: "Restore" takes the quote into account; disabled while the form loads, available offline.
+- PM reply: text typed before the form arrives is combined with the quote and saved.

@@ -1,5 +1,4 @@
-Redface 2 v0.69.5 — dev.
-- Visionneuse : les GIF animés sont décodés un par un ; fini les gels et images absentes au retour d'un GIF zoomé.
-- Visionneuse : un balayage vertical ne fait plus réapparaître la barre d'actions.
-- Éditeur : plus de plantage en arrière-plan après de nombreuses insertions dans un long message.
-- Nouveau MP : champ de texte refondu (une annulation par action, aperçu calculé hors du fil principal).
+Redface 2 v0.69.6 — dev.
+- Réponse MP : champ de texte refondu (une annulation par action, aperçu calculé hors du fil principal).
+- Réponse MP : « Restaurer » tient compte de la citation ; inactif tant que le formulaire charge, disponible hors ligne.
+- Réponse MP : un texte tapé avant l'arrivée du formulaire est combiné à la citation et sauvegardé.
