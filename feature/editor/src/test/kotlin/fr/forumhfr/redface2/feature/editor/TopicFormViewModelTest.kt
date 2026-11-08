@@ -1996,9 +1996,10 @@ class TopicFormViewModelTest {
             EditorDraftStore.Draft(body = "stored body", subject = "stored title"),
         )
         val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
-        vm.editBody(TextFieldValue("typed before load"), advanceMirror = false)
+        vm.editBody(TextFieldValue("typed before load"))
+        // The mirror runs during the initial draft read (R0c PR 3): the typing is already mirrored.
         assertEquals("typed before load", vm.bodyFieldState.text.toString())
-        assertEquals("", vm.state.value.bodyText)
+        assertEquals("typed before load", vm.state.value.bodyText)
         gate.complete(Unit)
         testScheduler.runCurrent()
         assertNull(vm.state.value.restorableDraft)

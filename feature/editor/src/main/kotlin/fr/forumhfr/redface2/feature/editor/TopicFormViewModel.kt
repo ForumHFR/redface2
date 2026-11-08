@@ -316,8 +316,8 @@ class TopicFormViewModel @AssistedInject constructor(
             val attemptRestored = restoreDraftIfAny()
             // The body mirror may have consumed user input while the initial draft read was suspended.
             // Retry user edits before loading the form; an automatic attempt restore must not resave itself.
-            if (!attemptRestored && bodyEditedBeforeHydration && bodyFieldState.text.isNotBlank() &&
-                _state.value.restorableDraft == null) {
+            val earlyEditPending = bodyEditedBeforeHydration && bodyFieldState.text.isNotBlank()
+            if (!attemptRestored && earlyEditPending && _state.value.restorableDraft == null) {
                 scheduleAutosave()
             }
             when (request.mode) {
