@@ -121,6 +121,29 @@ class EditorEventReducerTest {
     }
 
     @Test
+    fun `observing a retry preserves same kind terminals until effective launch`() {
+        val retries = listOf(
+            upload to OperationRef.Upload(EditorUploadToken(2, session)),
+            submission to submission.copy(token = SubmissionToken(2, session)),
+        )
+        val contents = listOf(
+            EditorEventContent.Problem(EditorErrors.network),
+            EditorEventContent.Finished(text),
+            EditorEventContent.Information(text),
+        )
+        retries.forEach { (previous, retry) ->
+            contents.forEach { content ->
+                val terminal = event(previous, content, 1)
+                val observed = containing(terminal).observe(retry)
+                assertEquals(listOf(terminal), observed.events)
+                assertEquals(EditorEventOperation(retry), observed.currentOperations.single())
+                val running = event(retry, EditorEventContent.InProgress(text), 2)
+                assertEquals(listOf(running), observed.step(EditorEventInput.OperationStarted(running)).events)
+            }
+        }
+    }
+
+    @Test
     fun `first Received registers an unobserved operation without applying launch cleanup`() {
         val error = problem(validation, EditorErrors.missingTitle, 1)
         val state = containing(error)
@@ -370,7 +393,7 @@ class EditorEventReducerTest {
         val retry = quote.copy(sequence = 2)
         val retried = closed.state.observe(retry).step(EditorEventInput.FormLoaded(session, retry))
         assertTrue(retried.currentOperations.single().finished)
-        assertNull(retried.visibleEvent)
+        assertEquals(retry, retried.currentOperations.single().ref)
     }
 
     @Test

@@ -13,19 +13,29 @@ class EditorEventTest {
     private val key = EventKey(session, OperationRef.Local(EditorLocalOperation.Notice, 1), 1)
 
     @Test
-    fun `attempt metadata requires an exact known owner and context without mapping absent owner to empty`() {
+    fun `attached attempt metadata requires an exact known owner and context`() {
         val identity = AttemptIdentity("alice", session.key, "attempt-1")
         val ref = OperationRef.Submission(SubmissionToken(1, session), identity)
         assertEquals(identity, ref.attempt)
         val anonymous = SubmissionToken(1, session.copy(owner = null))
         assertNull(OperationRef.Submission(anonymous).attempt)
-        assertThrows(IllegalArgumentException::class.java) {
-            OperationRef.Submission(anonymous, identity.copy(owner = ""))
-        }
         assertThrows(IllegalArgumentException::class.java) { ref.copy(attempt = identity.copy(owner = "bob")) }
         assertThrows(IllegalArgumentException::class.java) { ref.copy(attempt = identity.copy(key = "other")) }
         val emptyOwner = anonymous.copy(session = anonymous.session.copy(owner = ""))
         assertEquals("", OperationRef.Submission(emptyOwner, identity.copy(owner = "")).attempt?.owner)
+    }
+
+    @Test
+    fun `anonymous arming accepts a prepared attempt without attaching an identity`() {
+        val anonymous = SubmissionToken(1, session.copy(owner = null))
+        val prepared = AttemptIdentity("", anonymous.session.key, "prepared-at-arm")
+        val ref = OperationRef.Submission(anonymous, attempt = prepared)
+        assertNull(ref.attempt)
+        assertEquals(OperationRef.Submission(anonymous), ref)
+        assertEquals(OperationRef.Submission(anonymous).hashCode(), ref.hashCode())
+        val known = OperationRef.Submission(SubmissionToken(1, session), prepared.copy(owner = "alice"))
+        assertEquals(ref, known.copy(token = anonymous))
+        assertNull(known.copy(token = anonymous).attempt)
     }
 
     @Test

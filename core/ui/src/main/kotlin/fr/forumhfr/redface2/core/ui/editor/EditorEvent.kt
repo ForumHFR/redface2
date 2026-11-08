@@ -7,14 +7,25 @@ import fr.forumhfr.redface2.core.domain.editor.SubmissionToken
 
 /** Host identities; sequences increase within each operation kind for the lifetime of a session. */
 sealed interface OperationRef {
-    /** Matched by token; attempt is metadata learned later, bound to an explicitly known owner. */
-    data class Submission(val token: SubmissionToken, val attempt: AttemptIdentity? = null) : OperationRef {
-        init {
-            if (attempt != null) {
-                val owner = requireNotNull(token.session.owner)
-                require(attempt.owner == owner && attempt.key == token.session.key)
-            }
+    /**
+     * Matched by token; attempt metadata is attached only if the session owner is known (non-null).
+     * Anonymous arming can prepare an identity with an empty owner; construction and copy discard it.
+     * After observation, metadata is learned from deliveries (OperationStarted/Received), not re-observation.
+     */
+    class Submission(val token: SubmissionToken, attempt: AttemptIdentity? = null) : OperationRef {
+        val attempt: AttemptIdentity? = attempt?.takeIf { token.session.owner != null }?.also {
+            require(it.owner == token.session.owner && it.key == token.session.key)
         }
+
+        fun copy(token: SubmissionToken = this.token, attempt: AttemptIdentity? = this.attempt): Submission =
+            Submission(token, attempt)
+
+        override fun equals(other: Any?): Boolean =
+            other is Submission && token == other.token && attempt == other.attempt
+
+        override fun hashCode(): Int = 31 * token.hashCode() + (attempt?.hashCode() ?: 0)
+
+        override fun toString(): String = "Submission(token=$token, attempt=$attempt)"
     }
     data class Upload(val token: EditorUploadToken) : OperationRef
     data class Local(val kind: EditorLocalOperation, val sequence: Long) : OperationRef {

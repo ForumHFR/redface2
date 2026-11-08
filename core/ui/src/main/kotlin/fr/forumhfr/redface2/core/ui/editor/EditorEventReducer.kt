@@ -5,7 +5,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorSession
 sealed interface EditorEventInput {
     /** Explicit opening with a fresh session identity; same session is a no-op, never a render hook. */
     data class OpenSession(val session: EditorSession) : EditorEventInput
-    /** Register opening work or a GET, without applying the gesture lifecycle of ED-44. */
+    /** Register work without removing events; only an effective launch applies ED-44 cleanup. */
     data class ObserveOperation(val session: EditorSession, val operation: OperationRef) : EditorEventInput
     /**
      * Only an accepted, effective launch (send/upload/quote insertion), never the arm tap.
@@ -34,6 +34,7 @@ sealed interface EditorEventInput {
     data class Activate(val key: EventKey) : EditorEventInput
     /** Visual only: the host must not resolve a durable attempt or abandon a pending quote. */
     data class Acknowledge(val key: EventKey) : EditorEventInput
+    /** Close the sole open panel and return to the body; acknowledge only if its detail key matches. */
     data class CloseDetails(val key: EventKey) : EditorEventInput
 }
 
@@ -79,35 +80,23 @@ private fun registerOperation(
         previous?.ref?.sameOperation(ref) == true -> state
         previous == null || ref.sequence > previous.ref.sequence -> state.copy(
             currentOperations = state.currentOperations.filterNot { it.ref.sameKind(ref) } + EditorEventOperation(ref),
-            events = replaceEditorEventsByKind(state.events, ref),
         )
         else -> null
     }
 }
 
 /**
- * One current operation per kind; both registration and delivery use this replacement policy.
- * Retried reads/saves keep their failure until resolution or replacement; ambiguity requires an
- * acknowledgement or effective submission launch. New deliveries keep their own FIFO arrival order.
+ * Delivery replaces events of the same kind; observation alone preserves them until resolution or launch.
+ * Ambiguity requires an acknowledgement or effective submission launch.
+ * New deliveries keep their own FIFO arrival order.
  */
 internal fun replaceEditorEventsByKind(
     events: List<EditorEvent>,
     ref: OperationRef,
-    replacement: EditorEvent? = null,
+    replacement: EditorEvent,
 ): List<EditorEvent> = events.filterNot {
-    it.key.operation.sameKind(ref) && !it.isAmbiguous &&
-        (replacement != null || !retainUntilResolution(it, ref))
-} + listOfNotNull(replacement)
-
-private fun retainUntilResolution(event: EditorEvent, ref: OperationRef): Boolean {
-    val error = (event.content as? EditorEventContent.Problem)?.error ?: return false
-    return when {
-        ref.isRead -> error.afterFormLoaded(quotesResolved = true) == null
-        ref is OperationRef.Local && ref.kind == EditorLocalOperation.DraftSave ->
-            error.cause == EditorCause.DraftSaveFailed
-        else -> false
-    }
-}
+    it.key.operation.sameKind(ref) && !it.isAmbiguous
+} + replacement
 
 private fun startOperation(state: EditorEventState, event: EditorEvent): EditorEventState {
     val registered = when {
