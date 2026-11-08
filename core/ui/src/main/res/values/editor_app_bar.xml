@@ -1,0 +1,7 @@
+<resources>
+    <string name="editor_app_bar_reply_title">Répondre</string>
+    <string name="editor_app_bar_edit_title">Modifier</string>
+    <string name="editor_app_bar_new_topic_title">Nouveau sujet</string>
+    <string name="editor_app_bar_new_message_title">Nouveau MP</string>
+    <string name="editor_app_bar_open_header">Modifier l’en-tête : %1$s</string>
+</resources>
