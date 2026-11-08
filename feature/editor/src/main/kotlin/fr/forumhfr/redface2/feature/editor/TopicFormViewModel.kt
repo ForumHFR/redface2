@@ -145,7 +145,7 @@ class TopicFormViewModel @AssistedInject constructor(
             // hydration flags to `true` from the start so a silent
             // `InvalidHashCheck` refetch can never clobber what the user
             // already typed. Edit FP keeps the default `false` until the
-            // fetched form actually carries content.
+            // fetched body is known, even when it is blank.
             subjectHydratedFromServer = request.mode == TopicFormMode.New,
             draftHydratedFromServer = request.mode == TopicFormMode.New,
         ),
@@ -268,7 +268,7 @@ class TopicFormViewModel @AssistedInject constructor(
 
     /** Protect the frame before readOnly is recomposed, including typing and paste. */
     val bodyInputTransformation = InputTransformation {
-        if (!acceptMutation(blockDuringUpload = true)) {
+        if (_state.value.isAwaitingInitialBody || !acceptMutation(blockDuringUpload = true)) {
             revertAllChanges()
         } else if (asCharSequence().toString() != bodyFieldState.text.toString()) {
             bodyEditedBeforeHydration = true
@@ -313,11 +313,11 @@ class TopicFormViewModel @AssistedInject constructor(
             }
         }
         viewModelScope.launch {
-            restoreDraftIfAny()
+            val attemptRestored = restoreDraftIfAny()
             // The body mirror may have consumed user input while the initial draft read was suspended.
             // Retry user edits before loading the form; an automatic attempt restore must not resave itself.
-            if (bodyEditedBeforeHydration && bodyFieldState.text.isNotBlank() &&
-                _state.value.restorableDraft == null) {
+            val earlyEditPending = bodyEditedBeforeHydration && bodyFieldState.text.isNotBlank()
+            if (!attemptRestored && earlyEditPending && _state.value.restorableDraft == null) {
                 scheduleAutosave()
             }
             when (request.mode) {
@@ -365,11 +365,16 @@ class TopicFormViewModel @AssistedInject constructor(
      * EditFirstPost hydration remains eligible, while a real user edit suppresses the initial
      * offer. The fingerprint is recorded only after Ignore, so a restored row remains recoverable
      * if process death loses the live editor state before autosave.
+     * @return whether an unresolved attempt replaced the live buffer.
      */
-    private suspend fun restoreDraftIfAny() {
+    private suspend fun restoreDraftIfAny(): Boolean {
         val entry = submission.restore(draftKey.orEmpty())
-        if (entry != null && !submission.blocksMutation) {
-            if (entry.attempt != null) restoreAttempt(entry.draft) else offerOrdinaryDraft(entry.draft)
+        if (entry == null || submission.blocksMutation) return false
+        return if (entry.attempt != null) {
+            restoreAttempt(entry.draft)
+        } else {
+            offerOrdinaryDraft(entry.draft)
+            false
         }
     }
 
@@ -382,8 +387,8 @@ class TopicFormViewModel @AssistedInject constructor(
         }
     }
 
-    private fun restoreAttempt(draft: EditorDraftStore.Draft) {
-        if (!acceptMutation()) return
+    private fun restoreAttempt(draft: EditorDraftStore.Draft): Boolean {
+        if (!acceptMutation()) return false
         replaceBody(draft.body)
         previousBody = draft.body
         resetUndoBaseline()
@@ -394,6 +399,7 @@ class TopicFormViewModel @AssistedInject constructor(
                 restorableDraft = null, restorableSubject = null, submitError = EditorErrors.uncertain,
             )
         }
+        return true
     }
 
     private fun TopicFormState.canOfferDraftRestore(cached: EditorDraftStore.Draft): Boolean =
@@ -555,7 +561,8 @@ class TopicFormViewModel @AssistedInject constructor(
 
     @OptIn(ExperimentalFoundationApi::class)
     private fun resetUndoBaseline() {
-        // A late form may hydrate blank user input; keep that existing history undoable.
+        // New-topic input can precede a delayed attempt restore; preserve its undo history.
+        // EditFirstPost input stays locked until the seed is known, so initial hydration starts clean.
         if (!bodyEditedBeforeHydration) bodyFieldState.undoState.clearHistory()
     }
 
@@ -574,6 +581,7 @@ class TopicFormViewModel @AssistedInject constructor(
     }
 
     private fun onSmileySelected(token: String) {
+        if (_state.value.isAwaitingInitialBody) return
         bodyEditedBeforeHydration = true
         bodyFieldState.editBbcode { text, start, end -> insertBbcodeToken(token, text, start, end) }
         // Close the picker on successful insertion (#824 restores the search on the next
@@ -589,6 +597,7 @@ class TopicFormViewModel @AssistedInject constructor(
      * the intent (Codex PR2 review — the topic composer must honour the preference too).
      */
     private fun onImageUrlInserted(url: String) {
+        if (_state.value.isAwaitingInitialBody) return
         val token = imageInsertBbcodeOrNull(fullUrl = url, mode = imageInsertMode) ?: return
         insertImageBbcodeAtCaret(token, leadingNewline = false)
         scheduleAutosave()
@@ -602,7 +611,7 @@ class TopicFormViewModel @AssistedInject constructor(
      * Mirrors `PostEditorViewModel.insertImageBbcodeAtCaret`.
      */
     private fun insertImageBbcodeAtCaret(bbcode: String, leadingNewline: Boolean) {
-        if (submission.blocksMutation) return
+        if (submission.blocksMutation || _state.value.isAwaitingInitialBody) return
         bodyEditedBeforeHydration = true
         bodyFieldState.editBbcode { text, start, end ->
             val caret = start.coerceIn(0, text.length)
@@ -639,8 +648,10 @@ class TopicFormViewModel @AssistedInject constructor(
      * flight are ignored. [TopicFormState.uploadProgress] carries « n/N » when the batch has more
      * than one image.
      */
-    private fun canStartUpload(userId: String?, targets: List<String>): Boolean =
-        !submission.blocksMutation && uploadJob?.isActive != true && userId != null && targets.isNotEmpty()
+    private fun canStartUpload(userId: String?, targets: List<String>): Boolean {
+        if (_state.value.isAwaitingInitialBody) return false
+        return !submission.blocksMutation && uploadJob?.isActive != true && userId != null && targets.isNotEmpty()
+    }
 
     private fun onImagesPicked(uris: List<String>) {
         diagnostics.recordImagesPicked(uris.size)
@@ -721,6 +732,7 @@ class TopicFormViewModel @AssistedInject constructor(
     }
 
     private fun onToolbarActionClicked(action: BbcodeAction) {
+        if (_state.value.isAwaitingInitialBody) return
         bodyEditedBeforeHydration = true
         bodyFieldState.editBbcode { text, start, end -> applyBbcodeAction(action, text, start, end) }
         scheduleAutosave()
@@ -954,8 +966,8 @@ class TopicFormViewModel @AssistedInject constructor(
     private fun TopicFormState.shouldHydrateSubjectFrom(form: TopicForm): Boolean =
         !subjectHydratedFromServer && subject.text.isBlank() && form.subject.isNotBlank()
 
-    private fun TopicFormState.shouldHydrateDraftFrom(form: TopicForm): Boolean =
-        !draftHydratedFromServer && bodyFieldState.text.isBlank() && form.initialContent.isNotBlank()
+    private fun TopicFormState.shouldHydrateDraft(): Boolean =
+        !draftHydratedFromServer && bodyFieldState.text.isBlank()
 
     /**
      * Server value takes over only when [hydrate] is true, caret parked at the end. Extracted from
@@ -978,8 +990,9 @@ class TopicFormViewModel @AssistedInject constructor(
 
     private fun applyFormHydration(form: TopicForm) {
         val snapshot = _state.value
-        val hydrateBody = !submission.blocksMutation && snapshot.shouldHydrateDraftFrom(form)
+        val hydrateBody = !submission.blocksMutation && snapshot.shouldHydrateDraft()
         if (hydrateBody) {
+            // A successfully parsed blank body is also a known seed; only fetch failure keeps it locked.
             // Programmatic edit bypasses bodyInputTransformation, just like the upload callback.
             replaceBody(form.initialContent)
             previousBody = form.initialContent

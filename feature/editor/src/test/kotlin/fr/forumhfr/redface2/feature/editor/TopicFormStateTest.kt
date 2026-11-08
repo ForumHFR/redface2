@@ -48,6 +48,7 @@ class TopicFormStateTest {
             subject = TextFieldValue("Titre"),
             bodyText = "Corps",
             selectedSubcat = 401,
+            draftHydratedFromServer = true,
             isUploading = isUploading,
         )
 
@@ -85,6 +86,15 @@ class TopicFormStateTest {
         val state = newState(hasSubcategorySelect = false, selectedSubcat = null)
             .copy(isUploading = true)
         assertFalse(state.canSubmit)
+    }
+
+    @Test
+    fun editFirstPostCannotSubmitUnhydratedBody() {
+        val state = editFirstPostState().copy(draftHydratedFromServer = false)
+        assertTrue(state.isAwaitingInitialBody)
+        assertFalse(state.canSubmit)
+        assertFalse(editFirstPostState().isAwaitingInitialBody)
+        assertFalse(newState(hasSubcategorySelect = false, selectedSubcat = null).isAwaitingInitialBody)
     }
 
     @Test

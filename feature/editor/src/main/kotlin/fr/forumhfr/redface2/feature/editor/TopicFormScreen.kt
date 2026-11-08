@@ -206,7 +206,8 @@ internal fun TopicFormContent(
                         modifier = Modifier.weight(1f),
                         // #459 — lock editing during a batch so the caret cannot move between two
                         // programmatic [img] insertions (keeps them in pick order).
-                        readOnly = state.isUploading || state.submission.blocksBodyMutation,
+                        readOnly = state.isAwaitingInitialBody ||
+                            state.isUploading || state.submission.blocksBodyMutation,
                     )
                 }
             }
@@ -227,7 +228,7 @@ internal fun TopicFormContent(
                     onConfirmSubmit = { onIntent(TopicFormIntent.SubmitConfirmed(state.armToken)) },
                     onDisarmConfirm = { onIntent(TopicFormIntent.SubmitConfirmationDismissed) },
                     onOpenOptions = { optionsSheetOpen = true },
-                    onOpenSmileys = onOpenSmileys,
+                    onOpenSmileys = onOpenSmileys.takeUnless { state.isAwaitingInitialBody },
                 ),
             )
         }
@@ -249,7 +250,7 @@ internal fun TopicFormContent(
             )
         }
     }
-    if (imageUrlDialogOpen) {
+    if (imageUrlDialogOpen && !state.isAwaitingInitialBody) {
         ImageUrlDialog(
             onDismiss = { imageUrlDialogOpen = false },
             onInsert = { url -> onIntent(TopicFormIntent.ImageUrlInserted(url)) },
@@ -319,13 +320,15 @@ private fun TopicFormControlsZone(
                 onSelect = { id -> onIntent(TopicFormIntent.SubcatSelected(id)) },
             )
         }
-        BbcodeToolbar(
-            onAction = { onIntent(TopicFormIntent.ToolbarActionClicked(it)) },
-            onImageUrlRequested = onImageUrlRequested,
-            // #459 — upload wiring, same affordance as the reply editor.
-            onImageUploadRequested = onImageUploadRequested,
-            uploading = state.isUploading,
-        )
+        if (!state.isAwaitingInitialBody) {
+            BbcodeToolbar(
+                onAction = { onIntent(TopicFormIntent.ToolbarActionClicked(it)) },
+                onImageUrlRequested = onImageUrlRequested,
+                // #459 — upload wiring, same affordance as the reply editor.
+                onImageUploadRequested = onImageUploadRequested,
+                uploading = state.isUploading,
+            )
+        }
         // #459 — « n/N » batch counter while a multi-image upload is in flight.
         state.uploadProgress?.let { progress ->
             UploadProgressLabel(progress)

@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.parser.write
 
+import org.jsoup.Jsoup
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -95,6 +96,46 @@ class TopicFormParserTest {
         // hash_check must be present, never empty (the repository submit
         // refuses an empty hash via guardAgainstInvalidSubmission).
         assertNotNull(form.hashCheck)
+    }
+
+    @Test
+    fun `edit first post rejects a missing content textarea from the real fixture`() {
+        val document = Jsoup.parse(readFixture("write_edit_first_post_form.html"))
+        requireNotNull(document.selectFirst("form[action*=bdd.php] textarea[name=content_form]")).remove()
+
+        val result = parser.parseEditFirstPost(document.outerHtml())
+
+        assertTrue("An absent first-post body must not become a known empty body", result.isFailure)
+        assertTrue(result.exceptionOrNull() is IllegalStateException)
+        assertEquals("content_form textarea missing from first-post form", result.exceptionOrNull()?.message)
+    }
+
+    @Test
+    fun `edit first post accepts a present empty content textarea from the real fixture`() {
+        val document = Jsoup.parse(readFixture("write_edit_first_post_form.html"))
+        requireNotNull(document.selectFirst("form[action*=bdd.php] textarea[name=content_form]")).empty()
+
+        val form = parser.parseEditFirstPost(document.outerHtml()).getOrThrow()
+
+        assertEquals("", form.initialContent)
+        assertEquals(388, form.selectedSubcat)
+    }
+
+    @Test
+    fun `new topic keeps accepting empty or missing content textareas from real fixtures`() {
+        listOf(
+            "write_create_topic_form_android_cat.html",
+            "write_create_topic_anonymous_form.html",
+            "write_ia_create_form.html",
+        ).forEach { name ->
+            val document = Jsoup.parse(readFixture(name))
+            val textarea = requireNotNull(document.selectFirst("form[action*=bddpost.php] textarea[name=content_form]"))
+            val original = parser.parseNewTopic(document.outerHtml()).getOrThrow()
+            assertEquals(name, "", original.initialContent)
+
+            textarea.remove()
+            assertEquals(name, original, parser.parseNewTopic(document.outerHtml()).getOrThrow())
+        }
     }
 
     @Test
