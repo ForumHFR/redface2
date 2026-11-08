@@ -1,4 +1,4 @@
-Redface 2 v0.69.7 — dev.
-- Quotes: a quote request survives the app being closed; "Reload" and "Ignore quote" in the quick reply.
-- Post: "Restore" follows the shared editor rule.
-- New topic and first-post edit: rebuilt text field (one undo step per action) and aligned "Restore", disabled while loading.
+Redface 2 v0.69.8 — dev.
+- Post: rebuilt text field (one undo step per action).
+- First-post edit: text locked until the original message has loaded; fixes a first post being overwritten.
+- PM: a draft without text no longer replaces the message in progress; "Restore" disabled while sending.

@@ -1,4 +1,4 @@
-Redface 2 v0.69.7 — dev.
-- Citations : la demande survit à la fermeture de l'app ; « Recharger » et « Ignorer la citation » dans la réponse rapide.
-- Post : « Restaurer » suit la règle commune des éditeurs.
-- Nouveau sujet et modification du premier post : champ de texte refondu (une annulation par action) et « Restaurer » aligné, inactif pendant le chargement.
+Redface 2 v0.69.8 — dev.
+- Post : champ de texte refondu (une annulation par action).
+- Modification du premier post : texte verrouillé tant que le message d'origine n'est pas chargé ; corrige un écrasement du premier post.
+- MP : un brouillon sans texte ne remplace plus le message en cours ; « Restaurer » inactif pendant un envoi.
