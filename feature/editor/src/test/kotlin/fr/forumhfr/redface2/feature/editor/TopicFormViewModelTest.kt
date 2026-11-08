@@ -74,6 +74,7 @@ import fr.forumhfr.redface2.core.model.write.TopicForm
 import fr.forumhfr.redface2.core.model.write.TopicFormSubcategoryChoice
 import fr.forumhfr.redface2.core.model.write.TopicPollForm
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.EditorErrorAction
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
@@ -516,6 +517,30 @@ class TopicFormViewModelTest {
         assertNull(vm.state.value.submitError)
         vm.editBody(TextFieldValue("known body edited"))
         assertEquals("known body edited", vm.bodyFieldState.text.toString())
+    }
+
+    @Test
+    fun parserRejectedFormKeepsBodyLockedAndOffersReload() = runTest {
+        // #1512 — what `parseEditFirstPost` raises for a form without its body textarea.
+        topicFormRepository.formFailure = IllegalStateException("content_form textarea missing from first-post form")
+        val vm = newViewModel()
+        assertFalse(vm.state.value.isLoadingForm)
+        assertTrue(vm.state.value.isAwaitingInitialBody)
+        assertEquals(EditorErrors.invalidForm, vm.state.value.submitError)
+        assertEquals(EditorErrorAction.Reload, vm.state.value.submitError?.action)
+        vm.editBody(TextFieldValue("early typing"))
+        syncBody()
+        assertEquals("", vm.bodyFieldState.text.toString())
+        assertFalse(vm.state.value.canSubmit)
+
+        topicFormRepository.formFailure = null
+        vm.submit(TopicFormIntent.ReloadRequested)
+        syncBody()
+        assertFalse(vm.state.value.isAwaitingInitialBody)
+        assertNull(vm.state.value.submitError)
+        vm.editBody(TextFieldValue("known body edited"))
+        assertEquals("known body edited", vm.bodyFieldState.text.toString())
+        assertEquals(0, topicFormRepository.submitCalls)
     }
 
     @Test
