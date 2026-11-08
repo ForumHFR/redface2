@@ -10,7 +10,10 @@ import kotlinx.serialization.json.Json
 /** #1553: persistence format owned by data; invalid/unknown documents fail without changing the row. */
 internal object PendingInlineQuoteRequestCodec {
     private const val VERSION = 1
-    private val json = Json { encodeDefaults = true }
+    private val json = Json {
+        encodeDefaults = true
+        ignoreUnknownKeys = true
+    }
 
     fun encode(request: PendingInlineQuoteRequest, key: String): String {
         if (request.key != key) throw IOException("Inline quote scope does not match draft")

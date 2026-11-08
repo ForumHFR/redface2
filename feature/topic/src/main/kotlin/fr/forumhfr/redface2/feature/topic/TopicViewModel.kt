@@ -149,7 +149,16 @@ class TopicViewModel @AssistedInject constructor(
                     })
                     val drafts = EditorDraftSession(draftStore, EditorDraftKey.reply(request.cat, request.post))
                     drafts.load()
-                    if (drafts.enqueueInlineQuoteRequest(pending) is EditorDraftStore.StoreWriteResult.Written) {
+                    val owner = drafts.owner
+                    var result = drafts.enqueueInlineQuoteRequest(pending)
+                    // A closing sheet may have flushed between load and enqueue. Retry once on a fresh row.
+                    if (result is EditorDraftStore.StoreWriteResult.Conflict) {
+                        drafts.load()
+                        result = if (drafts.owner == owner) drafts.enqueueInlineQuoteRequest(pending) else {
+                            EditorDraftStore.StoreWriteResult.OwnerChanged
+                        }
+                    }
+                    if (result is EditorDraftStore.StoreWriteResult.Written) {
                         onPrepared(emptyList())
                     } else {
                         _effects.send(TopicEffect.QuotePreparationFailed)
@@ -157,6 +166,8 @@ class TopicViewModel @AssistedInject constructor(
                 }
             } catch (cancelled: CancellationException) {
                 throw cancelled
+            } catch (_: IllegalArgumentException) {
+                _effects.send(TopicEffect.QuotePreparationFailed)
             } catch (_: IOException) {
                 _effects.send(TopicEffect.QuotePreparationFailed)
             } finally {

@@ -78,6 +78,7 @@ internal fun QuickReplySheet(
     // #604 lots 2-3 — the cards this opening pre-arms : one for « Citer », the whole basket
     // for « Citer N » under the full-screen threshold (empty from the reply FAB).
     initialQuotes: List<QuoteSelection> = emptyList(),
+    legacyQuoteRequestDropped: Boolean = false,
 ) {
     val viewModel = hiltViewModel<QuickReplyViewModel, QuickReplyViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },
@@ -95,7 +96,10 @@ internal fun QuickReplySheet(
         // Re-seed the field from the #405 row at EACH opening — the VM outlives the sheet and
         // its cached text can be stale after a full-screen edit of the same draft (gate #788).
         // The VM outlives the sheet (topic-scoped) : hand it the page of THIS opening (#1243 suite).
-        viewModel.onSheetAttached(request.page, initialQuotes, restored = openingDelivered)
+        viewModel.onSheetAttached(
+            request.page, initialQuotes, restored = openingDelivered,
+            legacyQuoteRequestDropped = legacyQuoteRequestDropped,
+        )
         openingDelivered = true
         viewModel.effects.collect { effect ->
             when (effect) {
@@ -299,9 +303,9 @@ internal fun QuickReplyStatus(state: QuickReplyUiState, callbacks: QuickReplyQuo
         TextButton(onClick = callbacks.onResume, enabled = !state.isPreparingQuotes) {
             Text(stringResource(R.string.quick_reply_resume_quote))
         }
-    } else if (state.quoteStorageUnavailable ||
-        (state.pendingQuotes.isNotEmpty() && state.restorableDraft == null)
-    ) {
+    }
+    val quoteNeedsReload = state.pendingQuotes.isNotEmpty() && state.restorableDraft == null && !state.hasDormantQuote
+    if (!state.isLoadingDraft && (state.quoteStorageUnavailable || quoteNeedsReload)) {
         TextButton(onClick = callbacks.onReload, enabled = !state.isPreparingQuotes && !state.isDiscardingDraft) {
             Text(stringResource(fr.forumhfr.redface2.core.ui.R.string.editor_action_reload))
         }

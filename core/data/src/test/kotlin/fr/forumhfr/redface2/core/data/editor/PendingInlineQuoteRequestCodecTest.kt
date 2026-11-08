@@ -36,6 +36,18 @@ class PendingInlineQuoteRequestCodecTest {
     }
 
     @Test
+    fun `M7 additive unknown fields are ignored at every depth while version remains strict`() {
+        val extended = document.replace("\"version\":1", "\"extra\":true,\"version\":1")
+            .replace("\"cat\":23", "\"futureScope\":{},\"cat\":23")
+            .replace("\"page\":2", "\"futureQuote\":[1],\"page\":2")
+        assertEquals(PendingInlineQuoteRequestCodec.decode(document, key),
+            PendingInlineQuoteRequestCodec.decode(extended, key))
+        assertThrows(UnreadableInlineQuoteRequestException::class.java) {
+            PendingInlineQuoteRequestCodec.decode(extended.replace("\"version\":1", "\"version\":2"), key)
+        }
+    }
+
+    @Test
     fun `malformed unknown or mismatched documents fail with a content free error`() {
         val invalid = listOf(
             "not json", "null", "{}", document.replace("\"version\":1", "\"version\":2"),
@@ -44,7 +56,6 @@ class PendingInlineQuoteRequestCodecTest {
             document.replace("\"numreponse\":101", "\"numreponse\":0"),
             document.replace("\"page\":2", "\"page\":0"), document.replace("\"ref\":null", "\"ref\":-1"),
             document.replace("{\"numreponse\":101,\"page\":2,\"ref\":null,\"truncate\":false}", ""),
-            document.replace("\"version\":1", "\"extra\":true,\"version\":1"),
         )
         for (raw in invalid) {
             val error = assertThrows(UnreadableInlineQuoteRequestException::class.java) {

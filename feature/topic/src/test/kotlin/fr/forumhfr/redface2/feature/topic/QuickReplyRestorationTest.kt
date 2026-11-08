@@ -186,7 +186,7 @@ class QuickReplyRestorationTest {
     }
 
     @Test
-    fun `saving a launch writes exactly five metadata fields and no quote data`() {
+    fun `saving a launch writes metadata and a dropped flag without any quote data`() {
         val launch = QuickReplyLaunch(
             REQUEST,
             initialQuotes = listOf(QuoteSelection(QuoteLocator(3, 101, 7), "alice", "private preview", true)),
@@ -196,7 +196,7 @@ class QuickReplyRestorationTest {
             override fun canBeSaved(value: Any): Boolean = true
         }
         val saved = with(QuickReplyLaunchSaver) { scope.save(launch) }
-        assertEquals(listOf(23, 401, 35421, 3, true), saved)
+        assertEquals(listOf(23, 401, 35421, 3, true, false), saved)
     }
 
     @Test
@@ -208,7 +208,7 @@ class QuickReplyRestorationTest {
             listOf<Any>("unreadable old quote fields"),
         ).forEach { tail ->
             val restored = QuickReplyLaunchSaver.restore(listOf(23, 401, 35421, 3, true) + tail)
-            assertEquals(QuickReplyLaunch(REQUEST, consumesBasket = true), restored)
+            assertEquals(QuickReplyLaunch(REQUEST, consumesBasket = true, legacyQuoteRequestDropped = true), restored)
         }
     }
 

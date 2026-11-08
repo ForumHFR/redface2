@@ -178,6 +178,18 @@ open class VersionedEditorDraftStore : EditorDraftStore {
         }
     }
 
+    override suspend fun discardUnreadableInlineQuoteRequest(owner: String?, key: String): StoreWriteResult {
+        if (owner == null || owner != activeOwner) return StoreWriteResult.OwnerChanged
+        saveFailure?.let { return StoreWriteResult.Failed(it) }
+        val entry = entries[key] ?: return StoreWriteResult.Conflict
+        entries[key] = entry.copy(
+            draft = entry.draft.copy(pendingInlineQuoteRequest = null), version = entry.version + 1,
+        )
+        loadFailure = null
+        writes++
+        return StoreWriteResult.Written(entry.version + 1)
+    }
+
     override suspend fun beginAttempt(
         owner: String?, key: String, snapshot: Draft, expectedVersion: Long, attemptId: String,
     ): BeginAttemptResult {

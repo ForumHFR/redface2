@@ -34,7 +34,8 @@ data class PostEditorRequest(
      * #790 (#604 lot 2) — `true` ONLY when this editor is the ESCALATION of a quick-reply sheet. The
      * ViewModel then auto-applies the shared #405 draft row instead of surfacing the restore
      * banner (appending to anything already typed — the escalation continues the same
-     * composition act).
+     * composition act). An undecided restore offer is the exception: its separate Room input is
+     * the current field, the main row stays offered, and inline delivery waits for the decision.
      *
      * #843 — this flag is escalation-ONLY again. The #829/#833 COLD full-editor opens (FAB under the
      * FULL_EDITOR preset, « Citer », long-press, « Citer N » 3+) had wrongly set it too, silently

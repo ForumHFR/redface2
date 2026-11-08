@@ -1738,6 +1738,7 @@ internal fun TopicContent(
         QuickReplySheet(
             request = launch.request,
             initialQuotes = launch.initialQuotes,
+            legacyQuoteRequestDropped = launch.legacyQuoteRequestDropped,
             onDismiss = { quickReplyFor = null },
             onEscalate = { quotes ->
                 quickReplyFor = null
@@ -4367,6 +4368,8 @@ internal data class QuickReplyLaunch(
      * the basket alone — they never shipped it.
      */
     val consumesBasket: Boolean = false,
+    /** ED-132: an old saver tail was dropped; no legacy coordinates are read. */
+    val legacyQuoteRequestDropped: Boolean = false,
 )
 
 /**
@@ -4391,14 +4394,14 @@ internal fun rememberQuickReplyLaunch(): MutableState<QuickReplyLaunch?> =
     rememberSaveable(stateSaver = QuickReplyLaunchSaver) { mutableStateOf(null) }
 
 /**
- * #1553: save the mount and opening metadata only. Cards are transient; inline coordinates live
- * exclusively in Room. Older saver tails (including previews/coordinates) are ignored on restore.
+ * #1553: save the mount, opening metadata and a dropped-tail flag only. Cards are transient;
+ * inline coordinates live exclusively in Room. Older tails are detected by their presence only.
  */
 internal val QuickReplyLaunchSaver: Saver<QuickReplyLaunch?, Any> = listSaver<QuickReplyLaunch?, Any>(
     save = { launch ->
         if (launch == null) emptyList() else listOf(
             launch.request.cat, launch.request.subcat, launch.request.topicId,
-            launch.request.page, launch.consumesBasket,
+            launch.request.page, launch.consumesBasket, launch.legacyQuoteRequestDropped,
         )
     },
     restore = { saved ->
@@ -4410,6 +4413,7 @@ internal val QuickReplyLaunchSaver: Saver<QuickReplyLaunch?, Any> = listSaver<Qu
                 page = saved[3] as Int,
             ),
             consumesBasket = saved[4] as Boolean,
+            legacyQuoteRequestDropped = saved.getOrNull(5) as? Boolean ?: (saved.size > QUICK_REPLY_SAVER_HEADER_SIZE),
         )
     },
 )

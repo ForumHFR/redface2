@@ -6,6 +6,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -148,6 +151,42 @@ class QuickReplyErrorBannerLayoutTest {
         compose.onNodeWithText("Recharger").assertIsEnabled().performClick()
         compose.onNodeWithText("Ignorer la citation").assertIsEnabled().performClick()
         assertEquals(listOf("reload", "ignore quote"), actions)
+    }
+
+    @Test
+    fun `M4 reload stays hidden for the entire initial draft read`() {
+        val actions = mutableListOf<String>()
+        var state by mutableStateOf(QuickReplyUiState(isLoadingDraft = true))
+        compose.setContent {
+            RedfaceTheme(darkTheme = false) { Column { QuickReplyStatus(state, callbacks(actions)) } }
+        }
+        compose.onNodeWithText("Recharger").assertDoesNotExist()
+        compose.runOnIdle { state = state.copy(isLoadingDraft = false, submitError = EditorErrors.draftSaveFailed) }
+        compose.onNodeWithText("Recharger").assertIsEnabled().performClick()
+        assertEquals(listOf("reload"), actions)
+    }
+
+    @Test
+    fun `M1 unreadable sheet request has an explicit ignore without coordinates`() {
+        val actions = mutableListOf<String>()
+        val state = QuickReplyUiState(unreadableQuoteRequest = true, submitError = EditorErrors.unreadableQuoteRequest)
+        compose.setContent {
+            RedfaceTheme(darkTheme = false) { Column { QuickReplyStatus(state, callbacks(actions)) } }
+        }
+        compose.onNodeWithText("Ignorer la citation").assertIsEnabled().performClick()
+        assertEquals(listOf("ignore quote"), actions)
+    }
+
+    @Test
+    fun `Astra m3 legacy saver only suppression displays the transition notice`() {
+        val actions = mutableListOf<String>()
+        compose.setContent {
+            RedfaceTheme(darkTheme = false) {
+                Column { QuickReplyStatus(QuickReplyUiState(legacyQuoteRequestDropped = true), callbacks(actions)) }
+            }
+        }
+        compose.onNodeWithText("Veuillez sélectionner à nouveau le message à citer.", substring = true)
+            .assertIsDisplayed()
     }
 
     private fun callbacks(actions: MutableList<String>) = QuickReplyQuoteCallbacks(

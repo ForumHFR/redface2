@@ -433,7 +433,9 @@ internal fun PostEditorAlertBanners(
             )
         } else {
             Text(
-                text = if (error.cause == EditorCause.QuoteFetchFailed && state.canIgnorePendingQuote) {
+                text = if (!state.unreadableQuoteRequest && error.cause == EditorCause.QuoteFetchFailed &&
+                    state.canIgnorePendingQuote
+                ) {
                     stringResource(fr.forumhfr.redface2.core.ui.R.string.editor_error_quote_ignore)
                 } else {
                     error.bannerText()
@@ -442,20 +444,30 @@ internal fun PostEditorAlertBanners(
                 color = MaterialTheme.colorScheme.error,
             )
         }
-        val reload = !quoteAwaitingRestore && (state.quoteStorageUnavailable || state.pendingQuotes.isNotEmpty() ||
-            error.action == EditorErrorAction.Reload)
-        val (action, label) = when {
-            state.hasDormantQuote -> PostEditorIntent.PendingQuoteResumed to R.string.editor_action_resume_quote
-            reload -> PostEditorIntent.ReloadRequested to fr.forumhfr.redface2.core.ui.R.string.editor_action_reload
-            else -> PostEditorIntent.ErrorDismissed to R.string.editor_error_dismiss
-        }
-        TextButton(onClick = { onIntent(action) }, enabled = !state.isLoadingForm) {
-            Text(text = stringResource(label))
-        }
-        if (state.canIgnorePendingQuote) {
-            TextButton(onClick = { onIntent(PostEditorIntent.PendingQuoteIgnored) }, enabled = !state.isLoadingForm) {
-                Text(stringResource(fr.forumhfr.redface2.core.ui.R.string.editor_action_ignore_quote))
+        val reload = state.quoteStorageUnavailable || (!quoteAwaitingRestore &&
+            (state.pendingQuotes.isNotEmpty() || error.action == EditorErrorAction.Reload))
+        if (!state.hasDormantQuote || state.quoteStorageUnavailable) {
+            val action = if (reload) PostEditorIntent.ReloadRequested else PostEditorIntent.ErrorDismissed
+            val label = if (reload) {
+                fr.forumhfr.redface2.core.ui.R.string.editor_action_reload
+            } else { R.string.editor_error_dismiss }
+            TextButton(onClick = { onIntent(action) }, enabled = !state.isLoadingForm) {
+                Text(text = stringResource(label))
             }
+        }
+    }
+    // ED-132: these decisions belong to the request/attempt, independently of the visible error.
+    if (state.hasDormantQuote) {
+        TextButton(
+            onClick = { onIntent(PostEditorIntent.PendingQuoteResumed) },
+            enabled = !state.isLoadingForm && !state.submission.blocksBodyMutation,
+        ) {
+            Text(stringResource(R.string.editor_action_resume_quote))
+        }
+    }
+    if (state.canIgnorePendingQuote) {
+        TextButton(onClick = { onIntent(PostEditorIntent.PendingQuoteIgnored) }) {
+            Text(stringResource(fr.forumhfr.redface2.core.ui.R.string.editor_action_ignore_quote))
         }
     }
     state.uploadError?.let { error ->

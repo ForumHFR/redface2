@@ -5,6 +5,8 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import fr.forumhfr.redface2.core.database.RedfaceDatabase
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftOfferInput
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptOutcome
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptStatus
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.BeginAttemptResult
@@ -280,6 +282,68 @@ class RoomEditorDraftQuoteTransactionTest {
         assertEquals(9000L, dao.get("alice|$key")?.updatedAt)
         assertEquals(StoreWriteResult.Written(5), later.startNewComposition("alice", key, snapshot, 4))
         assertEquals(request, later.loadEntry("alice", key)?.draft?.pendingInlineQuoteRequest)
+    }
+
+    @Test
+    fun `M1 raw discard preserves all fields and the unresolved attempt without decoding`() = runTest {
+        val token = (store.beginAttempt("alice", key, Draft("body", "subject", "recipient"), 0)
+            as BeginAttemptResult.Started).token
+        store.finishAttempt(token, AttemptOutcome.UNCERTAIN)
+        val dao = database.editorDraftDao()
+        val raw = checkNotNull(dao.get("alice|$key")).copy(pendingInlineQuoteRequest = "unreadable")
+        dao.upsert(raw)
+        assertTrue(runCatching { store.loadEntry("alice", key) }.isFailure)
+        assertEquals(StoreWriteResult.Written(raw.contentVersion + 1),
+            store.discardUnreadableInlineQuoteRequest("alice", key))
+        assertEquals(raw.copy(pendingInlineQuoteRequest = null, contentVersion = raw.contentVersion + 1),
+            dao.get("alice|$key"))
+        val reopened = checkNotNull(store.loadEntry("alice", key))
+        assertEquals(token, reopened.attempt?.token)
+        assertEquals("body", reopened.draft.body)
+    }
+
+    @Test
+    fun `M1 failed or wrong owner raw discard leaves the entire unreadable row unchanged`() = runTest {
+        store.enqueueInlineQuoteRequest("alice", key, request, 0)
+        val dao = database.editorDraftDao()
+        val raw = checkNotNull(dao.get("alice|$key")).copy(pendingInlineQuoteRequest = "unreadable")
+        dao.upsert(raw)
+        assertEquals(StoreWriteResult.OwnerChanged, store.discardUnreadableInlineQuoteRequest("bob", key))
+        database.openHelper.writableDatabase.execSQL(
+            """CREATE TRIGGER reject_raw_discard BEFORE UPDATE ON editor_drafts
+                BEGIN SELECT RAISE(ABORT, 'disk failure'); END""".trimIndent(),
+        )
+        assertTrue(store.discardUnreadableInlineQuoteRequest("alice", key) is StoreWriteResult.Failed)
+        assertEquals(raw, dao.get("alice|$key"))
+    }
+
+    @Test
+    fun `published entry starts empty and a new editor session never resurrects the sent body`() = runTest {
+        val token = (store.beginAttempt("alice", key, Draft("sent body"), 0) as BeginAttemptResult.Started).token
+        store.finishAttempt(token, AttemptOutcome.PUBLISHED)
+        store.enqueueInlineQuoteRequest("alice", key, request, token.version)
+        val session = EditorDraftSession(newStore(), key)
+        val fresh = checkNotNull(session.load())
+        assertEquals("", fresh.draft.body)
+        assertNull(fresh.attempt)
+        assertEquals(request, session.pendingInlineQuoteRequest)
+    }
+
+    @Test
+    fun `M5 Room restores staged typing separately without changing the offered body or request`() = runTest {
+        val offered = Draft("D", pendingInlineQuoteRequest = request)
+        store.saveIfVersion("alice", key, offered, 0)
+        val before = store.loadEntry("alice", key)
+        val input = EditorDraftOfferInput.load(store, key, "alice", "D")
+        assertTrue(input.save("C") is StoreWriteResult.Written)
+        assertEquals(before, store.loadEntry("alice", key))
+        val reopened = EditorDraftOfferInput.load(newStore(), key, "alice", "D")
+        assertTrue(reopened.isPending)
+        assertEquals("C", reopened.body)
+        reopened.clear()
+        assertEquals(StoreWriteResult.Conflict, input.save("stale C"))
+        assertFalse(EditorDraftOfferInput.load(newStore(), key, "alice", "D").isPending)
+        assertEquals(before, store.loadEntry("alice", key))
     }
 
     private fun newStore(writeClock: Clock = clock) = RoomEditorDraftStore(

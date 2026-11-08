@@ -77,6 +77,9 @@ interface EditorDraftStore {
         owner: String?, key: String, request: PendingInlineQuoteRequest, expectedVersion: Long, draft: Draft? = null,
     ): StoreWriteResult
 
+    /** Explicit recovery from a sealed load: CAS the raw row, clearing only its request column. */
+    suspend fun discardUnreadableInlineQuoteRequest(owner: String?, key: String): StoreWriteResult
+
     /**
      * ED-170: atomically store the complete snapshot and IN_PROGRESS before issuing any POST.
      * Every accepted invocation supplies a fresh [attemptId], including after rejection;

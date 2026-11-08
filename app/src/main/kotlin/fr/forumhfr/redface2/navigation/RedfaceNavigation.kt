@@ -2969,7 +2969,8 @@ private fun RedfaceNavHost(
                     },
                     // #843/#790 — the quick-reply sheet's ESCALATION only: the sheet just persisted
                     // the shared #405 row, so the editor auto-applies it (resumeSharedDraft = true,
-                    // silent append — same composition act) WITHOUT surfacing the restore banner.
+                    // same composition act). An undecided offer retains its banner and current
+                    // field separately in Room; the post serves its inline request after the choice.
                     onEscalateToFullEditor = { subcat, page, quotes, consumesBasket ->
                         // #1553: pending inline coordinates stay in the shared durable row. This
                         // handoff contains cards only, even after a failed quote GET in the sheet.

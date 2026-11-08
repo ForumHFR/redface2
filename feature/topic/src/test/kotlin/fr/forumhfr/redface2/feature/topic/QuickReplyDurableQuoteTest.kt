@@ -5,6 +5,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftOfferInput
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptOutcome
@@ -31,6 +32,8 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.async
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -74,18 +77,20 @@ class QuickReplyDurableQuoteTest {
     }
 
     @Test
-    fun `old saver coordinates keep the mount without importing a quote or issuing a GET`() = runTest {
+    fun `Astra m3 old saver only propagates a dropped flag without coordinates`() = runTest {
         val scenario = Scenario()
         val launch = checkNotNull(QuickReplyLaunchSaver.restore(
             listOf(23, 401, 35421, 1, true, 1, 101, -1, "alice", "old preview", false),
         ))
         val sheet = scenario.create()
-        sheet.onSheetAttached(launch.request.page, launch.initialQuotes, restored = true)
+        sheet.onSheetAttached(launch.request.page, launch.initialQuotes, restored = true,
+            legacyQuoteRequestDropped = launch.legacyQuoteRequestDropped)
         runCurrent()
         assertTrue(sheet.state.value.pendingQuotes.isEmpty())
         assertTrue(scenario.fetches.isEmpty())
         assertNull(scenario.pending)
         assertEquals(0, scenario.store.writes)
+        assertTrue(sheet.state.value.legacyQuoteRequestDropped)
     }
 
     @Test
@@ -210,7 +215,7 @@ class QuickReplyDurableQuoteTest {
     }
 
     @Test
-    fun `uncertain request stays dormant until durable acknowledgement succeeds`() = runTest {
+    fun `Astra m2 dormant request makes no form GET until durable acknowledgement succeeds`() = runTest {
         val scenario = Scenario()
         val token = scenario.uncertain()
         scenario.enqueue()
@@ -218,6 +223,7 @@ class QuickReplyDurableQuoteTest {
         sheet.onSubmitClicked()
         sheet.onSubmitConfirmed(null)
         assertTrue(sheet.state.value.hasDormantQuote)
+        assertEquals(0, scenario.formFetches)
         assertTrue(scenario.fetches.isEmpty())
         assertFalse(sheet.state.value.canSubmit)
         scenario.store.finishFailure = IOException("disk")
@@ -361,7 +367,7 @@ class QuickReplyDurableQuoteTest {
         sheet.onSubmitClicked()
         advanceUntilIdle()
         assertTrue(sheet.state.value.quoteStorageUnavailable)
-        assertEquals(EditorErrors.draftSaveFailed, sheet.state.value.submitError)
+        assertEquals(EditorErrors.unreadableQuoteRequest, sheet.state.value.submitError)
         assertEquals(scenario.request, scenario.pending)
         assertTrue(scenario.fetches.isEmpty())
         assertEquals(0, scenario.formFetches)
@@ -407,6 +413,173 @@ class QuickReplyDurableQuoteTest {
         assertEquals("[quotemsg=101]quote[/quotemsg]\n", scenario.body)
         assertNull(scenario.pending)
         assertNull(scenario.store.entries[scenario.key]?.attempt)
+    }
+
+    @Test
+    fun `Astra1 failed dormant ignore and durable autosave retain warning and both decisions`() = runTest {
+        val scenario = Scenario()
+        val token = scenario.uncertain()
+        scenario.enqueue()
+        val sheet = scenario.open()
+        assertEquals(0, scenario.formFetches)
+        scenario.store.saveFailure = IOException("disk")
+        sheet.onPendingQuoteIgnored()
+        runCurrent()
+        assertEquals(EditorErrors.uncertain, sheet.state.value.submitError)
+        scenario.store.saveFailure = null
+        sheet.onTextChanged(TextFieldValue("continued uncertainty"))
+        advanceUntilIdle()
+        assertEquals(EditorErrors.uncertain, sheet.state.value.submitError)
+        assertTrue(sheet.state.value.hasDormantQuote)
+        assertTrue(sheet.state.value.canIgnorePendingQuote)
+        assertEquals(token, scenario.store.entries[scenario.key]?.attempt?.token)
+        assertEquals(0, scenario.formFetches)
+        assertEquals(0, scenario.posts)
+    }
+
+    @Test
+    fun `Astra1 storage information waits for explicit acknowledgement of the uncertainty`() = runTest {
+        val scenario = Scenario()
+        scenario.uncertain()
+        scenario.enqueue()
+        val sheet = scenario.open()
+        scenario.store.saveFailure = IOException("disk")
+        sheet.onPendingQuoteIgnored()
+        runCurrent()
+        assertEquals(EditorErrors.uncertain, sheet.state.value.submitError)
+        scenario.store.saveFailure = null
+        scenario.quoteGate = CompletableDeferred()
+        sheet.onDormantQuoteResumed()
+        runCurrent()
+        assertEquals(EditorErrors.draftSaveFailed, sheet.state.value.submitError)
+        assertEquals(1, scenario.formFetches)
+        scenario.quoteGate?.complete(Unit)
+        advanceUntilIdle()
+        assertNull(sheet.state.value.submitError)
+    }
+
+    @Test
+    fun `Astra3 undecided escalation durably hands over only the live field without serving Q`() = runTest {
+        val scenario = Scenario()
+        scenario.store.preload(scenario.key, Draft("offered D"))
+        scenario.enqueue()
+        val sheet = scenario.open()
+        sheet.onTextChanged(TextFieldValue("current C"))
+        val effect = async { sheet.effects.first() }
+        sheet.onEscalateRequested()
+        runCurrent()
+        assertTrue(effect.await() is QuickReplyEffect.EscalateToFullEditor)
+        assertEquals("offered D", scenario.body)
+        assertEquals(scenario.request, scenario.pending)
+        assertEquals(0, scenario.formFetches)
+        val input = EditorDraftOfferInput.load(scenario.store, scenario.key, "tester", "offered D")
+        assertEquals("current C", input.body)
+        assertTrue(input.isPending)
+        sheet.onDismissed() // Disposal after escalation must not write D over the handoff.
+        runCurrent()
+        assertEquals("offered D", scenario.body)
+    }
+
+    @Test
+    fun `M1 unreadable request can be explicitly discarded before reopening an uncertain session`() = runTest {
+        val scenario = Scenario()
+        val token = scenario.uncertain()
+        scenario.enqueue()
+        scenario.store.loadFailure = UnreadableInlineQuoteRequestException()
+        val sheet = scenario.open()
+        assertTrue(sheet.state.value.canIgnorePendingQuote)
+        assertEquals(0, scenario.formFetches)
+        sheet.onPendingQuoteIgnored()
+        runCurrent()
+        assertFalse(sheet.state.value.unreadableQuoteRequest)
+        assertFalse(sheet.state.value.quoteStorageUnavailable)
+        assertEquals("uncertain body", sheet.state.value.text.text)
+        assertEquals(token, scenario.store.entries[scenario.key]?.attempt?.token)
+        assertEquals(EditorErrors.uncertain, sheet.state.value.submitError)
+        assertNull(scenario.pending)
+    }
+
+    @Test
+    fun `M3 successful sheet autosave clears only the draft storage information`() = runTest {
+        val scenario = Scenario()
+        val sheet = scenario.open()
+        scenario.store.saveFailure = IOException("disk")
+        sheet.onTextChanged(TextFieldValue("unsaved body"))
+        advanceUntilIdle()
+        assertEquals(EditorErrors.draftSaveFailed, sheet.state.value.submitError)
+        scenario.store.saveFailure = null
+        sheet.onTextChanged(TextFieldValue("durable body"))
+        advanceUntilIdle()
+        assertNull(sheet.state.value.submitError)
+        assertEquals("durable body", scenario.body)
+        scenario.enqueue()
+        scenario.offline = true
+        sheet.onSheetOpened()
+        sheet.onDraftDiscardRequested()
+        advanceUntilIdle()
+        val quoteError = sheet.state.value.submitError
+        assertEquals(EditorErrors.quoteFetchFailed(inline = true, quickReply = true), quoteError)
+        sheet.onTextChanged(TextFieldValue("new live body"))
+        advanceUntilIdle()
+        assertEquals(quoteError, sheet.state.value.submitError)
+    }
+
+    @Test
+    fun `M4 initial draft read remains loading and reload cannot start a second restore`() = runTest {
+        val scenario = Scenario()
+        val gate = CompletableDeferred<Unit>()
+        scenario.store.loadGate = gate
+        val sheet = scenario.open()
+        assertTrue(sheet.state.value.isLoadingDraft)
+        sheet.onQuoteReloadRequested()
+        assertTrue(sheet.state.value.isLoadingDraft)
+        gate.complete(Unit)
+        runCurrent()
+        assertFalse(sheet.state.value.isLoadingDraft)
+        assertFalse(sheet.state.value.quoteStorageUnavailable)
+    }
+
+    @Test
+    fun `M5 typing under the offer survives process death without overwriting D or serving Q`() = runTest {
+        val scenario = Scenario()
+        scenario.store.preload(scenario.key, Draft("offered D"))
+        scenario.enqueue()
+        val sheet = scenario.open()
+        sheet.onTextChanged(TextFieldValue("current C"))
+        advanceTimeBy(751)
+        runCurrent()
+        assertEquals("offered D", scenario.body)
+        assertEquals(scenario.request, scenario.pending)
+        sheet.viewModelScope.cancel()
+        val restored = scenario.open()
+        runCurrent()
+        assertEquals("current C", restored.state.value.text.text)
+        assertEquals("offered D", restored.state.value.restorableDraft)
+        assertEquals(0, scenario.formFetches)
+        restored.onDraftDiscardRequested()
+        advanceUntilIdle()
+        assertEquals("current C\n\n[quotemsg=101]quote[/quotemsg]\n", scenario.body)
+        assertNull(scenario.pending)
+        assertFalse(EditorDraftOfferInput.load(scenario.store, scenario.key, "tester", "offered D").isPending)
+    }
+
+    @Test
+    fun `autosave started during GET and returning late cannot restore the consumed sheet request`() = runTest {
+        val scenario = Scenario()
+        scenario.enqueue()
+        scenario.quoteGate = CompletableDeferred()
+        val sheet = scenario.open()
+        sheet.onTextChanged(TextFieldValue("during GET"))
+        val saved = CompletableDeferred<Unit>()
+        scenario.store.saveReturnGate = saved
+        advanceTimeBy(751)
+        runCurrent()
+        scenario.quoteGate?.complete(Unit)
+        runCurrent()
+        saved.complete(Unit)
+        advanceUntilIdle()
+        assertEquals("during GET\n\n[quotemsg=101]quote[/quotemsg]\n", scenario.body)
+        assertNull(scenario.pending)
     }
 
     private inner class Scenario {

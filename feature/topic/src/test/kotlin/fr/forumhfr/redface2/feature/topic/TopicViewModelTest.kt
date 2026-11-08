@@ -171,6 +171,60 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `M6 invalid inline coordinates produce a controlled preparation failure`() = runTest {
+        val drafts = VersionedEditorDraftStore()
+        val model = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(listOf(flowOf(fakeTopic(1, 1)))),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("tester")),
+            draftStore = drafts,
+        )
+        for (locator in listOf(QuoteLocator(0, 101, null), QuoteLocator(1, 0, null), QuoteLocator(1, 101, -1))) {
+            model.effects.test {
+                model.prepareEditorQuotes(listOf(QuoteSelection(locator, "alice", "preview"))) {
+                    error("Invalid coordinates must not open an editor")
+                }
+                assertEquals(TopicEffect.QuotePreparationFailed, awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+        assertTrue(drafts.entries.isEmpty())
+        destroyViewModel(model)
+    }
+
+    @Test
+    fun `M9 quote entry retries once after a closing sheet flush and preserves its last keystrokes`() = runTest {
+        var calls = 0
+        val drafts = object : VersionedEditorDraftStore() {
+            override suspend fun enqueueInlineQuoteRequest(
+                owner: String?, key: String, request: fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest,
+                expectedVersion: Long,
+            ): EditorDraftStore.StoreWriteResult {
+                calls++
+                if (calls == 1) {
+                    super.saveIfVersion(owner, key, EditorDraftStore.Draft("closing sheet tail"), expectedVersion)
+                }
+                return super.enqueueInlineQuoteRequest(owner, key, request, expectedVersion)
+            }
+        }
+        val model = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(listOf(flowOf(fakeTopic(1, 1)))),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("tester")),
+            draftStore = drafts,
+        )
+        val opened = mutableListOf<List<QuoteSelection>>()
+        model.prepareEditorQuotes(listOf(QuoteSelection(QuoteLocator(1, 101, null), "alice", "preview")), opened::add)
+        advanceUntilIdle()
+        assertEquals(2, calls)
+        assertEquals(listOf(emptyList<QuoteSelection>()), opened)
+        val row = checkNotNull(drafts.entries[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_POST)])
+        assertEquals("closing sheet tail", row.draft.body)
+        assertEquals(listOf(101), row.draft.pendingInlineQuoteRequest?.quotes?.map { it.numreponse })
+        destroyViewModel(model)
+    }
+
+    @Test
     fun `card preference carries previews without creating an inline request`() = runTest {
         val drafts = VersionedEditorDraftStore()
         val model = topicViewModel(

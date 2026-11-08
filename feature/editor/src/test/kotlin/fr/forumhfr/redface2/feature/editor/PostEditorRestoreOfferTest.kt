@@ -25,6 +25,9 @@ import io.mockk.mockk
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.flowOf
@@ -219,6 +222,40 @@ class PostEditorRestoreOfferTest {
         assertEquals("", editor.state.value.draftRestoreSeed)
         editor.submit(PostEditorIntent.DraftRestoreRequested)
         assertRestored(editor, "typed before server form\n\n" + OFFER)
+    }
+
+    @Test
+    fun restoreEmitsOneBodyMutationWithCollapsedCaretForEveryRule() = runTest(dispatcher) {
+        for ((mode, live, expected) in listOf(
+            Triple(PostEditorMode.Edit, SEED, OFFER),
+            Triple(PostEditorMode.Reply, "typed", "typed\n\n" + OFFER),
+            Triple(PostEditorMode.Edit, SEED + " suffix", OFFER + "\n\nsuffix"),
+            Triple(PostEditorMode.Edit, "edited seed", "edited seed\n\n" + OFFER),
+            Triple(PostEditorMode.Edit, " \n", OFFER),
+            Triple(PostEditorMode.Edit, OFFER, OFFER),
+        )) {
+            val editor = open(mode)
+            runCurrent()
+            type(editor, live)
+            val bodies = mutableListOf<String>()
+            val collector = backgroundScope.launch(
+                UnconfinedTestDispatcher(testScheduler), start = CoroutineStart.UNDISPATCHED,
+            ) {
+                editor.state.collect { bodies += it.draft.text }
+            }
+            val before = bodies.size
+            editor.submit(PostEditorIntent.DraftRestoreRequested)
+            val mutations = bodies.drop(before).fold(live to 0) { (previous, count), body ->
+                body to (count + if (body != previous) 1 else 0)
+            }.second
+            assertEquals(if (live == expected) 0 else 1, mutations)
+            assertRestored(editor, expected)
+            collector.cancel()
+            editor.viewModelScope.cancel()
+            // Each iteration starts from the same offered body rather than a prior test's decided row.
+            store.preload(editKey, Draft(OFFER))
+            store.preload(replyKey, Draft(OFFER))
+        }
     }
 
     private fun type(editor: PostEditorViewModel, text: String) {

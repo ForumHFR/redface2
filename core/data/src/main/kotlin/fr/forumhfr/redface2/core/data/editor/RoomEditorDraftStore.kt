@@ -162,6 +162,19 @@ class RoomEditorDraftStore @Inject constructor(
         editorDraftDao.mutateInlineQuoteRequest(next, previous).result(next.contentVersion)
     }
 
+    override suspend fun discardUnreadableInlineQuoteRequest(owner: String?, key: String): StoreWriteResult =
+        write(owner) {
+            val previous = editorDraftDao.get(rowKey(checkNotNull(owner), key))
+                ?: return@write StoreWriteResult.Conflict
+            // No decoding: preserve even unknown payloads until the user explicitly discards them.
+            val next = previous.copy(
+                pendingInlineQuoteRequest = null,
+                contentVersion = previous.contentVersion + 1,
+                updatedAt = clock.millis(),
+            )
+            editorDraftDao.mutateInlineQuoteRequest(next, previous).result(next.contentVersion)
+        }
+
     override suspend fun beginAttempt(
         owner: String?,
         key: String,

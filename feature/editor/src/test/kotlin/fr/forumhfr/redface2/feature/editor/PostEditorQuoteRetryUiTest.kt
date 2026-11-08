@@ -155,6 +155,46 @@ class PostEditorQuoteRetryUiTest {
     }
 
     @Test
+    fun `Astra1 dormant decisions remain present independently of submitError`() {
+        val intents = mutableListOf<PostEditorIntent>()
+        var state by mutableStateOf(PostEditorState(
+            mode = PostEditorMode.Reply, cat = 23, topicId = 35421, numreponse = null, page = 1, subcat = 0,
+            pendingQuotes = listOf(QuoteSelection(QuoteLocator(1, 101, null), "", "")),
+            submission = EditorSubmissionState.Uncertain(AttemptToken("tester", "key", "id", 1)),
+            submitError = EditorErrors.draftSaveFailed,
+        ))
+        compose.setContent {
+            RedfaceTheme(darkTheme = false) { Column { PostEditorAlertBanners(state, intents::add) } }
+        }
+        compose.onNodeWithText("Après vérification, reprendre la citation").assertIsEnabled()
+        compose.onNodeWithText("Ignorer la citation").assertIsEnabled()
+        compose.runOnIdle { state = state.copy(submitError = null) }
+        compose.onNodeWithText("Après vérification, reprendre la citation").performClick()
+        compose.onNodeWithText("Ignorer la citation").performClick()
+        assertEquals(listOf(PostEditorIntent.PendingQuoteResumed, PostEditorIntent.PendingQuoteIgnored), intents)
+    }
+
+    @Test
+    fun `M1 unreadable request offers explicit ignore with no decoded coordinates`() {
+        compose.setContent {
+            RedfaceTheme(darkTheme = false) {
+                Column {
+                    PostEditorAlertBanners(
+                        PostEditorState(PostEditorMode.Reply, 23, 35421, null, 1, 0,
+                            unreadableQuoteRequest = true, quoteStorageUnavailable = true,
+                            submitError = EditorErrors.unreadableQuoteRequest),
+                        onIntent = {},
+                    )
+                }
+            }
+        }
+        compose.onNodeWithText("La demande de citation enregistrée est illisible.", substring = true)
+            .assertIsDisplayed()
+        compose.onNodeWithText("Ignorer la citation").assertIsEnabled()
+        compose.onNodeWithText("Recharger").assertIsEnabled()
+    }
+
+    @Test
     fun `v20 transition explicitly tells the user to select the quote again`() {
         val intents = mutableListOf<PostEditorIntent>()
         compose.setContent {

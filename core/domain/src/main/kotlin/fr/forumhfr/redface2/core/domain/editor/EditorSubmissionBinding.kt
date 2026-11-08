@@ -186,18 +186,23 @@ class EditorSubmissionBinding<E, F>(
 
     suspend fun persist(draft: EditorDraftStore.Draft?): StoreWriteResult? {
         val result = if (draft != null && initialized && !blocksClose) drafts.save(draft) else null
-        resolveDraftFailure(result)
-        if (result != null && result !is StoreWriteResult.Written && !drafts.invalidated) {
-            draftSaveFailed()
-        }
+        resolveDraftWrite(result)
         return result
     }
 
-    private fun resolveDraftFailure(result: StoreWriteResult?) {
+    private fun reportDraftWriteFailure(result: StoreWriteResult?) {
+        if (result != null && result !is StoreWriteResult.Written && !drafts.invalidated) {
+            draftSaveFailed()
+        }
+    }
+
+    /** ED-44 also applies to awaited quote mutations outside persist(). */
+    fun resolveDraftWrite(result: StoreWriteResult?) {
         if (result is StoreWriteResult.Written) {
             pendingDraftFailure = false
             callbacks.clearError(errors.draftSaveFailed)
         }
+        reportDraftWriteFailure(result)
     }
 
     private fun draftSaveFailed() {

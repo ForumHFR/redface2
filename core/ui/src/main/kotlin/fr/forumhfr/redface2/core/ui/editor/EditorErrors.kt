@@ -37,6 +37,7 @@ object EditorErrors {
         EditorCause.QuoteFetchFailed, EditorErrorClass.Certain,
         R.string.editor_summary_quote, R.string.editor_error_quote_fetch, EditorErrorAction.Reload,
     )
+    val unreadableQuoteRequest = quoteFetchFailed.copy(detail = EditorText(R.string.editor_error_quote_unreadable))
     val draftWriteFailed = create(
         EditorCause.DraftWriteFailed, EditorErrorClass.Certain,
         R.string.editor_submission_draft_write_failed, R.string.editor_detail_draft_write_failed,

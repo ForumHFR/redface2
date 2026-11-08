@@ -218,4 +218,18 @@ class EditorDraftQuoteSessionTest {
         assertEquals(StoreWriteResult.Written(2), session.save(Draft("new text")))
         assertEquals(request, store.entries[key]?.draft?.pendingInlineQuoteRequest)
     }
+    @Test
+    fun `M9 an old closing flush cannot overwrite a quote row that won the CAS`() = runTest {
+        val store = VersionedEditorDraftStore()
+        store.preload(key, Draft("last durable body"))
+        val closing = EditorDraftSession(store, key)
+        closing.load()
+        val producer = EditorDraftSession(store, key)
+        producer.load()
+        producer.enqueueInlineQuoteRequest(request)
+        assertEquals(StoreWriteResult.Conflict, closing.save(Draft("unflushed tail")))
+        assertEquals("last durable body", store.entries[key]?.draft?.body)
+        assertEquals(request, store.entries[key]?.draft?.pendingInlineQuoteRequest)
+    }
+
 }
