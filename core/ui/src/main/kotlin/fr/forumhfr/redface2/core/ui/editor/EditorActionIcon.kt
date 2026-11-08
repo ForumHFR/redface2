@@ -20,7 +20,10 @@ import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 
-/** Insertions have no selected state. Only the Format mode trigger supplies [expanded]. */
+/**
+ * Insertions have no selected state. Only the Format mode trigger supplies [expanded].
+ * The host dispatches NextGesture before [onClick]'s action and stops when gestureConsumed is true.
+ */
 @Composable
 @Suppress("LongParameterList") // Icon + label + click, then Compose modifier and two defaulted states.
 fun EditorActionIcon(

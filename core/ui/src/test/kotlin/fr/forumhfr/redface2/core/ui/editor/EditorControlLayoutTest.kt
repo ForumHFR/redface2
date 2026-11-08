@@ -1,16 +1,21 @@
 package fr.forumhfr.redface2.core.ui.editor
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
@@ -55,12 +60,10 @@ class EditorControlLayoutTest {
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, 1.3f)) {
                 RedfaceTheme(reading = ReadingDisplaySettings(fontScale = FontScalePreference.L)) {
-                    Surface {
-                        Box(Modifier.width(181.dp).height(height.value)) {
-                            EditorEventControl(sample.value, 181.dp, { _, _ -> },
-                                modifier = Modifier.testTag("control"), onSummaryTextLayout = { layout = it })
-                        }
-                    }
+                    Surface { Box(Modifier.width(185.dp).height(height.value)) {
+                        EditorEventControl(sample.value, 185.dp, { _, _ -> },
+                            modifier = Modifier.testTag("control"), onSummaryTextLayout = { layout = it })
+                    } }
                 }
             }
         }
@@ -70,9 +73,7 @@ class EditorControlLayoutTest {
         ) + (1..10).flatMap { total ->
             (1..total).map { index ->
                 EditorEventContent.InProgress(EditorText(R.string.editor_event_uploading, listOf(index, total)))
-            } + EditorEventContent.Finished(
-                EditorText(R.plurals.editor_event_images_inserted, listOf(total), quantity = total),
-            )
+            } + finishedUpload(total)
         } + (2..10).flatMap { total ->
             (0 until total).map { completed ->
                 EditorEventContent.Problem(
@@ -94,17 +95,16 @@ class EditorControlLayoutTest {
                 val pixelsPerDp = result.layoutInput.density.density
                 assertTrue(result.size.width / pixelsPerDp <= EDITOR_SUMMARY_TEXT_WIDTH_DP + 0.5f)
                 val intrinsic = result.multiParagraph.intrinsics.maxIntrinsicWidth / pixelsPerDp
-                println("ED-133 ${result.layoutInput.text}: intrinsic=${intrinsic}dp, height=$injectedHeight")
                 assertTrue(content.toString(), intrinsic <= EDITOR_SUMMARY_TEXT_WIDTH_DP)
                 if (content is EditorEventContent.Finished) {
                     val count = requireNotNull(content.summary.quantity)
                     assertEquals(if (count == 1) "1 insérée" else "$count insérées", result.layoutInput.text.text)
-                    compose.onNode(hasClickAction()).assert(hasContentDescription(
+                    compose.onAllNodes(hasContentDescription(
                         if (count == 1) "1 image insérée, Masquer" else "$count images insérées, Masquer",
-                    ))
+                    )).assertCountEquals(2) // Consultable name and permanent live announcement.
                 }
                 val bounds = compose.onNodeWithTag("control").getUnclippedBoundsInRoot()
-                assertEquals(181f, bounds.width.value, 0.5f)
+                assertEquals(185f, bounds.width.value, 0.5f)
                 assertEquals(48f, bounds.height.value, 0.5f)
                 if ((content as? EditorEventContent.Problem)?.error?.cause in
                     listOf(EditorCause.Uncertain, EditorCause.DraftWriteFailed)) {
@@ -119,7 +119,7 @@ class EditorControlLayoutTest {
 
     @Test
     fun `ED133 a 155 dp intrinsic text is not ellipsized in the 161 dp slot`() {
-        val width = mutableStateOf(181.dp)
+        val width = mutableStateOf(185.dp)
         var layout: TextLayoutResult? = null
         compose.setContent {
             RedfaceTheme {
@@ -135,16 +135,16 @@ class EditorControlLayoutTest {
                 }
             }
         }
-        listOf(181.dp, 90.dp).forEach { injectedWidth ->
+        listOf(185.dp, 90.dp).forEach { injectedWidth ->
             compose.runOnIdle { width.value = injectedWidth }
             compose.waitForIdle()
             val result = requireNotNull(layout)
             val pixelsPerDp = result.layoutInput.density.density
             assertEquals(155f, result.multiParagraph.intrinsics.maxIntrinsicWidth / pixelsPerDp, 1f)
-            assertEquals(injectedWidth.value - 20f, result.layoutInput.constraints.maxWidth / pixelsPerDp, 0.5f)
+            assertEquals(injectedWidth.value - 24f, result.layoutInput.constraints.maxWidth / pixelsPerDp, 0.5f)
             assertEquals(1, result.lineCount)
             assertEquals(injectedWidth == 90.dp, result.isLineEllipsized(0))
-            if (injectedWidth == 181.dp) assertEquals(result.layoutInput.text.length, result.getLineEnd(0))
+            if (injectedWidth == 185.dp) assertEquals(result.layoutInput.text.length, result.getLineEnd(0))
         }
     }
 
@@ -152,12 +152,10 @@ class EditorControlLayoutTest {
     fun `ED91 narrow fallback ellipsizes visually while preserving the full accessible name`() {
         var layout: TextLayoutResult? = null
         compose.setContent {
-            RedfaceTheme {
-                Surface {
-                    EditorEventControl(controlEvent(EditorEventContent.Problem(EditorErrors.draftWriteFailed)),
-                        width = 90.dp, onAction = { _, _ -> }, onSummaryTextLayout = { layout = it })
-                }
-            }
+            RedfaceTheme { Surface {
+                EditorEventControl(controlEvent(EditorEventContent.Problem(EditorErrors.draftWriteFailed)),
+                    width = 90.dp, onAction = { _, _ -> }, onSummaryTextLayout = { layout = it })
+            } }
         }
         compose.waitForIdle()
         assertTrue(requireNotNull(layout).isLineEllipsized(0))
@@ -175,14 +173,17 @@ class EditorControlLayoutTest {
         val dark = mutableStateOf(false)
         val height = mutableStateOf(56.dp)
         compose.setContent {
-            RedfaceTheme(darkTheme = dark.value) {
-                Surface {
-                    Box(Modifier.width(181.dp).height(height.value).testTag("sample")) {
-                        EditorEventControl(event.value, 181.dp, { _, _ -> }, Modifier.testTag("control")
+            RedfaceTheme(darkTheme = dark.value) { Surface {
+                Row(Modifier.width(360.dp).height(height.value).testTag("sample")
+                    .padding(start = 12.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.width(185.dp)) {
+                        EditorEventControl(event.value, 185.dp, { _, _ -> }, Modifier.testTag("control")
                             .then(if (event.value == null) Modifier else Modifier.height(height.value)))
                     }
+                    Spacer(Modifier.width(8.dp))
+                    Box(Modifier.width(139.dp).height(48.dp).testTag("submit-slot"))
                 }
-            }
+            } }
         }
         val cases = listOf(
             null,
@@ -190,9 +191,7 @@ class EditorControlLayoutTest {
             controlEvent(EditorEventContent.Problem(EditorErrors.missingTitle)),
             controlEvent(EditorEventContent.InProgress(EditorText(R.string.editor_event_sending))),
             controlEvent(EditorEventContent.InProgress(uploadText(2), UploadProgress(1, 3))),
-            controlEvent(EditorEventContent.Finished(
-                EditorText(R.plurals.editor_event_images_inserted, listOf(3), quantity = 3),
-            )),
+            controlEvent(finishedUpload(3)),
             controlEvent(EditorEventContent.Information(EditorText(R.string.editor_event_already_quoted))),
         )
         listOf(false, true).forEach { isDark ->
@@ -205,11 +204,19 @@ class EditorControlLayoutTest {
                     }
                     compose.onAllNodes(hasClickAction()).assertCountEquals(if (sample?.action == null) 0 else 1)
                     val bounds = compose.onNodeWithTag("sample").getUnclippedBoundsInRoot()
-                    assertEquals(181f, bounds.width.value, 0.5f)
+                    assertEquals(360f, bounds.width.value, 0.5f)
                     assertEquals(injectedHeight.value, bounds.height.value, 0.5f)
                     val control = compose.onNodeWithTag("control").getUnclippedBoundsInRoot()
-                    assertEquals(if (sample == null) 1f else 181f, control.width.value, 0.5f)
+                    assertEquals(if (sample == null) 1f else 185f, control.width.value, 0.5f)
                     assertEquals(if (sample == null) 1f else injectedHeight.value, control.height.value, 0.5f)
+                    assertEquals(12f, (control.left - bounds.left).value, 0.5f)
+                    if (sample != null) {
+                        val icon = compose.onNode(SemanticsMatcher.keyIsDefined(EditorEventIconTintKey),
+                            useUnmergedTree = true).getUnclippedBoundsInRoot()
+                        assertEquals(4f, (icon.left - control.left).value, 0.5f)
+                        val submit = compose.onNodeWithTag("submit-slot").getUnclippedBoundsInRoot()
+                        assertEquals(8f, (submit.left - control.right).value, 0.5f)
+                    }
                     if (sample?.action != null) {
                         val target = compose.onNode(hasClickAction()).getUnclippedBoundsInRoot()
                         assertEquals(48f, target.height.value, 0.5f)

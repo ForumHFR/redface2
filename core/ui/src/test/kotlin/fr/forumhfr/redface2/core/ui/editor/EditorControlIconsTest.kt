@@ -207,12 +207,12 @@ class EditorControlIconsTest {
         listOf(true, false).forEach { active ->
             compose.runOnIdle { enabled.value = active }
             compose.onAllNodes(hasClickAction()).assertCountEquals(1)
-            chip.assert(hasContentDescription("Retirer le destinataire Alice"))
+            chip.assert(hasContentDescription("Retirer Alice"))
                 .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
                 .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Selected))
                 .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.ToggleableState))
             val removal = chip.fetchSemanticsNode().config[SemanticsActions.OnClick]
-            assertEquals("Retirer le destinataire Alice", removal.label)
+            assertEquals("Retirer Alice", removal.label)
             if (active) chip.performClick() else {
                 chip.assertIsNotEnabled().performTouchInput { click() }
                 compose.runOnIdle { assertEquals(false, removal.action?.invoke()) }

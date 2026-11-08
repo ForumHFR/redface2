@@ -1,8 +1,15 @@
 package fr.forumhfr.redface2.core.ui.editor
 
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
@@ -13,17 +20,20 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import fr.forumhfr.redface2.core.domain.editor.EditorSession
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -42,9 +52,7 @@ class EditorEventControlTest {
         val current = mutableStateOf<EditorEvent?>(null)
         val actions = mutableListOf<Pair<EventKey, EditorEventAction>>()
         compose.setContent {
-            RedfaceTheme {
-                EditorEventControl(current.value, 181.dp, { key, action -> actions += key to action })
-            }
+            RedfaceTheme { EditorEventControl(current.value, 185.dp, { key, action -> actions += key to action }) }
         }
         val cases = listOf(
             EditorEventContent.Problem(EditorErrors.missingSubcategory) to EditorEventAction.Complete,
@@ -65,7 +73,7 @@ class EditorEventControlTest {
             compose.runOnIdle { current.value = event }
             compose.onAllNodes(hasClickAction()).assertCountEquals(1)
             compose.onNode(hasClickAction()).assertIsEnabled()
-                .assert(hasContentDescription(event.summary.resolve(context) + ", " + actionLabel(expected)))
+                .assert(hasContentDescription(event.accessibleSummary.resolve(context) + ", " + actionLabel(expected)))
                 .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
                 .performClick()
             assertEquals(actionLabel(expected),
@@ -77,9 +85,56 @@ class EditorEventControlTest {
     }
 
     @Test
+    fun `ED40 ED44 ED45 event tap and next action consume one gesture and leave the second available`() {
+        val information = controlEvent(EditorEventContent.Information(EditorText(R.string.editor_event_already_quoted)))
+        val state = mutableStateOf(EditorEventState(information.key.session, events = listOf(information)))
+        val actions = mutableListOf<String>()
+        val consumed = mutableListOf<Boolean>()
+        fun dispatch(input: EditorEventInput, action: String) {
+            val transition = reduceEditorEvents(state.value, input)
+            state.value = transition.state
+            consumed += transition.gestureConsumed
+            if (!transition.gestureConsumed) actions += action
+            assertTrue(transition.commands.isEmpty())
+        }
+        compose.setContent {
+            RedfaceTheme {
+                Row(Modifier.clickable { actions += "parent" }) {
+                    Box(Modifier.width(185.dp).testTag("slot")) {
+                        EditorEventControl(state.value.visibleEvent, 185.dp, { key, _ ->
+                            dispatch(EditorEventInput.Activate(key), "event fallthrough")
+                        })
+                        if (state.value.visibleEvent == null) EditorActionIcon(R.drawable.ic_editor_options,
+                            "Options", { dispatch(EditorEventInput.NextGesture(state.value.session), "Options") })
+                    }
+                    EditorActionIcon(R.drawable.ic_editor_done, "Envoyer", {
+                        dispatch(EditorEventInput.NextGesture(state.value.session), "Envoyer")
+                    })
+                }
+            }
+        }
+        val cases = listOf(information to "slot", controlEvent(finishedUpload(3)) to "slot", information to "Envoyer")
+        cases.forEach { (event, target) ->
+            compose.runOnIdle { state.value = EditorEventState(event.key.session, events = listOf(event)) }
+            val node = if (target == "slot") compose.onNodeWithTag(target, useUnmergedTree = true) else {
+                compose.onNode(hasContentDescription(target))
+            }
+            actions.clear()
+            consumed.clear()
+            node.performTouchInput { click(Offset(24f, center.y)) }
+            assertEquals(listOf(true), consumed)
+            assertTrue(actions.isEmpty())
+            assertEquals(null, state.value.visibleEvent)
+            node.performTouchInput { click(Offset(24f, center.y)) }
+            assertEquals(listOf(true, false), consumed)
+            assertEquals(listOf(if (target == "slot") "Options" else "Envoyer"), actions)
+        }
+    }
+
+    @Test
     fun `ED95 permanent live node survives absence progress replacement and unrelated recompositions`() {
         val current = mutableStateOf<EditorEvent?>(null)
-        val injectedWidth = mutableStateOf(181.dp)
+        val injectedWidth = mutableStateOf(185.dp)
         compose.setContent {
             RedfaceTheme { EditorEventControl(current.value, injectedWidth.value, { _, _ -> error("No action") }) }
         }
@@ -99,15 +154,9 @@ class EditorEventControlTest {
         assertLive(id, "Image 2/3…", LiveRegionMode.Polite)
         compose.runOnIdle { injectedWidth.value = 170.dp }
         assertLive(id, "Image 2/3…", LiveRegionMode.Polite)
-        compose.runOnIdle {
-            current.value = start.copy(content = EditorEventContent.Problem(EditorErrors.uncertain))
-        }
+        compose.runOnIdle { current.value = start.copy(content = EditorEventContent.Problem(EditorErrors.uncertain)) }
         assertLive(id, "Envoi incertain, Afficher les détails", LiveRegionMode.Assertive)
-        compose.runOnIdle {
-            current.value = start.copy(content = EditorEventContent.Finished(
-                EditorText(R.plurals.editor_event_images_inserted, listOf(3), quantity = 3),
-            ))
-        }
+        compose.runOnIdle { current.value = start.copy(content = finishedUpload(3)) }
         assertLive(id, "3 images insérées, Masquer", LiveRegionMode.Polite)
         compose.runOnIdle { current.value = null }
         assertLive(id, "", LiveRegionMode.Polite)
@@ -121,7 +170,7 @@ class EditorEventControlTest {
         compose.setContent {
             RedfaceTheme {
                 tints = with(MaterialTheme.colorScheme) { listOf(error, onSecondaryContainer, onSurfaceVariant) }
-                EditorEventControl(current.value, 181.dp, { _, _ -> })
+                EditorEventControl(current.value, 185.dp, { _, _ -> })
             }
         }
         val cases = editorErrorSamples.map { error ->
@@ -145,7 +194,7 @@ class EditorEventControlTest {
                 .assert(SemanticsMatcher.expectValue(EditorEventIconTintKey, tints[tint]))
             compose.onAllNodes(hasClickAction()).assertCountEquals(if (event.action == null) 0 else 1)
             if (event.action != null) compose.onNode(hasClickAction()).assert(hasContentDescription(
-                event.summary.resolve(context) + ", " + actionLabel(requireNotNull(event.action)),
+                event.accessibleSummary.resolve(context) + ", " + actionLabel(requireNotNull(event.action)),
             ))
         }
     }
@@ -173,3 +222,8 @@ internal fun controlEvent(content: EditorEventContent, occurrence: Long = 1): Ed
 )
 
 internal fun uploadText(index: Int) = EditorText(R.string.editor_event_uploading, listOf(index, 3))
+
+internal fun finishedUpload(count: Int) = EditorEventContent.Finished(
+    summary = EditorText(R.plurals.editor_event_images_inserted_summary, listOf(count), quantity = count),
+    accessibleSummary = EditorText(R.plurals.editor_event_images_inserted, listOf(count), quantity = count),
+)

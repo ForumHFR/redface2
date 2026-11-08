@@ -17,7 +17,7 @@ import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 
-/** One removal target, including the decorative cross; no nested clickable trailing icon. */
+/** Single removal target, including the decorative cross. Host gesture dispatch follows [EditorActionIcon]. */
 @Composable
 fun EditorRecipientChip(
     recipient: String,

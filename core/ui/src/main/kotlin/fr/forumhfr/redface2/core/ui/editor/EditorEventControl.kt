@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
@@ -36,9 +37,11 @@ import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 /**
  * Always compose this control, including when [event] is null; never key it by event identity.
  * Without an event only the 1 dp live node remains; no event slot is reserved.
- * The host allocates [width] and the gap to Submit. No window or bar policy lives here.
+ * [width] is the full envelope (nominal slot + 4 dp, about 185 dp at 360 dp).
+ * The host places it 4 dp into the start gutter, respecting system insets and the gap to Submit.
  * When the host supplies a taller height via [modifier], the 48 dp target is centered vertically.
- * [onAction] receives the exact displayed key; acknowledgement remains the host reducer's job.
+ * [onAction] dispatches only Activate with the displayed key, never NextGesture or a tool callback.
+ * The host applies the reducer's gestureConsumed result without dispatching another action.
  */
 @Composable
 fun EditorEventControl(
@@ -49,13 +52,8 @@ fun EditorEventControl(
     onSummaryTextLayout: ((TextLayoutResult) -> Unit)? = null,
 ) {
     require(width >= 48.dp)
-    val summary = event?.summary?.resolve().orEmpty()
-    // ED-133: 150 dp is the catalogue's intrinsic budget; layout uses the whole remaining slot.
-    // Short visual wording pending maintainer arbitration in spec v0.7.3.
-    val visualSummary = if (event?.content is EditorEventContent.Finished &&
-        event.summary.resourceId == R.plurals.editor_event_images_inserted) {
-        event.summary.copy(resourceId = R.plurals.editor_event_images_inserted_summary).resolve()
-    } else summary
+    val visualSummary = event?.summary?.resolve().orEmpty()
+    val summary = event?.accessibleSummary?.resolve().orEmpty()
     val action = event?.action
     val actionName = action?.controlLabel()
     val name = if (actionName == null) summary else "$summary, $actionName"
@@ -82,7 +80,8 @@ fun EditorEventControl(
                 .then(if (action == null) Modifier else Modifier.clickable(
                     role = Role.Button, onClickLabel = actionName, onClick = { onAction(event.key, action) },
                 ))
-                .semantics(mergeDescendants = true) { contentDescription = name },
+                .semantics(mergeDescendants = true) { contentDescription = name }
+                .padding(start = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {

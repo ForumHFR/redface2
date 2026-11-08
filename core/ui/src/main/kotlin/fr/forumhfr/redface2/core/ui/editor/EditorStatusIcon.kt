@@ -20,7 +20,7 @@ import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 
-/** [label] includes the state/count and tap destination. Keep composed across [visible] changes. */
+/** Keep composed across [visible] changes; [label] includes state/count and destination. See [EditorActionIcon]. */
 @Composable
 @Suppress("LongParameterList") // Independent icon, count, visibility and enabled state at the host boundary.
 fun EditorStatusIcon(
