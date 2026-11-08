@@ -143,10 +143,10 @@ private fun currentOperation(
 }
 
 private fun advanceUpload(state: EditorEventState, input: EditorEventInput.UploadAdvanced): EditorEventState {
-    val operation = currentOperation(state, input.key.session, input.key.operation) ?: return state
-    if (operation.finished || operation.ref !is OperationRef.Upload) return state
-    val event = state.events.find { it.key == input.key }
-    val content = event?.content as? EditorEventContent.InProgress ?: return state
+    val operation = currentOperation(state, input.key.session, input.key.operation)
+    val content = (state.events.find { it.key == input.key }?.content as? EditorEventContent.InProgress)
+        ?.takeIf { operation != null && !operation.finished && operation.ref is OperationRef.Upload }
+        ?: return state
     return state.copy(events = state.events.map {
         if (it.key == input.key) it.copy(content = content.copy(uploadProgress = input.progress)) else it
     })
