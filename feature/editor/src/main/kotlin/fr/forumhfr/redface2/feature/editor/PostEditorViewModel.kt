@@ -549,7 +549,7 @@ class PostEditorViewModel @AssistedInject constructor(
                     }
                     loadedForm = form
                     smileyPicker.refreshFavorites(favoriteStamp)
-                    if (!acceptMutation(blockDuringUpload = true)) {
+                    if (!acceptMutation(blockDuringUpload = insertInline)) {
                         inlineQuoteDeferredByUpload =
                             insertInline && _state.value.isUploading && !submission.blocksMutation
                         _state.update { it.copy(isLoadingForm = false) }
@@ -682,7 +682,7 @@ class PostEditorViewModel @AssistedInject constructor(
     private fun resumeSharedDraft(body: String) {
         // The body lives in the draft store, not SavedStateHandle. A new instance MUST reload it.
         if (sharedDraftResumed || submission.blocksMutation) return
-        if (!acceptMutation(blockDuringUpload = true)) return
+        if (!acceptMutation()) return
         val liveBody = bodyFieldState.text.toString()
         val combined = if (liveBody.isBlank() || liveBody == body) body else liveBody.trimEnd() + "\n\n" + body
         replaceBody(combined)
@@ -691,7 +691,7 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     private fun restoreAttempt(draft: EditorDraftStore.Draft) {
-        if (!acceptMutation(blockDuringUpload = true)) return
+        if (!acceptMutation()) return
         val liveBody = bodyFieldState.text.toString()
         if (liveBody.isBlank()) {
             replaceBody(draft.body)

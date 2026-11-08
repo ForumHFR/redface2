@@ -923,6 +923,78 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    @OptIn(ExperimentalFoundationApi::class)
+    fun unreadableQuoteDiscardRestoresUncertainBodyAfterTypingThenErasingAndKeepsUndo() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val token = (draftStore.beginAttempt("tester", key, EditorDraftStore.Draft("unresolved body"), 0)
+            as EditorDraftStore.BeginAttemptResult.Started).token
+        draftStore.finishAttempt(token, EditorDraftStore.AttemptOutcome.UNCERTAIN)
+        draftStore.enqueueInlineQuoteRequest("tester", key,
+            PendingInlineQuoteRequest(SAMPLE_CAT, SAMPLE_TOPIC_ID, listOf(PendingInlineQuoteRequest.Quote(101, 1))), 1)
+        draftStore.loadFailure = UnreadableInlineQuoteRequestException()
+        val vm = newReplyViewModel()
+        assertTrue(vm.state.value.unreadableQuoteRequest)
+        vm.editBody(TextFieldValue("x", TextRange(1)))
+        vm.editBody(TextFieldValue(""))
+        assertEquals("", vm.bodyFieldState.text.toString())
+        assertTrue(vm.bodyFieldState.undoState.canUndo)
+
+        vm.dispatch(PostEditorIntent.PendingQuoteIgnored)
+        settleBody()
+
+        assertEquals("unresolved body", vm.bodyFieldState.text.toString())
+        assertEquals("unresolved body", vm.state.value.bodyText)
+        assertEquals("unresolved body", draftStore.saved[key]?.body)
+        assertEquals(token, draftStore.entries[key]?.attempt?.token)
+        assertFalse(vm.state.value.unreadableQuoteRequest)
+        assertTrue(vm.bodyFieldState.undoState.canUndo)
+        vm.bodyFieldState.undoState.undo()
+        assertEquals("", vm.bodyFieldState.text.toString())
+        assertTrue(vm.bodyFieldState.undoState.canUndo)
+        vm.bodyFieldState.undoState.undo()
+        assertEquals("x", vm.bodyFieldState.text.toString())
+    }
+
+    @Test
+    fun unreadableQuoteDiscardDuringUploadRestoresUncertainBodyAndPersistsImage() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val token = (draftStore.beginAttempt("tester", key, EditorDraftStore.Draft("unresolved body"), 0)
+            as EditorDraftStore.BeginAttemptResult.Started).token
+        draftStore.finishAttempt(token, EditorDraftStore.AttemptOutcome.UNCERTAIN)
+        draftStore.enqueueInlineQuoteRequest("tester", key,
+            PendingInlineQuoteRequest(SAMPLE_CAT, SAMPLE_TOPIC_ID, listOf(PendingInlineQuoteRequest.Quote(101, 1))), 1)
+        draftStore.loadFailure = UnreadableInlineQuoteRequestException()
+        val uploadGate = CompletableDeferred<Unit>()
+        uploadRepository.uploadGate = uploadGate
+        val vm = newReplyViewModel()
+        assertTrue(vm.state.value.unreadableQuoteRequest)
+        assertTrue(vm.state.value.canIgnorePendingQuote)
+        assertEquals("", vm.bodyFieldState.text.toString())
+        vm.dispatch(PostEditorIntent.ImagePicked("content://pick/1"))
+        assertTrue(vm.state.value.isUploading)
+
+        vm.dispatch(PostEditorIntent.PendingQuoteIgnored)
+        settleBody()
+
+        assertTrue(vm.state.value.isUploading)
+        assertFalse(vm.state.value.unreadableQuoteRequest)
+        assertEquals("unresolved body", vm.bodyFieldState.text.toString())
+        assertEquals("unresolved body", vm.state.value.bodyText)
+        assertEquals("unresolved body", draftStore.saved[key]?.body)
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        uploadGate.complete(Unit)
+        settleBody()
+        val expected = "unresolved body[img]${uploadRepository.uploadResult.imageUrl}[/img]"
+        assertFalse(vm.state.value.isUploading)
+        assertEquals(expected, vm.bodyFieldState.text.toString())
+        assertEquals(expected, vm.state.value.bodyText)
+        assertEquals(expected, draftStore.saved[key]?.body)
+        assertEquals(token, draftStore.entries[key]?.attempt?.token)
+        assertEquals(EditorDraftStore.AttemptStatus.UNCERTAIN, draftStore.entries[key]?.attempt?.status)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
     fun `autosave started during GET and returning late cannot restore the consumed post request`() = runTest {
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
         replyRepository.formResult = Result.success(authenticatedForm("[quotemsg=101]quote[/quotemsg]"))
@@ -1603,6 +1675,47 @@ class PostEditorViewModelTest {
             assertEquals("body intact", "Reply", settled.bodyText)
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun cardQuoteReloadDuringUploadClearsFailureWithoutChangingBody() = runTest {
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.failure(IOException("offline")))
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)))
+        settleBody()
+        vm.editBody(TextFieldValue("Reply", TextRange(5)))
+        vm.dispatch(PostEditorIntent.SubmitClicked())
+        settleBody()
+        assertEquals(EditorErrors.quoteFetchFailed(inline = false), vm.state.value.submitError)
+        assertEquals(0, replyRepository.submitCalls)
+        val before = vm.bodyValue()
+        val uploadGate = CompletableDeferred<Unit>()
+        uploadRepository.uploadGate = uploadGate
+        vm.dispatch(PostEditorIntent.ImagePicked("content://pick/1"))
+        assertTrue(vm.state.value.isUploading)
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm("[quotemsg=101]quote[/quotemsg]")),
+        )
+        val fetchesBeforeReload = replyRepository.formFetches
+
+        vm.dispatch(PostEditorIntent.ReloadRequested)
+        settleBody()
+
+        assertEquals(fetchesBeforeReload + 1, replyRepository.formFetches)
+        assertTrue(vm.state.value.isUploading)
+        assertFalse(vm.state.value.isLoadingForm)
+        assertNull(vm.state.value.submitError)
+        assertEquals(before, vm.bodyValue())
+        assertEquals("Reply", vm.state.value.bodyText)
+        assertEquals(listOf(101), vm.state.value.quotes.map { it.numreponse })
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        uploadGate.complete(Unit)
+        settleBody()
+        val expected = "Reply[img]${uploadRepository.uploadResult.imageUrl}[/img]"
+        assertEquals(expected, vm.bodyFieldState.text.toString())
+        assertEquals(expected, draftStore.saved[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)]?.body)
+        assertEquals(fetchesBeforeReload + 1, replyRepository.formFetches)
+        assertNull(vm.state.value.submitError)
+        assertEquals(0, replyRepository.submitCalls)
     }
 
     @Test
@@ -3627,6 +3740,39 @@ class PostEditorViewModelTest {
             assertNull("no banner on an escalation hand-over", settled.restorableDraft)
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun sharedDraftReadCompletingDuringUploadRestoresBodyAndPersistsImage() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.preload(key, EditorDraftStore.Draft("shared body"))
+        val loadGate = CompletableDeferred<Unit>()
+        draftStore.loadGate = loadGate
+        val uploadGate = CompletableDeferred<Unit>()
+        uploadRepository.uploadGate = uploadGate
+        val vm = newReplyViewModel(resumeSharedDraft = true)
+        assertEquals("", vm.bodyFieldState.text.toString())
+        assertEquals(0, replyRepository.formFetches)
+        vm.dispatch(PostEditorIntent.ImagePicked("content://pick/1"))
+        assertTrue(vm.state.value.isUploading)
+
+        loadGate.complete(Unit)
+        settleBody()
+
+        assertTrue(vm.state.value.isUploading)
+        assertEquals("shared body", vm.bodyFieldState.text.toString())
+        assertEquals("shared body", vm.state.value.bodyText)
+        assertEquals("shared body", draftStore.saved[key]?.body)
+        assertNull(vm.state.value.restorableDraft)
+        uploadGate.complete(Unit)
+        settleBody()
+        val expected = "shared body[img]${uploadRepository.uploadResult.imageUrl}[/img]"
+        assertFalse(vm.state.value.isUploading)
+        assertEquals(expected, vm.bodyFieldState.text.toString())
+        assertEquals(expected, vm.state.value.bodyText)
+        assertEquals(expected, draftStore.saved[key]?.body)
+        assertNull(vm.state.value.restorableDraft)
+        assertEquals(0, replyRepository.submitCalls)
     }
 
     @Test
