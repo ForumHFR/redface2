@@ -31,8 +31,6 @@ dependencies {
     implementation(libs.androidx.activity.compose)
     // #1040 — androidx.core.net.toUri for the shared image-menu host label and browser Intent.
     implementation(libs.androidx.core.ktx)
-    // #1513 / P20 — current Activity bounds, including API 29 adjustResize compatibility.
-    implementation(libs.androidx.window)
     implementation(libs.materialKolor.utilities)
     implementation(libs.coil.compose)
     // #182 — fullscreen-only pan/pinch/double-tap viewer. Kept behind

@@ -3,5 +3,8 @@
     <string name="editor_app_bar_edit_title">Modifier</string>
     <string name="editor_app_bar_new_topic_title">Nouveau sujet</string>
     <string name="editor_app_bar_new_message_title">Nouveau MP</string>
-    <string name="editor_app_bar_open_header">Modifier l’en-tête : %1$s</string>
+    <string name="editor_app_bar_open_header">%1$s : %2$s</string>
+    <string name="editor_app_bar_open_topic_header">Modifier le titre et la sous-catégorie</string>
+    <string name="editor_app_bar_open_topic_title">Modifier le titre</string>
+    <string name="editor_app_bar_open_message_header">Modifier les destinataires et le sujet</string>
 </resources>

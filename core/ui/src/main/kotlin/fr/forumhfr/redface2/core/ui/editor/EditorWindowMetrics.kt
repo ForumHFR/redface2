@@ -15,11 +15,11 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.window.layout.WindowMetricsCalculator
 
 /** P20: full current ACTIVITY window, with the vertical union of stable system bars and cutout. */
 data class EditorWindowMetrics(val windowHeight: Dp, val stableTop: Dp, val stableBottom: Dp) {
@@ -33,17 +33,19 @@ data class EditorWindowMetrics(val windowHeight: Dp, val stableTop: Dp, val stab
 
 /**
  * No content/decor height, screenHeightDp, maximum display metrics or IME inset enters this read.
- * Null until root insets exist: the host must wait rather than silently classify from configuration.
+ * [windowHeightPx] comes from LocalWindowInfo.containerSize: Compose 1.12.1 uses current WindowMetrics
+ * for an Activity, including API 29. WindowManager remains Compose's runtime dependency, not ours.
+ * Null until window size and root insets exist: the host waits instead of classifying from configuration.
  * Device proof (API 29 adjustResize, 34/35, real multi-window) remains part of R1a-1's P20 gate.
  */
-fun readEditorWindowMetrics(activity: Activity): EditorWindowMetrics? {
-    val insets = ViewCompat.getRootWindowInsets(activity.window.decorView) ?: return null
+private fun readEditorWindowMetrics(activity: Activity, windowHeightPx: Int): EditorWindowMetrics? {
+    val insets = ViewCompat.getRootWindowInsets(activity.window.decorView)?.takeIf { windowHeightPx > 0 }
+        ?: return null
     val stable = insets.getInsetsIgnoringVisibility(
         WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout(),
     )
-    val bounds = WindowMetricsCalculator.getOrCreate().computeCurrentWindowMetrics(activity).bounds
     val density = activity.resources.displayMetrics.density
-    return EditorWindowMetrics((bounds.height() / density).dp, (stable.top / density).dp,
+    return EditorWindowMetrics((windowHeightPx / density).dp, (stable.top / density).dp,
         (stable.bottom / density).dp)
 }
 
@@ -51,12 +53,17 @@ fun readEditorWindowMetrics(activity: Activity): EditorWindowMetrics? {
 @Composable
 fun rememberEditorWindowMetrics(activity: Activity): State<EditorWindowMetrics?> {
     val configuration = LocalConfiguration.current
-    val metrics = remember(activity, configuration) { mutableStateOf(readEditorWindowMetrics(activity)) }
-    DisposableEffect(activity, configuration) {
+    val windowHeightPx = LocalWindowInfo.current.containerSize.height
+    val metrics = remember(activity, configuration, windowHeightPx) {
+        mutableStateOf(readEditorWindowMetrics(activity, windowHeightPx))
+    }
+    DisposableEffect(activity, configuration, windowHeightPx) {
         val view = activity.window.decorView
-        val listener = ViewTreeObserver.OnGlobalLayoutListener { metrics.value = readEditorWindowMetrics(activity) }
+        val listener = ViewTreeObserver.OnGlobalLayoutListener {
+            metrics.value = readEditorWindowMetrics(activity, windowHeightPx)
+        }
         view.viewTreeObserver.addOnGlobalLayoutListener(listener)
-        metrics.value = readEditorWindowMetrics(activity)
+        metrics.value = readEditorWindowMetrics(activity, windowHeightPx)
         onDispose { view.viewTreeObserver.removeOnGlobalLayoutListener(listener) }
     }
     return metrics

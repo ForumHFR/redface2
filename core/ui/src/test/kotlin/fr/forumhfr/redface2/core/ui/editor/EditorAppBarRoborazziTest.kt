@@ -60,7 +60,7 @@ class EditorAppBarRoborazziTest {
         }
         listOf(false, true).forEach { isDark ->
             listOf(1f, 1.3f).forEach { fontScale ->
-                (0..2).forEach { sample ->
+                (0..3).forEach { sample ->
                     capture(sample, isDark, fontScale)
                 }
             }
@@ -82,17 +82,19 @@ class EditorAppBarRoborazziTest {
     private fun AppBarSample(variant: Int) {
         val compact = variant == 2
         val metrics = EditorChromeMetrics(compact)
-        Surface(Modifier.size(if (compact) 760.dp else 360.dp, 180.dp).testTag("sample")) {
+        val width = when (variant) { 2 -> 760.dp; 3 -> 200.dp; else -> 360.dp }
+        Surface(Modifier.size(width, 180.dp).testTag("sample")) {
             Column {
                 EditorAppBar(
                     stringResource(if (variant == 0) R.string.editor_app_bar_reply_title
                         else R.string.editor_app_bar_new_topic_title),
                     "Titre du sujet et contexte de rédaction", {}, {}, Modifier.testTag("bar"),
-                    statuses = if (variant == 0) emptyList() else listOf(
+                    firstStatus = if (variant == 0) null else
                         EditorAppBarStatus(R.drawable.ic_editor_quote, "12 citations", {}, 12),
+                    secondStatus = if (variant == 0) null else
                         EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon retrouvé", {}),
-                    ),
                     onOpenHeader = if (variant == 0) null else ({}), compactHeight = compact,
+                    headerActionLabel = stringResource(R.string.editor_app_bar_open_topic_header),
                 )
                 Box(Modifier.weight(1f).fillMaxWidth()) { Text("Message") }
                 Surface(Modifier.fillMaxWidth().height(metrics.actionBarHeight).testTag("bottom"),
