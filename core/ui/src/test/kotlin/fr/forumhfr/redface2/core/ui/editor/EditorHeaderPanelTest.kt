@@ -82,36 +82,41 @@ class EditorHeaderPanelTest {
     private var bodyClicks = 0
 
     @Test
-    fun `ED101 title receives focus and Return preserves body composition selection scroll and undo`() {
+    fun `ED101 title receives focus and Return or Back preserves body composition selection scroll and undo`() {
         val initialBody = (1..30).joinToString("\n") { "Ligne $it" }
         setPanel(initialBody = initialBody)
         compose.runOnIdle { bodyFocus.requestFocus() }
         compose.onNodeWithTag("body").performTextInput("Ajout ")
-        val selection = TextRange(bodyState.text.length - 4, bodyState.text.length - 1)
-        compose.onNodeWithTag("body").performTextInputSelection(selection)
+        val selection = compose.runOnIdle { TextRange(bodyState.text.length - 4, bodyState.text.length - 1) }
         val stateBefore = bodyState
         val scrollBefore = bodyScroll
         val textBefore = compose.runOnIdle { bodyState.text.toString() }
-        val offsetBefore = compose.runOnIdle { bodyScroll.value }
-        compose.runOnIdle {
-            assertTrue(offsetBefore > 0)
-            assertTrue(bodyState.undoState.canUndo)
-            open.value = true
+        listOf(selection, TextRange(selection.end, selection.start)).forEachIndexed { index, range ->
+            compose.onNodeWithTag("body").performTextInputSelection(range)
+            val offsetBefore = compose.runOnIdle { bodyScroll.value }
+            compose.runOnIdle {
+                assertEquals(range, bodyState.selection)
+                assertTrue(offsetBefore > 0)
+                assertTrue(bodyState.undoState.canUndo)
+                open.value = true
+            }
+            compose.onNodeWithTag("title").assertIsFocused()
+            compose.runOnIdle { assertEquals(range, bodyState.selection) }
+            if (index == 0) compose.onNodeWithText("Retour au message").performClick()
+            else compose.runOnIdle { dispatcher.onBackPressed() }
+            compose.onNodeWithTag("body").assertIsFocused()
+            compose.runOnIdle {
+                assertSame(stateBefore, bodyState)
+                assertSame(scrollBefore, bodyScroll)
+                assertEquals(range, bodyState.selection)
+                assertEquals(textBefore, bodyState.text.toString())
+                assertEquals(offsetBefore, bodyScroll.value)
+                assertTrue(bodyState.undoState.canUndo)
+                assertEquals(0, disposals)
+                assertEquals(index + 1, closes)
+            }
         }
-        compose.onNodeWithTag("title").assertIsFocused()
-        compose.onNodeWithText("Retour au message").performClick()
-        compose.onNodeWithTag("body").assertIsFocused()
-        compose.runOnIdle {
-            assertSame(stateBefore, bodyState)
-            assertSame(scrollBefore, bodyScroll)
-            assertEquals(selection, bodyState.selection)
-            assertEquals(textBefore, bodyState.text.toString())
-            assertEquals(offsetBefore, bodyScroll.value)
-            assertTrue(bodyState.undoState.canUndo)
-            assertEquals(0, disposals)
-            assertEquals(1, closes)
-            bodyState.undoState.undo()
-        }
+        compose.runOnIdle { bodyState.undoState.undo() }
         compose.runOnIdle { assertEquals(initialBody, bodyState.text.toString()) }
     }
 
@@ -180,16 +185,18 @@ class EditorHeaderPanelTest {
         compose.setContent {
             dispatcher = checkNotNull(LocalOnBackPressedDispatcherOwner.current).onBackPressedDispatcher
             inputMode = LocalInputModeManager.current
+            bodyState = rememberTextFieldState(initialBody)
             RedfaceTheme {
                 BackHandler { leaves++ }
                 EditorHeaderPanel(
                     isOpen = open.value,
                     title = if (recipients) "Destinataires et sujet" else "Titre et sous-catégorie",
                     bodyFocusRequester = bodyFocus,
+                    bodyState = bodyState,
                     initialFocusRequester = titleFocus,
                     onClose = { closes++; open.value = false },
                     modifier = Modifier.fillMaxSize(),
-                    body = { Body(initialBody) },
+                    body = { Body() },
                 ) {
                     val field = remember { TextFieldState(if (recipients) "Alice" else "Titre fourni") }
                     BasicTextField(field, Modifier.focusRequester(titleFocus).testTag("title"),
@@ -202,8 +209,7 @@ class EditorHeaderPanelTest {
     }
 
     @Composable
-    private fun Body(initialBody: String) {
-        bodyState = rememberTextFieldState(initialBody)
+    private fun Body() {
         bodyScroll = rememberScrollState()
         DisposableEffect(Unit) { onDispose { disposals++ } }
         Column {

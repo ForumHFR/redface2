@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.ui.editor
 
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -17,6 +18,7 @@ import fr.forumhfr.redface2.core.ui.R
  * [onClose] must dispatch CloseDetails(key), then consume ReturnToBody by closing the overlay;
  * focus returns once [event] becomes null. This is visual acknowledgement only, not resolution of
  * a durable submission or abandonment of a quote. CompleteHeader is handled by EditorHeaderPanel.
+ * Supply the Message field's [bodyState] so focus transfers preserve its selection.
  *
  * [onReload] relaunches the host's existing GET only. Supply [onIgnoreQuote] only after two failures
  * of the SAME pending quote request; it is a distinct remedy, never a replacement for Reload.
@@ -27,6 +29,7 @@ import fr.forumhfr.redface2.core.ui.R
 fun EditorEventDetails(
     event: EditorEvent?,
     bodyFocusRequester: FocusRequester,
+    bodyState: TextFieldState,
     onClose: (EventKey) -> Unit,
     onReload: (EventKey) -> Unit,
     modifier: Modifier = Modifier,
@@ -44,6 +47,7 @@ fun EditorEventDetails(
         visible = event != null,
         title = event?.summary?.resolve().orEmpty(),
         bodyFocusRequester = bodyFocusRequester,
+        bodyState = bodyState,
         onClose = close,
         modifier = modifier,
         body = body,

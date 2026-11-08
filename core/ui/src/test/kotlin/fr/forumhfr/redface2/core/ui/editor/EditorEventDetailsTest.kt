@@ -6,6 +6,7 @@ import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -18,20 +19,26 @@ import androidx.compose.ui.input.InputModeManager
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.v2.createComposeRule
-import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performTextInputSelection
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import fr.forumhfr.redface2.core.domain.editor.EditorSession
@@ -62,6 +69,7 @@ class EditorEventDetailsTest {
     private val closed = mutableListOf<EventKey>()
     private lateinit var dispatcher: OnBackPressedDispatcher
     private lateinit var inputMode: InputModeManager
+    private lateinit var bodyState: TextFieldState
     private var leaves = 0
     private var quotePending = true
     private val context get() = ApplicationProvider.getApplicationContext<android.content.Context>()
@@ -139,12 +147,18 @@ class EditorEventDetailsTest {
         val event = event(EditorErrors.quoteFetchFailed)
         receive(event)
         setHost()
+        compose.runOnIdle { bodyFocus.requestFocus() }
+        val selection = TextRange(6, 1)
+        compose.onNodeWithTag("body").performTextInputSelection(selection)
+        compose.runOnIdle { assertEquals(selection, bodyState.selection) }
         activate(event)
+        compose.runOnIdle { assertEquals(selection, bodyState.selection) }
         compose.onNodeWithText("Ignorer la citation").assertDoesNotExist()
         compose.onAllNodes(hasClickAction()).assertCountEquals(2)
         compose.runOnIdle { dispatcher.onBackPressed() }
         compose.onNodeWithTag("body").assertIsFocused()
         compose.runOnIdle {
+            assertEquals(selection, bodyState.selection)
             assertEquals(listOf(event.key), closed)
             assertTrue(quotePending)
             assertEquals(0, leaves)
@@ -200,16 +214,21 @@ class EditorEventDetailsTest {
         listOf(EditorErrors.missingTitle, EditorErrors.missingRecipients, EditorErrors.unknownRecipient)
             .forEachIndexed { index, error ->
                 val event = event(error, index.toLong() + 1)
+                val selection = TextRange(index + 1, index + 3)
+                compose.runOnIdle { bodyFocus.requestFocus() }
+                compose.onNodeWithTag("body").performTextInputSelection(selection)
                 compose.runOnIdle { receive(event) }
-                compose.onNodeWithContentDescription(event.summary.resolve(context) + ", Compléter").performClick()
+                activate(event, "Compléter")
                 compose.onNodeWithTag("header-field").assertIsFocused()
                 compose.onNodeWithText("Masquer").assertDoesNotExist()
                 compose.runOnIdle {
                     assertNull(detail.value)
                     assertTrue(model.value.events.isEmpty())
+                    assertEquals(selection, bodyState.selection)
                 }
                 compose.onNodeWithText("Retour au message").performClick()
                 compose.onNodeWithTag("body").assertIsFocused()
+                compose.runOnIdle { assertEquals(selection, bodyState.selection) }
             }
     }
 
@@ -240,8 +259,14 @@ class EditorEventDetailsTest {
 
     private fun receive(event: EditorEvent) { dispatch(EditorEventInput.Received(event)) }
 
-    private fun activate(event: EditorEvent) {
-        compose.onNodeWithContentDescription(event.summary.resolve(context) + ", Afficher les détails").performClick()
+    private fun activate(event: EditorEvent, action: String = "Afficher les détails") {
+        val label = hasContentDescription(event.accessibleSummary.resolve(context) + ", " + action)
+        // The live region belongs to the button itself, with no second readable sibling.
+        compose.onAllNodes(label, useUnmergedTree = true).assertCountEquals(1)
+        compose.onNode(label and hasClickAction())
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
+            .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion))
+            .performClick()
     }
 
     private fun dispatch(input: EditorEventInput) {
@@ -260,10 +285,11 @@ class EditorEventDetailsTest {
         compose.setContent {
             dispatcher = checkNotNull(LocalOnBackPressedDispatcherOwner.current).onBackPressedDispatcher
             inputMode = LocalInputModeManager.current
+            bodyState = rememberTextFieldState("Message")
             RedfaceTheme {
                 BackHandler { leaves++ }
                 EditorHeaderPanel(
-                    header.value, "En-tête fourni", bodyFocus, { header.value = false },
+                    header.value, "En-tête fourni", bodyFocus, bodyState, { header.value = false },
                     Modifier.fillMaxSize(), initialFocusRequester = headerFocus,
                     body = { DetailHost(ignoreAvailable) },
                 ) {
@@ -279,6 +305,7 @@ class EditorEventDetailsTest {
         EditorEventDetails(
             event = detail.value,
             bodyFocusRequester = bodyFocus,
+            bodyState = bodyState,
             onClose = { closed += it; dispatch(EditorEventInput.CloseDetails(it)) },
             onReload = { reloads += it },
             onIgnoreQuote = if (ignoreAvailable) {
@@ -292,7 +319,7 @@ class EditorEventDetailsTest {
     @Composable
     private fun Body() {
         Column {
-            BasicTextField(rememberTextFieldState("Message"), Modifier.focusRequester(bodyFocus).testTag("body"))
+            BasicTextField(bodyState, Modifier.focusRequester(bodyFocus).testTag("body"))
             EditorEventControl(model.value.visibleEvent, 181.dp, { key, _ -> dispatch(EditorEventInput.Activate(key)) })
         }
     }

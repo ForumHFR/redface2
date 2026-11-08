@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -38,8 +39,9 @@ import fr.forumhfr.redface2.core.ui.R
 /**
  * ED-101/113 container only: the host supplies fields, validation and their enabled state.
  * Keep this composable mounted, including when [isOpen] is false, and put the editor in [body].
- * Attach [bodyFocusRequester] to its Message field. [initialFocusRequester], when supplied, must
- * be attached to a field in [content] (title or recipients); otherwise Return receives focus.
+ * Supply the Message field's [bodyState] and attach [bodyFocusRequester] to that field.
+ * [initialFocusRequester], when supplied, must be attached to a field in [content] (title or recipients);
+ * otherwise Return receives focus.
  * The host opens this panel on CompleteHeader and closes it in [onClose]. No CSV mapping lives here.
  * Insets and the editor's outer BackHandler belong to the host, composed before this container.
  */
@@ -49,6 +51,7 @@ fun EditorHeaderPanel(
     isOpen: Boolean,
     title: String,
     bodyFocusRequester: FocusRequester,
+    bodyState: TextFieldState,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
     initialFocusRequester: FocusRequester? = null,
@@ -56,7 +59,7 @@ fun EditorHeaderPanel(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     EditorPanelOverlay(
-        isOpen, title, bodyFocusRequester, onClose, modifier, initialFocusRequester, body,
+        isOpen, title, bodyFocusRequester, bodyState, onClose, modifier, initialFocusRequester, body,
     ) { closeFocus ->
         TextButton(onClick = onClose, modifier = Modifier.focusRequester(closeFocus)) {
             Text(stringResource(R.string.editor_panel_return_to_body))
@@ -72,6 +75,7 @@ internal fun EditorPanelOverlay(
     visible: Boolean,
     title: String,
     bodyFocusRequester: FocusRequester,
+    bodyState: TextFieldState,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
     initialFocusRequester: FocusRequester? = null,
@@ -80,7 +84,7 @@ internal fun EditorPanelOverlay(
 ) {
     val focusManager = LocalFocusManager.current
     val closeFocus = remember { FocusRequester() }
-    var wasOpen by remember { mutableStateOf(false) }
+    var wasOpen by remember(bodyState) { mutableStateOf(false) }
     Box(modifier) {
         Box(Modifier.fillMaxSize().focusProperties {
             // canFocus=false alone only affects one target, not a subtree. Refuse entry into
@@ -107,13 +111,19 @@ internal fun EditorPanelOverlay(
             }
         }
     }
-    LaunchedEffect(visible, initialFocusRequester) {
+    LaunchedEffect(visible, initialFocusRequester, bodyState) {
+        val selectionBeforeFocusChange = bodyState.selection
         if (visible) {
             // Also release a body's captured focus; merely hiding semantics does not release it.
             focusManager.clearFocus(force = true)
             (initialFocusRequester ?: closeFocus).requestFocus()
         } else if (wasOpen) {
             bodyFocusRequester.requestFocus()
+        }
+        // BTF2 collapses selection on focus loss. A panel must preserve both endpoints,
+        // including a reversed range, without replacing text or adding an undo entry.
+        if (bodyState.selection != selectionBeforeFocusChange) bodyState.edit {
+            selection = selectionBeforeFocusChange
         }
         wasOpen = visible
     }

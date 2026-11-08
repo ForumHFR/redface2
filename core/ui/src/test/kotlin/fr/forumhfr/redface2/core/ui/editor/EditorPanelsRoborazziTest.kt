@@ -4,7 +4,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.size
-import androidx.compose.material3.Button
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -58,6 +60,7 @@ class EditorPanelsRoborazziTest {
     private val dark = mutableStateOf(false)
     private val scale = mutableStateOf(1f)
     private val bodyFocus = FocusRequester()
+    private lateinit var bodyState: TextFieldState
     private lateinit var inputMode: InputModeManager
     private val event = EditorEvent(
         EventKey(EditorSession("capture", "alice", "topic:23:42"),
@@ -75,15 +78,17 @@ class EditorPanelsRoborazziTest {
         compose.setContent {
             val density = LocalDensity.current
             inputMode = LocalInputModeManager.current
+            bodyState = rememberTextFieldState("Corps fourni")
             CompositionLocalProvider(LocalDensity provides Density(density.density, scale.value)) {
                 RedfaceTheme(darkTheme = dark.value, dynamicColor = false) {
                     val modifier = Modifier.size(360.dp, 480.dp).testTag("panel-sample")
                     if (details) EditorEventDetails(
-                        event = event.takeIf { open.value }, bodyFocusRequester = bodyFocus,
+                        event = event.takeIf { open.value }, bodyFocusRequester = bodyFocus, bodyState = bodyState,
                         onClose = { open.value = false }, onReload = {}, onIgnoreQuote = {},
                         modifier = modifier, body = { Body() },
                     ) else EditorHeaderPanel(
                         isOpen = open.value, title = "Titre et sous-catégorie", bodyFocusRequester = bodyFocus,
+                        bodyState = bodyState,
                         onClose = { open.value = false }, modifier = modifier, body = { Body() },
                     ) {
                         OutlinedTextField("Un titre fourni", {}, Modifier.fillMaxWidth(), label = { Text("Titre") })
@@ -127,9 +132,7 @@ class EditorPanelsRoborazziTest {
         Surface(Modifier.fillMaxSize()) {
             Column {
                 Text("Message conservé")
-                Button(onClick = {}, modifier = Modifier.focusRequester(bodyFocus).testTag("body")) {
-                    Text("Corps fourni")
-                }
+                BasicTextField(bodyState, Modifier.focusRequester(bodyFocus).testTag("body"))
             }
         }
     }
