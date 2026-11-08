@@ -11,6 +11,9 @@ import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.HfrServerException
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.flags.FlagsResult
 import fr.forumhfr.redface2.core.domain.preferences.AppLauncherIcon
@@ -58,6 +61,8 @@ import fr.forumhfr.redface2.core.model.blacklist.BlacklistEntry
 import fr.forumhfr.redface2.core.model.Flag
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.write.EditPostContext
+import fr.forumhfr.redface2.core.model.write.QuoteLocator
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.Post
@@ -114,6 +119,130 @@ class TopicViewModelTest {
     @After
     fun tearDown() {
         Dispatchers.resetMain()
+    }
+
+    @Test
+    fun `full editor waits for the durable request and coalesces duplicate taps`() = runTest {
+        val drafts = VersionedEditorDraftStore()
+        val returned = CompletableDeferred<Unit>()
+        drafts.saveReturnGate = returned
+        val model = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(listOf(flowOf(fakeTopic(1, 1)))),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("tester")),
+            draftStore = drafts,
+        )
+        val quotes = listOf(QuoteSelection(
+            QuoteLocator(1, 101, null), "alice", "preview",
+        ))
+        val openings = mutableListOf<List<QuoteSelection>>()
+        model.prepareEditorQuotes(quotes, openings::add)
+        runCurrent()
+        model.prepareEditorQuotes(quotes, openings::add)
+        assertTrue(openings.isEmpty())
+        val entry = drafts.entries[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_POST)]
+        assertEquals(listOf(101), entry?.draft?.pendingInlineQuoteRequest?.quotes?.map { it.numreponse })
+        returned.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(listOf(emptyList<QuoteSelection>()), openings)
+        assertEquals(1, drafts.writes)
+        destroyViewModel(model)
+    }
+
+    @Test
+    fun `failed quote storage keeps the editor closed and reports a controlled failure`() = runTest {
+        val drafts = VersionedEditorDraftStore().apply { saveFailure = IOException("disk") }
+        val model = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(listOf(flowOf(fakeTopic(1, 1)))),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("tester")),
+            draftStore = drafts,
+        )
+        val quote = QuoteSelection(
+            QuoteLocator(1, 101, null), "alice", "preview",
+        )
+        model.effects.test {
+            model.prepareEditorQuotes(listOf(quote)) { error("failed persistence must not navigate") }
+            assertEquals(TopicEffect.QuotePreparationFailed, awaitItem())
+            cancelAndIgnoreRemainingEvents()
+        }
+        assertTrue(drafts.entries.isEmpty())
+        destroyViewModel(model)
+    }
+
+    @Test
+    fun `M6 invalid inline coordinates produce a controlled preparation failure`() = runTest {
+        val drafts = VersionedEditorDraftStore()
+        val model = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(listOf(flowOf(fakeTopic(1, 1)))),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("tester")),
+            draftStore = drafts,
+        )
+        for (locator in listOf(QuoteLocator(0, 101, null), QuoteLocator(1, 0, null), QuoteLocator(1, 101, -1))) {
+            model.effects.test {
+                model.prepareEditorQuotes(listOf(QuoteSelection(locator, "alice", "preview"))) {
+                    error("Invalid coordinates must not open an editor")
+                }
+                assertEquals(TopicEffect.QuotePreparationFailed, awaitItem())
+                cancelAndIgnoreRemainingEvents()
+            }
+        }
+        assertTrue(drafts.entries.isEmpty())
+        destroyViewModel(model)
+    }
+
+    @Test
+    fun `M9 quote entry retries once after a closing sheet flush and preserves its last keystrokes`() = runTest {
+        var calls = 0
+        val drafts = object : VersionedEditorDraftStore() {
+            override suspend fun enqueueInlineQuoteRequest(
+                owner: String?, key: String, request: fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest,
+                expectedVersion: Long,
+            ): EditorDraftStore.StoreWriteResult {
+                calls++
+                if (calls == 1) {
+                    super.saveIfVersion(owner, key, EditorDraftStore.Draft("closing sheet tail"), expectedVersion)
+                }
+                return super.enqueueInlineQuoteRequest(owner, key, request, expectedVersion)
+            }
+        }
+        val model = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(listOf(flowOf(fakeTopic(1, 1)))),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("tester")),
+            draftStore = drafts,
+        )
+        val opened = mutableListOf<List<QuoteSelection>>()
+        model.prepareEditorQuotes(listOf(QuoteSelection(QuoteLocator(1, 101, null), "alice", "preview")), opened::add)
+        advanceUntilIdle()
+        assertEquals(2, calls)
+        assertEquals(listOf(emptyList<QuoteSelection>()), opened)
+        val row = checkNotNull(drafts.entries[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_POST)])
+        assertEquals("closing sheet tail", row.draft.body)
+        assertEquals(listOf(101), row.draft.pendingInlineQuoteRequest?.quotes?.map { it.numreponse })
+        destroyViewModel(model)
+    }
+
+    @Test
+    fun `card preference carries previews without creating an inline request`() = runTest {
+        val drafts = VersionedEditorDraftStore()
+        val model = topicViewModel(
+            request = topicRequest(page = 1),
+            topicRepository = FakeTopicRepository(listOf(flowOf(fakeTopic(1, 1)))),
+            authRepository = FakeAuthRepository(AuthState.Authenticated("tester")),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = true),
+            draftStore = drafts,
+        )
+        val quotes = listOf(QuoteSelection(
+            QuoteLocator(1, 101, null), "alice", "preview",
+        ))
+        val openings = mutableListOf<List<QuoteSelection>>()
+        model.prepareEditorQuotes(quotes, openings::add)
+        advanceUntilIdle()
+        assertEquals(listOf(quotes), openings)
+        assertTrue(drafts.entries.isEmpty())
+        destroyViewModel(model)
     }
 
     @Test
@@ -6787,6 +6916,7 @@ class TopicViewModelTest {
         topicSearchRepository: TopicSearchRepository = FakeTopicSearchRepository(),
         searchRepository: SearchRepository = FakeSearchRepository(),
         flagRepository: FlagRepository = FakeFlagRepository(),
+        draftStore: EditorDraftStore = VersionedEditorDraftStore(),
         // #1144 — stands in for the @ApplicationScope singleton. Its own SupervisorJob is NEVER
         // cancelled by the tests, exactly like the process-lifetime scope it mirrors, so a test that
         // destroys the ViewModel really does leave the detached mutation running.
@@ -6808,6 +6938,7 @@ class TopicViewModelTest {
         topicSearchRepository = topicSearchRepository,
         searchRepository = searchRepository,
         flagRepository = flagRepository,
+        draftStore = draftStore,
         externalScope = externalScope,
     )
 
@@ -8523,6 +8654,7 @@ internal fun submitFeedbackTestViewModel(repository: TopicRepository): TopicView
     topicSearchRepository = FakeTopicSearchRepository(),
     searchRepository = FakeSearchRepository(),
     flagRepository = FakeFlagRepository(),
+    draftStore = VersionedEditorDraftStore(),
     externalScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate),
 )
 

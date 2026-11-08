@@ -10,12 +10,14 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorSessionResources
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionAdapter
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionScenario
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.EditorWriteOwner
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.domain.editor.SubmissionBodyMutation
 import fr.forumhfr.redface2.core.domain.editor.SubmissionErrorProbe
 import fr.forumhfr.redface2.core.domain.editor.SubmissionProbe
@@ -104,7 +106,7 @@ class QuickReplyViewModelTest {
             }
         }
         val vm = quickReplyViewModel(replyRepository = repository)
-        vm.onSheetOpened()
+        vm.openForTest()
         advanceUntilIdle()
         vm.onTextChanged(TextFieldValue("body"))
         vm.onSubmitClicked()
@@ -124,7 +126,7 @@ class QuickReplyViewModelTest {
     fun `ED132 quote alone with empty prefill stays blocked through close and reopen (#1033)`() = runTest {
         val repository = FakeQuickReplyRepository(quotePrefills = mapOf(101 to ""))
         val vm = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
-        vm.onSheetOpened(listOf(preview(101, "alice")))
+        vm.openForTest(listOf(preview(101, "alice")))
         advanceUntilIdle()
         vm.onSubmitClicked()
         assertEquals("", vm.state.value.text.text)
@@ -132,7 +134,7 @@ class QuickReplyViewModelTest {
         assertFalse(vm.state.value.canSubmit)
         vm.onDismissed()
         advanceUntilIdle()
-        vm.onSheetOpened()
+        vm.openForTest()
         advanceUntilIdle()
         assertEquals(listOf(101), vm.state.value.pendingQuotes.map { it.numreponse })
         assertFalse(vm.state.value.canSubmit)
@@ -145,11 +147,11 @@ class QuickReplyViewModelTest {
         val vm = quickReplyViewModel(
             replyRepository = repository, quoteCardsEnabled = false, confirmBeforePosting = true,
         )
-        vm.onSheetOpened()
+        vm.openForTest()
         vm.onTextChanged(TextFieldValue("body"))
         vm.onSubmitClicked()
         val token = (vm.state.value.submission as EditorSubmissionState.Armed).token
-        vm.onSheetOpened(listOf(preview(101, "alice")))
+        vm.openForTest(listOf(preview(101, "alice")))
         advanceTimeBy(401)
         runCurrent()
         assertTrue(vm.state.value.pendingQuotes.isEmpty())
@@ -165,7 +167,7 @@ class QuickReplyViewModelTest {
             results = mutableListOf(ReplySubmitResult.Failure(ReplyFailureReason.EmptyMessage)),
         )
         val vm = quickReplyViewModel(replyRepository = repository)
-        vm.onSheetOpened()
+        vm.openForTest()
         vm.onTextChanged(TextFieldValue("body"))
         vm.onSubmitClicked()
         advanceUntilIdle()
@@ -176,11 +178,11 @@ class QuickReplyViewModelTest {
     }
 
     @Test
-    fun `ED132 failure blocks submit and escalation carries the pending request in order`() = runTest {
+    fun `ED132 escalation carries no inline coordinates and reopening reads the pending row`() = runTest {
         val repository = FakeQuickReplyRepository(quotePrefills = mapOf(202 to ""))
         val vm = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
         val quotes = listOf(preview(202, "bob"), preview(101, "alice"))
-        vm.onSheetOpened(quotes)
+        vm.openForTest(quotes)
         advanceUntilIdle()
         vm.onTextChanged(TextFieldValue("body"))
         vm.onSubmitClicked()
@@ -190,13 +192,13 @@ class QuickReplyViewModelTest {
         vm.onEscalateRequested()
         advanceUntilIdle()
         val effect = vm.effects.first() as QuickReplyEffect.EscalateToFullEditor
-        assertEquals(listOf(202, 101), effect.quotes.map { it.numreponse })
+        assertTrue(effect.quotes.isEmpty())
         assertEquals(EditorErrors.quoteFetchFailed(inline = true, quickReply = true), vm.state.value.submitError)
         vm.onDismissed()
         advanceUntilIdle()
-        vm.onSheetOpened()
+        vm.openForTest()
         advanceUntilIdle()
-        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        assertEquals(listOf(202, 101), vm.state.value.pendingQuotes.map { it.numreponse })
         assertEquals("body", vm.state.value.text.text)
         assertEquals(0, repository.submitCalls)
     }
@@ -214,14 +216,14 @@ class QuickReplyViewModelTest {
         val store = FakeQuickReplyDraftStore()
         val vm = quickReplyViewModel(replyRepository = repository, draftStore = store, quoteCardsEnabled = false)
         val quotes = listOf(preview(202, "bob"), preview(101, "alice"))
-        vm.onSheetOpened(quotes)
+        vm.openForTest(quotes)
         advanceUntilIdle()
         vm.onTextChanged(TextFieldValue("body"))
         vm.onDismissed()
         advanceUntilIdle()
         assertEquals(listOf(202, 101), vm.state.value.pendingQuotes.map { it.numreponse })
         fail = false
-        vm.onSheetOpened(listOf(preview(101, "alice")))
+        vm.openForTest(listOf(preview(101, "alice")))
         advanceUntilIdle()
         val body = vm.state.value.text.text
         assertEquals(1, Regex("quotemsg=202").findAll(body).count())
@@ -237,7 +239,7 @@ class QuickReplyViewModelTest {
         val store = FakeQuickReplyDraftStore(initialBody = "brouillon en cours")
         val viewModel = quickReplyViewModel(draftStore = store)
 
-        viewModel.onSheetOpened()
+        viewModel.openForTest()
         advanceUntilIdle()
 
         assertEquals("brouillon en cours", viewModel.state.value.text.text)
@@ -249,13 +251,13 @@ class QuickReplyViewModelTest {
         // shared #405 row → back → reopen. The row must win over the VM's cached text.
         val store = FakeQuickReplyDraftStore()
         val viewModel = quickReplyViewModel(draftStore = store)
-        viewModel.onSheetOpened()
+        viewModel.openForTest()
         viewModel.onTextChanged(TextFieldValue("version sheet"))
         viewModel.onEscalateRequested()
         advanceUntilIdle()
 
         store.storedBody = "version plein écran"
-        viewModel.onSheetOpened()
+        viewModel.openForTest()
         advanceUntilIdle()
 
         assertEquals("version plein écran", viewModel.state.value.text.text)
@@ -268,7 +270,7 @@ class QuickReplyViewModelTest {
         // opening must re-snapshot the owner : bob gets HIS row, never alice's private draft.
         val store = FakeQuickReplyDraftStore(initialBody = "brouillon privé d'alice", initialOwner = "alice")
         val viewModel = quickReplyViewModel(draftStore = store)
-        viewModel.onSheetOpened()
+        viewModel.openForTest()
         advanceUntilIdle()
         assertEquals("brouillon privé d'alice", viewModel.state.value.text.text)
         viewModel.onDismissed()
@@ -276,7 +278,7 @@ class QuickReplyViewModelTest {
 
         store.activeOwner = "bob"
         store.storedBody = "brouillon de bob"
-        viewModel.onSheetOpened()
+        viewModel.openForTest()
         advanceUntilIdle()
 
         assertEquals(
@@ -293,7 +295,7 @@ class QuickReplyViewModelTest {
         // snapshot is gated to hold the load in flight).
         val store = FakeQuickReplyDraftStore(initialBody = "brouillon privé d'alice", initialOwner = "alice")
         val viewModel = quickReplyViewModel(draftStore = store)
-        viewModel.onSheetOpened()
+        viewModel.openForTest()
         advanceUntilIdle()
         viewModel.onDismissed()
         advanceUntilIdle()
@@ -305,7 +307,7 @@ class QuickReplyViewModelTest {
 
         viewModel.state.test {
             assertEquals("brouillon privé d'alice", awaitItem().text.text) // pre-reopen baseline
-            viewModel.onSheetOpened()
+            viewModel.openForTest()
             // The masking state must land BEFORE the (still-gated) load completes.
             assertEquals("bob must never see alice's text mid-load", "", awaitItem().text.text)
             ownerGate.complete(Unit)
@@ -324,13 +326,13 @@ class QuickReplyViewModelTest {
         val ownerGate = CompletableDeferred<Unit>()
         store.ownerGate = ownerGate
         val viewModel = quickReplyViewModel(draftStore = store)
-        viewModel.onSheetOpened() // session 1 : owner snapshot still pending
+        viewModel.openForTest() // session 1 : owner snapshot still pending
         viewModel.onTextChanged(TextFieldValue("texte d'alice"))
         viewModel.onDismissed() // flush scheduled, awaiting session 1's owner
         advanceUntilIdle()
 
         store.activeOwner = "bob"
-        viewModel.onSheetOpened() // seals session 1 before its owner ever resolved
+        viewModel.openForTest() // seals session 1 before its owner ever resolved
         ownerGate.complete(Unit) // the late resolution must not resurrect session 1's flush
         advanceUntilIdle()
 
@@ -383,13 +385,13 @@ class QuickReplyViewModelTest {
         val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
         advanceUntilIdle() // init prefetch for the assisted request page (3).
 
-        viewModel.onSheetOpened(currentPage = 3)
+        viewModel.openForTest(currentPage = 3)
         viewModel.onTextChanged(TextFieldValue("premier"))
         viewModel.onSubmitClicked()
         advanceUntilIdle()
         assertEquals(QuickReplyEffect.SubmitSucceeded(targetPage = 3, scrollTo = 301), viewModel.effects.first())
 
-        viewModel.onSheetOpened(currentPage = 5, initialQuotes = listOf(preview(202, "bob")))
+        viewModel.openForTest(currentPage = 5, initialQuotes = listOf(preview(202, "bob")))
         advanceUntilIdle()
         assertEquals("[quotemsg=202]corps[/quotemsg]\n", viewModel.state.value.text.text)
         viewModel.onTextChanged(TextFieldValue(viewModel.state.value.text.text + "\nsecond"))
@@ -648,7 +650,7 @@ class QuickReplyViewModelTest {
     @Test
     fun `onSheetOpened pre-arms several cards in citation order`() = runTest {
         val viewModel = quickReplyViewModel()
-        viewModel.onSheetOpened(listOf(preview(202, "bob"), preview(101, "alice")))
+        viewModel.openForTest(listOf(preview(202, "bob"), preview(101, "alice")))
         advanceUntilIdle()
 
         assertEquals(listOf(202, 101), viewModel.state.value.quotes.map { it.numreponse })
@@ -661,7 +663,7 @@ class QuickReplyViewModelTest {
         // safe in the hoisted basket (#868/#869 : it now survives until an actual send).
         val viewModel = quickReplyViewModel()
         viewModel.onQuoteAdded(preview(303, "carol"))
-        viewModel.onSheetOpened(listOf(preview(101, "alice"), preview(202, "bob")))
+        viewModel.openForTest(listOf(preview(101, "alice"), preview(202, "bob")))
         advanceUntilIdle()
 
         assertEquals(listOf(101, 202), viewModel.state.value.quotes.map { it.numreponse })
@@ -674,7 +676,7 @@ class QuickReplyViewModelTest {
         viewModel.onQuoteAdded(preview(303, "carol"))
         // A plain « Répondre » reopening delivers nothing : the previous session's cards must not
         // resurrect, while the #405 draft text is untouched (its row stays the source of truth).
-        viewModel.onSheetOpened()
+        viewModel.openForTest()
         advanceUntilIdle()
 
         assertTrue("stale cards must not survive a fresh opening", viewModel.state.value.quotes.isEmpty())
@@ -692,7 +694,7 @@ class QuickReplyViewModelTest {
             draftStore = draftStore,
             quoteCardsEnabled = false,
         )
-        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        viewModel.openForTest(listOf(preview(101, "alice")))
         advanceUntilIdle()
 
         val state = viewModel.state.value
@@ -713,7 +715,7 @@ class QuickReplyViewModelTest {
         val repository = FakeQuickReplyRepository(quotePrefills = mapOf(101 to prefill))
         val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
 
-        viewModel.onSheetOpened(listOf(preview(101, "alice", truncate = true)))
+        viewModel.openForTest(listOf(preview(101, "alice", truncate = true)))
         advanceUntilIdle()
 
         assertEquals(truncateQuote(prefill) + "\n", viewModel.state.value.text.text)
@@ -724,7 +726,7 @@ class QuickReplyViewModelTest {
     fun `inline mode merges a small basket in citation order`() = runTest {
         val repository = FakeQuickReplyRepository()
         val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
-        viewModel.onSheetOpened(listOf(preview(202, "bob"), preview(101, "alice")))
+        viewModel.openForTest(listOf(preview(202, "bob"), preview(101, "alice")))
         advanceUntilIdle()
 
         assertEquals(
@@ -740,7 +742,7 @@ class QuickReplyViewModelTest {
         // replacement recomputed from the row : keystrokes landed mid-fetch must survive.
         val repository = GatedQuoteFormRepository()
         val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
-        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        viewModel.openForTest(listOf(preview(101, "alice")))
         advanceUntilIdle()
         assertTrue(viewModel.state.value.isPreparingQuotes)
 
@@ -766,7 +768,7 @@ class QuickReplyViewModelTest {
             draftStore = FakeQuickReplyDraftStore(initialBody = "acquis"),
             quoteCardsEnabled = false,
         )
-        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        viewModel.openForTest(listOf(preview(101, "alice")))
         advanceUntilIdle()
 
         val state = viewModel.state.value
@@ -780,7 +782,7 @@ class QuickReplyViewModelTest {
         val repository = FakeQuickReplyRepository(quotePrefills = mapOf(101 to ""))
         val store = FakeQuickReplyDraftStore()
         val viewModel = quickReplyViewModel(replyRepository = repository, draftStore = store)
-        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        viewModel.openForTest(listOf(preview(101, "alice")))
         viewModel.onTextChanged(TextFieldValue("body"))
 
         viewModel.onSubmitClicked()
@@ -807,7 +809,7 @@ class QuickReplyViewModelTest {
         }
         val store = FakeQuickReplyDraftStore()
         val viewModel = quickReplyViewModel(replyRepository = repository, draftStore = store)
-        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        viewModel.openForTest(listOf(preview(101, "alice")))
         viewModel.onTextChanged(TextFieldValue("body"))
 
         viewModel.onSubmitClicked()
@@ -830,7 +832,7 @@ class QuickReplyViewModelTest {
             val repository = FakeQuickReplyRepository().apply { quoteFormFailure = failure }
             val store = FakeQuickReplyDraftStore()
             val viewModel = quickReplyViewModel(replyRepository = repository, draftStore = store)
-            viewModel.onSheetOpened(listOf(preview(101, "alice")))
+            viewModel.openForTest(listOf(preview(101, "alice")))
             viewModel.onTextChanged(TextFieldValue("body"))
             viewModel.onSubmitClicked()
             advanceUntilIdle()
@@ -858,7 +860,7 @@ class QuickReplyViewModelTest {
                 draftStore = FakeQuickReplyDraftStore(initialBody = "body"),
             )
 
-            viewModel.onSheetOpened(listOf(preview(101, "alice")))
+            viewModel.openForTest(listOf(preview(101, "alice")))
             advanceUntilIdle()
 
             assertEquals(0, repository.submitCalls)
@@ -875,7 +877,7 @@ class QuickReplyViewModelTest {
         // its BBCode into the next one.
         val repository = GatedQuoteFormRepository()
         val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
-        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        viewModel.openForTest(listOf(preview(101, "alice")))
         advanceUntilIdle()
         assertTrue(viewModel.state.value.isPreparingQuotes)
 
@@ -891,7 +893,7 @@ class QuickReplyViewModelTest {
     fun `escalation is inert while the quote insert is in flight`() = runTest {
         val repository = GatedQuoteFormRepository()
         val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
-        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        viewModel.openForTest(listOf(preview(101, "alice")))
         advanceUntilIdle()
         assertTrue(viewModel.state.value.isPreparingQuotes)
 
@@ -916,7 +918,7 @@ class QuickReplyViewModelTest {
         val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
         viewModel.onQuoteAdded(preview(101, "alice"))
 
-        viewModel.onSheetOpened(listOf(preview(202, "bob")))
+        viewModel.openForTest(listOf(preview(202, "bob")))
         advanceUntilIdle()
 
         val state = viewModel.state.value
@@ -931,7 +933,7 @@ class QuickReplyViewModelTest {
     fun `inline mode submits through the plain path with the field content`() = runTest {
         val repository = FakeQuickReplyRepository()
         val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
-        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        viewModel.openForTest(listOf(preview(101, "alice")))
         advanceUntilIdle()
         viewModel.onTextChanged(TextFieldValue("[quotemsg=101]corps[/quotemsg]\n\nmon ajout"))
 
@@ -952,7 +954,7 @@ class QuickReplyViewModelTest {
             results = mutableListOf(ReplySubmitResult.Success(refreshUrl = null, targetPage = 9, numreponse = 101)),
         )
         val viewModel = quickReplyViewModel(replyRepository = repository, quoteCardsEnabled = false)
-        viewModel.onSheetOpened(listOf(preview(101, "alice")))
+        viewModel.openForTest(listOf(preview(101, "alice")))
         advanceUntilIdle()
         assertTrue("inline mode arms no card", viewModel.state.value.quotes.isEmpty())
         viewModel.onTextChanged(
@@ -972,7 +974,7 @@ class QuickReplyViewModelTest {
     fun `a new explicit opening after terminal success permits one new send`() = runTest {
         val repository = FakeQuickReplyRepository()
         val viewModel = quickReplyViewModel(replyRepository = repository)
-        viewModel.onSheetOpened()
+        viewModel.openForTest()
         viewModel.onTextChanged(TextFieldValue("first"))
         viewModel.onSubmitClicked()
         advanceUntilIdle()
@@ -981,7 +983,7 @@ class QuickReplyViewModelTest {
         viewModel.onSubmitClicked()
         assertEquals(1, repository.submitCalls)
 
-        viewModel.onSheetOpened()
+        viewModel.openForTest()
         viewModel.onTextChanged(TextFieldValue("second"))
         viewModel.onSubmitClicked()
         advanceUntilIdle()
@@ -1130,6 +1132,29 @@ class QuickReplyViewModelTest {
         }
     }
 
+    private val openings = mutableMapOf<QuickReplyViewModel, Pair<EditorDraftStore, Boolean>>()
+
+    /** Mimic TopicViewModel's gesture preparation; the sheet receives cards only. */
+    private suspend fun QuickReplyViewModel.openForTest(initialQuotes: List<QuoteSelection> = emptyList()) =
+        openForTest(currentPage = 3, initialQuotes = initialQuotes)
+
+    private suspend fun QuickReplyViewModel.openForTest(
+        currentPage: Int, initialQuotes: List<QuoteSelection> = emptyList(),
+    ) {
+        val (store, cards) = openings.getValue(this)
+        if (!cards && initialQuotes.isNotEmpty()) {
+            val drafts = EditorDraftSession(store, EditorDraftKey.reply(23, 35421))
+            drafts.load()
+            val pending = PendingInlineQuoteRequest(23, 35421, initialQuotes.map {
+                PendingInlineQuoteRequest.Quote(it.numreponse, it.locator.page, it.locator.ref, it.truncate)
+            })
+            assertTrue(drafts.enqueueInlineQuoteRequest(pending) is EditorDraftStore.StoreWriteResult.Written)
+        }
+        onSheetOpened(currentPage, if (cards) initialQuotes else emptyList())
+        // These pre-existing tests continue the offered body; explicit decisions have dedicated tests.
+        if (state.value.restorableDraft != null) onDraftRestoreRequested()
+    }
+
     private fun quickReplyViewModel(
         replyRepository: ReplyRepository = FakeQuickReplyRepository(),
         draftStore: EditorDraftStore = FakeQuickReplyDraftStore(),
@@ -1151,7 +1176,7 @@ class QuickReplyViewModelTest {
             quickReplyAuthRepository(),
             DiagnosticsClock { mainDispatcher.scheduler.currentTime * 1_000_000L }, DiagnosticsLog(),
         ),
-    )
+    ).also { openings[it] = draftStore to quoteCardsEnabled }
 
     private companion object {
         /** Just past QuickReplyViewModel's 750 ms debounce. */

@@ -39,6 +39,11 @@ data class PostEditorState(
     val pendingQuotes: List<QuoteSelection> = emptyList(),
     /** Saturates at two; restored with the pending request after process death. */
     val quoteFetchFailures: Int = 0,
+    /** ED-132: v20 Bundle coordinates were dropped, without importing them into Room. */
+    val legacyQuoteRequestDropped: Boolean = false,
+    /** Invalid/unreadable durable content cannot authorize submission. */
+    val quoteStorageUnavailable: Boolean = false,
+    val unreadableQuoteRequest: Boolean = false,
     val draft: TextFieldValue = TextFieldValue(),
     val preview: PostContent = PostContent(blocks = emptyList()),
     val isPreviewVisible: Boolean = false,
@@ -59,6 +64,8 @@ data class PostEditorState(
     val draftHydratedFromForm: Boolean = false,
     /** Exact untouched server prefill, used to distinguish hydration from a user edit (#1415). */
     val draftHydratedContent: String? = null,
+    /** ED-89: in-memory server body actually hydrated in Edit; null until known, empty in Reply. */
+    val draftRestoreSeed: String? = if (mode == PostEditorMode.Edit) null else "",
     /**
      * Per-post options the user can flip from the editor (Phase 2C, #146 round
      * 2 follow-up). Seeded from `ReplyForm.options` on the first form load and
@@ -146,11 +153,20 @@ data class PostEditorState(
             (draft.text.isNotBlank() || (mode == PostEditorMode.Reply && quotes.isNotEmpty())) &&
             !isSubmitting &&
             !submission.blocksBodyMutation &&
-            !isLoadingForm && pendingQuotes.isEmpty() &&
+            !isLoadingForm && !quoteStorageUnavailable && pendingQuotes.isEmpty() &&
             !isUploading
 
+    val hasDormantQuote: Boolean
+        get() = pendingQuotes.isNotEmpty() && submission is EditorSubmissionState.Uncertain
+
+    val canRestoreDraft: Boolean
+        get() = draftRestoreSeed != null && (mode != PostEditorMode.Edit || !isLoadingForm)
+
+    @Suppress("ComplexCondition") // Explicit recovery, or an eligible readable request, plus busy-state guards.
     val canIgnorePendingQuote: Boolean
-        get() = pendingQuotes.isNotEmpty() && quoteFetchFailures >= 2 && !isLoadingForm &&
+        get() = (unreadableQuoteRequest ||
+            pendingQuotes.isNotEmpty() && (quoteFetchFailures >= 2 || hasDormantQuote)) &&
+            !isLoadingForm &&
             !submission.blocksBodyMutation
 
     val isSubmitEnabled: Boolean get() = canSubmit

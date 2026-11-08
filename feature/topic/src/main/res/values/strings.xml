@@ -226,9 +226,17 @@
     <string name="quick_reply_hint">Votre message…</string>
     <string name="quick_reply_send">Envoyer</string>
     <string name="quick_reply_fullscreen">Ouvrir l\'éditeur plein écran</string>
+    <string name="quick_reply_fullscreen_pending_draft">Choisissez « Restaurer » ou « Ignorer le brouillon » avant d’ouvrir l’éditeur plein écran.</string>
     <string name="quick_reply_confirm_title">Publier la réponse ?</string>
     <string name="quick_reply_confirm_action">Publier</string>
     <string name="quick_reply_confirm_cancel">Annuler</string>
+    <string name="quick_reply_quote_pending">Citation en attente</string>
+    <string name="quick_reply_resume_quote">Après vérification, reprendre la citation</string>
+    <string name="quick_reply_draft_found">Un brouillon non envoyé a été retrouvé pour ce message.</string>
+    <string name="quick_reply_draft_restore">Restaurer</string>
+    <string name="quick_reply_draft_ignore">Ignorer le brouillon</string>
+    <string name="quick_reply_legacy_quote_dropped">Une ancienne demande de citation n’a pas été conservée après la mise à jour. Votre brouillon reste disponible. Veuillez sélectionner à nouveau le message à citer.</string>
+    <string name="quick_reply_notice_dismiss">Fermer</string>
     <string name="quick_reply_preparing_quote">Insertion de la citation…</string>
 
     <!-- #293 — explicit moderation alert -->
@@ -253,4 +261,5 @@
     <string name="topic_alert_link_view_post">Voir le message</string>
     <string name="topic_alert_link_topic_page">%1$s, page %2$d</string>
     <string name="topic_alert_link_post_fallback">Message n° %1$d du sujet %2$d, page %3$d</string>
+    <string name="topic_quote_preparation_failed">La demande de citation n’a pas pu être enregistrée. Veuillez réessayer.</string>
 </resources>

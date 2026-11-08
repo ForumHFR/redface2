@@ -2946,6 +2946,7 @@ private fun RedfaceNavHost(
                     onReply = { subcat, page, quotes ->
                         // #868-#870 — « Citer » simple / #823 long-press / plain reply : these
                         // quotes never came from the basket, a submit must not empty it.
+                        // Inline launches carry no coordinates: TopicViewModel awaited their Room write.
                         multiQuoteNavState.onEditorQuotesHandoff(
                             quotes.takeIf { it.isNotEmpty() }?.let {
                                 EditorQuotesHandoff(
@@ -2968,8 +2969,11 @@ private fun RedfaceNavHost(
                     },
                     // #843/#790 — the quick-reply sheet's ESCALATION only: the sheet just persisted
                     // the shared #405 row, so the editor auto-applies it (resumeSharedDraft = true,
-                    // silent append — same composition act) WITHOUT surfacing the restore banner.
+                    // same composition act). The sheet requires a decision on its restore offer
+                    // before escalation, so the shared row contains the decided body.
                     onEscalateToFullEditor = { subcat, page, quotes, consumesBasket ->
+                        // #1553: pending inline coordinates stay in the shared durable row. This
+                        // handoff contains cards only, even after a failed quote GET in the sheet.
                         // #868-#870 — the escalated editor inherits the sheet session's basket
                         // consumption : a « Citer N » sheet escalated to full screen still empties
                         // the basket on ITS successful submit, and only then. The handoff is built
@@ -3018,7 +3022,7 @@ private fun RedfaceNavHost(
                     onPollExpansionChanged = { expanded ->
                         topicPollNavState.onExpansionChanged(route.cat, route.post, expanded)
                     },
-                    onMultiQuote = { subcat, page ->
+                    onMultiQuote = { subcat, page, selection ->
                         // #291 / #604 lot 3 — quote flavour of reply : the basket's previews are
                         // handed to the editor (cards, mockup P3) through the in-memory handoff.
                         // #868/#869 — the basket is NO LONGER cleared on launch : backing out of
@@ -3030,29 +3034,24 @@ private fun RedfaceNavHost(
                         // resumeSharedDraft = false, so an existing text draft is offered via the
                         // restore banner (cards are independent of it), instead of the silent append
                         // the escalation flag used to force here (pre-#843 Codex fork 4).
-                        val selection = multiQuoteNavState.basket
-                            ?.takeIf { it.matches(topicQuoteScope) }
-                            ?.selections
-                            .orEmpty()
-                        if (selection.isNotEmpty()) {
-                            multiQuoteNavState.onEditorQuotesHandoff(
-                                EditorQuotesHandoff(
-                                    scope = topicQuoteScope,
-                                    quotes = selection,
-                                    consumesBasket = true,
-                                ),
-                            )
-                            backStack.add(
-                                PostEditorRoute(
-                                    mode = PostEditorMode.Reply,
-                                    cat = route.cat,
-                                    topicId = route.post,
-                                    page = page,
-                                    subcat = subcat,
-                                    resumeSharedDraft = false,
-                                ),
-                            )
-                        }
+                        // Inline coordinates are already durable; selection contains only transient cards.
+                        multiQuoteNavState.onEditorQuotesHandoff(
+                            EditorQuotesHandoff(
+                                scope = topicQuoteScope,
+                                quotes = selection,
+                                consumesBasket = true,
+                            ),
+                        )
+                        backStack.add(
+                            PostEditorRoute(
+                                mode = PostEditorMode.Reply,
+                                cat = route.cat,
+                                topicId = route.post,
+                                page = page,
+                                subcat = subcat,
+                                resumeSharedDraft = false,
+                            ),
+                        )
                     },
                     onEdit = { subcat, page, numreponse ->
                         // Phase 2D (#147) — `PostEditorMode.Edit` triggers the

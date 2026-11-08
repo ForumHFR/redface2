@@ -30,13 +30,17 @@ open class VersionedEditorDraftStore : EditorDraftStore {
     var saveReturnGate: CompletableDeferred<Unit>? = null
     var finishGate: CompletableDeferred<Unit>? = null
     var cleanupGate: CompletableDeferred<Unit>? = null
+    var loadFailure: IOException? = null
     var saveFailure: IOException? = null
     var beginFailure: IOException? = null
     var cleanupFailure: IOException? = null
     var finishFailure: IOException? = null
+    val attemptedIds = mutableListOf<String>()
     var beginCalls = 0
         private set
     var finishCalls = 0
+        private set
+    var loadCalls = 0
         private set
 
     fun preload(key: String, draft: Draft) { entries[key] = DraftEntry(draft, 0) }
@@ -50,7 +54,9 @@ open class VersionedEditorDraftStore : EditorDraftStore {
                     owned.remove(key)
                     deletedKeys += key
                 } else {
-                    owned[key] = entry.copy(draft = entry.draft.copy(body = "", subject = null, recipients = null))
+                    owned[key] = entry.copy(draft = entry.draft.copy(
+                        body = "", subject = null, recipients = null, pendingInlineQuoteRequest = null,
+                    ))
                 }
                 writes++
             }
@@ -61,11 +67,20 @@ open class VersionedEditorDraftStore : EditorDraftStore {
     override suspend fun load(owner: String?, key: String): Draft? =
         loadEntry(owner, key)?.takeUnless { it.attempt?.status == AttemptStatus.PUBLISHED }?.draft
     override suspend fun loadEntry(owner: String?, key: String): DraftEntry? {
+        loadCalls++
+        loadFailure?.let {
+            if (it is UnreadableInlineQuoteRequestException) {
+                throw UnreadableInlineQuoteRequestException(entries[key]?.version, it)
+            }
+            throw it
+        }
         loadGate?.await()
         return entries[key].takeIf { owner != null && owner == activeOwner }
     }
     override suspend fun save(owner: String?, key: String, draft: Draft) {
-        saveIfVersion(owner, key, draft, entries[key]?.version ?: 0)
+        val entry = entries[key]
+        saveIfVersion(owner, key, draft.copy(pendingInlineQuoteRequest = entry?.draft?.pendingInlineQuoteRequest),
+            entry?.version ?: 0)
     }
     override suspend fun delete(owner: String?, key: String) {
         if (owner != null && owner == activeOwner && entries[key]?.attempt == null) {
@@ -83,6 +98,55 @@ open class VersionedEditorDraftStore : EditorDraftStore {
     }
     override suspend fun startNewComposition(owner: String?, key: String, draft: Draft, expectedVersion: Long) =
         saveVersioned(owner, key, draft, expectedVersion, newComposition = true)
+
+    override suspend fun enqueueInlineQuoteRequest(
+        owner: String?, key: String, request: PendingInlineQuoteRequest, expectedVersion: Long,
+    ): StoreWriteResult {
+        val entry = entries[key]
+        val rejection = quoteMutationRejection(owner, key, request, expectedVersion)
+        if (rejection != null) return rejection
+        val composition = entry?.takeUnless { it.attempt?.status == AttemptStatus.PUBLISHED }
+        val pending = composition?.draft?.pendingInlineQuoteRequest
+        val draft = (composition?.draft ?: Draft(body = "")).copy(
+            pendingInlineQuoteRequest = pending?.merge(request) ?: request,
+        )
+        entries[key] = DraftEntry(draft, expectedVersion + 1, composition?.attempt)
+        writes++
+        saveReturnGate?.await()
+        return StoreWriteResult.Written(expectedVersion + 1)
+    }
+
+    override suspend fun consumeInlineQuoteRequest(
+        owner: String?, key: String, request: PendingInlineQuoteRequest, expectedVersion: Long, draft: Draft?,
+    ): StoreWriteResult {
+        val rejection = quoteMutationRejection(owner, key, request, expectedVersion)
+        if (rejection != null) return rejection
+        return entries[key]?.let { entry ->
+            val deliveryBlocked = draft != null && entry.attempt != null
+            if (entry.draft.pendingInlineQuoteRequest != request || entry.attempt?.status == AttemptStatus.PUBLISHED ||
+                deliveryBlocked
+            ) {
+                StoreWriteResult.Conflict
+            } else {
+                entries[key] = entry.copy(
+                    draft = (draft ?: entry.draft).copy(pendingInlineQuoteRequest = null),
+                    version = expectedVersion + 1,
+                )
+                writes++
+                saveReturnGate?.await()
+                StoreWriteResult.Written(expectedVersion + 1)
+            }
+        } ?: StoreWriteResult.Conflict
+    }
+
+    private fun quoteMutationRejection(
+        owner: String?, key: String, request: PendingInlineQuoteRequest, expectedVersion: Long,
+    ): StoreWriteResult? = when {
+        owner == null || owner != activeOwner -> StoreWriteResult.OwnerChanged
+        saveFailure != null -> StoreWriteResult.Failed(checkNotNull(saveFailure))
+        request.key != key || (entries[key]?.version ?: 0L) != expectedVersion -> StoreWriteResult.Conflict
+        else -> null
+    }
 
     override suspend fun saveUnresolved(token: AttemptToken, draft: Draft, expectedVersion: Long): StoreWriteResult {
         val entry = entries[token.key]
@@ -122,10 +186,27 @@ open class VersionedEditorDraftStore : EditorDraftStore {
         }
     }
 
+    @Suppress("ReturnCount") // Guards (owner / injected failure / row revision) + the written tail.
+    override suspend fun discardUnreadableInlineQuoteRequest(
+        owner: String?, key: String, expectedVersion: Long,
+    ): StoreWriteResult {
+        if (owner == null || owner != activeOwner) return StoreWriteResult.OwnerChanged
+        saveFailure?.let { return StoreWriteResult.Failed(it) }
+        val entry = entries[key] ?: return StoreWriteResult.Conflict
+        if (entry.version != expectedVersion) return StoreWriteResult.Conflict
+        entries[key] = entry.copy(
+            draft = entry.draft.copy(pendingInlineQuoteRequest = null), version = entry.version + 1,
+        )
+        loadFailure = null
+        writes++
+        return StoreWriteResult.Written(entry.version + 1)
+    }
+
     override suspend fun beginAttempt(
         owner: String?, key: String, snapshot: Draft, expectedVersion: Long, attemptId: String,
     ): BeginAttemptResult {
         beginCalls++
+        attemptedIds += attemptId
         beginGate?.await()
         val failure = beginFailure
         val rejection = when {
@@ -165,7 +246,11 @@ open class VersionedEditorDraftStore : EditorDraftStore {
             AttemptOutcome.PUBLISHED -> AttemptStatus.PUBLISHED
             AttemptOutcome.UNCERTAIN -> AttemptStatus.UNCERTAIN
         }
-        owned[token.key] = entry.copy(attempt = status?.let { Attempt(token, it) })
+        owned[token.key] = entry.copy(
+            attempt = status?.let { Attempt(token, it) },
+            draft = if (status == AttemptStatus.PUBLISHED) entry.draft.copy(pendingInlineQuoteRequest = null)
+            else entry.draft,
+        )
         writes++
         return StoreWriteResult.Written(entry.version)
     }

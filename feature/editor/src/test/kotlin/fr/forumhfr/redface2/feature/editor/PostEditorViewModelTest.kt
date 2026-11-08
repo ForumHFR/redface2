@@ -11,10 +11,14 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
+import fr.forumhfr.redface2.core.domain.editor.UnreadableInlineQuoteRequestException
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionAdapter
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionScenario
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.EditorWriteOwner
 import fr.forumhfr.redface2.core.domain.editor.SubmissionBodyMutation
 import fr.forumhfr.redface2.core.domain.editor.SubmissionErrorProbe
@@ -134,6 +138,433 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `Astra1 failed dormant ignore then durable autosave keeps uncertainty and both decisions`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val token = (draftStore.beginAttempt("tester", key, EditorDraftStore.Draft("uncertain body"), 0)
+            as EditorDraftStore.BeginAttemptResult.Started).token
+        draftStore.finishAttempt(token, EditorDraftStore.AttemptOutcome.UNCERTAIN)
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        testScheduler.runCurrent()
+        assertEquals(0, replyRepository.formFetches) // Includes the plain form GET.
+        draftStore.saveFailure = IOException("disk")
+        vm.submit(PostEditorIntent.PendingQuoteIgnored)
+        testScheduler.runCurrent()
+        assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
+        assertTrue(vm.state.value.hasDormantQuote)
+        assertTrue(vm.state.value.canIgnorePendingQuote)
+        draftStore.saveFailure = null
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("continued uncertainty")))
+        testScheduler.advanceUntilIdle()
+        assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
+        assertTrue(vm.state.value.hasDormantQuote)
+        assertTrue(vm.state.value.canIgnorePendingQuote)
+        assertEquals(token, draftStore.entries[key]?.attempt?.token)
+        assertEquals(0, replyRepository.formFetches)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `Astra2 M2 post conflict reloads Room and reconciles before a new delivery CAS`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        replyRepository.formResult = Result.success(authenticatedForm("[quotemsg=101]quote[/quotemsg]"))
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        testScheduler.runCurrent()
+        val other = EditorDraftSession(draftStore, key)
+        other.load()
+        other.save(EditorDraftStore.Draft("concurrent body"))
+        get.complete(Unit)
+        testScheduler.runCurrent()
+        assertTrue(vm.state.value.quoteStorageUnavailable)
+        assertFalse(vm.state.value.canSubmit)
+        vm.submit(PostEditorIntent.ReloadRequested)
+        testScheduler.runCurrent()
+        assertEquals("concurrent body", vm.state.value.restorableDraft)
+        assertEquals(1, replyRepository.formFetches)
+        vm.submit(PostEditorIntent.DraftRestoreRequested)
+        testScheduler.advanceUntilIdle()
+        val persisted = checkNotNull(draftStore.saved[key])
+        assertTrue(persisted.body.contains("concurrent body"))
+        assertEquals(1, persisted.body.split("[quotemsg=101]").size - 1)
+        assertNull(persisted.pendingInlineQuoteRequest)
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `Q consumed elsewhere during GET then Conflict and Reload clears UI request and unlocks send`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        replyRepository.formResult = Result.success(authenticatedForm("[quotemsg=101]quote[/quotemsg]"))
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("typed during GET")))
+        val other = EditorDraftSession(draftStore, key)
+        other.load()
+        assertTrue(
+            other.consumeInlineQuoteRequest(checkNotNull(other.pendingInlineQuoteRequest))
+                is EditorDraftStore.StoreWriteResult.Written,
+        )
+        get.complete(Unit)
+        testScheduler.runCurrent()
+        val current = vm.state.value.draft
+        assertEquals("[quotemsg=101]quote[/quotemsg]\n\ntyped during GET", current.text)
+        assertTrue(vm.state.value.quoteStorageUnavailable)
+        assertTrue(vm.state.value.pendingQuotes.isNotEmpty())
+        assertFalse(vm.state.value.canSubmit)
+        vm.submit(PostEditorIntent.ReloadRequested)
+        testScheduler.runCurrent()
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        assertEquals(current, vm.state.value.draft)
+        assertFalse(vm.state.value.quoteStorageUnavailable)
+        assertEquals(0, vm.state.value.quoteFetchFailures)
+        assertTrue(vm.state.value.canSubmit)
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `Reload after external unreadable request repair clears obsolete quote error and preserves text`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val pending = PendingInlineQuoteRequest(SAMPLE_CAT, SAMPLE_TOPIC_ID,
+            listOf(PendingInlineQuoteRequest.Quote(101, 1)))
+        draftStore.preload(key, EditorDraftStore.Draft("", pendingInlineQuoteRequest = pending))
+        draftStore.loadFailure = UnreadableInlineQuoteRequestException()
+        val vm = newReplyViewModel()
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("keep this text")))
+        assertEquals(EditorErrors.unreadableQuoteRequest, vm.state.value.submitError)
+        draftStore.loadFailure = null
+        val other = EditorDraftSession(draftStore, key)
+        other.load()
+        other.consumeInlineQuoteRequest(pending)
+        vm.submit(PostEditorIntent.ReloadRequested)
+        testScheduler.runCurrent()
+        assertNull(vm.state.value.submitError)
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        assertEquals("keep this text", vm.state.value.draft.text)
+        assertTrue(vm.state.value.canSubmit)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `Reload after dormant Q was consumed elsewhere preserves the uncertain attempt and warning`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val token = (draftStore.beginAttempt("tester", key, EditorDraftStore.Draft("uncertain body"), 0)
+            as EditorDraftStore.BeginAttemptResult.Started).token
+        draftStore.finishAttempt(token, EditorDraftStore.AttemptOutcome.UNCERTAIN)
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        val other = EditorDraftSession(draftStore, key)
+        other.load()
+        other.consumeInlineQuoteRequest(checkNotNull(other.pendingInlineQuoteRequest))
+        val current = vm.state.value.draft
+        vm.submit(PostEditorIntent.PendingQuoteIgnored)
+        testScheduler.runCurrent()
+        assertTrue(vm.state.value.quoteStorageUnavailable)
+        vm.submit(PostEditorIntent.ReloadRequested)
+        testScheduler.runCurrent()
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        assertEquals(current, vm.state.value.draft)
+        assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
+        assertEquals(EditorSubmissionState.Uncertain(token), vm.state.value.submission)
+        assertEquals(token, draftStore.entries[key]?.attempt?.token)
+        assertEquals(EditorDraftStore.AttemptStatus.UNCERTAIN, draftStore.entries[key]?.attempt?.status)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `M2 conflicting dormant ignore reloads only Room before a successful new CAS`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val token = (draftStore.beginAttempt("tester", key, EditorDraftStore.Draft("uncertain body"), 0)
+            as EditorDraftStore.BeginAttemptResult.Started).token
+        draftStore.finishAttempt(token, EditorDraftStore.AttemptOutcome.UNCERTAIN)
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        val other = EditorDraftSession(draftStore, key)
+        other.load()
+        other.save(EditorDraftStore.Draft("uncertain body"))
+        vm.submit(PostEditorIntent.PendingQuoteIgnored)
+        testScheduler.runCurrent()
+        assertTrue(vm.state.value.quoteStorageUnavailable)
+        assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
+        vm.submit(PostEditorIntent.ReloadRequested)
+        testScheduler.runCurrent()
+        assertEquals(0, replyRepository.formFetches)
+        assertFalse(vm.state.value.quoteStorageUnavailable)
+        vm.submit(PostEditorIntent.PendingQuoteIgnored)
+        testScheduler.runCurrent()
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        assertEquals(token, draftStore.entries[key]?.attempt?.token)
+        assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
+    }
+
+    @Test
+    fun `405 post autosaves C in the main row and keeps D in memory until Restore`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.preload(key, EditorDraftStore.Draft("offered D"))
+        replyRepository.formResult = Result.success(authenticatedForm("[quotemsg=101]quote[/quotemsg]"))
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("current C")))
+        testScheduler.advanceTimeBy(751)
+        testScheduler.runCurrent()
+        assertEquals("current C", draftStore.saved[key]?.body)
+        assertEquals(setOf(key), draftStore.entries.keys)
+        assertEquals("offered D", vm.state.value.restorableDraft)
+        assertNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        assertEquals(0, replyRepository.formFetches)
+        vm.submit(PostEditorIntent.DraftRestoreRequested)
+        testScheduler.advanceUntilIdle()
+        assertEquals("[quotemsg=101]quote[/quotemsg]\n\ncurrent C\n\noffered D", draftStore.saved[key]?.body)
+        assertNull(vm.state.value.restorableDraft)
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        assertEquals(1, replyRepository.formFetches)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `405 post autosaves C in the main row and keeps D in memory until Ignore`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.preload(key, EditorDraftStore.Draft("offered D"))
+        replyRepository.formResult = Result.success(authenticatedForm("[quotemsg=101]quote[/quotemsg]"))
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("current C")))
+        testScheduler.advanceTimeBy(751)
+        testScheduler.runCurrent()
+        assertEquals("current C", draftStore.saved[key]?.body)
+        assertEquals(setOf(key), draftStore.entries.keys)
+        assertEquals("offered D", vm.state.value.restorableDraft)
+        assertNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        assertEquals(0, replyRepository.formFetches)
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
+        vm.submit(PostEditorIntent.DraftDiscardRequested)
+        testScheduler.runCurrent()
+        assertEquals("current C", draftStore.saved[key]?.body)
+        assertNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        get.complete(Unit)
+        testScheduler.advanceUntilIdle()
+        assertEquals("[quotemsg=101]quote[/quotemsg]\n\ncurrent C", draftStore.saved[key]?.body)
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        assertNull(vm.state.value.restorableDraft)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `Astra1 post storage information is deferred until explicit uncertainty acknowledgement`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val token = (draftStore.beginAttempt("tester", key, EditorDraftStore.Draft("uncertain body"), 0)
+            as EditorDraftStore.BeginAttemptResult.Started).token
+        draftStore.finishAttempt(token, EditorDraftStore.AttemptOutcome.UNCERTAIN)
+        replyRepository.formResult = Result.success(authenticatedForm("[quotemsg=101]quote[/quotemsg]"))
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        draftStore.saveFailure = IOException("disk")
+        vm.submit(PostEditorIntent.PendingQuoteIgnored)
+        testScheduler.runCurrent()
+        assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
+        draftStore.saveFailure = null
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
+        vm.submit(PostEditorIntent.PendingQuoteResumed)
+        testScheduler.runCurrent()
+        assertEquals(EditorErrors.draftSaveFailed, vm.state.value.submitError)
+        assertEquals(1, replyRepository.formFetches)
+        get.complete(Unit)
+        testScheduler.advanceUntilIdle()
+        assertNull(vm.state.value.submitError)
+    }
+
+    @Test
+    fun `m2 ordinary draft read failure does not block publication`() = runTest {
+        draftStore.loadFailure = IOException("disk")
+        replyRepository.submitResult = ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        val vm = newReplyViewModel()
+        testScheduler.runCurrent()
+        assertFalse(vm.state.value.quoteStorageUnavailable)
+        assertEquals(EditorErrors.draftSaveFailed, vm.state.value.submitError)
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("current C")))
+        assertTrue(vm.state.value.canSubmit)
+        vm.submit(PostEditorIntent.SubmitClicked())
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, replyRepository.submitCalls)
+        assertEquals(EditorDraftStore.AttemptStatus.PUBLISHED,
+            draftStore.entries[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)]?.attempt?.status)
+    }
+
+    @Test
+    fun `m4 conflict reconcile does not offer a body identical to the live field`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val body = "[quotemsg=101]quote[/quotemsg]\n"
+        replyRepository.formResult = Result.success(authenticatedForm(body))
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        val other = EditorDraftSession(draftStore, key)
+        other.load()
+        other.save(EditorDraftStore.Draft(body))
+        get.complete(Unit)
+        testScheduler.runCurrent()
+        assertTrue(vm.state.value.quoteStorageUnavailable)
+        assertEquals(body, vm.state.value.draft.text)
+        vm.submit(PostEditorIntent.ReloadRequested)
+        testScheduler.advanceUntilIdle()
+        assertNull(vm.state.value.restorableDraft)
+        assertEquals(body, vm.state.value.draft.text)
+        assertFalse(vm.state.value.quoteStorageUnavailable)
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        assertEquals(1, replyRepository.formFetches)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `B discarding an unreadable request without attempt clears the obsolete error`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val pending = PendingInlineQuoteRequest(SAMPLE_CAT, SAMPLE_TOPIC_ID,
+            listOf(PendingInlineQuoteRequest.Quote(101, 1)))
+        draftStore.preload(key, EditorDraftStore.Draft("ordinary body", pendingInlineQuoteRequest = pending))
+        draftStore.loadFailure = UnreadableInlineQuoteRequestException()
+        val vm = newReplyViewModel()
+        testScheduler.runCurrent()
+        assertNull(draftStore.entries[key]?.attempt)
+        assertEquals(EditorErrors.unreadableQuoteRequest, vm.state.value.submitError)
+        assertEquals(0, replyRepository.formFetches)
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("current C")))
+        vm.submit(PostEditorIntent.PendingQuoteIgnored)
+        testScheduler.runCurrent()
+        assertNull(vm.state.value.submitError)
+        assertFalse(vm.state.value.unreadableQuoteRequest)
+        assertFalse(vm.state.value.canIgnorePendingQuote)
+        assertTrue(vm.state.value.canSubmit)
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        assertNull(draftStore.entries[key]?.attempt)
+        assertEquals("ordinary body", draftStore.saved[key]?.body)
+        assertEquals(1, replyRepository.formFetches)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `publication under an undecided ordinary offer leaves only the erased main row`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.preload(key, EditorDraftStore.Draft("offered D"))
+        replyRepository.submitResult = ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        val vm = newReplyViewModel()
+        testScheduler.runCurrent()
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("published C")))
+        assertEquals("offered D", vm.state.value.restorableDraft)
+        assertTrue(vm.state.value.canSubmit)
+        vm.submit(PostEditorIntent.SubmitClicked())
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, replyRepository.submitCalls)
+        assertEquals("published C", replyRepository.lastSubmittedBbcode)
+        assertEquals(setOf(key), draftStore.entries.keys)
+        assertEquals("", draftStore.saved[key]?.body)
+        val writes = draftStore.writes
+        vm.submit(PostEditorIntent.CloseRequested)
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("late callback")))
+        testScheduler.advanceUntilIdle()
+        assertEquals(writes, draftStore.writes)
+        assertEquals("", draftStore.saved[key]?.body)
+    }
+
+    @Test
+    fun `published quote entry restores an empty post composition without resurrecting sent content`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val token = (draftStore.beginAttempt("tester", key, EditorDraftStore.Draft("sent body"), 0)
+            as EditorDraftStore.BeginAttemptResult.Started).token
+        draftStore.finishAttempt(token, EditorDraftStore.AttemptOutcome.PUBLISHED)
+        val producer = EditorDraftSession(draftStore, key)
+        producer.load()
+        producer.enqueueInlineQuoteRequest(PendingInlineQuoteRequest(SAMPLE_CAT, SAMPLE_TOPIC_ID,
+            listOf(PendingInlineQuoteRequest.Quote(101, 1))))
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
+        replyRepository.formResult = Result.success(authenticatedForm("[quotemsg=101]quote[/quotemsg]"))
+        val vm = newReplyViewModel(quoteAction = false)
+        testScheduler.runCurrent()
+        assertEquals("", vm.state.value.draft.text)
+        assertNull(vm.state.value.restorableDraft)
+        get.complete(Unit)
+        testScheduler.advanceUntilIdle()
+        assertEquals("[quotemsg=101]quote[/quotemsg]\n", vm.state.value.draft.text)
+        assertFalse(vm.state.value.draft.text.contains("sent body"))
+        assertNull(draftStore.entries[key]?.attempt)
+    }
+
+    @Test
+    fun `M1 post can explicitly discard an unreadable request and reopen its unresolved attempt`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val token = (draftStore.beginAttempt("tester", key, EditorDraftStore.Draft("unresolved body"), 0)
+            as EditorDraftStore.BeginAttemptResult.Started).token
+        draftStore.finishAttempt(token, EditorDraftStore.AttemptOutcome.UNCERTAIN)
+        draftStore.enqueueInlineQuoteRequest("tester", key,
+            PendingInlineQuoteRequest(SAMPLE_CAT, SAMPLE_TOPIC_ID, listOf(PendingInlineQuoteRequest.Quote(101, 1))), 1)
+        draftStore.loadFailure = UnreadableInlineQuoteRequestException()
+        val vm = newReplyViewModel()
+        testScheduler.runCurrent()
+        assertTrue(vm.state.value.unreadableQuoteRequest)
+        assertTrue(vm.state.value.canIgnorePendingQuote)
+        assertEquals(EditorErrors.unreadableQuoteRequest, vm.state.value.submitError)
+        assertEquals(0, replyRepository.formFetches)
+        vm.submit(PostEditorIntent.PendingQuoteIgnored)
+        testScheduler.runCurrent()
+        assertFalse(vm.state.value.quoteStorageUnavailable)
+        assertFalse(vm.state.value.unreadableQuoteRequest)
+        assertEquals("unresolved body", vm.state.value.draft.text)
+        assertEquals(token, draftStore.entries[key]?.attempt?.token)
+        assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+    }
+
+    @Test
+    fun `autosave started during GET and returning late cannot restore the consumed post request`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        replyRepository.formResult = Result.success(authenticatedForm("[quotemsg=101]quote[/quotemsg]"))
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("during GET")))
+        val saved = CompletableDeferred<Unit>()
+        draftStore.saveReturnGate = saved
+        testScheduler.advanceTimeBy(751)
+        testScheduler.runCurrent()
+        get.complete(Unit)
+        testScheduler.runCurrent()
+        saved.complete(Unit)
+        testScheduler.advanceUntilIdle()
+        assertEquals("[quotemsg=101]quote[/quotemsg]\n\nduring GET", draftStore.saved[key]?.body)
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+    }
+
+    @Test
+    fun `Astra m4 restore intent is refused during image upload`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.preload(key, EditorDraftStore.Draft("offered D"))
+        imageUploadReader.result = ImageUpload(byteArrayOf(1), "image/png", null)
+        val gate = CompletableDeferred<Unit>()
+        uploadRepository.uploadGate = gate
+        uploadRepository.uploadResult = uploadedImage("https://rehost.diberie.com/Picture/Get/f/7")
+        val vm = newReplyViewModel(authRepository = FakeAuthRepository(AuthState.Authenticated("alice")))
+        testScheduler.runCurrent()
+        vm.submit(PostEditorIntent.ImagePicked("content://x/1"))
+        testScheduler.runCurrent()
+        assertTrue(vm.state.value.isUploading)
+        val before = vm.state.value.draft
+        vm.submit(PostEditorIntent.DraftRestoreRequested)
+        assertEquals(before, vm.state.value.draft)
+        assertEquals("offered D", vm.state.value.restorableDraft)
+        gate.complete(Unit)
+        testScheduler.advanceUntilIdle()
+    }
+
+    @Test
     fun `successful reload clears only loading errors and keeps an uncertain send`() = runTest {
         replyRepository.formException = IOException("offline")
         val vm = newReplyViewModel()
@@ -151,6 +582,59 @@ class PostEditorViewModelTest {
         testScheduler.advanceUntilIdle()
         assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
         assertEquals(1, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `draft failure waits for uncertainty acknowledgement and clears after the next durable write`() = runTest {
+        replyRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        val vm = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("attempt body")))
+        vm.submit(PostEditorIntent.SubmitClicked())
+        testScheduler.advanceUntilIdle()
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val attempt = draftStore.entries[key]?.attempt
+
+        draftStore.saveFailure = IOException("disk full")
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("edited after uncertainty")))
+        testScheduler.advanceTimeBy(751)
+        testScheduler.runCurrent()
+        assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
+        assertEquals(attempt, draftStore.entries[key]?.attempt)
+        assertEquals(1, replyRepository.submitCalls)
+
+        vm.submit(PostEditorIntent.ErrorDismissed)
+        testScheduler.runCurrent()
+        assertEquals(EditorErrors.draftSaveFailed, vm.state.value.submitError)
+        assertNull(draftStore.entries[key]?.attempt)
+        assertEquals("edited after uncertainty", vm.state.value.draft.text)
+
+        draftStore.saveFailure = null
+        testScheduler.advanceTimeBy(751)
+        testScheduler.runCurrent()
+        assertNull(vm.state.value.submitError)
+        assertEquals("edited after uncertainty", draftStore.saved[key]?.body)
+        assertEquals(1, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `successful draft write preserves a newer form loading error`() = runTest {
+        val vm = newReplyViewModel()
+        testScheduler.advanceUntilIdle()
+        draftStore.saveFailure = IOException("disk full")
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("unsaved body")))
+        testScheduler.advanceUntilIdle()
+        assertEquals(EditorErrors.draftSaveFailed, vm.state.value.submitError)
+
+        replyRepository.formException = IOException("offline")
+        vm.submit(PostEditorIntent.ReloadRequested)
+        testScheduler.advanceUntilIdle()
+        assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
+        draftStore.saveFailure = null
+        vm.submit(PostEditorIntent.ContentChanged(TextFieldValue("saved body")))
+        testScheduler.advanceUntilIdle()
+        assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
+        assertEquals("saved body", draftStore.saved[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)]?.body)
     }
 
     @Test
@@ -340,7 +824,7 @@ class PostEditorViewModelTest {
         assertEquals(1, first.state.value.quoteFetchFailures)
         first.viewModelScope.cancel()
         val restored = SavedStateHandle(saved.keys().associateWith { saved.get<Any?>(it) })
-        // No route handoff survives process death; only coordinates + count from SavedStateHandle.
+        // The durable row retains coordinates; only the failure count comes from SavedStateHandle.
         val second = newReplyViewModel(
             savedStateHandle = restored,
             userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
@@ -356,7 +840,7 @@ class PostEditorViewModelTest {
         val afterIgnore = SavedStateHandle(restored.keys().associateWith { restored.get<Any?>(it) })
         val quoteFetches = replyRepository.fetchedContexts.count { it.isQuote }
         val third = newReplyViewModel(
-            initialQuotes = listOf(card(101)), savedStateHandle = afterIgnore,
+            initialQuotes = listOf(card(101)), savedStateHandle = afterIgnore, quoteAction = false,
             userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
         )
         testScheduler.advanceUntilIdle()
@@ -1334,8 +1818,22 @@ class PostEditorViewModelTest {
             FakeUserPreferencesRepository(quoteCardsEnabled = true),
         authRepository: AuthRepository = FakeAuthRepository(),
         savedStateHandle: SavedStateHandle = SavedStateHandle(),
-    ): PostEditorViewModel =
-        PostEditorViewModel(
+        quoteAction: Boolean = true,
+    ): PostEditorViewModel {
+        val cards = (userPreferencesRepository as? FakeUserPreferencesRepository)?.quoteCardsEnabled?.value ?: true
+        if (quoteAction && !cards && initialQuotes.isNotEmpty()) {
+            // Emulate the producer's durable boundary, never the ViewModel's restoration.
+            val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+            val entry = draftStore.entries[key]?.takeUnless {
+                it.attempt?.status == EditorDraftStore.AttemptStatus.PUBLISHED
+            }
+            val pending = PendingInlineQuoteRequest(SAMPLE_CAT, SAMPLE_TOPIC_ID, initialQuotes.map {
+                PendingInlineQuoteRequest.Quote(it.numreponse, it.locator.page, it.locator.ref, it.truncate)
+            })
+            val draft = (entry?.draft ?: EditorDraftStore.Draft("")).copy(pendingInlineQuoteRequest = pending)
+            draftStore.entries[key] = EditorDraftStore.DraftEntry(draft, (entry?.version ?: 0) + 1, entry?.attempt)
+        }
+        return PostEditorViewModel(
             request = PostEditorRequest(
                 mode = PostEditorMode.Reply,
                 cat = SAMPLE_CAT,
@@ -1343,7 +1841,7 @@ class PostEditorViewModelTest {
                 numreponse = null,
                 page = SAMPLE_PAGE,
                 subcat = subcat,
-                initialQuotes = initialQuotes,
+                initialQuotes = if (cards) initialQuotes else emptyList(),
                 resumeSharedDraft = resumeSharedDraft,
             ),
             previewParser = previewParser,
@@ -1362,6 +1860,7 @@ class PostEditorViewModelTest {
             quoteMaterializer = TopicReplyQuoteMaterializer(replyRepository),
             savedStateHandle = savedStateHandle,
         )
+    }
 
     // ----- Phase 2F-B (#11) / #441 : smiley picker ----------------------------------
     // The picker machinery (open/dismiss, ≤ 2-chars gate, debounce, stale-result guards,
@@ -2462,6 +2961,7 @@ class PostEditorViewModelTest {
         testScheduler.advanceTimeBy(800L)
         testScheduler.runCurrent()
         assertEquals("new live text", draftStore.saved[key]?.body)
+        assertEquals("rescued text", recreated.state.value.restorableDraft)
         assertEquals("tester", draftStore.lastSavedOwner)
 
         recreated.submit(PostEditorIntent.DraftRestoreRequested)
@@ -2484,7 +2984,12 @@ class PostEditorViewModelTest {
         testScheduler.advanceUntilIdle()
         assertEquals("first offered version", first.state.value.restorableDraft)
 
-        draftStore.preload(key, EditorDraftStore.Draft(body = "newer autosaved version"))
+        first.submit(PostEditorIntent.ContentChanged(TextFieldValue("newer autosaved version")))
+        testScheduler.advanceTimeBy(751)
+        testScheduler.runCurrent()
+        assertEquals("newer autosaved version", draftStore.saved[key]?.body)
+        assertEquals("first offered version", first.state.value.restorableDraft)
+        first.viewModelScope.cancel()
         val recreated = newReplyViewModel(savedStateHandle = savedStateHandle)
         testScheduler.advanceUntilIdle()
 
@@ -2580,6 +3085,52 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `inline quote waits for restore then reconciles with the restored body without becoming a seed`() = runTest {
+        val body = "[quotemsg=101]already quoted[/quotemsg]\n\nrescued reply"
+        draftStore.preload(EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID), EditorDraftStore.Draft(body))
+        val vm = newReplyViewModel(
+            initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        testScheduler.advanceUntilIdle()
+        assertEquals(body, vm.state.value.restorableDraft)
+        assertEquals(0, replyRepository.formFetches)
+        assertFalse(vm.state.value.canSubmit)
+        assertEquals(listOf(101), vm.state.value.pendingQuotes.map { it.numreponse })
+        vm.submit(PostEditorIntent.DraftRestoreRequested)
+        testScheduler.advanceUntilIdle()
+        assertEquals(body, vm.state.value.draft.text)
+        assertEquals(TextRange(body.length), vm.state.value.draft.selection)
+        assertEquals("", vm.state.value.draftRestoreSeed)
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        assertEquals(1, replyRepository.formFetches) // Only warm the plain form; the quote is already in D.
+        assertNull(replyRepository.lastFetchedContext?.quotedNumreponse)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `ignoring the restore offer keeps the inline request and serves it after the decision`() = runTest {
+        draftStore.preload(EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID), EditorDraftStore.Draft("rescued reply"))
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm("[quotemsg=101]requested quote[/quotemsg]")),
+        )
+        val vm = newReplyViewModel(
+            initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        testScheduler.advanceUntilIdle()
+        assertEquals(0, replyRepository.formFetches)
+        vm.submit(PostEditorIntent.DraftDiscardRequested)
+        testScheduler.advanceUntilIdle()
+        assertNull(vm.state.value.restorableDraft)
+        assertEquals("[quotemsg=101]requested quote[/quotemsg]\n", vm.state.value.draft.text)
+        assertEquals("", vm.state.value.draftRestoreSeed)
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        assertEquals(listOf(101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
     fun `discarding deletes the cached draft and clears the banner`() = runTest {
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
         val savedStateHandle = SavedStateHandle()
@@ -2612,8 +3163,8 @@ class PostEditorViewModelTest {
         viewModel.submit(PostEditorIntent.DraftDiscardRequested)
         testScheduler.advanceUntilIdle()
 
-        assertEquals("Ignore clears the content once by CAS, without a late autosave", 1, draftStore.saveCount)
-        assertEquals("", draftStore.saved[key]?.body)
+        assertEquals("Ignore persists the live field once without reapplying the offer", 1, draftStore.saveCount)
+        assertEquals("fresh text", draftStore.saved[key]?.body)
     }
 
     @Test
@@ -2911,6 +3462,24 @@ class PostEditorViewModelTest {
     }
 
     // ----- #604 lot 3 : cartes de citation dans l'éditeur ---------------------
+
+    @Test
+    fun `durable inline request keeps its rendering and preserves distinct new card previews`() = runTest {
+        val pending = PendingInlineQuoteRequest(SAMPLE_CAT, SAMPLE_TOPIC_ID,
+            listOf(PendingInlineQuoteRequest.Quote(101, SAMPLE_PAGE)))
+        draftStore.preload(EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID),
+            EditorDraftStore.Draft(body = "", pendingInlineQuoteRequest = pending))
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm("[quotemsg=101]durable quote[/quotemsg]")),
+        )
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101), card(202)))
+        testScheduler.advanceUntilIdle()
+        assertEquals("[quotemsg=101]durable quote[/quotemsg]\n", vm.state.value.draft.text)
+        assertEquals(listOf(202), vm.state.value.quotes.map { it.numreponse })
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        assertNull(draftStore.saved[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)]?.pendingInlineQuoteRequest)
+        assertEquals(0, replyRepository.submitCalls)
+    }
 
     @Test
     fun `initial quote cards are seeded in order and deduplicated`() = runTest {
@@ -3312,7 +3881,7 @@ class PostEditorViewModelTest {
         quoteCardsEnabled: Boolean = false,
     ) : UserPreferencesRepository {
         private val confirmBeforePosting = MutableStateFlow(confirmBeforePosting)
-        private val quoteCardsEnabled = MutableStateFlow(quoteCardsEnabled)
+        val quoteCardsEnabled = MutableStateFlow(quoteCardsEnabled)
 
         override fun observeProxyConfig(): Flow<ProxyConfig> = MutableStateFlow(ProxyConfig())
         override suspend fun saveProxyConfig(config: ProxyConfig) = Unit

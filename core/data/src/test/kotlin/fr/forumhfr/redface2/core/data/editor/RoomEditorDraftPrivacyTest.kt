@@ -14,6 +14,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptToken
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.BeginAttemptResult
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.Draft
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.StoreWriteResult
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.model.AuthState
 import io.mockk.every
 import io.mockk.mockk
@@ -181,10 +182,23 @@ class RoomEditorDraftPrivacyTest {
 
     @Test
     fun `all content writers reject stale authorization including absent rows`() = runTest {
+        assertStaleWritersRejected(reconnectBeforeResume = false)
+    }
+
+    @Test
+    fun `all content writers reject a pre purge authorization after the same owner reconnects`() = runTest {
+        assertStaleWritersRejected(reconnectBeforeResume = true)
+    }
+
+    private suspend fun assertStaleWritersRejected(reconnectBeforeResume: Boolean) = coroutineScope {
         for (writer in ContentWriter.entries) {
             for (existing in listOf(false, true)) {
                 auth.value = AuthState.Authenticated("Alice")
-                val contextKey = "$writer:$existing"
+                val contextKey = if (writer in listOf(ContentWriter.QUOTE_ENTRY, ContentWriter.QUOTE_CONSUMPTION)) {
+                    "reply:23:${1000 + writer.ordinal * 2 + if (existing) 1 else 0}"
+                } else {
+                    "$writer:$existing"
+                }
                 val version = if (existing) prepareExisting(writer, contextKey) else 0L
                 val gate = Gate().also { ownerReadGate = it }
                 val write = async { writeContent(writer, contextKey, version) }
@@ -192,6 +206,7 @@ class RoomEditorDraftPrivacyTest {
 
                 auth.value = AuthState.Authenticated("Bob")
                 store.purgePrivateForUser("alice")
+                if (reconnectBeforeResume) auth.value = AuthState.Authenticated("Alice")
                 gate.resume.complete(Unit)
                 val result = write.await()
 
@@ -235,7 +250,8 @@ class RoomEditorDraftPrivacyTest {
             val token = (store.beginAttempt("alice", contextKey, snapshot, 0) as BeginAttemptResult.Started).token
             store.finishAttempt(token, AttemptOutcome.PUBLISHED)
         } else {
-            store.saveIfVersion("alice", contextKey, snapshot, 0)
+            val pending = if (writer == ContentWriter.QUOTE_CONSUMPTION) quoteRequest(contextKey) else null
+            store.saveIfVersion("alice", contextKey, snapshot.copy(pendingInlineQuoteRequest = pending), 0)
         }
         return 1L
     }
@@ -255,6 +271,12 @@ class RoomEditorDraftPrivacyTest {
             val result = store.beginAttempt("alice", contextKey, snapshot, version) as BeginAttemptResult.Rejected
             result.reason
         }
+        ContentWriter.QUOTE_ENTRY -> store.enqueueInlineQuoteRequest(
+            "alice", contextKey, quoteRequest(contextKey), version,
+        )
+        ContentWriter.QUOTE_CONSUMPTION -> store.consumeInlineQuoteRequest(
+            "alice", contextKey, quoteRequest(contextKey), version, snapshot,
+        )
     }
 
     private suspend fun assertEmptyMarker(token: AttemptToken) {
@@ -268,7 +290,11 @@ class RoomEditorDraftPrivacyTest {
         assertNull(row.recipients)
     }
 
-    private enum class ContentWriter { LEGACY, VERSIONED, NEW_COMPOSITION, ATTEMPT }
+    private fun quoteRequest(contextKey: String) = PendingInlineQuoteRequest(
+        23, contextKey.substringAfterLast(':').toInt(), listOf(PendingInlineQuoteRequest.Quote(101, 1)),
+    )
+
+    private enum class ContentWriter { LEGACY, VERSIONED, NEW_COMPOSITION, ATTEMPT, QUOTE_ENTRY, QUOTE_CONSUMPTION }
 
     private class Gate {
         val entered = CompletableDeferred<Unit>()

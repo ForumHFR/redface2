@@ -59,9 +59,32 @@ interface EditorDraftStore {
     suspend fun startNewComposition(owner: String?, key: String, draft: Draft, expectedVersion: Long): StoreWriteResult
 
     /**
+     * #1553: persist a new explicit quote action before opening an editor. Owner/version checked;
+     * merge with an ordinary draft without touching its fields. A published row starts an empty
+     * composition; an unresolved attempt keeps its exact identity/status and a dormant request.
+     * No saved-instance-state restoration may call this mutation to replay old coordinates.
+     */
+    suspend fun enqueueInlineQuoteRequest(
+        owner: String?, key: String, request: PendingInlineQuoteRequest, expectedVersion: Long,
+    ): StoreWriteResult
+
+    /**
+     * #1553: CAS removal of exactly [request]. With [draft], atomically deliver the reconciled body
+     * and remove the request; unresolved attempts reject delivery. Without [draft], ignore only the
+     * request, retaining all fields and attempt metadata. Failures leave the entire row unchanged.
+     */
+    suspend fun consumeInlineQuoteRequest(
+        owner: String?, key: String, request: PendingInlineQuoteRequest, expectedVersion: Long, draft: Draft? = null,
+    ): StoreWriteResult
+
+    /** Clear only the request of the revision observed by the unreadable load; otherwise reload. */
+    suspend fun discardUnreadableInlineQuoteRequest(
+        owner: String?, key: String, expectedVersion: Long,
+    ): StoreWriteResult
+
+    /**
      * ED-170: atomically store the complete snapshot and IN_PROGRESS before issuing any POST.
-     * The binding preallocates [attemptId] before suspension so saved instance state can identify
-     * a later publication. Every new invocation needs a fresh UUID, including after rejection;
+     * Every accepted invocation supplies a fresh [attemptId], including after rejection;
      * the default keeps direct callers independent of any previously attempted identity.
      */
     suspend fun beginAttempt(
@@ -84,13 +107,8 @@ interface EditorDraftStore {
     /** ED-170: migrated drafts start at version 0, also used for absent rows when writing. */
     data class DraftEntry(val draft: Draft, val version: Long, val attempt: Attempt? = null)
 
-    /** Known before persistence; the UUID is never reused, even when the write is rejected. */
-    data class AttemptIdentity(val owner: String, val key: String, val id: String)
-
     /** ED-170: identity bound to an account, context and initial revision; later edits keep this version. */
-    data class AttemptToken(val owner: String, val key: String, val id: String, val version: Long) {
-        val identity: AttemptIdentity get() = AttemptIdentity(owner, key, id)
-    }
+    data class AttemptToken(val owner: String, val key: String, val id: String, val version: Long)
 
     /** ED-170: one durable attempt and the outcome currently known for it. */
     data class Attempt(val token: AttemptToken, val status: AttemptStatus)
@@ -122,6 +140,8 @@ interface EditorDraftStore {
         val isPrivate: Boolean = false,
         /** Epoch millis of last write; set by the store, ignored on save input. */
         val updatedAt: Long = 0L,
+        /** #1553: owned by the draft session, never restored from a field or navigation snapshot. */
+        val pendingInlineQuoteRequest: PendingInlineQuoteRequest? = null,
     ) {
         /**
          * Content-only marker for the restore-offer guard (#1415). The full draft must not be put

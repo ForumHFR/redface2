@@ -44,6 +44,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -65,6 +66,7 @@ import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
  * route ; the ViewModel is scoped to the topic's nav entry, so the field survives an
  * accidental dismiss, and the #405 draft row survives everything else.
  */
+@Suppress("LongParameterList") // Request, three outcome callbacks and the two opening seeds of the topic surface.
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 internal fun QuickReplySheet(
@@ -78,6 +80,7 @@ internal fun QuickReplySheet(
     // #604 lots 2-3 — the cards this opening pre-arms : one for « Citer », the whole basket
     // for « Citer N » under the full-screen threshold (empty from the reply FAB).
     initialQuotes: List<QuoteSelection> = emptyList(),
+    legacyQuoteRequestDropped: Boolean = false,
 ) {
     val viewModel = hiltViewModel<QuickReplyViewModel, QuickReplyViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },
@@ -95,7 +98,10 @@ internal fun QuickReplySheet(
         // Re-seed the field from the #405 row at EACH opening — the VM outlives the sheet and
         // its cached text can be stale after a full-screen edit of the same draft (gate #788).
         // The VM outlives the sheet (topic-scoped) : hand it the page of THIS opening (#1243 suite).
-        viewModel.onSheetAttached(request.page, initialQuotes, restored = openingDelivered)
+        viewModel.onSheetAttached(
+            request.page, initialQuotes, restored = openingDelivered,
+            legacyQuoteRequestDropped = legacyQuoteRequestDropped,
+        )
         openingDelivered = true
         viewModel.effects.collect { effect ->
             when (effect) {
@@ -115,7 +121,7 @@ internal fun QuickReplySheet(
     // its effect collector must survive until SubmitSucceeded, without replay at the next opening.
     // `submitting` is read through
     // rememberUpdatedState because both guards below are remembered once.
-    val submitting = rememberUpdatedState(state.submission.blocksBodyMutation)
+    val submitting = rememberUpdatedState(state.submission.blocksBodyMutation || state.isDiscardingDraft)
     // #854 — no half-height stop : this is a TYPING surface (autofocused field, IME quasi
     // permanent), the M3 PartiallyExpanded state only ever appears when a short display makes
     // the content taller than half the screen — and then a back/swipe must dismiss in ONE step,
@@ -191,7 +197,7 @@ internal fun QuickReplySheet(
                 OutlinedTextField(
                     value = state.text,
                     onValueChange = viewModel::onTextChanged,
-                    readOnly = state.submission.blocksBodyMutation,
+                    readOnly = state.submission.blocksBodyMutation || state.isDiscardingDraft,
                     // #807 — same #237 contract as BbcodeTextField : Compose capitalises NOTHING by
                     // default, the IME needs the explicit autoCap hint (surface regression, v220).
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
@@ -202,7 +208,17 @@ internal fun QuickReplySheet(
                         .fillMaxWidth()
                         .focusRequester(focusRequester),
                 )
-                QuickReplyStatus(state)
+                QuickReplyStatus(
+                    state,
+                    QuickReplyQuoteCallbacks(
+                        onReload = viewModel::onQuoteReloadRequested,
+                        onIgnore = viewModel::onPendingQuoteIgnored,
+                        onResume = viewModel::onDormantQuoteResumed,
+                        onRestoreDraft = viewModel::onDraftRestoreRequested,
+                        onDiscardDraft = viewModel::onDraftDiscardRequested,
+                        onDismissLegacy = viewModel::onLegacyQuoteNoticeDismissed,
+                    ),
+                )
             }
             QuickReplyActions(state, onSubmit = { viewModel.onSubmitClicked(timeoutMillis) })
         }
@@ -217,7 +233,8 @@ internal fun QuickReplySheet(
 }
 
 @Composable
-private fun QuickReplyHeader(state: QuickReplyUiState, fullScreenLabel: String, onEscalate: () -> Unit) {
+internal fun QuickReplyHeader(state: QuickReplyUiState, fullScreenLabel: String, onEscalate: () -> Unit) {
+    val offerReason = stringResource(R.string.quick_reply_fullscreen_pending_draft)
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(
             text = stringResource(R.string.quick_reply_title),
@@ -229,16 +246,50 @@ private fun QuickReplyHeader(state: QuickReplyUiState, fullScreenLabel: String, 
             onClick = onEscalate,
             // Gate #788 — no escalation while a POST is in flight (submit vs navigation
             // race) ; #805 — nor while a [quotemsg] insert is being fetched.
-            enabled = !state.isSubmitting && !state.isPreparingQuotes,
-            modifier = Modifier.semantics { contentDescription = fullScreenLabel },
+            enabled = !state.isSubmitting && !state.isPreparingQuotes && !state.isDiscardingDraft &&
+                !state.quoteStorageUnavailable && state.restorableDraft == null,
+            modifier = Modifier.semantics {
+                contentDescription = fullScreenLabel
+                if (state.restorableDraft != null) stateDescription = offerReason
+            },
         ) {
             RedfaceVectorIcon(resId = fr.forumhfr.redface2.core.ui.R.drawable.ic_ms_open_in_new)
         }
     }
 }
 
+internal data class QuickReplyQuoteCallbacks(
+    val onReload: () -> Unit,
+    val onIgnore: () -> Unit,
+    val onResume: () -> Unit,
+    val onRestoreDraft: () -> Unit,
+    val onDiscardDraft: () -> Unit,
+    val onDismissLegacy: () -> Unit,
+)
+
+@Suppress("CyclomaticComplexMethod") // One flat `if` per independent status row of the sheet.
 @Composable
-private fun QuickReplyStatus(state: QuickReplyUiState) {
+internal fun QuickReplyStatus(state: QuickReplyUiState, callbacks: QuickReplyQuoteCallbacks) {
+    if (state.legacyQuoteRequestDropped) {
+        Text(stringResource(R.string.quick_reply_legacy_quote_dropped), style = MaterialTheme.typography.bodySmall)
+        TextButton(onClick = callbacks.onDismissLegacy) {
+            Text(stringResource(R.string.quick_reply_notice_dismiss))
+        }
+    }
+    if (state.restorableDraft != null) {
+        Text(stringResource(R.string.quick_reply_draft_found), style = MaterialTheme.typography.bodySmall)
+        Row {
+            TextButton(onClick = callbacks.onRestoreDraft, enabled = !state.isDiscardingDraft) {
+                Text(stringResource(R.string.quick_reply_draft_restore))
+            }
+            TextButton(onClick = callbacks.onDiscardDraft, enabled = !state.isDiscardingDraft) {
+                Text(stringResource(R.string.quick_reply_draft_ignore))
+            }
+        }
+    }
+    if (state.pendingQuotes.isNotEmpty() && !state.isPreparingQuotes) {
+        Text(stringResource(R.string.quick_reply_quote_pending), style = MaterialTheme.typography.bodySmall)
+    }
     // #805 cards OFF — the [quotemsg] fetch runs at opening : typing stays enabled (the
     // insert concatenates onto the live field), only send/escalate wait for it.
     if (state.isPreparingQuotes) {
@@ -255,6 +306,22 @@ private fun QuickReplyStatus(state: QuickReplyUiState) {
         }
     }
     state.submitError?.let { error -> QuickReplyErrorBanner(error) }
+    if (state.hasDormantQuote) {
+        TextButton(onClick = callbacks.onResume, enabled = !state.isPreparingQuotes) {
+            Text(stringResource(R.string.quick_reply_resume_quote))
+        }
+    }
+    val quoteNeedsReload = state.pendingQuotes.isNotEmpty() && state.restorableDraft == null && !state.hasDormantQuote
+    if (!state.isLoadingDraft && (state.quoteStorageUnavailable || quoteNeedsReload)) {
+        TextButton(onClick = callbacks.onReload, enabled = !state.isPreparingQuotes && !state.isDiscardingDraft) {
+            Text(stringResource(fr.forumhfr.redface2.core.ui.R.string.editor_action_reload))
+        }
+    }
+    if (state.canIgnorePendingQuote) {
+        TextButton(onClick = callbacks.onIgnore) {
+            Text(stringResource(fr.forumhfr.redface2.core.ui.R.string.editor_action_ignore_quote))
+        }
+    }
 }
 
 @Composable

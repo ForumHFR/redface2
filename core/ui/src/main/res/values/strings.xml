@@ -226,7 +226,7 @@
     <string name="editor_summary_empty">Message vide</string>
     <string name="editor_error_quote_fetch">Citation non chargée. Rien n’est parti. Utilisez « Recharger ». Si la citation échoue encore, vous pourrez l’ignorer pour envoyer votre texte seul.</string>
     <string name="editor_error_quote_ignore">Citation toujours non chargée. « Ignorer la citation » retire la demande sans envoyer ni modifier votre texte.</string>
-    <string name="quick_reply_error_quote_fetch">Citation non chargée, envoi bloqué. Refaites « Citer » ou ouvrez l’éditeur complet pour envoyer sans la citation.</string>
+    <string name="quick_reply_error_quote_fetch">Citation non chargée, envoi bloqué. Utilisez « Recharger ». Après deux échecs, vous pourrez ignorer la citation pour envoyer votre texte seul.</string>
     <string name="quick_reply_error_uncertain">Votre message a peut-être été envoyé : vérifiez le sujet.</string>
     <string name="messages_reply_error_unexpected">Réponse inattendue de HFR. Votre message a peut-être été envoyé : vérifiez la conversation.</string>
     <string name="messages_reply_error_refused">Envoi refusé par HFR. Votre message n’a pas été envoyé.</string>
@@ -275,4 +275,5 @@
     <string name="editor_action_dismiss">Masquer</string>
     <string name="editor_action_reload">Recharger</string>
     <string name="editor_action_ignore_quote">Ignorer la citation</string>
+    <string name="editor_error_quote_unreadable">La demande de citation enregistrée est illisible. Vous pouvez la recharger ou ignorer la citation. Le texte et la tentative d’envoi sont conservés.</string>
 </resources>

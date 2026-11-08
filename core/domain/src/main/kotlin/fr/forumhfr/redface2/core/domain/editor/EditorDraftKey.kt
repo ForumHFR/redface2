@@ -2,9 +2,9 @@ package fr.forumhfr.redface2.core.domain.editor
 
 /**
  * Builds the stable, content-free context key under which an editor's draft is cached (#405).
- * The key encodes ONLY routing identity (mode + ids) — never any message body, subject or
- * recipient. The owning account is prepended by the store, not here. `numreponse` is unique per
- * category, so edit keys carry `cat` to stay globally unique.
+ * Composition keys encode routing identity (mode + ids), never any raw message body, subject or
+ * recipient. The owning account is prepended
+ * by the store, not here. `numreponse` is unique per category, so edit keys carry `cat` to stay globally unique.
  *
  * The reply key intentionally does NOT carry the quoted `numreponse`: per #405 a quote is appended
  * to the restored draft, so the key must stay stable for a given topic regardless of which post is

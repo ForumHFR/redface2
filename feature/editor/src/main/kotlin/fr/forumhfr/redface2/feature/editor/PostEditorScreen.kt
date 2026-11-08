@@ -259,6 +259,7 @@ internal fun PostEditorContent(
  * #405 — non-destructive draft-restore banner. Shown when a cached draft was found on init
  * ([PostEditorState.restorableDraft] / [TopicFormState] equivalent). « Restaurer » pre-fills the
  * editor ; « Ignorer » deletes the cached row. The draft is never silently applied nor lost.
+ * [restoreEnabled] disables « Restaurer » while the seed is unknown or a mutation is blocked.
  * Shared by [PostEditorContent] and `TopicFormContent` (same string resources).
  */
 @Composable
@@ -266,6 +267,7 @@ internal fun DraftRestoreBanner(
     onRestore: () -> Unit,
     onDiscard: () -> Unit,
     modifier: Modifier = Modifier,
+    restoreEnabled: Boolean = true,
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -287,6 +289,7 @@ internal fun DraftRestoreBanner(
             )
             TextButton(
                 onClick = onRestore,
+                enabled = restoreEnabled,
                 modifier = Modifier.heightIn(min = 48.dp),
                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
             ) {
@@ -319,9 +322,14 @@ private fun PostEditorControlsZone(
     showSubmitBar: Boolean,
 ) {
     val scroll = rememberScrollState()
-    val hasAlert = state.restorableDraft != null ||
+    val hasAlert = state.legacyQuoteRequestDropped || state.restorableDraft != null ||
         state.submitError != null || state.uploadError != null
-    LaunchedEffect(state.restorableDraft != null, state.submitError, state.uploadError) {
+    LaunchedEffect(
+        state.legacyQuoteRequestDropped,
+        state.restorableDraft != null,
+        state.submitError,
+        state.uploadError,
+    ) {
         if (hasAlert) scroll.animateScrollTo(0)
     }
     LaunchedEffect(state.isPreviewVisible) {
@@ -389,15 +397,31 @@ private fun PostEditorControlsZone(
 }
 
 @Composable
+@Suppress("CyclomaticComplexMethod") // One independent block per banner ; flat by design.
 internal fun PostEditorAlertBanners(
     state: PostEditorState,
     onIntent: (PostEditorIntent) -> Unit,
 ) {
+    val quoteAwaitingRestore = state.restorableDraft != null && state.pendingQuotes.isNotEmpty() &&
+        !state.hasDormantQuote
     if (state.restorableDraft != null) {
         DraftRestoreBanner(
             onRestore = { onIntent(PostEditorIntent.DraftRestoreRequested) },
             onDiscard = { onIntent(PostEditorIntent.DraftDiscardRequested) },
+            restoreEnabled = state.canRestoreDraft && !state.isUploading && !state.submission.blocksBodyMutation,
         )
+        if (quoteAwaitingRestore) {
+            Text(stringResource(R.string.editor_quote_pending), style = MaterialTheme.typography.bodySmall)
+        }
+    }
+    if (state.legacyQuoteRequestDropped) {
+        Text(
+            text = stringResource(R.string.editor_legacy_quote_dropped),
+            style = MaterialTheme.typography.bodyMedium,
+        )
+        TextButton(onClick = { onIntent(PostEditorIntent.LegacyQuoteNoticeDismissed) }) {
+            Text(stringResource(R.string.editor_error_dismiss))
+        }
     }
     state.submitError?.let { error ->
         val summary = error.takeIf { it.hasSubmissionSummary }
@@ -409,7 +433,9 @@ internal fun PostEditorAlertBanners(
             )
         } else {
             Text(
-                text = if (error.cause == EditorCause.QuoteFetchFailed && state.canIgnorePendingQuote) {
+                text = if (!state.unreadableQuoteRequest && error.cause == EditorCause.QuoteFetchFailed &&
+                    state.canIgnorePendingQuote
+                ) {
                     stringResource(fr.forumhfr.redface2.core.ui.R.string.editor_error_quote_ignore)
                 } else {
                     error.bannerText()
@@ -418,15 +444,30 @@ internal fun PostEditorAlertBanners(
                 color = MaterialTheme.colorScheme.error,
             )
         }
-        val reload = state.pendingQuotes.isNotEmpty() || error.action == EditorErrorAction.Reload
-        val (action, label) = when {
-            state.canIgnorePendingQuote -> PostEditorIntent.PendingQuoteIgnored to
-                fr.forumhfr.redface2.core.ui.R.string.editor_action_ignore_quote
-            reload -> PostEditorIntent.ReloadRequested to fr.forumhfr.redface2.core.ui.R.string.editor_action_reload
-            else -> PostEditorIntent.ErrorDismissed to R.string.editor_error_dismiss
+        val reload = state.quoteStorageUnavailable || (!quoteAwaitingRestore &&
+            (state.pendingQuotes.isNotEmpty() || error.action == EditorErrorAction.Reload))
+        if (!state.hasDormantQuote || state.quoteStorageUnavailable) {
+            val action = if (reload) PostEditorIntent.ReloadRequested else PostEditorIntent.ErrorDismissed
+            val label = if (reload) {
+                fr.forumhfr.redface2.core.ui.R.string.editor_action_reload
+            } else { R.string.editor_error_dismiss }
+            TextButton(onClick = { onIntent(action) }, enabled = !state.isLoadingForm) {
+                Text(text = stringResource(label))
+            }
         }
-        TextButton(onClick = { onIntent(action) }, enabled = !state.isLoadingForm) {
-            Text(text = stringResource(label))
+    }
+    // ED-132: these decisions belong to the request/attempt, independently of the visible error.
+    if (state.hasDormantQuote) {
+        TextButton(
+            onClick = { onIntent(PostEditorIntent.PendingQuoteResumed) },
+            enabled = !state.isLoadingForm && !state.submission.blocksBodyMutation,
+        ) {
+            Text(stringResource(R.string.editor_action_resume_quote))
+        }
+    }
+    if (state.canIgnorePendingQuote) {
+        TextButton(onClick = { onIntent(PostEditorIntent.PendingQuoteIgnored) }) {
+            Text(stringResource(fr.forumhfr.redface2.core.ui.R.string.editor_action_ignore_quote))
         }
     }
     state.uploadError?.let { error ->

@@ -1,6 +1,5 @@
 package fr.forumhfr.redface2.editor
 
-import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
@@ -8,12 +7,16 @@ import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptOutcome
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptStatus
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.BeginAttemptResult
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.Draft
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.StoreWriteResult
 import fr.forumhfr.redface2.core.domain.editor.EditorSessionResources
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
+import fr.forumhfr.redface2.core.domain.editor.UnreadableInlineQuoteRequestException
 import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollectionSnapshot
@@ -29,7 +32,6 @@ import fr.forumhfr.redface2.core.model.write.ReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
-import fr.forumhfr.redface2.feature.editor.PostEditorEffect
 import fr.forumhfr.redface2.feature.editor.PostEditorIntent
 import fr.forumhfr.redface2.feature.editor.PostEditorMode
 import fr.forumhfr.redface2.feature.editor.PostEditorRequest
@@ -37,7 +39,6 @@ import fr.forumhfr.redface2.feature.editor.PostEditorViewModel
 import fr.forumhfr.redface2.feature.topic.QuickReplyEffect
 import fr.forumhfr.redface2.feature.topic.QuickReplyRequest
 import fr.forumhfr.redface2.feature.topic.QuickReplyViewModel
-import io.mockk.clearMocks
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -60,840 +61,614 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/** Both features meet here; no feature-to-feature production or test dependency. */
+/** #1553: restoration reads only the durable row, independently of frozen navigation/Bundle snapshots. */
 @OptIn(ExperimentalCoroutinesApi::class)
 class PendingQuoteHandoffTest {
     private val dispatcher = UnconfinedTestDispatcher()
 
-    @Before
-    fun setUp() { Dispatchers.setMain(dispatcher) }
-
-    @After
-    fun tearDown() { Dispatchers.resetMain() }
+    @Before fun setUp() { Dispatchers.setMain(dispatcher) }
+    @After fun tearDown() { Dispatchers.resetMain() }
 
     @Test
-    fun `GET after background then autosave survives process death without duplicating the quote`() = runTest {
-        recreateAfterQuoteFetch(snapshotBeforeGet = true, autosaveBeforeDeath = true)
-    }
-
-    @Test
-    fun `GET after background then death before autosave replays the quote onto the durable text`() = runTest {
-        recreateAfterQuoteFetch(snapshotBeforeGet = true, autosaveBeforeDeath = false)
-    }
-
-    @Test
-    fun `GET before background then autosave survives process death without duplicating the quote`() = runTest {
-        recreateAfterQuoteFetch(snapshotBeforeGet = false, autosaveBeforeDeath = true)
-    }
-
-    @Test
-    fun `GET before background then death before autosave retains the request for replay`() = runTest {
-        recreateAfterQuoteFetch(snapshotBeforeGet = false, autosaveBeforeDeath = false)
-    }
-
-    private suspend fun TestScope.recreateAfterQuoteFetch(snapshotBeforeGet: Boolean, autosaveBeforeDeath: Boolean) {
-        val scenario = RecreationScenario(DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L })
-        val sheet = scenario.sheet()
-        sheet.onSheetOpened(scenario.quotes)
+    fun `delivery commits body and request removal before autosave and never replays an old Bundle`() = runTest {
+        val scenario = Scenario()
+        scenario.enqueue()
+        val saved = SavedStateHandle()
+        scenario.quoteGate = CompletableDeferred()
+        var editor = scenario.editor(saved)
+        runCurrent()
+        editor.submit(PostEditorIntent.ContentChanged(TextFieldValue("typed during GET")))
+        val frozen = snapshot(saved)
+        scenario.quoteGate?.complete(Unit)
+        runCurrent() // No autosave debounce has elapsed.
+        val expected = "[quotemsg=101]quote[/quotemsg]\n\ntyped during GET"
+        assertEquals(expected, scenario.body)
+        assertNull(scenario.pending)
+        editor.viewModelScope.cancel()
+        scenario.quoteGate = null
+        val fetches = scenario.fetchedQuotes.size
+        editor = scenario.editor(SavedStateHandle(frozen))
         advanceUntilIdle()
-        sheet.onTextChanged(TextFieldValue("text from the sheet"))
-        sheet.onEscalateRequested()
+        assertEquals(expected, editor.state.value.draft.text)
+        assertEquals(fetches, scenario.fetchedQuotes.size)
+        scenario.noPost()
+        editor.viewModelScope.cancel()
+    }
+
+    @Test
+    fun `death before delivery keeps the durable request without any saved coordinates`() = runTest {
+        val scenario = Scenario()
+        scenario.enqueue()
+        scenario.quoteGate = CompletableDeferred()
+        var editor = scenario.editor()
+        runCurrent()
+        assertEquals(scenario.request, scenario.pending)
+        editor.viewModelScope.cancel()
+        scenario.quoteGate = null
+        editor = scenario.editor()
         advanceUntilIdle()
-        val handoff = sheet.effects.first() as QuickReplyEffect.EscalateToFullEditor
-        assertEquals(scenario.quotes, handoff.quotes)
-        val savedState = SavedStateHandle()
-        var editor = scenario.editor(savedState, handoff.quotes)
-        try {
-            advanceUntilIdle()
-            assertEquals("text from the sheet", editor.state.value.draft.text)
-            assertEquals(EditorErrors.quoteFetchFailed, editor.state.value.submitError)
-            val quoteGate = CompletableDeferred<Unit>()
-            scenario.quoteGate = quoteGate
-            scenario.quoteAvailable = true
-            editor.submit(PostEditorIntent.ReloadRequested)
-            runCurrent()
-            assertTrue(editor.state.value.isLoadingForm)
-            // The background case freezes the Bundle before the GET; the other case freezes it after.
-            var savedSnapshot = snapshot(savedState)
-            quoteGate.complete(Unit)
-            runCurrent() // Complete insertion without advancing the autosave debounce.
-            val expected = "[quotemsg=101]quote[/quotemsg]\n\ntext from the sheet"
-            assertEquals(expected, editor.state.value.draft.text)
-            assertEquals("text from the sheet", scenario.storedBody)
-            if (!snapshotBeforeGet) savedSnapshot = snapshot(savedState)
-            if (autosaveBeforeDeath) advanceUntilIdle()
-            assertEquals(if (autosaveBeforeDeath) expected else "text from the sheet", scenario.storedBody)
-            editor.viewModelScope.cancel()
-            scenario.quoteGate = null
-            val quoteFetches = scenario.fetchedQuotes.size
-            val restoreGate = CompletableDeferred<Unit>()
-            scenario.drafts.loadGate = restoreGate
-            // New process: the in-memory navigation handoff is gone. Only the frozen coordinates
-            // in SavedStateHandle and the independently durable draft row survive.
-            editor = scenario.editor(SavedStateHandle(savedSnapshot))
-            val writes = scenario.drafts.writes
-            editor.submit(PostEditorIntent.ReloadRequested)
-            assertEquals(writes, scenario.drafts.writes)
-            assertFalse(editor.state.value.isLoadingForm)
-            restoreGate.complete(Unit)
-            advanceUntilIdle()
-            assertEquals(expected, editor.state.value.draft.text)
-            assertEquals(expected, scenario.storedBody)
-            assertEquals(quoteFetches + if (autosaveBeforeDeath) 0 else 1, scenario.fetchedQuotes.size)
-            assertTrue(editor.state.value.pendingQuotes.isEmpty())
-            assertNull(editor.state.value.submitError)
-            editor.submit(PostEditorIntent.ReloadRequested)
-            advanceUntilIdle()
-            assertEquals(expected, editor.state.value.draft.text)
-            coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
-        } finally {
-            editor.viewModelScope.cancel()
-            sheet.viewModelScope.cancel()
-        }
+        assertEquals("[quotemsg=101]quote[/quotemsg]\n", scenario.body)
+        assertNull(scenario.pending)
+        assertEquals(listOf(101, 101), scenario.fetchedQuotes)
+        scenario.noPost()
+        editor.viewModelScope.cancel()
     }
 
     @Test
-    fun `recreation after deleting a delivered quote reinserts only the missing selection`() = runTest {
-        val scenario = RecreationScenario(DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L })
-        scenario.quoteAvailable = true
-        scenario.drafts.preload(EditorDraftKey.reply(23, 35421),
-            Draft("text from the sheet"))
-        val quotes = scenario.quotes + QuoteSelection(QuoteLocator(1, 202, null), "bob", "")
-        val savedState = SavedStateHandle()
-        var editor = scenario.editor(savedState, quotes)
-        try {
-            advanceUntilIdle()
-            val withoutSecondQuote = "[quotemsg=101]quote[/quotemsg]\n\ntext from the sheet"
-            editor.submit(PostEditorIntent.ContentChanged(TextFieldValue(withoutSecondQuote)))
-            advanceUntilIdle()
-            assertEquals(withoutSecondQuote, scenario.storedBody)
-            val savedSnapshot = snapshot(savedState)
-            val fetches = scenario.fetchedQuotes.size
-            editor.viewModelScope.cancel()
-            editor = scenario.editor(SavedStateHandle(savedSnapshot))
-            advanceUntilIdle()
-            val expected = "[quotemsg=202]quote[/quotemsg]\n\n$withoutSecondQuote"
-            assertEquals(expected, editor.state.value.draft.text)
-            assertEquals(expected, scenario.storedBody)
-            assertEquals(listOf(202), scenario.fetchedQuotes.drop(fetches))
-            assertTrue(editor.state.value.pendingQuotes.isEmpty())
-            coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
-        } finally {
-            editor.viewModelScope.cancel()
-        }
+    fun `tags typed during GET are reconciled without duplicating any requested quote`() = runTest {
+        val scenario = Scenario()
+        val session = EditorDraftSession(scenario.drafts, scenario.key)
+        session.load()
+        session.enqueueInlineQuoteRequest(scenario.request.merge(PendingInlineQuoteRequest(
+            23, 35421, listOf(PendingInlineQuoteRequest.Quote(202, 2)),
+        )))
+        scenario.quoteGate = CompletableDeferred()
+        val editor = scenario.editor()
+        runCurrent()
+        editor.submit(PostEditorIntent.ContentChanged(TextFieldValue("[quotemsg=101]typed[/quotemsg]\nmy text")))
+        scenario.quoteGate?.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(1, Regex("\\[quotemsg=101").findAll(scenario.body.orEmpty()).count())
+        assertEquals(1, Regex("\\[quotemsg=202").findAll(scenario.body.orEmpty()).count())
+        assertTrue(scenario.body.orEmpty().endsWith("my text"))
+        assertNull(scenario.pending)
+        scenario.noPost()
+        editor.viewModelScope.cancel()
     }
 
     @Test
-    fun `quote tags typed during GET are reconciled before insertion`() = runTest {
-        val scenario = RecreationScenario(DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L })
-        scenario.quoteAvailable = true
+    fun `delivery failure blocks POST and retry reconciles existing tags without another GET`() = runTest {
+        val scenario = Scenario()
+        scenario.enqueue()
+        scenario.quoteGate = CompletableDeferred()
+        val editor = scenario.editor()
+        runCurrent()
+        scenario.drafts.saveFailure = IOException("disk")
+        scenario.quoteGate?.complete(Unit)
+        runCurrent()
+        assertEquals(scenario.request, scenario.pending)
+        assertFalse(editor.state.value.canSubmit)
+        editor.submit(PostEditorIntent.SubmitClicked())
+        scenario.noPost()
+        scenario.drafts.saveFailure = null
+        editor.submit(PostEditorIntent.ReloadRequested)
+        advanceUntilIdle()
+        assertNull(scenario.pending)
+        assertEquals(listOf(101), scenario.fetchedQuotes)
+        assertEquals(1, Regex("\\[quotemsg=101").findAll(scenario.body.orEmpty()).count())
+        assertTrue(editor.state.value.canSubmit)
+        editor.viewModelScope.cancel()
+    }
+
+    @Test
+    fun `typing while the committed CAS returns cannot restore a consumed request`() = runTest {
+        val scenario = Scenario()
+        scenario.enqueue()
+        scenario.quoteGate = CompletableDeferred()
+        val editor = scenario.editor()
+        runCurrent()
+        val commitReturn = CompletableDeferred<Unit>()
+        scenario.drafts.saveReturnGate = commitReturn
+        scenario.quoteGate?.complete(Unit)
+        runCurrent()
+        assertNull(scenario.pending)
+        assertFalse(editor.state.value.canSubmit)
+        val updated = editor.state.value.draft.text + "continued while saving"
+        editor.submit(PostEditorIntent.ContentChanged(TextFieldValue(updated)))
+        commitReturn.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(updated, scenario.body)
+        assertNull(scenario.pending)
+        scenario.noPost()
+        editor.viewModelScope.cancel()
+    }
+
+    @Test
+    fun `saved deletion after delivery is never reinserted from a frozen Bundle`() = runTest {
+        val scenario = Scenario()
+        scenario.enqueue()
+        val saved = SavedStateHandle()
+        var editor = scenario.editor(saved)
+        advanceUntilIdle()
+        val frozen = snapshot(saved)
+        editor.submit(PostEditorIntent.ContentChanged(TextFieldValue("quote deliberately removed")))
+        advanceUntilIdle()
+        editor.viewModelScope.cancel()
+        val fetches = scenario.fetchedQuotes.size
+        editor = scenario.editor(SavedStateHandle(frozen))
+        advanceUntilIdle()
+        assertEquals("quote deliberately removed", editor.state.value.draft.text)
+        assertEquals(fetches, scenario.fetchedQuotes.size)
+        assertNull(scenario.pending)
+        editor.viewModelScope.cancel()
+    }
+
+    @Test
+    fun `cold recreation offers the delivered body without replaying its retired request`() = runTest {
+        val scenario = Scenario()
+        scenario.enqueue()
+        val saved = SavedStateHandle()
+        var editor = scenario.editor(saved, resumeSharedDraft = false)
+        advanceUntilIdle()
+        val delivered = scenario.body
+        val frozen = snapshot(saved)
+        editor.viewModelScope.cancel()
+        val fetches = scenario.fetchedQuotes.size
+        editor = scenario.editor(SavedStateHandle(frozen), resumeSharedDraft = false)
+        advanceUntilIdle()
+        assertEquals("", editor.state.value.draft.text)
+        assertEquals(delivered, editor.state.value.restorableDraft)
+        assertTrue(editor.state.value.pendingQuotes.isEmpty())
+        editor.submit(PostEditorIntent.DraftRestoreRequested)
+        advanceUntilIdle()
+        assertEquals(delivered, editor.state.value.draft.text)
+        assertEquals(fetches, scenario.fetchedQuotes.size)
+        scenario.noPost()
+        editor.viewModelScope.cancel()
+    }
+
+    @Test
+    fun `ignore removes only the durable request and a stale Bundle cannot revive it`() = runTest {
+        val scenario = Scenario()
+        scenario.drafts.preload(scenario.key, Draft("kept body"))
+        scenario.enqueue()
+        scenario.quoteAvailable = false
+        val oldBundle = SavedStateHandle(mapOf("postEditor.pendingQuotes" to intArrayOf(1, 101, -1, 0)))
+        var editor = scenario.editor(oldBundle)
+        advanceUntilIdle()
+        editor.submit(PostEditorIntent.ReloadRequested)
+        advanceUntilIdle()
+        assertTrue(editor.state.value.canIgnorePendingQuote)
+        scenario.drafts.saveFailure = IOException("disk")
+        editor.submit(PostEditorIntent.PendingQuoteIgnored)
+        advanceUntilIdle()
+        assertEquals(scenario.request, scenario.pending)
+        assertFalse(editor.state.value.canSubmit)
+        scenario.drafts.saveFailure = null
+        editor.submit(PostEditorIntent.PendingQuoteIgnored)
+        advanceUntilIdle()
+        assertEquals("kept body", scenario.body)
+        assertNull(scenario.pending)
+        editor.viewModelScope.cancel()
+        val fetches = scenario.fetchedQuotes.size
+        editor = scenario.editor(SavedStateHandle(mapOf("postEditor.pendingQuotes" to intArrayOf(1, 101, -1, 0))))
+        advanceUntilIdle()
+        assertEquals(fetches, scenario.fetchedQuotes.size)
+        assertEquals("kept body", editor.state.value.draft.text)
+        scenario.noPost()
+        editor.viewModelScope.cancel()
+    }
+
+    @Test
+    fun `discarding the offered draft preserves the new request and awaits storage before GET`() = runTest {
+        val scenario = Scenario()
+        scenario.drafts.preload(scenario.key, Draft("offered draft"))
+        scenario.enqueue()
+        val editor = scenario.editor(resumeSharedDraft = false)
+        advanceUntilIdle()
+        assertTrue(scenario.fetchedQuotes.isEmpty())
+        val discardReturn = CompletableDeferred<Unit>()
+        scenario.drafts.saveReturnGate = discardReturn
+        editor.submit(PostEditorIntent.DraftDiscardRequested)
+        runCurrent()
+        assertEquals("", scenario.body)
+        assertEquals(scenario.request, scenario.pending)
+        assertTrue(scenario.fetchedQuotes.isEmpty())
+        discardReturn.complete(Unit)
+        advanceUntilIdle()
+        assertEquals(listOf(101), scenario.fetchedQuotes)
+        assertNull(scenario.pending)
+        assertEquals("[quotemsg=101]quote[/quotemsg]\n", scenario.body)
+        scenario.noPost()
+        editor.viewModelScope.cancel()
+    }
+
+    @Test
+    fun `accepting an offered quote consumes it without another GET`() = runTest {
+        val scenario = Scenario()
+        val offered = "[quotemsg=101]stored[/quotemsg]\nbody"
+        scenario.drafts.preload(scenario.key, Draft(offered))
+        scenario.enqueue()
+        val editor = scenario.editor(resumeSharedDraft = false)
+        advanceUntilIdle()
+        editor.submit(PostEditorIntent.DraftRestoreRequested)
+        advanceUntilIdle()
+        assertEquals(offered, scenario.body)
+        assertNull(scenario.pending)
+        assertTrue(scenario.fetchedQuotes.isEmpty())
+        editor.viewModelScope.cancel()
+    }
+
+    @Test
+    fun `process death while an offer awaits acceptance keeps its durable quote request`() = runTest {
+        restorePendingOffer(discard = false)
+    }
+
+    @Test
+    fun `process death while an offer awaits refusal keeps its durable quote request`() = runTest {
+        restorePendingOffer(discard = true)
+    }
+
+    private suspend fun TestScope.restorePendingOffer(discard: Boolean) {
+        val scenario = Scenario()
+        scenario.drafts.preload(scenario.key, Draft("offered body"))
+        scenario.enqueue()
+        var editor = scenario.editor(resumeSharedDraft = false)
+        advanceUntilIdle()
+        assertEquals("offered body", editor.state.value.restorableDraft)
+        editor.viewModelScope.cancel()
+        editor = scenario.editor(resumeSharedDraft = false)
+        advanceUntilIdle()
+        assertEquals("offered body", editor.state.value.restorableDraft)
+        assertEquals(scenario.request, scenario.pending)
+        assertTrue(scenario.fetchedQuotes.isEmpty())
+        editor.submit(if (discard) PostEditorIntent.DraftDiscardRequested else PostEditorIntent.DraftRestoreRequested)
+        advanceUntilIdle()
+        val expected = "[quotemsg=101]quote[/quotemsg]\n" + if (discard) "" else "\noffered body"
+        assertEquals(expected, scenario.body)
+        assertNull(scenario.pending)
+        scenario.noPost()
+        editor.viewModelScope.cancel()
+    }
+
+    @Test
+    fun `dormant request does no GET or POST until explicit successful acknowledgement`() = runTest {
+        val scenario = Scenario()
+        val attempt = scenario.unresolved()
+        scenario.enqueue()
+        val editor = scenario.editor()
+        advanceUntilIdle()
+        assertTrue(editor.state.value.hasDormantQuote)
+        assertTrue(scenario.fetchedQuotes.isEmpty())
+        assertEquals("uncertain body", editor.state.value.draft.text)
+        editor.submit(PostEditorIntent.SubmitClicked())
+        editor.submit(PostEditorIntent.ReloadRequested)
+        editor.submit(PostEditorIntent.ErrorDismissed)
+        advanceUntilIdle()
+        assertEquals(attempt, scenario.drafts.entries[scenario.key]?.attempt?.token)
+        assertTrue(scenario.fetchedQuotes.isEmpty())
+        scenario.drafts.finishFailure = IOException("disk")
+        editor.submit(PostEditorIntent.PendingQuoteResumed)
+        advanceUntilIdle()
+        assertTrue(editor.state.value.hasDormantQuote)
+        assertEquals(scenario.request, scenario.pending)
+        assertTrue(scenario.fetchedQuotes.isEmpty())
+        scenario.drafts.finishFailure = null
+        editor.submit(PostEditorIntent.PendingQuoteResumed)
+        advanceUntilIdle()
+        assertNull(scenario.drafts.entries[scenario.key]?.attempt)
+        assertNull(scenario.pending)
+        assertEquals("[quotemsg=101]quote[/quotemsg]\n\nuncertain body", scenario.body)
+        scenario.noPost()
+        editor.viewModelScope.cancel()
+    }
+
+    @Test
+    fun `ignoring a dormant quote preserves the uncertain attempt and its body`() = runTest {
+        val scenario = Scenario()
+        val attempt = scenario.unresolved()
+        scenario.enqueue()
+        val editor = scenario.editor()
+        advanceUntilIdle()
+        editor.submit(PostEditorIntent.PendingQuoteIgnored)
+        advanceUntilIdle()
+        assertNull(scenario.pending)
+        assertEquals(attempt, scenario.drafts.entries[scenario.key]?.attempt?.token)
+        assertEquals(AttemptStatus.UNCERTAIN, scenario.drafts.entries[scenario.key]?.attempt?.status)
+        assertEquals("uncertain body", scenario.body)
+        assertTrue(editor.state.value.submission is EditorSubmissionState.Uncertain)
+        assertEquals(EditorErrors.uncertain, editor.state.value.submitError)
+        assertTrue(scenario.fetchedQuotes.isEmpty())
+        scenario.noPost()
+        editor.viewModelScope.cancel()
+    }
+
+    @Test
+    fun `legacy Bundle coordinates without a durable request are ignored with an explicit notice`() = runTest {
+        val scenario = Scenario()
+        scenario.drafts.preload(scenario.key, Draft("ordinary v20 draft"))
+        val saved = SavedStateHandle(mapOf(
+            "postEditor.pendingQuotes" to intArrayOf(1, 101, -1, 0),
+            "postEditor.lastAttempt" to arrayListOf("tester", scenario.key, "old-id"),
+        ))
+        val editor = scenario.editor(saved)
+        advanceUntilIdle()
+        assertTrue(editor.state.value.legacyQuoteRequestDropped)
+        assertTrue(scenario.fetchedQuotes.isEmpty())
+        assertNull(scenario.pending)
+        assertEquals("ordinary v20 draft", editor.state.value.draft.text)
+        assertFalse(saved.contains("postEditor.pendingQuotes"))
+        scenario.noPost()
+        editor.viewModelScope.cancel()
+    }
+
+    @Test
+    fun `unreadable durable request blocks every GET and POST until restoration succeeds`() = runTest {
+        val scenario = Scenario()
+        scenario.enqueue()
+        scenario.drafts.loadFailure = UnreadableInlineQuoteRequestException()
+        val editor = scenario.editor()
+        advanceUntilIdle()
+        assertTrue(editor.state.value.quoteStorageUnavailable)
+        editor.submit(PostEditorIntent.ContentChanged(TextFieldValue("typed while storage failed")))
+        editor.submit(PostEditorIntent.SubmitClicked())
+        assertFalse(editor.state.value.canSubmit)
+        coVerify(exactly = 0) { scenario.repository.fetchReplyForm(any()) }
+        scenario.noPost()
+        assertEquals(scenario.request, scenario.pending)
+        scenario.drafts.loadFailure = null
+        editor.submit(PostEditorIntent.ReloadRequested)
+        advanceUntilIdle()
+        assertFalse(editor.state.value.quoteStorageUnavailable)
+        assertNull(scenario.pending)
+        assertEquals("[quotemsg=101]quote[/quotemsg]\n\ntyped while storage failed", scenario.body)
+        scenario.noPost()
+        editor.viewModelScope.cancel()
+    }
+
+    @Test
+    fun `snapshot while armed cannot replay a quote after confirmation and publication`() = runTest {
+        restorePublishedSnapshot(whileArmed = true, beforeBeginReturns = false)
+    }
+
+    @Test
+    fun `snapshot before begin commits cannot replay a quote after publication`() = runTest {
+        restorePublishedSnapshot(whileArmed = false, beforeBeginReturns = false)
+    }
+
+    @Test
+    fun `snapshot before begin returns cannot replay a quote after publication`() = runTest {
+        restorePublishedSnapshot(whileArmed = false, beforeBeginReturns = true)
+    }
+
+    private suspend fun TestScope.restorePublishedSnapshot(whileArmed: Boolean, beforeBeginReturns: Boolean) {
+        val scenario = Scenario(confirmationRequired = whileArmed)
+        scenario.enqueue()
+        val saved = SavedStateHandle()
+        var editor = scenario.editor(saved)
+        advanceUntilIdle()
         val gate = CompletableDeferred<Unit>()
-        scenario.quoteGate = gate
-        val quotes = scenario.quotes + QuoteSelection(QuoteLocator(1, 202, null), "bob", "")
-        val editor = scenario.editor(SavedStateHandle(), quotes)
-        try {
-            runCurrent()
-            assertTrue(editor.state.value.isLoadingForm)
-            val typed = "[quotemsg=101]typed quote[/quotemsg]\n\ntext from the sheet"
-            editor.submit(PostEditorIntent.ContentChanged(TextFieldValue(typed)))
-            gate.complete(Unit)
-            advanceUntilIdle()
-            val expected = "[quotemsg=202]quote[/quotemsg]\n\n$typed"
-            assertEquals(expected, editor.state.value.draft.text)
-            assertEquals(expected, scenario.storedBody)
-            assertEquals(listOf(101, 202, 202), scenario.fetchedQuotes)
-            assertTrue(editor.state.value.pendingQuotes.isEmpty())
-            assertNull(editor.state.value.submitError)
-            coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
-        } finally {
-            editor.viewModelScope.cancel()
+        if (!whileArmed) {
+            if (beforeBeginReturns) scenario.drafts.beginReturnGate = gate else scenario.drafts.beginGate = gate
         }
-    }
-
-    /** The Bundle keeps request coordinates only (`InlineQuoteRequest`), never the author nor the excerpt. */
-    private fun List<QuoteSelection>.coordinates() = map { it.locator to it.truncate }
-
-    private fun snapshot(handle: SavedStateHandle): Map<String, Any?> = handle.keys().associateWith { key ->
-        when (val value = handle.get<Any?>(key)) {
-            is IntArray -> value.copyOf()
-            is ArrayList<*> -> ArrayList(value)
-            else -> value
-        }
-    }
-
-    @Test
-    fun `publication after background snapshot suppresses both saved and route quotes after process death`() = runTest {
-        val scenario = RecreationScenario(DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L })
-        scenario.quoteAvailable = true
-        val sendGate = CompletableDeferred<Unit>()
-        scenario.submitGate = sendGate
-        val savedState = SavedStateHandle()
-        var editor = scenario.editor(savedState, scenario.quotes)
-        try {
-            advanceUntilIdle()
-            editor.submit(PostEditorIntent.SubmitClicked())
-            runCurrent()
-            assertTrue(editor.state.value.submission is EditorSubmissionState.Sending)
-            assertEquals(AttemptStatus.IN_PROGRESS, scenario.drafts.entries[scenario.draftKey]?.attempt?.status)
-            // The Bundle is frozen while the POST is pending; its success happens afterwards.
-            val savedSnapshot = snapshot(savedState)
-            sendGate.complete(Unit)
-            advanceUntilIdle()
-            assertTrue(editor.effects.first() is PostEditorEffect.SubmitSucceeded)
-            val published = scenario.drafts.entries[scenario.draftKey]
-            assertEquals(AttemptStatus.PUBLISHED, published?.attempt?.status)
-            val writes = scenario.drafts.writes
-            val fetches = scenario.fetchedQuotes.size
-            editor.viewModelScope.cancel()
-            clearMocks(scenario.repository, answers = false)
-            // Check the transient handoff and the independently restored navigation arguments.
-            for (routeQuotes in listOf(emptyList(), scenario.quotes)) {
-                editor = scenario.editor(SavedStateHandle(savedSnapshot), routeQuotes)
-                advanceUntilIdle()
-                assertEquals("", editor.state.value.draft.text)
-                assertNull(editor.state.value.restorableDraft)
-                assertTrue(editor.state.value.pendingQuotes.isEmpty())
-                assertTrue(editor.state.value.quotes.isEmpty())
-                assertFalse(editor.state.value.canSubmit)
-                editor.submit(PostEditorIntent.SubmitClicked())
-                editor.submit(PostEditorIntent.ReloadRequested)
-                advanceUntilIdle()
-                assertEquals("", editor.state.value.draft.text)
-                assertEquals(published, scenario.drafts.entries[scenario.draftKey])
-                assertEquals(writes, scenario.drafts.writes) // No startNewComposition/autosave.
-                assertEquals(fetches, scenario.fetchedQuotes.size)
-                coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
-                editor.viewModelScope.cancel()
-            }
-        } finally {
-            editor.viewModelScope.cancel()
-        }
-    }
-
-    @Test
-    fun `snapshot while armed retires the quote request after confirmation publication and process death`() = runTest {
-        val scenario = RecreationScenario(
-            DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L }, confirmationRequired = true,
-        )
-        scenario.quoteAvailable = true
-        val savedState = SavedStateHandle()
-        var editor = scenario.editor(savedState, scenario.quotes)
-        try {
-            advanceUntilIdle()
-            val writesBeforeArm = scenario.drafts.writes
-            editor.submit(PostEditorIntent.SubmitClicked())
-            assertTrue(editor.state.value.submission is EditorSubmissionState.Armed)
-            val prepared = checkNotNull(savedState.get<ArrayList<String>>("postEditor.lastAttempt"))
-            assertEquals(listOf("tester", scenario.draftKey), prepared.take(2))
-            assertEquals(0, scenario.drafts.beginCalls)
-            assertNull(scenario.drafts.entries[scenario.draftKey]?.attempt)
-            assertEquals(writesBeforeArm, scenario.drafts.writes)
-            // Freeze the Bundle before confirmation, not merely before the durable begin or POST.
-            val savedSnapshot = snapshot(savedState)
-            coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
+        editor.submit(PostEditorIntent.SubmitClicked())
+        runCurrent()
+        val frozen = snapshot(saved)
+        assertFalse(saved.contains("postEditor.lastAttempt"))
+        if (whileArmed) {
             advanceTimeBy(400)
             editor.submit(PostEditorIntent.SubmitConfirmed(editor.state.value.armToken))
-            advanceUntilIdle()
-            assertTrue(editor.effects.first() is PostEditorEffect.SubmitSucceeded)
-            val published = checkNotNull(scenario.drafts.entries[scenario.draftKey])
-            val attempt = checkNotNull(published.attempt)
-            assertEquals(AttemptStatus.PUBLISHED, attempt.status)
-            assertEquals(listOf(attempt.token.owner, attempt.token.key, attempt.token.id), prepared)
-            coVerify(exactly = 1) { scenario.repository.submitReply(any(), any(), any(), any()) }
-            val writes = scenario.drafts.writes
-            val fetches = scenario.fetchedQuotes.size
-            editor.viewModelScope.cancel()
-            clearMocks(scenario.repository, answers = false)
-            for (routeQuotes in listOf(emptyList(), scenario.quotes)) {
-                editor = scenario.editor(SavedStateHandle(savedSnapshot), routeQuotes)
-                advanceUntilIdle()
-                assertEquals("", editor.state.value.draft.text)
-                assertNull(editor.state.value.restorableDraft)
-                assertTrue(editor.state.value.pendingQuotes.isEmpty())
-                assertTrue(editor.state.value.quotes.isEmpty())
-                assertFalse(editor.state.value.canSubmit)
-                editor.submit(PostEditorIntent.SubmitClicked())
-                editor.submit(PostEditorIntent.SubmitConfirmed(editor.state.value.armToken))
-                editor.submit(PostEditorIntent.ReloadRequested)
-                advanceUntilIdle()
-                assertEquals("", editor.state.value.draft.text)
-                assertEquals(published, scenario.drafts.entries[scenario.draftKey])
-                assertEquals(writes, scenario.drafts.writes)
-                assertEquals(fetches, scenario.fetchedQuotes.size)
-                coVerify(exactly = 0) { scenario.repository.fetchReplyForm(match { it.isQuote }) }
-                coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
-                editor.viewModelScope.cancel()
-            }
-        } finally {
-            editor.viewModelScope.cancel()
+        } else {
+            gate.complete(Unit)
         }
+        advanceUntilIdle()
+        assertEquals(AttemptStatus.PUBLISHED, scenario.drafts.entries[scenario.key]?.attempt?.status)
+        val fetches = scenario.fetchedQuotes.size
+        editor.viewModelScope.cancel()
+        editor = scenario.editor(SavedStateHandle(frozen))
+        advanceUntilIdle()
+        assertEquals("", editor.state.value.draft.text)
+        assertNull(editor.state.value.restorableDraft)
+        assertNull(scenario.pending)
+        assertEquals(fetches, scenario.fetchedQuotes.size)
+        coVerify(exactly = 1) { scenario.repository.submitReply(any(), any(), any(), any()) }
+        editor.viewModelScope.cancel()
     }
 
     @Test
-    fun `snapshot before begin commits retires the quote request after publication and process death`() = runTest {
-        recreateAfterSuspendedBegin(snapshotBeforeCommit = true)
+    fun `publication B retires a frozen request from abandoned composition A`() = runTest {
+        // Inverts the pre-#1553 expectation formerly at PendingQuoteHandoffTest.kt:522.
+        val scenario = Scenario()
+        scenario.enqueue()
+        scenario.submitGate = CompletableDeferred()
+        val saved = SavedStateHandle()
+        var editor = scenario.editor(saved)
+        advanceUntilIdle()
+        editor.submit(PostEditorIntent.SubmitClicked())
+        runCurrent()
+        val earlier = (editor.state.value.submission as EditorSubmissionState.Sending).attempt
+        val frozen = snapshot(saved)
+        editor.viewModelScope.cancel()
+        scenario.drafts.finishAttempt(earlier, AttemptOutcome.CERTAIN_FAILURE)
+        val next = scenario.drafts.beginAttempt("tester", scenario.key, Draft("composition B"), earlier.version)
+        val published = (next as BeginAttemptResult.Started).token
+        scenario.drafts.finishAttempt(published, AttemptOutcome.PUBLISHED)
+        scenario.drafts.erasePublishedContent(published)
+        val fetches = scenario.fetchedQuotes.size
+        editor = scenario.editor(SavedStateHandle(frozen))
+        advanceUntilIdle()
+        assertEquals("", editor.state.value.draft.text)
+        assertNull(editor.state.value.restorableDraft)
+        assertNull(scenario.pending)
+        assertEquals(fetches, scenario.fetchedQuotes.size)
+        coVerify(exactly = 1) { scenario.repository.submitReply(any(), any(), any(), any()) }
+        editor.viewModelScope.cancel()
     }
 
     @Test
-    fun `snapshot before begin returns retires the quote request after publication and process death`() = runTest {
-        recreateAfterSuspendedBegin(snapshotBeforeCommit = false)
+    fun `a new explicit quote after publication starts an empty composition`() = runTest {
+        val scenario = Scenario()
+        scenario.unresolved().let { scenario.drafts.finishAttempt(it, AttemptOutcome.PUBLISHED) }
+        scenario.enqueue()
+        val editor = scenario.editor()
+        advanceUntilIdle()
+        assertEquals("[quotemsg=101]quote[/quotemsg]\n", scenario.body)
+        assertNull(scenario.drafts.entries[scenario.key]?.attempt)
+        assertNull(scenario.pending)
+        scenario.noPost()
+        editor.viewModelScope.cancel()
     }
 
-    private suspend fun TestScope.recreateAfterSuspendedBegin(snapshotBeforeCommit: Boolean) {
-        val scenario = RecreationScenario(DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L })
+    @Test
+    fun `late GET after account change cannot deliver or consume the previous request`() = runTest {
+        val scenario = Scenario()
+        scenario.enqueue()
+        scenario.quoteGate = CompletableDeferred()
+        val editor = scenario.editor()
+        runCurrent()
+        scenario.drafts.activeOwner = "other"
+        scenario.quoteGate?.complete(Unit)
+        advanceUntilIdle()
+        assertTrue(scenario.drafts.entries.isEmpty())
+        assertFalse(editor.state.value.canSubmit)
+        scenario.drafts.activeOwner = "tester"
+        assertEquals(scenario.request, scenario.pending)
+        scenario.noPost()
+        editor.viewModelScope.cancel()
+    }
+
+    @Test
+    fun `durable escalation never replays a frozen transfer flag`() = runTest {
+        val scenario = Scenario()
+        scenario.enqueue()
+        scenario.quoteAvailable = false
+        val frozen = mapOf<String, Any?>(
+            "quickReply.pendingTransferred" to true,
+            "quickReply.pendingQuotes" to intArrayOf(101, 1, -1, 0),
+        )
+        val sheet = scenario.sheet(SavedStateHandle(frozen))
+        sheet.onSheetOpened()
+        advanceUntilIdle()
+        sheet.onTextChanged(TextFieldValue("text from the sheet"))
+        sheet.onEscalateRequested()
+        advanceUntilIdle()
+        val handoff = sheet.effects.first() as QuickReplyEffect.EscalateToFullEditor
+        assertTrue(handoff.quotes.isEmpty())
+        assertEquals(scenario.request, scenario.pending)
+        // A new editor instance reads Room; no inline coordinates travel through the handoff.
         scenario.quoteAvailable = true
-        val beginGate = CompletableDeferred<Unit>()
-        val beginReturnGate = CompletableDeferred<Unit>()
-        scenario.drafts.beginGate = beginGate
-        scenario.drafts.beginReturnGate = beginReturnGate
-        val savedState = SavedStateHandle()
-        var editor = scenario.editor(savedState, scenario.quotes)
-        try {
-            advanceUntilIdle()
-            editor.submit(PostEditorIntent.SubmitClicked())
-            runCurrent()
-            assertEquals(1, scenario.drafts.beginCalls)
-            assertNull(scenario.drafts.entries[scenario.draftKey]?.attempt)
-            if (!snapshotBeforeCommit) {
-                beginGate.complete(Unit)
-                runCurrent()
-                assertEquals(AttemptStatus.IN_PROGRESS, scenario.drafts.entries[scenario.draftKey]?.attempt?.status)
-            }
-            assertTrue(editor.state.value.submission is EditorSubmissionState.PersistingAttempt)
-            val prepared = checkNotNull(savedState.get<ArrayList<String>>("postEditor.lastAttempt"))
-            assertEquals(listOf("tester", scenario.draftKey), prepared.take(2))
-            // Only the handle survives. The frozen Bundle precedes begin's result and any POST.
-            val savedSnapshot = snapshot(savedState)
-            coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
-            beginGate.complete(Unit)
-            beginReturnGate.complete(Unit)
-            advanceUntilIdle()
-            assertTrue(editor.effects.first() is PostEditorEffect.SubmitSucceeded)
-            val published = checkNotNull(scenario.drafts.entries[scenario.draftKey])
-            val attempt = checkNotNull(published.attempt)
-            assertEquals(AttemptStatus.PUBLISHED, attempt.status)
-            assertEquals(listOf(attempt.token.owner, attempt.token.key, attempt.token.id), prepared)
-            val writes = scenario.drafts.writes
-            val fetches = scenario.fetchedQuotes.size
-            editor.viewModelScope.cancel()
-            clearMocks(scenario.repository, answers = false)
-            editor = scenario.editor(SavedStateHandle(savedSnapshot))
-            advanceUntilIdle()
-            assertTrue(editor.state.value.pendingQuotes.isEmpty())
-            assertTrue(editor.state.value.quotes.isEmpty())
-            assertNull(editor.state.value.restorableDraft)
-            assertFalse(editor.state.value.canSubmit)
-            editor.submit(PostEditorIntent.SubmitClicked())
-            editor.submit(PostEditorIntent.ReloadRequested)
-            advanceUntilIdle()
-            assertEquals("", editor.state.value.draft.text)
-            assertEquals(published, scenario.drafts.entries[scenario.draftKey])
-            assertEquals(writes, scenario.drafts.writes)
-            assertEquals(fetches, scenario.fetchedQuotes.size)
-            coVerify(exactly = 0) { scenario.repository.fetchReplyForm(match { it.isQuote }) }
-            coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
-        } finally {
-            editor.viewModelScope.cancel()
-        }
+        val editor = scenario.editor(cards = handoff.quotes)
+        advanceUntilIdle()
+        assertEquals("[quotemsg=101]quote[/quotemsg]\n\ntext from the sheet", editor.state.value.draft.text)
+        assertTrue(editor.state.value.quotes.isEmpty())
+        assertNull(scenario.pending)
+        editor.viewModelScope.cancel()
+        val fetches = scenario.fetchedQuotes.size
+        sheet.onSheetOpened() // Return to the retained sheet VM before recreating it.
+        advanceUntilIdle()
+        assertTrue(sheet.state.value.pendingQuotes.isEmpty())
+        assertEquals(fetches, scenario.fetchedQuotes.size)
+        sheet.viewModelScope.cancel()
+        val restoredSheet = scenario.sheet(SavedStateHandle(frozen))
+        restoredSheet.onSheetOpened()
+        advanceUntilIdle()
+        assertTrue(restoredSheet.state.value.pendingQuotes.isEmpty())
+        assertEquals(fetches, scenario.fetchedQuotes.size)
+        assertEquals(scenario.body, restoredSheet.state.value.text.text)
+        scenario.noPost()
+        restoredSheet.viewModelScope.cancel()
     }
 
     @Test
-    fun `failed begin identity cannot retire the request published by a later retry`() = runTest {
-        recreateAfterRejectedBegin(conflict = false)
-    }
-
-    @Test
-    fun `conflicting begin identity cannot retire the request published by a later retry`() = runTest {
-        recreateAfterRejectedBegin(conflict = true)
-    }
-
-    private suspend fun TestScope.recreateAfterRejectedBegin(conflict: Boolean) {
-        val scenario = RecreationScenario(DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L })
-        scenario.quoteAvailable = true
-        val savedState = SavedStateHandle()
-        var editor = scenario.editor(savedState, scenario.quotes)
-        try {
-            advanceUntilIdle()
-            val beginGate = CompletableDeferred<Unit>()
-            scenario.drafts.beginGate = beginGate
-            editor.submit(PostEditorIntent.SubmitClicked())
-            runCurrent()
-            assertTrue(editor.state.value.submission is EditorSubmissionState.PersistingAttempt)
-            val rejectedIdentity = checkNotNull(savedState.get<ArrayList<String>>("postEditor.lastAttempt"))
-            val rejectedSnapshot = snapshot(savedState)
-            if (conflict) {
-                val entry = scenario.drafts.entries.getValue(scenario.draftKey)
-                // A competing autosave advances CAS without changing the body offered on recreation.
-                scenario.drafts.saveIfVersion("tester", scenario.draftKey, entry.draft, entry.version)
-            } else {
-                scenario.drafts.beginFailure = IOException("disk failure")
-            }
-            beginGate.complete(Unit)
-            advanceUntilIdle()
-            assertEquals(EditorSubmissionState.Ready, editor.state.value.submission)
-            assertEquals(EditorErrors.draftWriteFailed, editor.state.value.submitError)
-            assertNull(scenario.drafts.entries[scenario.draftKey]?.attempt)
-            coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
-            scenario.drafts.beginFailure = null
-            scenario.drafts.beginGate = null
-            // Reload the current CAS version, keeping the rejected identity in the frozen handle.
-            editor.viewModelScope.cancel()
-            val retryState = SavedStateHandle(rejectedSnapshot)
-            editor = scenario.editor(retryState)
-            advanceUntilIdle()
-            editor.submit(PostEditorIntent.SubmitClicked())
-            val retryIdentity = checkNotNull(retryState.get<ArrayList<String>>("postEditor.lastAttempt"))
-            assertNotEquals(rejectedIdentity[2], retryIdentity[2])
-            advanceUntilIdle()
-            assertTrue(editor.effects.first() is PostEditorEffect.SubmitSucceeded)
-            val published = checkNotNull(scenario.drafts.entries[scenario.draftKey]?.attempt)
-            assertEquals(AttemptStatus.PUBLISHED, published.status)
-            assertEquals(retryIdentity[2], published.token.id)
-            assertNotEquals(rejectedIdentity[2], published.token.id)
-            val fetches = scenario.fetchedQuotes.size
-            editor.viewModelScope.cancel()
-            clearMocks(scenario.repository, answers = false)
-            editor = scenario.editor(SavedStateHandle(rejectedSnapshot))
-            advanceUntilIdle()
-            val expected = "[quotemsg=101]quote[/quotemsg]\n"
-            assertEquals(expected, editor.state.value.draft.text)
-            assertEquals(expected, scenario.storedBody)
-            assertEquals(listOf(101), scenario.fetchedQuotes.drop(fetches))
-            assertTrue(editor.state.value.pendingQuotes.isEmpty())
-            coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
-        } finally {
-            editor.viewModelScope.cancel()
-        }
-    }
-
-    @Test
-    fun `fresh quote navigation starts a new composition despite an earlier published marker`() = runTest {
-        val scenario = RecreationScenario(DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L })
-        scenario.publishPreviousComposition()
-        scenario.quoteAvailable = true
-        val editor = scenario.editor(SavedStateHandle(), scenario.quotes, resumeSharedDraft = false)
-        try {
-            advanceUntilIdle()
-            assertEquals("[quotemsg=101]quote[/quotemsg]\n", editor.state.value.draft.text)
-            assertEquals(editor.state.value.draft.text, scenario.storedBody)
-            assertEquals(listOf(101), scenario.fetchedQuotes)
-            assertTrue(editor.state.value.pendingQuotes.isEmpty())
-            assertNull(scenario.drafts.entries[scenario.draftKey]?.attempt)
-            coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
-        } finally {
-            editor.viewModelScope.cancel()
-        }
-    }
-
-    @Test
-    fun `interrupted quote GET is restored when the published attempt belongs to another composition`() = runTest {
-        val scenario = RecreationScenario(DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L })
-        scenario.publishPreviousComposition()
+    fun `Ignore offer then escalate opens the real post with Q still pending until delivery`() = runTest {
+        val scenario = Scenario()
+        scenario.drafts.preload(scenario.key, Draft("offered D"))
+        scenario.enqueue()
+        val sheet = scenario.sheet()
+        sheet.onSheetOpened()
+        sheet.onTextChanged(TextFieldValue("current C"))
+        advanceTimeBy(751)
+        runCurrent()
+        assertEquals("offered D", sheet.state.value.restorableDraft)
+        assertTrue(scenario.fetchedQuotes.isEmpty())
+        // The quote fetch fails after Ignore, leaving the durable request available for escalation.
+        scenario.quoteAvailable = false
+        sheet.onDraftDiscardRequested()
+        advanceUntilIdle()
+        assertNull(sheet.state.value.restorableDraft)
+        assertEquals("current C", scenario.body)
+        assertEquals(scenario.request, scenario.pending)
+        sheet.onEscalateRequested()
+        runCurrent()
+        val handoff = sheet.effects.first() as QuickReplyEffect.EscalateToFullEditor
+        assertTrue(handoff.quotes.isEmpty())
+        val writes = scenario.drafts.writes
+        sheet.onDismissed()
+        runCurrent()
+        assertEquals(writes, scenario.drafts.writes)
+        assertEquals(scenario.request, scenario.pending)
         scenario.quoteAvailable = true
         scenario.quoteGate = CompletableDeferred()
-        val savedState = SavedStateHandle()
-        var editor = scenario.editor(savedState, scenario.quotes)
-        try {
-            runCurrent()
-            assertTrue(editor.state.value.isLoadingForm)
-            val savedSnapshot = snapshot(savedState)
-            editor.viewModelScope.cancel()
-            scenario.quoteGate = null
-            // Only this instance's coordinates survive; it never launched the earlier attempt.
-            editor = scenario.editor(SavedStateHandle(savedSnapshot))
-            advanceUntilIdle()
-            assertEquals("[quotemsg=101]quote[/quotemsg]\n", editor.state.value.draft.text)
-            assertEquals(editor.state.value.draft.text, scenario.storedBody)
-            assertEquals(listOf(101, 101), scenario.fetchedQuotes)
-            assertTrue(editor.state.value.pendingQuotes.isEmpty())
-            coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
-        } finally {
-            editor.viewModelScope.cancel()
-        }
+        val editor = scenario.editor(cards = handoff.quotes)
+        runCurrent()
+        assertEquals("current C", editor.state.value.draft.text)
+        assertNull(editor.state.value.restorableDraft)
+        assertEquals(listOf(101), editor.state.value.pendingQuotes.map { it.numreponse })
+        assertEquals(scenario.request, scenario.pending)
+        assertFalse(editor.state.value.canSubmit)
+        scenario.quoteGate?.complete(Unit)
+        advanceUntilIdle()
+        assertEquals("[quotemsg=101]quote[/quotemsg]\n\ncurrent C", editor.state.value.draft.text)
+        assertEquals(editor.state.value.draft.text, scenario.body)
+        assertNull(scenario.pending)
+        assertTrue(editor.state.value.pendingQuotes.isEmpty())
+        assertEquals(listOf(101, 101), scenario.fetchedQuotes)
+        scenario.noPost()
+        editor.viewModelScope.cancel()
+        sheet.viewModelScope.cancel()
     }
 
     @Test
-    fun `a different published token cannot retire the frozen request of an earlier attempt`() = runTest {
-        val scenario = RecreationScenario(DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L })
-        scenario.quoteAvailable = true
-        scenario.submitGate = CompletableDeferred()
-        val savedState = SavedStateHandle()
-        var editor = scenario.editor(savedState, scenario.quotes)
-        try {
-            advanceUntilIdle()
-            editor.submit(PostEditorIntent.SubmitClicked())
-            runCurrent()
-            val earlier = (editor.state.value.submission as EditorSubmissionState.Sending).attempt
-            val savedSnapshot = snapshot(savedState)
-            editor.viewModelScope.cancel()
-            // Another writer resolved this attempt and published a different composition meanwhile.
-            scenario.drafts.finishAttempt(earlier, AttemptOutcome.CERTAIN_FAILURE)
-            val next = scenario.drafts.beginAttempt("tester", scenario.draftKey, Draft("other body"), earlier.version)
-            val published = (next as BeginAttemptResult.Started).token
-            scenario.drafts.finishAttempt(published, AttemptOutcome.PUBLISHED)
-            scenario.drafts.erasePublishedContent(published)
-            clearMocks(scenario.repository, answers = false)
-            val fetches = scenario.fetchedQuotes.size
-            editor = scenario.editor(SavedStateHandle(savedSnapshot))
-            advanceUntilIdle()
-            assertEquals("[quotemsg=101]quote[/quotemsg]\n", editor.state.value.draft.text)
-            assertEquals(editor.state.value.draft.text, scenario.storedBody)
-            assertEquals(listOf(101), scenario.fetchedQuotes.drop(fetches))
-            assertTrue(editor.state.value.pendingQuotes.isEmpty())
-            coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
-        } finally {
-            editor.viewModelScope.cancel()
-        }
-    }
-
-    @Test
-    fun `replayed escalation handoff after recreation cannot duplicate a durable quote`() = runTest {
-        val scenario = RecreationScenario(DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L })
-        scenario.quoteAvailable = true
-        scenario.drafts.preload(EditorDraftKey.reply(23, 35421), Draft("text from the sheet"))
-        val savedState = SavedStateHandle()
-        var editor = scenario.editor(savedState, scenario.quotes)
-        try {
-            advanceUntilIdle()
-            val expected = "[quotemsg=101]quote[/quotemsg]\n\ntext from the sheet"
-            assertEquals(expected, scenario.storedBody)
-            val savedSnapshot = snapshot(savedState)
-            val fetches = scenario.fetchedQuotes.size
-            editor.viewModelScope.cancel()
-            editor = scenario.editor(SavedStateHandle(savedSnapshot), scenario.quotes)
-            advanceUntilIdle()
-            assertEquals(expected, editor.state.value.draft.text)
-            assertEquals(expected, scenario.storedBody)
-            assertEquals(fetches, scenario.fetchedQuotes.size)
-            assertTrue(editor.state.value.pendingQuotes.isEmpty())
-            coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
-        } finally {
-            editor.viewModelScope.cancel()
-        }
-    }
-
-    @Test
-    fun `cold editor keeps the durable restore offer without replaying its quote after process death`() = runTest {
-        val scenario = RecreationScenario(DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L })
-        scenario.quoteAvailable = true
-        val gate = CompletableDeferred<Unit>()
-        scenario.quoteGate = gate
-        val savedState = SavedStateHandle()
-        var editor = scenario.editor(savedState, scenario.quotes, resumeSharedDraft = false)
-        try {
-            runCurrent()
-            val savedSnapshot = snapshot(savedState)
-            editor.submit(PostEditorIntent.ContentChanged(TextFieldValue("text from the sheet")))
-            gate.complete(Unit)
-            advanceUntilIdle()
-            val expected = "[quotemsg=101]quote[/quotemsg]\n\ntext from the sheet"
-            assertEquals(expected, scenario.storedBody)
-            val fetches = scenario.fetchedQuotes.size
-            editor.viewModelScope.cancel()
-            editor = scenario.editor(SavedStateHandle(savedSnapshot), resumeSharedDraft = false)
-            advanceUntilIdle()
-            assertEquals("", editor.state.value.draft.text)
-            assertEquals(expected, editor.state.value.restorableDraft)
-            assertEquals(scenario.quotes.coordinates(), editor.state.value.pendingQuotes.coordinates())
-            assertFalse(editor.state.value.canSubmit)
-            assertEquals(fetches, scenario.fetchedQuotes.size)
-            editor.submit(PostEditorIntent.DraftRestoreRequested)
-            advanceUntilIdle()
-            assertEquals(expected, editor.state.value.draft.text)
-            assertEquals(expected, scenario.storedBody)
-            assertTrue(editor.state.value.pendingQuotes.isEmpty())
-            assertEquals(fetches, scenario.fetchedQuotes.size)
-            coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
-        } finally {
-            editor.viewModelScope.cancel()
-        }
-    }
-
-    @Test
-    fun `accepting an offer after typing fetches only its missing quote with an immediate GET`() = runTest {
-        acceptOfferAfterTyping(suspendGet = false)
-    }
-
-    @Test
-    fun `accepting an offer serializes a delayed GET and ignores repeated decisions during it`() = runTest {
-        acceptOfferAfterTyping(suspendGet = true)
-    }
-
-    private suspend fun TestScope.acceptOfferAfterTyping(suspendGet: Boolean) {
-        val scenario = RecreationScenario(DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L })
-        val offered = "[quotemsg=101]stored quote[/quotemsg]\n\nold text"
-        scenario.drafts.preload(scenario.draftKey, Draft(offered))
-        scenario.quoteAvailable = true
-        val gate = CompletableDeferred<Unit>().takeIf { suspendGet }
-        scenario.quoteGate = gate
-        val quotes = scenario.quotes + QuoteSelection(QuoteLocator(1, 202, null), "bob", "")
-        val editor = scenario.editor(SavedStateHandle(), quotes, resumeSharedDraft = false)
-        try {
-            advanceUntilIdle()
-            assertEquals(offered, editor.state.value.restorableDraft)
-            assertEquals(quotes, editor.state.value.pendingQuotes)
-            editor.submit(PostEditorIntent.ContentChanged(TextFieldValue("fresh text")))
-            editor.submit(PostEditorIntent.ReloadRequested)
-            editor.submit(PostEditorIntent.SubmitClicked())
-            advanceUntilIdle()
-            assertEquals("fresh text", editor.state.value.draft.text)
-            assertEquals(offered, editor.state.value.restorableDraft)
-            assertFalse(editor.state.value.canSubmit)
-            assertTrue(scenario.fetchedQuotes.isEmpty()) // Even Reload cannot bypass the offer.
-            editor.submit(PostEditorIntent.DraftRestoreRequested)
-            runCurrent()
-            assertNull(editor.state.value.restorableDraft)
-            assertEquals(listOf(202), scenario.fetchedQuotes)
-            if (suspendGet) {
-                assertTrue(editor.state.value.isLoadingForm)
-                assertEquals("fresh text\n\n$offered", editor.state.value.draft.text)
-            }
-            // A decision after an immediate GET, or during a suspended GET, cannot reapply the offer.
-            editor.submit(PostEditorIntent.DraftRestoreRequested)
-            editor.submit(PostEditorIntent.DraftDiscardRequested)
-            if (suspendGet) editor.submit(PostEditorIntent.SubmitClicked())
-            gate?.complete(Unit)
-            advanceUntilIdle()
-            val expected = "[quotemsg=202]quote[/quotemsg]\n\nfresh text\n\n$offered"
-            assertEquals(expected, editor.state.value.draft.text)
-            assertEquals(expected, scenario.storedBody)
-            assertEquals(listOf(202), scenario.fetchedQuotes)
-            assertTrue(editor.state.value.pendingQuotes.isEmpty())
-            assertTrue(editor.state.value.canSubmit)
-            coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
-        } finally {
-            editor.viewModelScope.cancel()
-        }
-    }
-
-    @Test
-    fun `discard waits for its durable write before fetching the offered quote and preserves live typing`() = runTest {
-        val scenario = RecreationScenario(DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L })
-        val offered = "[quotemsg=101]stored quote[/quotemsg]\n\nold text"
-        scenario.drafts.preload(scenario.draftKey, Draft(offered))
-        scenario.quoteAvailable = true
-        val quoteGate = CompletableDeferred<Unit>()
-        scenario.quoteGate = quoteGate
-        val editor = scenario.editor(SavedStateHandle(), scenario.quotes, resumeSharedDraft = false)
-        try {
-            advanceUntilIdle()
-            assertEquals(scenario.quotes, editor.state.value.pendingQuotes)
-            assertTrue(scenario.fetchedQuotes.isEmpty())
-            editor.submit(PostEditorIntent.ContentChanged(TextFieldValue("fresh text")))
-            editor.submit(PostEditorIntent.SubmitClicked())
-            val discardGate = CompletableDeferred<Unit>()
-            scenario.drafts.saveReturnGate = discardGate
-            editor.submit(PostEditorIntent.DraftDiscardRequested)
-            runCurrent()
-            assertNull(editor.state.value.restorableDraft)
-            assertEquals("", scenario.storedBody)
-            editor.submit(PostEditorIntent.ReloadRequested)
-            editor.submit(PostEditorIntent.SubmitClicked())
-            assertTrue(scenario.fetchedQuotes.isEmpty())
-            assertFalse(editor.state.value.canSubmit)
-            discardGate.complete(Unit)
-            runCurrent()
-            assertEquals(listOf(101), scenario.fetchedQuotes)
-            assertTrue(editor.state.value.isLoadingForm)
-            // The offer is settled even while the quote GET is pending; neither decision replays it.
-            editor.submit(PostEditorIntent.DraftRestoreRequested)
-            editor.submit(PostEditorIntent.DraftDiscardRequested)
-            editor.submit(PostEditorIntent.SubmitClicked())
-            quoteGate.complete(Unit)
-            advanceUntilIdle()
-            val expected = "[quotemsg=101]quote[/quotemsg]\n\nfresh text"
-            assertEquals(expected, editor.state.value.draft.text)
-            assertEquals(expected, scenario.storedBody)
-            assertTrue(editor.state.value.pendingQuotes.isEmpty())
-            assertTrue(editor.state.value.canSubmit)
-            coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
-        } finally {
-            editor.viewModelScope.cancel()
-        }
-    }
-
-    @Test
-    fun `process death before offer acceptance retains the request without fetching the offered quote`() = runTest {
-        recreateBeforeOfferDecision(accept = true)
-    }
-
-    @Test
-    fun `process death before offer refusal retains the request and fetches it after refusal`() = runTest {
-        recreateBeforeOfferDecision(accept = false)
-    }
-
-    private suspend fun TestScope.recreateBeforeOfferDecision(accept: Boolean) {
-        val scenario = RecreationScenario(DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L })
-        val offered = "[quotemsg=101]stored quote[/quotemsg]\n\nold text"
-        scenario.drafts.preload(scenario.draftKey, Draft(offered))
-        scenario.quoteAvailable = true
-        val savedState = SavedStateHandle()
-        var editor = scenario.editor(savedState, scenario.quotes, resumeSharedDraft = false)
-        try {
-            advanceUntilIdle()
-            val savedSnapshot = snapshot(savedState)
-            editor.viewModelScope.cancel()
-            editor = scenario.editor(SavedStateHandle(savedSnapshot), resumeSharedDraft = false)
-            advanceUntilIdle()
-            assertEquals("", editor.state.value.draft.text)
-            assertEquals(offered, editor.state.value.restorableDraft)
-            assertEquals(scenario.quotes.coordinates(), editor.state.value.pendingQuotes.coordinates())
-            assertFalse(editor.state.value.canSubmit)
-            assertTrue(scenario.fetchedQuotes.isEmpty())
-            editor.submit(PostEditorIntent.SubmitClicked())
-            editor.submit(
-                if (accept) PostEditorIntent.DraftRestoreRequested else PostEditorIntent.DraftDiscardRequested,
-            )
-            advanceUntilIdle()
-            val expected = if (accept) offered else "[quotemsg=101]quote[/quotemsg]\n"
-            assertEquals(expected, editor.state.value.draft.text)
-            assertEquals(expected, scenario.storedBody)
-            assertEquals(if (accept) emptyList<Int>() else listOf(101), scenario.fetchedQuotes)
-            assertTrue(editor.state.value.pendingQuotes.isEmpty())
-            assertNull(editor.state.value.restorableDraft)
-            coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
-        } finally {
-            editor.viewModelScope.cancel()
-        }
-    }
-
-    @Test
-    fun `escalation restores text before quote retry after process death and inserts only once`() = runTest {
-        val scenario = RecreationScenario(DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L })
+    fun `card escalation keeps the previews in memory and creates no durable request`() = runTest {
+        val scenario = Scenario()
+        val cards = listOf(QuoteSelection(QuoteLocator(1, 101, null), "alice", "preview"))
+        // Rendering was decided at the gesture. The current inline preference cannot reinterpret cards.
         val sheet = scenario.sheet()
-        sheet.onSheetOpened(scenario.quotes)
-        advanceUntilIdle()
-        sheet.onTextChanged(TextFieldValue("text from the sheet"))
+        sheet.onSheetOpened(cards)
+        sheet.onTextChanged(TextFieldValue("body"))
         sheet.onEscalateRequested()
         advanceUntilIdle()
         val handoff = sheet.effects.first() as QuickReplyEffect.EscalateToFullEditor
-        val savedState = SavedStateHandle()
-        var editor = scenario.editor(savedState, handoff.quotes)
-        try {
-            advanceUntilIdle()
-            assertEquals("text from the sheet", editor.state.value.draft.text)
-            assertEquals(EditorErrors.quoteFetchFailed, editor.state.value.submitError)
-            val savedSnapshot = snapshot(savedState)
-            editor.viewModelScope.cancel()
-            // No escalation payload in the new process. Its quote GET still fails.
-            editor = scenario.editor(SavedStateHandle(savedSnapshot))
-            advanceUntilIdle()
-            assertEquals("text from the sheet", editor.state.value.draft.text)
-            assertEquals("text from the sheet", scenario.storedBody)
-            assertEquals(EditorErrors.quoteFetchFailed, editor.state.value.submitError)
-            assertEquals(scenario.quotes.coordinates(), editor.state.value.pendingQuotes.coordinates())
-            assertFalse(editor.state.value.canSubmit)
-            editor.submit(PostEditorIntent.SubmitClicked())
-            scenario.quoteAvailable = true
-            editor.submit(PostEditorIntent.ReloadRequested)
-            advanceUntilIdle()
-            val expected = "[quotemsg=101]quote[/quotemsg]\n\ntext from the sheet"
-            assertEquals(expected, editor.state.value.draft.text)
-            assertEquals(expected, scenario.storedBody)
-            assertTrue(editor.state.value.pendingQuotes.isEmpty())
-            assertNull(editor.state.value.submitError)
-            val fetches = scenario.fetchedQuotes.size
-            editor.submit(PostEditorIntent.ReloadRequested)
-            advanceUntilIdle()
-            assertEquals(expected, editor.state.value.draft.text)
-            assertEquals(fetches, scenario.fetchedQuotes.size)
-            coVerify(exactly = 0) { scenario.repository.submitReply(any(), any(), any(), any()) }
-        } finally {
-            editor.viewModelScope.cancel()
-            sheet.viewModelScope.cancel()
-        }
+        assertEquals(cards, handoff.quotes)
+        assertNull(scenario.pending)
+        val editor = scenario.editor(cards = handoff.quotes)
+        advanceUntilIdle()
+        assertEquals(cards, editor.state.value.quotes)
+        assertEquals("body", editor.state.value.draft.text)
+        assertTrue(scenario.fetchedQuotes.isEmpty())
+        scenario.noPost()
+        editor.viewModelScope.cancel()
+        sheet.viewModelScope.cancel()
     }
 
-    @Test
-    fun `blocked sheet escalates pending quotes then full editor abandons without POST or text loss`() = runTest {
-        val drafts = VersionedEditorDraftStore()
-        val preferences = mockk<UserPreferencesRepository> {
-            every { observeConfirmBeforePosting() } returns flowOf(false)
-            every { observeQuoteCardsEnabled() } returns flowOf(false)
-            every { observeEditorImageInsert() } returns flowOf(EditorImageInsert.REDUCED)
-            every { observeImagePickerMode() } returns flowOf(ImagePickerMode.DEFAULT)
-        }
-        val auth = mockk<AuthRepository> {
-            every { observeAuthState() } returns flowOf(AuthState.Authenticated("tester"))
-        }
-        val localSmileys = mockk<SmileyLocalCollections> {
-            every { observe() } returns flowOf(SmileyLocalCollectionSnapshot())
-        }
-        val repository = mockk<ReplyRepository> {
-            coEvery { fetchReplyForm(any()) } answers {
-                if (firstArg<ReplyContext>().isQuote) throw IOException("gone")
-                ReplyForm(hashCheck = "FAKE_HASH", sujet = "Topic", hiddenFields = emptyMap(), isAnonymous = false)
-            }
-        }
-        val clock = DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L }
-        val materializer = TopicReplyQuoteMaterializer(repository)
-        val diagnostics = DiagnosticsLog()
-        val sheet = QuickReplyViewModel(
-            QuickReplyRequest(cat = 23, subcat = 0, topicId = 35421, page = 1), SavedStateHandle(),
-            repository, materializer, EditorSessionResources(drafts, preferences, auth, clock, diagnostics),
-        )
-        val quotes = listOf(QuoteSelection(QuoteLocator(1, 101, null), "alice", ""))
-        sheet.onSheetOpened(quotes)
-        advanceUntilIdle()
-        sheet.onTextChanged(TextFieldValue("text from the sheet"))
-        assertFalse(sheet.state.value.canSubmit)
-        assertFalse(sheet.state.value.isPreparingQuotes)
-        assertFalse(sheet.state.value.isSubmitting)
-        assertEquals(EditorErrors.quoteFetchFailed(inline = true, quickReply = true), sheet.state.value.submitError)
-        sheet.onEscalateRequested()
-        advanceUntilIdle()
-        val handoff = sheet.effects.first() as QuickReplyEffect.EscalateToFullEditor
-        assertEquals(quotes, handoff.quotes)
-        assertEquals("text from the sheet", drafts.saved[EditorDraftKey.reply(23, 35421)]?.body)
-        val editor = PostEditorViewModel(
-            request = PostEditorRequest(PostEditorMode.Reply, 23, 35421, null, 1, 0,
-                initialQuotes = handoff.quotes, resumeSharedDraft = true),
-            previewParser = mockk(relaxed = true), replyRepository = repository,
-            editPostRepository = mockk(relaxed = true), smileyRepository = mockk(relaxed = true),
-            userPreferencesRepository = preferences, draftStore = drafts, diagnostics = diagnostics,
-            uploadRepository = mockk(relaxed = true), imageUploadReader = mockk(relaxed = true),
-            authRepository = auth, quoteMaterializer = materializer,
-            hfrFavoriteSmileyRepository = mockk(relaxed = true), smileyLocalCollections = localSmileys,
-            clock = clock,
-        )
-        try {
-            advanceUntilIdle()
-            assertFalse(editor.state.value.canSubmit)
-            assertEquals("text from the sheet", editor.state.value.draft.text)
-            editor.submit(PostEditorIntent.ReloadRequested)
-            advanceUntilIdle()
-            assertTrue(editor.state.value.canIgnorePendingQuote)
-            val typed = TextFieldValue("continued in the editor", TextRange(2, 7))
-            editor.submit(PostEditorIntent.ContentChanged(typed))
-            editor.submit(PostEditorIntent.PendingQuoteIgnored)
-            advanceUntilIdle()
-            assertEquals(typed, editor.state.value.draft)
-            assertTrue(editor.state.value.pendingQuotes.isEmpty())
-            assertNull(editor.state.value.submitError)
-            assertTrue(editor.state.value.isSubmitEnabled)
-            coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any()) }
-        } finally {
-            editor.viewModelScope.cancel()
-            sheet.viewModelScope.cancel()
-        }
-    }
+    private fun snapshot(handle: SavedStateHandle): Map<String, Any?> =
+        handle.keys().associateWith { handle.get<Any?>(it) }
 
-    private class RecreationScenario(private val clock: DiagnosticsClock, confirmationRequired: Boolean = false) {
+    private inner class Scenario(confirmationRequired: Boolean = false) {
         val drafts = VersionedEditorDraftStore()
-        val draftKey = EditorDraftKey.reply(23, 35421)
-        val quotes = listOf(QuoteSelection(QuoteLocator(1, 101, null), "alice", ""))
-        var quoteAvailable = false
+        val key = EditorDraftKey.reply(23, 35421)
+        val request = PendingInlineQuoteRequest(23, 35421, listOf(PendingInlineQuoteRequest.Quote(101, 1)))
+        val body: String? get() = drafts.saved[key]?.body
+        val pending: PendingInlineQuoteRequest? get() = drafts.saved[key]?.pendingInlineQuoteRequest
+        val fetchedQuotes = mutableListOf<Int>()
+        var quoteAvailable = true
         var quoteGate: CompletableDeferred<Unit>? = null
         var submitGate: CompletableDeferred<Unit>? = null
-        val fetchedQuotes = mutableListOf<Int>()
-        val storedBody: String? get() = drafts.saved[EditorDraftKey.reply(23, 35421)]?.body
-        private val diagnostics = DiagnosticsLog()
         private val preferences = mockk<UserPreferencesRepository> {
             every { observeConfirmBeforePosting() } returns flowOf(confirmationRequired)
             every { observeQuoteCardsEnabled() } returns flowOf(false)
@@ -912,45 +687,49 @@ class PendingQuoteHandoffTest {
                 ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
             }
             coEvery { fetchReplyForm(any()) } coAnswers {
-                val numreponse = firstArg<ReplyContext>().quotedNumreponse
-                if (numreponse != null) {
-                    fetchedQuotes += numreponse
+                val number = firstArg<ReplyContext>().quotedNumreponse
+                if (number != null) {
+                    fetchedQuotes += number
                     quoteGate?.await()
-                    if (!quoteAvailable) throw IOException("gone")
+                    if (!quoteAvailable) throw IOException("offline")
                 }
-                ReplyForm(hashCheck = "FAKE_HASH", sujet = "Topic", hiddenFields = emptyMap(),
-                    isAnonymous = false,
-                    initialContent = if (numreponse != null) "[quotemsg=$numreponse]quote[/quotemsg]" else "")
+                ReplyForm(hashCheck = "FAKE_HASH", sujet = "Topic", hiddenFields = emptyMap(), isAnonymous = false,
+                    initialContent = if (number == null) "" else "[quotemsg=$number]quote[/quotemsg]")
             }
         }
-        private val materializer = TopicReplyQuoteMaterializer(repository)
 
-        suspend fun publishPreviousComposition() {
-            val result = drafts.beginAttempt("tester", draftKey, Draft("previously published"), 0)
-            val token = (result as BeginAttemptResult.Started).token
-            drafts.finishAttempt(token, AttemptOutcome.PUBLISHED)
-            drafts.erasePublishedContent(token)
+        suspend fun enqueue() {
+            val session = EditorDraftSession(drafts, key)
+            session.load()
+            assertTrue(session.enqueueInlineQuoteRequest(request) is StoreWriteResult.Written)
         }
 
-        fun sheet() = QuickReplyViewModel(
-            QuickReplyRequest(cat = 23, subcat = 0, topicId = 35421, page = 1), SavedStateHandle(),
-            repository, materializer, EditorSessionResources(drafts, preferences, auth, clock, diagnostics),
+        suspend fun unresolved() = (drafts.beginAttempt("tester", key, Draft("uncertain body"), 0)
+            as BeginAttemptResult.Started).token.also { drafts.finishAttempt(it, AttemptOutcome.UNCERTAIN) }
+
+        fun noPost() { coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any()) } }
+
+        fun sheet(saved: SavedStateHandle = SavedStateHandle()) = QuickReplyViewModel(
+            QuickReplyRequest(cat = 23, subcat = 0, topicId = 35421, page = 1), saved,
+            repository, TopicReplyQuoteMaterializer(repository),
+            EditorSessionResources(drafts, preferences, auth,
+                DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L }, DiagnosticsLog()),
         )
 
         fun editor(
-            savedState: SavedStateHandle,
-            quotes: List<QuoteSelection> = emptyList(),
+            saved: SavedStateHandle = SavedStateHandle(),
             resumeSharedDraft: Boolean = true,
+            cards: List<QuoteSelection> = emptyList(),
         ) = PostEditorViewModel(
             request = PostEditorRequest(PostEditorMode.Reply, 23, 35421, null, 1, 0,
-                initialQuotes = quotes, resumeSharedDraft = resumeSharedDraft),
+                initialQuotes = cards, resumeSharedDraft = resumeSharedDraft),
             previewParser = mockk(relaxed = true), replyRepository = repository,
             editPostRepository = mockk(relaxed = true), smileyRepository = mockk(relaxed = true),
-            userPreferencesRepository = preferences, draftStore = drafts, diagnostics = diagnostics,
+            userPreferencesRepository = preferences, draftStore = drafts, diagnostics = DiagnosticsLog(),
             uploadRepository = mockk(relaxed = true), imageUploadReader = mockk(relaxed = true),
-            authRepository = auth, quoteMaterializer = materializer,
+            authRepository = auth, quoteMaterializer = TopicReplyQuoteMaterializer(repository),
             hfrFavoriteSmileyRepository = mockk(relaxed = true), smileyLocalCollections = localSmileys,
-            clock = clock, savedStateHandle = savedState,
+            clock = DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L }, savedStateHandle = saved,
         )
     }
 }

@@ -33,7 +33,7 @@ import fr.forumhfr.redface2.core.database.entities.UploadedImageEntity
         PrivateMessageThreadPageEntity::class,
         PrivateMessageEntity::class,
     ],
-    version = 20,
+    version = 21,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)

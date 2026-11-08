@@ -16,6 +16,10 @@ import fr.forumhfr.redface2.core.domain.coroutines.ApplicationScope
 import fr.forumhfr.redface2.core.domain.coroutines.awaitDetached
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.domain.flags.FlagRepository
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.search.SearchRepository
@@ -42,7 +46,9 @@ import fr.forumhfr.redface2.core.model.write.PollVoteFailureReason
 import fr.forumhfr.redface2.core.model.write.PollVoteForm
 import fr.forumhfr.redface2.core.model.write.PollVoteResult
 import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
+import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -54,6 +60,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
@@ -109,6 +116,7 @@ class TopicViewModel @AssistedInject constructor(
     // #809 — plain Hilt dependency (the assisted Factory is unchanged): resolves + removes THIS
     // topic's drapeau for the top-bar long-press.
     private val flagRepository: FlagRepository,
+    private val draftStore: EditorDraftStore,
     // #1144/#779 — process-lifetime scope for the four HFR MUTATIONS this ViewModel owns (delete a
     // post, vote, remove the topic's drapeau, add a favourite). Since #1083 every HfrClient call is
     // cancellable, so those writes would be aborted mid-socket by a back press; [awaitDetached]
@@ -119,6 +127,54 @@ class TopicViewModel @AssistedInject constructor(
 
     private val _state = MutableStateFlow(TopicUiState.initial(request))
     val state: StateFlow<TopicUiState> = _state.asStateFlow()
+
+    private var preparingEditorQuotes = false
+
+    /**
+     * #1553: a sheet or full-editor quote gesture chooses its rendering before opening. Inline coordinates
+     * must be committed through the domain store first; only card previews travel in memory.
+     * Restoration never calls this entry point. Duplicate taps while preparing share one opening.
+     */
+    fun prepareEditorQuotes(quotes: List<QuoteSelection>, onPrepared: (List<QuoteSelection>) -> Unit) {
+        if (preparingEditorQuotes) return
+        preparingEditorQuotes = true
+        viewModelScope.launch {
+            try {
+                val cards = quotes.isEmpty() || userPreferencesRepository.observeQuoteCardsEnabled().first()
+                if (quotes.isEmpty() || cards) {
+                    onPrepared(quotes)
+                } else {
+                    val pending = PendingInlineQuoteRequest(request.cat, request.post, quotes.map {
+                        PendingInlineQuoteRequest.Quote(it.numreponse, it.locator.page, it.locator.ref, it.truncate)
+                    })
+                    val drafts = EditorDraftSession(draftStore, EditorDraftKey.reply(request.cat, request.post))
+                    drafts.load()
+                    val owner = drafts.owner
+                    var result = drafts.enqueueInlineQuoteRequest(pending)
+                    // A closing sheet may have flushed between load and enqueue. Retry once on a fresh row.
+                    if (result is EditorDraftStore.StoreWriteResult.Conflict) {
+                        drafts.load()
+                        result = if (drafts.owner == owner) drafts.enqueueInlineQuoteRequest(pending) else {
+                            EditorDraftStore.StoreWriteResult.OwnerChanged
+                        }
+                    }
+                    if (result is EditorDraftStore.StoreWriteResult.Written) {
+                        onPrepared(emptyList())
+                    } else {
+                        _effects.send(TopicEffect.QuotePreparationFailed)
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: IllegalArgumentException) {
+                _effects.send(TopicEffect.QuotePreparationFailed)
+            } catch (_: IOException) {
+                _effects.send(TopicEffect.QuotePreparationFailed)
+            } finally {
+                preparingEditorQuotes = false
+            }
+        }
+    }
 
     internal val submitAcknowledgements = TopicAcknowledgements(savedStateHandle, viewModelScope)
 

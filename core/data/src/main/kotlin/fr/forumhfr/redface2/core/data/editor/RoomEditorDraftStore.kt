@@ -14,6 +14,8 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.BeginAttemptResu
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.Draft
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.DraftEntry
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.StoreWriteResult
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
+import fr.forumhfr.redface2.core.domain.editor.UnreadableInlineQuoteRequestException
 import fr.forumhfr.redface2.core.model.AuthState
 import java.io.IOException
 import java.time.Clock
@@ -57,7 +59,12 @@ class RoomEditorDraftStore @Inject constructor(
                     AttemptStatus.valueOf(checkNotNull(entity.attemptState)),
                 )
             }
-            DraftEntry(entity.toDraft(), entity.contentVersion, attempt)
+            val draft = try {
+                entity.toDraft(key)
+            } catch (error: UnreadableInlineQuoteRequestException) {
+                throw UnreadableInlineQuoteRequestException(entity.contentVersion, error)
+            }
+            DraftEntry(draft, entity.contentVersion, attempt)
         }
     }
 
@@ -121,6 +128,62 @@ class RoomEditorDraftStore @Inject constructor(
             editorDraftDao.saveUnresolved(next, expectedVersion).result(next.contentVersion)
         }
 
+    override suspend fun enqueueInlineQuoteRequest(
+        owner: String?, key: String, request: PendingInlineQuoteRequest, expectedVersion: Long,
+    ): StoreWriteResult = write(owner) {
+        if (request.key != key) return@write StoreWriteResult.Conflict
+        val previous = editorDraftDao.get(rowKey(checkNotNull(owner), key))
+        if ((previous?.contentVersion ?: 0L) != expectedVersion) return@write StoreWriteResult.Conflict
+        val composition = if (previous == null || previous.attemptState == AttemptStatus.PUBLISHED.name) {
+            Draft(body = "").toEntity(owner, key)
+        } else {
+            previous
+        }
+        val pending = composition.pendingInlineQuoteRequest?.let { PendingInlineQuoteRequestCodec.decode(it, key) }
+        val next = composition.copy(
+            pendingInlineQuoteRequest = PendingInlineQuoteRequestCodec.encode(pending?.merge(request) ?: request, key),
+            contentVersion = expectedVersion + 1,
+            updatedAt = clock.millis(),
+        )
+        editorDraftDao.mutateInlineQuoteRequest(next, previous).result(next.contentVersion)
+    }
+
+    override suspend fun consumeInlineQuoteRequest(
+        owner: String?, key: String, request: PendingInlineQuoteRequest, expectedVersion: Long, draft: Draft?,
+    ): StoreWriteResult = write(owner) {
+        if (request.key != key) return@write StoreWriteResult.Conflict
+        val previous = editorDraftDao.get(rowKey(checkNotNull(owner), key)) ?: return@write StoreWriteResult.Conflict
+        val deliveryBlocked = draft != null && previous.attemptState != null
+        if (previous.contentVersion != expectedVersion || previous.attemptState == AttemptStatus.PUBLISHED.name ||
+            deliveryBlocked
+        ) return@write StoreWriteResult.Conflict
+        val pending = previous.pendingInlineQuoteRequest?.let { PendingInlineQuoteRequestCodec.decode(it, key) }
+        if (pending != request) return@write StoreWriteResult.Conflict
+        val content = draft?.copy(pendingInlineQuoteRequest = null)?.toEntity(owner, key) ?: previous
+        val next = content.copy(
+            pendingInlineQuoteRequest = null,
+            contentVersion = expectedVersion + 1,
+            updatedAt = clock.millis(),
+        )
+        editorDraftDao.mutateInlineQuoteRequest(next, previous).result(next.contentVersion)
+    }
+
+    override suspend fun discardUnreadableInlineQuoteRequest(
+        owner: String?, key: String, expectedVersion: Long,
+    ): StoreWriteResult =
+        write(owner) {
+            val previous = editorDraftDao.get(rowKey(checkNotNull(owner), key))
+                ?: return@write StoreWriteResult.Conflict
+            if (previous.contentVersion != expectedVersion) return@write StoreWriteResult.Conflict
+            // No decoding: preserve even unknown payloads until the user explicitly discards them.
+            val next = previous.copy(
+                pendingInlineQuoteRequest = null,
+                contentVersion = previous.contentVersion + 1,
+                updatedAt = clock.millis(),
+            )
+            editorDraftDao.mutateInlineQuoteRequest(next, previous).result(next.contentVersion)
+        }
+
     override suspend fun beginAttempt(
         owner: String?,
         key: String,
@@ -156,14 +219,17 @@ class RoomEditorDraftStore @Inject constructor(
                 AttemptOutcome.PUBLISHED -> AttemptStatus.PUBLISHED.name
                 AttemptOutcome.UNCERTAIN -> AttemptStatus.UNCERTAIN.name
             }
-            editorDraftDao.finishVersioned(rowKey(token.owner, token.key), token.id, token.version, status)
-                ?.let { StoreWriteResult.Written(it) } ?: StoreWriteResult.Conflict
+            editorDraftDao.finishVersioned(
+                rowKey(token.owner, token.key), token.id, token.version, status, clock.millis(),
+            )?.let { StoreWriteResult.Written(it) } ?: StoreWriteResult.Conflict
         }
 
     override suspend fun erasePublishedContent(token: AttemptToken): StoreWriteResult =
         write(token.owner, writesContent = false) {
-            (editorDraftDao.erasePublishedContent(rowKey(token.owner, token.key), token.id, token.version) == 1)
-                .result(token.version)
+            val erased = editorDraftDao.erasePublishedContent(
+                rowKey(token.owner, token.key), token.id, token.version, clock.millis(),
+            )
+            (erased == 1).result(token.version)
         }
 
     private suspend fun write(
@@ -213,9 +279,13 @@ class RoomEditorDraftStore @Inject constructor(
         recipients = recipients,
         updatedAt = clock.millis(),
         isPrivate = isPrivate,
+        pendingInlineQuoteRequest = pendingInlineQuoteRequest?.let { PendingInlineQuoteRequestCodec.encode(it, key) },
     )
 
-    private fun EditorDraftEntity.toDraft(): Draft = Draft(body, subject, recipients, isPrivate, updatedAt)
+    private fun EditorDraftEntity.toDraft(key: String): Draft = Draft(
+        body, subject, recipients, isPrivate, updatedAt,
+        pendingInlineQuoteRequest?.let { PendingInlineQuoteRequestCodec.decode(it, key) },
+    )
     private fun rowKey(owner: String, key: String): String = "$owner|$key"
     private suspend fun activeOwnerId(): String? =
         (authRepository.observeAuthState().first() as? AuthState.Authenticated)?.pseudo?.lowercase()
