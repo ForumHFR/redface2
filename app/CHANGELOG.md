@@ -16,6 +16,14 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.69.8` — `internal` (dev) — 2026-11-08
+
+Refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)), lot R0c ([#1512](https://github.com/ForumHFR/redface2/issues/1512)) : éditeur de post ([#1567](https://github.com/ForumHFR/redface2/pull/1567)) et deux correctifs ([#1568](https://github.com/ForumHFR/redface2/pull/1568), [#1569](https://github.com/ForumHFR/redface2/pull/1569)).
+
+- **Éditeur de post** : le champ de texte appartient désormais au ViewModel. Chaque action de la barre d'outils ou smiley s'annule en un pas ; une frappe pendant un envoi armé le désarme ; les citations chargées pendant un upload s'insèrent une seule fois, après l'upload.
+- **Modification du premier post** : le corps est verrouillé tant que le texte du serveur n'est pas chargé (frappe, insertions et images refusées, envoi impossible) ; un formulaire incomplet est refusé et « Recharger » est proposé. Corrige l'écrasement du premier post par un texte partiel tapé avant le chargement.
+- **MP** : une offre de brouillon sans corps (destinataire ou sujet seuls) ne touche plus au texte en cours ; « Restaurer » est inactif pendant un envoi, dans le nouveau MP et la réponse MP.
+
 ## `0.69.7` — `internal` (dev) — 2026-11-08
 
 Refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)) : demande de citation durable ([#1553](https://github.com/ForumHFR/redface2/issues/1553) ; [#1564](https://github.com/ForumHFR/redface2/pull/1564)) et lot R0c, partie 3 ([#1512](https://github.com/ForumHFR/redface2/issues/1512) ; [#1565](https://github.com/ForumHFR/redface2/pull/1565)).
