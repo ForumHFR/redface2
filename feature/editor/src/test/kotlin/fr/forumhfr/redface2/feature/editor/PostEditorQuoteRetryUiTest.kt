@@ -75,7 +75,9 @@ class PostEditorQuoteRetryUiTest {
         compose.onNodeWithText("Ignorer la citation").performClick()
         assertEquals(
             listOf(
-                PostEditorIntent.ReloadRequested, PostEditorIntent.ReloadRequested, PostEditorIntent.PendingQuoteIgnored,
+                PostEditorIntent.ReloadRequested,
+                PostEditorIntent.ReloadRequested,
+                PostEditorIntent.PendingQuoteIgnored,
             ),
             intents,
         )
