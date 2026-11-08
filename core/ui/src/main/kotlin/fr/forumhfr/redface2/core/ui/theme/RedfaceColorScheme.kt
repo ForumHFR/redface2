@@ -4,8 +4,9 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
+import com.materialkolor.dynamiccolor.ColorSpec
+import com.materialkolor.dynamiccolor.DynamicScheme
 import com.materialkolor.hct.Hct
-import com.materialkolor.scheme.DynamicScheme
 import com.materialkolor.scheme.SchemeMonochrome
 import com.materialkolor.scheme.SchemeTonalSpot
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
@@ -179,12 +180,16 @@ private fun dynamicScheme(options: RedfaceColorSchemeOptions): DynamicScheme {
                 sourceColorHct = sourceColorHct,
                 isDark = options.darkTheme,
                 contrastLevel = options.generation.contrastLevel,
+                // Keep the 5.x colors: 6.0 may default to a newer spec (#1550; switching specs is a product choice).
+                specVersion = ColorSpec.SpecVersion.SPEC_2021,
             )
         } else {
             SchemeTonalSpot(
                 sourceColorHct = sourceColorHct,
                 isDark = options.darkTheme,
                 contrastLevel = options.generation.contrastLevel,
+                // Keep the 5.x colors: 6.0 may default to a newer spec (#1550; switching specs is a product choice).
+                specVersion = ColorSpec.SpecVersion.SPEC_2021,
             )
         }
     }
