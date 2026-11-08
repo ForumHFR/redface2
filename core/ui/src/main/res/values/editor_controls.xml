@@ -1,0 +1,31 @@
+<resources>
+    <string name="editor_format">Mise en forme</string>
+    <string name="editor_smileys">Smileys</string>
+    <string name="editor_options">Options</string>
+    <string name="editor_preview_show">Afficher l’aperçu</string>
+    <string name="editor_preview_hide">Masquer l’aperçu</string>
+    <string name="editor_header_topic">Titre et sous-catégorie</string>
+    <string name="editor_header_message">Destinataires et sujet</string>
+    <string name="editor_return">Retour</string>
+    <string name="editor_mode_expanded">Développé</string>
+    <string name="editor_mode_collapsed">Replié</string>
+    <string name="editor_event_open_details">Afficher les détails</string>
+    <string name="editor_recipient_remove">Retirer le destinataire %1$s</string>
+    <string name="editor_status_restore">Brouillon retrouvé, restaurer ou ignorer</string>
+    <string name="editor_status_poll">Sondage préservé, afficher les détails</string>
+    <plurals name="editor_status_quotes">
+        <item quantity="one">%1$d citation, ouvrir le panneau citations</item>
+        <item quantity="other">%1$d citations, ouvrir le panneau citations</item>
+    </plurals>
+    <plurals name="editor_status_recipients">
+        <item quantity="one">%1$d destinataire, gérer les destinataires</item>
+        <item quantity="other">%1$d destinataires, gérer les destinataires</item>
+    </plurals>
+    <string name="editor_event_sending">Envoi…</string>
+    <string name="editor_event_uploading">Image %1$d/%2$d…</string>
+    <string name="editor_event_already_quoted">Déjà citée</string>
+    <plurals name="editor_event_images_inserted">
+        <item quantity="one">%1$d image insérée</item>
+        <item quantity="other">%1$d images insérées</item>
+    </plurals>
+</resources>

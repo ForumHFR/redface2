@@ -1,0 +1,152 @@
+package fr.forumhfr.redface2.core.ui.editor
+
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertHasNoClickAction
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.unit.dp
+import androidx.test.core.app.ApplicationProvider
+import fr.forumhfr.redface2.core.domain.editor.EditorSession
+import fr.forumhfr.redface2.core.ui.R
+import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import org.junit.Assert.assertEquals
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+
+@OptIn(ExperimentalTestApi::class)
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34], qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
+class EditorEventControlTest {
+    @get:Rule val compose = createComposeRule()
+    private val live = SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion)
+
+    @Test
+    fun `ED45 catalogue and terminal events expose exactly one named action and their exact key`() {
+        val current = mutableStateOf<EditorEvent?>(null)
+        val actions = mutableListOf<Pair<EventKey, EditorEventAction>>()
+        compose.setContent {
+            RedfaceTheme {
+                EditorEventControl(current.value, 181.dp, { key, action -> actions += key to action })
+            }
+        }
+        val cases = listOf(
+            EditorEventContent.Problem(EditorErrors.missingSubcategory) to EditorEventAction.Complete,
+            EditorEventContent.Problem(EditorErrors.unknownRecipient) to EditorEventAction.Complete,
+            EditorEventContent.Problem(EditorErrors.quoteFetchFailed) to EditorEventAction.Details,
+            EditorEventContent.Problem(EditorErrors.formNetwork) to EditorEventAction.Details,
+            EditorEventContent.Problem(EditorErrors.empty) to EditorEventAction.Details,
+            EditorEventContent.Problem(EditorErrors.noImageReceived) to EditorEventAction.Details,
+            EditorEventContent.Information(EditorErrors.network.summary) to EditorEventAction.Dismiss,
+            EditorEventContent.Information(EditorErrors.network.summary, EditorErrors.network.detail) to
+                EditorEventAction.Details,
+            EditorEventContent.Finished(EditorErrors.network.summary) to EditorEventAction.Dismiss,
+            EditorEventContent.Finished(EditorErrors.network.summary, EditorErrors.network.detail) to
+                EditorEventAction.Details,
+        )
+        cases.forEachIndexed { index, (content, expected) ->
+            val event = controlEvent(content, index.toLong())
+            compose.runOnIdle { current.value = event }
+            compose.onAllNodes(hasClickAction()).assertCountEquals(1)
+            compose.onNode(hasClickAction()).assertIsEnabled()
+                .assert(hasContentDescription(event.summary.resolve(context) + ", " + actionLabel(expected)))
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
+                .performClick()
+            assertEquals(actionLabel(expected),
+                compose.onNode(hasClickAction()).fetchSemanticsNode().config[SemanticsActions.OnClick].label)
+            compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.Text)).assertCountEquals(0)
+            assertEquals(event.key to expected, actions.last())
+        }
+        assertEquals(cases.size, actions.size)
+    }
+
+    @Test
+    fun `ED95 permanent live node survives absence progress replacement and unrelated recompositions`() {
+        val current = mutableStateOf<EditorEvent?>(null)
+        val injectedWidth = mutableStateOf(181.dp)
+        compose.setContent {
+            RedfaceTheme { EditorEventControl(current.value, injectedWidth.value, { _, _ -> error("No action") }) }
+        }
+        val id = compose.onNode(live).fetchSemanticsNode().id
+        assertLive(id, "", LiveRegionMode.Polite)
+        compose.onAllNodes(hasClickAction()).assertCountEquals(0)
+        val start = controlEvent(EditorEventContent.InProgress(uploadText(1), UploadProgress(0, 3)))
+        compose.runOnIdle { current.value = start }
+        assertLive(id, "Image 1/3…", LiveRegionMode.Polite)
+        val update = start.copy(content = EditorEventContent.InProgress(uploadText(2), UploadProgress(1, 3)))
+        compose.runOnIdle { current.value = update }
+        assertLive(id, "Image 1/3…", LiveRegionMode.Polite)
+        compose.onNode(hasContentDescription("Image 2/3…")).assertHasNoClickAction()
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Focused))
+        compose.onAllNodes(hasClickAction()).assertCountEquals(0)
+        compose.runOnIdle { injectedWidth.value = 170.dp }
+        assertLive(id, "Image 1/3…", LiveRegionMode.Polite)
+        compose.runOnIdle {
+            current.value = start.copy(content = EditorEventContent.Problem(EditorErrors.uncertain))
+        }
+        assertLive(id, "Envoi incertain, Afficher les détails", LiveRegionMode.Assertive)
+        compose.runOnIdle {
+            current.value = start.copy(content = EditorEventContent.Finished(
+                EditorText(R.plurals.editor_event_images_inserted, listOf(3), quantity = 3),
+            ))
+        }
+        assertLive(id, "3 images insérées, Masquer", LiveRegionMode.Polite)
+        compose.runOnIdle { current.value = null }
+        assertLive(id, "", LiveRegionMode.Polite)
+        compose.onAllNodes(hasClickAction()).assertCountEquals(0)
+    }
+
+    @Test
+    fun `ED49 information problems stay polite and every delivered error remains fully named`() {
+        val current = mutableStateOf<EditorEvent?>(null)
+        compose.setContent { RedfaceTheme { EditorEventControl(current.value, 181.dp, { _, _ -> }) } }
+        editorErrorSamples.forEach { error ->
+            val event = controlEvent(EditorEventContent.Problem(error))
+            compose.runOnIdle { current.value = event }
+            val expectedMode = if (error.errorClass == EditorErrorClass.Information) {
+                LiveRegionMode.Polite
+            } else LiveRegionMode.Assertive
+            compose.onNode(live).assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, expectedMode))
+            compose.onAllNodes(hasClickAction()).assertCountEquals(1)
+            compose.onNode(hasClickAction()).assert(hasContentDescription(
+                error.summary.resolve(context) + ", " + actionLabel(requireNotNull(event.action)),
+            ))
+        }
+    }
+
+    private fun assertLive(id: Int, name: String, mode: LiveRegionMode) {
+        val node = compose.onNode(live)
+        assertEquals(id, node.fetchSemanticsNode().id)
+        node.assert(hasContentDescription(name)).assertHasNoClickAction()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, mode))
+    }
+
+    private fun actionLabel(action: EditorEventAction): String = context.getString(when (action) {
+        EditorEventAction.Complete -> R.string.editor_action_complete
+        EditorEventAction.Details -> R.string.editor_event_open_details
+        EditorEventAction.Dismiss -> R.string.editor_action_dismiss
+    })
+
+    private val context get() = ApplicationProvider.getApplicationContext<android.content.Context>()
+}
+
+internal fun controlEvent(content: EditorEventContent, occurrence: Long = 1): EditorEvent = EditorEvent(
+    EventKey(EditorSession("controls", "alice", "topic:23:42"),
+        OperationRef.Local(EditorLocalOperation.Notice, 1), occurrence),
+    content, occurrence,
+)
+
+internal fun uploadText(index: Int) = EditorText(R.string.editor_event_uploading, listOf(index, 3))

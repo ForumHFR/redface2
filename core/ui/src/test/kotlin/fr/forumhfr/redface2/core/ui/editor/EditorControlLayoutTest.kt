@@ -1,0 +1,163 @@
+package fr.forumhfr.redface2.core.ui.editor
+
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Surface
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.height
+import androidx.compose.ui.unit.width
+import com.github.takahirom.roborazzi.captureRoboImage
+import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.ui.R
+import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+
+@OptIn(ExperimentalTestApi::class)
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34], qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+class EditorControlLayoutTest {
+    @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun `ED133 delivered summaries fit text only budget under injected normal and compact constraints`() {
+        val sample = mutableStateOf(controlEvent(EditorEventContent.Problem(EditorErrors.uncertain)))
+        val height = mutableStateOf(56.dp)
+        var layout: TextLayoutResult? = null
+        compose.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, 1.3f)) {
+                RedfaceTheme(reading = ReadingDisplaySettings(fontScale = FontScalePreference.L)) {
+                    Surface {
+                        Box(Modifier.width(181.dp).height(height.value)) {
+                            EditorEventControl(sample.value, 181.dp, { _, _ -> },
+                                modifier = Modifier.testTag("control"), onSummaryTextLayout = { layout = it })
+                        }
+                    }
+                }
+            }
+        }
+        val contents = editorErrorSamples.map { EditorEventContent.Problem(it) } + listOf(
+            EditorEventContent.InProgress(EditorText(R.string.editor_event_sending)),
+            EditorEventContent.InProgress(EditorText(R.string.editor_event_uploading, listOf(10, 10))),
+            EditorEventContent.Finished(EditorText(R.plurals.editor_event_images_inserted, listOf(10), quantity = 10)),
+            EditorEventContent.Information(EditorText(R.string.editor_event_already_quoted)),
+        )
+        listOf(56.dp, 48.dp).forEach { injectedHeight ->
+            compose.runOnIdle { height.value = injectedHeight }
+            contents.forEach { content ->
+                compose.runOnIdle { sample.value = controlEvent(content) }
+                compose.waitForIdle()
+                val result = requireNotNull(layout)
+                assertEquals(1.3f, result.layoutInput.density.fontScale, 0.001f)
+                assertEquals(11f * FontScalePreference.L.factor, result.layoutInput.style.fontSize.value, 0.001f)
+                assertEquals(content.toString(), 1, result.lineCount)
+                assertFalse(content.toString(), result.isLineEllipsized(0))
+                assertEquals(result.layoutInput.text.length, result.getLineEnd(0))
+                val pixelsPerDp = result.layoutInput.density.density
+                assertTrue(result.size.width / pixelsPerDp <= EDITOR_SUMMARY_TEXT_WIDTH_DP + 0.5f)
+                val bounds = compose.onNodeWithTag("control").getUnclippedBoundsInRoot()
+                assertEquals(181f, bounds.width.value, 0.5f)
+                assertEquals(48f, bounds.height.value, 0.5f)
+                if ((content as? EditorEventContent.Problem)?.error?.cause in
+                    listOf(EditorCause.Uncertain, EditorCause.DraftWriteFailed)) {
+                    compose.onNodeWithTag("control").captureRoboImage(
+                        "build/outputs/roborazzi/editor_budget_${contents.indexOf(content)}_" +
+                            "${injectedHeight.value}.png",
+                    )
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `ED91 narrow fallback ellipsizes visually while preserving the full accessible name`() {
+        var layout: TextLayoutResult? = null
+        compose.setContent {
+            RedfaceTheme {
+                Surface {
+                    EditorEventControl(controlEvent(EditorEventContent.Problem(EditorErrors.draftWriteFailed)),
+                        width = 90.dp, onAction = { _, _ -> }, onSummaryTextLayout = { layout = it })
+                }
+            }
+        }
+        compose.waitForIdle()
+        assertTrue(requireNotNull(layout).isLineEllipsized(0))
+        compose.onNode(hasClickAction()).assert(hasContentDescription("Brouillon non écrit, Afficher les détails"))
+        compose.onAllNodes(hasClickAction()).assertCountEquals(1)
+        val bounds = compose.onNode(hasClickAction()).getUnclippedBoundsInRoot()
+        assertEquals(90f, bounds.width.value, 0.5f)
+        assertTrue(bounds.height.value >= 48f)
+        compose.onNode(hasClickAction()).captureRoboImage("build/outputs/roborazzi/editor_event_narrow.png")
+    }
+
+    @Test
+    fun `ED40 event states keep their envelope and record light dark normal compact samples`() {
+        val event = mutableStateOf<EditorEvent?>(null)
+        val dark = mutableStateOf(false)
+        val height = mutableStateOf(56.dp)
+        compose.setContent {
+            RedfaceTheme(darkTheme = dark.value) {
+                Surface {
+                    Box(Modifier.width(181.dp).height(height.value).testTag("sample")) {
+                        EditorEventControl(event.value, 181.dp, { _, _ -> })
+                    }
+                }
+            }
+        }
+        val cases = listOf(
+            null,
+            controlEvent(EditorEventContent.Problem(EditorErrors.uncertain)),
+            controlEvent(EditorEventContent.Problem(EditorErrors.missingTitle)),
+            controlEvent(EditorEventContent.InProgress(EditorText(R.string.editor_event_sending))),
+            controlEvent(EditorEventContent.InProgress(uploadText(2), UploadProgress(1, 3))),
+            controlEvent(EditorEventContent.Finished(
+                EditorText(R.plurals.editor_event_images_inserted, listOf(3), quantity = 3),
+            )),
+            controlEvent(EditorEventContent.Information(EditorText(R.string.editor_event_already_quoted))),
+        )
+        listOf(false, true).forEach { isDark ->
+            listOf(56.dp, 48.dp).forEach { injectedHeight ->
+                cases.forEachIndexed { index, sample ->
+                    compose.runOnIdle {
+                        event.value = sample
+                        dark.value = isDark
+                        height.value = injectedHeight
+                    }
+                    compose.onAllNodes(hasClickAction()).assertCountEquals(if (sample?.action == null) 0 else 1)
+                    val bounds = compose.onNodeWithTag("sample").getUnclippedBoundsInRoot()
+                    assertEquals(181f, bounds.width.value, 0.5f)
+                    assertEquals(injectedHeight.value, bounds.height.value, 0.5f)
+                    compose.onNodeWithTag("sample").captureRoboImage(
+                        "build/outputs/roborazzi/editor_event_${index}_${isDark}_${injectedHeight.value}.png",
+                    )
+                }
+            }
+        }
+    }
+}
