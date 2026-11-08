@@ -2827,6 +2827,58 @@ class TopicFormViewModelTest {
     // ──────────────────────────────────────────────────────────────────────
 
     @Test
+    fun `cancelled picker preserves the previous error body selection and effects without upload`() = runTest {
+        val diagnostics = DiagnosticsLog()
+        val uploads = FakeUploadRepository()
+        val reader = FakeImageUploadReader()
+        val viewModel = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            diagnostics = diagnostics,
+            uploadRepository = uploads,
+            imageUploadReader = reader,
+        )
+        syncBody()
+        testScheduler.advanceUntilIdle()
+        viewModel.editBody(TextFieldValue(text = "draft", selection = TextRange(1, 4)))
+        syncBody()
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(
+            TopicFormIntent.ImagePickerEventReceived(
+                ImagePickerEvent.Unavailable(
+                    ImagePickerMode.PHOTO_PICKER,
+                    ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA,
+                ),
+            ),
+        )
+        testScheduler.advanceUntilIdle()
+        assertEquals(EditorErrors.pickerAbsent, viewModel.state.value.uploadError)
+        val stateBefore = viewModel.state.value
+
+        viewModel.effects.test {
+            ImagePickerContract.entries.forEach { contract ->
+                diagnostics.clear()
+                viewModel.submit(
+                    TopicFormIntent.ImagePickerEventReceived(ImagePickerEvent.Cancelled(contract, resultCode = 0)),
+                )
+                syncBody()
+                testScheduler.advanceUntilIdle()
+
+                assertEquals(stateBefore, viewModel.state.value)
+                assertEquals("draft", viewModel.bodyFieldState.text.toString())
+                assertEquals(TextRange(1, 4), viewModel.bodyFieldState.selection)
+                assertTrue(reader.readUris.isEmpty())
+                assertEquals(0, uploads.uploadCalls)
+                assertEquals(
+                    listOf("cancelled contract=${contract.diagnosticName} resultCode=0"),
+                    diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
+                )
+                expectNoEvents()
+            }
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `empty picker result shows a banner without starting an upload`() = runTest {
         val diagnostics = DiagnosticsLog()
         val uploads = FakeUploadRepository()
@@ -2873,6 +2925,9 @@ class TopicFormViewModelTest {
             expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
+        viewModel.submit(TopicFormIntent.UploadErrorDismissed)
+        testScheduler.advanceUntilIdle()
+        assertNull(viewModel.state.value.uploadError)
     }
 
     @Test

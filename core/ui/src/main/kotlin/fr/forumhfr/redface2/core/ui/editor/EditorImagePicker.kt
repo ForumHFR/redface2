@@ -1,8 +1,13 @@
 package fr.forumhfr.redface2.core.ui.editor
 
+import android.app.Activity
 import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContract
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import fr.forumhfr.redface2.core.model.editor.ImagePickerContract
@@ -42,25 +47,25 @@ fun <T> pickedImagesForUpload(contract: ImagePickerContract, uris: List<T>): Lis
  * #1128 — shared selector for every editor. PickMultipleVisualMedia, OpenMultipleDocuments and
  * GetMultipleContents launchers all stay registered across preference changes, so a pending result
  * still reaches its callback. URI access is used immediately for upload; it does not need a
- * persistable grant. Every callback emits a structured [ImagePickerEvent.Result], including an
- * empty result; the caller owns diagnostics and decides whether an upload should start.
+ * persistable grant. Callbacks distinguish [ImagePickerEvent.Cancelled] from a successful
+ * [ImagePickerEvent.Result], including an empty success; the caller owns diagnostics and uploads.
  */
 @Composable
 fun rememberEditorImagePicker(mode: ImagePickerMode, onEvent: (ImagePickerEvent) -> Unit): () -> Unit {
     val photoPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.PickMultipleVisualMedia(MAX_IMAGES_PER_UPLOAD),
-    ) { uris ->
-        emitImagePickerResult(ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA, uris, onEvent)
+        contract = ImagePickerResultContract(ActivityResultContracts.PickMultipleVisualMedia(MAX_IMAGES_PER_UPLOAD)),
+    ) { result ->
+        emitImagePickerResult(ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA, result.resultCode, result.uris, onEvent)
     }
     val documentPicker = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenMultipleDocuments(),
-    ) { uris ->
-        emitImagePickerResult(ImagePickerContract.OPEN_MULTIPLE_DOCUMENTS, uris, onEvent)
+        contract = ImagePickerResultContract(ActivityResultContracts.OpenMultipleDocuments()),
+    ) { result ->
+        emitImagePickerResult(ImagePickerContract.OPEN_MULTIPLE_DOCUMENTS, result.resultCode, result.uris, onEvent)
     }
     val getContent = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetMultipleContents(),
-    ) { uris ->
-        emitImagePickerResult(ImagePickerContract.GET_MULTIPLE_CONTENTS, uris, onEvent)
+        contract = ImagePickerResultContract(ActivityResultContracts.GetMultipleContents()),
+    ) { result ->
+        emitImagePickerResult(ImagePickerContract.GET_MULTIPLE_CONTENTS, result.resultCode, result.uris, onEvent)
     }
     return {
         val request = imagePickRequestFor(mode)
@@ -77,6 +82,24 @@ fun rememberEditorImagePicker(mode: ImagePickerMode, onEvent: (ImagePickerEvent)
     }
 }
 
+/** Keeps AndroidX's intent, native fallbacks and URI parsing while retaining the activity result code. */
+internal class ImagePickerResultContract<I>(
+    private val delegate: ActivityResultContract<I, List<Uri>>,
+) : ActivityResultContract<I, ImagePickerActivityResult>() {
+    override fun createIntent(context: Context, input: I): Intent = delegate.createIntent(context, input)
+
+    // A synchronous value is a successful selection; null still asks the registry to launch the activity.
+    override fun getSynchronousResult(context: Context, input: I): SynchronousResult<ImagePickerActivityResult>? =
+        delegate.getSynchronousResult(context, input)?.let {
+            SynchronousResult(ImagePickerActivityResult(Activity.RESULT_OK, it.value))
+        }
+
+    override fun parseResult(resultCode: Int, intent: Intent?): ImagePickerActivityResult =
+        ImagePickerActivityResult(resultCode, delegate.parseResult(resultCode, intent))
+}
+
+internal data class ImagePickerActivityResult(val resultCode: Int, val uris: List<Uri>)
+
 /** Only the launch boundary may emit Unavailable; cancellation/result stays a different event. */
 internal fun launchEditorImagePicker(mode: ImagePickerMode, onEvent: (ImagePickerEvent) -> Unit, launch: () -> Unit) {
     try {
@@ -89,13 +112,15 @@ internal fun launchEditorImagePicker(mode: ImagePickerMode, onEvent: (ImagePicke
 /** Emits the Activity Result callback before any empty-result filtering in the editor layer. */
 internal fun <T> emitImagePickerResult(
     contract: ImagePickerContract,
+    resultCode: Int,
     uris: List<T>,
     onEvent: (ImagePickerEvent) -> Unit,
 ) {
     onEvent(
-        ImagePickerEvent.Result(
-            contract = contract,
-            uris = uris.map { it.toString() },
-        ),
+        if (resultCode == Activity.RESULT_OK) {
+            ImagePickerEvent.Result(contract = contract, uris = uris.map { it.toString() })
+        } else {
+            ImagePickerEvent.Cancelled(contract = contract, resultCode = resultCode)
+        },
     )
 }

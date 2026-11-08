@@ -946,19 +946,22 @@ class PostEditorViewModel @AssistedInject constructor(
      */
     private fun onImagePicked(uri: String) = onImagesPicked(listOf(uri))
 
-    /** #988/#1420 — records the picker boundary and surfaces a callback without images. */
+    /** #1573 — cancellation only records diagnostics; a successful empty callback retains #1128 feedback. */
     private fun onImagePickerEvent(event: ImagePickerEvent) {
         if (submission.blocksMutation) return
         diagnostics.recordImagePickerEvent(event)
-        if (event is ImagePickerEvent.Unavailable) {
-            _state.update { it.copy(uploadError = EditorErrors.pickerAbsent) }
-        }
-        if (event is ImagePickerEvent.Result) {
-            val pickedImages = pickedImagesForUpload(event.contract, event.uris)
-            val showEmptyPickerBanner = pickedImages.isEmpty() && uploadJob?.isActive != true
-            onImagesPicked(event.uris)
-            if (showEmptyPickerBanner) {
-                _state.update { it.copy(uploadError = EditorErrors.noImageReceived) }
+        when (event) {
+            is ImagePickerEvent.Launched, is ImagePickerEvent.Cancelled -> Unit
+            is ImagePickerEvent.Unavailable -> {
+                _state.update { it.copy(uploadError = EditorErrors.pickerAbsent) }
+            }
+            is ImagePickerEvent.Result -> {
+                val pickedImages = pickedImagesForUpload(event.contract, event.uris)
+                val showEmptyPickerBanner = pickedImages.isEmpty() && uploadJob?.isActive != true
+                onImagesPicked(event.uris)
+                if (showEmptyPickerBanner) {
+                    _state.update { it.copy(uploadError = EditorErrors.noImageReceived) }
+                }
             }
         }
     }

@@ -2623,6 +2623,51 @@ class PostEditorViewModelTest {
     // ----- #459 PR2 : image upload from the photo picker ---------------------
 
     @Test
+    fun `cancelled picker preserves the previous error body selection and effects without upload`() = runTest {
+        val diagnostics = DiagnosticsLog()
+        val viewModel = newReplyViewModel(
+            diagnostics = diagnostics,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("alice")),
+        )
+        settleBody()
+        viewModel.editBody(TextFieldValue(text = "draft", selection = TextRange(1, 4)))
+        settleBody()
+        viewModel.dispatch(
+            PostEditorIntent.ImagePickerEventReceived(
+                ImagePickerEvent.Unavailable(
+                    ImagePickerMode.PHOTO_PICKER,
+                    ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA,
+                ),
+            ),
+        )
+        settleBody()
+        assertEquals(EditorErrors.pickerAbsent, viewModel.state.value.uploadError)
+        val stateBefore = viewModel.state.value
+
+        viewModel.effects.test {
+            ImagePickerContract.entries.forEach { contract ->
+                diagnostics.clear()
+                viewModel.dispatch(
+                    PostEditorIntent.ImagePickerEventReceived(ImagePickerEvent.Cancelled(contract, resultCode = 0)),
+                )
+                settleBody()
+
+                assertEquals(stateBefore, viewModel.state.value)
+                assertEquals("draft", viewModel.bodyFieldState.text.toString())
+                assertEquals(TextRange(1, 4), viewModel.bodyFieldState.selection)
+                assertEquals(0, imageUploadReader.readCalls)
+                assertEquals(0, uploadRepository.uploadCalls)
+                assertEquals(
+                    listOf("cancelled contract=${contract.diagnosticName} resultCode=0"),
+                    diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
+                )
+                expectNoEvents()
+            }
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `empty picker result shows a banner without starting an upload`() = runTest {
         val diagnostics = DiagnosticsLog()
         val viewModel = newReplyViewModel(
@@ -2662,6 +2707,9 @@ class PostEditorViewModelTest {
             expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
+        viewModel.dispatch(PostEditorIntent.UploadErrorDismissed)
+        settleBody()
+        assertNull(viewModel.state.value.uploadError)
     }
 
     @Test
