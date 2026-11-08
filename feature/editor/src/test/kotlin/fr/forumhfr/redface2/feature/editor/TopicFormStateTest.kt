@@ -32,7 +32,7 @@ class TopicFormStateTest {
             page = null,
             numreponse = null,
             subject = TextFieldValue("Titre"),
-            draft = TextFieldValue("Corps"),
+            bodyText = "Corps",
             hasSubcategorySelect = hasSubcategorySelect,
             selectedSubcat = selectedSubcat,
         )
@@ -46,7 +46,7 @@ class TopicFormStateTest {
             page = 1,
             numreponse = 1,
             subject = TextFieldValue("Titre"),
-            draft = TextFieldValue("Corps"),
+            bodyText = "Corps",
             selectedSubcat = 401,
             isUploading = isUploading,
         )
@@ -76,7 +76,7 @@ class TopicFormStateTest {
     @Test
     fun `New blocks submit when the draft is blank even on a cat without sub-category`() {
         val state = newState(hasSubcategorySelect = false, selectedSubcat = null)
-            .copy(draft = TextFieldValue(""))
+            .copy(bodyText = "")
         assertFalse(state.canSubmit)
     }
 

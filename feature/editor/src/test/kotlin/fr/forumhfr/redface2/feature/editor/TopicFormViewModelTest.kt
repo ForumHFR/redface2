@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.feature.editor
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
@@ -77,6 +79,8 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.toEditorError
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancel
@@ -85,11 +89,15 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -114,6 +122,8 @@ class TopicFormViewModelTest {
     private val favoriteRepository = FakeHfrFavoriteSmileyRepository()
     private val localCollections = FakeSmileyLocalCollections()
 
+    private val viewModels = mutableListOf<TopicFormViewModel>()
+
     @Before
     fun setUp() {
         Dispatchers.setMain(dispatcher)
@@ -121,6 +131,7 @@ class TopicFormViewModelTest {
 
     @After
     fun tearDown() {
+        viewModels.forEach { it.viewModelScope.cancel() }
         Dispatchers.resetMain()
     }
 
@@ -129,10 +140,12 @@ class TopicFormViewModelTest {
         for (creating in listOf(false, true)) {
             topicFormRepository.formFailure = java.io.IOException("offline")
             val vm = if (creating) newTopicViewModel(entrySubcat = SAMPLE_SUBCAT) else newViewModel()
+            syncBody()
             testScheduler.advanceUntilIdle()
             assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
             topicFormRepository.formFailure = null
             vm.submit(TopicFormIntent.ReloadRequested)
+            syncBody()
             testScheduler.advanceUntilIdle()
             assertNull(vm.state.value.submitError)
             vm.viewModelScope.cancel()
@@ -146,13 +159,16 @@ class TopicFormViewModelTest {
         for (creating in listOf(false, true)) {
             draftStore = FakeEditorDraftStore()
             val vm = if (creating) newTopicViewModel(entrySubcat = SAMPLE_SUBCAT) else newViewModel()
+            syncBody()
             testScheduler.advanceUntilIdle()
             vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("title")))
-            vm.submit(TopicFormIntent.ContentChanged(TextFieldValue("body")))
+            vm.editBody(TextFieldValue("body"))
             vm.submit(TopicFormIntent.SubmitClicked())
+            syncBody()
             testScheduler.advanceUntilIdle()
             assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
             vm.submit(TopicFormIntent.ReloadRequested)
+            syncBody()
             testScheduler.advanceUntilIdle()
             assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
             vm.viewModelScope.cancel()
@@ -161,10 +177,17 @@ class TopicFormViewModelTest {
 
     @Test
     fun `new upload clears the old failure only after passing the upload guard`() = runTest {
+        val diagnostics = DiagnosticsLog()
         val uploads = FakeUploadRepository().apply { uploadException = UploadException.TooLarge(1) }
-        val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT, uploadRepository = uploads)
+        val vm = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            diagnostics = diagnostics,
+            uploadRepository = uploads,
+        )
+        syncBody()
         testScheduler.advanceUntilIdle()
         vm.submit(TopicFormIntent.ImagesPicked(listOf("content://first")))
+        syncBody()
         testScheduler.advanceUntilIdle()
         assertEquals(EditorErrors.tooLarge, vm.state.value.uploadError)
         uploads.uploadException = null
@@ -172,14 +195,19 @@ class TopicFormViewModelTest {
         uploads.uploadGate = gate
         vm.submit(TopicFormIntent.ImagesPicked(listOf("content://second")))
         assertNull(vm.state.value.uploadError)
+        val pickerEventsBefore = diagnostics.entries.value.count { it.tag == "ImagePicker" }
         vm.submit(TopicFormIntent.ImagePickerEventReceived(
             ImagePickerEvent.Unavailable(ImagePickerMode.PHOTO_PICKER, ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA),
         ))
+        assertEquals(pickerEventsBefore + 1, diagnostics.entries.value.count { it.tag == "ImagePicker" })
+        assertEquals(EditorErrors.pickerAbsent, vm.state.value.uploadError)
         vm.submit(TopicFormIntent.ImagesPicked(List(11) { "content://ignored/$it" }))
         assertEquals(EditorErrors.pickerAbsent, vm.state.value.uploadError)
         gate.complete(Unit)
+        syncBody()
         testScheduler.advanceUntilIdle()
         vm.submit(TopicFormIntent.ImagesPicked(listOf("content://third")))
+        syncBody()
         testScheduler.advanceUntilIdle()
         assertNull(vm.state.value.uploadError)
         assertEquals(3, uploads.uploadCalls)
@@ -192,14 +220,16 @@ class TopicFormViewModelTest {
             failOnCall = 2
         }
         val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT, uploadRepository = uploads)
+        syncBody()
         testScheduler.advanceUntilIdle()
         vm.submit(TopicFormIntent.ImagesPicked(listOf("content://pick/1", "content://pick/2", "content://pick/3")))
+        syncBody()
         testScheduler.advanceUntilIdle()
         assertEquals(2, uploads.uploadCalls)
-        assertEquals(1, Regex("\\[img]").findAll(vm.state.value.draft.text).count())
+        assertEquals(1, Regex("\\[img]").findAll(vm.state.value.bodyText).count())
         val expected = EditorErrors.stopped(EditorErrors.tooLarge, UploadProgress(1, 3))
         assertEquals(expected, vm.state.value.uploadError)
-        vm.submit(TopicFormIntent.ContentChanged(TextFieldValue(vm.state.value.draft.text + "typed")))
+        vm.editBody(TextFieldValue(vm.state.value.bodyText + "typed"))
         assertEquals(expected, vm.state.value.uploadError)
         assertFalse(vm.state.value.isUploading)
     }
@@ -208,15 +238,19 @@ class TopicFormViewModelTest {
     fun `ED131 errors survive body selection subject selection subcategory options and insertions`() = runTest {
         topicFormRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.EmptyMessage)
         val vm = newViewModel()
+        syncBody()
         testScheduler.advanceUntilIdle()
         vm.submit(TopicFormIntent.SubmitClicked())
+        syncBody()
         testScheduler.advanceUntilIdle()
         vm.submit(TopicFormIntent.ImagePickerEventReceived(
             ImagePickerEvent.Unavailable(ImagePickerMode.PHOTO_PICKER, ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA),
         ))
+        vm.editBody(TextFieldValue("body"))
+        vm.editBody(TextFieldValue("body", TextRange(0, 2)))
+        assertEquals(EditorErrors.empty, vm.state.value.submitError)
+        assertEquals(EditorErrors.pickerAbsent, vm.state.value.uploadError)
         listOf(
-            TopicFormIntent.ContentChanged(TextFieldValue("body")),
-            TopicFormIntent.ContentChanged(TextFieldValue("body", TextRange(0, 2))),
             TopicFormIntent.SubjectChanged(TextFieldValue("title")),
             TopicFormIntent.SubjectChanged(TextFieldValue("title", TextRange(0, 2))),
             TopicFormIntent.SubcatSelected(SAMPLE_SUBCAT),
@@ -238,7 +272,7 @@ class TopicFormViewModelTest {
         viewModel.state.test {
             val hydrated = awaitHydratedState()
             assertEquals("Sample first post title", hydrated.subject.text)
-            assertEquals("Body BBCode goes here.", hydrated.draft.text)
+            assertEquals("Body BBCode goes here.", hydrated.bodyText)
             assertEquals(SAMPLE_SUBCAT, hydrated.selectedSubcat)
             assertEquals(2, hydrated.subcategoryChoices.size)
             assertTrue(hydrated.signatureEnabled)
@@ -267,13 +301,13 @@ class TopicFormViewModelTest {
             awaitHydratedState()
             // User retypes the subject AND the body in their own words.
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("User-overridden subject")))
-            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("user override", TextRange(13))))
+            viewModel.editBody(TextFieldValue("user override", TextRange(13)))
             viewModel.submit(TopicFormIntent.MsgIconSelected(6))
             // Submit triggers InvalidHashCheck → silent refetch with the same fake form.
             viewModel.submit(TopicFormIntent.SubmitClicked())
             val finalState = expectMostRecentItem()
             assertEquals("User-overridden subject", finalState.subject.text)
-            assertEquals("user override", finalState.draft.text)
+            assertEquals("user override", finalState.bodyText)
             assertEquals(6, finalState.msgIcon)
             // The user-facing banner stays armed on InvalidHashCheck even though
             // the refetch is silent — without this the user has no way to know
@@ -296,7 +330,7 @@ class TopicFormViewModelTest {
         viewModel.state.test {
             awaitHydratedState()
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Edited title")))
-            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Edited body", TextRange(11))))
+            viewModel.editBody(TextFieldValue("Edited body", TextRange(11)))
             viewModel.submit(TopicFormIntent.SubcatSelected(SAMPLE_OTHER_SUBCAT))
             viewModel.submit(TopicFormIntent.ToggleSignature(enabled = false))
             viewModel.submit(TopicFormIntent.ToggleSmileyDisabled(disabled = true))
@@ -347,9 +381,10 @@ class TopicFormViewModelTest {
             skipItems(1)
             // Form arrives.
             gate.complete(Unit)
+            syncBody()
             val hydrated = expectMostRecentItem()
             assertEquals("My pre-fetch subject", hydrated.subject.text)
-            assertEquals("Body BBCode goes here.", hydrated.draft.text)
+            assertEquals("Body BBCode goes here.", hydrated.bodyText)
             // Subject is not flagged as server-hydrated (user edited it first),
             // but draft is. The two flags are independent now.
             assertFalse(hydrated.subjectHydratedFromServer)
@@ -368,12 +403,13 @@ class TopicFormViewModelTest {
             assertFalse(blank.subjectHydratedFromServer)
             assertFalse(blank.draftHydratedFromServer)
             // User types into the content while the fetch is still in flight.
-            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("pre-fetch draft", TextRange(15))))
+            viewModel.editBody(TextFieldValue("pre-fetch draft", TextRange(15)))
             skipItems(1)
             gate.complete(Unit)
+            syncBody()
             val hydrated = expectMostRecentItem()
             assertEquals("Sample first post title", hydrated.subject.text)
-            assertEquals("pre-fetch draft", hydrated.draft.text)
+            assertEquals("pre-fetch draft", hydrated.bodyText)
             assertTrue(hydrated.subjectHydratedFromServer)
             assertFalse(hydrated.draftHydratedFromServer)
             cancelAndIgnoreRemainingEvents()
@@ -388,12 +424,12 @@ class TopicFormViewModelTest {
             awaitHydratedState()
             // User overwrites both fields after the initial hydration.
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("user subject after hydrate")))
-            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("user draft after hydrate", TextRange(24))))
+            viewModel.editBody(TextFieldValue("user draft after hydrate", TextRange(24)))
             // Submit → InvalidHashCheck → silent refetch.
             viewModel.submit(TopicFormIntent.SubmitClicked())
             val finalState = expectMostRecentItem()
             assertEquals("user subject after hydrate", finalState.subject.text)
-            assertEquals("user draft after hydrate", finalState.draft.text)
+            assertEquals("user draft after hydrate", finalState.bodyText)
             cancelAndIgnoreRemainingEvents()
         }
         assertEquals(2, topicFormRepository.formFetches)
@@ -410,7 +446,7 @@ class TopicFormViewModelTest {
             // subject / draft stay empty — the create-topic flow has nothing
             // to hydrate from the server.
             assertEquals("", final.subject.text)
-            assertEquals("", final.draft.text)
+            assertEquals("", final.bodyText)
             // Hydration flags are locked to `true` from the start so a silent
             // refetch can't clobber the user's saisie.
             assertTrue(final.subjectHydratedFromServer)
@@ -451,7 +487,7 @@ class TopicFormViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
         viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
-        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
+        viewModel.editBody(TextFieldValue("Body", TextRange(4)))
         viewModel.submit(TopicFormIntent.SubmitClicked())
         // No POST happened because canSubmit returned false.
         assertEquals(0, topicFormRepository.newTopicSubmitCalls)
@@ -493,7 +529,7 @@ class TopicFormViewModelTest {
             assertNull(hydrated.selectedSubcat)
             assertFalse(hydrated.hasSubcategorySelect)
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Sujet IA")))
-            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Corps IA", TextRange(8))))
+            viewModel.editBody(TextFieldValue("Corps IA", TextRange(8)))
             // canSubmit must be true WITHOUT any SubcatSelected.
             val ready = expectMostRecentItem()
             assertTrue("cat-without-subcat must enable submit with subcat=0", ready.canSubmit)
@@ -520,7 +556,7 @@ class TopicFormViewModelTest {
             assertTrue("default fixture exposes a subcat select", hydrated.hasSubcategorySelect)
             assertNull(hydrated.selectedSubcat)
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
-            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
+            viewModel.editBody(TextFieldValue("Body", TextRange(4)))
             val blocked = expectMostRecentItem()
             assertFalse("missing subcat selection must keep submit disabled", blocked.canSubmit)
             cancelAndIgnoreRemainingEvents()
@@ -542,7 +578,7 @@ class TopicFormViewModelTest {
         viewModel.state.test {
             expectMostRecentItem() // drain hydration
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic 2E")))
-            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body 2E", TextRange(7))))
+            viewModel.editBody(TextFieldValue("Body 2E", TextRange(7)))
             // User overrides the entry chip to a different sub-category.
             viewModel.submit(TopicFormIntent.SubcatSelected(SAMPLE_OTHER_SUBCAT))
             viewModel.submit(TopicFormIntent.ToggleSignature(enabled = true))
@@ -575,7 +611,7 @@ class TopicFormViewModelTest {
         }
         viewModel.effects.test {
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
-            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
+            viewModel.editBody(TextFieldValue("Body", TextRange(4)))
             viewModel.submit(TopicFormIntent.SubcatSelected(SAMPLE_OTHER_SUBCAT))
             viewModel.submit(TopicFormIntent.SubmitClicked())
             val effect = awaitItem() as TopicFormEffect.NewTopicCreated
@@ -606,7 +642,7 @@ class TopicFormViewModelTest {
         }
         viewModel.effects.test {
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Mon nouveau sujet")))
-            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
+            viewModel.editBody(TextFieldValue("Body", TextRange(4)))
             viewModel.submit(TopicFormIntent.SubcatSelected(SAMPLE_OTHER_SUBCAT))
             viewModel.submit(TopicFormIntent.SubmitClicked())
             val effect = awaitItem() as TopicFormEffect.NewTopicCreated
@@ -624,11 +660,11 @@ class TopicFormViewModelTest {
         viewModel.state.test {
             expectMostRecentItem() // drain initial hydration
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("user subject after hydrate")))
-            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("user draft after hydrate", TextRange(24))))
+            viewModel.editBody(TextFieldValue("user draft after hydrate", TextRange(24)))
             viewModel.submit(TopicFormIntent.SubmitClicked())
             val finalState = expectMostRecentItem()
             assertEquals("user subject after hydrate", finalState.subject.text)
-            assertEquals("user draft after hydrate", finalState.draft.text)
+            assertEquals("user draft after hydrate", finalState.bodyText)
             val submitError = finalState.submitError
             assertTrue(
                 "expected submitError to be Hfr(InvalidHashCheck), was $submitError",
@@ -657,7 +693,7 @@ class TopicFormViewModelTest {
         }
         // User still tries to submit — the VM short-circuits without calling the repo.
         viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
-        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
+        viewModel.editBody(TextFieldValue("Body", TextRange(4)))
         viewModel.submit(TopicFormIntent.SubcatSelected(SAMPLE_SUBCAT))
         viewModel.submit(TopicFormIntent.SubmitClicked())
         assertEquals(0, topicFormRepository.newTopicSubmitCalls)
@@ -677,15 +713,18 @@ class TopicFormViewModelTest {
         val favorite = wiki.copy(source = EditorSmileySource.HFR_FAVORITE)
         favoriteRepository.addResult = HfrFavoriteSmileyMutationResult.Success(listOf(favorite))
         val viewModel = newViewModel()
+        syncBody()
         testScheduler.advanceUntilIdle()
         val fetches = topicFormRepository.formFetches
         viewModel.smileyPicker.open()
         viewModel.smileyPicker.onFavoriteClicked(wiki)
+        syncBody()
         testScheduler.advanceUntilIdle()
         assertEquals(listOf(wiki.token), favoriteRepository.added)
         assertEquals(listOf(favorite), (viewModel.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys)
 
         viewModel.smileyPicker.onFavoriteClicked(wiki)
+        syncBody()
         testScheduler.advanceUntilIdle()
         assertEquals(listOf(wiki.token), favoriteRepository.removed)
         assertEquals(listOf("alice", "alice"), favoriteRepository.owners)
@@ -704,11 +743,14 @@ class TopicFormViewModelTest {
             topicFormRepository.newTopicFormResult =
                 topicFormRepository.newTopicFormResult.copy(favoriteSmileys = listOf(favorite))
             val viewModel = if (createTopic) newTopicViewModel(SAMPLE_SUBCAT) else newViewModel()
+            syncBody()
             testScheduler.advanceUntilIdle()
             assertTrue(viewModel.state.value.isLoadingForm)
             localCollections.snapshot.value = SmileyLocalCollectionSnapshot("bob")
+            syncBody()
             testScheduler.advanceUntilIdle()
             gate.complete(Unit)
+            syncBody()
             testScheduler.advanceUntilIdle()
 
             assertFalse(viewModel.state.value.isLoadingForm)
@@ -717,6 +759,7 @@ class TopicFormViewModelTest {
             assertTrue(open.favoriteSmileys.isEmpty())
             assertNull(open.onFavoriteChange)
             viewModel.smileyPicker.onFavoriteClicked(favorite)
+            syncBody()
             testScheduler.advanceUntilIdle()
             assertTrue(favoriteRepository.owners.isEmpty())
         }
@@ -729,15 +772,17 @@ class TopicFormViewModelTest {
         )
         topicFormRepository.formResult = topicFormRepository.formResult.copy(favoriteSmileys = listOf(favorite))
         val viewModel = newViewModel()
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         viewModel.smileyPicker.open()
         val open = viewModel.smileyPicker.state.value as SmileyPickerState.Open
         assertEquals(listOf(favorite), open.favoriteSmileys)
-        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("hello", TextRange(5))))
+        viewModel.editBody(TextFieldValue("hello", TextRange(5)))
         viewModel.submit(TopicFormIntent.SmileySelected(open.favoriteSmileys.single().token))
 
-        assertEquals("hello [:fictif espace:3] ", viewModel.state.value.draft.text)
+        syncBody()
+        assertEquals("hello [:fictif espace:3] ", viewModel.state.value.bodyText)
         assertEquals(SmileyPickerState.Hidden, viewModel.smileyPicker.state.value)
         assertEquals(0, smileyRepository.callCount)
     }
@@ -751,6 +796,7 @@ class TopicFormViewModelTest {
         topicFormRepository.formResult = topicFormRepository.formResult.copy(favoriteSmileys = listOf(favoriteA))
         topicFormRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
         val viewModel = newViewModel()
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         viewModel.smileyPicker.open()
@@ -758,6 +804,7 @@ class TopicFormViewModelTest {
 
         topicFormRepository.formResult = topicFormRepository.formResult.copy(favoriteSmileys = listOf(favoriteB))
         viewModel.submit(TopicFormIntent.SubmitClicked())
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         assertEquals(2, topicFormRepository.formFetches)
@@ -765,6 +812,7 @@ class TopicFormViewModelTest {
 
         topicFormRepository.formResult = topicFormRepository.formResult.copy(favoriteSmileys = emptyList())
         viewModel.submit(TopicFormIntent.SubmitClicked())
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         assertEquals(3, topicFormRepository.formFetches)
@@ -834,17 +882,16 @@ class TopicFormViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
         // Move caret to end of draft, open preview, then pick a smiley.
-        viewModel.submit(
-            TopicFormIntent.ContentChanged(TextFieldValue("hello", TextRange(5))),
-        )
+        viewModel.editBody(TextFieldValue("hello", TextRange(5)))
         viewModel.submit(TopicFormIntent.TogglePreview)
         viewModel.smileyPicker.open()
         viewModel.submit(TopicFormIntent.SmileySelected(":jap:"))
+        syncBody()
         viewModel.state.test {
             val state = expectMostRecentItem()
             // Surrounding-spaces convention from `insertBbcodeToken` is honoured.
-            assertEquals("hello :jap: ", state.draft.text)
-            assertEquals(12, state.draft.selection.start)
+            assertEquals("hello :jap: ", state.bodyText)
+            assertEquals(12, viewModel.bodyFieldState.selection.start)
             // Preview was visible : the new draft text must be re-parsed.
             val firstBlock = state.preview.blocks.first() as PostBlock.Paragraph
             val firstInline = firstBlock.inlines.first() as PostInline.Text
@@ -879,15 +926,16 @@ class TopicFormViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
 
-        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("image: ", TextRange(7))))
+        viewModel.editBody(TextFieldValue("image: ", TextRange(7)))
         viewModel.submit(TopicFormIntent.TogglePreview)
         viewModel.submit(TopicFormIntent.ImageUrlInserted("https://example.com/pic.gif"))
+        syncBody()
 
         viewModel.state.test {
             val state = expectMostRecentItem()
             val expected = "image: [img]https://example.com/pic.gif[/img]"
-            assertEquals(expected, state.draft.text)
-            assertEquals(expected.length, state.draft.selection.start)
+            assertEquals(expected, state.bodyText)
+            assertEquals(expected.length, viewModel.bodyFieldState.selection.start)
             val block = state.preview.blocks.single() as PostBlock.Paragraph
             val inline = block.inlines.single() as PostInline.Text
             assertEquals(expected, inline.value)
@@ -903,10 +951,10 @@ class TopicFormViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
 
-        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("image: ", TextRange(7))))
+        viewModel.editBody(TextFieldValue("image: ", TextRange(7)))
         viewModel.submit(TopicFormIntent.ImageUrlInserted("javascript:alert(1)"))
 
-        assertEquals("image: ", viewModel.state.value.draft.text)
+        assertEquals("image: ", viewModel.state.value.bodyText)
     }
 
     @Test
@@ -922,12 +970,13 @@ class TopicFormViewModelTest {
             cancelAndIgnoreRemainingEvents()
         }
 
-        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("image: ", TextRange(7))))
+        viewModel.editBody(TextFieldValue("image: ", TextRange(7)))
         viewModel.submit(TopicFormIntent.ImageUrlInserted("https://example.com/pic.gif"))
 
         val expected =
             "image: [url=https://example.com/pic.gif][img]https://example.com/pic.gif[/img][/url]"
-        assertEquals(expected, viewModel.state.value.draft.text)
+        syncBody()
+        assertEquals(expected, viewModel.state.value.bodyText)
     }
 
     // ----- #312 : confirmation avant publication ------------------------------
@@ -1002,7 +1051,7 @@ class TopicFormViewModelTest {
         viewModel.state.test {
             expectMostRecentItem() // drain hydration
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
-            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
+            viewModel.editBody(TextFieldValue("Body", TextRange(4)))
             viewModel.submit(TopicFormIntent.SubmitClicked())
             cancelAndIgnoreRemainingEvents()
         }
@@ -1026,7 +1075,7 @@ class TopicFormViewModelTest {
         viewModel.state.test {
             expectMostRecentItem() // drain hydration
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
-            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
+            viewModel.editBody(TextFieldValue("Body", TextRange(4)))
             viewModel.submit(TopicFormIntent.SubmitClicked())
             val parked = expectMostRecentItem()
             assertTrue("the confirmation dialog must be armed", parked.showSubmitConfirmation)
@@ -1050,13 +1099,13 @@ class TopicFormViewModelTest {
         viewModel.state.test {
             expectMostRecentItem() // drain hydration
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
-            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
+            viewModel.editBody(TextFieldValue("Body", TextRange(4)))
             viewModel.submit(TopicFormIntent.SubmitClicked())
             viewModel.submit(TopicFormIntent.SubmitConfirmationDismissed)
             val finalState = expectMostRecentItem()
             assertFalse(finalState.showSubmitConfirmation)
             assertEquals("the subject survives the dismissal", "Topic", finalState.subject.text)
-            assertEquals("the draft survives the dismissal", "Body", finalState.draft.text)
+            assertEquals("the draft survives the dismissal", "Body", finalState.bodyText)
             cancelAndIgnoreRemainingEvents()
         }
         assertEquals("dismiss must not POST anything", 0, topicFormRepository.newTopicSubmitCalls)
@@ -1074,7 +1123,7 @@ class TopicFormViewModelTest {
         viewModel.state.test {
             expectMostRecentItem() // drain hydration
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
-            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
+            viewModel.editBody(TextFieldValue("Body", TextRange(4)))
             viewModel.submit(TopicFormIntent.SubmitClicked())
             val finalState = expectMostRecentItem()
             assertFalse("invalid form must not raise the dialog", finalState.showSubmitConfirmation)
@@ -1092,7 +1141,7 @@ class TopicFormViewModelTest {
         viewModel.state.test {
             expectMostRecentItem() // drain hydration
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
-            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
+            viewModel.editBody(TextFieldValue("Body", TextRange(4)))
             viewModel.submit(TopicFormIntent.SubmitClicked())
             val parked = expectMostRecentItem()
             assertTrue("the confirmation dialog must be armed", parked.showSubmitConfirmation)
@@ -1131,7 +1180,7 @@ class TopicFormViewModelTest {
         viewModel.state.test {
             expectMostRecentItem() // drain hydration
             viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Topic")))
-            viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Body", TextRange(4))))
+            viewModel.editBody(TextFieldValue("Body", TextRange(4)))
             viewModel.submit(TopicFormIntent.SubmitClicked())
             val parked = expectMostRecentItem()
             assertTrue("the confirmation dialog must be armed", parked.showSubmitConfirmation)
@@ -1149,15 +1198,863 @@ class TopicFormViewModelTest {
         assertFalse(viewModel.state.value.isSubmitting)
     }
 
+    // #1512 — the live buffer wins over the descending UI projection on every boundary.
+    @Test
+    fun submitUsesLiveBodyBeforeMirrorEmission() = runTest {
+        val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("title")))
+        vm.bodyFieldState.edit { append("live body") }
+        assertEquals("", vm.state.value.bodyText)
+        assertFalse(vm.state.value.canSubmit)
+        vm.submit(TopicFormIntent.SubmitClicked())
+        testScheduler.runCurrent()
+        assertEquals("live body", topicFormRepository.lastSubmittedBbcode)
+        assertEquals(1, topicFormRepository.newTopicSubmitCalls)
+    }
+
+    @Test
+    fun submitRejectsBlankLiveBodyWhenMirrorStillAllowsIt() = runTest {
+        val vm = newViewModel()
+        assertTrue(vm.state.value.canSubmit)
+        vm.bodyFieldState.edit { replace(0, length, "") }
+        assertTrue(vm.state.value.bodyText.isNotBlank())
+        vm.submit(TopicFormIntent.SubmitClicked())
+        testScheduler.runCurrent()
+        assertEquals(0, draftStore.beginCalls)
+        assertEquals(0, topicFormRepository.submitCalls)
+    }
+
+    @Test
+    fun armingAndConfirmingValidateLiveBodyBeforeMirrorEmission() = runTest {
+        val vm = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            userPreferencesRepository = FakeUserPreferencesRepository(confirmBeforePosting = true),
+        )
+        vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("title")))
+        vm.bodyFieldState.edit { append("live body") }
+        vm.submit(TopicFormIntent.SubmitClicked())
+        val token = vm.state.value.armToken
+        assertTrue(token != null)
+        syncBody()
+        assertEquals("the descending mirror must not disarm", token, vm.state.value.armToken)
+        testScheduler.advanceTimeBy(500)
+        vm.bodyFieldState.edit { replace(0, length, "confirmed body") }
+        assertEquals("live body", vm.state.value.bodyText)
+        vm.submit(TopicFormIntent.SubmitConfirmed(token))
+        testScheduler.runCurrent()
+        assertEquals("confirmed body", topicFormRepository.lastSubmittedBbcode)
+        assertEquals(1, topicFormRepository.newTopicSubmitCalls)
+    }
+
+    @Test
+    fun confirmationRejectsBlankLiveBody() = runTest {
+        val vm = newViewModel(
+            userPreferencesRepository = FakeUserPreferencesRepository(confirmBeforePosting = true),
+        )
+        vm.submit(TopicFormIntent.SubmitClicked())
+        val token = vm.state.value.armToken
+        testScheduler.advanceTimeBy(500)
+        vm.bodyFieldState.edit { replace(0, length, "") }
+        vm.submit(TopicFormIntent.SubmitConfirmed(token))
+        testScheduler.runCurrent()
+        assertEquals(0, draftStore.beginCalls)
+        assertEquals(0, topicFormRepository.submitCalls)
+    }
+
+    @Test
+    fun submitFreezesBodyTitleSubcategoryAndOptionsBeforePersistence() = runTest {
+        topicFormRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        val gate = CompletableDeferred<Unit>()
+        draftStore.beginGate = gate
+        val vm = newViewModel()
+        vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("frozen title")))
+        vm.submit(TopicFormIntent.SubcatSelected(SAMPLE_OTHER_SUBCAT))
+        vm.submit(TopicFormIntent.ToggleSignature(false))
+        vm.submit(TopicFormIntent.ToggleSmileyDisabled(true))
+        vm.submit(TopicFormIntent.ToggleEmailNotification(true))
+        vm.submit(TopicFormIntent.MsgIconSelected(6))
+        vm.bodyFieldState.edit { replace(0, length, "frozen body") }
+        vm.submit(TopicFormIntent.SubmitClicked())
+        assertTrue(vm.state.value.isSubmitting)
+        vm.editBody(TextFieldValue("late input"))
+        vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("late title")))
+        vm.submit(TopicFormIntent.SubcatSelected(SAMPLE_SUBCAT))
+        vm.submit(TopicFormIntent.ToggleSignature(true))
+        vm.submit(TopicFormIntent.ToggleSmileyDisabled(false))
+        vm.submit(TopicFormIntent.ToggleEmailNotification(false))
+        vm.submit(TopicFormIntent.MsgIconSelected(1))
+        gate.complete(Unit)
+        testScheduler.runCurrent()
+        assertEquals("frozen body", vm.bodyFieldState.text.toString())
+        assertEquals("frozen body", topicFormRepository.lastSubmittedBbcode)
+        assertEquals("frozen title", topicFormRepository.lastSubmittedSubject)
+        assertEquals(SAMPLE_OTHER_SUBCAT, topicFormRepository.lastSubmittedSubcat)
+        assertEquals(ReplyFormOptions(false, true, true), topicFormRepository.lastSubmittedOptions)
+        assertEquals("6", topicFormRepository.lastSubmittedForm?.msgIcon)
+        val saved = draftStore.saved.getValue(EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE))
+        assertEquals("frozen body", saved.body)
+        assertEquals("frozen title", saved.subject)
+    }
+
+    @Test
+    fun autosaveReadsLiveBodyAtDeadline() = runTest {
+        val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        testScheduler.advanceTimeBy(800)
+        testScheduler.runCurrent()
+        assertEquals(0, draftStore.saveCount)
+        vm.editBody(TextFieldValue("first"))
+        testScheduler.advanceTimeBy(749)
+        vm.bodyFieldState.edit { replace(0, length, "latest") }
+        assertEquals("first", vm.state.value.bodyText)
+        testScheduler.advanceTimeBy(1)
+        testScheduler.runCurrent()
+        assertEquals("latest", draftStore.saved[EditorDraftKey.newTopic(SAMPLE_CAT)]?.body)
+    }
+
+    @Test
+    fun selectionChangeDoesNotAutosave() = runTest {
+        val vm = newViewModel()
+        vm.editBody(TextFieldValue("body"))
+        testScheduler.advanceUntilIdle()
+        val writes = draftStore.saveCount
+        vm.bodyFieldState.edit { selection = TextRange(1, 3) }
+        syncBody()
+        testScheduler.advanceUntilIdle()
+        assertEquals(writes, draftStore.saveCount)
+        assertEquals(TextRange(1, 3), vm.bodyFieldState.selection)
+    }
+
+    @Test
+    fun closeFlushesLiveBodyBeforeMirrorEmission() = runTest {
+        val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        vm.bodyFieldState.edit { append("last keystroke") }
+        assertEquals("", vm.state.value.bodyText)
+        vm.submit(TopicFormIntent.CloseRequested)
+        assertEquals(TopicFormEffect.CloseCommitted, vm.effects.first())
+        assertEquals("last keystroke", draftStore.saved[EditorDraftKey.newTopic(SAMPLE_CAT)]?.body)
+    }
+
+    @Test
+    @OptIn(ExperimentalFoundationApi::class)
+    fun uncertainAttemptRestoresIntoStableBufferWithoutIdenticalAutosave() = runTest {
+        topicFormRepository.newTopicSubmitResult = NewTopicSubmitResult.Failure(ReplyFailureReason.Unknown)
+        val original = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        original.submit(TopicFormIntent.SubjectChanged(TextFieldValue("uncertain title")))
+        original.editBody(TextFieldValue("uncertain body"))
+        original.submit(TopicFormIntent.SubmitClicked())
+        testScheduler.advanceUntilIdle()
+        original.viewModelScope.cancel()
+        val writes = draftStore.saveCount
+        val restored = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        val field = restored.bodyFieldState
+        syncBody()
+        assertTrue(field === restored.bodyFieldState)
+        assertFalse(field.undoState.canUndo)
+        assertEquals("uncertain body", field.text.toString())
+        assertEquals(TextRange(14), field.selection)
+        assertEquals("uncertain title", restored.state.value.subject.text)
+        assertEquals(EditorErrors.uncertain, restored.state.value.submitError)
+        assertNull(restored.state.value.restorableDraft)
+        testScheduler.advanceTimeBy(800)
+        testScheduler.runCurrent()
+        assertEquals(writes, draftStore.saveCount)
+    }
+
+    @Test
+    fun restoreReplacesUntouchedSeed() = runTest {
+        val vm = editWithRestoreOffer()
+        assertRestoreAndSingleUndo(vm, TextFieldValue("seed", TextRange(1, 3)), "draft")
+    }
+
+    @Test
+    fun restoreReplacesBlankField() = runTest {
+        val vm = editWithRestoreOffer()
+        assertRestoreAndSingleUndo(vm, TextFieldValue("  \n", TextRange(1)), "draft")
+    }
+
+    @Test
+    fun restoreReplacesBlankFieldWhenSeedEmpty() = runTest {
+        draftStore.preload(EditorDraftKey.newTopic(SAMPLE_CAT), EditorDraftStore.Draft(body = "draft"))
+        val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        assertRestoreAndSingleUndo(vm, TextFieldValue("  ", TextRange(2)), "draft")
+    }
+
+    @Test
+    fun restoreKeepsTextTypedAfterSeed() = runTest {
+        val vm = editWithRestoreOffer()
+        assertRestoreAndSingleUndo(vm, TextFieldValue("seed suffix", TextRange(1)), "draft\n\nsuffix")
+    }
+
+    @Test
+    fun restoreTreatsBlankSuffixAsUntouchedSeed() = runTest {
+        val vm = editWithRestoreOffer()
+        assertRestoreAndSingleUndo(vm, TextFieldValue("seed  \n", TextRange(4)), "draft")
+    }
+
+    @Test
+    fun restoreTrimsTrailingWhitespaceBeforeSeparator() = runTest {
+        draftStore.preload(EditorDraftKey.newTopic(SAMPLE_CAT), EditorDraftStore.Draft(body = "draft"))
+        val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        assertRestoreAndSingleUndo(vm, TextFieldValue("typed \n\n", TextRange(2)), "typed\n\ndraft")
+    }
+
+    @Test
+    fun restoreAppendsAfterTypedTextWhenSeedEmpty() = runTest {
+        draftStore.preload(EditorDraftKey.newTopic(SAMPLE_CAT), EditorDraftStore.Draft(body = "draft"))
+        val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        assertRestoreAndSingleUndo(vm, TextFieldValue("typed  \n", TextRange(1, 3)), "typed\n\ndraft")
+        assertEquals("", vm.state.value.draftHydratedContent)
+    }
+
+    @Test
+    fun restoreAppendsWhenSeedEditedInside() = runTest {
+        val vm = editWithRestoreOffer()
+        assertRestoreAndSingleUndo(vm, TextFieldValue("seXd  \n", TextRange(2)), "seXd\n\ndraft")
+    }
+
+    @Test
+    fun restoreIdenticalOfferedBodyRestoresTitleWithoutDuplication() = runTest {
+        topicFormRepository.formResult = topicFormRepository.formResult.copy(subject = "", initialContent = "seed")
+        draftStore.preload(
+            EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE),
+            EditorDraftStore.Draft(body = "seed", subject = "restored title"),
+        )
+        val vm = newViewModel()
+        assertEquals("seed", vm.state.value.restorableDraft)
+        vm.submit(TopicFormIntent.DraftRestoreRequested)
+        assertEquals("seed", vm.bodyFieldState.text.toString())
+        assertEquals(TextRange(4), vm.bodyFieldState.selection)
+        assertEquals("restored title", vm.state.value.subject.text)
+    }
+
+    @Test
+    fun restoreTitleOnlyOfferKeepsNonBlankLiveTitle() = runTest {
+        topicFormRepository.formResult = topicFormRepository.formResult.copy(
+            subject = "live title", initialContent = "seed",
+        )
+        for (offeredBody in listOf("", "   ")) {
+            draftStore = FakeEditorDraftStore()
+            draftStore.preload(
+                EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE),
+                EditorDraftStore.Draft(body = offeredBody, subject = "stored title"),
+            )
+            val vm = newViewModel()
+            vm.editBody(TextFieldValue("seed", TextRange(1, 3)))
+            assertEquals(offeredBody, vm.state.value.restorableDraft)
+            vm.submit(TopicFormIntent.DraftRestoreRequested)
+            assertEquals("seed", vm.bodyFieldState.text.toString())
+            assertEquals(TextRange(1, 3), vm.bodyFieldState.selection)
+            assertEquals("live title", vm.state.value.subject.text)
+            assertNull(vm.state.value.restorableDraft)
+            vm.viewModelScope.cancel()
+        }
+    }
+
+    @Test
+    @OptIn(ExperimentalFoundationApi::class)
+    fun titleOnlyRestoreAfterHydrationKeepsBodyAndSingleUndoInBothModes() = runTest {
+        topicFormRepository.formResult = topicFormRepository.formResult.copy(subject = "", initialContent = "seed")
+        for (creating in listOf(false, true)) {
+            for (offeredBody in listOf("", "   ")) {
+                draftStore = FakeEditorDraftStore()
+                val key = if (creating) {
+                    EditorDraftKey.newTopic(SAMPLE_CAT)
+                } else {
+                    EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE)
+                }
+                draftStore.preload(key, EditorDraftStore.Draft(body = offeredBody, subject = "restored title"))
+                val vm = if (creating) newTopicViewModel(entrySubcat = SAMPLE_SUBCAT) else newViewModel()
+                val seed = if (creating) "" else "seed"
+                assertFalse(vm.state.value.isLoadingForm)
+                assertTrue(vm.state.value.draftHydratedFromServer)
+                assertEquals(seed, vm.bodyFieldState.text.toString())
+                assertEquals(offeredBody, vm.state.value.restorableDraft)
+                assertFalse(vm.bodyFieldState.undoState.canUndo)
+                val typed = TextFieldValue("$seed suffix", TextRange(1, 3))
+                vm.editBody(typed)
+                assertTrue(vm.bodyFieldState.undoState.canUndo)
+
+                vm.submit(TopicFormIntent.DraftRestoreRequested)
+                syncBody()
+                assertEquals(typed.text, vm.bodyFieldState.text.toString())
+                assertEquals(typed.selection, vm.bodyFieldState.selection)
+                assertEquals(seed, vm.state.value.draftHydratedContent)
+                assertTrue(vm.state.value.draftHydratedFromServer)
+                assertEquals("restored title", vm.state.value.subject.text)
+                assertNull(vm.state.value.restorableDraft)
+                assertNull(vm.state.value.restorableSubject)
+                assertTrue(vm.bodyFieldState.undoState.canUndo)
+                vm.bodyFieldState.undoState.undo()
+                assertEquals(seed, vm.bodyFieldState.text.toString())
+                assertEquals(TextRange(seed.length), vm.bodyFieldState.selection)
+                assertFalse(vm.bodyFieldState.undoState.canUndo)
+                vm.viewModelScope.cancel()
+            }
+        }
+    }
+
+    @Test
+    fun restoreIdenticalLiveBodyDoesNotDuplicateIt() = runTest {
+        val vm = editWithRestoreOffer()
+        vm.editBody(TextFieldValue("draft", TextRange(1, 3)))
+        vm.submit(TopicFormIntent.DraftRestoreRequested)
+        assertEquals("draft", vm.bodyFieldState.text.toString())
+        assertEquals(TextRange(5), vm.bodyFieldState.selection)
+        assertEquals("seed", vm.state.value.draftHydratedContent)
+    }
+
+    @Test
+    fun editReopenRestoreYieldsSingleCopy() = runTest {
+        topicFormRepository.formResult = topicFormRepository.formResult.copy(initialContent = "seed")
+        val original = newViewModel()
+        original.editBody(TextFieldValue("saved revision"))
+        original.submit(TopicFormIntent.CloseRequested)
+        assertEquals(TopicFormEffect.CloseCommitted, original.effects.first())
+        original.viewModelScope.cancel()
+        val reopened = newViewModel()
+        assertEquals("saved revision", reopened.state.value.restorableDraft)
+        assertRestoreAndSingleUndo(reopened, TextFieldValue("seed", TextRange(4)), "saved revision")
+    }
+
+    @Test
+    fun lateHydrationChecksLiveBodyBeforeMirrorEmission() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        topicFormRepository.formGate = gate
+        val vm = newViewModel()
+        vm.bodyFieldState.edit { append("typed before form") }
+        assertEquals("", vm.state.value.bodyText)
+        gate.complete(Unit)
+        testScheduler.runCurrent()
+        assertEquals("typed before form", vm.bodyFieldState.text.toString())
+        assertEquals(topicFormRepository.formResult.subject, vm.state.value.subject.text)
+        assertFalse(vm.state.value.draftHydratedFromServer)
+        assertEquals("", vm.state.value.draftHydratedContent)
+    }
+
+    @Test
+    @OptIn(ExperimentalFoundationApi::class)
+    fun lateHydrationPreservesExistingBlankInputUndoHistory() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        topicFormRepository.formGate = gate
+        val vm = newViewModel()
+        vm.editBody(TextFieldValue("  ", TextRange(2)))
+        gate.complete(Unit)
+        testScheduler.runCurrent()
+        assertEquals(topicFormRepository.formResult.initialContent, vm.bodyFieldState.text.toString())
+        vm.bodyFieldState.undoState.undo()
+        assertEquals("  ", vm.bodyFieldState.text.toString())
+    }
+
+    @Test
+    @OptIn(ExperimentalFoundationApi::class)
+    fun restoreDisabledWhileSeedFormLoads() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        topicFormRepository.formGate = gate
+        draftStore.preload(
+            EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE),
+            EditorDraftStore.Draft(body = "draft", subject = "draft title"),
+        )
+        val vm = newViewModel()
+        val loading = vm.state.value
+        val initialSelection = vm.bodyFieldState.selection
+        assertTrue(loading.isLoadingForm)
+        assertFalse(loading.draftHydratedFromServer)
+        assertFalse(loading.subjectHydratedFromServer)
+        assertEquals("draft", loading.restorableDraft)
+        assertEquals("draft title", loading.restorableSubject)
+
+        vm.submit(TopicFormIntent.DraftRestoreRequested)
+        syncBody()
+        assertEquals(loading, vm.state.value)
+        assertEquals("", vm.bodyFieldState.text.toString())
+        assertEquals(initialSelection, vm.bodyFieldState.selection)
+        assertFalse(vm.bodyFieldState.undoState.canUndo)
+        assertEquals(0, draftStore.saveCount)
+
+        gate.complete(Unit)
+        syncBody()
+        val seed = topicFormRepository.formResult.initialContent
+        assertFalse(vm.state.value.isLoadingForm)
+        assertTrue(vm.state.value.draftHydratedFromServer)
+        assertTrue(vm.state.value.subjectHydratedFromServer)
+        assertEquals(seed, vm.bodyFieldState.text.toString())
+        assertEquals(seed, vm.state.value.draftHydratedContent)
+        assertEquals("draft", vm.state.value.restorableDraft)
+        assertEquals("draft title", vm.state.value.restorableSubject)
+        val hydratedSelection = vm.bodyFieldState.selection
+
+        vm.submit(TopicFormIntent.DraftRestoreRequested)
+        syncBody()
+        assertEquals("draft", vm.bodyFieldState.text.toString())
+        assertEquals(topicFormRepository.formResult.subject, vm.state.value.subject.text)
+        assertEquals(seed, vm.state.value.draftHydratedContent)
+        assertNull(vm.state.value.restorableDraft)
+        assertEquals(TextRange(5), vm.bodyFieldState.selection)
+        vm.bodyFieldState.undoState.undo()
+        assertEquals(seed, vm.bodyFieldState.text.toString())
+        assertEquals(hydratedSelection, vm.bodyFieldState.selection)
+    }
+
+    @Test
+    fun restoreAllowedWithEmptySeedAfterFormFailure() = runTest {
+        topicFormRepository.formFailure = java.io.IOException("offline")
+        draftStore.preload(
+            EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE),
+            EditorDraftStore.Draft(body = "D"),
+        )
+        val vm = newViewModel()
+        assertFalse(vm.state.value.isLoadingForm)
+        assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
+        assertEquals("", vm.state.value.draftHydratedContent)
+        assertEquals("", vm.bodyFieldState.text.toString())
+        assertEquals("D", vm.state.value.restorableDraft)
+
+        vm.submit(TopicFormIntent.DraftRestoreRequested)
+        syncBody()
+        assertEquals("D", vm.bodyFieldState.text.toString())
+        assertEquals("", vm.state.value.draftHydratedContent)
+        assertTrue(vm.state.value.draftHydratedFromServer)
+        assertNull(vm.state.value.restorableDraft)
+        assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
+
+        // The restore decision survives erasure: only the blank title may hydrate on reload.
+        vm.editBody(TextFieldValue(""))
+        assertEquals("", vm.bodyFieldState.text.toString())
+        topicFormRepository.formFailure = null
+        vm.submit(TopicFormIntent.ReloadRequested)
+        syncBody()
+        testScheduler.advanceUntilIdle()
+        assertFalse(vm.state.value.isLoadingForm)
+        assertNull(vm.state.value.submitError)
+        assertEquals("", vm.bodyFieldState.text.toString())
+        assertEquals("", vm.state.value.draftHydratedContent)
+        assertTrue(vm.state.value.draftHydratedFromServer)
+        assertEquals("Sample first post title", vm.state.value.subject.text)
+        assertNull(vm.state.value.restorableDraft)
+    }
+
+    @Test
+    fun titleOnlyRestoreAfterFormFailurePreservesHydrationPolicyInBothModes() = runTest {
+        for (creating in listOf(false, true)) {
+            for (offeredBody in listOf("", "   ")) {
+                topicFormRepository.formFailure = java.io.IOException("offline")
+                draftStore = FakeEditorDraftStore()
+                val key = if (creating) {
+                    EditorDraftKey.newTopic(SAMPLE_CAT)
+                } else {
+                    EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE)
+                }
+                draftStore.preload(key, EditorDraftStore.Draft(body = offeredBody, subject = "restored title"))
+                val vm = if (creating) newTopicViewModel(entrySubcat = SAMPLE_SUBCAT) else newViewModel()
+                assertFalse(vm.state.value.isLoadingForm)
+                assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
+                assertEquals(offeredBody, vm.state.value.restorableDraft)
+                assertEquals("", vm.bodyFieldState.text.toString())
+                // New topics start with hydration disabled; edit-first-post still awaits its server body.
+                assertEquals(creating, vm.state.value.draftHydratedFromServer)
+
+                vm.submit(TopicFormIntent.DraftRestoreRequested)
+                syncBody()
+                assertEquals("restored title", vm.state.value.subject.text)
+                assertEquals("", vm.bodyFieldState.text.toString())
+                assertEquals(TextRange(0), vm.bodyFieldState.selection)
+                assertEquals("", vm.state.value.draftHydratedContent)
+                assertEquals(creating, vm.state.value.draftHydratedFromServer)
+                assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
+                assertNull(vm.state.value.restorableDraft)
+                assertNull(vm.state.value.restorableSubject)
+
+                topicFormRepository.formFailure = null
+                vm.submit(TopicFormIntent.ReloadRequested)
+                syncBody()
+                testScheduler.advanceUntilIdle()
+                val expectedBody = if (creating) "" else topicFormRepository.formResult.initialContent
+                assertEquals(expectedBody, vm.bodyFieldState.text.toString())
+                assertEquals(expectedBody, vm.state.value.draftHydratedContent)
+                assertTrue(vm.state.value.draftHydratedFromServer)
+                assertEquals("restored title", vm.state.value.subject.text)
+                assertFalse(vm.state.value.isLoadingForm)
+                assertNull(vm.state.value.submitError)
+                vm.viewModelScope.cancel()
+            }
+        }
+    }
+
+    @Test
+    fun delayedDraftOfferDoesNotReplaceLiveTyping() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        draftStore.loadGate = gate
+        draftStore.preload(
+            EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE),
+            EditorDraftStore.Draft(body = "stored body", subject = "stored title"),
+        )
+        val vm = newViewModel()
+        vm.bodyFieldState.edit { append("typed before load") }
+        gate.complete(Unit)
+        testScheduler.runCurrent()
+        assertNull(vm.state.value.restorableDraft)
+        assertEquals("typed before load", vm.bodyFieldState.text.toString())
+        assertEquals("", vm.state.value.draftHydratedContent)
+    }
+
+    @Test
+    fun typingConsumedBeforeInitialDraftReadCompletesIsAutosavedInBothModes() = runTest {
+        for (creating in listOf(false, true)) {
+            val gate = CompletableDeferred<Unit>()
+            draftStore = FakeEditorDraftStore().apply { loadGate = gate }
+            val key = if (creating) {
+                EditorDraftKey.newTopic(SAMPLE_CAT)
+            } else {
+                EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE)
+            }
+            draftStore.preload(key, EditorDraftStore.Draft(body = "stored body", subject = "stored title"))
+            val vm = if (creating) newTopicViewModel(entrySubcat = SAMPLE_SUBCAT) else newViewModel()
+            assertEquals(1, draftStore.loadCalls)
+            vm.editBody(TextFieldValue("typed before load"))
+            syncBody()
+            // The mirror already advanced previousBody, but the submission binding is not initialized yet.
+            assertEquals("typed before load", vm.state.value.bodyText)
+            assertFalse(gate.isCompleted)
+            assertEquals(0, draftStore.saveCount)
+            assertEquals("stored body", draftStore.saved[key]?.body)
+
+            gate.complete(Unit)
+            syncBody()
+            assertNull(vm.state.value.restorableDraft)
+            assertEquals("typed before load", vm.bodyFieldState.text.toString())
+            assertEquals("", vm.state.value.draftHydratedContent)
+            testScheduler.advanceTimeBy(800)
+            testScheduler.runCurrent()
+            assertEquals("typed before load", draftStore.saved[key]?.body)
+            assertEquals(1, draftStore.saveCount)
+            vm.viewModelScope.cancel()
+        }
+    }
+
+    @Test
+    fun formArrivalComparesOfferWithLiveBodyBeforeMirrorEmission() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        topicFormRepository.formGate = gate
+        draftStore.preload(
+            EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE),
+            EditorDraftStore.Draft(body = "stored body", subject = topicFormRepository.formResult.subject),
+        )
+        val vm = newViewModel()
+        vm.bodyFieldState.edit { append("stored body") }
+        assertEquals("", vm.state.value.bodyText)
+        gate.complete(Unit)
+        testScheduler.runCurrent()
+        assertNull(vm.state.value.restorableDraft)
+        assertEquals("stored body", vm.bodyFieldState.text.toString())
+        assertEquals("", vm.state.value.draftHydratedContent)
+    }
+
+    @Test
+    fun seedDoesNotChangeOnRefetchOrRestore() = runTest {
+        val vm = editWithRestoreOffer()
+        topicFormRepository.formResult = topicFormRepository.formResult.copy(initialContent = "refetched seed")
+        vm.submit(TopicFormIntent.ReloadRequested)
+        testScheduler.runCurrent()
+        assertEquals("seed", vm.state.value.draftHydratedContent)
+        assertEquals("seed", vm.bodyFieldState.text.toString())
+        vm.submit(TopicFormIntent.DraftRestoreRequested)
+        assertEquals("draft", vm.bodyFieldState.text.toString())
+        assertEquals("seed", vm.state.value.draftHydratedContent)
+    }
+
+    @Test
+    fun serverHydrationDoesNotAutosaveAnIdenticalDraft() = runTest {
+        val vm = newViewModel()
+        syncBody()
+        testScheduler.advanceTimeBy(800)
+        testScheduler.runCurrent()
+        assertEquals(topicFormRepository.formResult.initialContent, vm.state.value.bodyText)
+        assertEquals(0, draftStore.saveCount)
+        assertEquals(0, draftStore.writes)
+    }
+
+    @Test
+    fun seedAutosaveNeverOverwritesOfferedDraft() = runTest {
+        val vm = editWithRestoreOffer()
+        val key = EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE)
+        syncBody()
+        testScheduler.advanceTimeBy(800)
+        testScheduler.runCurrent()
+        assertEquals("seed", vm.state.value.bodyText)
+        assertEquals("draft", vm.state.value.restorableDraft)
+        assertEquals("draft", draftStore.saved[key]?.body)
+        assertEquals(0, draftStore.saveCount)
+    }
+
+    @Test
+    fun pendingTitleAutosaveCannotWriteServerSeedOverOfferedDraft() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        topicFormRepository.formGate = gate
+        val key = EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE)
+        draftStore.preload(key, EditorDraftStore.Draft(body = "draft", subject = "draft title"))
+        val vm = newViewModel()
+        vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("typed title")))
+        testScheduler.advanceTimeBy(300)
+        gate.complete(Unit)
+        syncBody()
+        testScheduler.advanceTimeBy(800)
+        testScheduler.runCurrent()
+        assertEquals(topicFormRepository.formResult.initialContent, vm.bodyFieldState.text.toString())
+        assertEquals("draft", vm.state.value.restorableDraft)
+        assertEquals("draft", draftStore.saved[key]?.body)
+        assertEquals("draft title", draftStore.saved[key]?.subject)
+        assertEquals(0, draftStore.saveCount)
+    }
+
+    @Test
+    fun bodyMutationsAreBlockedDuringUploadButHeadersAndCallbackAreAccepted() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val uploads = FakeUploadRepository().apply { uploadGate = gate }
+        draftStore.preload(EditorDraftKey.newTopic(SAMPLE_CAT), EditorDraftStore.Draft(body = "draft"))
+        val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT, uploadRepository = uploads)
+        vm.editBody(TextFieldValue("typed", TextRange(2, 4)))
+        vm.submit(TopicFormIntent.ImagesPicked(listOf("content://pick/1")))
+        assertTrue(vm.state.value.isUploading)
+        vm.submit(TopicFormIntent.DraftRestoreRequested)
+        vm.submit(TopicFormIntent.ToolbarActionClicked(BbcodeAction.Quote))
+        vm.submit(TopicFormIntent.SmileySelected(":jap:"))
+        vm.submit(TopicFormIntent.ImageUrlInserted("https://example.com/blocked.png"))
+        vm.submit(TopicFormIntent.ImagesPicked(listOf("content://ignored")))
+        vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("accepted title")))
+        vm.submit(TopicFormIntent.SubcatSelected(SAMPLE_OTHER_SUBCAT))
+        val signatureEnabled = !vm.state.value.signatureEnabled
+        vm.submit(TopicFormIntent.ToggleSignature(signatureEnabled))
+        vm.editBody(TextFieldValue("blocked"))
+        assertEquals("typed", vm.bodyFieldState.text.toString())
+        assertEquals(TextRange(2, 4), vm.bodyFieldState.selection)
+        assertEquals("draft", vm.state.value.restorableDraft)
+        assertEquals("accepted title", vm.state.value.subject.text)
+        assertEquals(SAMPLE_OTHER_SUBCAT, vm.state.value.selectedSubcat)
+        assertEquals(signatureEnabled, vm.state.value.signatureEnabled)
+        assertEquals(1, uploads.uploadCalls)
+        gate.complete(Unit)
+        syncBody()
+        assertTrue(vm.bodyFieldState.text.contains("[img]"))
+        assertEquals("draft", vm.state.value.restorableDraft)
+        assertFalse(vm.state.value.isUploading)
+    }
+
+    @Test
+    fun formHydratesFirstPostDuringUploadBeforeCallbackInsertsAtSeedEnd() = runTest {
+        val formGate = CompletableDeferred<Unit>()
+        val uploadCompletion = CompletableDeferred<Unit>()
+        topicFormRepository.formGate = formGate
+        val seed = topicFormRepository.formResult.initialContent
+        val uploads = FakeUploadRepository().apply { uploadGate = uploadCompletion }
+        val vm = newViewModel(uploadRepository = uploads)
+        vm.submit(TopicFormIntent.ImagesPicked(listOf("content://pick/1")))
+        assertTrue(vm.state.value.isLoadingForm)
+        assertTrue(vm.state.value.isUploading)
+        assertEquals(1, uploads.uploadCalls)
+        assertEquals("", vm.bodyFieldState.text.toString())
+
+        formGate.complete(Unit)
+        syncBody()
+        assertFalse(vm.state.value.isLoadingForm)
+        assertTrue(vm.state.value.isUploading)
+        assertTrue(vm.state.value.draftHydratedFromServer)
+        assertEquals(seed, vm.bodyFieldState.text.toString())
+        assertEquals(TextRange(seed.length), vm.bodyFieldState.selection)
+        assertEquals(seed, vm.state.value.draftHydratedContent)
+
+        uploadCompletion.complete(Unit)
+        syncBody()
+        val imageUrl = "https://rehost.diberie.com/Picture/Get/f/1"
+        // Hydration parks the caret at the end; the first completed upload adds no leading newline.
+        val expected = "$seed[img]$imageUrl[/img]"
+        assertEquals(expected, vm.bodyFieldState.text.toString())
+        assertEquals(TextRange(expected.length), vm.bodyFieldState.selection)
+        assertEquals(seed, vm.state.value.draftHydratedContent)
+        assertFalse(vm.state.value.isUploading)
+    }
+
+    @Test
+    @OptIn(ExperimentalFoundationApi::class)
+    fun restoreWhileArmedDisarmsThenRestoresAndRejectsTheOldConfirmation() = runTest {
+        topicFormRepository.formResult = topicFormRepository.formResult.copy(initialContent = "seed")
+        draftStore.preload(
+            EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE),
+            EditorDraftStore.Draft(body = "draft"),
+        )
+        val vm = newViewModel(
+            userPreferencesRepository = FakeUserPreferencesRepository(confirmBeforePosting = true),
+        )
+        vm.bodyFieldState.edit { selection = TextRange(1, 3) }
+        vm.submit(TopicFormIntent.SubmitClicked())
+        val token = requireNotNull(vm.state.value.armToken)
+        assertTrue(vm.state.value.showSubmitConfirmation)
+
+        vm.submit(TopicFormIntent.DraftRestoreRequested)
+        assertNull(vm.state.value.armToken)
+        assertFalse(vm.state.value.showSubmitConfirmation)
+        assertEquals("draft", vm.bodyFieldState.text.toString())
+        assertEquals(TextRange(5), vm.bodyFieldState.selection)
+        assertEquals("seed", vm.state.value.draftHydratedContent)
+        assertNull(vm.state.value.restorableDraft)
+        testScheduler.advanceTimeBy(400)
+        vm.submit(TopicFormIntent.SubmitConfirmed(token))
+        testScheduler.runCurrent()
+        assertEquals(0, topicFormRepository.submitCalls)
+        vm.bodyFieldState.undoState.undo()
+        assertEquals("seed", vm.bodyFieldState.text.toString())
+        assertEquals(TextRange(1, 3), vm.bodyFieldState.selection)
+    }
+
+    private fun editWithRestoreOffer(): TopicFormViewModel {
+        topicFormRepository.formResult = topicFormRepository.formResult.copy(initialContent = "seed")
+        draftStore.preload(
+            EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE),
+            EditorDraftStore.Draft(body = "draft"),
+        )
+        return newViewModel()
+    }
+
+    @OptIn(ExperimentalFoundationApi::class)
+    private fun assertRestoreAndSingleUndo(vm: TopicFormViewModel, before: TextFieldValue, expected: String) {
+        vm.editBody(before)
+        val seed = vm.state.value.draftHydratedContent
+        vm.submit(TopicFormIntent.DraftRestoreRequested)
+        assertEquals(expected, vm.bodyFieldState.text.toString())
+        assertEquals(TextRange(expected.length), vm.bodyFieldState.selection)
+        assertEquals(seed, vm.state.value.draftHydratedContent)
+        assertNull(vm.state.value.restorableDraft)
+        assertTrue(vm.bodyFieldState.undoState.canUndo)
+        vm.bodyFieldState.undoState.undo()
+        assertEquals(before.text, vm.bodyFieldState.text.toString())
+        assertEquals(before.selection, vm.bodyFieldState.selection)
+    }
+
+    @Test
+    fun previewIsClearedWhenHiddenAndRecomputedWhenReopened() = runTest {
+        val vm = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT,
+            defaultDispatcher = StandardTestDispatcher(testScheduler),
+        )
+        vm.editBody(TextFieldValue("old"))
+        vm.submit(TopicFormIntent.TogglePreview)
+        testScheduler.runCurrent()
+        assertEquals(previewParser.parsePreview("old"), vm.state.value.preview)
+        vm.submit(TopicFormIntent.TogglePreview)
+        assertEquals(PostContent(emptyList()), vm.state.value.preview)
+        vm.editBody(TextFieldValue("new"))
+        vm.submit(TopicFormIntent.TogglePreview)
+        assertEquals(PostContent(emptyList()), vm.state.value.preview)
+        testScheduler.runCurrent()
+        assertEquals(previewParser.parsePreview("new"), vm.state.value.preview)
+        vm.submit(TopicFormIntent.TogglePreview)
+        vm.submit(TopicFormIntent.TogglePreview)
+        testScheduler.runCurrent()
+        assertEquals(previewParser.parsePreview("new"), vm.state.value.preview)
+    }
+
+    @Test
+    fun previewDiscardsResultAfterEdit() = previewDiscardsStaleResult(hide = false)
+
+    @Test
+    fun previewDiscardsResultAfterHide() = previewDiscardsStaleResult(hide = true)
+
+    private fun previewDiscardsStaleResult(hide: Boolean) = runTest {
+        val started = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val executor = Executors.newSingleThreadExecutor()
+        val parserDispatcher = executor.asCoroutineDispatcher()
+        val oldPreview = previewParser.parsePreview("old")
+        val newPreview = previewParser.parsePreview("new")
+        val parser = BbcodePreviewParser { text ->
+            if (text == "old") {
+                started.countDown()
+                check(release.await(5, TimeUnit.SECONDS)) { "preview barrier timed out" }
+                oldPreview
+            } else {
+                newPreview
+            }
+        }
+        val vm = newTopicViewModel(
+            entrySubcat = SAMPLE_SUBCAT, previewParser = parser, defaultDispatcher = parserDispatcher,
+        )
+        val published = mutableListOf<PostContent>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+            vm.state.collect { published += it.preview }
+        }
+        try {
+            vm.editBody(TextFieldValue("old"))
+            vm.submit(TopicFormIntent.TogglePreview)
+            testScheduler.runCurrent()
+            assertTrue("parse must run off Main", started.await(5, TimeUnit.SECONDS))
+            if (hide) {
+                vm.submit(TopicFormIntent.TogglePreview)
+            } else {
+                // No notification: the final live-buffer check must reject the old result itself.
+                vm.bodyFieldState.edit { replace(0, length, "new") }
+            }
+            release.countDown()
+            executor.submit {}.get(5, TimeUnit.SECONDS)
+            testScheduler.runCurrent()
+            assertFalse("old parse must never publish", oldPreview in published)
+            if (hide) {
+                assertFalse(vm.state.value.isPreviewVisible)
+                assertEquals(PostContent(emptyList()), vm.state.value.preview)
+            } else {
+                syncBody()
+                executor.submit {}.get(5, TimeUnit.SECONDS)
+                testScheduler.runCurrent()
+                assertEquals(newPreview, vm.state.value.preview)
+            }
+        } finally {
+            release.countDown()
+            vm.viewModelScope.cancel()
+            parserDispatcher.close()
+            assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS))
+        }
+    }
+
+    @Test
+    @OptIn(ExperimentalFoundationApi::class)
+    fun formattingSmileysQuotesAndImageUrlsEachUseOneUndoableEdit() = runTest {
+        val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        for (intent in listOf(
+            TopicFormIntent.ToolbarActionClicked(BbcodeAction.Bold),
+            TopicFormIntent.ToolbarActionClicked(BbcodeAction.Quote),
+            TopicFormIntent.SmileySelected(":jap:"),
+            TopicFormIntent.ImageUrlInserted("https://example.com/image.png"),
+        )) {
+            vm.editBody(TextFieldValue("before selected after", TextRange(7, 15)))
+            vm.submit(intent)
+            assertTrue(intent.toString(), vm.bodyFieldState.text.toString() != "before selected after")
+            vm.bodyFieldState.undoState.undo()
+            assertEquals(intent.toString(), "before selected after", vm.bodyFieldState.text.toString())
+            assertEquals(intent.toString(), TextRange(7, 15), vm.bodyFieldState.selection)
+        }
+    }
+
+    @Test
+    @OptIn(ExperimentalFoundationApi::class)
+    fun uploadedImageUsesOneUndoableEdit() = runTest {
+        val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        vm.editBody(TextFieldValue("before selected after", TextRange(7, 15)))
+        vm.submit(TopicFormIntent.ImagesPicked(listOf("content://pick/1")))
+        syncBody()
+        assertTrue(vm.bodyFieldState.text.contains("[img]"))
+        vm.bodyFieldState.undoState.undo()
+        assertEquals("before selected after", vm.bodyFieldState.text.toString())
+        assertEquals(TextRange(7, 15), vm.bodyFieldState.selection)
+    }
+
     // ----- #405 : draft autosave / restore -----------------------------------
 
     @Test
     fun `New autosave persists subject and body under the newTopic key`() = runTest {
         val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("My title")))
-        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("My body")))
+        viewModel.editBody(TextFieldValue("My body"))
         testScheduler.advanceTimeBy(800L)
         testScheduler.runCurrent()
 
@@ -1174,15 +2071,17 @@ class TopicFormViewModelTest {
             EditorDraftStore.Draft(body = "rescued body", subject = "rescued title"),
         )
         val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        syncBody()
         testScheduler.advanceUntilIdle()
         assertEquals("rescued body", viewModel.state.value.restorableDraft)
         assertEquals("rescued title", viewModel.state.value.restorableSubject)
-        assertEquals("draft is not auto-applied", "", viewModel.state.value.draft.text)
+        assertEquals("draft is not auto-applied", "", viewModel.state.value.bodyText)
 
         viewModel.submit(TopicFormIntent.DraftRestoreRequested)
+        syncBody()
         testScheduler.advanceUntilIdle()
 
-        assertEquals("rescued body", viewModel.state.value.draft.text)
+        assertEquals("rescued body", viewModel.state.value.bodyText)
         assertEquals("rescued title", viewModel.state.value.subject.text)
         assertNull(viewModel.state.value.restorableDraft)
     }
@@ -1199,6 +2098,7 @@ class TopicFormViewModelTest {
             entrySubcat = SAMPLE_SUBCAT,
             savedStateHandle = savedStateHandle,
         )
+        syncBody()
         testScheduler.advanceUntilIdle()
         assertEquals("rescued body", first.state.value.restorableDraft)
         assertNull(savedStateHandle.get<String>("draft_restore_offer_fingerprint"))
@@ -1207,12 +2107,13 @@ class TopicFormViewModelTest {
             entrySubcat = SAMPLE_SUBCAT,
             savedStateHandle = savedStateHandle,
         )
+        syncBody()
         testScheduler.advanceUntilIdle()
         assertEquals("rescued body", recreated.state.value.restorableDraft)
         assertEquals("rescued title", recreated.state.value.restorableSubject)
 
         recreated.submit(TopicFormIntent.SubjectChanged(TextFieldValue("new live title")))
-        recreated.submit(TopicFormIntent.ContentChanged(TextFieldValue("new live body")))
+        recreated.editBody(TextFieldValue("new live body"))
         testScheduler.advanceTimeBy(800L)
         testScheduler.runCurrent()
         assertEquals("new live body", draftStore.saved[key]?.body)
@@ -1220,6 +2121,7 @@ class TopicFormViewModelTest {
         assertEquals("tester", draftStore.lastSavedOwner)
 
         recreated.submit(TopicFormIntent.DraftRestoreRequested)
+        syncBody()
         testScheduler.advanceUntilIdle()
         assertNull(savedStateHandle.get<String>("draft_restore_offer_fingerprint"))
         assertEquals("new live body\n\nrescued body", draftStore.saved[key]?.body)
@@ -1228,6 +2130,7 @@ class TopicFormViewModelTest {
             entrySubcat = SAMPLE_SUBCAT,
             savedStateHandle = savedStateHandle,
         )
+        syncBody()
         testScheduler.advanceUntilIdle()
         assertEquals("new live body\n\nrescued body", afterRestore.state.value.restorableDraft)
         assertEquals("new live title", afterRestore.state.value.restorableSubject)
@@ -1242,6 +2145,7 @@ class TopicFormViewModelTest {
             entrySubcat = SAMPLE_SUBCAT,
             savedStateHandle = savedStateHandle,
         )
+        syncBody()
         testScheduler.advanceUntilIdle()
         assertEquals("first body", first.state.value.restorableDraft)
 
@@ -1250,6 +2154,7 @@ class TopicFormViewModelTest {
             entrySubcat = SAMPLE_SUBCAT,
             savedStateHandle = savedStateHandle,
         )
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         assertEquals("new body", recreated.state.value.restorableDraft)
@@ -1264,9 +2169,10 @@ class TopicFormViewModelTest {
         )
 
         val viewModel = newViewModel()
+        syncBody()
         testScheduler.advanceUntilIdle()
 
-        assertEquals(topicFormRepository.formResult.initialContent, viewModel.state.value.draft.text)
+        assertEquals(topicFormRepository.formResult.initialContent, viewModel.state.value.bodyText)
         assertEquals(topicFormRepository.formResult.subject, viewModel.state.value.subject.text)
         assertEquals("unfinished body", viewModel.state.value.restorableDraft)
         assertEquals("unfinished title", viewModel.state.value.restorableSubject)
@@ -1283,6 +2189,7 @@ class TopicFormViewModelTest {
         )
 
         val viewModel = newViewModel()
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         assertNull(viewModel.state.value.restorableDraft)
@@ -1297,12 +2204,11 @@ class TopicFormViewModelTest {
             EditorDraftStore.Draft(body = "unfinished body", subject = "unfinished title"),
         )
         val viewModel = newViewModel()
+        syncBody()
         testScheduler.advanceUntilIdle()
-        val hydrated = viewModel.state.value.draft
+        val hydrated = TextFieldValue(viewModel.bodyFieldState.text.toString(), viewModel.bodyFieldState.selection)
 
-        viewModel.submit(
-            TopicFormIntent.ContentChanged(hydrated.copy(selection = TextRange(4))),
-        )
+        viewModel.editBody(hydrated.copy(selection = TextRange(4)))
         testScheduler.advanceTimeBy(800L)
         testScheduler.runCurrent()
 
@@ -1318,6 +2224,7 @@ class TopicFormViewModelTest {
             EditorDraftStore.Draft(body = "rescued body", subject = "old title"),
         )
         val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("new title")))
@@ -1329,8 +2236,9 @@ class TopicFormViewModelTest {
         assertEquals("old title", draftStore.saved[key]?.subject)
         assertEquals("rescued body", viewModel.state.value.restorableDraft)
         viewModel.submit(TopicFormIntent.DraftRestoreRequested)
+        syncBody()
         testScheduler.advanceUntilIdle()
-        assertEquals("rescued body", viewModel.state.value.draft.text)
+        assertEquals("rescued body", viewModel.state.value.bodyText)
         assertEquals("new title", viewModel.state.value.subject.text)
     }
 
@@ -1341,13 +2249,15 @@ class TopicFormViewModelTest {
             EditorDraftStore.Draft(body = "rescued body", subject = "rescued title"),
         )
         val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("fresh title")))
-        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("fresh body")))
+        viewModel.editBody(TextFieldValue("fresh body"))
         viewModel.submit(TopicFormIntent.DraftRestoreRequested)
 
-        assertEquals("fresh body\n\nrescued body", viewModel.state.value.draft.text)
+        syncBody()
+        assertEquals("fresh body\n\nrescued body", viewModel.state.value.bodyText)
         assertEquals("fresh title", viewModel.state.value.subject.text)
         assertNull(viewModel.state.value.restorableDraft)
     }
@@ -1361,9 +2271,11 @@ class TopicFormViewModelTest {
             entrySubcat = SAMPLE_SUBCAT,
             savedStateHandle = savedStateHandle,
         )
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         viewModel.submit(TopicFormIntent.DraftDiscardRequested)
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         assertEquals("", draftStore.saved[key]?.body)
@@ -1374,6 +2286,7 @@ class TopicFormViewModelTest {
             entrySubcat = SAMPLE_SUBCAT,
             savedStateHandle = savedStateHandle,
         )
+        syncBody()
         testScheduler.advanceUntilIdle()
         assertNull(recreated.state.value.restorableDraft)
     }
@@ -1381,11 +2294,13 @@ class TopicFormViewModelTest {
     @Test
     fun `a successful new-topic submit deletes the cached draft`() = runTest {
         val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        syncBody()
         testScheduler.advanceUntilIdle()
         viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("My title")))
-        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("My body")))
+        viewModel.editBody(TextFieldValue("My body"))
 
         viewModel.submit(TopicFormIntent.SubmitClicked())
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         assertEquals("submit must have happened", 1, topicFormRepository.newTopicSubmitCalls)
@@ -1400,16 +2315,18 @@ class TopicFormViewModelTest {
     @Test
     fun `EditFirstPost autosave and delete-on-submit use the editFirstPost key`() = runTest {
         val viewModel = newViewModel()
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         // The FP form hydrated subject + body ; change the body so a draft is worth saving.
-        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("rewritten FP body")))
+        viewModel.editBody(TextFieldValue("rewritten FP body"))
         testScheduler.advanceTimeBy(800L)
         testScheduler.runCurrent()
         val key = EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE)
         assertEquals("rewritten FP body", draftStore.saved[key]?.body)
 
         viewModel.submit(TopicFormIntent.SubmitClicked())
+        syncBody()
         testScheduler.advanceUntilIdle()
         assertEquals(1, topicFormRepository.submitCalls)
         assertEquals("", draftStore.saved[key]?.body)
@@ -1424,12 +2341,13 @@ class TopicFormViewModelTest {
     @Test
     fun `CloseRequested flushes the pending debounce before CloseCommitted`() = runTest {
         val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         // Type, then close IMMEDIATELY — well inside the 750 ms debounce window. The flush must
         // persist the state at close time, not the snapshot the debounce captured at scheduling.
         viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Mon titre")))
-        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("dernier mot")))
+        viewModel.editBody(TextFieldValue("dernier mot"))
         viewModel.submit(TopicFormIntent.CloseRequested)
 
         val effect = viewModel.effects.first()
@@ -1448,6 +2366,7 @@ class TopicFormViewModelTest {
         val key = EditorDraftKey.newTopic(SAMPLE_CAT)
         draftStore.preload(key, EditorDraftStore.Draft(body = "stale", subject = "stale title"))
         val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         viewModel.submit(TopicFormIntent.CloseRequested)
@@ -1463,15 +2382,16 @@ class TopicFormViewModelTest {
     @Test
     fun `CloseRequested with blank fields and no pending offer deletes the stale row`() = runTest {
         val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        syncBody()
         testScheduler.advanceUntilIdle()
         val key = EditorDraftKey.newTopic(SAMPLE_CAT)
 
         viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("temporary title")))
-        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("temporary body")))
+        viewModel.editBody(TextFieldValue("temporary body"))
         testScheduler.advanceTimeBy(800L)
         testScheduler.runCurrent()
         viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("")))
-        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("")))
+        viewModel.editBody(TextFieldValue(""))
         viewModel.submit(TopicFormIntent.CloseRequested)
 
         assertEquals(TopicFormEffect.CloseCommitted, viewModel.effects.first())
@@ -1483,6 +2403,7 @@ class TopicFormViewModelTest {
         // The delete branch requires BOTH fields blank : a titled-but-bodyless topic in progress
         // is still worth restoring.
         val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Titre seul")))
@@ -1500,15 +2421,17 @@ class TopicFormViewModelTest {
         val gate = CompletableDeferred<Unit>()
         topicFormRepository.submitGate = gate
         val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        syncBody()
         testScheduler.advanceUntilIdle()
         viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Mon titre")))
-        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Mon corps")))
+        viewModel.editBody(TextFieldValue("Mon corps"))
 
         viewModel.submit(TopicFormIntent.SubmitClicked())
         // Back pressed while the POST is in flight — must be inert (gate #803: popping would
         // cancel the submit with the viewModelScope and leave the server state unknown).
         viewModel.submit(TopicFormIntent.CloseRequested)
         gate.complete(Unit)
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         viewModel.effects.test {
@@ -1524,10 +2447,12 @@ class TopicFormViewModelTest {
     @Test
     fun `a second CloseRequested is a no-op (gate #803)`() = runTest {
         val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         viewModel.submit(TopicFormIntent.CloseRequested)
         viewModel.submit(TopicFormIntent.CloseRequested)
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         viewModel.effects.test {
@@ -1555,12 +2480,10 @@ class TopicFormViewModelTest {
             uploadRepository = uploads,
             imageUploadReader = reader,
         )
+        syncBody()
         testScheduler.advanceUntilIdle()
-        viewModel.submit(
-            TopicFormIntent.ContentChanged(
-                TextFieldValue(text = "draft", selection = TextRange(1, 4)),
-            ),
-        )
+        viewModel.editBody(TextFieldValue(text = "draft", selection = TextRange(1, 4)))
+        syncBody()
         testScheduler.advanceUntilIdle()
         val stateBefore = viewModel.state.value
 
@@ -1573,6 +2496,7 @@ class TopicFormViewModelTest {
                     ),
                 ),
             )
+            syncBody()
             testScheduler.advanceUntilIdle()
 
             assertEquals(
@@ -1603,6 +2527,7 @@ class TopicFormViewModelTest {
             uploadRepository = uploads,
             imageUploadReader = reader,
         )
+        syncBody()
         testScheduler.advanceUntilIdle()
         val uri = "content://media/picker/photo/1"
 
@@ -1614,6 +2539,7 @@ class TopicFormViewModelTest {
                 ),
             ),
         )
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         assertEquals(listOf(uri), reader.readUris)
@@ -1633,6 +2559,7 @@ class TopicFormViewModelTest {
             uploadRepository = uploads,
             imageUploadReader = reader,
         )
+        syncBody()
         testScheduler.advanceUntilIdle()
         val uris = (1..11).map {
             "content://com.android.providers.media.documents/document/image%3A$it"
@@ -1646,6 +2573,7 @@ class TopicFormViewModelTest {
                 ),
             ),
         )
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         assertEquals(uris.take(10), reader.readUris)
@@ -1670,15 +2598,17 @@ class TopicFormViewModelTest {
             uploadRepository = uploads,
             imageUploadReader = reader,
         )
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         viewModel.submit(TopicFormIntent.ImagesPicked(listOf("content://pick/1", "content://pick/2")))
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         assertEquals(listOf("content://pick/1", "content://pick/2"), reader.readUris)
         assertEquals(2, uploads.uploadCalls)
         val state = viewModel.state.value
-        assertEquals(2, Regex("\\[img]").findAll(state.draft.text).count())
+        assertEquals(2, Regex("\\[img]").findAll(state.bodyText).count())
         assertFalse(state.isUploading)
         assertEquals(null, state.uploadError)
         assertEquals(null, state.uploadProgress)
@@ -1692,9 +2622,11 @@ class TopicFormViewModelTest {
             authRepository = FakeAuthRepository(AuthState.Anonymous),
             uploadRepository = uploads,
         )
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         viewModel.submit(TopicFormIntent.ImagesPicked(listOf("content://pick/1")))
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         assertEquals(0, uploads.uploadCalls)
@@ -1710,16 +2642,18 @@ class TopicFormViewModelTest {
             entrySubcat = SAMPLE_SUBCAT,
             uploadRepository = uploads,
         )
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         viewModel.submit(TopicFormIntent.ImagesPicked(listOf("content://pick/1", "content://pick/2")))
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         val state = viewModel.state.value
         assertEquals(EditorErrors.stopped(EditorErrors.tooLarge, UploadProgress(0, 2)), state.uploadError)
         assertFalse(state.isUploading)
         assertEquals(1, uploads.uploadCalls)
-        assertEquals("", state.draft.text)
+        assertEquals("", state.bodyText)
 
         viewModel.submit(TopicFormIntent.UploadErrorDismissed)
         assertEquals(null, viewModel.state.value.uploadError)
@@ -1732,14 +2666,16 @@ class TopicFormViewModelTest {
         val gate = CompletableDeferred<Unit>()
         val uploads = FakeUploadRepository().apply { uploadGate = gate }
         val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT, uploadRepository = uploads)
+        syncBody()
         testScheduler.advanceUntilIdle()
         viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Mon titre")))
-        viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue("Mon corps")))
+        viewModel.editBody(TextFieldValue("Mon corps"))
         viewModel.submit(TopicFormIntent.ImagesPicked(listOf("content://pick/1")))
         assertTrue("sanity: the upload must be in flight", viewModel.state.value.isUploading)
 
         viewModel.submit(TopicFormIntent.SubmitClicked())
         gate.complete(Unit)
+        syncBody()
         testScheduler.advanceUntilIdle()
 
         assertEquals("no POST may slip through mid-upload", 0, topicFormRepository.newTopicSubmitCalls)
@@ -1787,11 +2723,13 @@ class TopicFormViewModelTest {
                 userPreferencesRepository = userPreferences,
                 uploadRepository = uploads,
                 authRepository = authRepository,
+                advanceMirror = false,
             )
         } else {
             newViewModel(
                 userPreferencesRepository = userPreferences,
                 uploadRepository = uploads, authRepository = authRepository,
+                advanceMirror = false,
             )
         }
         var viewModel = createViewModel()
@@ -1829,7 +2767,7 @@ class TopicFormViewModelTest {
 
             override fun editBody(body: String) {
                 viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Contract title")))
-                viewModel.submit(TopicFormIntent.ContentChanged(TextFieldValue(body, TextRange(body.length))))
+                viewModel.editBody(TextFieldValue(body, TextRange(body.length)), advanceMirror = false)
             }
 
             override fun clickSubmit() = viewModel.submit(TopicFormIntent.SubmitClicked())
@@ -1854,7 +2792,9 @@ class TopicFormViewModelTest {
             override fun snapshot(): SubmissionProbe = viewModel.state.value.let {
                 it.armToken?.let { token -> arms[token.id] = token }
                 SubmissionProbe(
-                    it.draft.text, it.canSubmit, it.isSubmitting, it.isUploading, it.showSubmitConfirmation,
+                    viewModel.bodyFieldState.text.toString(),
+                    it.copy(bodyText = viewModel.bodyFieldState.text.toString()).canSubmit,
+                    it.isSubmitting, it.isUploading, it.showSubmitConfirmation,
                     armId = it.armToken?.id,
                     error = when (it.submitError) {
                         EditorErrors.network -> SubmissionErrorProbe.NETWORK
@@ -1897,6 +2837,9 @@ class TopicFormViewModelTest {
         uploadRepository: UploadRepository = FakeUploadRepository(),
         imageUploadReader: ImageUploadReader = FakeImageUploadReader(),
         savedStateHandle: SavedStateHandle = SavedStateHandle(),
+        advanceMirror: Boolean = true,
+        previewParser: BbcodePreviewParser = this.previewParser,
+        defaultDispatcher: CoroutineDispatcher = dispatcher,
     ): TopicFormViewModel = TopicFormViewModel(
         request = TopicFormRequest(
             mode = TopicFormMode.New,
@@ -1907,6 +2850,7 @@ class TopicFormViewModelTest {
             numreponse = null,
         ),
         previewParser = previewParser,
+        defaultDispatcher = defaultDispatcher,
         clock = submissionClock,
         topicFormRepository = topicFormRepository,
         smileyRepository = smileyRepository,
@@ -1919,7 +2863,28 @@ class TopicFormViewModelTest {
         uploadRepository = uploadRepository,
         imageUploadReader = imageUploadReader,
         savedStateHandle = savedStateHandle,
-    )
+    ).also { registerViewModel(it, advanceMirror) }
+
+    private fun registerViewModel(vm: TopicFormViewModel, advanceMirror: Boolean) {
+        viewModels += vm
+        if (advanceMirror) syncBody()
+    }
+
+    private fun syncBody() {
+        Snapshot.sendApplyNotifications()
+        dispatcher.scheduler.runCurrent()
+    }
+
+    /** Synthetic user input; TopicFormInputTest covers real BTF2 typing and paste. */
+    private fun TopicFormViewModel.editBody(value: TextFieldValue, advanceMirror: Boolean = true) {
+        bodyFieldState.edit {
+            if (asCharSequence().toString() != value.text) replace(0, length, value.text)
+            selection = value.selection
+            with(bodyInputTransformation) { transformInput() }
+        }
+        Snapshot.sendApplyNotifications()
+        if (advanceMirror) dispatcher.scheduler.runCurrent()
+    }
 
     private suspend fun app.cash.turbine.ReceiveTurbine<TopicFormState>.awaitHydratedState(): TopicFormState {
         // Under `UnconfinedTestDispatcher`, the init coroutine fetches the form
@@ -1932,11 +2897,15 @@ class TopicFormViewModelTest {
         return hydrated
     }
 
+    @Suppress("LongParameterList") // Test factory mirroring the ViewModel's injected dependencies.
     private fun newViewModel(
         authRepository: AuthRepository = FakeAuthRepository(),
         diagnostics: DiagnosticsLog = DiagnosticsLog(),
         userPreferencesRepository: UserPreferencesRepository = FakeUserPreferencesRepository(),
         uploadRepository: UploadRepository = FakeUploadRepository(),
+        advanceMirror: Boolean = true,
+        previewParser: BbcodePreviewParser = this.previewParser,
+        defaultDispatcher: CoroutineDispatcher = dispatcher,
     ): TopicFormViewModel = TopicFormViewModel(
         request = TopicFormRequest(
             mode = TopicFormMode.EditFirstPost,
@@ -1947,6 +2916,7 @@ class TopicFormViewModelTest {
             numreponse = SAMPLE_NUMREPONSE,
         ),
         previewParser = previewParser,
+        defaultDispatcher = defaultDispatcher,
         clock = submissionClock,
         topicFormRepository = topicFormRepository,
         smileyRepository = smileyRepository,
@@ -1958,7 +2928,7 @@ class TopicFormViewModelTest {
         authRepository = authRepository,
         uploadRepository = uploadRepository,
         imageUploadReader = FakeImageUploadReader(),
-    )
+    ).also { registerViewModel(it, advanceMirror) }
 
     /** #459 — canned [ImageUploadReader] (1-byte PNG), records the picked uris in call order. */
     private class FakeImageUploadReader : ImageUploadReader {
