@@ -265,6 +265,14 @@ class PostEditorRestoreOfferTest {
             }.second
             assertEquals(if (live == expected) 0 else 1, mutations)
             assertRestored(editor, expected)
+            if (live != expected) {
+                // The flow conflates; history does not. One undo must land exactly on the pre-restore body.
+                editor.bodyFieldState.undoState.undo()
+                assertEquals(live, editor.bodyFieldState.text.toString())
+                assertEquals(TextRange(0, live.length), editor.bodyFieldState.selection)
+                editor.bodyFieldState.undoState.redo()
+                assertRestored(editor, expected)
+            }
             collector.cancel()
             editor.viewModelScope.cancel()
             // Each iteration starts from the same offered body rather than a prior test's decided row.

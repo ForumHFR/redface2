@@ -326,6 +326,86 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun inlineQuoteReloadStartedDuringUploadFetchesThenInsertsOnceAfterUpload() = runTest {
+        val uploadGate = CompletableDeferred<Unit>()
+        uploadRepository.uploadGate = uploadGate
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.failure(IOException("offline")))
+        val vm = newReplyViewModel(
+            initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false),
+        )
+        settleBody()
+        assertEquals(1, vm.state.value.quoteFetchFailures)
+        vm.submit(PostEditorIntent.ImagesPicked(listOf("content://pick/1")))
+        assertTrue(vm.state.value.isUploading)
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm("[quotemsg=101]quote[/quotemsg]")),
+        )
+        val fetchesBeforeReload = replyRepository.formFetches
+        vm.dispatch(PostEditorIntent.ReloadRequested)
+        syncBody()
+        assertEquals("the GET is not dropped by the upload", fetchesBeforeReload + 1, replyRepository.formFetches)
+        assertEquals("", vm.bodyFieldState.text.toString())
+        assertEquals(listOf(101), vm.state.value.pendingQuotes.map { it.numreponse })
+        uploadGate.complete(Unit)
+        settleBody()
+        val body = vm.bodyFieldState.text.toString()
+        assertEquals(1, Regex("\\[quotemsg=101]").findAll(body).count())
+        assertEquals(1, Regex("\\[img]").findAll(body).count())
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun selectionBeforeLateEditHydrationIsNotATypedEditSoHydrationIsNotUndoable() = runTest {
+        assertFalse(lateEditHydrationIsUndoable(typedThenErased = false))
+    }
+
+    @Test
+    fun typedThenErasedBeforeLateEditHydrationKeepsHistory() = runTest {
+        assertTrue(lateEditHydrationIsUndoable(typedThenErased = true))
+    }
+
+    private fun lateEditHydrationIsUndoable(typedThenErased: Boolean): Boolean {
+        val gate = CompletableDeferred<Unit>()
+        editPostRepository.formGate = gate
+        val vm = newEditViewModel()
+        syncBody()
+        if (typedThenErased) {
+            vm.editBody(TextFieldValue("x", TextRange(1)))
+            vm.editBody(TextFieldValue(""))
+        } else {
+            vm.editBody(TextFieldValue("", TextRange(0)))
+        }
+        gate.complete(Unit)
+        settleBody()
+        assertEquals("existing post body", vm.bodyFieldState.text.toString())
+        return vm.bodyFieldState.undoState.canUndo
+    }
+
+    @Test
+    fun editFormArrivingDuringUploadHydratesBlankFieldAndKeepsUploadedImage() = runTest {
+        val formGate = CompletableDeferred<Unit>()
+        val uploadGate = CompletableDeferred<Unit>()
+        editPostRepository.formGate = formGate
+        uploadRepository.uploadGate = uploadGate
+        val vm = newEditViewModel()
+        syncBody()
+        vm.submit(PostEditorIntent.ImagesPicked(listOf("content://pick/1")))
+        assertTrue(vm.state.value.isUploading)
+        formGate.complete(Unit)
+        syncBody()
+        assertEquals("existing post body", vm.bodyFieldState.text.toString())
+        assertTrue(vm.state.value.draftHydratedFromForm)
+        uploadGate.complete(Unit)
+        settleBody()
+        val body = vm.bodyFieldState.text.toString()
+        assertTrue(body.contains("existing post body"))
+        assertEquals(1, Regex("\\[img]").findAll(body).count())
+        assertEquals(0, editPostRepository.submitCalls)
+    }
+
+    @Test
     @OptIn(ExperimentalFoundationApi::class)
     fun toolbarSmileyAndImageInsertionsUndoOnceAndRetainEarlierEdit() = runTest {
         val vm = newReplyViewModel()

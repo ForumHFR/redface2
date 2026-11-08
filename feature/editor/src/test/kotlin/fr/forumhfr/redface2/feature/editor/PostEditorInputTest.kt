@@ -117,13 +117,10 @@ class PostEditorInputTest {
     }
 
     @Test
-    fun selectionOnlyDisarmsLikeAnyFieldInteractionAndDoesNotMarkBodyEdited() {
+    fun selectionOnlyDisarmsLikeAnyFieldInteractionAndAddsNoHistory() {
         setFieldContent(confirmBeforePosting = true, editing = true)
-        val bodyEdited = PostEditorViewModel::class.java.getDeclaredField("bodyEditedBeforeHydration").apply {
-            isAccessible = true
-        }
         compose.runOnIdle {
-            assertFalse(bodyEdited.getBoolean(vm))
+            assertFalse(vm.bodyFieldState.undoState.canUndo)
             vm.submit(PostEditorIntent.SubmitClicked())
             requireNotNull(vm.state.value.armToken)
         }
@@ -134,7 +131,8 @@ class PostEditorInputTest {
             assertEquals("seed", vm.bodyFieldState.text.toString())
             assertEquals(TextRange(1, 3), vm.bodyFieldState.selection)
             assertNull(vm.state.value.armToken)
-            assertFalse(bodyEdited.getBoolean(vm))
+            // The hydration-baseline consequence is pinned in PostEditorViewModelTest (late hydration).
+            assertFalse(vm.bodyFieldState.undoState.canUndo)
         }
         coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any()) }
     }

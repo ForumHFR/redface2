@@ -292,8 +292,7 @@ class PostEditorViewModel @AssistedInject constructor(
 
     /** Synchronous guard, including the frame before readOnly recomposes. */
     val bodyInputTransformation = InputTransformation {
-        val disarmed = submission.tryDisarm()
-        if (!disarmed || submission.blocksMutation || _state.value.isUploading) {
+        if (!acceptMutation(blockDuringUpload = true)) {
             revertAllChanges()
         } else if (asCharSequence().toString() != bodyFieldState.text.toString()) {
             bodyEditedBeforeHydration = true
@@ -503,7 +502,7 @@ class PostEditorViewModel @AssistedInject constructor(
 
     /** Inline delivery only runs once this opening chose the inline rendering (cards ON never does). */
     private fun inlineQuoteLoadBlocked(insertInline: Boolean): Boolean =
-        _state.value.isLoadingForm || submission.blocksMutation || _state.value.isUploading ||
+        _state.value.isLoadingForm || submission.blocksMutation ||
             (insertInline && (submission.drafts.pendingInlineQuoteRequest == null || _state.value.hasDormantQuote))
 
     private fun missingInlineQuotes(quotes: List<QuoteSelection>): List<QuoteSelection> {
@@ -636,7 +635,7 @@ class PostEditorViewModel @AssistedInject constructor(
         val entry = submission.restore(draftKey.orEmpty())
         if (entry != null && !submission.blocksMutation) {
             if (entry.attempt != null) {
-                restoreAttempt(entry.draft, retainCurrent = reconcile)
+                restoreAttempt(entry.draft)
             } else {
                 restoreOrdinaryDraft(entry.draft, reconcile)
             }
@@ -690,10 +689,10 @@ class PostEditorViewModel @AssistedInject constructor(
         scheduleAutosave()
     }
 
-    private fun restoreAttempt(draft: EditorDraftStore.Draft, retainCurrent: Boolean = false) {
+    private fun restoreAttempt(draft: EditorDraftStore.Draft) {
         if (!acceptMutation(blockDuringUpload = true)) return
         val liveBody = bodyFieldState.text.toString()
-        if (liveBody.isBlank() && (!retainCurrent || !bodyEditedBeforeHydration)) {
+        if (liveBody.isBlank()) {
             replaceBody(draft.body)
             resetUndoBaseline()
         }
@@ -1107,7 +1106,7 @@ class PostEditorViewModel @AssistedInject constructor(
 
     private fun applyFormHydration(form: ReplyForm) {
         val snapshot = _state.value
-        val hydrate = !submission.blocksMutation && !snapshot.isUploading && !snapshot.draftHydratedFromForm &&
+        val hydrate = !submission.blocksMutation && !snapshot.draftHydratedFromForm &&
             bodyFieldState.text.isBlank() && form.initialContent.isNotBlank()
         if (hydrate) {
             replaceBody(form.initialContent)
