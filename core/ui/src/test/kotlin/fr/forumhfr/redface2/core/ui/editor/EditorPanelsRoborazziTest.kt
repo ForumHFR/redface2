@@ -83,12 +83,14 @@ class EditorPanelsRoborazziTest {
                 RedfaceTheme(darkTheme = dark.value, dynamicColor = false) {
                     val modifier = Modifier.size(360.dp, 480.dp).testTag("panel-sample")
                     if (details) EditorEventDetails(
-                        event = event.takeIf { open.value }, bodyFocusRequester = bodyFocus, bodyState = bodyState,
+                        event = event.takeIf { open.value }, bodyState = bodyState,
+                        onReturnToBody = { bodyFocus.requestFocus() },
                         onClose = { open.value = false }, onReload = {}, onIgnoreQuote = {},
                         modifier = modifier, body = { Body() },
                     ) else EditorHeaderPanel(
-                        isOpen = open.value, title = "Titre et sous-catégorie", bodyFocusRequester = bodyFocus,
+                        isOpen = open.value, title = "Titre et sous-catégorie",
                         bodyState = bodyState,
+                        onReturnToBody = { bodyFocus.requestFocus() },
                         onClose = { open.value = false }, modifier = modifier, body = { Body() },
                     ) {
                         OutlinedTextField("Un titre fourni", {}, Modifier.fillMaxWidth(), label = { Text("Titre") })

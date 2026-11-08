@@ -49,6 +49,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextInputSelection
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
@@ -163,7 +164,15 @@ class EditorHeaderPanelTest {
         }
         val returnButton = compose.onNodeWithText("Retour au message")
         returnButton.assertIsFocused().performKeyInput { pressKey(Key.Tab) }
-        compose.onNodeWithTag("title").assertIsFocused().performKeyInput { pressKey(Key.Tab) }
+        val title = compose.onNodeWithTag("title")
+        title.assertIsFocused().performKeyInput { pressKey(Key.Tab) }
+        title.assertIsFocused() // Forward traversal at the last control is bounded.
+        returnButton.requestFocus().performKeyInput {
+            keyDown(Key.ShiftLeft)
+            pressKey(Key.Tab)
+            keyUp(Key.ShiftLeft)
+        }
+        returnButton.assertIsFocused() // Backward traversal at the first control is bounded.
         compose.onNodeWithTag("title").assertTextEquals("Titre fourni")
         compose.onNodeWithTag("body", useUnmergedTree = true).assertIsNotFocused()
         compose.onRoot().performTouchInput { click(coveredTarget) }
@@ -191,8 +200,8 @@ class EditorHeaderPanelTest {
                 EditorHeaderPanel(
                     isOpen = open.value,
                     title = if (recipients) "Destinataires et sujet" else "Titre et sous-catégorie",
-                    bodyFocusRequester = bodyFocus,
                     bodyState = bodyState,
+                    onReturnToBody = { bodyFocus.requestFocus() },
                     initialFocusRequester = titleFocus,
                     onClose = { closes++; open.value = false },
                     modifier = Modifier.fillMaxSize(),

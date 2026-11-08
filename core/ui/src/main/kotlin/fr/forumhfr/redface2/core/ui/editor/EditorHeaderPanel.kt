@@ -39,7 +39,10 @@ import fr.forumhfr.redface2.core.ui.R
 /**
  * ED-101/113 container only: the host supplies fields, validation and their enabled state.
  * Keep this composable mounted, including when [isOpen] is false, and put the editor in [body].
- * Supply the Message field's [bodyState] and attach [bodyFocusRequester] to that field.
+ * Supply the Message field's [bodyState]. [onReturnToBody] runs once after an open panel closes,
+ * when the body is focusable again; it must restore focus synchronously. The host captures IME
+ * visibility BEFORE opening, prevents automatic keyboard opening on body focus when it was closed,
+ * then explicitly shows or hides the keyboard to restore that captured state (ED-53).
  * [initialFocusRequester], when supplied, must be attached to a field in [content] (title or recipients);
  * otherwise Return receives focus.
  * The host opens this panel on CompleteHeader and closes it in [onClose]. No CSV mapping lives here.
@@ -50,16 +53,16 @@ import fr.forumhfr.redface2.core.ui.R
 fun EditorHeaderPanel(
     isOpen: Boolean,
     title: String,
-    bodyFocusRequester: FocusRequester,
     bodyState: TextFieldState,
     onClose: () -> Unit,
+    onReturnToBody: () -> Unit,
     modifier: Modifier = Modifier,
     initialFocusRequester: FocusRequester? = null,
     body: @Composable () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     EditorPanelOverlay(
-        isOpen, title, bodyFocusRequester, bodyState, onClose, modifier, initialFocusRequester, body,
+        isOpen, title, bodyState, onClose, onReturnToBody, modifier, initialFocusRequester, body,
     ) { closeFocus ->
         TextButton(onClick = onClose, modifier = Modifier.focusRequester(closeFocus)) {
             Text(stringResource(R.string.editor_panel_return_to_body))
@@ -74,9 +77,9 @@ fun EditorHeaderPanel(
 internal fun EditorPanelOverlay(
     visible: Boolean,
     title: String,
-    bodyFocusRequester: FocusRequester,
     bodyState: TextFieldState,
     onClose: () -> Unit,
+    onReturnToBody: () -> Unit,
     modifier: Modifier = Modifier,
     initialFocusRequester: FocusRequester? = null,
     body: @Composable () -> Unit,
@@ -96,7 +99,10 @@ internal fun EditorPanelOverlay(
         // Registered after the body's handler: a panel opened on entry consumes the first Back.
         BackHandler(enabled = visible, onBack = onClose)
         if (visible) Surface(
-            modifier = Modifier.matchParentSize().semantics {
+            modifier = Modifier.matchParentSize().focusProperties {
+                // Keep keyboard traversal inside the panel, including at either Tab boundary.
+                onExit = { cancelFocusChange() }
+            }.focusGroup().semantics {
                 paneTitle = title
                 isTraversalGroup = true
             },
@@ -118,7 +124,7 @@ internal fun EditorPanelOverlay(
             focusManager.clearFocus(force = true)
             (initialFocusRequester ?: closeFocus).requestFocus()
         } else if (wasOpen) {
-            bodyFocusRequester.requestFocus()
+            onReturnToBody()
         }
         // BTF2 collapses selection on focus loss. A panel must preserve both endpoints,
         // including a reversed range, without replacing text or adding an undo entry.

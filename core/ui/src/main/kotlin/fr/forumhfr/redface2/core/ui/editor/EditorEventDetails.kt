@@ -6,7 +6,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
 import fr.forumhfr.redface2.core.ui.R
@@ -16,9 +15,11 @@ import fr.forumhfr.redface2.core.ui.R
  * Keep this container mounted around [body]. Never substitute the bar's current visible event
  * for the open snapshot: a replacement must not be acknowledged by an older close callback.
  * [onClose] must dispatch CloseDetails(key), then consume ReturnToBody by closing the overlay;
- * focus returns once [event] becomes null. This is visual acknowledgement only, not resolution of
+ * [onReturnToBody] runs once after [event] becomes null. This is visual acknowledgement only, not resolution of
  * a durable submission or abandonment of a quote. CompleteHeader is handled by EditorHeaderPanel.
- * Supply the Message field's [bodyState] so focus transfers preserve its selection.
+ * Supply the Message field's [bodyState] so focus transfers preserve its selection. As with
+ * [EditorHeaderPanel], the host captures IME visibility before opening, prevents automatic keyboard
+ * reopening if it was closed, and restores focus synchronously and that IME state in [onReturnToBody].
  *
  * [onReload] relaunches the host's existing GET only. Supply [onIgnoreQuote] only after two failures
  * of the SAME pending quote request; it is a distinct remedy, never a replacement for Reload.
@@ -28,10 +29,10 @@ import fr.forumhfr.redface2.core.ui.R
 @Suppress("LongParameterList") // Each remedy has its own callback and exact event identity.
 fun EditorEventDetails(
     event: EditorEvent?,
-    bodyFocusRequester: FocusRequester,
     bodyState: TextFieldState,
     onClose: (EventKey) -> Unit,
     onReload: (EventKey) -> Unit,
+    onReturnToBody: () -> Unit,
     modifier: Modifier = Modifier,
     onIgnoreQuote: ((EventKey) -> Unit)? = null,
     body: @Composable () -> Unit,
@@ -46,9 +47,9 @@ fun EditorEventDetails(
     EditorPanelOverlay(
         visible = event != null,
         title = event?.summary?.resolve().orEmpty(),
-        bodyFocusRequester = bodyFocusRequester,
         bodyState = bodyState,
         onClose = close,
+        onReturnToBody = onReturnToBody,
         modifier = modifier,
         body = body,
     ) { closeFocus ->

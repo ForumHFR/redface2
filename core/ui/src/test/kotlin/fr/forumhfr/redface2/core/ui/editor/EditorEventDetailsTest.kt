@@ -240,9 +240,17 @@ class EditorEventDetailsTest {
         compose.runOnIdle { assertTrue(inputMode.requestInputMode(InputMode.Keyboard)) }
         activate(event)
         compose.onNodeWithTag("body").assertDoesNotExist()
-        compose.onNodeWithText("Recharger").requestFocus().performKeyInput { pressKey(Key.Tab) }
+        val reload = compose.onNodeWithText("Recharger")
+        val dismiss = compose.onNodeWithText("Masquer")
+        reload.requestFocus().performKeyInput {
+            keyDown(Key.ShiftLeft)
+            pressKey(Key.Tab)
+            keyUp(Key.ShiftLeft)
+        }
+        reload.assertIsFocused().performKeyInput { pressKey(Key.Tab) }
         compose.onNodeWithText("Ignorer la citation").assertIsFocused().performKeyInput { pressKey(Key.Tab) }
-        compose.onNodeWithText("Masquer").assertIsFocused().performKeyInput {
+        dismiss.assertIsFocused().performKeyInput { pressKey(Key.Tab) }
+        dismiss.assertIsFocused().performKeyInput {
             keyDown(Key.ShiftLeft)
             pressKey(Key.Tab)
             keyUp(Key.ShiftLeft)
@@ -289,7 +297,7 @@ class EditorEventDetailsTest {
             RedfaceTheme {
                 BackHandler { leaves++ }
                 EditorHeaderPanel(
-                    header.value, "En-tête fourni", bodyFocus, bodyState, { header.value = false },
+                    header.value, "En-tête fourni", bodyState, { header.value = false }, { bodyFocus.requestFocus() },
                     Modifier.fillMaxSize(), initialFocusRequester = headerFocus,
                     body = { DetailHost(ignoreAvailable) },
                 ) {
@@ -304,8 +312,8 @@ class EditorEventDetailsTest {
     private fun DetailHost(ignoreAvailable: Boolean) {
         EditorEventDetails(
             event = detail.value,
-            bodyFocusRequester = bodyFocus,
             bodyState = bodyState,
+            onReturnToBody = { bodyFocus.requestFocus() },
             onClose = { closed += it; dispatch(EditorEventInput.CloseDetails(it)) },
             onReload = { reloads += it },
             onIgnoreQuote = if (ignoreAvailable) {
