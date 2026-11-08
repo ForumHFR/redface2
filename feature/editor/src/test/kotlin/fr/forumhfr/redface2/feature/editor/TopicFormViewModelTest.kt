@@ -1989,22 +1989,29 @@ class TopicFormViewModelTest {
 
     @Test
     fun delayedNewDraftOfferDoesNotReplaceLiveTyping() = runTest {
-        val gate = CompletableDeferred<Unit>()
-        draftStore.loadGate = gate
-        draftStore.preload(
-            EditorDraftKey.newTopic(SAMPLE_CAT),
-            EditorDraftStore.Draft(body = "stored body", subject = "stored title"),
-        )
-        val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
-        vm.editBody(TextFieldValue("typed before load"))
-        // The mirror runs during the initial draft read (R0c PR 3): the typing is already mirrored.
-        assertEquals("typed before load", vm.bodyFieldState.text.toString())
-        assertEquals("typed before load", vm.state.value.bodyText)
-        gate.complete(Unit)
-        testScheduler.runCurrent()
-        assertNull(vm.state.value.restorableDraft)
-        assertEquals("typed before load", vm.bodyFieldState.text.toString())
-        assertEquals("", vm.state.value.draftHydratedContent)
+        for (mirrored in listOf(true, false)) {
+            val gate = CompletableDeferred<Unit>()
+            draftStore = FakeEditorDraftStore().apply { loadGate = gate }
+            draftStore.preload(
+                EditorDraftKey.newTopic(SAMPLE_CAT),
+                EditorDraftStore.Draft(body = "stored body", subject = "stored title"),
+            )
+            val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+            if (mirrored) {
+                // The mirror runs during the initial draft read (R0c PR 3).
+                vm.editBody(TextFieldValue("typed before load"))
+            } else {
+                // Direct edit without apply notifications: the mirror still lags when the read completes.
+                vm.bodyFieldState.edit { append("typed before load") }
+            }
+            assertEquals("typed before load", vm.bodyFieldState.text.toString())
+            assertEquals(if (mirrored) "typed before load" else "", vm.state.value.bodyText)
+            gate.complete(Unit)
+            testScheduler.runCurrent()
+            assertNull(vm.state.value.restorableDraft)
+            assertEquals("typed before load", vm.bodyFieldState.text.toString())
+            assertEquals("", vm.state.value.draftHydratedContent)
+        }
     }
 
     @Test
