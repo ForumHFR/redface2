@@ -38,11 +38,9 @@ import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 
 /**
  * Always compose this control, including when [event] is null; never key it by event identity.
- * Without an event the same semantic node keeps a 1 dp footprint; no event slot is reserved.
- * [width] is the full envelope (nominal slot + 4 dp, about 185 dp at 360 dp).
- * The host places it 4 dp into the start gutter, respecting system insets and the gap to Submit.
- * When the host supplies a taller height via [modifier], the 48 dp target is centered vertically.
- * [onAction] dispatches Activate with the displayed key; the host honors gestureConsumed without another dispatch.
+ * Without an event its semantic node keeps a 1 dp footprint. [width] includes the 4 dp start-gutter
+ * extension (about 185 dp at 360 dp); the host respects insets/Submit spacing and centers the 48 dp
+ * target in any taller [modifier]. [onAction] dispatches Activate with the displayed key; honor gestureConsumed.
  */
 @Composable
 fun EditorEventControl(
@@ -58,20 +56,9 @@ fun EditorEventControl(
     val action = event?.action
     val actionName = action?.controlLabel()
     val name = if (actionName == null) summary else "$summary, $actionName"
-    // Track operations outside the progress branch: masking, occurrences and null must not replay a start.
-    val announced = remember { mutableSetOf<Pair<EditorSession, OperationRef>>() }
-    val operation = event?.key?.let { it.session to it.operation }
-    val inProgress = event?.content is EditorEventContent.InProgress
-    val announceProgress = remember(operation, inProgress, name) { inProgress && operation !in announced }
-    SideEffect { if (inProgress) announced.add(requireNotNull(operation)) }
-    // UI 1.12.1 sends description changes even without liveRegion; only start/terminal states are live.
-    val announce = !inProgress || announceProgress
+    val announce = rememberEventAnnouncement(event, name)
     val isError = event?.rank == EditorEventRank.Error
-    val tint = when {
-        isError -> MaterialTheme.colorScheme.error
-        action != null -> MaterialTheme.colorScheme.onSecondaryContainer
-        else -> MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    val tint = event.controlTint()
     Box(
         modifier = if (event == null) modifier else modifier.width(width).heightIn(min = 48.dp),
         contentAlignment = Alignment.CenterStart,
@@ -94,15 +81,31 @@ fun EditorEventControl(
             val icon = event.controlIcon()
             RedfaceVectorIcon(icon, Modifier.testTag("editor-event-icon-$icon")
                 .semantics { this[EditorEventIconTintKey] = tint }, tint = tint, size = 16.dp)
-            Text(
-                text = visualSummary,
+            Text(text = visualSummary,
                 modifier = Modifier.weight(1f, fill = false).clearAndSetSemantics {},
-                style = MaterialTheme.typography.labelSmall,
-                color = tint, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                onTextLayout = { onSummaryTextLayout?.invoke(it) },
-            )
+                style = MaterialTheme.typography.labelSmall, color = tint,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                onTextLayout = { onSummaryTextLayout?.invoke(it) })
         }
     }
+}
+
+@Composable
+private fun EditorEvent?.controlTint(): Color = when {
+    this?.rank == EditorEventRank.Error -> MaterialTheme.colorScheme.error
+    this?.action != null -> MaterialTheme.colorScheme.onSecondaryContainer
+    else -> MaterialTheme.colorScheme.onSurfaceVariant
+}
+
+@Composable
+private fun rememberEventAnnouncement(event: EditorEvent?, name: String): Boolean {
+    // Track operations across masking/absence; UI 1.12.1 still sends non-live description changes.
+    val announced = remember { mutableSetOf<Pair<EditorSession, OperationRef>>() }
+    val operation = event?.key?.let { it.session to it.operation }
+    val inProgress = event?.content is EditorEventContent.InProgress
+    val start = remember(operation, inProgress, name) { inProgress && operation !in announced }
+    SideEffect { if (inProgress) announced.add(requireNotNull(operation)) }
+    return !inProgress || start
 }
 
 /** Internal visual diagnostic, ignored by accessibility services. */

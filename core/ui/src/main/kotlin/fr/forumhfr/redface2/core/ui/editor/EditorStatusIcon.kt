@@ -15,18 +15,25 @@ import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
+import kotlinx.coroutines.launch
 
 /** Keep composed across [visible] changes; [label] includes state/count and destination. See [EditorActionIcon]. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -48,19 +55,31 @@ fun EditorStatusIcon(
     // Stack rather than overlay: even a large counter never covers the 24 dp glyph.
     val badgeWidth = with(density) { badgeSize.width.toDp() } + 8.dp
     val height = 24.dp + if (badgeCount == null) 0.dp else maxOf(16.dp, with(density) { badgeSize.height.toDp() })
+    // Replace only the tooltip state on masking: its popup/job die, the live anchor keeps its ID.
+    val tooltip = key(visible) { rememberTooltipState() }
+    val scope = rememberCoroutineScope()
     TooltipBox(
         positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
-        tooltip = { PlainTooltip { Text(label) } }, state = rememberTooltipState(),
-        modifier = modifier, focusable = false, enableUserInput = visible,
+        tooltip = { PlainTooltip { Text(label) } }, state = tooltip,
+        // UI 1.12.1: a non-merging leaf with only liveRegion is silent; clear M3's merging anchor/children.
+        modifier = modifier.clearAndSetSemantics {
+            liveRegion = LiveRegionMode.Polite
+            if (visible) {
+                contentDescription = label
+                role = Role.Button
+                if (!enabled) disabled()
+                onClick {
+                    if (enabled) onClick()
+                    enabled
+                }
+                onLongClick { scope.launch { tooltip.show() }; true }
+            }
+        }, focusable = false, enableUserInput = visible,
     ) {
-        IconButton(
-            onClick = onClick, enabled = enabled && visible,
+        IconButton(onClick = onClick, enabled = enabled && visible,
             modifier = (if (!visible) Modifier.size(1.dp) else Modifier.sizeIn(
                 minWidth = maxOf(48.dp, badgeWidth), minHeight = maxOf(48.dp, height),
-            )).semantics {
-                liveRegion = LiveRegionMode.Polite
-                if (visible) contentDescription = label
-            }.then(if (visible) Modifier else Modifier.clearAndSetSemantics {}),
+            )).clearAndSetSemantics {},
         ) {
             if (visible) Column(horizontalAlignment = Alignment.CenterHorizontally) {
                 RedfaceVectorIcon(iconRes, Modifier.testTag(EDITOR_STATUS_GLYPH_TAG))

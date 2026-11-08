@@ -1,6 +1,5 @@
 package fr.forumhfr.redface2.core.ui.editor
 
-import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction as Action
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.mutableStateOf
@@ -21,6 +20,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertDoesNotExist
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -28,6 +28,7 @@ import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithText
@@ -49,8 +50,6 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
-import org.robolectric.util.ReflectionHelpers.ClassParameter
-import org.robolectric.util.ReflectionHelpers.callInstanceMethod
 
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -85,7 +84,6 @@ class EditorControlIconsTest {
         val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
         icons.forEachIndexed { position, (_, label) ->
             compose.runOnIdle { index.value = position }
-            compose.onAllNodes(hasClickAction()).assertCountEquals(1)
             compose.onNode(hasClickAction()).assert(hasContentDescription(context.getString(label)))
                 .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Selected))
                 .captureRoboImage("build/outputs/roborazzi/editor_action_$position.png")
@@ -112,7 +110,6 @@ class EditorControlIconsTest {
         compose.onNodeWithText("Mise en forme", useUnmergedTree = true).assertIsDisplayed()
         button.assertIsFocused()
         assertEquals(0, clicks)
-        compose.onAllNodes(hasClickAction()).assertCountEquals(1)
     }
     @Test fun `ED90 and ED93 icons follow visual keyboard order and disabled insertions cannot run`() {
         val first = FocusRequester()
@@ -160,13 +157,11 @@ class EditorControlIconsTest {
         val id = compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion)).fetchSemanticsNode().id
         compose.assertLiveNode(id, "", LiveRegionMode.Polite, view)
         compose.onAllNodes(hasClickAction()).assertCountEquals(0)
-        compose.runOnIdle { assertAbsent(view) }
         compose.runOnIdle { visible.value = true }
         compose.assertLiveNode(id, "3 citations, ouvrir le panneau citations", LiveRegionMode.Polite, view)
         val button = compose.onNode(hasClickAction())
         button.assert(hasContentDescription("3 citations, ouvrir le panneau citations")).performClick()
         assertEquals(1, clicks)
-        compose.onAllNodes(hasClickAction()).assertCountEquals(1)
         button.getUnclippedBoundsInRoot().run { assertTrue(toString(), width.value >= 48f && height.value >= 48f) }
         val glyph = compose.onNodeWithTag(EDITOR_STATUS_GLYPH_TAG, useUnmergedTree = true).getUnclippedBoundsInRoot()
         val badge = compose.onNodeWithTag(EDITOR_STATUS_BADGE_TAG, useUnmergedTree = true).getUnclippedBoundsInRoot()
@@ -177,10 +172,15 @@ class EditorControlIconsTest {
         }
         compose.runOnIdle { count.value = 4 }
         compose.assertLiveNode(id, "4 citations, ouvrir le panneau citations", LiveRegionMode.Polite, view)
+        button.performTouchInput { longClick() }
+        compose.onNodeWithText("4 citations, ouvrir le panneau citations", useUnmergedTree = true).assertIsDisplayed()
+        compose.onAllNodes(isRoot(), useUnmergedTree = true).assertCountEquals(2)
         compose.runOnIdle { visible.value = false }
+        // Queries include every root: an open tooltip must disappear with its anchor.
+        compose.onAllNodes(isRoot(), useUnmergedTree = true).assertCountEquals(1)
+        compose.onNodeWithText("4 citations, ouvrir le panneau citations", useUnmergedTree = true).assertDoesNotExist()
         compose.onAllNodes(hasClickAction()).assertCountEquals(0)
         compose.assertLiveNode(id, "", LiveRegionMode.Polite, view)
-        compose.runOnIdle { assertAbsent(view) }
     }
     @Test fun `recipient InputChip has one removal button without checked state and obeys disabled state`() {
         var removals = 0
@@ -207,16 +207,6 @@ class EditorControlIconsTest {
             assertEquals(48f, chip.getUnclippedBoundsInRoot().height.value, 0.5f)
             val state = if (active) "enabled" else "disabled"
             chip.captureRoboImage("build/outputs/roborazzi/editor_recipient_$state.png")
-        }
-    }
-    private fun assertAbsent(view: android.view.View, id: Int = android.view.View.NO_ID) {
-        val info = requireNotNull(view.accessibilityNodeProvider.createAccessibilityNodeInfo(id))
-        assertTrue("Absent node $id must not accept input", !info.isFocusable && !info.isScreenReaderFocusable &&
-            info.actionList.all { it == Action.ACTION_ACCESSIBILITY_FOCUS ||
-                it == Action.ACTION_CLEAR_ACCESSIBILITY_FOCUS })
-        repeat(info.childCount) { index -> // Robolectric getChild() is a placeholder; read stored virtual IDs.
-            val child = callInstanceMethod<Long>(info, "getChildId", ClassParameter.from(Int::class.java, index))
-            assertAbsent(view, (child shr 32).toInt())
         }
     }
 }

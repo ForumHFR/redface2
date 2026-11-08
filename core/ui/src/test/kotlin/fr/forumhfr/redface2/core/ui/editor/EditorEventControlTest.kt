@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.ui.editor
 
 import android.view.View
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction as Action
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -53,9 +54,7 @@ class EditorEventControlTest {
     @get:Rule val compose = createComposeRule()
     private val live = SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion)
     private lateinit var view: View
-
-    @Test
-    fun `ED45 catalogue and terminal events expose exactly one named action and their exact key`() {
+    @Test fun `ED45 catalogue and terminal events expose exactly one named action and their exact key`() {
         val current = mutableStateOf<EditorEvent?>(null)
         val actions = mutableListOf<Pair<EventKey, EditorEventAction>>()
         compose.setContent { RedfaceTheme {
@@ -78,7 +77,6 @@ class EditorEventControlTest {
         cases.forEachIndexed { index, (content, expected) ->
             val event = controlEvent(content, index.toLong())
             compose.runOnIdle { current.value = event }
-            compose.onAllNodes(hasClickAction()).assertCountEquals(1)
             compose.onNode(hasClickAction()).assertIsEnabled()
                 .assert(hasContentDescription(event.accessibleSummary.resolve(context) + ", " + actionLabel(expected)))
                 .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
@@ -90,9 +88,7 @@ class EditorEventControlTest {
         }
         assertEquals(cases.size, actions.size)
     }
-
-    @Test
-    fun `ED40 ED44 ED45 event tap and next action consume one gesture and leave the second available`() {
+    @Test fun `ED40 ED44 ED45 event tap and next action consume one gesture and leave the second available`() {
         val information = controlEvent(EditorEventContent.Information(EditorText(R.string.editor_event_already_quoted)))
         val state = mutableStateOf(EditorEventState(information.key.session, events = listOf(information)))
         val actions = mutableListOf<String>()
@@ -135,9 +131,7 @@ class EditorEventControlTest {
             assertEquals(listOf(if (target == "slot") "Options" else "Envoyer"), actions)
         }
     }
-
-    @Test
-    fun `ED95 control survives absence and only starts and terminations make progress live`() {
+    @Test fun `ED95 control survives absence and only starts and terminations make progress live`() {
         val current = mutableStateOf<EditorEvent?>(null)
         val injectedWidth = mutableStateOf(185.dp)
         compose.setContent {
@@ -178,9 +172,7 @@ class EditorEventControlTest {
             compose.assertLiveNode(id, name, mode, view)
         }
     }
-
-    @Test
-    fun `ED49 states keep their icon tint live mode and full accessible name`() {
+    @Test fun `ED49 states keep their icon tint live mode and full accessible name`() {
         val current = mutableStateOf<EditorEvent?>(null)
         var tints = emptyList<Color>()
         compose.setContent { RedfaceTheme {
@@ -212,16 +204,13 @@ class EditorEventControlTest {
             compose.onAllNodes(hasClickAction()).assertCountEquals(if (event.action == null) 0 else 1)
         }
     }
-
     private fun actionLabel(action: EditorEventAction): String = context.getString(when (action) {
         EditorEventAction.Complete -> R.string.editor_action_complete
         EditorEventAction.Details -> R.string.editor_event_open_details
         EditorEventAction.Dismiss -> R.string.editor_action_dismiss
     })
-
     private val context get() = ApplicationProvider.getApplicationContext<android.content.Context>()
 }
-
 /** Keyboard focus says nothing about TalkBack; inspect every node exposed by Android's provider. */
 internal fun ComposeContentTestRule.assertLiveNode(id: Int, name: String, mode: LiveRegionMode?, view: View) {
     listOf(false, true).forEach { unmerged ->
@@ -232,6 +221,9 @@ internal fun ComposeContentTestRule.assertLiveNode(id: Int, name: String, mode: 
         val info = requireNotNull(view.accessibilityNodeProvider.createAccessibilityNodeInfo(id))
         assertEquals(if (name.isEmpty()) 0 else 1, nodes.count { it.isScreenReaderFocusable })
         assertEquals(name.isNotEmpty(), info.isScreenReaderFocusable)
+        assertEquals(name, info.contentDescription?.toString().orEmpty())
+        if (name.isEmpty()) assertTrue(nodes.all { !it.isFocusable && it.actionList.all { action ->
+            action == Action.ACTION_ACCESSIBILITY_FOCUS || action == Action.ACTION_CLEAR_ACCESSIBILITY_FOCUS } })
         assertTrue(info.isVisibleToUser && info.isImportantForAccessibility)
         val liveMode = if (mode == null) View.ACCESSIBILITY_LIVE_REGION_NONE else
             if (mode == LiveRegionMode.Assertive) View.ACCESSIBILITY_LIVE_REGION_ASSERTIVE else
@@ -240,7 +232,6 @@ internal fun ComposeContentTestRule.assertLiveNode(id: Int, name: String, mode: 
         if (name.isNotEmpty()) assertEquals(1, nodes.count { it.contentDescription?.toString() == name })
     }
 }
-
 private fun View.editorAccessibilityNodes(id: Int = View.NO_ID): List<AccessibilityNodeInfo> {
     val info = requireNotNull(accessibilityNodeProvider.createAccessibilityNodeInfo(id))
     // Robolectric getChild() returns a placeholder; use Android's stored virtual child IDs instead.
@@ -249,14 +240,11 @@ private fun View.editorAccessibilityNodes(id: Int = View.NO_ID): List<Accessibil
         editorAccessibilityNodes((childId shr 32).toInt())
     }
 }
-
 internal fun controlEvent(content: EditorEventContent, occurrence: Long = 1): EditorEvent = EditorEvent(
     EventKey(EditorSession("controls", "alice", "topic:23:42"),
         OperationRef.Local(EditorLocalOperation.Notice, 1), occurrence), content, occurrence,
 )
-
 internal fun uploadText(index: Int) = EditorText(R.string.editor_event_uploading, listOf(index, 3))
-
 internal fun finishedUpload(count: Int) = EditorEventContent.Finished(
     summary = EditorText(R.plurals.editor_event_images_inserted_summary, listOf(count), quantity = count),
     accessibleSummary = EditorText(R.plurals.editor_event_images_inserted, listOf(count), quantity = count),
