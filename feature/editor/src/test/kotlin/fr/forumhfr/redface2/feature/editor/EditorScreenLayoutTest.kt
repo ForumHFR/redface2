@@ -8,6 +8,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
@@ -19,12 +20,15 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
+import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -153,6 +157,73 @@ class EditorScreenLayoutTest {
     }
 
     @Test
+    @Config(qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
+    fun topicFormLocksBodyAndInsertionControlsWhileSeedUnknown() {
+        val state = mutableStateOf(topicState().copy(mode = TopicFormMode.EditFirstPost, isLoadingForm = true))
+        val body = TextFieldState("seed")
+        val intents = mutableListOf<TopicFormIntent>()
+        var smileyOpens = 0
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                TopicFormContent(
+                    state = state.value,
+                    bodyFieldState = body,
+                    bodyInputTransformation = InputTransformation {},
+                    onIntent = { intents += it },
+                    onOpenSmileys = { smileyOpens += 1 },
+                )
+            }
+        }
+        assertTopicBodyAndInsertionsLocked()
+        compose.onNodeWithText("Options").assertIsEnabled()
+
+        // Failure ends the spinner, but does not make the missing first post editable.
+        compose.runOnIdle {
+            state.value = state.value.copy(isLoadingForm = false, submitError = EditorErrors.formNetwork)
+        }
+        assertTopicBodyAndInsertionsLocked()
+        compose.onNodeWithText("Recharger").assertIsEnabled().performClick()
+        compose.runOnIdle { assertEquals(listOf(TopicFormIntent.ReloadRequested), intents) }
+
+        // Once known, the body and insertions remain available even during a later refetch.
+        compose.runOnIdle {
+            state.value = state.value.copy(
+                draftHydratedFromServer = true, isLoadingForm = true, submitError = null,
+            )
+        }
+        compose.onAllNodes(hasSetTextAction()).assertCountEquals(2)
+        compose.onAllNodes(hasSetTextAction())[1].performTextInput(" typed")
+        for (label in listOf("Gras", "Citation", "Image", "Uploader", "Smileys")) {
+            compose.onNodeWithText(label).assertIsEnabled()
+        }
+        compose.onNodeWithText("Smileys").performClick()
+        compose.runOnIdle {
+            assertEquals("seed typed", body.text.toString())
+            assertEquals(1, smileyOpens)
+        }
+    }
+
+    @Test
+    @Config(qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
+    fun topicFormNewKeepsBodyAndInsertionControlsWhileLoading() {
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                TopicFormContent(
+                    state = topicState().copy(isLoadingForm = true),
+                    bodyFieldState = remember { TextFieldState() },
+                    bodyInputTransformation = InputTransformation {},
+                    onIntent = {},
+                    onOpenSmileys = {},
+                )
+            }
+        }
+        compose.onAllNodes(hasSetTextAction()).assertCountEquals(2)
+        for (label in listOf("Gras", "Citation", "Image", "Uploader", "Smileys")) {
+            compose.onNodeWithText(label).assertIsEnabled()
+        }
+    }
+
+    @Test
     @Config(qualifiers = "fr-rFR-w360dp-h260dp-xxhdpi")
     fun `post editor keeps both draft actions fully visible below the 220 dp budget threshold`() {
         compose.setContent {
@@ -194,6 +265,14 @@ class EditorScreenLayoutTest {
         compose.onNodeWithText("Répondre au sujet").assertIsDisplayed()
         compose.onNodeWithText("Uploader").assertIsDisplayed()
         compose.onNode(hasSetTextAction()).assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT - FIELD_LABEL_HEADROOM)
+    }
+
+    private fun assertTopicBodyAndInsertionsLocked() {
+        // Only the subject retains SetText; the read-only body must not expose this action.
+        compose.onAllNodes(hasSetTextAction()).assertCountEquals(1)
+        for (label in listOf("Gras", "Citation", "Image", "Uploader", "Smileys")) {
+            compose.onNodeWithText(label).assertDoesNotExist()
+        }
     }
 
     private fun assertDraftActionsFullyVisible() {

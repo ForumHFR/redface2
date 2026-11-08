@@ -394,7 +394,7 @@ class TopicFormViewModelTest {
     }
 
     @Test
-    fun `slow fetch preserves user-edited draft but still hydrates subject`() = runTest {
+    fun `slow fetch rejects early body input and hydrates both subject and draft`() = runTest {
         val gate = CompletableDeferred<Unit>()
         topicFormRepository.formGate = gate
         val viewModel = newViewModel()
@@ -402,18 +402,179 @@ class TopicFormViewModelTest {
             val blank = awaitItem()
             assertFalse(blank.subjectHydratedFromServer)
             assertFalse(blank.draftHydratedFromServer)
-            // User types into the content while the fetch is still in flight.
+            // The first post must be known before typing can replace its body.
             viewModel.editBody(TextFieldValue("pre-fetch draft", TextRange(15)))
-            skipItems(1)
+            assertEquals("", viewModel.bodyFieldState.text.toString())
             gate.complete(Unit)
             syncBody()
             val hydrated = expectMostRecentItem()
             assertEquals("Sample first post title", hydrated.subject.text)
-            assertEquals("pre-fetch draft", hydrated.bodyText)
+            assertEquals(topicFormRepository.formResult.initialContent, hydrated.bodyText)
             assertTrue(hydrated.subjectHydratedFromServer)
-            assertFalse(hydrated.draftHydratedFromServer)
+            assertTrue(hydrated.draftHydratedFromServer)
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun editFirstPostRejectsInsertionsUntilSeedKnown() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        topicFormRepository.formGate = gate
+        val uploads = FakeUploadRepository()
+        val vm = newViewModel(uploadRepository = uploads)
+        val selection = vm.bodyFieldState.selection
+        val intents = listOf(
+            TopicFormIntent.ToolbarActionClicked(BbcodeAction.Bold),
+            TopicFormIntent.ToolbarActionClicked(BbcodeAction.Quote),
+            TopicFormIntent.SmileySelected(":o"),
+            TopicFormIntent.ImageUrlInserted("https://example.test/image.png"),
+            TopicFormIntent.ImagesPicked(listOf("content://pick/1")),
+            TopicFormIntent.ImagePickerEventReceived(
+                ImagePickerEvent.Result(ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA, listOf("content://pick/2")),
+            ),
+        )
+        for (intent in intents) {
+            vm.submit(intent)
+            syncBody()
+            assertEquals("Rejected $intent", "", vm.bodyFieldState.text.toString())
+            assertEquals(selection, vm.bodyFieldState.selection)
+            assertFalse(vm.state.value.isUploading)
+        }
+        // Exercise the final callback guard even though the upload launch itself was refused.
+        val insert = TopicFormViewModel::class.java.getDeclaredMethod(
+            "insertImageBbcodeAtCaret", String::class.java, Boolean::class.javaPrimitiveType,
+        ).apply { isAccessible = true }
+        insert.invoke(vm, "[img]https://example.test/late.png[/img]", false)
+        syncBody()
+        assertEquals("", vm.bodyFieldState.text.toString())
+        assertEquals(selection, vm.bodyFieldState.selection)
+        assertEquals(0, uploads.uploadCalls)
+        assertEquals(0, draftStore.saveCount)
+
+        gate.complete(Unit)
+        syncBody()
+        assertEquals(topicFormRepository.formResult.initialContent, vm.bodyFieldState.text.toString())
+        assertFalse(vm.state.value.isAwaitingInitialBody)
+        vm.submit(TopicFormIntent.SmileySelected(":o"))
+        assertTrue(vm.bodyFieldState.text.toString().contains(":o"))
+    }
+
+    @Test
+    @Suppress("UNCHECKED_CAST") // Inject an inconsistent state to exercise the independent send guard.
+    fun editFirstPostCannotSubmitUnhydratedBody() = runTest {
+        val vm = newViewModel(
+            userPreferencesRepository = FakeUserPreferencesRepository(confirmBeforePosting = true),
+        )
+        vm.submit(TopicFormIntent.SubmitClicked())
+        val token = requireNotNull(vm.state.value.armToken)
+        val state = TopicFormViewModel::class.java.getDeclaredField("_state").run {
+            isAccessible = true
+            get(vm) as MutableStateFlow<TopicFormState>
+        }
+        assertTrue(state.value.canSubmit)
+        state.value = state.value.copy(draftHydratedFromServer = false)
+        assertFalse(state.value.canSubmit)
+        vm.submit(TopicFormIntent.SubmitClicked())
+        vm.submit(TopicFormIntent.SubmitConfirmed(token))
+        testScheduler.runCurrent()
+        assertEquals(0, topicFormRepository.submitCalls)
+        assertEquals(token, vm.state.value.armToken)
+    }
+
+    @Test
+    fun formFailureKeepsBodyLockedUntilRetryOrExplicitRestore() = runTest {
+        topicFormRepository.formFailure = java.io.IOException("offline")
+        val uploads = FakeUploadRepository()
+        val vm = newViewModel(uploadRepository = uploads)
+        assertFalse(vm.state.value.isLoadingForm)
+        assertTrue(vm.state.value.isAwaitingInitialBody)
+        assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
+        vm.editBody(TextFieldValue("early typing or paste"))
+        vm.submit(TopicFormIntent.ToolbarActionClicked(BbcodeAction.Quote))
+        vm.submit(TopicFormIntent.SmileySelected(":o"))
+        vm.submit(TopicFormIntent.ImageUrlInserted("https://example.test/image.png"))
+        vm.submit(TopicFormIntent.ImagesPicked(listOf("content://pick/1")))
+        vm.submit(
+            TopicFormIntent.ImagePickerEventReceived(
+                ImagePickerEvent.Result(ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA, listOf("content://pick/2")),
+            ),
+        )
+        syncBody()
+        assertEquals("", vm.bodyFieldState.text.toString())
+        assertEquals(0, uploads.uploadCalls)
+        assertFalse(vm.state.value.canSubmit)
+
+        val gate = CompletableDeferred<Unit>()
+        topicFormRepository.formGate = gate
+        topicFormRepository.formFailure = null
+        vm.submit(TopicFormIntent.ReloadRequested)
+        assertTrue(vm.state.value.isLoadingForm)
+        assertTrue(vm.state.value.isAwaitingInitialBody)
+        gate.complete(Unit)
+        syncBody()
+        assertFalse(vm.state.value.isAwaitingInitialBody)
+        assertNull(vm.state.value.submitError)
+        vm.editBody(TextFieldValue("known body edited"))
+        assertEquals("known body edited", vm.bodyFieldState.text.toString())
+    }
+
+    @Test
+    fun blankServerBodyIsKnownAndUnlocksEditing() = runTest {
+        for (seed in listOf("", " \n")) {
+            topicFormRepository.formResult = topicFormRepository.formResult.copy(initialContent = seed)
+            val vm = newViewModel()
+            assertTrue(vm.state.value.draftHydratedFromServer)
+            assertFalse(vm.state.value.isAwaitingInitialBody)
+            assertEquals(seed, vm.state.value.draftHydratedContent)
+            assertEquals(seed, vm.bodyFieldState.text.toString())
+            assertFalse(vm.state.value.canSubmit)
+            vm.editBody(TextFieldValue("filled body"))
+            assertEquals("filled body", vm.bodyFieldState.text.toString())
+            assertTrue(vm.state.value.canSubmit)
+        }
+    }
+
+    @Test
+    fun newRemainsEditableWhileFormLoads() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        topicFormRepository.formGate = gate
+        val uploads = FakeUploadRepository()
+        val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT, uploadRepository = uploads)
+        assertTrue(vm.state.value.isLoadingForm)
+        assertFalse(vm.state.value.isAwaitingInitialBody)
+        vm.editBody(TextFieldValue("new body", TextRange(8)))
+        vm.submit(TopicFormIntent.ToolbarActionClicked(BbcodeAction.Quote))
+        vm.submit(TopicFormIntent.SmileySelected(":o"))
+        vm.submit(TopicFormIntent.ImageUrlInserted("https://example.test/image.png"))
+        vm.submit(TopicFormIntent.ImagesPicked(listOf("content://pick/1")))
+        syncBody()
+        val body = vm.bodyFieldState.text.toString()
+        assertTrue(body.startsWith("new body"))
+        assertTrue(body.contains("[quote]"))
+        assertTrue(body.contains(":o"))
+        assertTrue(body.contains("[img]https://example.test/image.png[/img]"))
+        assertEquals(1, uploads.uploadCalls)
+        gate.complete(Unit)
+        syncBody()
+        assertEquals(body, vm.bodyFieldState.text.toString())
+    }
+
+    @Test
+    fun knownBodyRemainsEditableDuringRefetch() = runTest {
+        val vm = newViewModel()
+        val gate = CompletableDeferred<Unit>()
+        topicFormRepository.formGate = gate
+        vm.submit(TopicFormIntent.ReloadRequested)
+        assertTrue(vm.state.value.isLoadingForm)
+        assertFalse(vm.state.value.isAwaitingInitialBody)
+        vm.editBody(TextFieldValue("edited during refetch", TextRange(21)))
+        vm.submit(TopicFormIntent.SmileySelected(":o"))
+        val body = vm.bodyFieldState.text.toString()
+        assertTrue(body.startsWith("edited during refetch"))
+        assertTrue(body.contains(":o"))
+        gate.complete(Unit)
+        syncBody()
+        assertEquals(body, vm.bodyFieldState.text.toString())
     }
 
     @Test
@@ -1361,6 +1522,86 @@ class TopicFormViewModelTest {
     }
 
     @Test
+    @OptIn(ExperimentalFoundationApi::class)
+    fun uncertainAttemptAfterConsumedEarlyTypingDoesNotAutosaveRestoredContent() = runTest {
+        topicFormRepository.newTopicSubmitResult = NewTopicSubmitResult.Failure(ReplyFailureReason.Unknown)
+        val original = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        original.submit(TopicFormIntent.SubjectChanged(TextFieldValue("uncertain title")))
+        original.editBody(TextFieldValue("uncertain body"))
+        original.submit(TopicFormIntent.SubmitClicked())
+        testScheduler.advanceUntilIdle()
+        original.viewModelScope.cancel()
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        val entry = draftStore.entries.getValue(key)
+        assertEquals(EditorDraftStore.AttemptStatus.UNCERTAIN, entry.attempt?.status)
+        val writes = draftStore.writes
+        val saves = draftStore.saveCount
+        val loadCalls = draftStore.loadCalls
+        val gate = CompletableDeferred<Unit>()
+        draftStore.loadGate = gate
+        val restored = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        val field = restored.bodyFieldState
+        assertEquals(loadCalls + 1, draftStore.loadCalls)
+        assertFalse(restored.state.value.isAwaitingInitialBody)
+
+        restored.editBody(TextFieldValue("typed during read"))
+        syncBody()
+        // Consume the input before restoration, so the mirror cannot schedule a later autosave for it.
+        assertEquals("typed during read", restored.state.value.bodyText)
+        assertFalse(gate.isCompleted)
+        assertEquals(entry, draftStore.entries[key])
+        assertEquals(writes, draftStore.writes)
+        assertEquals(saves, draftStore.saveCount)
+
+        gate.complete(Unit)
+        syncBody()
+        assertTrue(field === restored.bodyFieldState)
+        assertEquals("uncertain body", field.text.toString())
+        assertEquals("uncertain title", restored.state.value.subject.text)
+        assertEquals(EditorErrors.uncertain, restored.state.value.submitError)
+        assertNull(restored.state.value.restorableDraft)
+        assertTrue(field.undoState.canUndo)
+        testScheduler.advanceTimeBy(800)
+        testScheduler.runCurrent()
+        assertEquals(writes, draftStore.writes)
+        assertEquals(saves, draftStore.saveCount)
+        assertEquals(entry.version, draftStore.entries[key]?.version)
+        assertEquals(entry, draftStore.entries[key])
+        field.undoState.undo()
+        assertEquals("typed during read", field.text.toString())
+    }
+
+    @Test
+    @OptIn(ExperimentalFoundationApi::class)
+    fun uncertainFirstPostAttemptRestoresBeforeFormArrives() = runTest {
+        topicFormRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        val original = newViewModel()
+        original.submit(TopicFormIntent.SubjectChanged(TextFieldValue("uncertain title")))
+        original.editBody(TextFieldValue("uncertain first post"))
+        original.submit(TopicFormIntent.SubmitClicked())
+        testScheduler.advanceUntilIdle()
+        original.viewModelScope.cancel()
+        val writes = draftStore.saveCount
+        val gate = CompletableDeferred<Unit>()
+        topicFormRepository.formGate = gate
+        val restored = newViewModel()
+        assertTrue(restored.state.value.isLoadingForm)
+        assertTrue(restored.state.value.draftHydratedFromServer)
+        assertFalse(restored.state.value.isAwaitingInitialBody)
+        assertEquals("uncertain first post", restored.bodyFieldState.text.toString())
+        assertEquals("uncertain title", restored.state.value.subject.text)
+        assertEquals(EditorErrors.uncertain, restored.state.value.submitError)
+        assertFalse(restored.bodyFieldState.undoState.canUndo)
+        assertNull(restored.state.value.restorableDraft)
+        gate.complete(Unit)
+        syncBody()
+        assertEquals("uncertain first post", restored.bodyFieldState.text.toString())
+        testScheduler.advanceTimeBy(800)
+        testScheduler.runCurrent()
+        assertEquals(writes, draftStore.saveCount)
+    }
+
+    @Test
     fun restoreReplacesUntouchedSeed() = runTest {
         val vm = editWithRestoreOffer()
         assertRestoreAndSingleUndo(vm, TextFieldValue("seed", TextRange(1, 3)), "draft")
@@ -1467,6 +1708,7 @@ class TopicFormViewModelTest {
                 val seed = if (creating) "" else "seed"
                 assertFalse(vm.state.value.isLoadingForm)
                 assertTrue(vm.state.value.draftHydratedFromServer)
+                assertFalse(vm.state.value.isAwaitingInitialBody)
                 assertEquals(seed, vm.bodyFieldState.text.toString())
                 assertEquals(offeredBody, vm.state.value.restorableDraft)
                 assertFalse(vm.bodyFieldState.undoState.canUndo)
@@ -1517,32 +1759,36 @@ class TopicFormViewModelTest {
     }
 
     @Test
-    fun lateHydrationChecksLiveBodyBeforeMirrorEmission() = runTest {
+    fun lateHydrationRejectsInputBeforeMirrorEmission() = runTest {
         val gate = CompletableDeferred<Unit>()
         topicFormRepository.formGate = gate
         val vm = newViewModel()
-        vm.bodyFieldState.edit { append("typed before form") }
+        vm.editBody(TextFieldValue("typed before form"), advanceMirror = false)
+        assertEquals("", vm.bodyFieldState.text.toString())
         assertEquals("", vm.state.value.bodyText)
         gate.complete(Unit)
         testScheduler.runCurrent()
-        assertEquals("typed before form", vm.bodyFieldState.text.toString())
+        assertEquals(topicFormRepository.formResult.initialContent, vm.bodyFieldState.text.toString())
         assertEquals(topicFormRepository.formResult.subject, vm.state.value.subject.text)
-        assertFalse(vm.state.value.draftHydratedFromServer)
-        assertEquals("", vm.state.value.draftHydratedContent)
+        assertTrue(vm.state.value.draftHydratedFromServer)
+        assertEquals(topicFormRepository.formResult.initialContent, vm.state.value.draftHydratedContent)
     }
 
     @Test
     @OptIn(ExperimentalFoundationApi::class)
-    fun lateHydrationPreservesExistingBlankInputUndoHistory() = runTest {
+    fun rejectedEarlyBlankInputDoesNotPolluteHydrationUndoHistory() = runTest {
         val gate = CompletableDeferred<Unit>()
         topicFormRepository.formGate = gate
         val vm = newViewModel()
         vm.editBody(TextFieldValue("  ", TextRange(2)))
+        assertEquals("", vm.bodyFieldState.text.toString())
+        assertFalse(vm.bodyFieldState.undoState.canUndo)
         gate.complete(Unit)
         testScheduler.runCurrent()
         assertEquals(topicFormRepository.formResult.initialContent, vm.bodyFieldState.text.toString())
+        assertFalse(vm.bodyFieldState.undoState.canUndo)
         vm.bodyFieldState.undoState.undo()
-        assertEquals("  ", vm.bodyFieldState.text.toString())
+        assertEquals(topicFormRepository.formResult.initialContent, vm.bodyFieldState.text.toString())
     }
 
     @Test
@@ -1575,6 +1821,7 @@ class TopicFormViewModelTest {
         syncBody()
         val seed = topicFormRepository.formResult.initialContent
         assertFalse(vm.state.value.isLoadingForm)
+        assertFalse(vm.state.value.isAwaitingInitialBody)
         assertTrue(vm.state.value.draftHydratedFromServer)
         assertTrue(vm.state.value.subjectHydratedFromServer)
         assertEquals(seed, vm.bodyFieldState.text.toString())
@@ -1604,6 +1851,7 @@ class TopicFormViewModelTest {
         )
         val vm = newViewModel()
         assertFalse(vm.state.value.isLoadingForm)
+        assertTrue(vm.state.value.isAwaitingInitialBody)
         assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
         assertEquals("", vm.state.value.draftHydratedContent)
         assertEquals("", vm.bodyFieldState.text.toString())
@@ -1612,6 +1860,8 @@ class TopicFormViewModelTest {
         vm.submit(TopicFormIntent.DraftRestoreRequested)
         syncBody()
         assertEquals("D", vm.bodyFieldState.text.toString())
+        assertTrue(vm.state.value.draftHydratedFromServer)
+        assertFalse(vm.state.value.isAwaitingInitialBody)
         assertEquals("", vm.state.value.draftHydratedContent)
         assertTrue(vm.state.value.draftHydratedFromServer)
         assertNull(vm.state.value.restorableDraft)
@@ -1652,6 +1902,7 @@ class TopicFormViewModelTest {
                 assertEquals("", vm.bodyFieldState.text.toString())
                 // New topics start with hydration disabled; edit-first-post still awaits its server body.
                 assertEquals(creating, vm.state.value.draftHydratedFromServer)
+                assertEquals(!creating, vm.state.value.isAwaitingInitialBody)
 
                 vm.submit(TopicFormIntent.DraftRestoreRequested)
                 syncBody()
@@ -1660,9 +1911,14 @@ class TopicFormViewModelTest {
                 assertEquals(TextRange(0), vm.bodyFieldState.selection)
                 assertEquals("", vm.state.value.draftHydratedContent)
                 assertEquals(creating, vm.state.value.draftHydratedFromServer)
+                assertEquals(!creating, vm.state.value.isAwaitingInitialBody)
                 assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
                 assertNull(vm.state.value.restorableDraft)
                 assertNull(vm.state.value.restorableSubject)
+                if (!creating) {
+                    vm.editBody(TextFieldValue("still locked after title-only restore"))
+                    assertEquals("", vm.bodyFieldState.text.toString())
+                }
 
                 topicFormRepository.formFailure = null
                 vm.submit(TopicFormIntent.ReloadRequested)
@@ -1674,6 +1930,7 @@ class TopicFormViewModelTest {
                 assertTrue(vm.state.value.draftHydratedFromServer)
                 assertEquals("restored title", vm.state.value.subject.text)
                 assertFalse(vm.state.value.isLoadingForm)
+                assertFalse(vm.state.value.isAwaitingInitialBody)
                 assertNull(vm.state.value.submitError)
                 vm.viewModelScope.cancel()
             }
@@ -1681,15 +1938,42 @@ class TopicFormViewModelTest {
     }
 
     @Test
-    fun delayedDraftOfferDoesNotReplaceLiveTyping() = runTest {
+    fun titleOnlyRestoreAfterHydrationKeepsSeedBody() = runTest {
+        topicFormRepository.formResult = topicFormRepository.formResult.copy(subject = "")
+        draftStore.preload(
+            EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE),
+            EditorDraftStore.Draft(body = "", subject = "T"),
+        )
+        val vm = newViewModel()
+        val seed = topicFormRepository.formResult.initialContent
+        assertEquals(seed, vm.bodyFieldState.text.toString())
+        assertTrue(vm.state.value.draftHydratedFromServer)
+        assertEquals("", vm.state.value.restorableDraft)
+        vm.editBody(TextFieldValue(seed, TextRange(1, 3)))
+
+        vm.submit(TopicFormIntent.DraftRestoreRequested)
+        syncBody()
+        assertEquals("T", vm.state.value.subject.text)
+        assertEquals(seed, vm.bodyFieldState.text.toString())
+        assertEquals(seed, vm.state.value.draftHydratedContent)
+        assertEquals(TextRange(1, 3), vm.bodyFieldState.selection)
+        assertTrue(vm.state.value.draftHydratedFromServer)
+        assertFalse(vm.state.value.isAwaitingInitialBody)
+        assertNull(vm.state.value.restorableDraft)
+    }
+
+    @Test
+    fun delayedNewDraftOfferDoesNotReplaceLiveTyping() = runTest {
         val gate = CompletableDeferred<Unit>()
         draftStore.loadGate = gate
         draftStore.preload(
-            EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE),
+            EditorDraftKey.newTopic(SAMPLE_CAT),
             EditorDraftStore.Draft(body = "stored body", subject = "stored title"),
         )
-        val vm = newViewModel()
-        vm.bodyFieldState.edit { append("typed before load") }
+        val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        vm.editBody(TextFieldValue("typed before load"), advanceMirror = false)
+        assertEquals("typed before load", vm.bodyFieldState.text.toString())
+        assertEquals("", vm.state.value.bodyText)
         gate.complete(Unit)
         testScheduler.runCurrent()
         assertNull(vm.state.value.restorableDraft)
@@ -1698,7 +1982,7 @@ class TopicFormViewModelTest {
     }
 
     @Test
-    fun typingConsumedBeforeInitialDraftReadCompletesIsAutosavedInBothModes() = runTest {
+    fun initialDraftReadAutosavesNewTypingButRejectsFirstPostTyping() = runTest {
         for (creating in listOf(false, true)) {
             val gate = CompletableDeferred<Unit>()
             draftStore = FakeEditorDraftStore().apply { loadGate = gate }
@@ -1712,27 +1996,34 @@ class TopicFormViewModelTest {
             assertEquals(1, draftStore.loadCalls)
             vm.editBody(TextFieldValue("typed before load"))
             syncBody()
-            // The mirror already advanced previousBody, but the submission binding is not initialized yet.
-            assertEquals("typed before load", vm.state.value.bodyText)
+            // New input is consumed before the binding initializes; first-post input stays rejected.
+            val acceptedBody = if (creating) "typed before load" else ""
+            assertEquals(acceptedBody, vm.bodyFieldState.text.toString())
+            assertEquals(acceptedBody, vm.state.value.bodyText)
+            assertEquals(!creating, vm.state.value.isAwaitingInitialBody)
             assertFalse(gate.isCompleted)
             assertEquals(0, draftStore.saveCount)
             assertEquals("stored body", draftStore.saved[key]?.body)
 
             gate.complete(Unit)
             syncBody()
-            assertNull(vm.state.value.restorableDraft)
-            assertEquals("typed before load", vm.bodyFieldState.text.toString())
-            assertEquals("", vm.state.value.draftHydratedContent)
+            val seed = if (creating) "" else topicFormRepository.formResult.initialContent
+            val liveBody = if (creating) acceptedBody else seed
+            assertEquals(if (creating) null else "stored body", vm.state.value.restorableDraft)
+            assertEquals(liveBody, vm.bodyFieldState.text.toString())
+            assertEquals(seed, vm.state.value.draftHydratedContent)
+            assertFalse(vm.state.value.isAwaitingInitialBody)
             testScheduler.advanceTimeBy(800)
             testScheduler.runCurrent()
-            assertEquals("typed before load", draftStore.saved[key]?.body)
-            assertEquals(1, draftStore.saveCount)
+            assertEquals(if (creating) acceptedBody else "stored body", draftStore.saved[key]?.body)
+            assertEquals(if (creating) 1 else 0, draftStore.saveCount)
+            assertEquals(if (creating) 1 else 0, draftStore.writes)
             vm.viewModelScope.cancel()
         }
     }
 
     @Test
-    fun formArrivalComparesOfferWithLiveBodyBeforeMirrorEmission() = runTest {
+    fun formArrivalKeepsOfferWhenEarlyInputIsRejected() = runTest {
         val gate = CompletableDeferred<Unit>()
         topicFormRepository.formGate = gate
         draftStore.preload(
@@ -1740,13 +2031,41 @@ class TopicFormViewModelTest {
             EditorDraftStore.Draft(body = "stored body", subject = topicFormRepository.formResult.subject),
         )
         val vm = newViewModel()
-        vm.bodyFieldState.edit { append("stored body") }
+        vm.editBody(TextFieldValue("stored body"), advanceMirror = false)
+        assertEquals("", vm.bodyFieldState.text.toString())
         assertEquals("", vm.state.value.bodyText)
         gate.complete(Unit)
         testScheduler.runCurrent()
-        assertNull(vm.state.value.restorableDraft)
+        val seed = topicFormRepository.formResult.initialContent
+        assertEquals("stored body", vm.state.value.restorableDraft)
+        assertEquals(seed, vm.bodyFieldState.text.toString())
+        assertEquals(seed, vm.state.value.draftHydratedContent)
+        testScheduler.advanceTimeBy(800)
+        testScheduler.runCurrent()
+        assertEquals("stored body", draftStore.saved[EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE)]?.body)
+        assertEquals(0, draftStore.saveCount)
+    }
+
+    @Test
+    fun formArrivalComparesOfferWithLiveBodyBeforeMirrorEmission() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        topicFormRepository.formGate = gate
+        draftStore.preload(
+            EditorDraftKey.newTopic(SAMPLE_CAT),
+            EditorDraftStore.Draft(body = "stored body"),
+        )
+        val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        assertEquals("stored body", vm.state.value.restorableDraft)
+        // Direct edit without apply notifications: the mirror has not emitted yet when the form arrives.
+        vm.bodyFieldState.edit { append("stored body") }
         assertEquals("stored body", vm.bodyFieldState.text.toString())
-        assertEquals("", vm.state.value.draftHydratedContent)
+        assertEquals("", vm.state.value.bodyText)
+
+        gate.complete(Unit)
+        testScheduler.runCurrent()
+        assertNull(vm.state.value.restorableDraft)
+        assertNull(vm.state.value.restorableSubject)
+        assertEquals("stored body", vm.bodyFieldState.text.toString())
     }
 
     @Test
@@ -1840,29 +2159,29 @@ class TopicFormViewModelTest {
     }
 
     @Test
-    fun formHydratesFirstPostDuringUploadBeforeCallbackInsertsAtSeedEnd() = runTest {
+    fun fastUploadCannotReplaceFirstPostBeforeFormArrives() = runTest {
         val formGate = CompletableDeferred<Unit>()
-        val uploadCompletion = CompletableDeferred<Unit>()
         topicFormRepository.formGate = formGate
         val seed = topicFormRepository.formResult.initialContent
-        val uploads = FakeUploadRepository().apply { uploadGate = uploadCompletion }
+        val uploads = FakeUploadRepository() // Completes immediately if an upload is allowed to start.
         val vm = newViewModel(uploadRepository = uploads)
         vm.submit(TopicFormIntent.ImagesPicked(listOf("content://pick/1")))
         assertTrue(vm.state.value.isLoadingForm)
-        assertTrue(vm.state.value.isUploading)
-        assertEquals(1, uploads.uploadCalls)
+        assertFalse(vm.state.value.isUploading)
+        assertEquals(0, uploads.uploadCalls)
         assertEquals("", vm.bodyFieldState.text.toString())
 
         formGate.complete(Unit)
         syncBody()
         assertFalse(vm.state.value.isLoadingForm)
-        assertTrue(vm.state.value.isUploading)
+        assertFalse(vm.state.value.isUploading)
         assertTrue(vm.state.value.draftHydratedFromServer)
         assertEquals(seed, vm.bodyFieldState.text.toString())
         assertEquals(TextRange(seed.length), vm.bodyFieldState.selection)
         assertEquals(seed, vm.state.value.draftHydratedContent)
 
-        uploadCompletion.complete(Unit)
+        // Picking again after hydration may upload; its result is appended to the actual first post.
+        vm.submit(TopicFormIntent.ImagesPicked(listOf("content://pick/1")))
         syncBody()
         val imageUrl = "https://rehost.diberie.com/Picture/Get/f/1"
         // Hydration parks the caret at the end; the first completed upload adds no leading newline.
@@ -1871,6 +2190,11 @@ class TopicFormViewModelTest {
         assertEquals(TextRange(expected.length), vm.bodyFieldState.selection)
         assertEquals(seed, vm.state.value.draftHydratedContent)
         assertFalse(vm.state.value.isUploading)
+        assertEquals(1, uploads.uploadCalls)
+        vm.submit(TopicFormIntent.SubmitClicked())
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, topicFormRepository.submitCalls)
+        assertEquals(expected, topicFormRepository.lastSubmittedBbcode)
     }
 
     @Test

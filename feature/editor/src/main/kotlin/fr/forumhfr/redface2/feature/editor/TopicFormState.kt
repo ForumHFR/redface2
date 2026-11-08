@@ -68,7 +68,7 @@ data class TopicFormState(
     val subjectHydratedFromServer: Boolean = false,
     /** Exact untouched subject received from HFR; null until a non-blank hydration lands. */
     val subjectHydratedContent: String? = null,
-    /** Mirror of [subjectHydratedFromServer] for the BBCode draft. */
+    /** True once the BBCode body is known, including a blank server body or an explicit restore. */
     val draftHydratedFromServer: Boolean = false,
     /** Exact server seed, set only when body hydration is applied; empty for a new topic. */
     val draftHydratedContent: String = "",
@@ -114,6 +114,10 @@ data class TopicFormState(
     /** #1128 — observed continuously so the next image pick uses the current preference. */
     val imagePickerMode: ImagePickerMode = ImagePickerMode.DEFAULT,
 ) {
+    /** A failed initial fetch leaves the first post unknown until reload or explicit restore. */
+    val isAwaitingInitialBody: Boolean
+        get() = mode == TopicFormMode.EditFirstPost && !draftHydratedFromServer
+
     /**
      * Submit is allowed when the mode-specific routing context is complete,
      * the user has typed a non-blank subject AND content, the form was
@@ -121,6 +125,7 @@ data class TopicFormState(
      * submitting, and no image upload is in flight ([isUploading], #459/#953 F5 —
      * same guard as [PostEditorState.canSubmit] : a tap on « Envoyer » must not
      * race the upload and POST before the `[img]` markup is inserted).
+     * EditFirstPost also requires a known initial body, including an explicit draft restore.
      *
      * #213 — the New (create-topic) branch now supports a category WITHOUT a
      * sub-category (e.g. cat IA, cat=32) : when the parsed form carried no
@@ -148,6 +153,7 @@ data class TopicFormState(
                     (selectedSubcat != null && selectedSubcat > 0) &&
                     subject.text.isNotBlank() &&
                     bodyText.isNotBlank() &&
+                    draftHydratedFromServer &&
                     !isLoadingForm &&
                     !isSubmitting &&
                     !submission.blocksBodyMutation &&

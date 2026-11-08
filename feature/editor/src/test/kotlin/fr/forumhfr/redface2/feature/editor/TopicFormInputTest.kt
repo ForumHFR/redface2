@@ -83,6 +83,7 @@ class TopicFormInputTest {
     private val store = VersionedEditorDraftStore()
     private val repository = mockk<TopicFormRepository>()
     private val uploads = mockk<UploadRepository>()
+    private var formGate: CompletableDeferred<Unit>? = null
     private var uploadGate: CompletableDeferred<Unit>? = null
     private var postStarted = false
     private var postGate: CompletableDeferred<Unit>? = null
@@ -90,6 +91,48 @@ class TopicFormInputTest {
     @After
     fun tearDown() {
         if (::vm.isInitialized) vm.viewModelScope.cancel()
+    }
+
+    @Test
+    fun editFirstPostRejectsTypingAndPasteUntilSeedKnown() {
+        val gate = CompletableDeferred<Unit>()
+        formGate = gate
+        setFieldContent(confirmBeforePosting = false, editing = true, waitForForm = false)
+        val selection = compose.runOnIdle {
+            assertTrue(vm.state.value.isAwaitingInitialBody)
+            vm.bodyFieldState.selection
+        }
+        // The composition deliberately remains editable: the synchronous VM guard must reject both.
+        field().performTextInput("early typing")
+        paste()
+        compose.runOnIdle {
+            assertEquals("", vm.bodyFieldState.text.toString())
+            assertEquals(selection, vm.bodyFieldState.selection)
+            assertFalse(vm.state.value.draftHydratedFromServer)
+            gate.complete(Unit)
+        }
+        compose.waitUntil { vm.state.value.draftHydratedFromServer }
+        compose.runOnIdle { assertEquals("seed", vm.bodyFieldState.text.toString()) }
+        field().performTextInput(" typed")
+        paste()
+        compose.runOnIdle { assertEquals("seed typed pasted", vm.bodyFieldState.text.toString()) }
+    }
+
+    @Test
+    fun newRemainsEditableWhileFormLoads() {
+        val gate = CompletableDeferred<Unit>()
+        formGate = gate
+        setFieldContent(confirmBeforePosting = false, waitForForm = false)
+        field().performTextInput("new body")
+        paste()
+        compose.runOnIdle {
+            assertTrue(vm.state.value.isLoadingForm)
+            assertFalse(vm.state.value.isAwaitingInitialBody)
+            assertEquals("new body pasted", vm.bodyFieldState.text.toString())
+            gate.complete(Unit)
+        }
+        compose.waitUntil { !vm.state.value.isLoadingForm }
+        compose.runOnIdle { assertEquals("new body pasted", vm.bodyFieldState.text.toString()) }
     }
 
     @Test
@@ -253,7 +296,11 @@ class TopicFormInputTest {
 
     private fun field() = compose.onNode(hasSetTextAction())
 
-    private fun setFieldContent(confirmBeforePosting: Boolean, editing: Boolean = false) {
+    private fun setFieldContent(
+        confirmBeforePosting: Boolean,
+        editing: Boolean = false,
+        waitForForm: Boolean = true,
+    ) {
         val clipboard = RuntimeEnvironment.getApplication().getSystemService(Context.CLIPBOARD_SERVICE)
             as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("test", " pasted"))
@@ -262,8 +309,14 @@ class TopicFormInputTest {
             subcategoryChoices = emptyList(), hiddenFields = emptyMap(), options = ReplyFormOptions(),
             msgIcon = "1", poll = TopicPollForm(false, emptyMap()), isAnonymous = false,
         )
-        coEvery { repository.fetchNewTopicForm(any()) } returns form
-        coEvery { repository.fetchEditFirstPostForm(any()) } returns form
+        coEvery { repository.fetchNewTopicForm(any()) } coAnswers {
+            formGate?.await()
+            form
+        }
+        coEvery { repository.fetchEditFirstPostForm(any()) } coAnswers {
+            formGate?.await()
+            form
+        }
         coEvery { repository.submitNewTopic(any(), any(), any(), any(), any(), any()) } coAnswers {
             postStarted = true
             postGate?.await()
@@ -323,7 +376,7 @@ class TopicFormInputTest {
                 }
             }
         }
-        compose.waitUntil { !vm.state.value.isLoadingForm }
+        if (waitForForm) compose.waitUntil { !vm.state.value.isLoadingForm }
         field().requestFocus()
     }
 
