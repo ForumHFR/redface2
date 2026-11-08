@@ -16,6 +16,16 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.69.7` — `internal` (dev) — 2026-11-08
+
+Refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)) : demande de citation durable ([#1553](https://github.com/ForumHFR/redface2/issues/1553) ; [#1564](https://github.com/ForumHFR/redface2/pull/1564)) et lot R0c, partie 3 ([#1512](https://github.com/ForumHFR/redface2/issues/1512) ; [#1565](https://github.com/ForumHFR/redface2/pull/1565)).
+
+- **Citations** : une demande de citation survit à la mort du processus ; la feuille de réponse rapide propose « Recharger » et « Ignorer la citation » ; l'agrandissement vers l'éditeur complet est inactif tant que l'offre de brouillon n'est pas tranchée.
+- **Éditeur de post, brouillon** : « Restaurer » suit la règle commune aux éditeurs (graine intacte remplacée, texte tapé après elle gardé, sinon ajout à la fin).
+- **Formulaire de sujet** : le champ de texte appartient désormais au ViewModel. Chaque action de la barre d'outils ou smiley s'annule en un pas ; l'aperçu est calculé hors du fil principal ; une frappe pendant un envoi armé le désarme.
+- **Formulaire de sujet, brouillon** : « Restaurer » suit la même règle ; un brouillon réduit au titre ne touche pas au corps ; « Restaurer » est inactif tant que le formulaire charge, pendant un upload et pendant un envoi.
+- Maintenance : materialKolor 6.0.0 sans changement de couleurs ([#1550](https://github.com/ForumHFR/redface2/issues/1550)) ; test de cohérence de la documentation plus robuste ([#1545](https://github.com/ForumHFR/redface2/issues/1545)).
+
 ## `0.69.6` — `internal` (dev) — 2026-11-08
 
 Refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)), lot R0c, partie 4 ([#1512](https://github.com/ForumHFR/redface2/issues/1512) ; [#1560](https://github.com/ForumHFR/redface2/pull/1560)).
