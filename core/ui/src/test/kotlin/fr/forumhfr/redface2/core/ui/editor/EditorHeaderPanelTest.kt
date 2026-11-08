@@ -92,24 +92,31 @@ class EditorHeaderPanelTest {
         val stateBefore = bodyState
         val scrollBefore = bodyScroll
         val textBefore = compose.runOnIdle { bodyState.text.toString() }
+        // R0a A / ED-22 keep requires the same selected extent, even if the field normalizes direction.
         listOf(selection, TextRange(selection.end, selection.start)).forEachIndexed { index, range ->
             compose.onNodeWithTag("body").performTextInputSelection(range)
             val offsetBefore = compose.runOnIdle { bodyScroll.value }
             compose.runOnIdle {
-                assertEquals(range, bodyState.selection)
+                assertEquals(range.min, bodyState.selection.min)
+                assertEquals(range.max, bodyState.selection.max)
                 assertTrue(offsetBefore > 0)
                 assertTrue(bodyState.undoState.canUndo)
                 open.value = true
             }
             compose.onNodeWithTag("title").assertIsFocused()
-            compose.runOnIdle { assertEquals(range, bodyState.selection) }
+            compose.runOnIdle {
+                assertEquals(range.min, bodyState.selection.min)
+                assertEquals(range.max, bodyState.selection.max)
+                assertEquals(textBefore, bodyState.text.toString())
+            }
             if (index == 0) compose.onNodeWithText("Retour au message").performClick()
             else compose.runOnIdle { dispatcher.onBackPressed() }
             compose.onNodeWithTag("body").assertIsFocused()
             compose.runOnIdle {
                 assertSame(stateBefore, bodyState)
                 assertSame(scrollBefore, bodyScroll)
-                assertEquals(range, bodyState.selection)
+                assertEquals(range.min, bodyState.selection.min)
+                assertEquals(range.max, bodyState.selection.max)
                 assertEquals(textBefore, bodyState.text.toString())
                 assertEquals(offsetBefore, bodyScroll.value)
                 assertTrue(bodyState.undoState.canUndo)

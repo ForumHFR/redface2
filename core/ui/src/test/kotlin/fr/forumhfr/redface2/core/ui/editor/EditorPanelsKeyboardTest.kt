@@ -55,6 +55,7 @@ class EditorPanelsKeyboardTest {
         val details = mutableStateOf(false)
         val imeBeforePanel = mutableStateOf(false)
         val bodyState = TextFieldState("Message")
+        val textBefore = bodyState.text.toString()
         val panelState = TextFieldState("Titre")
         val bodyFocus = FocusRequester()
         val panelFocus = FocusRequester()
@@ -111,6 +112,9 @@ class EditorPanelsKeyboardTest {
                 val selection = TextRange(6, 1)
                 compose.onNodeWithTag("body").performTextInputSelection(selection)
                 compose.runOnIdle {
+                    // R0a A / ED-22 keep preserves extent, not the direction normalized by the field.
+                    assertEquals(selection.min, bodyState.selection.min)
+                    assertEquals(selection.max, bodyState.selection.max)
                     keyboardVisible = initiallyOpen
                     imeBeforePanel.value = keyboardVisible // Host snapshot BEFORE opening.
                     open.value = true
@@ -118,6 +122,9 @@ class EditorPanelsKeyboardTest {
                 compose.onNodeWithTag("body").assertDoesNotExist()
                 compose.runOnIdle {
                     assertEquals(expectedReturns, returns)
+                    assertEquals(selection.min, bodyState.selection.min)
+                    assertEquals(selection.max, bodyState.selection.max)
+                    assertEquals(textBefore, bodyState.text.toString())
                     // A header field or a remedy may change the IME while the panel is open.
                     keyboardVisible = !initiallyOpen
                     shows = 0
@@ -129,7 +136,9 @@ class EditorPanelsKeyboardTest {
                 compose.runOnIdle {
                     expectedReturns++
                     assertEquals(expectedReturns, returns)
-                    assertEquals(selection, bodyState.selection)
+                    assertEquals(selection.min, bodyState.selection.min)
+                    assertEquals(selection.max, bodyState.selection.max)
+                    assertEquals(textBefore, bodyState.text.toString())
                     assertEquals(initiallyOpen, keyboardVisible)
                     assertEquals(if (initiallyOpen) 1 else 0, shows)
                     assertEquals(if (initiallyOpen) 0 else 1, hides)

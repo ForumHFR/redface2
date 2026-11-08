@@ -149,16 +149,27 @@ class EditorEventDetailsTest {
         setHost()
         compose.runOnIdle { bodyFocus.requestFocus() }
         val selection = TextRange(6, 1)
+        val textBefore = compose.runOnIdle { bodyState.text.toString() }
         compose.onNodeWithTag("body").performTextInputSelection(selection)
-        compose.runOnIdle { assertEquals(selection, bodyState.selection) }
+        // R0a A / ED-22 keep preserves the selected extent; the field may normalize its direction.
+        compose.runOnIdle {
+            assertEquals(selection.min, bodyState.selection.min)
+            assertEquals(selection.max, bodyState.selection.max)
+        }
         activate(event)
-        compose.runOnIdle { assertEquals(selection, bodyState.selection) }
+        compose.runOnIdle {
+            assertEquals(selection.min, bodyState.selection.min)
+            assertEquals(selection.max, bodyState.selection.max)
+            assertEquals(textBefore, bodyState.text.toString())
+        }
         compose.onNodeWithText("Ignorer la citation").assertDoesNotExist()
         compose.onAllNodes(hasClickAction()).assertCountEquals(2)
         compose.runOnIdle { dispatcher.onBackPressed() }
         compose.onNodeWithTag("body").assertIsFocused()
         compose.runOnIdle {
-            assertEquals(selection, bodyState.selection)
+            assertEquals(selection.min, bodyState.selection.min)
+            assertEquals(selection.max, bodyState.selection.max)
+            assertEquals(textBefore, bodyState.text.toString())
             assertEquals(listOf(event.key), closed)
             assertTrue(quotePending)
             assertEquals(0, leaves)
@@ -194,16 +205,25 @@ class EditorEventDetailsTest {
         activate(old)
         val staleClose = requireNotNull(compose.onNodeWithText("Masquer").fetchSemanticsNode()
             .config[SemanticsActions.OnClick].action)
-        compose.runOnIdle {
-            receive(newer)
-            dispatch(EditorEventInput.Activate(newer.key))
-        }
-        compose.onNodeWithText(requireNotNull(newer.detail).resolve(context)).assertExists()
-        compose.runOnIdle { staleClose() }
+        compose.runOnIdle { receive(newer) }
+        // Equal-rank events stay FIFO: close the old detail before the newer event is actionable.
+        compose.onNodeWithText(requireNotNull(old.detail).resolve(context)).assertExists()
+        compose.onNodeWithText("Masquer").performClick()
         compose.onNodeWithTag("body").assertIsFocused()
         compose.runOnIdle {
             assertEquals(listOf(old.key), closed)
+            assertEquals(newer, model.value.visibleEvent)
+        }
+        activate(newer)
+        compose.onNodeWithText(requireNotNull(newer.detail).resolve(context)).assertExists()
+        compose.onNodeWithText(requireNotNull(old.detail).resolve(context)).assertDoesNotExist()
+        compose.runOnIdle { assertEquals(newer.key, model.value.detailKey) }
+        compose.runOnIdle { staleClose() }
+        compose.onNodeWithTag("body").assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(listOf(old.key, old.key), closed)
             assertEquals(listOf(newer), model.value.events)
+            assertNull(model.value.detailKey)
             assertNull(detail.value)
         }
     }
