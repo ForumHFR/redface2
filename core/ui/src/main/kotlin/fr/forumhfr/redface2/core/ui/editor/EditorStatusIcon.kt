@@ -1,14 +1,19 @@
 package fr.forumhfr.redface2.core.ui.editor
 
 import androidx.annotation.DrawableRes
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.material3.Badge
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Text
+import androidx.compose.material3.TooltipAnchorPosition
+import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -24,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 
 /** Keep composed across [visible] changes; [label] includes state/count and destination. See [EditorActionIcon]. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 @Suppress("LongParameterList") // Independent icon, count, visibility and enabled state at the host boundary.
 fun EditorStatusIcon(
@@ -41,29 +47,27 @@ fun EditorStatusIcon(
     val density = LocalDensity.current
     // Stack rather than overlay: even a large counter never covers the 24 dp glyph.
     val badgeWidth = with(density) { badgeSize.width.toDp() } + 8.dp
-    val contentHeight = if (badgeCount == null) 24.dp else {
-        24.dp + maxOf(16.dp, with(density) { badgeSize.height.toDp() })
-    }
-    Box(modifier) {
-        EditorIconTooltip(label) {
-            IconButton(
-                onClick = onClick, enabled = enabled && visible,
-                modifier = (if (!visible) Modifier.size(1.dp) else Modifier.sizeIn(
-                    minWidth = maxOf(48.dp, badgeWidth), minHeight = maxOf(48.dp, contentHeight),
-                )).semantics {
-                    liveRegion = LiveRegionMode.Polite
-                    if (visible) contentDescription = label
-                }.then(if (visible) Modifier else Modifier.clearAndSetSemantics {}),
-            ) {
-                if (!visible) return@IconButton
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    RedfaceVectorIcon(iconRes, Modifier.testTag(EDITOR_STATUS_GLYPH_TAG))
-                    if (badgeCount != null) Badge(
-                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                        modifier = Modifier.testTag(EDITOR_STATUS_BADGE_TAG).clearAndSetSemantics {},
-                    ) { Text(badgeCount.toString(), style = style, maxLines = 1) }
-                }
+    val height = 24.dp + if (badgeCount == null) 0.dp else maxOf(16.dp, with(density) { badgeSize.height.toDp() })
+    TooltipBox(
+        positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
+        tooltip = { PlainTooltip { Text(label) } }, state = rememberTooltipState(),
+        modifier = modifier, focusable = false, enableUserInput = visible,
+    ) {
+        IconButton(
+            onClick = onClick, enabled = enabled && visible,
+            modifier = (if (!visible) Modifier.size(1.dp) else Modifier.sizeIn(
+                minWidth = maxOf(48.dp, badgeWidth), minHeight = maxOf(48.dp, height),
+            )).semantics {
+                liveRegion = LiveRegionMode.Polite
+                if (visible) contentDescription = label
+            }.then(if (visible) Modifier else Modifier.clearAndSetSemantics {}),
+        ) {
+            if (visible) Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                RedfaceVectorIcon(iconRes, Modifier.testTag(EDITOR_STATUS_GLYPH_TAG))
+                if (badgeCount != null) Badge(containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                    modifier = Modifier.testTag(EDITOR_STATUS_BADGE_TAG).clearAndSetSemantics {},
+                ) { Text(badgeCount.toString(), style = style, maxLines = 1) }
             }
         }
     }

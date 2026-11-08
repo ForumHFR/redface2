@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.ui.editor
 
+import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction as Action
 import androidx.compose.foundation.layout.Row
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.mutableStateOf
@@ -48,6 +49,8 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.util.ReflectionHelpers.ClassParameter
+import org.robolectric.util.ReflectionHelpers.callInstanceMethod
 
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -55,9 +58,7 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class EditorControlIconsTest {
     @get:Rule val compose = createComposeRule()
-
-    @Test
-    fun `ED32 and ED33 action vectors render with their French labels and no selection semantics`() {
+    @Test fun `ED32 and ED33 action vectors render with their French labels and no selection semantics`() {
         val icons = listOf(
             R.drawable.ic_editor_format to R.string.editor_format,
             R.drawable.ic_editor_smileys to R.string.editor_smileys,
@@ -90,25 +91,21 @@ class EditorControlIconsTest {
                 .captureRoboImage("build/outputs/roborazzi/editor_action_$position.png")
         }
     }
-
-    @Test
-    fun `ED32 action name and tooltip agree while only the mode trigger has a state`() {
+    @Test fun `ED32 action name and tooltip agree while only the mode trigger has a state`() {
         val expanded = mutableStateOf(false)
-        val focus = FocusRequester()
+        val focus = FocusRequester() // IconButton accepts keyboard focus only outside touch mode.
         lateinit var inputModeManager: InputModeManager
         var clicks = 0
-        compose.setContent {
-            inputModeManager = LocalInputModeManager.current
+        compose.setContent { inputModeManager = LocalInputModeManager.current
             RedfaceTheme { EditorActionIcon(R.drawable.ic_editor_format, stringResource(R.string.editor_format),
                 { clicks++ }, Modifier.focusRequester(focus), expanded = expanded.value) }
         }
         val button = compose.onNode(hasClickAction())
         button.assert(hasContentDescription("Mise en forme"))
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Replié"))
-        assertTarget(button.getUnclippedBoundsInRoot().width.value, button.getUnclippedBoundsInRoot().height.value)
+        button.getUnclippedBoundsInRoot().run { assertTrue(toString(), width.value >= 48f && height.value >= 48f) }
         compose.runOnIdle { expanded.value = true }
         button.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Développé"))
-        // IconButton accepts keyboard focus only outside touch mode.
         compose.runOnIdle { assertTrue(inputModeManager.requestInputMode(InputMode.Keyboard)) }
         compose.runOnIdle { focus.requestFocus() }
         button.performTouchInput { longClick() }
@@ -117,15 +114,12 @@ class EditorControlIconsTest {
         assertEquals(0, clicks)
         compose.onAllNodes(hasClickAction()).assertCountEquals(1)
     }
-
-    @Test
-    fun `ED90 and ED93 icons follow visual keyboard order and disabled insertions cannot run`() {
+    @Test fun `ED90 and ED93 icons follow visual keyboard order and disabled insertions cannot run`() {
         val first = FocusRequester()
         val enabled = mutableStateOf(true)
         lateinit var inputModeManager: InputModeManager
         var clicks = 0
-        compose.setContent {
-            inputModeManager = LocalInputModeManager.current
+        compose.setContent { inputModeManager = LocalInputModeManager.current
             RedfaceTheme { Row {
                 EditorActionIcon(R.drawable.ic_editor_bold, "Gras", { clicks++ },
                     Modifier.focusRequester(first), enabled = enabled.value)
@@ -151,32 +145,29 @@ class EditorControlIconsTest {
         bold.assertIsNotEnabled().performTouchInput { click() }
         assertEquals(1, clicks)
     }
-
-    @Test
-    fun `ED40 status arrival uses a permanent polite region and one named count target`() {
+    @Test fun `ED40 status arrival uses a permanent polite region and one named count target`() {
         val visible = mutableStateOf(false)
         val dark = mutableStateOf(false)
         val count = mutableStateOf(3)
         lateinit var view: android.view.View
         var clicks = 0
-        compose.setContent {
-            view = LocalView.current
+        compose.setContent { view = LocalView.current
             RedfaceTheme(darkTheme = dark.value) { Surface {
                 EditorStatusIcon(R.drawable.ic_editor_quote, "${count.value} citations, ouvrir le panneau citations",
                     { clicks++ }, badgeCount = count.value, visible = visible.value)
             } }
         }
-        val live = SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion)
-        val id = compose.onNode(live).fetchSemanticsNode().id
+        val id = compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion)).fetchSemanticsNode().id
         compose.assertLiveNode(id, "", LiveRegionMode.Polite, view)
         compose.onAllNodes(hasClickAction()).assertCountEquals(0)
+        compose.runOnIdle { assertAbsent(view) }
         compose.runOnIdle { visible.value = true }
         compose.assertLiveNode(id, "3 citations, ouvrir le panneau citations", LiveRegionMode.Polite, view)
         val button = compose.onNode(hasClickAction())
         button.assert(hasContentDescription("3 citations, ouvrir le panneau citations")).performClick()
         assertEquals(1, clicks)
         compose.onAllNodes(hasClickAction()).assertCountEquals(1)
-        assertTarget(button.getUnclippedBoundsInRoot().width.value, button.getUnclippedBoundsInRoot().height.value)
+        button.getUnclippedBoundsInRoot().run { assertTrue(toString(), width.value >= 48f && height.value >= 48f) }
         val glyph = compose.onNodeWithTag(EDITOR_STATUS_GLYPH_TAG, useUnmergedTree = true).getUnclippedBoundsInRoot()
         val badge = compose.onNodeWithTag(EDITOR_STATUS_BADGE_TAG, useUnmergedTree = true).getUnclippedBoundsInRoot()
         assertTrue("Badge must not cover glyph", badge.top >= glyph.bottom)
@@ -189,10 +180,9 @@ class EditorControlIconsTest {
         compose.runOnIdle { visible.value = false }
         compose.onAllNodes(hasClickAction()).assertCountEquals(0)
         compose.assertLiveNode(id, "", LiveRegionMode.Polite, view)
+        compose.runOnIdle { assertAbsent(view) }
     }
-
-    @Test
-    fun `recipient InputChip has one removal button without checked state and obeys disabled state`() {
+    @Test fun `recipient InputChip has one removal button without checked state and obeys disabled state`() {
         var removals = 0
         val enabled = mutableStateOf(true)
         compose.setContent { RedfaceTheme { Surface {
@@ -213,14 +203,20 @@ class EditorControlIconsTest {
                 compose.runOnIdle { assertEquals(false, removal.action?.invoke()) }
             }
             assertEquals(1, removals)
-            assertTarget(chip.getUnclippedBoundsInRoot().width.value, chip.getUnclippedBoundsInRoot().height.value)
+            chip.getUnclippedBoundsInRoot().run { assertTrue(toString(), width.value >= 48f && height.value >= 48f) }
             assertEquals(48f, chip.getUnclippedBoundsInRoot().height.value, 0.5f)
             val state = if (active) "enabled" else "disabled"
             chip.captureRoboImage("build/outputs/roborazzi/editor_recipient_$state.png")
         }
     }
-
-    private fun assertTarget(width: Float, height: Float) {
-        assertTrue("Target ${width}x$height dp", width >= 48f && height >= 48f)
+    private fun assertAbsent(view: android.view.View, id: Int = android.view.View.NO_ID) {
+        val info = requireNotNull(view.accessibilityNodeProvider.createAccessibilityNodeInfo(id))
+        assertTrue("Absent node $id must not accept input", !info.isFocusable && !info.isScreenReaderFocusable &&
+            info.actionList.all { it == Action.ACTION_ACCESSIBILITY_FOCUS ||
+                it == Action.ACTION_CLEAR_ACCESSIBILITY_FOCUS })
+        repeat(info.childCount) { index -> // Robolectric getChild() is a placeholder; read stored virtual IDs.
+            val child = callInstanceMethod<Long>(info, "getChildId", ClassParameter.from(Int::class.java, index))
+            assertAbsent(view, (child shr 32).toInt())
+        }
     }
 }
