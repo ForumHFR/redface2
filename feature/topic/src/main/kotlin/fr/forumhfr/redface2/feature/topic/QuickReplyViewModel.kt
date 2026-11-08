@@ -151,6 +151,7 @@ sealed interface QuickReplyEffect {
  * body, the sheet offers that body before fetching quotes: ignoring the body preserves the request.
  * Unresolved attempts always restore their body and keep their new request dormant.
  */
+@Suppress("LargeClass") // Sheet MVI plus the #405 draft and durable quote contracts, like PostEditorViewModel.
 @HiltViewModel(assistedFactory = QuickReplyViewModel.Factory::class)
 class QuickReplyViewModel @AssistedInject constructor(
     @Assisted private val request: QuickReplyRequest,
@@ -319,6 +320,7 @@ class QuickReplyViewModel @AssistedInject constructor(
         openSheet(currentPage, initialQuotes)
     }
 
+    @Suppress("CyclomaticComplexMethod") // One opening sequence: reset, Room read, offer input, then state seed.
     private fun openSheet(
         currentPage: Int, initialQuotes: List<QuoteSelection>, retainedText: TextFieldValue? = null,
     ) {
