@@ -156,13 +156,14 @@ class EditorControlIconsTest {
     fun `ED40 status arrival uses a permanent polite region and one named count target`() {
         val visible = mutableStateOf(false)
         val dark = mutableStateOf(false)
+        val count = mutableStateOf(3)
         lateinit var view: android.view.View
         var clicks = 0
         compose.setContent {
             view = LocalView.current
             RedfaceTheme(darkTheme = dark.value) { Surface {
-                EditorStatusIcon(R.drawable.ic_editor_quote, "3 citations, ouvrir le panneau citations",
-                    { clicks++ }, badgeCount = 3, visible = visible.value)
+                EditorStatusIcon(R.drawable.ic_editor_quote, "${count.value} citations, ouvrir le panneau citations",
+                    { clicks++ }, badgeCount = count.value, visible = visible.value)
             } }
         }
         val live = SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion)
@@ -183,6 +184,8 @@ class EditorControlIconsTest {
             compose.runOnIdle { dark.value = isDark }
             button.captureRoboImage("build/outputs/roborazzi/editor_status_$isDark.png")
         }
+        compose.runOnIdle { count.value = 4 }
+        compose.assertLiveNode(id, "4 citations, ouvrir le panneau citations", LiveRegionMode.Polite, view)
         compose.runOnIdle { visible.value = false }
         compose.onAllNodes(hasClickAction()).assertCountEquals(0)
         compose.assertLiveNode(id, "", LiveRegionMode.Polite, view)

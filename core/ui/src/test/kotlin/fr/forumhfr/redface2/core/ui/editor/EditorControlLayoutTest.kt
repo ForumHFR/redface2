@@ -101,7 +101,7 @@ class EditorControlLayoutTest {
                     assertEquals(if (count == 1) "1 insérée" else "$count insérées", result.layoutInput.text.text)
                     compose.onAllNodes(hasContentDescription(
                         if (count == 1) "1 image insérée, Masquer" else "$count images insérées, Masquer",
-                    )).assertCountEquals(2) // Consultable name and permanent live announcement.
+                    )).assertCountEquals(1)
                 }
                 val bounds = compose.onNodeWithTag("control").getUnclippedBoundsInRoot()
                 assertEquals(185f, bounds.width.value, 0.5f)
@@ -118,7 +118,7 @@ class EditorControlLayoutTest {
     }
 
     @Test
-    fun `ED133 a 155 dp intrinsic text is not ellipsized in the 161 dp slot`() {
+    fun `ED133 text wider than the catalogue budget fits the available slot without ellipsis`() {
         val width = mutableStateOf(185.dp)
         var layout: TextLayoutResult? = null
         compose.setContent { RedfaceTheme {
@@ -138,8 +138,11 @@ class EditorControlLayoutTest {
             compose.waitForIdle()
             val result = requireNotNull(layout)
             val pixelsPerDp = result.layoutInput.density.density
-            assertEquals(155f, result.multiParagraph.intrinsics.maxIntrinsicWidth / pixelsPerDp, 1f)
-            assertEquals(injectedWidth.value - 24f, result.layoutInput.constraints.maxWidth / pixelsPerDp, 0.5f)
+            val intrinsic = result.multiParagraph.intrinsics.maxIntrinsicWidth / pixelsPerDp
+            val available = result.layoutInput.constraints.maxWidth / pixelsPerDp
+            assertTrue(intrinsic > EDITOR_SUMMARY_TEXT_WIDTH_DP)
+            assertEquals(injectedWidth.value - 24f, available, 0.5f)
+            assertEquals(injectedWidth == 185.dp, intrinsic <= available)
             assertEquals(1, result.lineCount)
             assertEquals(injectedWidth == 90.dp, result.isLineEllipsized(0))
             if (injectedWidth == 185.dp) assertEquals(result.layoutInput.text.length, result.getLineEnd(0))

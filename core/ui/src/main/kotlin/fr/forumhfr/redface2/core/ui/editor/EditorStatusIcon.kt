@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.ui.editor
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.material3.Badge
 import androidx.compose.material3.IconButton
@@ -13,8 +14,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
@@ -42,27 +45,27 @@ fun EditorStatusIcon(
         24.dp + maxOf(16.dp, with(density) { badgeSize.height.toDp() })
     }
     Box(modifier) {
-        if (visible) EditorIconTooltip(label) {
+        EditorIconTooltip(label) {
             IconButton(
-                onClick = onClick,
-                enabled = enabled,
-                modifier = Modifier.sizeIn(
+                onClick = onClick, enabled = enabled && visible,
+                modifier = (if (!visible) Modifier.size(1.dp) else Modifier.sizeIn(
                     minWidth = maxOf(48.dp, badgeWidth), minHeight = maxOf(48.dp, contentHeight),
-                ).semantics { contentDescription = label },
+                )).semantics {
+                    liveRegion = LiveRegionMode.Polite
+                    if (visible) contentDescription = label
+                }.then(if (visible) Modifier else Modifier.clearAndSetSemantics {}),
             ) {
+                if (!visible) return@IconButton
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
                     RedfaceVectorIcon(iconRes, Modifier.testTag(EDITOR_STATUS_GLYPH_TAG))
                     if (badgeCount != null) Badge(
                         containerColor = MaterialTheme.colorScheme.secondaryContainer,
                         contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
                         modifier = Modifier.testTag(EDITOR_STATUS_BADGE_TAG).clearAndSetSemantics {},
-                    ) {
-                        Text(badgeCount.toString(), style = style, maxLines = 1)
-                    }
+                    ) { Text(badgeCount.toString(), style = style, maxLines = 1) }
                 }
             }
         }
-        EditorLiveAnnouncement(if (visible) label else "")
     }
 }
 

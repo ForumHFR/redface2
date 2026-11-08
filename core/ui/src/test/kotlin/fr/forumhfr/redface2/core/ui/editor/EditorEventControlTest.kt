@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.ui.editor
 
 import android.view.View
+import android.view.accessibility.AccessibilityNodeInfo
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
@@ -20,7 +21,6 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
-import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasClickAction
@@ -43,6 +43,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.util.ReflectionHelpers.ClassParameter
+import org.robolectric.util.ReflectionHelpers.callInstanceMethod
 
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -135,7 +137,7 @@ class EditorEventControlTest {
     }
 
     @Test
-    fun `ED95 permanent live node survives absence progress replacement and unrelated recompositions`() {
+    fun `ED95 control survives absence and only starts and terminations make progress live`() {
         val current = mutableStateOf<EditorEvent?>(null)
         val injectedWidth = mutableStateOf(185.dp)
         compose.setContent {
@@ -143,7 +145,7 @@ class EditorEventControlTest {
             RedfaceTheme { EditorEventControl(current.value, injectedWidth.value, { _, _ -> error("No action") }) }
         }
         val id = compose.onNode(live).fetchSemanticsNode().id
-        assertLive(id, "", LiveRegionMode.Polite)
+        compose.assertLiveNode(id, "", LiveRegionMode.Polite, view)
         compose.onAllNodes(hasClickAction()).assertCountEquals(0)
         val session = controlEvent(EditorEventContent.InProgress(uploadText(1))).key.session
         fun upload(id: Long, index: Int) = EditorEvent(
@@ -159,24 +161,21 @@ class EditorEventControlTest {
         assertEquals(update, resumed)
         val next = upload(2, 2)
         val cases = listOf(
-            start to "Image 1/3…", update to "Image 1/3…",
-            update.copy(key = update.key.copy(occurrence = 2)) to "Image 1/3…",
-            masked.visibleEvent to "Envoi incertain, Afficher les détails",
-            resumed to "", null to "", update to "", next to "Image 2/3…",
-            next.copy(content = error.content) to "Envoi incertain, Afficher les détails",
-            next.copy(content = finishedUpload(3)) to "3 images insérées, Masquer", null to "",
+            start to LiveRegionMode.Polite, update to null,
+            update.copy(key = update.key.copy(occurrence = 2)) to null,
+            masked.visibleEvent to LiveRegionMode.Assertive, resumed to null,
+            null to LiveRegionMode.Polite, update to null, next to LiveRegionMode.Polite,
+            next.copy(content = error.content) to LiveRegionMode.Assertive,
+            next.copy(content = finishedUpload(3)) to LiveRegionMode.Polite, null to LiveRegionMode.Polite,
         )
-        cases.forEach { (event, announcement) ->
+        cases.forEach { (event, mode) ->
             compose.runOnIdle { current.value = event }
-            val mode = if (event?.rank == EditorEventRank.Error) LiveRegionMode.Assertive else LiveRegionMode.Polite
-            assertLive(id, announcement, mode)
+            val name = event?.let { it.accessibleSummary.resolve(context) +
+                (it.action?.let { action -> ", " + actionLabel(action) } ?: "") }.orEmpty()
+            compose.assertLiveNode(id, name, mode, view)
             compose.onAllNodes(hasClickAction()).assertCountEquals(if (event?.action == null) 0 else 1)
-            if (event?.content is EditorEventContent.InProgress && event.summary.resolve(context) != announcement) {
-                compose.onNode(hasContentDescription(event.summary.resolve(context))).assertHasNoClickAction()
-                    .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Focused))
-            }
             compose.runOnIdle { injectedWidth.value = if (injectedWidth.value == 185.dp) 170.dp else 185.dp }
-            assertLive(id, announcement, mode)
+            compose.assertLiveNode(id, name, mode, view)
         }
     }
 
@@ -185,9 +184,11 @@ class EditorEventControlTest {
         val current = mutableStateOf<EditorEvent?>(null)
         var tints = emptyList<Color>()
         compose.setContent { RedfaceTheme {
+            view = LocalView.current
             tints = with(MaterialTheme.colorScheme) { listOf(error, onSecondaryContainer, onSurfaceVariant) }
             EditorEventControl(current.value, 185.dp, { _, _ -> })
         } }
+        val id = compose.onNode(live).fetchSemanticsNode().id
         val cases = editorErrorSamples.map { error ->
             val isError = error.errorClass != EditorErrorClass.Information
             Triple(EditorEventContent.Problem(error),
@@ -203,18 +204,14 @@ class EditorEventControlTest {
         cases.forEach { (content, icon, tint) ->
             val event = controlEvent(content)
             compose.runOnIdle { current.value = event }
-            val expectedMode = if (tint == 0) LiveRegionMode.Assertive else LiveRegionMode.Polite
-            compose.onNode(live).assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, expectedMode))
+            val name = event.accessibleSummary.resolve(context) +
+                (event.action?.let { ", " + actionLabel(it) } ?: "")
+            compose.assertLiveNode(id, name, if (tint == 0) LiveRegionMode.Assertive else LiveRegionMode.Polite, view)
             compose.onNodeWithTag("editor-event-icon-$icon", useUnmergedTree = true)
                 .assert(SemanticsMatcher.expectValue(EditorEventIconTintKey, tints[tint]))
             compose.onAllNodes(hasClickAction()).assertCountEquals(if (event.action == null) 0 else 1)
-            if (event.action != null) compose.onNode(hasClickAction()).assert(hasContentDescription(
-                event.accessibleSummary.resolve(context) + ", " + actionLabel(requireNotNull(event.action)),
-            ))
         }
     }
-
-    private fun assertLive(id: Int, name: String, mode: LiveRegionMode) = compose.assertLiveNode(id, name, mode, view)
 
     private fun actionLabel(action: EditorEventAction): String = context.getString(when (action) {
         EditorEventAction.Complete -> R.string.editor_action_complete
@@ -225,31 +222,37 @@ class EditorEventControlTest {
     private val context get() = ApplicationProvider.getApplicationContext<android.content.Context>()
 }
 
-/** Check both Compose trees and Android's pruned tree: a covered live sibling passes Compose queries alone. */
-internal fun ComposeContentTestRule.assertLiveNode(id: Int, name: String, mode: LiveRegionMode, view: View) {
-    val live = SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion)
+/** Keyboard focus says nothing about TalkBack; inspect every node exposed by Android's provider. */
+internal fun ComposeContentTestRule.assertLiveNode(id: Int, name: String, mode: LiveRegionMode?, view: View) {
     listOf(false, true).forEach { unmerged ->
-        onAllNodes(live, useUnmergedTree = unmerged).assertCountEquals(1)
-        assertTrue(onAllNodes(hasClickAction(), useUnmergedTree = unmerged).fetchSemanticsNodes().size <= 1)
-        val node = onNode(live, useUnmergedTree = unmerged)
-        assertEquals(id, node.fetchSemanticsNode().id)
-        node.assert(hasContentDescription(name)).assertHasNoClickAction()
-            .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Focused))
-            .assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, mode))
+        if (name.isNotEmpty()) onAllNodes(hasContentDescription(name), useUnmergedTree = unmerged).assertCountEquals(1)
     }
     runOnIdle {
+        val nodes = view.editorAccessibilityNodes()
         val info = requireNotNull(view.accessibilityNodeProvider.createAccessibilityNodeInfo(id))
-        assertEquals(name, info.contentDescription?.toString())
-        assertEquals(if (mode == LiveRegionMode.Assertive) View.ACCESSIBILITY_LIVE_REGION_ASSERTIVE else
-            View.ACCESSIBILITY_LIVE_REGION_POLITE, info.liveRegion)
-        assertTrue(info.isVisibleToUser && !info.isClickable && !info.isFocusable)
+        assertEquals(if (name.isEmpty()) 0 else 1, nodes.count { it.isScreenReaderFocusable })
+        assertEquals(name.isNotEmpty(), info.isScreenReaderFocusable)
+        assertTrue(info.isVisibleToUser && info.isImportantForAccessibility)
+        val liveMode = if (mode == null) View.ACCESSIBILITY_LIVE_REGION_NONE else
+            if (mode == LiveRegionMode.Assertive) View.ACCESSIBILITY_LIVE_REGION_ASSERTIVE else
+                View.ACCESSIBILITY_LIVE_REGION_POLITE
+        assertEquals(liveMode, info.liveRegion)
+        if (name.isNotEmpty()) assertEquals(1, nodes.count { it.contentDescription?.toString() == name })
+    }
+}
+
+private fun View.editorAccessibilityNodes(id: Int = View.NO_ID): List<AccessibilityNodeInfo> {
+    val info = requireNotNull(accessibilityNodeProvider.createAccessibilityNodeInfo(id))
+    // Robolectric getChild() returns a placeholder; use Android's stored virtual child IDs instead.
+    return listOf(info) + (0 until info.childCount).flatMap { index ->
+        val childId = callInstanceMethod<Long>(info, "getChildId", ClassParameter.from(Int::class.java, index))
+        editorAccessibilityNodes((childId shr 32).toInt())
     }
 }
 
 internal fun controlEvent(content: EditorEventContent, occurrence: Long = 1): EditorEvent = EditorEvent(
     EventKey(EditorSession("controls", "alice", "topic:23:42"),
-        OperationRef.Local(EditorLocalOperation.Notice, 1), occurrence),
-    content, occurrence,
+        OperationRef.Local(EditorLocalOperation.Notice, 1), occurrence), content, occurrence,
 )
 
 internal fun uploadText(index: Int) = EditorText(R.string.editor_event_uploading, listOf(index, 3))

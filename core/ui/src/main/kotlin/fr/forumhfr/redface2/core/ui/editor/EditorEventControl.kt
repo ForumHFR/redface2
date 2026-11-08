@@ -38,12 +38,11 @@ import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 
 /**
  * Always compose this control, including when [event] is null; never key it by event identity.
- * Without an event only the 1 dp live node remains; no event slot is reserved.
+ * Without an event the same semantic node keeps a 1 dp footprint; no event slot is reserved.
  * [width] is the full envelope (nominal slot + 4 dp, about 185 dp at 360 dp).
  * The host places it 4 dp into the start gutter, respecting system insets and the gap to Submit.
  * When the host supplies a taller height via [modifier], the 48 dp target is centered vertically.
- * [onAction] dispatches only Activate with the displayed key, never NextGesture or a tool callback.
- * The host applies the reducer's gestureConsumed result without dispatching another action.
+ * [onAction] dispatches Activate with the displayed key; the host honors gestureConsumed without another dispatch.
  */
 @Composable
 fun EditorEventControl(
@@ -63,11 +62,10 @@ fun EditorEventControl(
     val announced = remember { mutableSetOf<Pair<EditorSession, OperationRef>>() }
     val operation = event?.key?.let { it.session to it.operation }
     val inProgress = event?.content is EditorEventContent.InProgress
-    val progressAnnouncement = remember(operation, inProgress) {
-        if (inProgress && operation !in announced) name else ""
-    }
+    val announceProgress = remember(operation, inProgress, name) { inProgress && operation !in announced }
     SideEffect { if (inProgress) announced.add(requireNotNull(operation)) }
-    val announcement = if (inProgress) progressAnnouncement else name
+    // UI 1.12.1 sends description changes even without liveRegion; only start/terminal states are live.
+    val announce = !inProgress || announceProgress
     val isError = event?.rank == EditorEventRank.Error
     val tint = when {
         isError -> MaterialTheme.colorScheme.error
@@ -78,33 +76,32 @@ fun EditorEventControl(
         modifier = if (event == null) modifier else modifier.width(width).heightIn(min = 48.dp),
         contentAlignment = Alignment.CenterStart,
     ) {
-        if (event != null) Row(
-            modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
+        Row(
+            modifier = (if (event == null) Modifier.size(1.dp) else Modifier.fillMaxWidth().heightIn(min = 48.dp))
                 .clip(MaterialTheme.shapes.small)
                 .background(if (action != null) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
-                .then(if (action == null) Modifier else Modifier.clickable(
+                .then(if (event == null || action == null) Modifier else Modifier.clickable(
                     role = Role.Button, onClickLabel = actionName, onClick = { onAction(event.key, action) },
                 ))
-                .semantics(mergeDescendants = true) { contentDescription = name }
-                .padding(start = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
+                .semantics(mergeDescendants = event != null) {
+                    if (event != null) contentDescription = name
+                    if (announce) liveRegion = if (isError) LiveRegionMode.Assertive else LiveRegionMode.Polite
+                }
+                .then(if (event == null) Modifier else Modifier.padding(start = 4.dp)),
+            horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (event == null) return@Row
             val icon = event.controlIcon()
-            RedfaceVectorIcon(icon,
-                Modifier.testTag("editor-event-icon-$icon")
-                    .semantics { this[EditorEventIconTintKey] = tint }, tint = tint, size = 16.dp)
+            RedfaceVectorIcon(icon, Modifier.testTag("editor-event-icon-$icon")
+                .semantics { this[EditorEventIconTintKey] = tint }, tint = tint, size = 16.dp)
             Text(
                 text = visualSummary,
                 modifier = Modifier.weight(1f, fill = false).clearAndSetSemantics {},
                 style = MaterialTheme.typography.labelSmall,
-                color = tint,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+                color = tint, maxLines = 1, overflow = TextOverflow.Ellipsis,
                 onTextLayout = { onSummaryTextLayout?.invoke(it) },
             )
         }
-        EditorLiveAnnouncement(announcement, isError)
     }
 }
 
@@ -123,13 +120,4 @@ private fun EditorEvent.controlIcon(): Int = when {
     content is EditorEventContent.InProgress -> R.drawable.ic_editor_progress
     content is EditorEventContent.Finished -> R.drawable.ic_editor_done
     else -> R.drawable.ic_editor_info
-}
-
-/** Compose last: covered siblings are pruned from Android accessibility, even when transparent. */
-@Composable
-internal fun EditorLiveAnnouncement(text: String, assertive: Boolean = false) {
-    Box(Modifier.size(1.dp).semantics {
-        liveRegion = if (assertive) LiveRegionMode.Assertive else LiveRegionMode.Polite
-        contentDescription = text
-    })
 }
