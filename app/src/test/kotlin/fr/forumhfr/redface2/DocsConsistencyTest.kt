@@ -693,7 +693,7 @@ class DocsConsistencyTest {
             }
 
         override fun visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult {
-            if (attrs.isRegularFile && isIndexedSource(file)) files += file
+            if (attrs.isRegularFile && isIndexedSource(file)) files.add(file)
             return FileVisitResult.CONTINUE
         }
 
