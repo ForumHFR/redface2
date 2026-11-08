@@ -21,6 +21,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
@@ -108,7 +109,8 @@ class EditorScreenLayoutTest {
                 )
             }
         }
-        compose.onNodeWithText("Image").performClick()
+        // The last chip is off-screen in the horizontal toolbar; reveal it before the touch click.
+        compose.onNodeWithText("Image").performScrollTo().assertIsDisplayed().performClick()
         compose.onNodeWithText("Insérer une image").assertIsDisplayed()
         compose.runOnIdle { state.value = state.value.copy(draftHydratedFromForm = false) }
         compose.onNodeWithText("Insérer une image").assertDoesNotExist()

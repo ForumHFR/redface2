@@ -16,7 +16,6 @@ import kotlinx.coroutines.test.runTest
 import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
-import org.jsoup.Jsoup
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -77,29 +76,37 @@ class DefaultEditPostRepositoryTest {
 
     @Test
     fun `GET edit rejects a missing textarea but accepts a present empty body`() = runTest {
-        val document = Jsoup.parse(fixture("write_edit_form_test_post.html"))
-        val textarea = requireNotNull(document.selectFirst("form[action*=bdd.php] textarea[name=content_form]"))
+        val html = fixture("write_edit_form_test_post.html")
+        val textarea = Regex("""(?s)(<textarea[^>]*name="content_form"[^>]*>).*?(</textarea>)""")
+        assertTrue(textarea.containsMatchIn(html))
         val context = EditPostContext(23, 550, 35395, 20, 2784595)
-        textarea.remove()
-        server.enqueue(MockResponse().setBody(document.outerHtml()))
+        val stripped = html.replace(textarea, "")
+        assertFalse(stripped.contains("content_form\""))
+        server.enqueue(MockResponse().setBody(stripped))
 
         val failure = runCatching { repository.fetchEditPostForm(context) }.exceptionOrNull()
         assertTrue(failure is IllegalStateException)
         assertEquals("content_form textarea missing from edit form", failure?.message)
 
-        requireNotNull(document.selectFirst("form[action*=bdd.php]")).appendChild(textarea.empty())
-        server.enqueue(MockResponse().setBody(document.outerHtml()))
+        val emptied = html.replace(textarea, "$1$2")
+        assertTrue(textarea.containsMatchIn(emptied))
+        server.enqueue(MockResponse().setBody(emptied))
         assertEquals("", repository.fetchEditPostForm(context).initialContent)
     }
 
     @Test
     fun `GET edit never treats a fallback reply composer as the edited post body`() = runTest {
-        server.enqueue(MockResponse().setBody(fixture("write_reply_form_open_topic.html")))
+        val editHtml = fixture("write_edit_form_test_post.html")
+        val replyHtml = editHtml.replace("action=\"/bdd.php", "action=\"/bddpost.php")
+        assertTrue("The edit form action must be replaced", replyHtml != editHtml)
+        assertTrue(replyHtml.contains("action=\"/bddpost.php"))
+        server.enqueue(MockResponse().setBody(replyHtml))
         val failure = runCatching {
             repository.fetchEditPostForm(EditPostContext(23, 550, 35395, 20, 2784595))
         }.exceptionOrNull()
 
         assertTrue(failure is IllegalStateException)
+        assertEquals("Reply form not found", failure?.message)
     }
 
     @Test
