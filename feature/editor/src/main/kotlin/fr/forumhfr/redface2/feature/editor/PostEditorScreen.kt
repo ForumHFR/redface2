@@ -259,7 +259,7 @@ internal fun PostEditorContent(
  * #405 — non-destructive draft-restore banner. Shown when a cached draft was found on init
  * ([PostEditorState.restorableDraft] / [TopicFormState] equivalent). « Restaurer » pre-fills the
  * editor ; « Ignorer » deletes the cached row. The draft is never silently applied nor lost.
- * [restoreEnabled] lets a surface disable « Restaurer » while an upload is in flight (R0c).
+ * [restoreEnabled] disables « Restaurer » while the seed is unknown or a mutation is blocked.
  * Shared by [PostEditorContent] and `TopicFormContent` (same string resources).
  */
 @Composable
@@ -402,11 +402,17 @@ internal fun PostEditorAlertBanners(
     state: PostEditorState,
     onIntent: (PostEditorIntent) -> Unit,
 ) {
+    val quoteAwaitingRestore = state.restorableDraft != null && state.pendingQuotes.isNotEmpty() &&
+        !state.hasDormantQuote
     if (state.restorableDraft != null) {
         DraftRestoreBanner(
             onRestore = { onIntent(PostEditorIntent.DraftRestoreRequested) },
             onDiscard = { onIntent(PostEditorIntent.DraftDiscardRequested) },
+            restoreEnabled = state.canRestoreDraft && !state.isUploading && !state.submission.blocksBodyMutation,
         )
+        if (quoteAwaitingRestore) {
+            Text(stringResource(R.string.editor_quote_pending), style = MaterialTheme.typography.bodySmall)
+        }
     }
     if (state.legacyQuoteRequestDropped) {
         Text(
@@ -436,19 +442,17 @@ internal fun PostEditorAlertBanners(
                 color = MaterialTheme.colorScheme.error,
             )
         }
-        val reload = state.quoteStorageUnavailable || state.pendingQuotes.isNotEmpty() ||
-            error.action == EditorErrorAction.Reload
+        val reload = !quoteAwaitingRestore && (state.quoteStorageUnavailable || state.pendingQuotes.isNotEmpty() ||
+            error.action == EditorErrorAction.Reload)
         val (action, label) = when {
             state.hasDormantQuote -> PostEditorIntent.PendingQuoteResumed to R.string.editor_action_resume_quote
-            state.canIgnorePendingQuote -> PostEditorIntent.PendingQuoteIgnored to
-                fr.forumhfr.redface2.core.ui.R.string.editor_action_ignore_quote
             reload -> PostEditorIntent.ReloadRequested to fr.forumhfr.redface2.core.ui.R.string.editor_action_reload
             else -> PostEditorIntent.ErrorDismissed to R.string.editor_error_dismiss
         }
         TextButton(onClick = { onIntent(action) }, enabled = !state.isLoadingForm) {
             Text(text = stringResource(label))
         }
-        if (state.hasDormantQuote) {
+        if (state.canIgnorePendingQuote) {
             TextButton(onClick = { onIntent(PostEditorIntent.PendingQuoteIgnored) }, enabled = !state.isLoadingForm) {
                 Text(stringResource(fr.forumhfr.redface2.core.ui.R.string.editor_action_ignore_quote))
             }

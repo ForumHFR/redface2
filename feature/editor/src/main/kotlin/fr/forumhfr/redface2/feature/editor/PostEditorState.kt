@@ -63,6 +63,8 @@ data class PostEditorState(
     val draftHydratedFromForm: Boolean = false,
     /** Exact untouched server prefill, used to distinguish hydration from a user edit (#1415). */
     val draftHydratedContent: String? = null,
+    /** ED-89: in-memory server body actually hydrated in Edit; null until known, empty in Reply. */
+    val draftRestoreSeed: String? = if (mode == PostEditorMode.Edit) null else "",
     /**
      * Per-post options the user can flip from the editor (Phase 2C, #146 round
      * 2 follow-up). Seeded from `ReplyForm.options` on the first form load and
@@ -155,6 +157,9 @@ data class PostEditorState(
 
     val hasDormantQuote: Boolean
         get() = pendingQuotes.isNotEmpty() && submission is EditorSubmissionState.Uncertain
+
+    val canRestoreDraft: Boolean
+        get() = draftRestoreSeed != null && (mode != PostEditorMode.Edit || !isLoadingForm)
 
     val canIgnorePendingQuote: Boolean
         get() = pendingQuotes.isNotEmpty() && (quoteFetchFailures >= 2 || hasDormantQuote) && !isLoadingForm &&

@@ -6,6 +6,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -53,7 +55,7 @@ class PostEditorQuoteRetryUiTest {
     }
 
     @Test
-    fun `same banner button offers explicit ignore only after reload failed again`() {
+    fun `banner adds explicit ignore alongside reload only after the same request failed twice`() {
         val intents = mutableListOf<PostEditorIntent>()
         var state by mutableStateOf(PostEditorState(
             mode = PostEditorMode.Reply, cat = 23, topicId = 35421, numreponse = null, page = 1, subcat = 0,
@@ -68,11 +70,62 @@ class PostEditorQuoteRetryUiTest {
         compose.onNodeWithText("Ignorer la citation").assertDoesNotExist()
         compose.onNodeWithText("Recharger").performClick()
         compose.runOnIdle { state = state.copy(quoteFetchFailures = 2) }
-        compose.onNodeWithText("Recharger").assertDoesNotExist()
+        compose.onNodeWithText("Recharger").assertIsDisplayed().performClick()
         compose.onNodeWithText("Citation toujours non chargée.", substring = true).assertIsDisplayed()
         compose.onNodeWithText("Ignorer la citation").performClick()
-        assertEquals(listOf(PostEditorIntent.ReloadRequested, PostEditorIntent.PendingQuoteIgnored), intents)
+        assertEquals(
+            listOf(
+                PostEditorIntent.ReloadRequested, PostEditorIntent.ReloadRequested, PostEditorIntent.PendingQuoteIgnored,
+            ),
+            intents,
+        )
         assertTrue(intents.none { it is PostEditorIntent.SubmitClicked || it == PostEditorIntent.ErrorDismissed })
+    }
+
+    @Test
+    fun `restore offer explains the pending quote without offering a load action`() {
+        val intents = mutableListOf<PostEditorIntent>()
+        compose.setContent {
+            RedfaceTheme(darkTheme = false) {
+                Column {
+                    PostEditorAlertBanners(
+                        PostEditorState(
+                            mode = PostEditorMode.Reply, cat = 23, topicId = 35421,
+                            numreponse = null, page = 1, subcat = 0,
+                            restorableDraft = "saved body",
+                            pendingQuotes = listOf(QuoteSelection(QuoteLocator(1, 101, null), "", "")),
+                            submitError = EditorErrors.quoteFetchFailed,
+                        ),
+                        onIntent = intents::add,
+                    )
+                }
+            }
+        }
+        compose.onNodeWithText("Citation en attente").assertIsDisplayed()
+        compose.onNodeWithText("Recharger").assertDoesNotExist()
+        compose.onNodeWithText("Restaurer").assertIsEnabled().performClick()
+        compose.onNodeWithText("Ignorer").assertIsEnabled().performClick()
+        assertEquals(listOf(PostEditorIntent.DraftRestoreRequested, PostEditorIntent.DraftDiscardRequested), intents)
+    }
+
+    @Test
+    fun `restore stays disabled until the edit seed is known including after a failed load`() {
+        val intents = mutableListOf<PostEditorIntent>()
+        var state by mutableStateOf(PostEditorState(
+            mode = PostEditorMode.Edit, cat = 23, topicId = 35421, numreponse = 101, page = 1, subcat = 0,
+            restorableDraft = "saved body", isLoadingForm = true,
+        ))
+        compose.setContent {
+            RedfaceTheme(darkTheme = false) {
+                Column { PostEditorAlertBanners(state, onIntent = intents::add) }
+            }
+        }
+        compose.onNodeWithText("Restaurer").assertIsDisplayed().assertIsNotEnabled().performClick()
+        compose.onNodeWithText("Ignorer").assertIsEnabled()
+        assertTrue(intents.isEmpty())
+        compose.runOnIdle { state = state.copy(isLoadingForm = false, draftRestoreSeed = "") }
+        compose.onNodeWithText("Restaurer").assertIsEnabled().performClick()
+        assertEquals(listOf(PostEditorIntent.DraftRestoreRequested), intents)
     }
 
     @Test

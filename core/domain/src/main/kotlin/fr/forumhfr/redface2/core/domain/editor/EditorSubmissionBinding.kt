@@ -34,6 +34,8 @@ data class EditorSubmissionCallbacks<E, F>(
     val state: (EditorSubmissionState) -> Unit,
     val error: (F?) -> Unit,
     val success: (E) -> Unit,
+    /** Clear only this error if it is still visible; other feature-local errors must survive. */
+    val clearError: (F) -> Unit = {},
 )
 
 /** ED-88: the feature supplies its existing navigation effect, after terminal state and cleanup. */
@@ -192,7 +194,10 @@ class EditorSubmissionBinding<E, F>(
     }
 
     private fun resolveDraftFailure(result: StoreWriteResult?) {
-        if (result is StoreWriteResult.Written) pendingDraftFailure = false
+        if (result is StoreWriteResult.Written) {
+            pendingDraftFailure = false
+            callbacks.clearError(errors.draftSaveFailed)
+        }
     }
 
     private fun draftSaveFailed() {

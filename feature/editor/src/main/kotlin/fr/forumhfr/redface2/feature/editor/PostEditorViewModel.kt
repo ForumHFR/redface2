@@ -237,6 +237,9 @@ class PostEditorViewModel @AssistedInject constructor(
                 }
             },
             success = { value -> _effects.trySend(value) },
+            clearError = { error ->
+                _state.update { if (it.submitError == error) it.copy(submitError = null) else it }
+            },
         ),
     )
 
@@ -699,17 +702,20 @@ class PostEditorViewModel @AssistedInject constructor(
         }
     }
 
-    /**
-     * #405 — append the cached body after any live text (caret at the end) and clear the banner.
-     * Marks the draft hydrated so a late form fetch cannot overwrite the restored text.
-     */
+    /** ED-89: replace the untouched seed, keep its typed suffix, or append after other live text. */
     private fun onDraftRestoreRequested() {
-        val offeredBody = _state.value.restorableDraft ?: return
+        val snapshot = _state.value
+        if (!snapshot.canRestoreDraft) return
+        val offeredBody = snapshot.restorableDraft ?: return
+        val seed = snapshot.draftRestoreSeed.orEmpty()
         _state.update { current ->
-            val body = if (current.draft.text.isBlank() || current.draft.text == offeredBody) {
-                offeredBody
-            } else {
-                current.draft.text.trimEnd() + "\n\n" + offeredBody
+            val liveBody = current.draft.text
+            val suffix = liveBody.takeIf { seed.isNotEmpty() && it.startsWith(seed) }?.substring(seed.length)
+            val body = when {
+                liveBody.isBlank() || liveBody == offeredBody || liveBody == seed -> offeredBody
+                suffix != null && suffix.isBlank() -> offeredBody
+                suffix != null -> offeredBody + "\n\n" + suffix.trimStart()
+                else -> liveBody.trimEnd() + "\n\n" + offeredBody
             }
             current
                 .withDraft(TextFieldValue(text = body, selection = TextRange(body.length)))
@@ -1002,7 +1008,7 @@ class PostEditorViewModel @AssistedInject constructor(
 
     private fun loadEditFormIfPossible() {
         val context = buildEditPostContext() ?: run {
-            _state.update { it.copy(submitError = EditorErrors.missingSubcat) }
+            _state.update { it.copy(submitError = EditorErrors.missingSubcat, draftRestoreSeed = "") }
             return
         }
         launchFormFetch { editPostRepository.fetchEditPostForm(context) }
@@ -1110,6 +1116,11 @@ class PostEditorViewModel @AssistedInject constructor(
             preview = if (shouldHydrate && isPreviewVisible) nextPreview else preview,
             draftHydratedFromForm = draftHydratedFromForm || shouldHydrate,
             draftHydratedContent = if (shouldHydrate) nextDraft.text else draftHydratedContent,
+            draftRestoreSeed = if (mode == PostEditorMode.Edit && shouldHydrate) {
+                nextDraft.text
+            } else {
+                draftRestoreSeed.orEmpty()
+            },
             signatureEnabled = if (hydrateOptions) form.options.signatureEnabled else signatureEnabled,
             smileyDisabled = if (hydrateOptions) form.options.smileyDisabled else smileyDisabled,
             emailNotificationEnabled = if (hydrateOptions) {
@@ -1161,6 +1172,7 @@ class PostEditorViewModel @AssistedInject constructor(
         _state.update {
             it.copy(
                 isLoadingForm = false,
+                draftRestoreSeed = it.draftRestoreSeed.orEmpty(),
                 submitError = if (it.submitError == EditorErrors.uncertain) it.submitError else mapped,
             )
         }
