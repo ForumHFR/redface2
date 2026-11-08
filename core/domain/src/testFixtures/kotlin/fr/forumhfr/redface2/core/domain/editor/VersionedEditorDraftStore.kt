@@ -178,6 +178,7 @@ open class VersionedEditorDraftStore : EditorDraftStore {
         }
     }
 
+    @Suppress("ReturnCount") // Guards (owner / injected failure / missing row) + the written tail.
     override suspend fun discardUnreadableInlineQuoteRequest(owner: String?, key: String): StoreWriteResult {
         if (owner == null || owner != activeOwner) return StoreWriteResult.OwnerChanged
         saveFailure?.let { return StoreWriteResult.Failed(it) }
