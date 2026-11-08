@@ -5,7 +5,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorSession
 sealed interface EditorEventInput {
     /** Explicit opening with a fresh session identity; same session is a no-op, never a render hook. */
     data class OpenSession(val session: EditorSession) : EditorEventInput
-    /** Register work without removing events; only an effective launch applies ED-44 cleanup. */
+    /** Register work, removing superseded progress; only an effective launch applies ED-44 cleanup. */
     data class ObserveOperation(val session: EditorSession, val operation: OperationRef) : EditorEventInput
     /**
      * Only an accepted, effective launch (send/upload/quote insertion), never the arm tap.
@@ -33,7 +33,7 @@ sealed interface EditorEventInput {
     data class Activate(val key: EventKey) : EditorEventInput
     /** Programmatic visual acknowledgement; gestures use Activate/NextGesture/CloseDetails. No durable write. */
     data class Acknowledge(val key: EventKey) : EditorEventInput
-    /** Close the sole open panel and return to the body; acknowledge only if its detail key matches. */
+    /** Close this session's open panel and return to the body; acknowledge only if its detail key matches. */
     data class CloseDetails(val key: EventKey) : EditorEventInput
 }
 
@@ -81,13 +81,16 @@ private fun registerOperation(
         previous?.ref?.sameOperation(ref) == true -> state
         previous == null || ref.sequence > previous.ref.sequence -> state.copy(
             currentOperations = state.currentOperations.filterNot { it.ref.sameKind(ref) } + EditorEventOperation(ref),
+            events = state.events.filterNot {
+                it.content is EditorEventContent.InProgress && it.key.operation.sameKind(ref)
+            },
         )
         else -> null
     }
 }
 
 /**
- * Delivery replaces only the same operation; distinct operations of one kind retain their events.
+ * Delivery replaces only the same operation; distinct operations of one kind retain their terminals.
  * Launch cleanup and uncertainty's own lifecycle are handled separately.
  * New deliveries keep their own FIFO arrival order.
  */
@@ -140,9 +143,9 @@ private fun currentOperation(
 }
 
 private fun advanceUpload(state: EditorEventState, input: EditorEventInput.UploadAdvanced): EditorEventState {
-    val event = state.events.find {
-        it.key == input.key && input.key.session == state.session && input.key.operation is OperationRef.Upload
-    }
+    val operation = currentOperation(state, input.key.session, input.key.operation) ?: return state
+    if (operation.finished || operation.ref !is OperationRef.Upload) return state
+    val event = state.events.find { it.key == input.key }
     val content = event?.content as? EditorEventContent.InProgress ?: return state
     return state.copy(events = state.events.map {
         if (it.key == input.key) it.copy(content = content.copy(uploadProgress = input.progress)) else it
@@ -215,8 +218,8 @@ private fun acknowledgeEvent(state: EditorEventState, key: EventKey): EditorEven
 }
 
 private fun closeDetails(state: EditorEventState, key: EventKey): EditorEventTransition {
-    if (state.detailKey == null) return EditorEventTransition(state)
-    // A stale closure still returns focus, but cannot acknowledge a newer detail's event.
+    if (key.session != state.session || state.detailKey == null) return EditorEventTransition(state)
+    // Within this session, a stale closure returns focus without acknowledging a newer detail's event.
     val acknowledged = if (state.detailKey == key) acknowledgeEvent(state, key) else state
     return EditorEventTransition(
         acknowledged.copy(detailKey = null),

@@ -113,6 +113,7 @@ class EditorEventReducerTest {
         val next = OperationRef.Upload(EditorUploadToken(2, session))
         val running = event(next, EditorEventContent.InProgress(text), 2)
         val state = containing(old).step(EditorEventInput.OperationStarted(running))
+        assertEquals(listOf(running), state.events)
         val staleInputs = listOf(
             EditorEventInput.OperationStarted(old),
             EditorEventInput.ObserveOperation(session, upload),
@@ -129,6 +130,36 @@ class EditorEventReducerTest {
     }
 
     @Test
+    fun `superseded upload progress cannot mask the current terminal in either callback order`() {
+        val old = event(upload, EditorEventContent.InProgress(text), 1)
+        val next = OperationRef.Upload(EditorUploadToken(2, session))
+        val active = event(next, EditorEventContent.InProgress(text), 2)
+        val finished = event(next, EditorEventContent.Finished(text), 3)
+        val progress = UploadProgress(1, 2)
+        val advances = listOf(EditorEventInput.UploadAdvanced(old.key, progress),
+            EditorEventInput.UploadAdvanced(active.key, progress))
+        val terminals = listOf(EditorEventInput.Received(problem(upload, EditorErrors.tooLarge, 99)),
+            EditorEventInput.Received(finished))
+        listOf(EditorEventInput.ObserveOperation(session, next), EditorEventInput.OperationStarted(active),
+            EditorEventInput.Received(active)).forEach { reservation ->
+            val reserved = containing(old).step(reservation)
+            assertFalse(reserved.events.contains(old))
+            listOf(false, true).forEach { reversed ->
+                var state = reserved.step(EditorEventInput.Received(active))
+                (if (reversed) advances.reversed() else advances).forEach { state = state.step(it) }
+                assertEquals(listOf(active.copy(content = EditorEventContent.InProgress(text, progress))), state.events)
+                (if (reversed) terminals.reversed() else terminals).forEach { state = state.step(it) }
+                assertEquals(listOf(finished), state.events)
+                assertEquals(finished, state.visibleEvent)
+                val closed = reduceEditorEvents(state, EditorEventInput.Activate(finished.key))
+                assertTrue(closed.state.events.isEmpty())
+                assertTrue(closed.gestureConsumed)
+                advances.forEach { assertEquals(closed.state, closed.state.step(it)) }
+            }
+        }
+    }
+
+    @Test
     fun `observing before effective launch preserves the launch and rejects subsequent starts`() {
         val error = problem(validation, EditorErrors.missingTitle, 1)
         val observed = containing(error).observe(submission)
@@ -141,10 +172,11 @@ class EditorEventReducerTest {
     }
 
     @Test
-    fun `observing a retry preserves same kind terminals until effective launch`() {
+    fun `observing a retry purges stale progress but preserves same kind terminals until effective launch`() {
         val retries = listOf(
             upload to OperationRef.Upload(EditorUploadToken(2, session)),
             submission to submission.copy(token = SubmissionToken(2, session)),
+            notice to notice.copy(sequence = 2),
         )
         val contents = listOf(
             EditorEventContent.Problem(EditorErrors.network),
@@ -152,6 +184,8 @@ class EditorEventReducerTest {
             EditorEventContent.Information(text),
         )
         retries.forEach { (previous, retry) ->
+            val progress = event(previous, EditorEventContent.InProgress(text), 1)
+            assertTrue(containing(progress).observe(retry).events.isEmpty())
             contents.forEach { content ->
                 val terminal = event(previous, content, 1)
                 val observed = containing(terminal).observe(retry)
@@ -244,6 +278,12 @@ class EditorEventReducerTest {
             EditorEventInput.CloseDetails(error.key),
         )
         inputs.forEach { assertEquals(EditorEventTransition(state), reduceEditorEvents(state, it)) }
+        val nextUpload = OperationRef.Upload(EditorUploadToken(1, nextSession))
+        val nextError = error.copy(key = EventKey(nextSession, nextUpload, 1))
+        val nextOpened = state.step(EditorEventInput.Received(nextError)).step(EditorEventInput.Activate(nextError.key))
+        assertEquals(nextError.key, nextOpened.detailKey)
+        val staleClosed = reduceEditorEvents(nextOpened, EditorEventInput.CloseDetails(error.key))
+        assertEquals(EditorEventTransition(nextOpened), staleClosed)
         val reopened = state.step(EditorEventInput.OpenSession(session.copy(id = "opening-a-again")))
         assertEquals(reopened, reopened.step(EditorEventInput.Received(error)))
     }
