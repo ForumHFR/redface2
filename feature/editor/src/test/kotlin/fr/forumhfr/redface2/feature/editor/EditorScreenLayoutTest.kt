@@ -9,9 +9,9 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasSetTextAction
@@ -21,6 +21,8 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptToken
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
@@ -141,6 +143,13 @@ class EditorScreenLayoutTest {
         compose.runOnIdle { state.value = state.value.copy(isUploading = true) }
         compose.onNodeWithText("Restaurer").assertIsNotEnabled()
         compose.onNodeWithText("Ignorer").assertIsEnabled()
+        compose.runOnIdle {
+            state.value = state.value.copy(
+                isUploading = false,
+                submission = EditorSubmissionState.Uncertain(AttemptToken("tester", "key", "id", 1), accepted = true),
+            )
+        }
+        compose.onNodeWithText("Restaurer").assertIsNotEnabled()
     }
 
     @Test
