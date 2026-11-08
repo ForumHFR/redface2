@@ -720,6 +720,9 @@ class DocsConsistencyTest {
             val kept = Files.writeString(sources.resolve("Kept.kt"), "class Kept")
             val build = Files.createDirectories(tmp.resolve("mod/build/generated/src/main"))
             Files.writeString(build.resolve("Generated.kt"), "class Generated")
+            // Only pruning keeps this one out: the path has a `src` segment and no `build` segment.
+            val toolDir = Files.createDirectories(tmp.resolve(".gradle/src/main/kotlin"))
+            Files.writeString(toolDir.resolve("Decoy.kt"), "class Decoy")
             val collector = SourceFileCollector(tmp)
 
             Files.walkFileTree(tmp, collector)
