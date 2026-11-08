@@ -106,6 +106,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
     }
 
     /** The raw row stays sealed until this explicit abandonment succeeds and the binding reloads. */
+    @Suppress("ComplexCondition") // One guard: sealed flag, live binding, key, and the version found unreadable.
     suspend fun discardUnreadableInlineQuoteRequest(): StoreWriteResult = writes.withLock {
         withContext(NonCancellable) {
             val expectedVersion = unreadableVersion
