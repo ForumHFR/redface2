@@ -586,6 +586,7 @@ class PostEditorViewModel @AssistedInject constructor(
         }
     }
 
+    @Suppress("ComplexCondition") // Resume vs offer: one clause per reconcile / pending offer / ignored state.
     private suspend fun restoreOrdinaryDraft(draft: EditorDraftStore.Draft, reconcile: Boolean) {
         val body = draft.body
         if (body.isBlank()) return
