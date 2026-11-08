@@ -413,12 +413,13 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         val snapshot = _state.value
         val offeredBody = snapshot.restorableDraft ?: return
         val liveBody = bodyFieldState.text.toString()
-        val body = if (liveBody.isBlank() || liveBody == offeredBody) {
-            offeredBody
-        } else {
-            liveBody.trimEnd() + "\n\n" + offeredBody
+        val body = when {
+            offeredBody.isBlank() -> liveBody
+            liveBody.isBlank() || liveBody == offeredBody -> offeredBody
+            else -> liveBody.trimEnd() + "\n\n" + offeredBody
         }
-        replaceBody(body)
+        // A routing-only offer (blank body) fills subject/recipients and leaves the body and its caret alone.
+        if (offeredBody.isNotBlank()) replaceBody(body)
         _state.update { current ->
             current.copy(
                 subject = current.subject.ifBlank { current.restorableSubject.orEmpty() },
