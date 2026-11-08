@@ -101,6 +101,33 @@ class DefaultTopicFormRepositoryTest {
     }
 
     @Test
+    fun `GET FP form without content textarea fails instead of returning a known empty body`() = runTest {
+        // #1512 — the real capture with its body textarea stripped: an absent body must not unlock first-post editing.
+        val stripped = fixture("write_edit_first_post_form.html")
+            .replace(Regex("""(?s)<textarea[^>]*name="content_form"[^>]*>.*?</textarea>"""), "")
+        assertFalse(stripped.contains("content_form\""))
+        server.enqueue(MockResponse().setBody(stripped))
+
+        val error = runCatching {
+            repository.fetchEditFirstPostForm(EditFirstPostContext(10, 388, 148_749, 1, 2_523_829))
+        }.exceptionOrNull()
+
+        assertTrue("expected a parse failure, got $error", error is IllegalStateException)
+    }
+
+    @Test
+    fun `GET FP form with an empty content textarea returns a known empty body`() = runTest {
+        val emptied = fixture("write_edit_first_post_form.html")
+            .replace(Regex("""(?s)(<textarea[^>]*name="content_form"[^>]*>).*?(</textarea>)"""), "$1$2")
+        server.enqueue(MockResponse().setBody(emptied))
+
+        val form = repository.fetchEditFirstPostForm(EditFirstPostContext(10, 388, 148_749, 1, 2_523_829))
+
+        assertEquals("", form.initialContent)
+        assertEquals(388, form.selectedSubcat)
+    }
+
+    @Test
     fun `POST FP edit hits bdd_php with sujet, subcat, numreponse rempli and numrep empty`() = runTest {
         server.enqueue(MockResponse().setBody(fixture("write_edit_first_post_form.html")))
         server.enqueue(MockResponse().setBody(fixture("write_edit_first_post_success_response.html")))
