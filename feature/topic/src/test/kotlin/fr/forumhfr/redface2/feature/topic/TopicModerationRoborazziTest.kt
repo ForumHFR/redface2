@@ -11,12 +11,12 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.testing.captureRoboImage
 import java.time.Instant
 import org.junit.Rule
 import org.junit.Test
@@ -26,7 +26,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * #1112 — record-only visual review of the real Topic moderation card.
+ * #1112 — screenshot verification and visual review of the real Topic moderation card.
  *
  * The captures deliberately include every colour-sensitive family: body text + link, quote,
  * spoiler, code, signature, citation pill, edit marker, menu and footer actions. The fourth image
@@ -108,7 +108,7 @@ class TopicModerationRoborazziTest {
         }
 
         composeTestRule.onRoot().captureRoboImage(
-            filePath = "build/outputs/roborazzi/$fileName",
+            filePath = "src/test/screenshots/$fileName",
         )
     }
 

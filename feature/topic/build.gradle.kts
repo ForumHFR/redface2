@@ -1,5 +1,6 @@
 plugins {
     id("redface.android.compose.library")
+    id("redface.android.roborazzi")
     id("redface.android.hilt.library")
 }
 
@@ -18,13 +19,6 @@ android {
             // reads `stringResource`, so the host activity needs the merged Android resources at
             // JVM unit-test time. Same convention as :core:ui (Compose UI tests).
             isIncludeAndroidResources = true
-            all {
-                // #1040 lot 6 — record-only before/after extraction captures. Same AGP 9 setup
-                // as :core:ui and :feature:messages: no Roborazzi Gradle plugin, the plain unit
-                // test task writes the diagnostic PNGs.
-                it.systemProperties["robolectric.pixelCopyRenderMode"] = "hardware"
-                it.systemProperties["roborazzi.test.record"] = "true"
-            }
         }
     }
 }
@@ -54,8 +48,8 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.turbine)
     // #436 — Robolectric hosts `createComposeRule()` on the JVM so TopicPostCardMultiQuoteTest
-    // can exercise the per-post « + » affordance without a device. #1040 adds a record-only
-    // Roborazzi extraction proof on the same harness (no plugin under AGP 9). The BOM aligns the
+    // can exercise the per-post « + » affordance without a device. #1040 adds the Roborazzi
+    // extraction proof on the same harness (references compared by default). The BOM aligns the
     // UI-test artifacts; the debug manifest pulls the Activity surrogate mounted by the rule.
     testImplementation(platform(libs.androidx.compose.bom))
     testImplementation(libs.androidx.compose.ui.test.junit4)

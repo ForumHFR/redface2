@@ -12,12 +12,12 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.model.Poll
 import fr.forumhfr.redface2.core.model.PollOption
 import fr.forumhfr.redface2.core.model.write.PollVoteChoice
 import fr.forumhfr.redface2.core.model.write.PollVoteForm
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -26,8 +26,8 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * #1201 — record-only visual review of the owner « Clore ce sondage » affordance in the three static
- * colour schemes. The PNG files are inspection artefacts, not versioned baselines. Two scenarios : an
+ * #1201 — screenshot verification and visual review of the owner « Clore ce sondage » affordance in the three static
+ * colour schemes. The PNG files are versioned references. Two scenarios : an
  * OPEN poll where the owner sees the button, and a CLOSED poll where the affordance is gone (the
  * caller applies the native `poll.canClose` capability gate).
  *
@@ -76,7 +76,7 @@ class TopicPollCloseCardRoborazziTest {
             compose.runOnIdle { scenario.value = next }
             compose.waitForIdle()
             compose.onRoot().captureRoboImage(
-                filePath = "build/outputs/roborazzi/topic_poll_close_${next.fileName}_$suffix.png",
+                filePath = "src/test/screenshots/topic_poll_close_${next.fileName}_$suffix.png",
             )
         }
     }

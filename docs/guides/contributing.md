@@ -259,13 +259,62 @@ Cas particulier : toute contribution qui ajoute ou modifie une fonction de la **
 
 **Rendu visuel (Roborazzi) :**
 
-Screenshot testing **JVM** (sur Robolectric, sans device) via Roborazzi 1.73, consommé comme artefact de test simple (pas le plugin Gradle), avec `roborazzi.test.record=true` forcé.
+Screenshot testing **JVM** (Robolectric, sans device) via Roborazzi **1.77.0**, consommé comme
+artefacts de test sans le plugin Gradle amont. La convention `redface.android.roborazzi` transmet
+les propriétés système `roborazzi.test.record` et `roborazzi.test.verify` aux tests unitaires.
+Le mode unique `-Proborazzi.mode=record|verify` vaut **`verify` par défaut** ; toute autre valeur est rejetée.
 
-- **Mode `record`** (par défaut ici) : un test `captureRoboImage` génère un PNG dans `<module>/build/outputs/roborazzi/` (non versionné) → **inspection visuelle** rapide (~40 s). Lancer via l'env Docker, ex. `./scripts/docker-dev.sh ./gradlew :core:ui:testDebugUnitTest`. (Il n'existe **pas** de tâche `recordRoborazzi` : le plugin Gradle Roborazzi n'est pas appliqué — record forcé via `roborazzi.test.record=true`.)
-- **Quand l'utiliser** : `record` est réservé aux **changements de rendu intentionnels** (PostRenderer, écrans refondus) — on régénère puis on regarde l'image. `verifyRoborazzi` (compare) existe mais les **baselines ne sont pas versionnées** en V1 (elles bougeraient à chaque itération des refontes #603/#604).
-- **Statut** : **recommandé** pour tout changement de rendu UI structurant, **pas encore un gate CI dur**. Le passage en `verify` + baselines committées + gate fera l'objet d'une décision dédiée une fois les refontes UI stabilisées.
-- **Couverture actuelle** : `:core:ui` (PostRenderer — code, smiley, citation ; `FlagItem` refonte #603 ; vitrine réglages `SettingsHomeShowcase`) et quelques surfaces ciblées dans `:feature:topic` (extraction zoom) / `:feature:messages` (`MessageCard`, chrome de conversation). Elle s'étend au cas par cas — **pas** d'obligation « tout écran doit avoir un snapshot ».
-- Décision et rationale : [ADR-016]({{ site.baseurl }}/adr/016-roborazzi-screenshot-testing).
+Preuves dans le tag officiel **1.77.0** :
+[`RoborazziProperties.kt`](https://github.com/takahirom/roborazzi/blob/1.77.0/include-build/roborazzi-core/src/commonMain/kotlin/com/github/takahirom/roborazzi/RoborazziProperties.kt)
+lit ces propriétés système et `roborazzi.compare.output.dir` ;
+[`RoborazziOptions.common.kt`](https://github.com/takahirom/roborazzi/blob/1.77.0/include-build/roborazzi-core/src/commonMain/kotlin/com/github/takahirom/roborazzi/RoborazziOptions.common.kt)
+expose `CompareOptions(changeThreshold, imageComparator)`. Le plugin amont n'est donc pas nécessaire.
+
+- **Vérifier** : la tâche racine du dépôt `verifyRoborazziDebug` dépend des `testDebugUnitTest` des six
+  modules `core/ui`, `feature/topic`, `feature/messages`, `feature/editor`, `feature/settings`,
+  `feature/forum`, sans filtre de noms de classes. Elle refuse le mode `record`.
+  Les tests unitaires ordinaires comparent aussi par défaut, y compris les captures des classes
+  `ImageViewerScreenTest`, `PostRendererContentGeometryTest`, `ForumCategoryContentInsetsTest` et
+  `ForumCategoryCollapseTest`. Il n'existe pas de tâche amont `verifyRoborazzi` sans suffixe.
+- **Références** : PNG versionnés dans `<module>/src/test/screenshots/`. Une référence absente ou
+  différente fait échouer la vérification ; `verify` ne la crée ni ne l'écrase. Les captures passent
+  par le helper partagé `build-logic/src/roborazziTest/kotlin/` : `changeThreshold = 0f` et
+  `SimpleImageComparator(maxDistance = 0f)` imposent **zéro pixel différent**.
+- **Sorties de diagnostic** : images `*_actual.png` et `*_compare.png` sous
+  `<module>/build/outputs/roborazzi/<tâche>/`, résultats JSON sous
+  `<module>/build/test-results/roborazzi/<tâche>/`. La CI les publie dans l'artefact
+  `roborazzi-comparisons`, même après un échec du job `test`.
+- **Cache** : mode et dossier de références sont des entrées des tâches de test. Une modification ou
+  suppression de PNG invalide leur résultat ; l'enregistrement désactive le cache et l'état à jour
+  de ces tâches, car il doit réellement écrire les références.
+- **Enregistrer** : uniquement pour l'initialisation ou un changement visuel **intentionnel**, dans
+  l'environnement épinglé `scripts/docker-dev.sh` (même image que la CI). Conserver les paramètres
+  déterministes des tests (SDK, densité, locale, police, thème, horloge et données), puis relire les
+  PNG **avant/après dans la PR** avant d'approuver leur mise à jour. **Jamais de régénération
+  automatique en CI** ni pour faire disparaître un échec inexpliqué.
+- Couverture étendue au cas par cas ; aucune obligation de snapshot pour chaque écran.
+  Décision : [ADR-016, évolution #1571]({{ site.baseurl }}/adr/016-roborazzi-screenshot-testing).
+
+```bash
+# Vérification globale (également exécutée par le job CI test).
+./scripts/docker-dev.sh ./gradlew verifyRoborazziDebug -Proborazzi.mode=verify
+
+# Initialisation explicite des six modules sur box, puis relecture et versionnement des PNG.
+./scripts/docker-dev.sh ./gradlew -Proborazzi.mode=record \
+  :core:ui:testDebugUnitTest :feature:topic:testDebugUnitTest \
+  :feature:messages:testDebugUnitTest :feature:editor:testDebugUnitTest \
+  :feature:settings:testDebugUnitTest :feature:forum:testDebugUnitTest --rerun-tasks
+
+# Mise à jour ciblée d'un changement visuel voulu, puis comparaison sans réenregistrement.
+./scripts/docker-dev.sh ./gradlew :core:ui:testDebugUnitTest \
+  -Proborazzi.mode=record --tests '*PostRendererQuoteRoborazziTest*' --rerun-tasks
+./scripts/docker-dev.sh ./gradlew verifyRoborazziDebug -Proborazzi.mode=verify --rerun-tasks
+```
+
+À l'introduction de la garde, l'orchestrateur doit encore enregistrer les références sur box,
+relire les PNG et prouver : référence absente → échec ; changement visuel sans mise à jour → échec
+avec diff ; références approuvées → succès. Répéter avec le cache activé, puis sur une seconde box
+et en CI pour établir la répétabilité avant tout assouplissement de tolérance.
 
 **Smoke test mensuel HFR (fin de phase de lecture) :**
 
