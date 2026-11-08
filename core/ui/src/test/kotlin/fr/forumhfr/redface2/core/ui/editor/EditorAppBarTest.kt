@@ -84,7 +84,8 @@ class EditorAppBarTest {
                     MaterialTheme(typography = typography.copy(
                         titleSmall = typography.titleSmall.copy(lineHeight = titleHeight, lineHeightStyle = lineStyle,
                             platformStyle = PlatformTextStyle(includeFontPadding = false)),
-                        labelMedium = typography.labelMedium.copy(lineHeight = contextHeight, lineHeightStyle = lineStyle,
+                        labelMedium = typography.labelMedium.copy(lineHeight = contextHeight,
+                            lineHeightStyle = lineStyle,
                             platformStyle = PlatformTextStyle(includeFontPadding = false)),
                     )) {
                         Column(Modifier.width(360.dp)) {
@@ -135,9 +136,11 @@ class EditorAppBarTest {
                     Box(Modifier.width(360.dp).windowInsetsPadding(sides)) {
                         EditorAppBar("Nouveau sujet au titre suffisamment long pour être tronqué", "Contexte", {}, {},
                             Modifier.testTag("bar"),
-                            firstStatus = EditorAppBarStatus(R.drawable.ic_editor_quote, "Citations", {}, badgeCount = 123456),
+                            firstStatus = EditorAppBarStatus(R.drawable.ic_editor_quote, "Citations", {},
+                                badgeCount = 123456),
                             secondStatus = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon", {}),
-                            onOpenHeader = {}, headerActionLabel = stringResource(R.string.editor_app_bar_open_topic_header))
+                            onOpenHeader = {},
+                            headerActionLabel = stringResource(R.string.editor_app_bar_open_topic_header))
                     }
                 }
             }
@@ -220,7 +223,8 @@ class EditorAppBarTest {
                     assertEquals(View.ACCESSIBILITY_LIVE_REGION_POLITE, info.liveRegion)
                     assertTrue(info.isVisibleToUser && info.isImportantForAccessibility)
                     assertEquals(if (visible[index]) label else "", info.contentDescription?.toString().orEmpty())
-                    assertEquals("Absent states must not add a readable target", visible[index], info.isScreenReaderFocusable)
+                    assertEquals("Absent states must not add a readable target", visible[index],
+                        info.isScreenReaderFocusable)
                     assertEquals(0, info.childCount)
                     if (!visible[index]) {
                         assertFalse(info.isFocusable)
@@ -270,7 +274,9 @@ class EditorAppBarTest {
         }
         listOf(1f, 1.3f).forEach { fontScale ->
             listOf(240.dp, 200.dp, 176.dp).forEach { width ->
-                compose.runOnIdle { available.value = width; scale.value = fontScale; hasCategory.value = width != 200.dp }
+                compose.runOnIdle {
+                    available.value = width; scale.value = fontScale; hasCategory.value = width != 200.dp
+                }
                 val barNode = compose.onNodeWithTag("bar")
                 val bar = barNode.getUnclippedBoundsInRoot()
                 assertEquals(width.value, bar.width.value, 0.5f)
@@ -280,7 +286,8 @@ class EditorAppBarTest {
                 assertTrue(header.width >= 48.dp)
                 assertEquals(48f, header.height.value, 0.5f)
                 val actionLabel = if (width == 200.dp) "Modifier le titre" else "Modifier le titre et la sous-catégorie"
-                headerNode.assert(hasContentDescription("$actionLabel : Nouveau sujet, Titre et catégorie")).performClick()
+                headerNode.assert(hasContentDescription("$actionLabel : Nouveau sujet, Titre et catégorie"))
+                    .performClick()
                 val back = compose.onNodeWithContentDescription("Retour").getUnclippedBoundsInRoot()
                 assertTrue(back.width >= 48.dp && back.left >= bar.left && back.right <= header.left)
                 val pxPerDp = barNode.fetchSemanticsNode().boundsInRoot.width / bar.width.value
@@ -324,7 +331,8 @@ class EditorAppBarTest {
                     )) {
                         Column {
                             EditorAppBar("Nouveau MP", "Alice et Bob", { closes++ }, { previews++ },
-                                Modifier.testTag("bar"), onOpenHeader = { headers++ }, closeEnabled = closeEnabled.value,
+                                Modifier.testTag("bar"), onOpenHeader = { headers++ },
+                                closeEnabled = closeEnabled.value,
                                 headerActionLabel = stringResource(R.string.editor_app_bar_open_message_header))
                             Text("Nouveau MP", style = MaterialTheme.typography.titleSmall,
                                 maxLines = 1, modifier = Modifier.testTag("reference-title"))
