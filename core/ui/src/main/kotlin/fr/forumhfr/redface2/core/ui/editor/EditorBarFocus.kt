@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.ui.editor
 
+import androidx.compose.foundation.focusGroup
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
@@ -20,10 +21,12 @@ internal enum class EditorBarFocusTarget { Format, Color, Image, Return }
 
 /** Save the keyboard target, never a FocusRequester tied to the old composition. */
 @Composable
-internal fun rememberEditorBarFocus(): EditorBarFocus {
+internal fun rememberEditorBarFocus(mode: EditorBarMode): EditorBarFocus {
     val saved = rememberSaveable { mutableStateOf<EditorBarFocusTarget?>(null) }
     val inputMode = LocalInputModeManager.current
-    return remember(saved, inputMode) { EditorBarFocus(saved, inputMode) }
+    val focus = remember(saved, inputMode) { EditorBarFocus(saved, inputMode) }
+    LaunchedEffect(mode, focus.pending) { focus.clearUnavailableTarget(mode) }
+    return focus
 }
 
 internal class EditorBarFocus(
@@ -31,7 +34,25 @@ internal class EditorBarFocus(
     private val inputMode: InputModeManager,
 ) {
     private var focused: EditorBarFocusTarget? = null
-    private var pending by mutableStateOf(saved.value)
+    private var sublevelFocused = false
+    var pending by mutableStateOf(saved.value)
+        private set
+
+    fun sublevelModifier(): Modifier = Modifier.onFocusChanged { sublevelFocused = it.hasFocus }.focusGroup()
+
+    fun clearUnavailableTarget(mode: EditorBarMode) {
+        val available = when (pending) {
+            EditorBarFocusTarget.Format -> mode == EditorBarMode.Normal || mode == EditorBarMode.Format
+            EditorBarFocusTarget.Color -> mode == EditorBarMode.Format
+            EditorBarFocusTarget.Image -> mode == EditorBarMode.Normal
+            EditorBarFocusTarget.Return -> mode == EditorBarMode.Color || mode == EditorBarMode.Image
+            null -> true
+        }
+        if (!available) {
+            pending = null
+            saved.value = focused
+        }
+    }
 
     @Composable
     fun modifier(target: EditorBarFocusTarget): Modifier {
@@ -55,7 +76,20 @@ internal class EditorBarFocus(
     }
 
     fun navigate(source: EditorBarFocusTarget, destination: EditorBarFocusTarget, action: () -> Unit) {
-        if (focused == source && inputMode.inputMode == InputMode.Keyboard) {
+        navigateWhen(focused == source, destination, action)
+    }
+
+    fun navigateBack(mode: EditorBarMode, action: () -> Unit) {
+        val destination = when (mode) {
+            EditorBarMode.Color -> EditorBarFocusTarget.Color
+            EditorBarMode.Image -> EditorBarFocusTarget.Image
+            else -> EditorBarFocusTarget.Format
+        }
+        navigateWhen(sublevelFocused || focused == EditorBarFocusTarget.Format, destination, action)
+    }
+
+    private fun navigateWhen(hasFocus: Boolean, destination: EditorBarFocusTarget, action: () -> Unit) {
+        if (hasFocus && inputMode.inputMode == InputMode.Keyboard) {
             pending = destination
             saved.value = destination
         }

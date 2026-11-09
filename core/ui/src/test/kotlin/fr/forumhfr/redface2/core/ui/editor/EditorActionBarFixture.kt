@@ -53,6 +53,7 @@ internal class EditorActionBarFixture {
     val loading = mutableStateOf(false)
     val sending = mutableStateOf(false)
     val enabled = mutableStateOf(true)
+    val acceptGestures = mutableStateOf(true)
     val header = mutableStateOf(false)
     val firstStatus = mutableStateOf<EditorAppBarStatus?>(null)
     val secondStatus = mutableStateOf<EditorAppBarStatus?>(null)
@@ -94,7 +95,7 @@ internal class EditorActionBarFixture {
                                 } else false
                             })
                         EditorActionBar(bar.value, EditorActionBarActions(
-                            onGesture = { bar.value = reduceEditorBar(bar.value, it) },
+                            onGesture = { if (acceptGestures.value) bar.value = reduceEditorBar(bar.value, it) },
                             onBbcode = { action ->
                                 calls += "bbcode"
                                 body.editBbcode { text, start, end -> applyBbcodeAction(action, text, start, end) }

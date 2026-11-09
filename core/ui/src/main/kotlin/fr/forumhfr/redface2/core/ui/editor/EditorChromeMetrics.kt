@@ -37,8 +37,10 @@ data class EditorChromeMetrics(val compactHeight: Boolean) {
         val formatMinimumWidth = minimumTargetSize * 2
         val eventSubmitGap = 8.dp
         val eventGutterExtension = 4.dp
-        // Reserve the event's target and Send gap even at rest; its summary uses the space left by fixed slots.
-        val minimumContentWidth = minimumTargetSize + eventSubmitGap
+        val minimumEventWidth = 185.dp
+        // ED-30/133: reserve outside the gutter extension whenever a fixed slot precedes the event.
+        val eventContentWidth = minimumEventWidth + eventSubmitGap
+        val minimumContentWidth = minimumTargetSize
     }
 }
 

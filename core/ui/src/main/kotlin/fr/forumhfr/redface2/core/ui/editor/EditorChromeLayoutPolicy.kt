@@ -15,7 +15,7 @@ data class EditorChromeLayoutRequest(
     // Independent identities: null means absent; a present target reserves at least 48 dp.
     val firstStatusWidth: Dp? = null,
     val secondStatusWidth: Dp? = null,
-    // ED-25/41: mode-specific reserve, independent of event presence; includes its target and Send gap.
+    // ED-25/30: scrolling target at rest; full event envelope plus Send gap during an event.
     val minimumContentWidth: Dp = EditorChromeMetrics.minimumContentWidth,
 )
 
@@ -45,7 +45,8 @@ fun allocateEditorChrome(request: EditorChromeLayoutRequest): EditorChromeAlloca
     val fixed = mutableListOf<EditorFixedSlot>()
     val overflow = mutableListOf<EditorFixedSlot>()
     candidates.forEach { (slot, width) ->
-        if (remaining - width >= request.minimumContentWidth) {
+        // Keep a priority prefix so masking a wide status never shifts a lower-priority status left.
+        if (overflow.isEmpty() && remaining - width >= request.minimumContentWidth) {
             fixed += slot
             remaining -= width
         } else {

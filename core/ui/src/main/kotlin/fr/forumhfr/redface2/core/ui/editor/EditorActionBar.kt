@@ -63,8 +63,8 @@ data class EditorBarShortcut(
  * changing IME visibility; external surfaces restore focus on close. No field, picker launcher,
  * submission controller or preference lives here. Keep composed across events/arms for live node identity.
  * [firstStatus]/[secondStatus] are independent permanent slots (see [EditorAppBar]): null means absent,
- * never compacted into the other slot. Fixed-slot allocation depends on width and mode, never on events:
- * keep a 48 dp event target plus the Send gap (two targets in Format); shorten the summary to fit.
+ * never compacted into the other slot. ED-30 events mask the lowest-priority fixed slots until the
+ * full ED-133 envelope fits; retained slots keep their resting positions and return on acknowledgement.
  */
 @Composable
 @Suppress("LongParameterList") // Stateless rendering inputs, matching the app bar's host boundary.
@@ -105,10 +105,9 @@ fun EditorActionBar(
         }
     }
     val insert: (BbcodeAction) -> Unit = { action -> actions.onBbcode(action); actions.onBodyFocus() }
-    val focus = rememberEditorBarFocus()
+    val focus = rememberEditorBarFocus(mode)
     val back = {
-        val destination = if (mode == EditorBarMode.Color) EditorBarFocusTarget.Color else EditorBarFocusTarget.Image
-        focus.navigate(EditorBarFocusTarget.Return, destination) { actions.onGesture(EditorBarGesture.Back) }
+        focus.navigateBack(mode) { actions.onGesture(EditorBarGesture.Back) }
     }
     val backAction = resolveEditorBack(EditorBackState(bar = state))
     BackHandler(!armed && (backAction == EditorBackAction.CloseSublevel ||
@@ -189,9 +188,11 @@ private fun EditorBarEnvelope(
     SubcomposeLayout(Modifier.fillMaxWidth().height(height)) { constraints ->
         val button = subcompose("submit", submit).single()
             .measure(Constraints(maxWidth = constraints.maxWidth, maxHeight = height.roundToPx()))
-        // ED-41: an event replaces tools inside the same allocation, never demoting a fixed slot.
-        val minimum = if (mode == EditorBarMode.Format) EditorChromeMetrics.formatMinimumWidth
-            else EditorChromeMetrics.minimumContentWidth
+        val minimum = when {
+            event != null -> EditorChromeMetrics.eventContentWidth
+            mode == EditorBarMode.Format -> EditorChromeMetrics.formatMinimumWidth
+            else -> EditorChromeMetrics.minimumContentWidth
+        }
         val allocation = allocateEditorChrome(EditorChromeLayoutRequest(
             constraints.maxWidth.toDp(), button.width.toDp(), compact, hasHeader,
             firstStatusWidth = statusWidths[0], secondStatusWidth = statusWidths[1],
@@ -315,11 +316,15 @@ private fun EditorBarTools(
                 actions.onGesture(EditorBarGesture.OpenColor)
             }
         }, enabled, focus.modifier(EditorBarFocusTarget.Color))
-        EditorBarMode.Color -> EditorColorRow({ insert(it); actions.onGesture(EditorBarGesture.ColorChosen) },
-            back, enabled, focus.modifier(EditorBarFocusTarget.Return))
-        EditorBarMode.Image -> EditorImageRow(images, external, {
-            insert(BbcodeAction.Image); actions.onGesture(EditorBarGesture.ImageAction)
-        }, back, enabled, focus.modifier(EditorBarFocusTarget.Return))
+        EditorBarMode.Color -> Row(focus.sublevelModifier()) {
+            EditorColorRow({ insert(it); actions.onGesture(EditorBarGesture.ColorChosen) },
+                back, enabled, focus.modifier(EditorBarFocusTarget.Return))
+        }
+        EditorBarMode.Image -> Row(focus.sublevelModifier()) {
+            EditorImageRow(images, external, {
+                insert(BbcodeAction.Image); actions.onGesture(EditorBarGesture.ImageAction)
+            }, back, enabled, focus.modifier(EditorBarFocusTarget.Return))
+        }
     }
 }
 

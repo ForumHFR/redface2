@@ -21,6 +21,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.VerticalAlignmentLine
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -39,7 +40,8 @@ import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 /**
  * Always compose this control, including when [event] is null; never key it by event identity.
  * Without an event its semantic node keeps a 1 dp footprint. [width] includes the 4 dp start-gutter
- * extension (about 185 dp at 360 dp); the host respects insets/Submit spacing and centers the 48 dp
+ * extension only without preceding fixed slots; the host reserves at least 185 dp at 360 dp,
+ * respects insets/Submit spacing and centers the 48 dp
  * target in any taller [modifier]. [onAction] dispatches Activate with the displayed key; honor gestureConsumed.
  */
 @Composable
@@ -85,7 +87,7 @@ fun EditorEventControl(
             if (event == null) return@Row
             RedfaceVectorIcon(event.controlIcon(), Modifier.editorEventIconPlacement(), tint = tint, size = 16.dp)
             Text(text = visualSummary,
-                modifier = Modifier.weight(1f, fill = false),
+                modifier = Modifier.weight(1f, fill = false).testTag(EDITOR_EVENT_SUMMARY_TAG),
                 style = MaterialTheme.typography.labelSmall, color = tint,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                 onTextLayout = { onSummaryTextLayout?.invoke(it) })
@@ -114,6 +116,8 @@ private fun rememberEventAnnouncement(event: EditorEvent?, name: String): Boolea
 /** Internal visual diagnostics on the control itself, ignored by accessibility services. */
 internal val EditorEventIconKey = SemanticsPropertyKey<Int>("EditorEventIcon")
 internal val EditorEventIconTintKey = SemanticsPropertyKey<Color>("EditorEventIconTint")
+
+internal const val EDITOR_EVENT_SUMMARY_TAG = "editor-event-summary"
 
 /** Actual glyph start, inherited by parent layouts without creating a semantic child. */
 internal val EditorEventIconStart = VerticalAlignmentLine(::minOf)

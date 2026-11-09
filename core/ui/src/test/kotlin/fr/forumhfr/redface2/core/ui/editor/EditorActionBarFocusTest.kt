@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.core.ui.editor
 
+import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -103,6 +105,72 @@ class EditorActionBarFocusTest {
         compose.onNodeWithTag("body").assertIsFocused()
         assertEquals(EditorBarMode.Format, host.bar.value.mode)
         assertEquals(listOf("bbcode"), host.calls)
+    }
+
+    @Test
+    fun `system Back from a color swatch or image action restores its keyboard trigger`() {
+        lateinit var back: OnBackPressedDispatcher
+        compose.setContent {
+            back = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+            host.Content()
+        }
+        compose.runOnIdle { assertTrue(host.inputMode.requestInputMode(InputMode.Keyboard)) }
+        listOf("Couleur" to EditorBarMode.Format, "Image" to EditorBarMode.Normal).forEach { (label, parent) ->
+            compose.runOnIdle { host.bar.value = EditorBarState(parent) }
+            openWithKeyboard(label)
+            compose.onNodeWithContentDescription("Retour").performKeyInput { pressKey(Key.Tab) }
+            val firstAction = if (parent == EditorBarMode.Format) "Rouge" else "Uploader une image"
+            compose.onNodeWithContentDescription(firstAction).assertIsFocused()
+            compose.runOnIdle { back.onBackPressed() }
+            assertEquals(parent, host.bar.value.mode)
+            compose.onNodeWithContentDescription(label).assertIsFocused()
+        }
+        assertTrue(host.calls.isEmpty())
+    }
+
+    @Test
+    fun `refused keyboard opening cannot later steal body focus when the host opens a sublevel`() {
+        compose.setContent { host.Content() }
+        compose.runOnIdle { assertTrue(host.inputMode.requestInputMode(InputMode.Keyboard)) }
+        listOf("Couleur" to EditorBarMode.Format, "Image" to EditorBarMode.Normal).forEach { (label, parent) ->
+            compose.runOnIdle {
+                host.bar.value = EditorBarState(parent); host.acceptGestures.value = false
+            }
+            openWithKeyboard(label)
+            assertEquals(parent, host.bar.value.mode)
+            compose.onNodeWithContentDescription(label).assertIsFocused()
+            compose.runOnIdle { host.bodyFocus.requestFocus() }
+            compose.onNodeWithTag("body").assertIsFocused()
+            compose.runOnIdle {
+                host.bar.value = EditorBarState(if (parent == EditorBarMode.Format) EditorBarMode.Color
+                    else EditorBarMode.Image)
+            }
+            compose.onNodeWithTag("body").assertIsFocused()
+            compose.onNodeWithContentDescription("Retour").assertIsNotFocused()
+        }
+    }
+
+    @Test
+    fun `refused keyboard Back cannot later steal body focus when the host closes a sublevel`() {
+        lateinit var back: OnBackPressedDispatcher
+        compose.setContent {
+            back = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+            host.Content()
+        }
+        compose.runOnIdle { assertTrue(host.inputMode.requestInputMode(InputMode.Keyboard)) }
+        listOf("Couleur" to EditorBarMode.Format, "Image" to EditorBarMode.Normal).forEach { (label, parent) ->
+            compose.runOnIdle {
+                host.bar.value = EditorBarState(parent); host.acceptGestures.value = true
+            }
+            openWithKeyboard(label)
+            compose.runOnIdle { host.acceptGestures.value = false; back.onBackPressed() }
+            compose.onNodeWithContentDescription("Retour").assertIsFocused()
+            compose.runOnIdle { host.bodyFocus.requestFocus() }
+            compose.onNodeWithTag("body").assertIsFocused()
+            compose.runOnIdle { host.bar.value = EditorBarState(parent) }
+            compose.onNodeWithTag("body").assertIsFocused()
+            compose.onNodeWithContentDescription(label).assertIsNotFocused()
+        }
     }
 
     @Test

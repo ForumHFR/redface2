@@ -87,8 +87,10 @@ fun EditorStatusIcon(
         ) {
             if (visible) Box(Modifier.size(maxOf(24.dp, badgeWidth), height)) {
                 RedfaceVectorIcon(iconRes, Modifier.align(Alignment.TopCenter).testTag(EDITOR_STATUS_GLYPH_TAG))
-                if (badgeCount != null) Badge(containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                val badgeAlpha = if (enabled) 1f else DISABLED_BADGE_ALPHA
+                if (badgeCount != null) Badge(
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = badgeAlpha),
+                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = badgeAlpha),
                     modifier = Modifier.align(Alignment.BottomCenter).testTag(EDITOR_STATUS_BADGE_TAG)
                         .clearAndSetSemantics {},
                 ) { Text(badgeCount.toString(), style = style, maxLines = 1,
@@ -107,3 +109,5 @@ internal fun measureEditorStatusBadge(count: Int?): DpSize {
 internal const val EDITOR_STATUS_GLYPH_TAG = "editor-status-glyph"
 internal const val EDITOR_STATUS_BADGE_TAG = "editor-status-badge"
 internal const val EDITOR_STATUS_BADGE_TEXT_TAG = "editor-status-badge-text"
+
+private const val DISABLED_BADGE_ALPHA = 0.38f
