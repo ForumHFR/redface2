@@ -17,6 +17,8 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.movableContentOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -63,6 +65,8 @@ data class EditorBarShortcut(
  * then restores focus/viewport without changing IME visibility. External surfaces restore focus
  * when they close. No field, picker launcher, submission controller or preference lives here.
  * Keep composed across events/arms: the event control and its live node retain their identity.
+ * [firstStatus] and [secondStatus] are independent permanent slots, as in [EditorAppBar].
+ * Pass null for absence; never compact the second state into the first slot.
  */
 @Composable
 @Suppress("LongParameterList") // Stateless rendering inputs, matching the app bar's host boundary.
@@ -75,7 +79,8 @@ fun EditorActionBar(
     modifier: Modifier = Modifier,
     event: EditorEvent? = null,
     compactHeight: Boolean = false,
-    statuses: List<EditorAppBarStatus> = emptyList(),
+    firstStatus: EditorAppBarStatus? = null,
+    secondStatus: EditorAppBarStatus? = null,
     onOpenHeader: (() -> Unit)? = null,
     headerLabel: String = stringResource(R.string.editor_header_topic),
     previewVisible: Boolean = false,
@@ -85,7 +90,6 @@ fun EditorActionBar(
     uploadProgress: UploadProgress? = null,
     loadingForm: Boolean = false,
 ) {
-    require(statuses.size <= 2)
     val buttonState = editorBarSubmitState(state, submitState, uploading, loadingForm)
     val armed = buttonState.armed
     val mode = if (armed) EditorBarMode.Normal else state.visibleMode
@@ -94,14 +98,14 @@ fun EditorActionBar(
     val formatScroll = rememberScrollState()
     val colorScroll = rememberScrollState()
     val imageScroll = rememberScrollState()
-    val measurer = rememberTextMeasurer()
-    val badgeStyle = MaterialTheme.typography.labelSmall
-    val density = LocalDensity.current
-    val statusWidths = statuses.map {
-        maxOf(48.dp, with(density) { measurer.measure(it.badgeCount?.toString().orEmpty(), badgeStyle)
-            .size.width.toDp() } + 8.dp)
+    val statuses = listOf(firstStatus, secondStatus)
+    val statusWidths = editorBarStatusWidths(statuses)
+    val external: (() -> Unit) -> Unit = { action ->
+        if (!consumeEditorBarInformation(event, actions.onEvent)) {
+            actions.onGesture(EditorBarGesture.OpenSurface)
+            action()
+        }
     }
-    val external: (() -> Unit) -> Unit = { action -> actions.onGesture(EditorBarGesture.OpenSurface); action() }
     val insert: (BbcodeAction) -> Unit = { action -> actions.onBbcode(action); actions.onBodyFocus() }
     val back = { actions.onGesture(EditorBarGesture.Back) }
     val backAction = resolveEditorBack(EditorBackState(bar = state))
@@ -114,9 +118,9 @@ fun EditorActionBar(
         EditorBarMode.Color -> colorScroll
         EditorBarMode.Image -> imageScroll
     }
-    val slot: @Composable (EditorFixedSlot) -> Unit = { fixed ->
+    val slot: @Composable (EditorFixedSlot, Boolean) -> Unit = { fixed, visible ->
         EditorBarFixedSlot(fixed, statuses, headerLabel, onOpenHeader, actions.onPreview,
-            previewVisible, controlsEnabled, external)
+            previewVisible, controlsEnabled, visible, external)
     }
     val format: @Composable () -> Unit = {
         EditorBarFormatToggle(mode == EditorBarMode.Format, enabled) {
@@ -141,6 +145,17 @@ fun EditorActionBar(
                 Modifier.align(Alignment.TopStart))
         }
     }
+}
+
+@Composable
+private fun editorBarStatusWidths(statuses: List<EditorAppBarStatus?>): List<Dp?> {
+    val measurer = rememberTextMeasurer()
+    val style = MaterialTheme.typography.labelSmall
+    val density = LocalDensity.current
+    return statuses.map { status -> status?.let {
+        maxOf(48.dp, with(density) { measurer.measure(it.badgeCount?.toString().orEmpty(), style)
+            .size.width.toDp() } + 8.dp)
+    } }
 }
 
 private fun editorBarSubmitState(
@@ -178,7 +193,7 @@ private fun EditorBarEnvelope(
     height: Dp,
     compact: Boolean,
     hasHeader: Boolean,
-    statusWidths: List<Dp>,
+    statusWidths: List<Dp?>,
     mode: EditorBarMode,
     event: EditorEvent?,
     submit: @Composable () -> Unit,
@@ -187,16 +202,23 @@ private fun EditorBarEnvelope(
     SubcomposeLayout(Modifier.fillMaxWidth().height(height)) { constraints ->
         val button = subcompose("submit", submit).single()
             .measure(Constraints(maxWidth = constraints.maxWidth, maxHeight = height.roundToPx()))
-        // ED-133: extend ERROR into the leading gutter, never toward Send.
-        val extension = if (event?.rank == EditorEventRank.Error) 4.dp else 0.dp
-        val allocation = allocateEditorChrome(EditorChromeLayoutRequest(
-            constraints.maxWidth.toDp() + extension, button.width.toDp(), compact, hasHeader, statusWidths,
+        // ED-133: every event extends into the leading gutter, never toward Send.
+        val extension = if (event != null) 4.dp else 0.dp
+        val statusSlots = listOf(EditorFixedSlot.FirstStatus, EditorFixedSlot.SecondStatus)
+            .filterIndexed { index, _ -> statusWidths[index] != null }
+        val measured = allocateEditorChrome(EditorChromeLayoutRequest(
+            constraints.maxWidth.toDp() + extension, button.width.toDp(), compact, hasHeader,
+            statusWidths.filterNotNull(),
             minimumContentWidth = when {
                 event != null -> 189.dp + extension // event envelope + 8 dp Send gap
                 mode == EditorBarMode.Format -> 96.dp // trigger + one full scroll target
                 else -> 48.dp
             },
         ))
+        val allocation = measured.copy(
+            fixedSlots = measured.fixedSlots.map { it.resolveStatusSlot(statusSlots) },
+            overflowSlots = measured.overflowSlots.map { it.resolveStatusSlot(statusSlots) },
+        )
         val leading = (16.dp - extension).roundToPx()
         val width = (constraints.maxWidth - leading - 16.dp.roundToPx() - button.width).coerceAtLeast(0)
         val row = subcompose("content") { content(allocation) }.single()
@@ -209,16 +231,23 @@ private fun EditorBarEnvelope(
     }
 }
 
+private fun EditorFixedSlot.resolveStatusSlot(statusSlots: List<EditorFixedSlot>): EditorFixedSlot = when (this) {
+    EditorFixedSlot.FirstStatus -> statusSlots[0]
+    EditorFixedSlot.SecondStatus -> statusSlots[1]
+    else -> this
+}
+
 @Composable
 @Suppress("LongParameterList") // Four independent slots share the exact same fixed/overflow dispatch.
 private fun EditorBarFixedSlot(
     fixed: EditorFixedSlot,
-    statuses: List<EditorAppBarStatus>,
+    statuses: List<EditorAppBarStatus?>,
     headerLabel: String,
     onHeader: (() -> Unit)?,
     onPreview: () -> Unit,
     previewVisible: Boolean,
     enabled: Boolean,
+    visible: Boolean,
     external: (() -> Unit) -> Unit,
 ) {
     when (fixed) {
@@ -229,8 +258,10 @@ private fun EditorBarFixedSlot(
             { external(onPreview) }, enabled = enabled)
         else -> {
             val status = statuses[if (fixed == EditorFixedSlot.FirstStatus) 0 else 1]
-            EditorStatusIcon(status.iconRes, status.label, { external(status.onClick) },
-                badgeCount = status.badgeCount, enabled = enabled && status.enabled)
+            EditorStatusIcon(status?.iconRes ?: R.drawable.ic_editor_restore, status?.label.orEmpty(),
+                { status?.let { external(it.onClick) } }, Modifier.testTag("editor-bar-${fixed.name}"),
+                badgeCount = status?.badgeCount,
+                enabled = enabled && status?.enabled == true, visible = visible && status != null)
         }
     }
 }
@@ -245,23 +276,37 @@ private fun EditorBarRow(
     height: Dp,
     onEvent: (EventKey, EditorEventAction) -> Unit,
     scroll: ScrollState,
-    slot: @Composable (EditorFixedSlot) -> Unit,
+    renderSlot: @Composable (EditorFixedSlot, Boolean) -> Unit,
     format: @Composable () -> Unit,
     tools: @Composable () -> Unit,
 ) {
+    // Move the actual PR 2 nodes, not copies: fixed, scrolling and silent anchors share identity.
+    val first = remember { movableContentOf<@Composable () -> Unit> { it() } }
+    val second = remember { movableContentOf<@Composable () -> Unit> { it() } }
+    val slot: @Composable (EditorFixedSlot, Boolean) -> Unit = { fixed, visible ->
+        when (fixed) {
+            EditorFixedSlot.FirstStatus -> first { renderSlot(fixed, visible) }
+            EditorFixedSlot.SecondStatus -> second { renderSlot(fixed, visible) }
+            else -> renderSlot(fixed, visible)
+        }
+    }
+    val showTools = event == null && !armed
     Row(verticalAlignment = Alignment.CenterVertically) {
-        allocation.fixedSlots.forEach { slot(it) }
+        allocation.fixedSlots.forEach { slot(it, true) }
         Box(Modifier.weight(1f)) {
             // Permanent call site, including absent events and arm masking.
             EditorEventControl(event, (allocation.scrollingWidth - 8.dp).coerceAtLeast(48.dp), onEvent,
-                if (event == null) Modifier else Modifier.height(height))
-            if (event == null && !armed) Row(verticalAlignment = Alignment.CenterVertically) {
+                Modifier.testTag("editor-bar-event").then(if (event == null) Modifier else Modifier.height(height)))
+            if (showTools) Row(verticalAlignment = Alignment.CenterVertically) {
                 if (mode == EditorBarMode.Format) format()
                 EditorBarScroll(scroll, Modifier.weight(1f)) {
-                    allocation.overflowSlots.forEach { slot(it) }
+                    allocation.overflowSlots.forEach { slot(it, true) }
                     tools()
                 }
             }
+            val displayed = allocation.fixedSlots + if (showTools) allocation.overflowSlots else emptyList()
+            listOf(EditorFixedSlot.FirstStatus, EditorFixedSlot.SecondStatus)
+                .filterNot { it in displayed }.forEach { slot(it, false) }
         }
     }
 }

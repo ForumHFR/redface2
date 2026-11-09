@@ -3,26 +3,31 @@ package fr.forumhfr.redface2.core.ui.editor
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
 import androidx.compose.ui.unit.width
 import fr.forumhfr.redface2.core.ui.R
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -43,8 +48,7 @@ class EditorActionBarLayoutTest {
         host.scale.value = 1.3f
         host.shortcut.value = EditorBarShortcut(R.drawable.ic_editor_bold, "Raccourci", {})
         compose.setContent { host.Content() }
-        val submit = bounds("editor-bar-submit")
-        val scroll = bounds("editor-bar-scroll")
+        val submit = bounds("editor-bar-submit"); val scroll = bounds("editor-bar-scroll")
         listOf("Mise en forme", "Smileys", "Raccourci").forEach { label ->
             val target = compose.onNodeWithContentDescription(label).getUnclippedBoundsInRoot()
             assertTrue(target.left >= scroll.left && target.right <= scroll.right)
@@ -66,10 +70,9 @@ class EditorActionBarLayoutTest {
 
     @Test
     fun `ED25 compact fixed slots overflow by width and are hidden before an event is squeezed`() {
-        host.compact.value = true; host.header.value = true; host.scale.value = 1.3f
-        host.width.value = 760.dp
-        host.statuses.value = listOf(EditorAppBarStatus(R.drawable.ic_editor_quote, "12 citations", {}, 12),
-            EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon retrouvé", {}))
+        host.compact.value = true; host.header.value = true; host.scale.value = 1.3f; host.width.value = 760.dp
+        host.firstStatus.value = EditorAppBarStatus(R.drawable.ic_editor_quote, "12 citations", {}, 12)
+        host.secondStatus.value = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon retrouvé", {})
         host.bar.value = EditorBarState(EditorBarMode.Format)
         compose.setContent { host.Content() }
         val preview = compose.onNodeWithContentDescription("Afficher l’aperçu")
@@ -80,7 +83,7 @@ class EditorActionBarLayoutTest {
         compose.onNodeWithContentDescription("12 citations").revealEditorControl()
         compose.onNodeWithContentDescription("Brouillon retrouvé").performScrollTo().assertIsDisplayed()
         // Cross the ED-25/92 boundary using measured Send, not an assumed font-dependent width.
-        // ERROR's 4 dp gutter extension increases both available width and event reserve equally.
+        // Every event's 4 dp gutter extension increases available width and event reserve equally.
         val headerBoundary = bounds("editor-bar-submit").width + 32.dp + 48.dp + 189.dp
         // Stay 1 dp either side to avoid pixel/Dp rounding at the exact boundary.
         compose.runOnIdle {
@@ -99,27 +102,92 @@ class EditorActionBarLayoutTest {
         preview.assertDoesNotExist()
         compose.onNodeWithContentDescription("12 citations").assertDoesNotExist()
         compose.onNodeWithContentDescription("Brouillon retrouvé").assertDoesNotExist()
-        val event = eventControl.getUnclippedBoundsInRoot()
-        val send = bounds("editor-bar-submit")
-        assertEquals(12f, event.left.value, 0.5f)
-        assertTrue(event.width >= 185.dp)
-        assertTrue(send.left - event.right >= 7.9.dp)
-        assertEquals(48f, event.height.value, 0.5f)
+        val event = eventControl.getUnclippedBoundsInRoot(); val send = bounds("editor-bar-submit")
+        assertEquals(12f, event.left.value, 0.5f); assertTrue(event.width >= 185.dp)
+        assertTrue(send.left - event.right >= 7.9.dp); assertEquals(48f, event.height.value, 0.5f)
         assertEquals(48f, bounds("bar").height.value, 0.5f)
+    }
+
+    @Test
+    fun `ED44 first gesture only acknowledges information in fixed and overflow locations`() {
+        host.compact.value = true; host.header.value = true; host.scale.value = 1.3f
+        host.firstStatus.value = EditorAppBarStatus(R.drawable.ic_editor_quote, "Citations", { host.calls += "quotes" })
+        host.secondStatus.value = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon",
+            { host.calls += "draft" })
+        compose.setContent { host.Content() }
+        listOf(760.dp, 360.dp).forEach { width ->
+            listOf("Titre et sous-catégorie" to "header", "Afficher l’aperçu" to "preview",
+                "Citations" to "quotes", "Brouillon" to "draft").forEach { (label, call) ->
+                listOf(EditorEventContent.Information(EditorText(R.string.editor_event_already_quoted)),
+                    EditorEventContent.Problem(EditorErrors.noImageReceived)).forEach { content ->
+                    val information = controlEvent(content)
+                    compose.runOnIdle {
+                        host.width.value = width; host.bar.value = EditorBarState(EditorBarMode.Format)
+                        host.calls.clear(); host.eventActions.clear(); host.event.value = information
+                    }
+                    val target = compose.onNodeWithContentDescription(label)
+                    if (width == 760.dp) target.performTouchInput { click() }
+                    else {
+                        target.assertDoesNotExist()
+                        compose.onNode(hasClickAction() and hasAnyAncestor(hasTestTag("editor-bar-event")))
+                            .performTouchInput { click() }
+                    }
+                    assertTrue(host.calls.isEmpty()); assertEquals(EditorBarMode.Format, host.bar.value.mode)
+                    val action = if (width == 760.dp) EditorEventAction.Dismiss else information.action
+                    assertEquals(listOf(information.key to action), host.eventActions)
+                    target.revealEditorControl().performTouchInput { click() }
+                    assertEquals(listOf(call), host.calls); assertEquals(EditorBarMode.Normal, host.bar.value.mode)
+                }
+            }
+        }
+    }
+
+    @Test
+    fun `ED95 independent status nodes survive absence and both overflow boundaries`() {
+        host.compact.value = true; host.header.value = true; host.scale.value = 1.3f
+        host.bar.value = EditorBarState(EditorBarMode.Format)
+        compose.setContent { host.Content() }
+        val tags = listOf("editor-bar-FirstStatus", "editor-bar-SecondStatus")
+        val statuses = listOf(EditorAppBarStatus(R.drawable.ic_editor_quote, "Citations", {}, 12),
+            EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon", {}))
+        val ids = tags.map { compose.onNodeWithTag(it, useUnmergedTree = true).fetchSemanticsNode().id }
+        listOf(false to false, false to true, true to true, true to false, false to false).forEach { (a, b) ->
+            listOf(760.dp, 360.dp, 760.dp).forEach { width ->
+                compose.runOnIdle {
+                    host.width.value = width
+                    host.firstStatus.value = statuses[0].takeIf { a }
+                    host.secondStatus.value = statuses[1].takeIf { b }
+                }
+                tags.forEachIndexed { index, tag ->
+                    val visible = listOf(a, b)[index]
+                    listOf(false, true).forEach { unmerged ->
+                        val node = compose.onNodeWithTag(tag, useUnmergedTree = unmerged).fetchSemanticsNode()
+                        assertEquals(ids[index], node.id)
+                        assertEquals(LiveRegionMode.Polite, node.config[SemanticsProperties.LiveRegion])
+                        assertFalse(node.config.isMergingSemanticsOfDescendants)
+                        if (!visible) listOf(SemanticsProperties.ContentDescription, SemanticsProperties.Text,
+                            SemanticsProperties.Focused, SemanticsProperties.Role, SemanticsActions.OnClick,
+                            SemanticsActions.OnLongClick, SemanticsActions.RequestFocus).forEach {
+                            assertFalse("Absent status exposes $it", node.config.contains(it))
+                        }
+                        else assertEquals(width == 360.dp, hasAnyAncestor(hasScrollAction()).matches(node))
+                    }
+                    if (visible) compose.onNodeWithContentDescription(statuses[index].label).revealEditorControl()
+                }
+            }
+        }
     }
 
     @Test
     fun `ED41 ED46 ED95 modes events arm and progress keep geometry and a permanent live node`() {
         compose.setContent { host.Content() }
         val live = SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion) and
-            hasAnyAncestor(hasTestTag("bar")) and !hasTestTag("editor-bar-submit")
+            hasAnyAncestor(hasTestTag("editor-bar-event"))
         val liveId = compose.onNode(live).fetchSemanticsNode().id
-        val body = bounds("body")
-        val send = bounds("editor-bar-submit")
+        val body = bounds("body"); val send = bounds("editor-bar-submit")
         EditorBarMode.entries.forEach { mode ->
             compose.runOnIdle { host.bar.value = EditorBarState(mode) }
-            assertEquals(body, bounds("body"))
-            assertEquals(send, bounds("editor-bar-submit"))
+            assertEquals(body, bounds("body")); assertEquals(send, bounds("editor-bar-submit"))
             assertEquals(56f, bounds("bar").height.value, 0.5f)
         }
         compose.runOnIdle { host.bar.value = host.bar.value.copy(arm = host.arm) }
@@ -134,25 +202,28 @@ class EditorActionBarLayoutTest {
         compose.onNode(live).assert(
             SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Assertive))
         val progress = bounds("editor-bar-progress")
-        assertEquals(bounds("bar").top, progress.top)
-        assertEquals(2f, progress.height.value, 0.5f)
-        assertEquals(body, bounds("body"))
-        assertEquals(send, bounds("editor-bar-submit"))
+        assertEquals(bounds("bar").top, progress.top); assertEquals(2f, progress.height.value, 0.5f)
+        assertEquals(body, bounds("body")); assertEquals(send, bounds("editor-bar-submit"))
         compose.runOnIdle { host.event.value = null; host.uploading.value = false }
         assertEquals(liveId, compose.onNode(live).fetchSemanticsNode().id)
     }
 
     @Test
-    fun `ED91 ED92 narrow event keeps its full name and the gap without shrinking font or targets`() {
-        host.width.value = 240.dp; host.scale.value = 1.3f
-        host.event.value = controlEvent(EditorEventContent.Problem(EditorErrors.draftWriteFailed))
-        compose.setContent { host.Content() }
-        val event = compose.onNode(
-            hasClickAction() and hasContentDescription("Brouillon non écrit, Afficher les détails"))
-            .getUnclippedBoundsInRoot()
-        assertTrue(event.width >= 48.dp && event.height >= 48.dp)
-        assertTrue(bounds("editor-bar-submit").left - event.right >= 7.9.dp)
-        assertEquals(56f, bounds("bar").height.value, 0.5f)
+    fun `ED91 ED92 ED133 all event ranks share the extended envelope in normal and compact height`() {
+        host.scale.value = 1.3f; compose.setContent { host.Content() }
+        val events = listOf(controlEvent(EditorEventContent.Problem(EditorErrors.draftWriteFailed)),
+            controlEvent(EditorEventContent.Problem(EditorErrors.network)),
+            controlEvent(EditorEventContent.InProgress(EditorText(R.string.editor_event_sending))), host.finished(),
+            controlEvent(EditorEventContent.Information(EditorText(R.string.editor_event_already_quoted))))
+        listOf(240.dp, 360.dp).forEach { width -> listOf(false, true).forEach { compact -> events.forEach { item ->
+            compose.runOnIdle { host.width.value = width; host.compact.value = compact; host.event.value = item }
+            val event = bounds("editor-bar-event")
+            assertEquals(12f, event.left.value, 0.5f); assertTrue(event.width >= if (width == 360.dp) 185.dp else 48.dp)
+            assertTrue(bounds("editor-bar-submit").left - event.right >= 7.9.dp)
+            assertEquals(if (compact) 48f else 56f, bounds("bar").height.value, 0.5f)
+            if (item == events.first()) compose.onNodeWithContentDescription(
+                "Brouillon non écrit, Afficher les détails").assertExists()
+        } } }
     }
 
     @Test

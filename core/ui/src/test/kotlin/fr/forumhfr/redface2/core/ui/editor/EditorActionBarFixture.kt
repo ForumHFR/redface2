@@ -54,7 +54,9 @@ internal class EditorActionBarFixture {
     val sending = mutableStateOf(false)
     val enabled = mutableStateOf(true)
     val header = mutableStateOf(false)
-    val statuses = mutableStateOf(emptyList<EditorAppBarStatus>())
+    val firstStatus = mutableStateOf<EditorAppBarStatus?>(null)
+    val secondStatus = mutableStateOf<EditorAppBarStatus?>(null)
+    var submitActions: ArmedSubmitActions? = null
     val shortcut = mutableStateOf<EditorBarShortcut?>(null)
     val imageUrl = mutableStateOf(true)
     val body = TextFieldState("Un texte choisi", TextRange(3, 8))
@@ -100,10 +102,11 @@ internal class EditorActionBarFixture {
                             onEvent = { key, action -> eventActions += key to action; event.value = null },
                         ), ArmedSubmitState(bar.value.arm != null, !uploading.value && !sending.value,
                             armToken = bar.value.arm),
-                            ArmedSubmitActions({ calls += "send" }, { calls += "confirm" }, { calls += "disarm" }),
+                            submitActions ?: ArmedSubmitActions(
+                                { calls += "send" }, { calls += "confirm" }, { calls += "disarm" }),
                             EditorBarImageActions({ calls += "upload" },
                                 if (imageUrl.value) ({ calls += "url" }) else null, !imageUrl.value),
-                            Modifier.testTag("bar"), event.value, compact.value, statuses.value,
+                            Modifier.testTag("bar"), event.value, compact.value, firstStatus.value, secondStatus.value,
                             onOpenHeader = if (header.value) ({ calls += "header" }) else null,
                             shortcut = shortcut.value, controlsEnabled = enabled.value,
                             uploading = uploading.value, uploadProgress = progress.value,

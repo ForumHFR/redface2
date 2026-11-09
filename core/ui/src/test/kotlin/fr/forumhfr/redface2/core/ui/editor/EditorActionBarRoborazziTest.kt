@@ -42,9 +42,8 @@ class EditorActionBarRoborazziTest {
         compose.runOnIdle {
             host.dark.value = dark; host.scale.value = scale; host.width.value = width
             host.compact.value = compact; host.header.value = true
-            host.statuses.value = listOf(
-                EditorAppBarStatus(R.drawable.ic_editor_quote, "12 citations", {}, 12),
-                EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon retrouvé", {}))
+            host.firstStatus.value = EditorAppBarStatus(R.drawable.ic_editor_quote, "12 citations", {}, 12)
+            host.secondStatus.value = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon retrouvé", {})
         }
         (0..17).forEach { sample ->
             compose.runOnIdle { showSample(sample) }
