@@ -37,9 +37,9 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
 import androidx.compose.ui.unit.width
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.domain.editor.EditorSession
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -125,7 +125,7 @@ class EditorPanelsRoborazziTest {
     private fun capture(details: Boolean, dark: Boolean, scale: Float, state: String) {
         val panel = if (details) "details" else "header"
         compose.onNodeWithTag("panel-sample").captureRoboImage(
-            "build/outputs/roborazzi/editor_panel_${panel}_${dark}_${scale}_$state.png",
+            "src/test/screenshots/editor_panel_${panel}_${dark}_${scale}_$state.png",
         )
     }
 
