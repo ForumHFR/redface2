@@ -100,8 +100,9 @@ internal class PostEditorChromeEvents {
         if (current is EditorSubmissionState.Succeeded ||
             current is EditorSubmissionState.Uncertain && current.accepted
         ) {
-            // ED-88: terminal success is relayed by the existing effect, never an event.
-            state = state.copy(events = state.events.filterNot { it.key.operation == sending })
+            // ED-88: terminal success is relayed by the existing effect, never an event. The reducer ends the
+            // operation silently (R1a-1 PR 1b), so a late delivery for it is dropped.
+            sending?.let { dispatch(EditorEventInput.OperationCompleted(state.session, it)) }
         }
     }
     private fun observeUpload(previous: PostEditorState, current: PostEditorState) {

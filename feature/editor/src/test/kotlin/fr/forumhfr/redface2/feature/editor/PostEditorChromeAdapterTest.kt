@@ -97,9 +97,14 @@ class PostEditorChromeAdapterTest {
         host.transition(host.state.copy(submission = EditorSubmissionState.Succeeded(
             EditorDraftStore.AttemptToken("alice", host.session.key, "attempt", 1))))
         assertNull(host.events.state.visibleEvent)
+        // Completed through the reducer: the operation is finished, so a later occurrence of it is dropped.
+        assertTrue(host.events.state.currentOperations.single { it.ref == event!!.key.operation }.finished)
+        host.events.dispatch(EditorEventInput.Received(event!!.copy(key = event.key.copy(
+            occurrence = event.key.occurrence + 1))))
+        assertNull(host.events.state.visibleEvent)
         host.events.open(host.session.copy(id = "account-change", owner = "bob"))
         assertNull(host.events.state.visibleEvent)
-        host.events.dispatch(EditorEventInput.Received(event!!))
+        host.events.dispatch(EditorEventInput.Received(event))
         assertNull(host.events.state.visibleEvent)
     }
 
