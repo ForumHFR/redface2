@@ -10,6 +10,9 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
  * surface ; quote / edit / create-topic surface in #146 / #147 / #148 / #149.
  */
 sealed interface PostEditorIntent {
+    data object Started : PostEditorIntent
+    /** Lifecycle ON_STOP: persist without closing the editor or cancelling an upload. */
+    data object Stopped : PostEditorIntent
     data class ToolbarActionClicked(val action: BbcodeAction) : PostEditorIntent
     data object TogglePreview : PostEditorIntent
 

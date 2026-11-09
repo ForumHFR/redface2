@@ -124,6 +124,13 @@ class PendingQuoteHandoffTest {
         val fetches = scenario.fetchedQuotes.size
         editor = scenario.editor(SavedStateHandle(frozen))
         settleBody()
+        // ED-81: this Bundle predates delivery, so Room's body is offered without replaying the request.
+        assertEquals("", editor.bodyFieldState.text.toString())
+        assertEquals(expected, editor.state.value.restorableDraft)
+        assertNull(scenario.pending)
+        assertEquals(fetches, scenario.fetchedQuotes.size)
+        editor.submit(PostEditorIntent.DraftRestoreRequested)
+        settleBody()
         assertEquals(expected, editor.bodyFieldState.text.toString())
         assertEquals(fetches, scenario.fetchedQuotes.size)
         scenario.noPost()
@@ -232,6 +239,14 @@ class PendingQuoteHandoffTest {
         val fetches = scenario.fetchedQuotes.size
         editor = scenario.editor(SavedStateHandle(frozen))
         settleBody()
+        // ED-81: a newer saved deletion invalidates the frozen checkpoint; offer the current Room body.
+        assertEquals("", editor.bodyFieldState.text.toString())
+        assertEquals("quote deliberately removed", editor.state.value.restorableDraft)
+        assertEquals("quote deliberately removed", scenario.body)
+        assertNull(scenario.pending)
+        assertEquals(fetches, scenario.fetchedQuotes.size)
+        editor.submit(PostEditorIntent.DraftRestoreRequested)
+        settleBody()
         assertEquals("quote deliberately removed", editor.bodyFieldState.text.toString())
         assertEquals(fetches, scenario.fetchedQuotes.size)
         assertNull(scenario.pending)
@@ -239,7 +254,7 @@ class PendingQuoteHandoffTest {
     }
 
     @Test
-    fun `cold recreation offers the delivered body without replaying its retired request`() = runTest {
+    fun `matching checkpoint resumes the delivered body and missing checkpoint offers it without replay`() = runTest {
         val scenario = Scenario()
         scenario.enqueue()
         val saved = SavedStateHandle()
@@ -251,6 +266,15 @@ class PendingQuoteHandoffTest {
         val fetches = scenario.fetchedQuotes.size
         editor = scenario.editor(SavedStateHandle(frozen), resumeSharedDraft = false)
         settleBody()
+        // ED-81: a matching delivery checkpoint resumes silently, even without a shared-draft route.
+        assertEquals(delivered, editor.bodyFieldState.text.toString())
+        assertNull(editor.state.value.restorableDraft)
+        assertTrue(editor.state.value.pendingQuotes.isEmpty())
+        assertEquals(fetches, scenario.fetchedQuotes.size)
+        editor.viewModelScope.cancel()
+        editor = scenario.editor(resumeSharedDraft = false)
+        settleBody()
+        // Without any checkpoint, ED-81 keeps the ordinary explicit restore offer.
         assertEquals("", editor.bodyFieldState.text.toString())
         assertEquals(delivered, editor.state.value.restorableDraft)
         assertTrue(editor.state.value.pendingQuotes.isEmpty())

@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.editor
 
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.snapshotFlow
@@ -77,6 +78,7 @@ import fr.forumhfr.redface2.core.ui.editor.toEditorUploadError
 import java.io.IOException
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
@@ -139,11 +141,14 @@ class PostEditorViewModel @AssistedInject constructor(
 
     /** The live body, selection and IME state stay in memory, outside the Bundle. */
     val bodyFieldState = TextFieldState()
+    val bodyScrollState = ScrollState(0)
+    private val restoration = PostEditorRestoration(savedStateHandle)
     private var previousBody = bodyFieldState.text.toString()
     private var bodyEditedBeforeHydration = false
 
     private val _state: MutableStateFlow<PostEditorState> = MutableStateFlow(
         PostEditorState(
+            isInitializing = true,
             mode = request.mode,
             cat = request.cat,
             topicId = request.topicId,
@@ -289,6 +294,10 @@ class PostEditorViewModel @AssistedInject constructor(
     private var sharedDraftResumed = false
     private var draftRestoreDiscarding = false
     private var inlineQuoteDeferredByUpload = false
+    private var screenStopped = false
+    private var stoppedBody: String? = null
+    private var pendingCheckpoints = 0
+    private var lastCheckpointVersion = 0L
 
     /** Synchronous guard, including the frame before readOnly recomposes. */
     val bodyInputTransformation = InputTransformation {
@@ -300,11 +309,21 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     private fun acceptMutation(blockDuringUpload: Boolean = false): Boolean {
-        if (submission.blocksMutation || (blockDuringUpload && _state.value.isUploading)) return false
+        val uploadBlocked = blockDuringUpload && _state.value.isUploading
+        if (_state.value.isInitializing || submission.blocksMutation || uploadBlocked) return false
         return submission.tryDisarm()
     }
 
     init {
+        submission.drafts.checkpointObserver = { draft, version, result ->
+            if (!submission.drafts.invalidated) {
+                if (result == null) {
+                    captureCheckpoint(draft, version)
+                } else {
+                    restoration.completed(draft, version, result)
+                }
+            }
+        }
         observeBody()
         observePreview()
         submission.observePreference(userPreferencesRepository.observeConfirmBeforePosting())
@@ -330,6 +349,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 if (authObserved && newUserId != activeUserId) {
                     uploadJob?.cancel()
                     submission.accountChanged()
+                    restoration.invalidate()
                     inlineQuoteDeferredByUpload = false
                     _state.update { it.copy(isUploading = false, uploadProgress = null) }
                 }
@@ -340,12 +360,16 @@ class PostEditorViewModel @AssistedInject constructor(
         viewModelScope.launch {
             restoreDraftIfAny()
             draftRestored = true
-            if (!submission.isInitialized) return@launch
-            if (bodyFieldState.text.toString().isNotBlank() && _state.value.restorableDraft == null) scheduleAutosave()
-            when (request.mode) {
-                PostEditorMode.Reply -> resolveQuoteRenderingThenLoad()
-                PostEditorMode.Edit -> loadEditFormIfPossible()
+            if (submission.isInitialized) {
+                when (request.mode) {
+                    PostEditorMode.Reply -> resolveQuoteRenderingThenLoad()
+                    PostEditorMode.Edit -> {
+                        _state.update { it.copy(isInitializing = false) }
+                        loadEditFormIfPossible()
+                    }
+                }
             }
+            _state.update { it.copy(isInitializing = false) }
         }
     }
 
@@ -388,17 +412,19 @@ class PostEditorViewModel @AssistedInject constructor(
         val pending = submission.drafts.pendingInlineQuoteRequest
         val inlinePosts = pending?.quotes?.map { it.numreponse }.orEmpty().toSet()
         _state.update {
-            it.copy(quotes = request.initialQuotes.distinctBy { quote -> quote.numreponse }
+            it.copy(quotes = request.initialQuotes.takeUnless { restoration.isRecreation }.orEmpty()
+                .distinctBy { quote -> quote.numreponse }
                 .filterNot { quote -> quote.numreponse in inlinePosts })
         }
         if (pending != null) {
             setPendingQuotes(pending.quotes.map {
                 QuoteSelection(QuoteLocator(it.page, it.numreponse, it.ref), "", "", it.truncate)
             })
+            _state.update { it.copy(isInitializing = false) }
             if (!_state.value.hasDormantQuote) loadReplyFormWithInlineQuotes(_state.value.pendingQuotes)
         } else {
             savedStateHandle.remove<Int>(QUOTE_FAILURES_KEY)
-            _state.update { it.copy(quoteFetchFailures = 0) }
+            _state.update { it.copy(quoteFetchFailures = 0, isInitializing = false) }
             loadReplyFormIfPossible()
         }
     }
@@ -635,9 +661,23 @@ class PostEditorViewModel @AssistedInject constructor(
             _state.update { it.copy(restorableDraft = null) }
         }
         val entry = submission.restore(draftKey.orEmpty())
+        val owner = submission.drafts.owner
+        if (restoration.isRecreation && !restoration.belongsTo(owner, draftKey)) {
+            savedStateHandle.remove<String>(DRAFT_RESTORE_OFFER_FINGERPRINT_KEY)
+            savedStateHandle.remove<Int>(QUOTE_FAILURES_KEY)
+            _state.update { it.copy(quoteFetchFailures = 0) }
+        }
+        restoration.bind(owner, draftKey)
         if (entry != null && !submission.blocksMutation) {
             if (entry.attempt != null) {
                 restoreAttempt(entry.draft)
+                if (restoration.matches(entry, owner, draftKey)) restoreViewport(entry.draft.body.length)
+            } else if (!reconcile && restoration.matches(entry, owner, draftKey)) {
+                replaceBody(entry.draft.body)
+                previousBody = entry.draft.body
+                restoreViewport(entry.draft.body.length)
+                resetUndoBaseline()
+                _state.update { it.copy(draftHydratedFromForm = true, restorableDraft = null) }
             } else {
                 restoreOrdinaryDraft(entry.draft, reconcile)
             }
@@ -668,7 +708,9 @@ class PostEditorViewModel @AssistedInject constructor(
     private fun restoreOrdinaryDraft(draft: EditorDraftStore.Draft, reconcile: Boolean) {
         val body = draft.body
         if (body.isBlank()) return
-        if (request.mode == PostEditorMode.Reply && request.resumeSharedDraft && !reconcile) {
+        // #1574 keeps the shared resume to Reply; ED-81 never replays it on a recreation.
+        val resumesSharedReply = request.mode == PostEditorMode.Reply && request.resumeSharedDraft
+        if (resumesSharedReply && !reconcile && !restoration.isRecreation) {
             resumeSharedDraft(body)
         } else {
             val fingerprint = draft.restoreOfferFingerprint()
@@ -683,19 +725,21 @@ class PostEditorViewModel @AssistedInject constructor(
     private fun resumeSharedDraft(body: String) {
         // The body lives in the draft store, not SavedStateHandle. A new instance MUST reload it.
         if (sharedDraftResumed || submission.blocksMutation) return
-        if (!acceptMutation()) return
         val liveBody = bodyFieldState.text.toString()
         val combined = if (liveBody.isBlank() || liveBody == body) body else liveBody.trimEnd() + "\n\n" + body
         replaceBody(combined)
+        previousBody = combined
+        resetUndoBaseline()
+        _state.update { it.copy(draftHydratedFromForm = true) }
         sharedDraftResumed = true
-        scheduleAutosave()
     }
 
     private fun restoreAttempt(draft: EditorDraftStore.Draft) {
-        if (!acceptMutation()) return
+        if (submission.blocksMutation) return
         val liveBody = bodyFieldState.text.toString()
         if (liveBody.isBlank()) {
             replaceBody(draft.body)
+            previousBody = draft.body
             resetUndoBaseline()
         }
         _state.update {
@@ -710,18 +754,70 @@ class PostEditorViewModel @AssistedInject constructor(
     private fun PostEditorState.canOfferDraftRestore(cachedBody: String, liveBody: String): Boolean =
         liveBody != cachedBody && (liveBody.isBlank() || liveBody == draftHydratedContent)
 
+    private fun restoreViewport(length: Int) {
+        bodyFieldState.edit { selection = restoration.selection(length) }
+    }
+
+    /** Called after the hydrated field's layout settles; rotation retains the VM's live scroll. */
+    suspend fun restoreBodyScroll() {
+        restoration.scrollToRestore?.let { position ->
+            val target = position.coerceAtMost(bodyScrollState.maxValue)
+            bodyScrollState.scrollTo(target)
+            if (bodyScrollState.value == target) restoration.scrollRestored()
+        }
+    }
+
+    /** ED-81: capture the live field synchronously, before launching or awaiting any storage work. */
+    private fun persistDraftNow() {
+        if (!draftRestored || submission.blocksClose || submission.drafts.invalidated) return
+        val draft = draftSnapshot() ?: return
+        // Several stops/upload completions may queue behind the same in-flight CAS or autosave join.
+        val version = maxOf(submission.drafts.nextContentVersion, lastCheckpointVersion + 1)
+        lastCheckpointVersion = version
+        pendingCheckpoints++
+        stoppedBody = draft.body
+        restoration.capture(draft, version, bodyFieldState.selection, checkpointScroll())
+        viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            try {
+                val result = submission.flush(::draftSnapshot)
+                restoration.completed(draft, version, result)
+            } finally {
+                pendingCheckpoints--
+                if (pendingCheckpoints == 0) lastCheckpointVersion = 0L
+            }
+        }
+    }
+
     /** ED-170: CAS autosave clears blank content without deleting any newer generation or marker. */
     private fun scheduleAutosave() {
         if (!draftRestored) return
-        submission.autosave(::draftSnapshot)
+        if (screenStopped) {
+            // A delayed mirror must not rewrite the just-flushed revision; upload inserts still persist.
+            if (stoppedBody != bodyFieldState.text.toString()) persistDraftNow()
+        } else {
+            submission.autosave(::draftSnapshot)
+        }
+    }
+
+    private fun checkpointScroll(): Int = restoration.scrollToRestore ?: bodyScrollState.value
+
+    private fun captureCheckpoint(draft: EditorDraftStore.Draft, version: Long) {
+        // #1574: storage writes (including discard) cannot certify an unknown edit body.
+        if (_state.value.isAwaitingInitialBody) return
+        // A queued write may start after a later ON_STOP has already reserved its revision.
+        if (version < lastCheckpointVersion) return
+        if (bodyFieldState.text.toString() == draft.body) {
+            restoration.capture(draft, version, bodyFieldState.selection, checkpointScroll())
+        }
     }
 
     private fun draftSnapshot(): EditorDraftStore.Draft? {
         val snapshot = _state.value
-        // #405: C is durable in the main row; the undecided D stays only in restorableDraft.
         val liveBody = bodyFieldState.text.toString()
-        if (liveBody.isBlank() && snapshot.restorableDraft != null) return null
-        return EditorDraftStore.Draft(body = liveBody)
+        // #405: C is durable in the main row; the undecided D stays only in restorableDraft.
+        val undecidedBlank = liveBody.isBlank() && snapshot.restorableDraft != null
+        // #1574: only a known body can resume ED-81, including an intentional user clearing.
+        return if (snapshot.isAwaitingInitialBody || undecidedBlank) null else EditorDraftStore.Draft(body = liveBody)
     }
 
     /** #604 lot 4a — one-shot latch : a committed close is never re-emitted (gate #803). */
@@ -771,6 +867,11 @@ class PostEditorViewModel @AssistedInject constructor(
         if (intent == PostEditorIntent.DraftRestoreRequested && !_state.value.canRestoreDraft) return
         if (intent.mutatesEditor && !acceptMutation(blockDuringUpload = intent.mutatesBody)) return
         when (intent) {
+            PostEditorIntent.Started -> { screenStopped = false }
+            PostEditorIntent.Stopped -> {
+                screenStopped = true
+                persistDraftNow()
+            }
             is PostEditorIntent.ToolbarActionClicked -> onToolbarActionClicked(intent.action)
             PostEditorIntent.TogglePreview -> onTogglePreview()
             is PostEditorIntent.SubmitClicked -> onSubmitClicked(intent)

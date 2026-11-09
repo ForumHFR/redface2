@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.editor
 
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
@@ -45,6 +46,7 @@ class EditorSubmitCallbackRestorationTest {
         )
         every { model.effects } returns effects.receiveAsFlow()
         every { model.bodyFieldState } returns TextFieldState()
+        every { model.bodyScrollState } returns ScrollState(0)
         every { model.bodyInputTransformation } returns InputTransformation {}
         val received = mutableListOf<PostEditorEffect.SubmitSucceeded>()
         restoration.setContent {

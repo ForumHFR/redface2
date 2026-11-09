@@ -223,6 +223,12 @@ class EditorSubmissionBinding<E, F>(
         return persist(draft)
     }
 
+    /** ED-81: an upload/quote may finish while cancellation joins an already committing autosave. */
+    suspend fun flush(snapshot: () -> EditorDraftStore.Draft?): StoreWriteResult? {
+        autosave?.cancelAndJoin()
+        return persist(snapshot())
+    }
+
     fun launch(
         permit: SubmissionRequest.Accepted,
         draft: EditorDraftStore.Draft,
