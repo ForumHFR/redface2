@@ -4,7 +4,9 @@ import android.view.View
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -53,6 +55,7 @@ import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -188,31 +191,37 @@ class EditorAppBarTest {
             }
         }
         listOf(1f, 1.3f, 1.5f, 2f).forEach { fontScale ->
-            listOf(12, 123456).forEach { badgeCount ->
+            listOf(12, 123, 123456).forEach { badgeCount ->
                 compose.runOnIdle { scale.value = fontScale; count.value = badgeCount }
-                val barNode = compose.onNodeWithTag("bar")
-                val bar = barNode.getUnclippedBoundsInRoot()
-                assertEquals(48f, bar.height.value, 0.5f)
-                val pixelsPerDp = barNode.fetchSemanticsNode().boundsInRoot.height / bar.height.value
-                listOf(EDITOR_STATUS_GLYPH_TAG, EDITOR_STATUS_BADGE_TAG).forEach { tag ->
-                    val node = compose.onNodeWithTag(tag, useUnmergedTree = true)
-                    val bounds = node.getUnclippedBoundsInRoot()
-                    assertTrue(bounds.top >= bar.top && bounds.bottom <= bar.bottom)
-                    val clipped = node.fetchSemanticsNode().boundsInRoot
-                    assertEquals("$tag must not be clipped", bounds.height.value * pixelsPerDp, clipped.height, 0.5f)
-                    assertEquals(bounds.width.value * pixelsPerDp, clipped.width, 0.5f)
-                    if (tag == EDITOR_STATUS_GLYPH_TAG) {
-                        assertEquals(24f, bounds.height.value, 0.5f)
-                        assertEquals(24f, bounds.width.value, 0.5f)
-                    }
-                }
-                assertRenderedLineFits(EDITOR_STATUS_BADGE_TEXT_TAG, bar)
-                val text = textLayout(EDITOR_STATUS_BADGE_TEXT_TAG)
-                assertEquals(fontScale, text.layoutInput.density.fontScale, 0.001f)
-                assertEquals(11f * FontScalePreference.L.factor, text.layoutInput.style.fontSize.value, 0.001f)
-                assertFalse("All digits must remain visible", text.didOverflowWidth)
+                assertStatusFits(fontScale, badgeCount)
             }
         }
+    }
+
+    @Test
+    fun `ED10 geometry oracle accepts loose constraints but rejects clipped digits and line height`() {
+        compose.setContent {
+            RedfaceTheme {
+                Column(Modifier.width(160.dp).testTag("oracle")) {
+                    Text("12", style = MaterialTheme.typography.labelSmall, maxLines = 1,
+                        modifier = Modifier.widthIn(max = 120.dp).testTag("loose"))
+                    Text("Un titre beaucoup trop long", style = MaterialTheme.typography.titleSmall, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis, modifier = Modifier.width(64.dp).testTag("ellipsis"))
+                    Text("123456", style = MaterialTheme.typography.labelSmall, maxLines = 1,
+                        modifier = Modifier.width(8.dp).testTag("narrow"))
+                    Text("12", style = MaterialTheme.typography.labelSmall, maxLines = 1,
+                        modifier = Modifier.height(1.dp).testTag("short"))
+                }
+            }
+        }
+        val envelope = compose.onNodeWithTag("oracle").getUnclippedBoundsInRoot()
+        assertRenderedLineFits("loose", envelope)
+        assertDigitsFit(textLayout("loose"), "12")
+        assertRenderedLineFits("ellipsis", envelope)
+        assertTrue(textLayout("ellipsis").isLineEllipsized(0))
+        val narrow = textLayout("narrow")
+        assertThrows(AssertionError::class.java) { assertDigitsFit(narrow, "123456") }
+        assertThrows(AssertionError::class.java) { assertRenderedLineFits("short", envelope) }
     }
 
     @Test
@@ -381,37 +390,58 @@ class EditorAppBarTest {
     }
 
     @Test
-    fun `ED10 context that would show only an ellipsis is hidden while short context remains`() {
+    fun `ED10 title avoids a lone ellipsis and context is hidden unless readable and fitting`() {
+        val scale = mutableStateOf(1.3f)
         val context = mutableStateOf("W".repeat(20))
+        var headers = 0
         compose.setContent {
             val density = LocalDensity.current
-            CompositionLocalProvider(LocalDensity provides Density(density.density, 1.3f)) {
+            CompositionLocalProvider(LocalDensity provides Density(density.density, scale.value)) {
                 RedfaceTheme(reading = ReadingDisplaySettings(fontScale = FontScalePreference.L)) {
                     Column {
                         EditorAppBar("Nouveau sujet", context.value, {}, {}, Modifier.width(200.dp).testTag("bar"),
                             firstStatus = EditorAppBarStatus(R.drawable.ic_editor_quote, "Citations", {}, 3),
                             secondStatus = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon", {}),
-                            onOpenHeader = {}, headerActionLabel = "Modifier le titre")
+                            onOpenHeader = { headers++ }, headerActionLabel = "Modifier le titre")
+                        Text("Nouveau sujet", style = MaterialTheme.typography.titleSmall, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.width(24.dp).testTag("reference-title"))
                         Text(context.value, style = MaterialTheme.typography.labelMedium, maxLines = 1,
-                            overflow = TextOverflow.Ellipsis, modifier = Modifier.width(24.dp).testTag("reference"))
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.width(24.dp).testTag("reference-context"))
                     }
                 }
             }
         }
-        val bar = compose.onNodeWithTag("bar").getUnclippedBoundsInRoot()
-        val title = assertRenderedLineFits(EDITOR_APP_BAR_LINE_ONE, bar)
-        assertEquals(24f, title.width.value, 0.5f)
-        val reference = textLayout("reference")
-        assertTrue(reference.isLineEllipsized(0))
-        assertEquals(0, reference.getLineEnd(0, visibleEnd = true))
-        val contextHeight = compose.onNodeWithTag("reference").getUnclippedBoundsInRoot().height
-        assertTrue("Height alone must allow both lines", title.height + contextHeight <= bar.height)
-        compose.onNodeWithTag(EDITOR_APP_BAR_LINE_TWO, useUnmergedTree = true).assertDoesNotExist()
-        compose.onNodeWithTag(EDITOR_APP_BAR_TITLE)
-            .assert(hasContentDescription("Modifier le titre : Nouveau sujet, ${context.value}"))
-        compose.runOnIdle { context.value = "I" }
-        compose.onNodeWithTag(EDITOR_APP_BAR_LINE_TWO, useUnmergedTree = true).assertIsDisplayed()
-        assertEquals(1, textLayout(EDITOR_APP_BAR_LINE_TWO).getLineEnd(0, visibleEnd = true))
+        listOf(1.3f, 2f).forEach { fontScale ->
+            compose.runOnIdle { scale.value = fontScale; context.value = "W".repeat(20) }
+            val bar = compose.onNodeWithTag("bar").getUnclippedBoundsInRoot()
+            val title = assertRenderedLineFits(EDITOR_APP_BAR_LINE_ONE, bar)
+            assertEquals(24f, title.width.value, 0.5f)
+            val referenceTitle = textLayout("reference-title")
+            assertTrue(referenceTitle.isLineEllipsized(0))
+            assertEquals(0, referenceTitle.getLineEnd(0, visibleEnd = true))
+            val renderedTitle = textLayout(EDITOR_APP_BAR_LINE_ONE)
+            val onlyEllipsis = renderedTitle.isLineEllipsized(0) &&
+                renderedTitle.getLineEnd(0, visibleEnd = true) == 0
+            assertFalse("The title must never be an ellipsis alone", onlyEllipsis)
+            val referenceContext = textLayout("reference-context")
+            assertTrue(referenceContext.isLineEllipsized(0))
+            assertEquals(0, referenceContext.getLineEnd(0, visibleEnd = true))
+            val contextHeight = compose.onNodeWithTag("reference-context").getUnclippedBoundsInRoot().height
+            val linesFit = title.height + contextHeight <= bar.height
+            assertEquals("Exercise width and height independently", fontScale == 1.3f, linesFit)
+            compose.onNodeWithTag(EDITOR_APP_BAR_LINE_TWO, useUnmergedTree = true).assertDoesNotExist()
+            compose.onNodeWithTag(EDITOR_APP_BAR_TITLE).assertIsDisplayed()
+                .assert(hasContentDescription("Modifier le titre : Nouveau sujet, ${context.value}"))
+                .performClick()
+            compose.runOnIdle { context.value = "I" }
+            if (linesFit) {
+                assertRenderedLineFits(EDITOR_APP_BAR_LINE_TWO, bar)
+                assertEquals(1, textLayout(EDITOR_APP_BAR_LINE_TWO).getLineEnd(0, visibleEnd = true))
+            } else compose.onNodeWithTag(EDITOR_APP_BAR_LINE_TWO, useUnmergedTree = true).assertDoesNotExist()
+        }
+        assertEquals(2, headers)
     }
 
     @Test
@@ -500,12 +530,54 @@ class EditorAppBarTest {
         return results.single()
     }
 
+    private fun assertStatusFits(fontScale: Float, badgeCount: Int) {
+        val barNode = compose.onNodeWithTag("bar")
+        val bar = barNode.getUnclippedBoundsInRoot()
+        assertEquals(48f, bar.height.value, 0.5f)
+        val pixelsPerDp = barNode.fetchSemanticsNode().boundsInRoot.height / bar.height.value
+        val glyph = assertStatusPartFits(EDITOR_STATUS_GLYPH_TAG, bar, pixelsPerDp)
+        assertEquals(24f, glyph.height.value, 0.5f)
+        assertEquals(24f, glyph.width.value, 0.5f)
+        assertStatusPartFits(EDITOR_STATUS_BADGE_TAG, bar, pixelsPerDp)
+        assertRenderedLineFits(EDITOR_STATUS_BADGE_TEXT_TAG, bar)
+        val text = textLayout(EDITOR_STATUS_BADGE_TEXT_TAG)
+        assertEquals(fontScale, text.layoutInput.density.fontScale, 0.001f)
+        assertEquals(11f * FontScalePreference.L.factor, text.layoutInput.style.fontSize.value, 0.001f)
+        assertDigitsFit(text, badgeCount.toString())
+    }
+
+    private fun assertDigitsFit(text: TextLayoutResult, digits: String) {
+        assertEquals(1, text.lineCount)
+        assertEquals(digits, text.layoutInput.text.text)
+        assertEquals("Every digit must be on the line", digits.length, text.getLineEnd(0, visibleEnd = true))
+        assertFalse("Digits must not be ellipsized", text.isLineEllipsized(0))
+        // Simple Text's GetTextLayoutResult rebuilds MultiParagraph at the incoming maxWidth, which
+        // can exceed its measured size (ParagraphLayoutCache). didOverflowWidth then counts empty slack.
+        // Check the full untruncated text's intrinsic width and actual line edges instead.
+        assertTrue("All digits must fit", text.multiParagraph.intrinsics.maxIntrinsicWidth <= text.size.width)
+        assertTrue(text.getLineLeft(0) >= 0f)
+        assertTrue(text.getLineRight(0) <= text.size.width)
+    }
+
+    private fun assertStatusPartFits(tag: String, bar: DpRect, pixelsPerDp: Float): DpRect {
+        val node = compose.onNodeWithTag(tag, useUnmergedTree = true)
+        val bounds = node.getUnclippedBoundsInRoot()
+        assertTrue(bounds.top >= bar.top && bounds.bottom <= bar.bottom)
+        assertTrue(bounds.left >= bar.left && bounds.right <= bar.right)
+        val clipped = node.fetchSemanticsNode().boundsInRoot
+        assertEquals("$tag must not be clipped", bounds.height.value * pixelsPerDp, clipped.height, 0.5f)
+        assertEquals(bounds.width.value * pixelsPerDp, clipped.width, 0.5f)
+        return bounds
+    }
+
     private fun assertRenderedLineFits(tag: String, bar: DpRect): DpRect {
         val node = compose.onNodeWithTag(tag, useUnmergedTree = true)
         val bounds = node.getUnclippedBoundsInRoot()
         val layout = textLayout(tag)
         assertEquals(1, layout.lineCount)
-        assertFalse("Text must not overflow vertically", layout.didOverflowHeight)
+        // didOverflowHeight also includes didExceedMaxLines after horizontal ellipsizing.
+        // Paragraph/line geometry tests vertical clipping without rejecting intentional ellipses.
+        assertTrue("Text height must fit", layout.multiParagraph.height <= layout.size.height)
         assertTrue(layout.getLineTop(0) >= 0f)
         assertTrue(layout.getLineBottom(0) <= layout.size.height + 0.5f)
         assertTrue(bounds.top >= bar.top && bounds.bottom <= bar.bottom)

@@ -19,6 +19,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -77,7 +78,8 @@ fun EditorStatusIcon(
             }
         }, focusable = false, enableUserInput = visible,
     ) {
-        IconButton(onClick = onClick, enabled = enabled && visible,
+        // The stacked badge reaches the bottom edge; a round button clips its lower corners.
+        IconButton(onClick = onClick, enabled = enabled && visible, shape = RectangleShape,
             modifier = (if (!visible) Modifier.size(1.dp) else Modifier.sizeIn(
                 minWidth = maxOf(48.dp, badgeWidth), minHeight = 48.dp,
             )).clearAndSetSemantics {},

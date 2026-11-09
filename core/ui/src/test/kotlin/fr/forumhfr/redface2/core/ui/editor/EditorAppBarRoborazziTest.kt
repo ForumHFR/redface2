@@ -64,6 +64,7 @@ class EditorAppBarRoborazziTest {
                     capture(sample, isDark, fontScale)
                 }
             }
+            capture(sample = 4, isDark = isDark, fontScale = 2f)
         }
     }
 
@@ -83,6 +84,7 @@ class EditorAppBarRoborazziTest {
         val compact = variant == 2
         val metrics = EditorChromeMetrics(compact)
         val width = when (variant) { 2 -> 760.dp; 3 -> 200.dp; else -> 360.dp }
+        val count = if (variant == 4) 123 else 12
         Surface(Modifier.size(width, 180.dp).testTag("sample")) {
             Column {
                 EditorAppBar(
@@ -90,7 +92,7 @@ class EditorAppBarRoborazziTest {
                         else R.string.editor_app_bar_new_topic_title),
                     "Titre du sujet et contexte de rédaction", {}, {}, Modifier.testTag("bar"),
                     firstStatus = if (variant == 0) null else
-                        EditorAppBarStatus(R.drawable.ic_editor_quote, "12 citations", {}, 12),
+                        EditorAppBarStatus(R.drawable.ic_editor_quote, "$count citations", {}, count),
                     secondStatus = if (variant == 0) null else
                         EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon retrouvé", {}),
                     onOpenHeader = if (variant == 0) null else ({}), compactHeight = compact,

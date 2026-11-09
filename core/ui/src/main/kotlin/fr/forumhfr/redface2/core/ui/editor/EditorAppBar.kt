@@ -121,15 +121,18 @@ private fun EditorAppBarTitle(
             val measurer = rememberTextMeasurer()
             val titleStyle = MaterialTheme.typography.titleSmall
             val contextStyle = MaterialTheme.typography.labelMedium
-            val titleHeight = measurer.measure(title, titleStyle, overflow = TextOverflow.Ellipsis,
-                maxLines = 1, constraints = constraints).size.height
+            val titleLayout = measurer.measure(title, titleStyle, overflow = TextOverflow.Ellipsis,
+                maxLines = 1, constraints = constraints)
+            // Keep a fragment of the title rather than an ellipsis alone; the header keeps its full name.
+            val titleOverflow = if (titleLayout.getLineEnd(0, visibleEnd = true) == 0) TextOverflow.Clip
+                else TextOverflow.Ellipsis
             val contextLayout = measurer.measure(context, contextStyle, overflow = TextOverflow.Ellipsis,
                 maxLines = 1, constraints = constraints)
             val hasVisibleContext = contextLayout.getLineEnd(0, visibleEnd = true) > 0
-            val linesFit = titleHeight + contextLayout.size.height <= with(density) { 48.dp.roundToPx() }
+            val linesFit = titleLayout.size.height + contextLayout.size.height <= with(density) { 48.dp.roundToPx() }
             val showContext = context.isNotEmpty() && hasVisibleContext && linesFit
             Column {
-                Text(title, style = titleStyle, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                Text(title, style = titleStyle, maxLines = 1, overflow = titleOverflow,
                     modifier = Modifier.fillMaxWidth().testTag(EDITOR_APP_BAR_LINE_ONE))
                 if (showContext) Text(context, style = contextStyle, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.fillMaxWidth().testTag(EDITOR_APP_BAR_LINE_TWO))
