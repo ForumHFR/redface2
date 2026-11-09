@@ -1,4 +1,2 @@
-Redface 2 v0.69.8 — dev.
-- Post: rebuilt text field (one undo step per action).
-- First-post edit: text locked until the original message has loaded; fixes a first post being overwritten.
-- PM: a draft without text no longer replaces the message in progress; "Restore" disabled while sending.
+Redface 2 v0.69.9 — dev.
+- Edit a post: text locked until the original message has loaded; fixes a post being replaced by text typed too early.
