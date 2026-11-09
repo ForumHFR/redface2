@@ -73,7 +73,7 @@ Kotlin, Jetpack Compose, MVI, Compose Navigation 3, Hilt (KSP), OkHttp 5, Jsoup,
 Tests bootstrappes en Phase 0 et consommes des Phase 1 :
 - **Konsist** (`app/src/test/.../ArchitectureKonsistTest.kt`) — frontières architecture, scope non vide. Vit dans `:app` : après un fix hors `:app`, relancer `:app:testProdDebugUnitTest --tests '*ArchitectureKonsistTest*' --rerun` (le task est sinon UP-TO-DATE). La règle « material tokens » interdit d'importer les types `androidx.compose.material3.ColorScheme`/`Typography`/`Shapes` hors `core/ui`, **tests des features compris** : lire `MaterialTheme.colorScheme` en place.
 - **JUnit 4** + **Turbine** sur le parser (`core/parser/src/test/.../PostContentParserTest.kt`, `TopicPageParserTest.kt`) et les ViewModel slice (`feature/topic/src/test/.../TopicViewModelTest.kt`).
-- **MockK** et **Robolectric** consommés dans tout le repo (tests ViewModel/écrans, Compose Testing JVM, tests Roborazzi record de `:core:ui`).
+- **MockK** et **Robolectric** consommés dans tout le repo (tests ViewModel/écrans, Compose Testing JVM, captures Roborazzi comparées aux références versionnées de six modules, `verifyRoborazziDebug`).
 
 Strategie complete (TDD/spec/prototype par sous-chantier, fixtures, couverture differenciee) definie dans `docs/specs/methodology.md` et `docs/guides/contributing.md` :
 - Couverture **hybride differenciee** : 100% sur les transformers du parser HFR (fixtures dictent l'exhaustivite), guidee par risque ailleurs (ViewModels, mappers, repositories). **Pas d'objectif 100% global.**

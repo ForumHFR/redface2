@@ -1,5 +1,6 @@
 plugins {
     id("redface.android.compose.library")
+    id("redface.android.roborazzi")
     id("redface.android.hilt.library")
 }
 
@@ -10,12 +11,6 @@ android {
         unitTests {
             isIncludeAndroidResources = true
             isReturnDefaultValues = true
-            all {
-                // Record-only Roborazzi harness, identical to :feature:messages: hardware
-                // PixelCopy keeps Compose drawing faithful without the AGP 9-incompatible plugin.
-                it.systemProperties["robolectric.pixelCopyRenderMode"] = "hardware"
-                it.systemProperties["roborazzi.test.record"] = "true"
-            }
         }
     }
 }

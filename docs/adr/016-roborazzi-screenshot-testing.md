@@ -12,6 +12,20 @@ permalink: /adr/016-roborazzi-screenshot-testing
 
 Accepté — 2026-06-21
 
+Évolution acceptée — 2026-11-08, [#1571](https://github.com/ForumHFR/redface2/issues/1571).
+Le mode `record` initial décrit ci-dessous est remplacé par **`verify` par défaut**, sans plugin
+Gradle amont : Roborazzi 1.77.0 lit directement les propriétés système record/verify des tests.
+Les références sont versionnées dans `<module>/src/test/screenshots/` ; le comparateur impose
+`changeThreshold = 0f` et `maxDistance = 0f`. La tâche racine `verifyRoborazziDebug` agrège les tests
+des six modules couverts et entre dans le job CI `test`, qui publie les diffs même en échec.
+La mise à jour des références reste un enregistrement explicite dans l'environnement Docker
+épinglé, pour un changement visuel voulu, avec relecture des PNG avant/après dans la PR.
+La CI ne régénère jamais les références. Le mode opératoire canonique est dans
+[contributing.md]({{ site.baseurl }}/guides/contributing#tests).
+Références initiales enregistrées et garde prouvée sur box le 8 novembre 2026 (#1571) ; tout
+assouplissement de tolérance exige d'abord la répétabilité sur une seconde box et en CI.
+Cette évolution remplace le report du gate CI et des références versionnées décidé initialement.
+
 ## Contexte
 
 La méthodologie ([ADR-000]({{ site.baseurl }}/adr/000-methodologie-triple-hybride)) prototype l'UI Compose

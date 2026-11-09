@@ -14,9 +14,9 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onRoot
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -29,8 +29,8 @@ import org.robolectric.annotation.GraphicsMode
  * (direction figée 2026-06-15, Claude + Codex) : Search app bar (pill 56dp → app bar ~72dp) +
  * racine « catégories d'abord » REGROUPÉE par familles (cercles tonals + sous-titres) + NavigationBar
  * 80dp à 5 items. Icônes = vraies Material Symbols Outlined (`ic_ms_*`, plus de placeholder « tune »).
- * Record-only (`roborazzi.test.record=true` forcé dans `core/ui/build.gradle.kts`) → PNG sous
- * `core/ui/build/outputs/roborazzi/` ; gating CI à venir avec le plugin Roborazzi (AGP 9, #781) :
+ * Références versionnées sous `core/ui/src/test/screenshots/`, comparées par défaut (#1571).
+ * Pour les mettre à jour intentionnellement, ajouter `-Proborazzi.mode=record` :
  *
  *     ./scripts/docker-dev.sh ./gradlew :core:ui:testDebugUnitTest \
  *         --tests '*SettingsHomeShowcaseRoborazziTest*' --console=plain
@@ -83,7 +83,7 @@ class SettingsHomeShowcaseRoborazziTest {
             }
         }
         composeTestRule.onRoot().captureRoboImage(
-            filePath = "build/outputs/roborazzi/settings_v2_shell_light.png",
+            filePath = "src/test/screenshots/settings_v2_shell_light.png",
         )
     }
 
@@ -95,7 +95,7 @@ class SettingsHomeShowcaseRoborazziTest {
             }
         }
         composeTestRule.onRoot().captureRoboImage(
-            filePath = "build/outputs/roborazzi/settings_v2_shell_dark.png",
+            filePath = "src/test/screenshots/settings_v2_shell_dark.png",
         )
     }
 
@@ -107,7 +107,7 @@ class SettingsHomeShowcaseRoborazziTest {
             }
         }
         composeTestRule.onRoot().captureRoboImage(
-            filePath = "build/outputs/roborazzi/settings_v2_shell_amoled.png",
+            filePath = "src/test/screenshots/settings_v2_shell_amoled.png",
         )
     }
 

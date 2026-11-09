@@ -40,9 +40,9 @@ import coil3.memory.MemoryCache
 import coil3.request.CachePolicy
 import coil3.request.ImageResult
 import coil3.test.FakeImageLoaderEngine
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.testing.captureRoboImage
 import java.util.concurrent.atomic.AtomicReference
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -271,7 +271,7 @@ class ImageViewerScreenTest {
         assertEquals(close.right - 24.dp, closeAction().getUnclippedBoundsInRoot().right)
     }
 
-    // Record-only, like the other :core:ui captures: testDebugUnitTest enables roborazzi.test.record.
+    // Verified by default; update references explicitly with -Proborazzi.mode=record.
     // Light/dark refer to the image behind the translucent controls, not the app theme.
     @Test
     fun recordLightImage() = recordViewer(imageColor = android.graphics.Color.WHITE, suffix = "light")
@@ -300,7 +300,7 @@ class ImageViewerScreenTest {
         }
         composeTestRule.onNodeWithTag(IMAGE_VIEWER_ERROR_TAG).assertDoesNotExist()
         composeTestRule.onRoot().captureRoboImage(
-            filePath = "build/outputs/roborazzi/image_viewer_actions_$suffix.png",
+            filePath = "src/test/screenshots/image_viewer_actions_$suffix.png",
         )
     }
 
