@@ -21,13 +21,13 @@ import coil3.ColorImage
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.test.FakeImageLoaderEngine
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.domain.preferences.PostImageMaxWidth
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
+import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -179,7 +179,7 @@ class PostRendererImageParityRoborazziTest {
         composeTestRule.waitUntil(5_000) { ledger.hasSucceeded(imageUrl, MediaAttemptKind.PAINTER) }
         composeTestRule.waitForIdle()
         composeTestRule.onRoot().captureRoboImage(
-            filePath = "build/outputs/roborazzi/$name.png",
+            filePath = "src/test/screenshots/$name.png",
         )
     }
 }

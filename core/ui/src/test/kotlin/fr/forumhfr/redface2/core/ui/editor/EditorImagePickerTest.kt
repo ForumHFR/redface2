@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.ui.editor
 
+import android.app.Activity
 import android.content.ActivityNotFoundException
 import fr.forumhfr.redface2.core.model.editor.ImagePickerContract
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
@@ -104,6 +105,7 @@ class EditorImagePickerTest {
 
         emitImagePickerResult(
             contract = ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA,
+            resultCode = Activity.RESULT_OK,
             uris = emptyList<String>(),
             onEvent = events::add,
         )
@@ -126,6 +128,7 @@ class EditorImagePickerTest {
 
         emitImagePickerResult(
             contract = ImagePickerContract.OPEN_MULTIPLE_DOCUMENTS,
+            resultCode = Activity.RESULT_OK,
             uris = uris,
             onEvent = events::add,
         )

@@ -89,7 +89,7 @@ jobs:
           - name: assemble
             gradle: ":app:assembleProdDebug"
           - name: test
-            gradle: "test testDebugUnitTest"
+            gradle: "test testDebugUnitTest verifyRoborazziDebug -Proborazzi.mode=verify"
           - name: lint
             gradle: "lintDebug :app:lintProdDebug"
           - name: detekt
@@ -104,6 +104,16 @@ jobs:
 
       - name: ${{ matrix.task.name }}
         run: ./gradlew ${{ matrix.task.gradle }}
+
+      - name: Upload Roborazzi comparisons and results
+        if: ${{ always() && matrix.task.name == 'test' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: roborazzi-comparisons
+          path: |
+            **/build/outputs/roborazzi/**
+            **/build/test-results/roborazzi/**
+          if-no-files-found: warn
 
   # Repo hygiene guards (no Gradle/SDK needed — pure bash). Fixture provenance is BLOCKING;
   # the large-file report is advisory (writes to the job summary, never fails). Wired into the

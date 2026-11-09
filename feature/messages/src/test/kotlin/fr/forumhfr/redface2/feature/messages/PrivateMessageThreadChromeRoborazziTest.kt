@@ -8,7 +8,6 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostBlock
@@ -18,6 +17,7 @@ import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.testing.captureRoboImage
 import java.time.Instant
 import org.junit.Rule
 import org.junit.Test
@@ -27,7 +27,7 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * Record-only visual review of the complete MP thread chrome at the narrow 360 dp reference width.
+ * Screenshot verification and visual review of the complete MP thread chrome at the narrow 360 dp reference width.
  * Five synthetic captures complement the interaction assertions in [PrivateMessageThreadContentTest]:
  * settled page pill/FAB cluster, open picker, keep-content spinner with disarmed controls, and the
  * zoomed reader with its reset chip. The fifth combines the armed multi-quote basket with both page
@@ -37,7 +37,7 @@ import org.robolectric.annotation.GraphicsMode
  *     ./scripts/docker-dev.sh ./gradlew :feature:messages:testDebugUnitTest \
  *         --tests '*PrivateMessageThreadChromeRoborazziTest*' --console=plain --no-daemon
  *
- * Output: `feature/messages/build/outputs/roborazzi/private_message_thread_*.png` (gitignored).
+ * Output: `feature/messages/src/test/screenshots/private_message_thread_*.png` (versioned).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "w360dp-h780dp-xxhdpi")
@@ -123,7 +123,7 @@ class PrivateMessageThreadChromeRoborazziTest {
     }
 
     private fun capture(name: String) {
-        compose.onRoot().captureRoboImage(filePath = "build/outputs/roborazzi/$name.png")
+        compose.onRoot().captureRoboImage(filePath = "src/test/screenshots/$name.png")
     }
 
     private fun threadState(isRefreshing: Boolean): PrivateMessageThreadUiState =

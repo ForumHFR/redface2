@@ -1,5 +1,6 @@
 plugins {
     id("redface.android.compose.library")
+    id("redface.android.roborazzi")
     id("redface.android.hilt.library")
 }
 
@@ -13,13 +14,6 @@ android {
             // needs the merged Android resources at JVM unit-test time. Same convention as
             // :core:ui / :feature:topic (Compose UI tests).
             isIncludeAndroidResources = true
-            all {
-                // Record-only Roborazzi harness, identical to :core:ui: hardware PixelCopy keeps
-                // Compose drawing faithful and the plain test task writes the diagnostic PNG.
-                // The Gradle plugin stays unapplied because it is incompatible with AGP 9.
-                it.systemProperties["robolectric.pixelCopyRenderMode"] = "hardware"
-                it.systemProperties["roborazzi.test.record"] = "true"
-            }
         }
     }
 }
@@ -48,8 +42,7 @@ dependencies {
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.coil.core)
     testImplementation(libs.coil.test)
-    // #1040 — record-only visual control of the real MP card. No Roborazzi Gradle plugin under
-    // AGP 9: captureRoboImage writes under build/outputs/roborazzi from testDebugUnitTest.
+    // #1040/#1571 — MP card references, compared by redface.android.roborazzi.
     testImplementation(libs.roborazzi)
     testImplementation(libs.roborazzi.compose)
     debugImplementation(libs.androidx.compose.ui.test.manifest)

@@ -81,6 +81,7 @@ import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.EditorError
+import fr.forumhfr.redface2.core.ui.editor.EditorErrorAction
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
@@ -182,6 +183,15 @@ class PostEditorViewModelTest {
         syncBody()
     }
 
+    @Suppress("UNCHECKED_CAST") // Inject an unknown seed to probe independent send and callback guards.
+    private fun PostEditorViewModel.forgetInitialBody() {
+        val state = PostEditorViewModel::class.java.getDeclaredField("_state").run {
+            isAccessible = true
+            get(this@forgetInitialBody) as MutableStateFlow<PostEditorState>
+        }
+        state.value = state.value.copy(draftHydratedFromForm = false)
+    }
+
     @Test
     fun submitAndConfirmUseLiveBodyBeforeMirrorNotification() = runTest {
         val prefs = FakeUserPreferencesRepository(confirmBeforePosting = true)
@@ -216,10 +226,11 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun formHydrationReadsLiveBodyBeforeMirrorNotification() = runTest {
+    fun replyFormHydrationReadsLiveBodyBeforeMirrorNotification() = runTest {
         val gate = CompletableDeferred<Unit>()
-        editPostRepository.formGate = gate
-        val vm = newEditViewModel()
+        replyRepository.formGate = gate
+        replyRepository.formResult = Result.success(authenticatedForm("server prefill"))
+        val vm = newReplyViewModel()
         vm.editBody(TextFieldValue("typed during GET", TextRange(4)), advanceMirror = false)
         assertEquals("", vm.state.value.bodyText)
         gate.complete(Unit)
@@ -364,8 +375,8 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun typedThenErasedBeforeLateEditHydrationKeepsHistory() = runTest {
-        assertTrue(lateEditHydrationIsUndoable(typedThenErased = true))
+    fun typingThenErasingBeforeLateEditHydrationIsRejectedAndAddsNoHistory() = runTest {
+        assertFalse(lateEditHydrationIsUndoable(typedThenErased = true))
     }
 
     @OptIn(ExperimentalFoundationApi::class)
@@ -387,7 +398,7 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun editFormArrivingDuringUploadHydratesBlankFieldAndKeepsUploadedImage() = runTest {
+    fun editUploadIsRejectedUntilHydrationThenKeepsServerBody() = runTest {
         val formGate = CompletableDeferred<Unit>()
         val uploadGate = CompletableDeferred<Unit>()
         editPostRepository.formGate = formGate
@@ -395,11 +406,14 @@ class PostEditorViewModelTest {
         val vm = newEditViewModel()
         syncBody()
         vm.submit(PostEditorIntent.ImagesPicked(listOf("content://pick/1")))
-        assertTrue(vm.state.value.isUploading)
+        assertFalse(vm.state.value.isUploading)
+        assertEquals(0, uploadRepository.uploadCalls)
         formGate.complete(Unit)
         syncBody()
         assertEquals("existing post body", vm.bodyFieldState.text.toString())
         assertTrue(vm.state.value.draftHydratedFromForm)
+        vm.submit(PostEditorIntent.ImagesPicked(listOf("content://pick/1")))
+        assertTrue(vm.state.value.isUploading)
         uploadGate.complete(Unit)
         settleBody()
         val body = vm.bodyFieldState.text.toString()
@@ -463,15 +477,16 @@ class PostEditorViewModelTest {
 
     @Test
     @OptIn(ExperimentalFoundationApi::class)
-    fun lateHydrationPreservesHistoryWhenTypingWasErasedBeforeFormArrived() = runTest {
+    fun lateReplyHydrationPreservesHistoryWhenTypingWasErasedBeforeFormArrived() = runTest {
         val gate = CompletableDeferred<Unit>()
-        editPostRepository.formGate = gate
-        val vm = newEditViewModel()
+        replyRepository.formGate = gate
+        replyRepository.formResult = Result.success(authenticatedForm("server prefill"))
+        val vm = newReplyViewModel()
         vm.editBody(TextFieldValue("typed before form", TextRange(17)))
         vm.editBody(TextFieldValue(""))
         gate.complete(Unit)
         testScheduler.runCurrent()
-        assertEquals("existing post body", vm.bodyFieldState.text.toString())
+        assertEquals("server prefill", vm.bodyFieldState.text.toString())
         assertTrue(vm.bodyFieldState.undoState.canUndo)
         vm.bodyFieldState.undoState.undo()
         assertEquals("", vm.bodyFieldState.text.toString())
@@ -1912,6 +1927,186 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun editCannotSubmitOrConfirmAnUnknownInitialBody() = runTest {
+        val vm = newEditViewModel(
+            userPreferencesRepository = FakeUserPreferencesRepository(confirmBeforePosting = true),
+        )
+        vm.submit(PostEditorIntent.SubmitClicked())
+        val token = requireNotNull(vm.state.value.armToken)
+        assertTrue(vm.state.value.canSubmit)
+        vm.forgetInitialBody()
+        assertFalse(vm.state.value.canSubmit)
+        vm.submit(PostEditorIntent.SubmitClicked())
+        testScheduler.advanceTimeBy(401)
+        vm.submit(PostEditorIntent.SubmitConfirmed(token))
+        testScheduler.runCurrent()
+        assertEquals(0, editPostRepository.submitCalls)
+        assertEquals(token, vm.state.value.armToken)
+    }
+
+    @Test
+    fun editFormFailureRejectsTypingAndPasteUntilReloadHydratesWholePost() = runTest {
+        editPostRepository.formException = IOException("offline")
+        val vm = newEditViewModel()
+        assertFalse(vm.state.value.isLoadingForm)
+        assertTrue(vm.state.value.isAwaitingInitialBody)
+        assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
+        assertEquals(EditorErrorAction.Reload, vm.state.value.submitError?.action)
+        vm.editBody(TextFieldValue("typed offline"))
+        vm.editBody(TextFieldValue("pasted offline"))
+        assertEquals("", vm.bodyFieldState.text.toString())
+        assertFalse(vm.state.value.canSubmit)
+        vm.submit(PostEditorIntent.SubmitClicked())
+        vm.submit(PostEditorIntent.SubmitConfirmed(vm.state.value.armToken))
+        assertEquals(0, editPostRepository.submitCalls)
+
+        val gate = CompletableDeferred<Unit>()
+        editPostRepository.formGate = gate
+        editPostRepository.formException = null
+        vm.submit(PostEditorIntent.ReloadRequested)
+        assertTrue(vm.state.value.isLoadingForm)
+        assertTrue(vm.state.value.isAwaitingInitialBody)
+        vm.editBody(TextFieldValue("typed during reload"))
+        gate.complete(Unit)
+        settleBody()
+        assertEquals("existing post body", vm.bodyFieldState.text.toString())
+        assertEquals("existing post body", vm.state.value.draftRestoreSeed)
+        assertFalse(vm.state.value.isAwaitingInitialBody)
+        assertNull(vm.state.value.submitError)
+        assertTrue(vm.state.value.canSubmit)
+        assertEquals(2, editPostRepository.formFetches)
+    }
+
+    @Test
+    fun editInsertionsAndUploadsAreRefusedWhileInitialBodyIsUnknown() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        editPostRepository.formGate = gate
+        val vm = newEditViewModel()
+        vm.smileyPicker.open()
+        val before = vm.bodyValue()
+        for (intent in listOf(
+            PostEditorIntent.ToolbarActionClicked(BbcodeAction.Bold),
+            PostEditorIntent.ToolbarActionClicked(BbcodeAction.Quote),
+            PostEditorIntent.SmileySelected(":jap:"),
+            PostEditorIntent.ImageUrlInserted("https://example.test/image.png"),
+            PostEditorIntent.ImagePicked("content://pick/1"),
+            PostEditorIntent.ImagesPicked(listOf("content://pick/2")),
+            PostEditorIntent.ImagePickerEventReceived(
+                ImagePickerEvent.Result(ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA, listOf("content://pick/3")),
+            ),
+        )) {
+            vm.submit(intent)
+            assertEquals(before, vm.bodyValue())
+            assertFalse(vm.state.value.isUploading)
+        }
+        assertTrue(vm.smileyPicker.state.value is SmileyPickerState.Open)
+        assertEquals(0, imageUploadReader.readCalls)
+        assertEquals(0, uploadRepository.uploadCalls)
+        assertFalse(vm.state.value.canSubmit)
+        gate.complete(Unit)
+        settleBody()
+        assertEquals("existing post body", vm.bodyFieldState.text.toString())
+        vm.submit(PostEditorIntent.SmileySelected(":jap:"))
+        assertTrue(vm.bodyFieldState.text.toString().contains(":jap:"))
+        assertEquals(SmileyPickerState.Hidden, vm.smileyPicker.state.value)
+    }
+
+    @Test
+    fun editUploadCallbackCannotInsertOrAutosaveAfterBodyBecomesUnknown() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        uploadRepository.uploadGate = gate
+        val vm = newEditViewModel()
+        vm.submit(PostEditorIntent.ImagesPicked(listOf("content://pick/1")))
+        assertTrue(vm.state.value.isUploading)
+        val before = vm.bodyValue()
+        val saves = draftStore.saveCount
+        // Probe the async callback independently from the upload-start guard.
+        vm.forgetInitialBody()
+        gate.complete(Unit)
+        settleBody()
+        assertEquals(before, vm.bodyValue())
+        assertEquals(saves, draftStore.saveCount)
+        assertFalse(vm.state.value.isUploading)
+        assertFalse(vm.state.value.canSubmit)
+    }
+
+    @Test
+    fun parserRejectedEditFormKeepsBodyLockedAndOffersReload() = runTest {
+        editPostRepository.formException = IllegalStateException("content_form textarea missing from edit form")
+        val vm = newEditViewModel()
+        assertEquals(EditorErrors.invalidForm, vm.state.value.submitError)
+        assertEquals(EditorErrorAction.Reload, vm.state.value.submitError?.action)
+        vm.editBody(TextFieldValue("partial replacement"))
+        assertEquals("", vm.bodyFieldState.text.toString())
+        assertTrue(vm.state.value.isAwaitingInitialBody)
+        assertFalse(vm.state.value.canSubmit)
+        editPostRepository.formException = null
+        vm.submit(PostEditorIntent.ReloadRequested)
+        settleBody()
+        assertEquals("existing post body", vm.bodyFieldState.text.toString())
+        assertFalse(vm.state.value.isAwaitingInitialBody)
+        assertTrue(vm.state.value.canSubmit)
+    }
+
+    @Test
+    fun blankEditServerBodyIsKnownAndUnlocksWithoutChangingReply() = runTest {
+        for (seed in listOf("", " \n")) {
+            editPostRepository.formResult = Result.success(authenticatedForm(seed))
+            val vm = newEditViewModel()
+            assertTrue(vm.state.value.draftHydratedFromForm)
+            assertFalse(vm.state.value.isAwaitingInitialBody)
+            assertEquals(seed, vm.state.value.draftHydratedContent)
+            assertEquals(seed, vm.state.value.draftRestoreSeed)
+            assertEquals(seed, vm.bodyFieldState.text.toString())
+            assertFalse(vm.state.value.canSubmit)
+            vm.editBody(TextFieldValue("filled body"))
+            assertEquals("filled body", vm.bodyFieldState.text.toString())
+            assertTrue(vm.state.value.canSubmit)
+            vm.viewModelScope.cancel()
+        }
+        val gate = CompletableDeferred<Unit>()
+        replyRepository.formGate = gate
+        replyRepository.formException = IOException("offline")
+        val reply = newReplyViewModel()
+        assertFalse(reply.state.value.isAwaitingInitialBody)
+        reply.editBody(TextFieldValue("reply during GET"))
+        gate.complete(Unit)
+        settleBody()
+        reply.submit(PostEditorIntent.SmileySelected(":jap:"))
+        assertTrue(reply.bodyFieldState.text.toString().contains("reply during GET"))
+        assertTrue(reply.bodyFieldState.text.toString().contains(":jap:"))
+        assertFalse(reply.state.value.isAwaitingInitialBody)
+    }
+
+    @Test
+    fun editAttemptRestoreUnlocksOnlyNonblankBodiesAndRefetchPreservesThem() = runTest {
+        val key = EditorDraftKey.editPost(SAMPLE_CAT, SAMPLE_EDITED_NUMREPONSE)
+        val token = EditorDraftStore.AttemptToken("tester", key, "uncertain", 1)
+        for (body in listOf("", " \n", "restored body")) {
+            draftStore.entries[key] = EditorDraftStore.DraftEntry(
+                EditorDraftStore.Draft(body), 1,
+                EditorDraftStore.Attempt(token, EditorDraftStore.AttemptStatus.UNCERTAIN),
+            )
+            editPostRepository.formException = IOException("offline")
+            val vm = newEditViewModel()
+            assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
+            assertEquals(body.isNotBlank(), vm.state.value.draftHydratedFromForm)
+            assertEquals(body.isBlank(), vm.state.value.isAwaitingInitialBody)
+            vm.editBody(TextFieldValue("replacement after restore"))
+            val expected = if (body.isBlank()) body else "replacement after restore"
+            assertEquals(expected, vm.bodyFieldState.text.toString())
+            assertEquals(body.isNotBlank(), vm.state.value.canSubmit)
+            editPostRepository.formException = null
+            vm.submit(PostEditorIntent.ReloadRequested)
+            settleBody()
+            val reloaded = if (body.isBlank()) "existing post body" else expected
+            assertEquals(reloaded, vm.bodyFieldState.text.toString())
+            assertFalse(vm.state.value.isAwaitingInitialBody)
+            vm.viewModelScope.cancel()
+        }
+    }
+
+    @Test
     fun `Edit init fetches the edit form and hydrates draft from existing BBCode`() = runTest {
         editPostRepository.formResult = Result.success(
             ReplyForm(
@@ -2623,6 +2818,51 @@ class PostEditorViewModelTest {
     // ----- #459 PR2 : image upload from the photo picker ---------------------
 
     @Test
+    fun `cancelled picker preserves the previous error body selection and effects without upload`() = runTest {
+        val diagnostics = DiagnosticsLog()
+        val viewModel = newReplyViewModel(
+            diagnostics = diagnostics,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("alice")),
+        )
+        settleBody()
+        viewModel.editBody(TextFieldValue(text = "draft", selection = TextRange(1, 4)))
+        settleBody()
+        viewModel.dispatch(
+            PostEditorIntent.ImagePickerEventReceived(
+                ImagePickerEvent.Unavailable(
+                    ImagePickerMode.PHOTO_PICKER,
+                    ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA,
+                ),
+            ),
+        )
+        settleBody()
+        assertEquals(EditorErrors.pickerAbsent, viewModel.state.value.uploadError)
+        val stateBefore = viewModel.state.value
+
+        viewModel.effects.test {
+            ImagePickerContract.entries.forEach { contract ->
+                diagnostics.clear()
+                viewModel.dispatch(
+                    PostEditorIntent.ImagePickerEventReceived(ImagePickerEvent.Cancelled(contract, resultCode = 0)),
+                )
+                settleBody()
+
+                assertEquals(stateBefore, viewModel.state.value)
+                assertEquals("draft", viewModel.bodyFieldState.text.toString())
+                assertEquals(TextRange(1, 4), viewModel.bodyFieldState.selection)
+                assertEquals(0, imageUploadReader.readCalls)
+                assertEquals(0, uploadRepository.uploadCalls)
+                assertEquals(
+                    listOf("cancelled contract=${contract.diagnosticName} resultCode=0"),
+                    diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
+                )
+                expectNoEvents()
+            }
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `empty picker result shows a banner without starting an upload`() = runTest {
         val diagnostics = DiagnosticsLog()
         val viewModel = newReplyViewModel(
@@ -2662,6 +2902,9 @@ class PostEditorViewModelTest {
             expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
+        viewModel.dispatch(PostEditorIntent.UploadErrorDismissed)
+        settleBody()
+        assertNull(viewModel.state.value.uploadError)
     }
 
     @Test

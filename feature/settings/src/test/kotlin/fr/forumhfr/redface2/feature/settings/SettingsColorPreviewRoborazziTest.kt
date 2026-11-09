@@ -3,12 +3,12 @@ package fr.forumhfr.redface2.feature.settings
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.domain.preferences.AccentPreset
 import fr.forumhfr.redface2.core.domain.preferences.DarkSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.LightSurfaceTone
 import fr.forumhfr.redface2.core.domain.preferences.ThemeAccent
 import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
+import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -17,8 +17,8 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * #595 — record-only Roborazzi captures of the live colour preview. PNGs land under
- * `feature/settings/build/outputs/roborazzi/` and stay unversioned.
+ * #595 — Roborazzi reference captures of the live colour preview. PNGs land under
+ * `feature/settings/src/test/screenshots/` and are versioned.
  *
  *     ./scripts/docker-dev.sh ./gradlew :feature:settings:testDebugUnitTest \
  *         --tests '*SettingsColorPreviewRoborazziTest*' --console=plain
@@ -113,7 +113,7 @@ class SettingsColorPreviewRoborazziTest {
             SettingsColorPreview(preferences = preferences, darkTheme = darkTheme)
         }
         composeTestRule.onNodeWithContentDescription(SETTINGS_COLOR_PREVIEW_TAG)
-            .captureRoboImage(filePath = "build/outputs/roborazzi/$name.png")
+            .captureRoboImage(filePath = "src/test/screenshots/$name.png")
     }
 
     private companion object {

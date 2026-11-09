@@ -208,11 +208,37 @@ class PostEditorRestoreOfferTest {
         assertFalse(editor.state.value.isLoadingForm)
         assertEquals("", editor.state.value.draftRestoreSeed)
         assertTrue(editor.state.value.canRestoreDraft)
+        assertTrue(editor.state.value.isAwaitingInitialBody)
         type(editor, "typed offline")
+        assertEquals("", editor.bodyFieldState.text.toString())
         editor.submit(PostEditorIntent.DraftRestoreRequested)
-        assertRestored(editor, "typed offline\n\n" + OFFER)
+        assertRestored(editor, OFFER)
+        assertFalse(editor.state.value.isAwaitingInitialBody)
+        type(editor, OFFER + " suffix")
+        assertEquals(OFFER + " suffix", editor.bodyFieldState.text.toString())
         advanceUntilIdle()
-        assertEquals("typed offline\n\n" + OFFER, store.saved[editKey]?.body)
+        assertEquals(OFFER + " suffix", store.saved[editKey]?.body)
+        coEvery { editRepository.fetchEditPostForm(any()) } returns form(SEED)
+        editor.submit(PostEditorIntent.ReloadRequested)
+        runCurrent()
+        assertEquals(OFFER + " suffix", editor.bodyFieldState.text.toString())
+    }
+
+    @Test
+    fun blankDraftCannotUnlockEditAfterFormFailure() = runTest(dispatcher) {
+        coEvery { editRepository.fetchEditPostForm(any()) } throws IOException("offline")
+        for (body in listOf("", " \n")) {
+            store.preload(editKey, Draft(body))
+            val editor = open()
+            runCurrent()
+            assertNull(editor.state.value.restorableDraft)
+            editor.submit(PostEditorIntent.DraftRestoreRequested)
+            type(editor, "partial replacement")
+            assertEquals("", editor.bodyFieldState.text.toString())
+            assertTrue(editor.state.value.isAwaitingInitialBody)
+            assertFalse(editor.state.value.canSubmit)
+            editor.viewModelScope.cancel()
+        }
     }
 
     @Test
@@ -225,17 +251,18 @@ class PostEditorRestoreOfferTest {
     }
 
     @Test
-    fun restoreHasEmptySeedWhenTypingPreventedServerHydration() = runTest(dispatcher) {
+    fun rejectedTypingLeavesServerSeedAvailableForRestore() = runTest(dispatcher) {
         val gate = CompletableDeferred<ReplyForm>()
         coEvery { editRepository.fetchEditPostForm(any()) } coAnswers { gate.await() }
         val editor = open()
         runCurrent()
         type(editor, "typed before server form")
+        assertEquals("", editor.bodyFieldState.text.toString())
         gate.complete(form(SEED))
         runCurrent()
-        assertEquals("", editor.state.value.draftRestoreSeed)
+        assertEquals(SEED, editor.state.value.draftRestoreSeed)
         editor.submit(PostEditorIntent.DraftRestoreRequested)
-        assertRestored(editor, "typed before server form\n\n" + OFFER)
+        assertRestored(editor, OFFER)
     }
 
     @Test

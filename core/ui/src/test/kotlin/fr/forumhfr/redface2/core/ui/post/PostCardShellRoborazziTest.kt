@@ -14,8 +14,8 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -32,9 +32,8 @@ import org.robolectric.annotation.GraphicsMode
  * - `flat = true` — transparent, rectangular, closed by the `outlineVariant` hairline;
  * - `flat = true` + multi-quote border (#436) — the outline closes the post, NO hairline under it.
  *
- * Record-only dump for the review (not a blocking golden). Run on demand (writes a PNG under
- * `core/ui/build/outputs/roborazzi/`, gitignored — see the header of
- * [PostRendererQuoteRoborazziTest] for why the Roborazzi Gradle plugin is not applied) :
+ * References under `core/ui/src/test/screenshots/` are compared by default, including in CI.
+ * Add `-Proborazzi.mode=record` only for an intentional visual update:
  *
  *     ./scripts/docker-dev.sh ./gradlew :core:ui:testDebugUnitTest \
  *         --tests '*PostCardShellRoborazziTest*' --console=plain --no-daemon
@@ -77,7 +76,7 @@ class PostCardShellRoborazziTest {
         }
 
         composeTestRule.onRoot().captureRoboImage(
-            filePath = "build/outputs/roborazzi/post_card_shell_card_vs_flat.png",
+            filePath = "src/test/screenshots/post_card_shell_card_vs_flat.png",
         )
     }
 

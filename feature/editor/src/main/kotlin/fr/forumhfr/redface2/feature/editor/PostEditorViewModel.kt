@@ -292,7 +292,7 @@ class PostEditorViewModel @AssistedInject constructor(
 
     /** Synchronous guard, including the frame before readOnly recomposes. */
     val bodyInputTransformation = InputTransformation {
-        if (!acceptMutation(blockDuringUpload = true)) {
+        if (_state.value.isAwaitingInitialBody || !acceptMutation(blockDuringUpload = true)) {
             revertAllChanges()
         } else if (asCharSequence().toString() != bodyFieldState.text.toString()) {
             bodyEditedBeforeHydration = true
@@ -501,9 +501,10 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     /** Inline delivery only runs once this opening chose the inline rendering (cards ON never does). */
-    private fun inlineQuoteLoadBlocked(insertInline: Boolean): Boolean =
-        _state.value.isLoadingForm || submission.blocksMutation ||
-            (insertInline && (submission.drafts.pendingInlineQuoteRequest == null || _state.value.hasDormantQuote))
+    private fun inlineQuoteLoadBlocked(insertInline: Boolean): Boolean {
+        if (request.mode != PostEditorMode.Reply || _state.value.isLoadingForm || submission.blocksMutation) return true
+        return insertInline && (submission.drafts.pendingInlineQuoteRequest == null || _state.value.hasDormantQuote)
+    }
 
     private fun missingInlineQuotes(quotes: List<QuoteSelection>): List<QuoteSelection> {
         val present = QuotedNumreponses.fromBbcode(bodyFieldState.text.toString()).toSet()
@@ -549,7 +550,7 @@ class PostEditorViewModel @AssistedInject constructor(
                     }
                     loadedForm = form
                     smileyPicker.refreshFavorites(favoriteStamp)
-                    if (!acceptMutation(blockDuringUpload = insertInline)) {
+                    if (_state.value.isAwaitingInitialBody || !acceptMutation(blockDuringUpload = insertInline)) {
                         inlineQuoteDeferredByUpload =
                             insertInline && _state.value.isUploading && !submission.blocksMutation
                         _state.update { it.copy(isLoadingForm = false) }
@@ -667,7 +668,7 @@ class PostEditorViewModel @AssistedInject constructor(
     private fun restoreOrdinaryDraft(draft: EditorDraftStore.Draft, reconcile: Boolean) {
         val body = draft.body
         if (body.isBlank()) return
-        if (request.resumeSharedDraft && !reconcile) {
+        if (request.mode == PostEditorMode.Reply && request.resumeSharedDraft && !reconcile) {
             resumeSharedDraft(body)
         } else {
             val fingerprint = draft.restoreOfferFingerprint()
@@ -698,7 +699,11 @@ class PostEditorViewModel @AssistedInject constructor(
             resetUndoBaseline()
         }
         _state.update {
-            it.copy(draftHydratedFromForm = true, restorableDraft = null, submitError = EditorErrors.uncertain)
+            it.copy(
+                draftHydratedFromForm = it.draftHydratedFromForm ||
+                    request.mode == PostEditorMode.Reply || bodyFieldState.text.isNotBlank(),
+                restorableDraft = null, submitError = EditorErrors.uncertain,
+            )
         }
     }
 
@@ -895,6 +900,7 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     private fun onSmileySelected(token: String) {
+        if (_state.value.isAwaitingInitialBody) return
         bodyEditedBeforeHydration = true
         bodyFieldState.editBbcode { text, start, end -> insertBbcodeToken(token, text, start, end) }
         smileyPicker.dismiss(SmileyPickerCloseCause.INSERTION)
@@ -909,6 +915,7 @@ class PostEditorViewModel @AssistedInject constructor(
      * (no suspend between the intent and the caret insertion — Codex PR2 review).
      */
     private fun onImageUrlInserted(url: String) {
+        if (_state.value.isAwaitingInitialBody) return
         val bbcode = imageInsertBbcodeOrNull(fullUrl = url, mode = imageInsertMode) ?: return
         insertImageBbcodeAtCaret(bbcode, leadingNewline = false)
         scheduleAutosave()
@@ -923,7 +930,7 @@ class PostEditorViewModel @AssistedInject constructor(
      */
     private fun insertImageBbcodeAtCaret(bbcode: String, leadingNewline: Boolean) {
         // Only validated upload callbacks reach this path during isUploading.
-        if (!acceptMutation()) return
+        if (_state.value.isAwaitingInitialBody || !acceptMutation()) return
         bodyEditedBeforeHydration = true
         bodyFieldState.editBbcode { text, start, end ->
             val caret = start.coerceIn(0, text.length)
@@ -946,19 +953,22 @@ class PostEditorViewModel @AssistedInject constructor(
      */
     private fun onImagePicked(uri: String) = onImagesPicked(listOf(uri))
 
-    /** #988/#1420 — records the picker boundary and surfaces a callback without images. */
+    /** #1573 — cancellation only records diagnostics; a successful empty callback retains #1128 feedback. */
     private fun onImagePickerEvent(event: ImagePickerEvent) {
         if (submission.blocksMutation) return
         diagnostics.recordImagePickerEvent(event)
-        if (event is ImagePickerEvent.Unavailable) {
-            _state.update { it.copy(uploadError = EditorErrors.pickerAbsent) }
-        }
-        if (event is ImagePickerEvent.Result) {
-            val pickedImages = pickedImagesForUpload(event.contract, event.uris)
-            val showEmptyPickerBanner = pickedImages.isEmpty() && uploadJob?.isActive != true
-            onImagesPicked(event.uris)
-            if (showEmptyPickerBanner) {
-                _state.update { it.copy(uploadError = EditorErrors.noImageReceived) }
+        when (event) {
+            is ImagePickerEvent.Launched, is ImagePickerEvent.Cancelled -> Unit
+            is ImagePickerEvent.Unavailable -> {
+                _state.update { it.copy(uploadError = EditorErrors.pickerAbsent) }
+            }
+            is ImagePickerEvent.Result -> {
+                val pickedImages = pickedImagesForUpload(event.contract, event.uris)
+                val showEmptyPickerBanner = pickedImages.isEmpty() && uploadJob?.isActive != true
+                onImagesPicked(event.uris)
+                if (showEmptyPickerBanner) {
+                    _state.update { it.copy(uploadError = EditorErrors.noImageReceived) }
+                }
             }
         }
     }
@@ -972,8 +982,13 @@ class PostEditorViewModel @AssistedInject constructor(
      * or an upload already in flight are ignored. [PostEditorState.uploadProgress] carries an « n/N »
      * counter while more than one image is in the batch (null for a single image).
      */
-    private fun canStartUpload(userId: String?, targets: List<String>): Boolean =
-        !submission.blocksMutation && uploadJob?.isActive != true && userId != null && targets.isNotEmpty()
+    private fun canStartUpload(userId: String?, targets: List<String>): Boolean {
+        if (_state.value.isAwaitingInitialBody) return false
+        return !submission.blocksMutation && uploadJob?.isActive != true && userId != null && targets.isNotEmpty()
+    }
+
+    private fun canApplyUpload(userId: String?): Boolean =
+        !_state.value.isAwaitingInitialBody && !submission.blocksMutation && activeUserId == userId
 
     private fun onImagesPicked(uris: List<String>) {
         diagnostics.recordImagesPicked(uris.size)
@@ -1012,7 +1027,7 @@ class PostEditorViewModel @AssistedInject constructor(
                     displayUrl = uploaded.resizedUrl ?: uploaded.imageUrl,
                     mode = mode,
                 )
-                if (submission.blocksMutation || activeUserId != userId) break
+                if (!canApplyUpload(userId)) break
                 if (bbcode != null) {
                     // Each image after the first lands on its own line (no more run-together uploads).
                     insertImageBbcodeAtCaret(bbcode, leadingNewline = completed > 0)
@@ -1053,6 +1068,7 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     private fun onToolbarActionClicked(action: BbcodeAction) {
+        if (_state.value.isAwaitingInitialBody) return
         bodyEditedBeforeHydration = true
         bodyFieldState.editBbcode { text, start, end -> applyBbcodeAction(action, text, start, end) }
         scheduleAutosave()
@@ -1107,8 +1123,7 @@ class PostEditorViewModel @AssistedInject constructor(
 
     private fun applyFormHydration(form: ReplyForm) {
         val snapshot = _state.value
-        val hydrate = !submission.blocksMutation && !snapshot.draftHydratedFromForm &&
-            bodyFieldState.text.isBlank() && form.initialContent.isNotBlank()
+        val hydrate = !submission.blocksMutation && snapshot.shouldHydrateBody(form)
         if (hydrate) {
             replaceBody(form.initialContent)
             previousBody = form.initialContent
@@ -1117,6 +1132,11 @@ class PostEditorViewModel @AssistedInject constructor(
         val liveBody = bodyFieldState.text.toString()
         _state.update { it.withFormHydration(form, hydrate, liveBody) }
     }
+
+    /** An empty edit textarea is a known server seed; a missing textarea is rejected by the parser. */
+    private fun PostEditorState.shouldHydrateBody(form: ReplyForm): Boolean =
+        !draftHydratedFromForm && bodyFieldState.text.isBlank() &&
+            (mode == PostEditorMode.Edit || form.initialContent.isNotBlank())
 
     /** Pure metadata reduction; refetches preserve the live field and the user's option choices. */
     private fun PostEditorState.withFormHydration(

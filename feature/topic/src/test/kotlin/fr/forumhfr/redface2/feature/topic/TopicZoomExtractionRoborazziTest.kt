@@ -1,7 +1,6 @@
 package fr.forumhfr.redface2.feature.topic
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,15 +18,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.unit.dp
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -40,7 +41,7 @@ import org.robolectric.annotation.GraphicsMode
  * #1040 lot 6 — pixel proof for the extraction of the topic draw layer. The `before` branch is the
  * exact pre-extraction graphicsLayer body; the `after` branch is [topicZoomTransform]. Both render
  * the SAME deterministic topic harness at 1× and at one fixed non-trivial transform. Roborazzi
- * records all four review artefacts, while Bitmap.sameAs makes exact pixel equality an assertion.
+ * verifies all four references, while Bitmap.sameAs compares the two current renders exactly.
  *
  * This proves draw-layer equivalence only. Gesture/state behaviour remains the responsibility of
  * TopicZoomMathTest, TopicZoomGestureTest, TopicZoomQuoteFoldTest and TopicSwipeMultiTouchTest.
@@ -101,12 +102,12 @@ class TopicZoomExtractionRoborazziTest {
     }
 
     private fun captureHarness(name: String): Bitmap {
-        val filePath = "build/outputs/roborazzi/$name.png"
+        val filePath = "src/test/screenshots/$name.png"
         val node = compose.onNodeWithTag(CAPTURE_TAG)
         node.captureRoboImage(filePath = filePath)
-        return checkNotNull(BitmapFactory.decodeFile(filePath)) {
-            "Roborazzi capture could not be decoded: $filePath"
-        }
+        // Verify does not overwrite the reference or write an _actual image when pixels match.
+        // Read the current surface in both modes, never a reference or a previous run's output.
+        return node.captureToImage().asAndroidBitmap()
     }
 
     /** Exact draw layer that lived inline in TopicScreen before the extraction. */

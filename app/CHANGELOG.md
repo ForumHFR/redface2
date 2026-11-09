@@ -16,6 +16,12 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.69.9` — `internal` (dev) — 2026-11-09
+
+Refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)), lot R0c ([#1512](https://github.com/ForumHFR/redface2/issues/1512)) : correctif relevé pendant la recette sur appareil ([#1574](https://github.com/ForumHFR/redface2/pull/1574)).
+
+- **Modifier un message** : le texte est verrouillé tant que le message d'origine n'est pas chargé (frappe, insertions et images refusées, envoi impossible) ; un formulaire incomplet est refusé et « Recharger » est proposé. Corrige le remplacement d'un message entier par un texte tapé avant le chargement.
+
 ## `0.69.8` — `internal` (dev) — 2026-11-08
 
 Refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)), lot R0c ([#1512](https://github.com/ForumHFR/redface2/issues/1512)) : éditeur de post ([#1567](https://github.com/ForumHFR/redface2/pull/1567)) et deux correctifs ([#1568](https://github.com/ForumHFR/redface2/pull/1568), [#1569](https://github.com/ForumHFR/redface2/pull/1569)).
