@@ -15,8 +15,8 @@ data class EditorChromeLayoutRequest(
     // Independent identities: null means absent; a present target reserves at least 48 dp.
     val firstStatusWidth: Dp? = null,
     val secondStatusWidth: Dp? = null,
-    // ED-30/92: events reserve their measured envelope PLUS the send gap, ahead of fixed slots.
-    val minimumContentWidth: Dp = EditorChromeMetrics.minimumTargetSize,
+    // ED-25/41: mode-specific reserve, independent of event presence; includes its target and Send gap.
+    val minimumContentWidth: Dp = EditorChromeMetrics.minimumContentWidth,
 )
 
 data class EditorChromeAllocation(
@@ -33,7 +33,7 @@ fun allocateEditorChrome(request: EditorChromeLayoutRequest): EditorChromeAlloca
         request.firstStatusWidth, request.secondStatusWidth)
     require(widths.all { it.value.isFinite() && it >= 0.dp })
     val target = EditorChromeMetrics.minimumTargetSize
-    require(request.submitWidth >= target && request.minimumContentWidth >= target)
+    require(request.submitWidth >= target && request.minimumContentWidth >= EditorChromeMetrics.minimumContentWidth)
     val candidates = if (request.compactHeight) buildList {
         if (request.hasHeader) add(EditorFixedSlot.Header to target)
         add(EditorFixedSlot.Preview to target)

@@ -20,18 +20,18 @@ class EditorChromeLayoutPolicyTest {
     }
 
     @Test
-    fun `ED25 each exact boundary retains one more slot without shrinking 48 dp`() {
+    fun `ED25 each exact boundary retains one more slot without shrinking the event target or Send gap`() {
         val priority = EditorFixedSlot.entries
         (0..4).forEach { count ->
-            val width = 139.dp + 32.dp + 48.dp + 48.dp * count
+            val width = 139.dp + 32.dp + 56.dp + 48.dp * count
             val exact = allocateEditorChrome(compact.copy(availableWidth = width))
             assertEquals(priority.take(count), exact.fixedSlots)
             assertEquals(priority.drop(count), exact.overflowSlots)
-            assertEquals(48.dp, exact.scrollingWidth)
+            assertEquals(56.dp, exact.scrollingWidth)
             if (count > 0) {
                 val below = allocateEditorChrome(compact.copy(availableWidth = width - 0.1.dp))
                 assertEquals(priority.take(count - 1), below.fixedSlots)
-                assertTrue(below.scrollingWidth >= 48.dp)
+                assertTrue(below.scrollingWidth >= 56.dp)
             }
         }
     }
@@ -70,26 +70,26 @@ class EditorChromeLayoutPolicyTest {
 
     @Test
     fun `ED25 second status alone keeps its identity and reserves no absent first status`() {
-        val request = compact.copy(availableWidth = 347.dp, hasHeader = false,
+        val request = compact.copy(availableWidth = 355.dp, hasHeader = false,
             firstStatusWidth = null, secondStatusWidth = 80.dp)
         val exact = allocateEditorChrome(request)
         assertEquals(listOf(EditorFixedSlot.Preview, EditorFixedSlot.SecondStatus), exact.fixedSlots)
         assertTrue(exact.overflowSlots.isEmpty())
-        assertEquals(48.dp, exact.scrollingWidth)
-        val below = allocateEditorChrome(request.copy(availableWidth = 346.dp))
+        assertEquals(56.dp, exact.scrollingWidth)
+        val below = allocateEditorChrome(request.copy(availableWidth = 354.dp))
         assertEquals(listOf(EditorFixedSlot.Preview), below.fixedSlots)
         assertEquals(listOf(EditorFixedSlot.SecondStatus), below.overflowSlots)
-        assertEquals(127.dp, below.scrollingWidth)
+        assertEquals(135.dp, below.scrollingWidth)
     }
 
     @Test
-    fun `ED30 event envelope takes priority over fixed slots`() {
-        val result = allocateEditorChrome(compact.copy(
-            minimumContentWidth = EditorChromeMetrics.eventMinimumContentWidth))
-        assertTrue(result.fixedSlots.isEmpty())
-        assertEquals(189.dp, result.scrollingWidth)
-        assertFalse(result.hasMinimumContentWidth) // The host adds ED-133's 4 dp only without fixed slots.
-        assertEquals(EditorFixedSlot.entries, result.overflowSlots)
+    fun `ED25 ED41 fixed slots leave an actionable event with a reduced summary at 360 dp`() {
+        val result = allocateEditorChrome(compact)
+        assertEquals(listOf(EditorFixedSlot.Header, EditorFixedSlot.Preview), result.fixedSlots)
+        assertEquals(listOf(EditorFixedSlot.FirstStatus, EditorFixedSlot.SecondStatus), result.overflowSlots)
+        assertEquals(93.dp, result.scrollingWidth)
+        assertEquals(85.dp, result.scrollingWidth - EditorChromeMetrics.eventSubmitGap)
+        assertTrue(result.hasMinimumContentWidth)
     }
 
     @Test
@@ -115,7 +115,7 @@ class EditorChromeLayoutPolicyTest {
                 val result = allocateEditorChrome(compact.copy(availableWidth = width.dp, submitWidth = send))
                 assertEquals(EditorFixedSlot.entries, result.fixedSlots + result.overflowSlots)
                 assertTrue(result.scrollingWidth >= 0.dp)
-                if (result.fixedSlots.isNotEmpty()) assertTrue(result.scrollingWidth >= 48.dp)
+                if (result.fixedSlots.isNotEmpty()) assertTrue(result.scrollingWidth >= 56.dp)
                 val allocated = 32.dp + send + 48.dp * result.fixedSlots.size + result.scrollingWidth
                 if (width.dp >= 32.dp + send) assertEquals(width.dp, allocated)
             }

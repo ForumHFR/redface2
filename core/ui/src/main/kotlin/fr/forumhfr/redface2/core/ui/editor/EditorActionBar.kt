@@ -63,7 +63,8 @@ data class EditorBarShortcut(
  * changing IME visibility; external surfaces restore focus on close. No field, picker launcher,
  * submission controller or preference lives here. Keep composed across events/arms for live node identity.
  * [firstStatus]/[secondStatus] are independent permanent slots (see [EditorAppBar]): null means absent,
- * never compacted into the other slot.
+ * never compacted into the other slot. Fixed-slot allocation depends on width and mode, never on events:
+ * keep a 48 dp event target plus the Send gap (two targets in Format); shorten the summary to fit.
  */
 @Composable
 @Suppress("LongParameterList") // Stateless rendering inputs, matching the app bar's host boundary.
@@ -188,11 +189,9 @@ private fun EditorBarEnvelope(
     SubcomposeLayout(Modifier.fillMaxWidth().height(height)) { constraints ->
         val button = subcompose("submit", submit).single()
             .measure(Constraints(maxWidth = constraints.maxWidth, maxHeight = height.roundToPx()))
-        val minimum = when {
-            event != null -> EditorChromeMetrics.eventMinimumContentWidth
-            mode == EditorBarMode.Format -> EditorChromeMetrics.formatMinimumWidth
-            else -> EditorChromeMetrics.minimumTargetSize
-        }
+        // ED-41: an event replaces tools inside the same allocation, never demoting a fixed slot.
+        val minimum = if (mode == EditorBarMode.Format) EditorChromeMetrics.formatMinimumWidth
+            else EditorChromeMetrics.minimumContentWidth
         val allocation = allocateEditorChrome(EditorChromeLayoutRequest(
             constraints.maxWidth.toDp(), button.width.toDp(), compact, hasHeader,
             firstStatusWidth = statusWidths[0], secondStatusWidth = statusWidths[1],

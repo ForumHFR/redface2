@@ -35,10 +35,10 @@ data class EditorChromeMetrics(val compactHeight: Boolean) {
         val horizontalGutter = 16.dp
         val horizontalGutters = horizontalGutter * 2
         val formatMinimumWidth = minimumTargetSize * 2
-        val eventMinimumWidth = 185.dp
         val eventSubmitGap = 8.dp
         val eventGutterExtension = 4.dp
-        val eventMinimumContentWidth = eventMinimumWidth + eventSubmitGap
+        // Reserve the event's target and Send gap even at rest; its summary uses the space left by fixed slots.
+        val minimumContentWidth = minimumTargetSize + eventSubmitGap
     }
 }
 

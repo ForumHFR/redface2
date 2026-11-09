@@ -44,7 +44,7 @@ class EditorActionBarLayoutTest {
     private val host = EditorActionBarFixture()
     private fun bounds(tag: String) = compose.onNodeWithTag(tag).getUnclippedBoundsInRoot()
     private fun headerBoundary() = bounds("editor-bar-submit").width + EditorChromeMetrics.horizontalGutters +
-        EditorChromeMetrics.minimumTargetSize + EditorChromeMetrics.eventMinimumContentWidth
+        EditorChromeMetrics.minimumTargetSize + EditorChromeMetrics.formatMinimumWidth
 
     @Test
     fun `ED21 ED30 ED38 two formats or three normal actions fit at 360 and 1_3 times L`() {
@@ -72,7 +72,7 @@ class EditorActionBarLayoutTest {
     }
 
     @Test
-    fun `ED25 compact fixed slots overflow by width and are hidden before an event is squeezed`() {
+    fun `ED25 compact fixed slots overflow only by width while the event summary shrinks`() {
         host.compact.value = true; host.header.value = true; host.scale.value = 1.3f; host.width.value = 760.dp
         host.firstStatus.value = EditorAppBarStatus(R.drawable.ic_editor_quote, "12 citations", {}, 12)
         host.secondStatus.value = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon retrouvé", {})
@@ -83,8 +83,7 @@ class EditorActionBarLayoutTest {
         preview.revealEditorControl()
         compose.onNodeWithContentDescription("12 citations").revealEditorControl()
         compose.onNodeWithContentDescription("Brouillon retrouvé").performScrollTo().assertIsDisplayed()
-        // Cross the ED-25/92 boundary using measured Send, not an assumed font-dependent width.
-        // A retained header keeps the 16 dp gutter and requires the full unextended event reserve.
+        // Cross the Format allocation boundary using measured Send, independently of the event.
         val headerBoundary = headerBoundary()
         // Stay 1 dp either side to avoid pixel/Dp rounding at the exact boundary.
         compose.runOnIdle {
@@ -98,7 +97,7 @@ class EditorActionBarLayoutTest {
         assertEquals(16f, header.getUnclippedBoundsInRoot().left.value, 0.5f)
         assertEquals(64f, retainedEvent.left.value, 0.5f)
         assertTrue(header.getUnclippedBoundsInRoot().right <= retainedEvent.left)
-        assertTrue(retainedEvent.width >= 185.dp)
+        assertTrue(retainedEvent.width >= 48.dp && retainedEvent.width < 185.dp)
         assertTrue(bounds("editor-bar-submit").left - retainedEvent.right >= 7.9.dp)
         compose.runOnIdle { host.width.value = headerBoundary - 1.dp }
         header.assertDoesNotExist()
@@ -106,7 +105,7 @@ class EditorActionBarLayoutTest {
         compose.onNodeWithContentDescription("12 citations").assertDoesNotExist()
         compose.onNodeWithContentDescription("Brouillon retrouvé").assertDoesNotExist()
         val event = eventControl.getUnclippedBoundsInRoot(); val send = bounds("editor-bar-submit")
-        assertEquals(12f, event.left.value, 0.5f); assertTrue(event.width >= 185.dp)
+        assertEquals(12f, event.left.value, 0.5f); assertTrue(event.width >= 48.dp)
         assertTrue(send.left - event.right >= 7.9.dp); assertEquals(48f, event.height.value, 0.5f)
         assertEquals(48f, bounds("bar").height.value, 0.5f)
     }
@@ -156,36 +155,44 @@ class EditorActionBarLayoutTest {
         compose.setContent { host.Content() }
         val labels = listOf("Titre et sous-catégorie", "Afficher l’aperçu", "12 citations", "Brouillon retrouvé")
         listOf(360.dp, 760.dp).forEach { width ->
-            compose.runOnIdle { host.width.value = width }
-            val fixed = labels.mapNotNull { label ->
-                val node = compose.onNodeWithContentDescription(label)
-                if (hasAnyAncestor(hasScrollAction()).matches(node.fetchSemanticsNode())) null
-                else label to node.getUnclippedBoundsInRoot()
-            }.toMap()
-            assertTrue(fixed.isNotEmpty())
-            val send = bounds("editor-bar-submit")
-            val body = bounds("body")
-            val events = listOf(host.finished(), controlEvent(EditorEventContent.Problem(EditorErrors.missingTitle)))
-            events.forEach { event ->
-                compose.runOnIdle { host.event.value = event }
-                val retained = labels.filter { label ->
-                    compose.onAllNodes(hasContentDescription(label)).fetchSemanticsNodes().isNotEmpty()
-                }
-                assertEquals(if (width == 760.dp) labels else emptyList<String>(), retained)
-                retained.forEach { label ->
-                    assertEquals(fixed.getValue(label),
-                        compose.onNodeWithContentDescription(label).getUnclippedBoundsInRoot())
-                }
-                assertTrue(bounds("editor-bar-event").width >= 185.dp)
-                assertEquals(send, bounds("editor-bar-submit")); assertEquals(body, bounds("body"))
-                compose.onNode(hasClickAction() and hasAnyAncestor(hasTestTag("editor-bar-event")))
-                    .performTouchInput { click() }
-                fixed.forEach { (label, position) ->
-                    assertEquals(position, compose.onNodeWithContentDescription(label).getUnclippedBoundsInRoot())
-                }
-                assertEquals(send, bounds("editor-bar-submit")); assertEquals(body, bounds("body"))
-                assertEquals(event.key to event.action, host.eventActions.last())
+            EditorBarMode.entries.forEach { mode ->
+                compose.runOnIdle { host.width.value = width; host.bar.value = EditorBarState(mode) }
+                assertFixedSlotsThroughEvents(labels)
             }
+        }
+    }
+
+    private fun assertFixedSlotsThroughEvents(labels: List<String>) {
+        val fixed = labels.mapNotNull { label ->
+            val node = compose.onNodeWithContentDescription(label)
+            if (hasAnyAncestor(hasScrollAction()).matches(node.fetchSemanticsNode())) null
+            else label to node.getUnclippedBoundsInRoot()
+        }.toMap()
+        assertTrue(fixed.isNotEmpty())
+        val send = bounds("editor-bar-submit"); val body = bounds("body")
+        val events = listOf(host.finished(), controlEvent(EditorEventContent.Problem(EditorErrors.missingTitle)))
+        events.forEach { event ->
+            compose.runOnIdle { host.event.value = event }
+            val retained = labels.filter { label ->
+                compose.onAllNodes(hasContentDescription(label)).fetchSemanticsNodes().isNotEmpty()
+            }
+            // The oracle is the measured allocation at rest, never a special case for narrow events.
+            assertEquals(fixed.keys.toList(), retained)
+            fixed.forEach { (label, position) ->
+                assertEquals(position, compose.onNodeWithContentDescription(label).getUnclippedBoundsInRoot())
+            }
+            val envelope = bounds("editor-bar-event")
+            assertTrue(envelope.width >= 48.dp)
+            assertEquals(fixed.values.last().right.value, envelope.left.value, 0.5f)
+            assertEquals(8f, (send.left - envelope.right).value, 0.5f)
+            assertEquals(send, bounds("editor-bar-submit")); assertEquals(body, bounds("body"))
+            compose.onNode(hasClickAction() and hasAnyAncestor(hasTestTag("editor-bar-event")))
+                .performTouchInput { click() }
+            fixed.forEach { (label, position) ->
+                assertEquals(position, compose.onNodeWithContentDescription(label).getUnclippedBoundsInRoot())
+            }
+            assertEquals(send, bounds("editor-bar-submit")); assertEquals(body, bounds("body"))
+            assertEquals(event.key to event.action, host.eventActions.last())
         }
     }
 
@@ -276,11 +283,13 @@ class EditorActionBarLayoutTest {
         compose.runOnIdle { host.width.value = width; host.compact.value = compact; host.event.value = events.first() }
         val event = bounds("editor-bar-event"); val send = bounds("editor-bar-submit")
         val retainsPreview = compact && width >= send.width + EditorChromeMetrics.horizontalGutters +
-            EditorChromeMetrics.minimumTargetSize + EditorChromeMetrics.eventMinimumContentWidth
+            EditorChromeMetrics.minimumTargetSize + EditorChromeMetrics.minimumContentWidth
         val preview = compose.onNodeWithContentDescription("Afficher l’aperçu")
         if (retainsPreview) preview.assertIsDisplayed() else preview.assertDoesNotExist()
         assertEquals(if (retainsPreview) 64f else 12f, event.left.value, 0.5f)
-        assertTrue(event.width >= if (width == 360.dp) 185.dp else 48.dp); assertTrue(send.left - event.right >= 7.9.dp)
+        assertTrue(event.width >= 48.dp)
+        if (!retainsPreview && width == 360.dp) assertTrue(event.width >= 185.dp)
+        assertTrue(send.left - event.right >= 7.9.dp)
         assertEquals(if (compact) 48f else 56f, bounds("bar").height.value, 0.5f)
         compose.onNodeWithContentDescription("Brouillon non écrit, Afficher les détails").assertExists()
         events.forEach { item ->

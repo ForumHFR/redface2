@@ -5,12 +5,13 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
 import org.junit.Assert.assertEquals
@@ -69,12 +70,24 @@ class EditorActionBarFocusTest {
     @Test
     fun `touch color and image navigation does not capture keyboard focus`() {
         compose.setContent { host.Content() }
-        compose.runOnIdle { assertTrue(host.inputMode.requestInputMode(InputMode.Touch)) }
+        // Android cannot request Touch mode. Keep keyboard focus possible so an erroneous request can steal it.
+        compose.runOnIdle { assertTrue(host.inputMode.requestInputMode(InputMode.Keyboard)) }
         listOf("Couleur" to EditorBarMode.Format, "Image" to EditorBarMode.Normal).forEach { (label, parent) ->
-            compose.runOnIdle { host.bar.value = EditorBarState(parent) }
-            compose.onNodeWithContentDescription(label).revealEditorControl().performClick()
-            compose.onNodeWithContentDescription("Retour").assertIsNotFocused().performClick()
+            compose.runOnIdle { host.bar.value = EditorBarState(parent); host.bodyFocus.requestFocus() }
+            compose.onNodeWithTag("body").assertIsFocused()
+            compose.onNodeWithContentDescription(label).revealEditorControl().performTouchInput { click() }
+            assertEquals(if (parent == EditorBarMode.Format) EditorBarMode.Color else EditorBarMode.Image,
+                host.bar.value.mode)
+            compose.onNodeWithTag("body").assertIsFocused()
+            val back = compose.onNodeWithContentDescription("Retour").assertIsNotFocused()
+            // Positive control: a bad focus request really can steal focus from the field in this oracle.
+            back.requestFocus().assertIsFocused()
+            compose.onNodeWithTag("body").assertIsNotFocused()
+            compose.runOnIdle { host.bodyFocus.requestFocus() }
+            back.assertIsNotFocused().performTouchInput { click() }
+            assertEquals(parent, host.bar.value.mode)
             compose.onNodeWithContentDescription(label).assertIsNotFocused()
+            compose.onNodeWithTag("body").assertIsFocused()
         }
         assertTrue(host.calls.isEmpty())
     }
