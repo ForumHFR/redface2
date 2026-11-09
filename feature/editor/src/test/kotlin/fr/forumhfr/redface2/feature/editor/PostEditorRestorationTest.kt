@@ -12,6 +12,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptOutcome
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptStatus
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.BeginAttemptResult
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.Draft
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.DraftEntry
@@ -391,6 +392,60 @@ class PostEditorRestorationTest {
         type(restored, "intentional replacement after hydration")
         assertEquals("intentional replacement after hydration", restored.bodyFieldState.text.toString())
         coVerify(exactly = 2) { edits.fetchEditPostForm(any()) }
+    }
+
+    @Test
+    fun clearedUncertainEditUnlocksAfterDeathOnlyWhenFormGetSucceeds() = runTest(dispatcher) {
+        val request = request().copy(mode = PostEditorMode.Edit, numreponse = 101)
+        val editKey = EditorDraftKey.editPost(23, 101)
+        val attempted = Draft("possibly sent body")
+        store.preload(editKey, attempted)
+        val begun = store.beginAttempt("tester", editKey, attempted, 0) as BeginAttemptResult.Started
+        store.finishAttempt(begun.token, AttemptOutcome.UNCERTAIN)
+        val saved = SavedStateHandle()
+        val first = open(saved, request)
+        runCurrent()
+        assertResumed(first, attempted.body)
+        assertFalse(first.state.value.isAwaitingInitialBody)
+        type(first, "")
+        first.submit(PostEditorIntent.Stopped)
+        runCurrent()
+        val unresolved = checkNotNull(store.entries[editKey])
+        assertEquals("", unresolved.draft.body)
+        assertEquals(AttemptStatus.UNCERTAIN, unresolved.attempt?.status)
+        assertEquals(begun.token, unresolved.attempt?.token) // The flush really used saveUnresolved.
+        assertTrue(unresolved.version > begun.token.version)
+        val frozen = freeze(saved)
+        val checkpoint = checkNotNull(frozen.get<String>("postEditor.resumeVersion"))
+        first.viewModelScope.cancel()
+
+        coEvery { edits.fetchEditPostForm(any()) } throws IOException("offline")
+        val restored = open(frozen, request)
+        runCurrent()
+        assertTrue(restored.state.value.isAwaitingInitialBody)
+        assertFalse(restored.state.value.draftHydratedFromForm)
+        assertFalse(restored.state.value.canSubmit)
+        assertEquals(EditorErrors.uncertain, restored.state.value.submitError)
+        val saves = store.saveCount
+        type(restored, "replacement before successful GET")
+        restored.submit(PostEditorIntent.Stopped)
+        runCurrent()
+        assertEquals("", restored.bodyFieldState.text.toString())
+        assertEquals(saves, store.saveCount) // #1574: the failed GET cannot certify a new blank checkpoint.
+        assertEquals(checkpoint, frozen.get<String>("postEditor.resumeVersion"))
+
+        coEvery { edits.fetchEditPostForm(any()) } returns form("server body")
+        restored.submit(PostEditorIntent.ReloadRequested)
+        runCurrent()
+        assertResumed(restored, "server body")
+        assertTrue(restored.state.value.draftHydratedFromForm)
+        assertFalse(restored.state.value.isAwaitingInitialBody)
+        assertTrue(restored.state.value.canSubmit)
+        type(restored, "replacement after successful GET")
+        assertEquals("replacement after successful GET", restored.bodyFieldState.text.toString())
+        assertEquals(EditorErrors.uncertain, restored.state.value.submitError)
+        assertTrue(restored.state.value.submission is EditorSubmissionState.Uncertain)
+        coVerify(exactly = 3) { edits.fetchEditPostForm(any()) }
     }
 
     @Test
