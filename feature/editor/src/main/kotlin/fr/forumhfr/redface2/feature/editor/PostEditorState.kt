@@ -51,6 +51,9 @@ data class PostEditorState(
     val validation: BbcodeValidation = BbcodeValidation.Idle,
     /** True while we GET `message.php` (reply / quote / edit form) to grab `hash_check`. */
     val isLoadingForm: Boolean = false,
+    /** Availability is evidence from the private loadedForm, never inferred from a finished GET. */
+    val hasLoadedForm: Boolean = false,
+    val hasAuthenticatedForm: Boolean = false,
     /** True while we POST `bddpost.php` (reply / quote) or `bdd.php` (edit). Guards against double submit. */
     val isSubmitting: Boolean = false,
     /** ED-161/169: terminal success and in-flight reservation are state, never a replayed effect. */

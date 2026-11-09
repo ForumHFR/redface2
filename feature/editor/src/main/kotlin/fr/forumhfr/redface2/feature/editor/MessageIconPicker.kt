@@ -37,6 +37,7 @@ internal fun MessageIconPicker(
     enabled: Boolean,
     onIconSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    alwaysExpanded: Boolean = false,
 ) {
     var expanded by rememberSaveable { mutableStateOf(false) }
     val toneDescription = stringResource(R.string.editor_msg_icon_tone_description, selectedIcon)
@@ -45,7 +46,9 @@ internal fun MessageIconPicker(
             modifier = Modifier
                 .fillMaxWidth()
                 .testTag(MSG_ICON_PICKER_TOGGLE_TAG)
-                .clickable(enabled = enabled, role = Role.Button) { expanded = !expanded }
+                .then(if (alwaysExpanded) Modifier else Modifier.clickable(enabled = enabled, role = Role.Button) {
+                    expanded = !expanded
+                })
                 .padding(vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -72,13 +75,13 @@ internal fun MessageIconPicker(
             // clickable Row. `material-icons-core` is out of reach (detekt ForbiddenImport bans
             // `androidx.compose.material.*`), so the glyph is muted for TalkBack instead.
             Text(
-                text = if (expanded) "⌃" else "⌄",
+                text = if (alwaysExpanded) "" else if (expanded) "⌃" else "⌄",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.clearAndSetSemantics {},
             )
         }
-        if (expanded) {
+        if (alwaysExpanded || expanded) {
             MessageIconGrid(
                 selectedIcon = selectedIcon,
                 enabled = enabled,

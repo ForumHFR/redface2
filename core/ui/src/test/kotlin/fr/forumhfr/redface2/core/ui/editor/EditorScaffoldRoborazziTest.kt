@@ -114,6 +114,7 @@ class EditorScaffoldRoborazziTest {
             useUnmergedTree = true).assertCountEquals(0)
         compose.runOnIdle {
             assertEquals(TextRange.Zero, host.body.selection)
+            // No edit occurred: even a viewport shorter than the first line must retain its initial scroll.
             assertEquals(0, host.scroll.value)
             assertEquals(0, host.inputSessions)
             assertNull(host.inputConnection)

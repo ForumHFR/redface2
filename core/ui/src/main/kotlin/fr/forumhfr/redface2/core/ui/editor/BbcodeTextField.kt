@@ -35,6 +35,8 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalContext
@@ -161,6 +163,12 @@ internal fun BbcodeTextField(
  * open IME, switch it to true: BTF2 starts the session even if the field already regained focus.
  * [onSemanticsClick] optionally overrides the field's accessibility click, preserving its action label.
  * The override owns focus and IME restoration; null keeps the native field action.
+ * [revealCaretOnChange] follows programmatic edits outside BTF2's focused, editable caret tracking.
+ * The first measured content never reveals the caret. After an edit, viewport changes keep an
+ * already visible caret in view; scrolling away suspends that follow.
+ * [caretRevealResetKey] reads a snapshot-backed counter the host increments in the same snapshot as
+ * server hydration or draft restoration. It is observed alongside the buffer, before recomposition,
+ * so these changes establish a measured baseline without revealing or competing with restored scroll.
  */
 @Suppress("LongParameterList") // Same chrome and viewport hooks for both editor APIs.
 @Composable
@@ -177,10 +185,22 @@ fun BbcodeTextField(
     showKeyboardOnFocus: Boolean = true,
     onViewportMeasured: ((heightPx: Int) -> Unit)? = null,
     onSemanticsClick: (() -> Boolean)? = null,
+    caretRevealResetKey: () -> Int = { 0 },
+    revealCaretOnChange: Boolean = false,
     onTextLayout: (Density.(getResult: () -> TextLayoutResult?) -> Unit)? = null,
 ) {
     val fieldInteractions = remember { MutableInteractionSource() }
     val focusRequester = remember { FocusRequester() }
+    var layout by remember(state) { mutableStateOf<TextLayoutResult?>(null) }
+    var focused by remember(state) { mutableStateOf(false) }
+    val currentReadOnly by rememberUpdatedState(readOnly)
+    val currentResetKey by rememberUpdatedState(caretRevealResetKey)
+    LaunchedEffect(state, scrollState, revealCaretOnChange) {
+        if (revealCaretOnChange) {
+            // Keep the measured baseline across edits. BTF2 owns focused, editable scrolling.
+            revealEditorCaret({ layout }, state, scrollState, { currentResetKey() }, { !focused || currentReadOnly })
+        }
+    }
     LaunchedEffect(Unit) {
         if (autoFocus) focusRequester.requestFocus()
     }
@@ -215,7 +235,7 @@ fun BbcodeTextField(
                         // A null label lets the native/input-transformation label survive peer merging.
                         onClick(action = onSemanticsClick)
                     })
-                    .focusRequester(focusRequester),
+                    .focusRequester(focusRequester).onFocusChanged { focused = it.isFocused },
                 textStyle = LocalTextStyle.current.merge(
                     TextStyle(color = MaterialTheme.colorScheme.onSurface),
                 ),
@@ -227,7 +247,10 @@ fun BbcodeTextField(
                     showKeyboardOnFocus = showKeyboardOnFocus,
                 ),
                 lineLimits = lineLimits,
-                onTextLayout = onTextLayout,
+                onTextLayout = { getResult ->
+                    if (revealCaretOnChange) layout = getResult()
+                    onTextLayout?.invoke(this, getResult)
+                },
                 interactionSource = fieldInteractions,
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                 decorator = measuredEditorDecorator(OutlinedTextFieldDefaults.decorator(
@@ -326,3 +349,58 @@ private fun measuredEditorDecorator(delegate: TextFieldDecorator, onMeasured: ((
             }
         }
     }
+
+private data class BbcodeCaretSnapshot(
+    val value: BbcodeTextSnapshot,
+    val caret: Rect,
+    val viewport: Int,
+    val resetKey: Int,
+) {
+    fun isVisible(scroll: Int): Boolean = caret.top >= scroll && caret.bottom <= scroll + viewport
+}
+
+/** ED-14: reveal edits, then follow viewport changes only while the caret was already visible. */
+private suspend fun revealEditorCaret(
+    getLayout: () -> TextLayoutResult?,
+    state: TextFieldState,
+    scroll: ScrollState,
+    resetKey: () -> Int,
+    canReveal: () -> Boolean,
+) {
+    var previous: BbcodeCaretSnapshot? = null
+    var followViewport = false
+    // Observe measurement without recomposing the field on every frame of an IME/panel animation.
+    snapshotFlow { measuredEditorCaret(getLayout(), state, scroll.viewportSize, resetKey()) }.collect { current ->
+        if (current == null) return@collect
+        val baseline = previous?.takeIf { it.resetKey == current.resetKey }
+        val edited = baseline != null && baseline.value != current.value
+        followViewport = baseline != null && (followViewport || edited)
+        // Use the old geometry and viewport, but the current offset so manual scrolling wins.
+        val shouldReveal = edited || baseline?.isVisible(scroll.value) == true
+        previous = current
+        if (followViewport && shouldReveal && canReveal()) scroll.revealCaret(current.caret, current.viewport)
+    }
+}
+
+private fun measuredEditorCaret(
+    layout: TextLayoutResult?,
+    state: TextFieldState,
+    viewport: Int,
+    resetKey: Int,
+): BbcodeCaretSnapshot? {
+    if (layout == null) return null
+    val value = BbcodeTextSnapshot(state.text.toString(), state.selection)
+    return if (layout.layoutInput.text.text == value.text && viewport > 0) {
+        val caret = layout.getCursorRect(value.selection.end.coerceIn(0, value.text.length))
+        BbcodeCaretSnapshot(value, caret, viewport, resetKey)
+    } else null
+}
+
+private suspend fun ScrollState.revealCaret(caret: Rect, viewport: Int) {
+    val target = when {
+        caret.bottom > value + viewport -> kotlin.math.ceil(caret.bottom).toInt() - viewport
+        caret.top < value -> caret.top.toInt()
+        else -> value
+    }.coerceIn(0, maxValue)
+    if (target != value) scrollTo(target)
+}

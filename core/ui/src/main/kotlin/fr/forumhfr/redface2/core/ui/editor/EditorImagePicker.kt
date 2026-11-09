@@ -124,3 +124,17 @@ internal fun <T> emitImagePickerResult(
         },
     )
 }
+
+/**
+ * Host port for the R1a-2 chrome: #1573's [ImagePickerEvent.Cancelled] is also reported to [onCancelled], so the
+ * host can close its picker surface; every event, cancellation included, still reaches [onEvent].
+ */
+@Composable
+fun rememberEditorImagePicker(
+    mode: ImagePickerMode,
+    onCancelled: (() -> Unit)?,
+    onEvent: (ImagePickerEvent) -> Unit,
+): () -> Unit = rememberEditorImagePicker(mode) { event ->
+    if (event is ImagePickerEvent.Cancelled) onCancelled?.invoke()
+    onEvent(event)
+}
