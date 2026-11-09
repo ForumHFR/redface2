@@ -468,7 +468,7 @@ expect_configuration() {
 source_tokens=(
   sourceSets getSourceSets srcDir srcDirs setSrcDirs getSrcDirs setRoot root
   directories getDirectories sources getSources addSource
-  addStaticSourceDirectory addGeneratedSourceDirectory
+  addStaticSourceDirectory addGeneratedSourceDirectory from includeBuild buildSrc
 )
 for source_token in "${source_tokens[@]}"; do
   new_build_case "token_$source_token" feature/example/build.gradle.kts <<BUILD
@@ -520,6 +520,32 @@ with(sourceSets.getByName("main").kotlin) { directories += "hidden" }
 BUILD
 expect_configuration 1
 
+new_build_case apply_from_root_file feature/example/build.gradle.kts <<'BUILD'
+apply(from = rootProject.file("gradle/shared-sources.gradle.kts"))
+BUILD
+expect_configuration 1
+
+new_build_case apply_block_from feature/example/build.gradle.kts <<'BUILD'
+apply { from("x.gradle.kts") }
+BUILD
+expect_configuration 1
+
+new_build_case apply_from_groovy feature/example/build.gradle <<'BUILD'
+apply from: 'x.gradle'
+BUILD
+expect_configuration 1
+
+new_case second_include_build <<'SOURCE'
+package p.fixture
+@HiltViewModel class Real
+SOURCE
+source_file="$case_root/settings.gradle.kts"
+cat >>"$source_file" <<'BUILD'
+includeBuild("build-logic")
+includeBuild("other")
+BUILD
+expect_configuration 9
+
 new_build_case release_set_root feature/example/build.gradle.kts <<'BUILD'
 sourceSets.getByName("release").setRoot("hidden")
 BUILD
@@ -553,15 +579,19 @@ val sourceSetsExtra = 1
 val resources = 2
 val rootProjectName = 3
 val mydirectories = 4
+val fromExtra = 5
+val includeBuildExtra = 6
+val buildSrcExtra = 7
 BUILD
 expect_list "ViewModels : p.fixture.Real"
 
 new_build_case config_comment_and_literal feature/example/build.gradle.kts <<'BUILD'
 // sourceSets getSourceSets srcDir srcDirs setSrcDirs getSrcDirs setRoot root
 /* directories getDirectories sources getSources addSource
-   addStaticSourceDirectory addGeneratedSourceDirectory */
+   addStaticSourceDirectory addGeneratedSourceDirectory from includeBuild buildSrc */
 /* /* nested */ directories += "x" */
 val sample = "sourceSets.getByName(\"main\").kotlin.directories += \"x\""
+val delegated = "from includeBuild buildSrc"
 val raw = """sources addGeneratedSourceDirectory root "directories""""
 val interpolated = "${run { /* sources */ "sourceSets" }}"
 BUILD
@@ -572,7 +602,7 @@ package p.fixture
 @HiltViewModel class Real
 SOURCE
 cat >>"$case_root/settings.gradle.kts" <<'SETTINGS'
-// sourceSets root sources projectDir setProjectDir buildFileName
+// sourceSets root sources projectDir setProjectDir buildFileName from includeBuild buildSrc
 /* project(":x").projectDir = file("y") */
 val ignored = "projectDir setProjectDir buildFileName srcDir"
 val raw = """sourceSets root sources"""
@@ -595,6 +625,8 @@ roborazzi_path=build-logic/src/main/kotlin/fr/forumhfr/redface2/buildlogic/Redfa
 # shellcheck disable=SC2016 # literal Gradle line, $projectDir must not expand
 database_line='assets.directories.add("$projectDir/schemas")'
 roborazzi_line='sourceSets.getByName("test").kotlin.directories +='
+catalog_line='from(files("../gradle/libs.versions.toml"))'
+include_build_line='includeBuild("build-logic")'
 
 new_build_case whitelist_database "$database_path" <<'BUILD'
 android {
@@ -625,6 +657,31 @@ BUILD
 echo 'include(":core:database")' >>"$case_root/settings.gradle.kts"
 expect_configuration 1
 
+new_build_case whitelist_catalog build-logic/settings.gradle.kts <<<"$catalog_line"
+expect_list "ViewModels : p.fixture.Real"
+
+new_build_case whitelist_include_build settings.gradle.kts <<'BUILD'
+includeBuild("build-logic")
+include(":app", ":core:base", ":feature:example")
+BUILD
+expect_list "ViewModels : p.fixture.Real"
+
+new_build_case whitelist_delegation_trim build-logic/settings.gradle.kts </dev/null
+printf '\t  %s  \t\n' "$catalog_line" >"$source_file"
+printf '\t  %s  \t\n' "$include_build_line" >>"$case_root/settings.gradle.kts"
+expect_list "ViewModels : p.fixture.Real"
+
+new_build_case whitelist_catalog_changed build-logic/settings.gradle.kts <<'BUILD'
+from(files("../gradle/other.toml"))
+BUILD
+expect_configuration 1
+
+new_build_case whitelist_catalog_comment build-logic/settings.gradle.kts <<<"$catalog_line // comment"
+expect_configuration 1
+
+new_build_case whitelist_include_build_comment settings.gradle.kts <<<"$include_build_line // comment"
+expect_configuration 1
+
 new_build_case whitelist_roborazzi_changed "$roborazzi_path" <<'BUILD'
 sourceSets.getByName("main").kotlin.directories +=
 BUILD
@@ -636,7 +693,7 @@ BUILD
 echo 'include(":core:database")' >>"$case_root/settings.gradle.kts"
 expect_configuration 1
 
-for whitelist_line in 'sourceSets {' "$database_line" "$roborazzi_line"; do
+for whitelist_line in 'sourceSets {' "$database_line" "$roborazzi_line" "$catalog_line" "$include_build_line"; do
   new_build_case "whitelist_wrong_file_$case_count" feature/example/build.gradle.kts <<<"$whitelist_line"
   expect_configuration 1
 done
@@ -654,12 +711,12 @@ source_file="$case_root/build-logic/src/main/kotlin/zz/Other.kt"
 printf '%s\n' "$roborazzi_line" >"$source_file"
 expect_configuration 1
 
-# Les tests et les autres extensions de build-logic ne sont pas de la configuration.
+# Les tests et les autres extensions de build-logic ne sont pas de la configuration,
+# sauf les fichiers Gradle désormais tous soumis à la liste fermée.
 for build_path in \
   build-logic/src/test/java/TextBlockTest.java \
   build-logic/src/roborazziTest/java/TextBlockTest.java \
   build-logic/src/debug/java/TextBlockTest.java \
-  build-logic/src/main/ignored.gradle \
   build-logic/src/main/ignored.groovy; do
   new_build_case "ignored_${build_path//\//_}" "$build_path" <<'BUILD'
 class TextBlockTest { String text = """
@@ -669,10 +726,59 @@ BUILD
   expect_list "ViewModels : p.fixture.Real"
 done
 
-new_build_case unincluded_custom_dir not/included/build.gradle.kts <<'BUILD'
+expect_uncovered_gradle() {
+  derive
+  [[ "$rc" -eq 1 ]] || fail "fichier Gradle non couvert accepté (rc=$rc)"
+  grep -Fx -- "::error::Hilt: $1 : fichier Gradle non couvert par la garde" \
+    "$work_dir/stderr" >/dev/null || fail "diagnostic du fichier Gradle $1 absent"
+  echo "OK: $case_name (fichier Gradle non couvert)"
+}
+
+for build_path in gradle/extra.gradle.kts gradle/extra.gradle \
+  not/included/build.gradle.kts build-logic/src/main/ignored.gradle \
+  build-logic/src/main/ignored.gradle.kts build-logic/src/test/extra.gradle.kts; do
+  new_build_case "uncovered_${build_path//\//_}" "$build_path" </dev/null
+  expect_uncovered_gradle "$build_path"
+done
+
+new_build_case uncovered_gradle_symlink gradle/plain.txt </dev/null
+ln -s plain.txt "$case_root/gradle/extra.gradle.kts"
+expect_uncovered_gradle gradle/extra.gradle.kts
+
+new_case root_build_src <<'SOURCE'
+package p.fixture
+@HiltViewModel class Real
+SOURCE
+mkdir -p "$case_root/buildSrc"
+derive
+[[ "$rc" -eq 1 ]] || fail "buildSrc vide accepté (rc=$rc)"
+grep -Fx -- '::error::Hilt: buildSrc/ non supporté par la garde' \
+  "$work_dir/stderr" >/dev/null || fail "diagnostic buildSrc absent"
+echo "OK: $case_name (buildSrc rejeté)"
+
+# Sans Git, les sorties et caches connus sont exclus, à toute profondeur.
+for cache_path in build .gradle .gradle-user .gradle-tmp .kotlin \
+  feature/example/build nested/.git; do
+  new_build_case "cache_${cache_path//\//_}" "$cache_path/extra.gradle.kts" <<'BUILD'
 sourceSets.main.java.srcDir("hidden")
 BUILD
-expect_list "ViewModels : p.fixture.Real"
+  expect_list "ViewModels : p.fixture.Real"
+done
+
+# Le chemin Git doit aussi voir les fichiers non suivis non ignorés. Le dépôt
+# factice est initialisé uniquement dans mktemp, sans commit ni ajout à l'index.
+if command -v git >/dev/null; then
+  new_build_case git_untracked_gradle gradle/extra.gradle.kts </dev/null
+  git -C "$case_root" init -q
+  expect_uncovered_gradle gradle/extra.gradle.kts
+
+  new_build_case git_ignored_cache local-cache/extra.gradle.kts <<'BUILD'
+sourceSets.main.java.srcDir("hidden")
+BUILD
+  git -C "$case_root" init -q
+  echo 'local-cache/' >"$case_root/.gitignore"
+  expect_list "ViewModels : p.fixture.Real"
+fi
 
 # Bout en bout : ZIP valide mais DEX factice, avec les seuls marqueurs de l'app et
 # de core:base. Hidden manque délibérément. La copie du script utilise le dépôt du
@@ -683,10 +789,11 @@ printf '%s\n' 'Hilt_App' 'Lhilt_aggregated_deps/_p_app_' \
 (cd "$work_dir/archive" && zip -q "$work_dir/without-hidden.apk" classes.dex)
 
 run_artifact() {
+  local artifact="${1:-$work_dir/without-hidden.apk}"
   mkdir -p "$case_root/scripts/release"
   cp "$script_dir/verify-hilt-artifact.sh" "$case_root/scripts/release/"
   set +e
-  bash "$case_root/scripts/release/verify-hilt-artifact.sh" "$work_dir/without-hidden.apk" \
+  bash "$case_root/scripts/release/verify-hilt-artifact.sh" "$artifact" \
     >"$work_dir/stdout" 2>"$work_dir/stderr"
   rc=$?
   set -e
@@ -708,6 +815,74 @@ run_artifact
 grep -Fx -- "OK: Hilt: $work_dir/without-hidden.apk (2 modules)" \
   "$work_dir/stdout" >/dev/null || fail "succès de l'archive témoin absent"
 echo "OK: $case_name"
+
+# Ces dépôts passent la dérivation : les échecs suivants viennent exclusivement
+# des octets DEX. Couvrir chaque type de marqueur en APK ET en AAB, dont la perte
+# partielle d'un ViewModel alors que le second marqueur du module est présent.
+for artifact_type in apk aab; do
+  for missing_marker in none viewmodel module application; do
+    new_case "artifact_dex_${artifact_type}_$missing_marker" <<'SOURCE'
+package p.fixture
+@HiltViewModel class First
+@HiltViewModel class Second
+SOURCE
+    expect_list "ViewModels : p.fixture.First p.fixture.Second" >/dev/null
+    archive_dir="$work_dir/$case_name-archive"
+    dex_entry=classes.dex
+    [[ "$artifact_type" != aab ]] || dex_entry=base/dex/classes.dex
+    mkdir -p "$(dirname -- "$archive_dir/$dex_entry")"
+    first_marker='Lhilt_aggregated_deps/_p_fixture_First_HiltModules_KeyModule;'
+    second_marker='Lhilt_aggregated_deps/_p_fixture_Second_HiltModules_KeyModule;'
+    base_marker='Lhilt_aggregated_deps/_p_base_Base;'
+    {
+      printf 'dex\n035\0'
+      printf '%s\0' 'Lhilt_aggregated_deps/_p_app_App;' "$first_marker"
+      [[ "$missing_marker" == application ]] || printf '%s\0' 'Hilt_App'
+      [[ "$missing_marker" == module ]] || printf '%s\0' "$base_marker"
+      if [[ "$missing_marker" != viewmodel ]]; then
+        printf '%s\0' "$second_marker"
+      else
+        # Un descripteur plus long ne doit pas satisfaire celui de Second.
+        printf '%s\0' 'Lhilt_aggregated_deps/_p_fixture_Second_HiltModules_KeyModuleExtra;'
+      fi
+    } >"$archive_dir/$dex_entry"
+    artifact="$work_dir/$case_name.$artifact_type"
+    (cd "$archive_dir" && zip -q "$artifact" "$dex_entry")
+    run_artifact "$artifact"
+    if [[ "$missing_marker" == none ]]; then
+      [[ "$rc" -eq 0 && ! -s "$work_dir/stderr" ]] || fail "archive DEX complète rejetée (rc=$rc)"
+      grep -Fx -- "OK: Hilt: $artifact (3 modules)" "$work_dir/stdout" >/dev/null || fail "succès DEX absent"
+    else
+      [[ "$rc" -eq 1 ]] || fail "marqueur DEX $missing_marker manquant accepté (rc=$rc)"
+      case "$missing_marker" in
+        viewmodel) diagnostic="feature:example : p.fixture.Second"; marker="$second_marker" ;;
+        module) diagnostic='core:base : préfixe de package _p_base_'; marker='Lhilt_aggregated_deps/_p_base_' ;;
+        application) diagnostic='app : p.app.App'; marker=Hilt_App ;;
+      esac
+      echo "::error::Hilt: $artifact : module $diagnostic absent du DEX (marqueur $marker)" >"$work_dir/expected"
+      diff -u "$work_dir/expected" "$work_dir/stderr" || fail "diagnostic DEX différent"
+    fi
+    echo "OK: $case_name (contrôle DEX)"
+  done
+done
+
+new_case artifact_apply_from_astra_r5 <<'SOURCE'
+package p.fixture
+class Plain
+SOURCE
+mkdir -p "$case_root/gradle" "$case_root/feature/example/shared-kotlin"
+cat >"$case_root/gradle/shared-sources.gradle.kts" <<'BUILD'
+sourceSets.getByName("main").kotlin.directories += "shared-kotlin"
+BUILD
+cat >"$case_root/feature/example/shared-kotlin/Hidden.kt" <<'SOURCE'
+package p.fixture
+@HiltViewModel class Hidden
+SOURCE
+cat >"$case_root/feature/example/build.gradle.kts" <<'BUILD'
+plugins { id("redface.android.library"); id("redface.android.hilt.library") }
+apply(from = rootProject.file("gradle/shared-sources.gradle.kts"))
+BUILD
+expect_artifact_rejected "::error::Hilt: gradle/shared-sources.gradle.kts : fichier Gradle non couvert par la garde"
 
 for source_set in release prod; do
   module_path=feature/example

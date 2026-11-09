@@ -80,20 +80,35 @@ La configuration inspectée comprend exclusivement :
 - `build-logic/settings.gradle(.kts)` et `build-logic/build.gradle(.kts)` ;
 - les fichiers `.kt`, `.kts` et `.java` de `build-logic/src/main/**`.
 
-Les autres source sets de `build-logic`, dont `src/test` et `src/roborazziTest`,
-ne sont pas lus. Les projets non inclus ne participent pas à la dérivation.
+La liste des **fichiers Gradle est fermée** : tout autre fichier `*.gradle` ou
+`*.gradle.kts`, même non chargé, échoue avec « fichier Gradle non couvert par la
+garde ». Cela couvre aussi les builds de projets non inclus et les scripts placés
+sous `build-logic/src/`. Un dossier `buildSrc/` à la racine est refusé, même vide.
+Le dépôt actuel contient 22 fichiers Gradle, tous dans la liste couverte.
+
+Dans un checkout Git, l'inventaire utilise `git ls-files` : fichiers suivis et
+fichiers non suivis non ignorés. Les caches locaux ignorés ne participent donc
+pas au contrôle. Sans Git, `find` parcourt le dépôt en excluant les dossiers
+`.git`, `build`, `.gradle`, `.gradle-user`, `.gradle-tmp` et `.kotlin`, à toute
+profondeur ; ces mêmes dossiers sont exclus de l'inventaire Git. Ce repli permet
+de contrôler un export sans supposer que ses autres scripts seraient inoffensifs.
+
+Hors fichiers Gradle soumis à cet inventaire, les autres source sets de
+`build-logic`, dont `src/test` et `src/roborazziTest`, ne sont pas lus. Les sources
+des projets non inclus ne participent pas à la dérivation.
 
 Hors commentaires et chaînes, tout identifiant exact parmi `sourceSets`,
 `getSourceSets`, `srcDir`, `srcDirs`, `setSrcDirs`, `getSrcDirs`, `setRoot`, `root`,
 `directories`, `getDirectories`, `sources`, `getSources`, `addSource`,
-`addStaticSourceDirectory`, `addGeneratedSourceDirectory` échoue avec
+`addStaticSourceDirectory`, `addGeneratedSourceDirectory`, `from`, `includeBuild`
+et `buildSrc` échoue avec
 « configuration de sources non supportée par la garde ». Dans les seuls fichiers
 `settings.gradle(.kts)`, ce refus couvre aussi `projectDir`, `setProjectDir` et
 `buildFileName`. La garde ne résout ni récepteur implicite, ni sélecteur, ni
 variante Gradle.
 
 Une **liste blanche explicite** dans le bloc `BEGIN` du script autorise seulement
-ces trois couples (chemin relatif, ligne exacte après suppression des blancs de
+ces cinq couples (chemin relatif, ligne exacte après suppression des blancs de
 début et de fin) :
 
 | Fichier | Ligne autorisée |
@@ -101,9 +116,14 @@ début et de fin) :
 | `core/database/build.gradle.kts` | `sourceSets {` |
 | `core/database/build.gradle.kts` | `assets.directories.add("$projectDir/schemas")` |
 | `build-logic/src/main/kotlin/fr/forumhfr/redface2/buildlogic/RedfaceAndroidRoborazziConventionPlugin.kt` | `sourceSets.getByName("test").kotlin.directories +=` |
+| `build-logic/settings.gradle.kts` | `from(files("../gradle/libs.versions.toml"))` |
+| `settings.gradle.kts` | `includeBuild("build-logic")` |
 
 Les deux premières lignes exposent les schémas Room aux tests ; la troisième
-ajoute le helper Roborazzi au source set `test`. Une ligne modifiée, un commentaire
+ajoute le helper Roborazzi au source set `test`. Les deux dernières chargent le
+catalogue de versions et l'unique build inclus, dont la configuration est inspectée.
+Les autres chargements (`apply(from = …)`, `apply { from(…) }`, `apply from: …`,
+autre `includeBuild`) sont refusés. Une ligne modifiée, un commentaire
 ajouté à cette ligne ou la même ligne dans un autre fichier ne bénéficie pas de
 l'exception. Les lignes de continuation sont inspectées comme les autres lignes.
 
@@ -163,9 +183,10 @@ autres liaisons `@Module` ne sont pas contrôlées individuellement ; une perte 
 de ces liaisons peut donc passer. La lecture statique n'est pas un parseur Kotlin
 ou Java complet. Les remappages explicites de projets dans les settings inspectés
 sont refusés par les tokens ci-dessus.
-Les sources générées pendant le build et les sources ajoutées par un plugin tiers
-sans configuration de répertoire visible dans les fichiers inspectés restent hors
-de portée ; cette lecture statique ne permet pas de garantir leur couverture.
+Les plugins tiers publiés (leur code n'est pas inspecté) et les sources générées
+pendant le build restent hors de portée. Une source ajoutée par un de ces plugins
+sans configuration de répertoire visible dans les fichiers inspectés peut donc
+échapper à la dérivation ; cette lecture statique ne garantit pas sa couverture.
 Utiliser un checkout correspondant au binaire.
 
 Depuis un checkout du code correspondant au binaire, contrôle manuel sans Gradle
@@ -184,7 +205,10 @@ bash scripts/release/verify-hilt-artifact.test.sh
 ```
 
 Le test compare les listes complètes et les diagnostics localisés, puis rejoue
-les contournements avec des archives synthétiques sans le marqueur caché. Il
+les contournements avec des archives synthétiques sans le marqueur caché. Des
+APK et AAB factices dont la dérivation est reconnue vérifient aussi le contrôle
+DEX : perte d'un ViewModel parmi deux, préfixe d'un module sans ViewModel,
+`Hilt_<Application>` manquant, et archive complète acceptée. Le test
 s'arrête au premier écart et n'est pas branché dans un workflow.
 
 ### Compatibilité Room et rollback

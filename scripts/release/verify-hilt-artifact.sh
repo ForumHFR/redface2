@@ -8,9 +8,11 @@
 # de flavors identiques aux build types, ainsi que les préfixes test/androidTest
 # (vérification de son JAR par l'orchestrateur). debug exact est donc le build type
 # debug ; les releases ne compilent que des variantes <flavor>Release.
-# Configuration : tokens de sources interdits dans les settings/build files et
+# Configuration : liste fermée des fichiers Gradle (settings/build racine,
+# builds des projets inclus, settings/build de build-logic) ; buildSrc est refusé.
+# Tokens de sources et de délégation interdits dans ces fichiers et dans
 # build-logic/src/main (.kt/.kts/.java), hors commentaires et chaînes. Les seules
-# exceptions sont trois couples (chemin relatif, ligne exacte sans blancs aux
+# exceptions sont cinq couples (chemin relatif, ligne exacte sans blancs aux
 # extrémités), listés dans BEGIN. Aucun récepteur ni variante Gradle n'est déduit.
 # Une occurrence Hilt non appariée est une erreur, jamais une contribution devinée
 # ou ignorée.
@@ -66,6 +68,9 @@ scan_code() {
       allowed_source_line["core/database/build.gradle.kts" SUBSEP "sourceSets {"] = 1
       allowed_source_line["core/database/build.gradle.kts" SUBSEP "assets.directories.add(\"$projectDir/schemas\")"] = 1
       allowed_source_line["build-logic/src/main/kotlin/fr/forumhfr/redface2/buildlogic/RedfaceAndroidRoborazziConventionPlugin.kt" SUBSEP "sourceSets.getByName(\"test\").kotlin.directories +="] = 1
+      # Chargement du catalogue de versions et unique build inclus connu.
+      allowed_source_line["build-logic/settings.gradle.kts" SUBSEP "from(files(\"../gradle/libs.versions.toml\"))"] = 1
+      allowed_source_line["settings.gradle.kts" SUBSEP "includeBuild(\"build-logic\")"] = 1
     }
     function target(word) {
       return word ~ /^(HiltViewModel|AndroidEntryPoint|HiltAndroidApp|InstallIn)$/
@@ -350,7 +355,7 @@ scan_code() {
       settings_file = source_file ~ /\/settings\.gradle(\.kts)?$/
       for (i = 1; i <= token_count; i++) {
         word = token[i]
-        if (word ~ /^(sourceSets|getSourceSets|srcDir|srcDirs|setSrcDirs|getSrcDirs|setRoot|root|directories|getDirectories|sources|getSources|addSource|addStaticSourceDirectory|addGeneratedSourceDirectory)$/ ||
+        if (word ~ /^(sourceSets|getSourceSets|srcDir|srcDirs|setSrcDirs|getSrcDirs|setRoot|root|directories|getDirectories|sources|getSources|addSource|addStaticSourceDirectory|addGeneratedSourceDirectory|from|includeBuild|buildSrc)$/ ||
             (settings_file && word ~ /^(projectDir|setProjectDir|buildFileName)$/)) {
           line = source_line[token_line[i]]
           sub(/^[[:space:]]+/, "", line)
@@ -406,6 +411,11 @@ scan_code() {
   ' "$@"
 }
 
+if [[ -d "$repo_root/buildSrc" ]]; then
+  echo "::error::Hilt: buildSrc/ non supporté par la garde" >&2
+  exit 1
+fi
+
 settings_files=()
 for settings_file in "$repo_root/settings.gradle"{,.kts}; do
   [[ ! -f "$settings_file" ]] || settings_files+=("$settings_file")
@@ -428,6 +438,35 @@ for build_file in "$repo_root/build.gradle"{,.kts} \
   "$repo_root/build-logic/settings.gradle"{,.kts} "$repo_root/build-logic/build.gradle"{,.kts}; do
   [[ ! -f "$build_file" ]] || build_files+=("$build_file")
 done
+# Seuls ces fichiers Gradle sont couverts. Une convention .gradle.kts sous
+# build-logic/src/main n'élargit pas cette liste, même si scan_code la lirait.
+declare -A covered_gradle_files
+for build_file in "${settings_files[@]}" "${build_files[@]}"; do
+  covered_gradle_files["${build_file#"$repo_root/"}"]=1
+done
+# Git inclut les fichiers suivis ET non suivis non ignorés : les caches locaux
+# ignorés ne changent pas le résultat et un nouveau script oublié est refusé.
+# Sans checkout Git (ex. export, fixture), find exclut les sorties et caches
+# connus du dépôt ; tout autre fichier Gradle doit appartenir à la liste fermée.
+if [[ -e "$repo_root/.git" ]] && command -v git >/dev/null; then
+  git -C "$repo_root" ls-files --cached --others --exclude-standard -z -- \
+    '*.gradle' '*.gradle.kts' | sort -zu >"$work_dir/gradle-files"
+else
+  find "$repo_root" -type d \( -name .git -o -name build -o -name .gradle \
+    -o -name .gradle-user -o -name .gradle-tmp -o -name .kotlin \) -prune -o \
+    \( -type f -o -type l \) \( -name '*.gradle' -o -name '*.gradle.kts' \) -print0 | sort -z >"$work_dir/gradle-files"
+fi
+while IFS= read -r -d '' gradle_file; do
+  gradle_file="${gradle_file#"$repo_root/"}"
+  case "/$gradle_file/" in
+    */.git/*|*/build/*|*/.gradle/*|*/.gradle-user/*|*/.gradle-tmp/*|*/.kotlin/*) continue ;;
+  esac
+  if [[ -z "${covered_gradle_files[$gradle_file]:-}" ]]; then
+    echo "::error::Hilt: $gradle_file : fichier Gradle non couvert par la garde" >&2
+    exit 1
+  fi
+done <"$work_dir/gradle-files"
+
 if [[ -d "$repo_root/build-logic/src/main" ]]; then
   find "$repo_root/build-logic/src/main" -type f \( -name '*.kt' -o -name '*.kts' -o -name '*.java' \) -print0 | sort -z >"$work_dir/build-logic-files"
   while IFS= read -r -d '' build_file; do build_files+=("$build_file"); done <"$work_dir/build-logic-files"
