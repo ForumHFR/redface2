@@ -14,6 +14,7 @@ data class EditorBackState(
     val panelOpen: Boolean = false,
     val sharedPreviewOpen: Boolean = false,
     val submissionSucceeded: Boolean = false,
+    val event: EditorEvent? = null,
 )
 
 sealed interface EditorBackAction {
@@ -30,11 +31,9 @@ sealed interface EditorBackAction {
 }
 
 /**
- * ED-85: Back acts on visible layers. XaTriX decision (2026-11-09, 22:01, #1513): event details
- * close before disarming because their opaque panel covers the bar and armed button. Smiley details,
- * sheets and tooltips stay first, then event details, then the arm, then retained Format/Color/Image
- * modes masked by the event (ED-82) or arm. Closing details preserves the arm and saved mode;
- * the next Back disarms if needed before closing the mode.
+ * ED-85, decisions of 2026-11-09 (#1513): event details precede disarming, then visible tool levels,
+ * panel, preview and guarded exit. A mode retained behind a displayed event is not an open level:
+ * Back neither closes that mode nor acknowledges the event (22:12 decision).
  */
 fun resolveEditorBack(state: EditorBackState): EditorBackAction = when {
     state.sheet == EditorSheet.Smileys && state.smileyDetailOpen -> EditorBackAction.ReturnToSmileyGrid
@@ -42,8 +41,9 @@ fun resolveEditorBack(state: EditorBackState): EditorBackAction = when {
     state.tooltipOpen -> EditorBackAction.CloseTooltip
     state.eventDetailKey != null -> EditorBackAction.CloseEventDetails(state.eventDetailKey)
     state.bar.arm != null -> EditorBackAction.Disarm(state.bar.arm)
-    state.bar.visibleMode in setOf(EditorBarMode.Color, EditorBarMode.Image) -> EditorBackAction.CloseSublevel
-    state.bar.visibleMode == EditorBarMode.Format -> EditorBackAction.CloseFormat
+    state.bar.visibleMode(state.event) in setOf(EditorBarMode.Color, EditorBarMode.Image) ->
+        EditorBackAction.CloseSublevel
+    state.bar.visibleMode(state.event) == EditorBarMode.Format -> EditorBackAction.CloseFormat
     state.panelOpen -> EditorBackAction.ClosePanel
     state.sharedPreviewOpen -> EditorBackAction.CloseSharedPreview
     else -> EditorBackAction.Leave(saveDraft = !state.submissionSucceeded)

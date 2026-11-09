@@ -90,7 +90,7 @@ fun EditorActionBar(
 ) {
     val buttonState = editorBarSubmitState(state, submitState, uploading, loadingForm)
     val armed = buttonState.armed
-    val mode = if (armed) EditorBarMode.Normal else state.visibleMode
+    val mode = if (armed) EditorBarMode.Normal else state.visibleMode(event)
     val height = EditorChromeMetrics(compactHeight).actionBarHeight
     val normalScroll = rememberScrollState()
     val formatScroll = rememberScrollState()
@@ -109,7 +109,7 @@ fun EditorActionBar(
     val back = {
         focus.navigateBack(mode) { actions.onGesture(EditorBarGesture.Back) }
     }
-    val backAction = resolveEditorBack(EditorBackState(bar = state))
+    val backAction = resolveEditorBack(EditorBackState(bar = state, event = event))
     BackHandler(!armed && (backAction == EditorBackAction.CloseSublevel ||
         backAction == EditorBackAction.CloseFormat), onBack = back)
     val enabled = controlsEnabled && !uploading
@@ -170,7 +170,7 @@ private fun editorBarSubmitState(
     enabled = submit.enabled && !uploading && !loadingForm && !submit.showProgress,
 )
 
-private fun consumeEditorBarInformation(event: EditorEvent?, onEvent: (EventKey, EditorEventAction) -> Unit): Boolean {
+internal fun consumeEditorBarInformation(event: EditorEvent?, onEvent: (EventKey, EditorEventAction) -> Unit): Boolean {
     val information = event?.content is EditorEventContent.Information ||
         (event?.content as? EditorEventContent.Problem)?.error?.errorClass == EditorErrorClass.Information
     if (information && event != null) onEvent(event.key, EditorEventAction.Dismiss)

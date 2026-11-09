@@ -15,6 +15,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.foundation.text.input.TextFieldDecorator
 import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
@@ -35,8 +36,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
@@ -90,6 +95,7 @@ fun BbcodeTextField(
     // #555 — true requests focus (and thus the IME) once on first composition. Opening an editor
     // pre-filled with a long post otherwise leaves the keyboard closed.
     autoFocus: Boolean = false,
+    showLabel: Boolean = true,
 ) {
     BbcodeTextField(
         value = value,
@@ -101,6 +107,7 @@ fun BbcodeTextField(
         autoFocus = autoFocus,
         scrollState = rememberScrollState(),
         onTextLayout = null,
+        showLabel = showLabel,
     )
 }
 
@@ -117,6 +124,7 @@ internal fun BbcodeTextField(
     autoFocus: Boolean = false,
     scrollState: ScrollState = rememberScrollState(),
     onTextLayout: (Density.(getResult: () -> TextLayoutResult?) -> Unit)?,
+    showLabel: Boolean = true,
 ) {
     val fieldState = rememberTextFieldState(
         initialText = value.text,
@@ -136,6 +144,7 @@ internal fun BbcodeTextField(
         autoFocus = autoFocus,
         scrollState = scrollState,
         onTextLayout = onTextLayout,
+        showLabel = showLabel,
     )
 }
 
@@ -143,6 +152,15 @@ internal fun BbcodeTextField(
  * Material 3 BBCode editor with a host-owned buffer, IME composition and selection.
  * The host must give the field a bounded height. [inputTransformation] guards user edits
  * synchronously; programmatic edits must be guarded by the owner before editing [state].
+ * Keep [onTextLayout] last so existing trailing lambdas always receive the text layout.
+ * [showLabel] removes both the visual label and its headroom when false, keeping [label] as the
+ * accessible name, with 8 dp vertical padding for the compact viewport. The default preserves the
+ * historical decoration of both public overloads.
+ * [showKeyboardOnFocus] lets a scaffold restore focus without opening a previously closed IME.
+ * False also prevents a programmatic focus request from starting an input session. To restore an
+ * open IME, switch it to true: BTF2 starts the session even if the field already regained focus.
+ * [onSemanticsClick] optionally overrides the field's accessibility click, preserving its action label.
+ * The override owns focus and IME restoration; null keeps the native field action.
  */
 @Suppress("LongParameterList") // Same chrome and viewport hooks for both editor APIs.
 @Composable
@@ -155,6 +173,10 @@ fun BbcodeTextField(
     readOnly: Boolean = false,
     autoFocus: Boolean = false,
     scrollState: ScrollState = rememberScrollState(),
+    showLabel: Boolean = true,
+    showKeyboardOnFocus: Boolean = true,
+    onViewportMeasured: ((heightPx: Int) -> Unit)? = null,
+    onSemanticsClick: (() -> Boolean)? = null,
     onTextLayout: (Density.(getResult: () -> TextLayoutResult?) -> Unit)? = null,
 ) {
     val fieldInteractions = remember { MutableInteractionSource() }
@@ -166,7 +188,9 @@ fun BbcodeTextField(
     // #872 — reserve half the floating label's line height above the outlined box. The headroom
     // follows fontScale instead of clipping the label at the historical fixed 8 dp.
     val labelLineHeight = MaterialTheme.typography.bodySmall.lineHeight
-    val labelHeadroom = if (labelLineHeight.isSp) {
+    val labelHeadroom = if (!showLabel) {
+        0.dp
+    } else if (labelLineHeight.isSp) {
         with(LocalDensity.current) { (labelLineHeight / 2).toDp() }.coerceAtLeast(8.dp)
     } else {
         8.dp
@@ -186,6 +210,11 @@ fun BbcodeTextField(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(top = labelHeadroom)
+                    .then(if (showLabel) Modifier else Modifier.semantics { contentDescription = label })
+                    .then(if (onSemanticsClick == null) Modifier else Modifier.semantics {
+                        // A null label lets the native/input-transformation label survive peer merging.
+                        onClick(action = onSemanticsClick)
+                    })
                     .focusRequester(focusRequester),
                 textStyle = LocalTextStyle.current.merge(
                     TextStyle(color = MaterialTheme.colorScheme.onSurface),
@@ -195,20 +224,23 @@ fun BbcodeTextField(
                 keyboardOptions = KeyboardOptions(
                     capitalization = KeyboardCapitalization.Sentences,
                     imeAction = ImeAction.Default,
+                    showKeyboardOnFocus = showKeyboardOnFocus,
                 ),
                 lineLimits = lineLimits,
                 onTextLayout = onTextLayout,
                 interactionSource = fieldInteractions,
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                decorator = OutlinedTextFieldDefaults.decorator(
+                decorator = measuredEditorDecorator(OutlinedTextFieldDefaults.decorator(
                     state = state,
                     enabled = true,
                     lineLimits = lineLimits,
                     outputTransformation = null,
                     interactionSource = fieldInteractions,
-                    label = { Text(label) },
+                    label = if (showLabel) ({ Text(label) }) else null,
                     placeholder = placeholder?.let { hint -> { Text(hint) } },
-                ),
+                    contentPadding = if (showLabel) OutlinedTextFieldDefaults.contentPaddingWithoutLabel()
+                        else OutlinedTextFieldDefaults.contentPaddingWithoutLabel(top = 8.dp, bottom = 8.dp),
+                ), onViewportMeasured),
                 scrollState = scrollState,
             )
         }
@@ -282,3 +314,15 @@ private data class BbcodeTextSnapshot(
     val text: String,
     val selection: TextRange,
 )
+
+/** Measurement only: unlike ScrollState.viewportSize, this port is available before placement. */
+private fun measuredEditorDecorator(delegate: TextFieldDecorator, onMeasured: ((Int) -> Unit)?): TextFieldDecorator =
+    if (onMeasured == null) delegate else TextFieldDecorator { inner ->
+        delegate.Decoration {
+            Layout(content = inner) { measurables, constraints ->
+                val viewport = measurables.single().measure(constraints)
+                onMeasured(viewport.height)
+                layout(viewport.width, viewport.height) { viewport.placeRelative(0, 0) }
+            }
+        }
+    }

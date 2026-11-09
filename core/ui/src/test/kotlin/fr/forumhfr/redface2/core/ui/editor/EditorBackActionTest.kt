@@ -17,7 +17,7 @@ class EditorBackActionTest {
     fun `ED85 - first visible layer consumes Back in contract order`() {
         val initial = EditorBackState(
             smileyDetailOpen = true, sheet = EditorSheet.Smileys, tooltipOpen = true,
-            bar = EditorBarState(EditorBarMode.Color), eventDetailKey = key,
+            bar = EditorBarState(EditorBarMode.Color, arm), eventDetailKey = key,
             panelOpen = true, sharedPreviewOpen = true,
         )
         assertEquals(EditorBackAction.ReturnToSmileyGrid, resolveEditorBack(initial))
@@ -31,15 +31,15 @@ class EditorBackActionTest {
         assertEquals(EditorBackAction.CloseTooltip, resolveEditorBack(tooltip))
         val detail = tooltip.copy(tooltipOpen = false)
         assertEquals(EditorBackAction.CloseEventDetails(key), resolveEditorBack(detail))
-        val sublevel = detail.copy(eventDetailKey = null)
+        val armed = detail.copy(eventDetailKey = null)
+        assertEquals(EditorBackAction.Disarm(arm), resolveEditorBack(armed))
+        val sublevel = armed.copy(bar = armed.bar.withSubmission(EditorSubmissionState.Ready))
         assertEquals(EditorBackAction.CloseSublevel, resolveEditorBack(sublevel))
         val image = sublevel.copy(bar = EditorBarState(EditorBarMode.Image))
         assertEquals(EditorBackAction.CloseSublevel, resolveEditorBack(image))
         val format = sublevel.copy(bar = EditorBarState(EditorBarMode.Format))
         assertEquals(EditorBackAction.CloseFormat, resolveEditorBack(format))
-        val armed = format.copy(bar = EditorBarState(arm = arm))
-        assertEquals(EditorBackAction.Disarm(arm), resolveEditorBack(armed))
-        val panel = armed.copy(bar = EditorBarState())
+        val panel = format.copy(bar = EditorBarState())
         assertEquals(EditorBackAction.ClosePanel, resolveEditorBack(panel))
         val preview = panel.copy(panelOpen = false)
         assertEquals(EditorBackAction.CloseSharedPreview, resolveEditorBack(preview))
@@ -95,6 +95,26 @@ class EditorBackActionTest {
     }
 
     @Test
+    fun `ED85 - a mode masked by an event passes Back to panel preview or saving exit without acknowledgement`() {
+        val event = controlEvent(EditorEventContent.Problem(EditorErrors.network))
+        listOf(EditorBarMode.Format, EditorBarMode.Color, EditorBarMode.Image).forEach { mode ->
+            val masked = EditorBackState(bar = EditorBarState(mode), event = event,
+                panelOpen = true, sharedPreviewOpen = true)
+            assertEquals(EditorBackAction.ClosePanel, resolveEditorBack(masked))
+            val preview = masked.copy(panelOpen = false)
+            assertEquals(EditorBackAction.CloseSharedPreview, resolveEditorBack(preview))
+            val leaving = preview.copy(sharedPreviewOpen = false)
+            assertEquals(EditorBackAction.Leave(saveDraft = true), resolveEditorBack(leaving))
+            assertEquals(event, leaving.event)
+            assertEquals(mode, leaving.bar.mode)
+            val acknowledged = leaving.copy(event = null)
+            val close = if (mode == EditorBarMode.Format) EditorBackAction.CloseFormat
+                else EditorBackAction.CloseSublevel
+            assertEquals(close, resolveEditorBack(acknowledged))
+        }
+    }
+
+    @Test
     fun `ED85 - armed event detail closes first then disarms then closes the preserved mode`() {
         listOf(EditorBarMode.Format, EditorBarMode.Color, EditorBarMode.Image).forEach { mode ->
             val masked = EditorBackState(bar = EditorBarState(mode, arm), eventDetailKey = key)
@@ -114,7 +134,25 @@ class EditorBackActionTest {
     }
 
     @Test
-    fun `ED85 - smiley details sheets and tooltips consume Back before event details and disarming`() {
+    fun `ED85 - event details precede disarming even with a retained mode`() {
+        val state = EditorBackState(bar = EditorBarState(EditorBarMode.Format, arm), eventDetailKey = key)
+        assertEquals(EditorBackAction.CloseEventDetails(key), resolveEditorBack(state))
+        assertEquals(EditorBackAction.Disarm(arm), resolveEditorBack(state.copy(eventDetailKey = null)))
+    }
+
+    @Test
+    fun `ED85 - disarming a mode masked by an event keeps the event and passes next Back to the panel`() {
+        val event = controlEvent(EditorEventContent.Problem(EditorErrors.network))
+        val state = EditorBackState(bar = EditorBarState(EditorBarMode.Format, arm), event = event, panelOpen = true)
+        assertEquals(EditorBackAction.Disarm(arm), resolveEditorBack(state))
+        val disarmed = state.copy(bar = state.bar.withSubmission(EditorSubmissionState.Ready))
+        assertEquals(EditorBackAction.ClosePanel, resolveEditorBack(disarmed))
+        assertEquals(event, disarmed.event)
+        assertEquals(EditorBarMode.Format, disarmed.bar.mode)
+    }
+
+    @Test
+    fun `ED85 - smiley details sheets and tooltips still consume Back before disarming`() {
         val initial = EditorBackState(
             smileyDetailOpen = true, sheet = EditorSheet.Smileys, tooltipOpen = true,
             bar = EditorBarState(EditorBarMode.Color, arm), eventDetailKey = key,
