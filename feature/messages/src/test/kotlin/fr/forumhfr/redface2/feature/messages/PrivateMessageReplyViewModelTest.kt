@@ -358,6 +358,49 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
+    fun `cancelled picker preserves the previous error body selection and effects without upload`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val diagnostics = DiagnosticsLog()
+        val uploads = FakeUploadRepository()
+        val reader = FakeImageUploadReader()
+        val viewModel = PrivateMessageReplyViewModel(
+            request, repository, previewParser, mainDispatcher, userPreferences(), draftStore,
+            FakeAuthRepository(), uploads, reader, diagnostics, submissionClock, smileyRepository(),
+            favoriteRepository, localCollections,
+        ).also(::trackViewModel)
+        advanceUntilIdle()
+        viewModel.editBody(TextFieldValue(text = "draft", selection = TextRange(1, 4)))
+        advanceUntilIdle()
+        viewModel.onImagePickerEvent(
+            ImagePickerEvent.Unavailable(ImagePickerMode.PHOTO_PICKER, ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA),
+        )
+        advanceUntilIdle()
+        assertEquals(EditorErrors.pickerAbsent, viewModel.state.value.uploadError)
+        val stateBefore = viewModel.state.value
+
+        viewModel.effects.test {
+            ImagePickerContract.entries.forEach { contract ->
+                diagnostics.clear()
+                viewModel.onImagePickerEvent(ImagePickerEvent.Cancelled(contract, resultCode = 0))
+                advanceUntilIdle()
+
+                assertEquals(stateBefore, viewModel.state.value)
+                assertEquals("draft", viewModel.bodyFieldState.text.toString())
+                assertEquals(TextRange(1, 4), viewModel.bodyFieldState.selection)
+                assertTrue(reader.readUris.isEmpty())
+                assertEquals(0, uploads.uploadCalls)
+                assertEquals(
+                    listOf("cancelled contract=${contract.diagnosticName} resultCode=0"),
+                    diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
+                )
+                expectNoEvents()
+            }
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `empty picker result shows a banner without starting an upload`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } returns form()
@@ -402,6 +445,9 @@ class PrivateMessageReplyViewModelTest {
             expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
+        viewModel.onUploadErrorDismissed()
+        advanceUntilIdle()
+        assertNull(viewModel.state.value.uploadError)
     }
 
     @Test

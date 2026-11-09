@@ -308,6 +308,51 @@ class PrivateMessageComposeViewModelTest {
     }
 
     @Test
+    fun `cancelled picker preserves the previous error body selection and effects without upload`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val diagnostics = DiagnosticsLog()
+        val uploads = FakeUploadRepository()
+        val reader = FakeImageUploadReader()
+        val vm = viewModel(
+            repository = repository,
+            uploadRepository = uploads,
+            imageUploadReader = reader,
+            diagnostics = diagnostics,
+            clock = submissionClock,
+        )
+        advanceUntilIdle()
+        vm.editBody(TextFieldValue(text = "draft", selection = TextRange(1, 4)))
+        advanceUntilIdle()
+        vm.onImagePickerEvent(
+            ImagePickerEvent.Unavailable(ImagePickerMode.PHOTO_PICKER, ImagePickerContract.PICK_MULTIPLE_VISUAL_MEDIA),
+        )
+        advanceUntilIdle()
+        assertEquals(EditorErrors.pickerAbsent, vm.state.value.uploadError)
+        val stateBefore = vm.state.value
+
+        vm.effects.test {
+            ImagePickerContract.entries.forEach { contract ->
+                diagnostics.clear()
+                vm.onImagePickerEvent(ImagePickerEvent.Cancelled(contract, resultCode = 0))
+                advanceUntilIdle()
+
+                assertEquals(stateBefore, vm.state.value)
+                assertEquals("draft", vm.bodyFieldState.text.toString())
+                assertEquals(TextRange(1, 4), vm.bodyFieldState.selection)
+                assertTrue(reader.readUris.isEmpty())
+                assertEquals(0, uploads.uploadCalls)
+                assertEquals(
+                    listOf("cancelled contract=${contract.diagnosticName} resultCode=0"),
+                    diagnostics.entries.value.filter { it.tag == "ImagePicker" }.map { it.message },
+                )
+                expectNoEvents()
+            }
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    @Test
     fun `empty picker result shows a banner without starting an upload`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchComposeForm(any()) } returns composeForm()
@@ -354,6 +399,9 @@ class PrivateMessageComposeViewModelTest {
             expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
+        vm.onUploadErrorDismissed()
+        advanceUntilIdle()
+        assertNull(vm.state.value.uploadError)
     }
 
     @Test
