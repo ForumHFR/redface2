@@ -22,11 +22,11 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
+import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -74,7 +74,7 @@ class EditorAppBarRoborazziTest {
         val bottom = compose.onNodeWithTag("bottom").getUnclippedBoundsInRoot()
         assertEquals(if (sample == 2) 48f else 56f, bottom.height.value, 0.5f)
         compose.onNodeWithTag("sample").captureRoboImage(
-            "build/outputs/roborazzi/editor_app_bar_${sample}_${isDark}_$fontScale.png",
+            "src/test/screenshots/editor_app_bar_${sample}_${isDark}_$fontScale.png",
         )
     }
 
