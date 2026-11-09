@@ -85,8 +85,10 @@ class EditorScaffoldRoborazziTest {
             assertTrue(it(layouts))
         }
         val layout = layouts.single()
+        val viewportTop = host.scroll.value
+        val viewportBottom = viewportTop + host.scroll.viewportSize
         val completeLines = (0 until layout.lineCount).count { line ->
-            layout.getLineTop(line) >= 0 && layout.getLineBottom(line) <= host.scroll.viewportSize
+            layout.getLineTop(line) >= viewportTop && layout.getLineBottom(line) <= viewportBottom
         }
         assertTrue("J: the real BTF2 viewport must show three complete lines at 1 × M", completeLines >= 3)
     }

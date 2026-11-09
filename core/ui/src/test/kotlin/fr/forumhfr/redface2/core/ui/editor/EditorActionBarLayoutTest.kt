@@ -268,7 +268,7 @@ class EditorActionBarLayoutTest {
         }
         compose.runOnIdle { host.bar.value = host.bar.value.copy(arm = host.arm) }
         assertEquals(send, bounds("editor-bar-submit"))
-        compose.onNodeWithTag("editor-bar-submit").assert(
+        compose.onNodeWithTag("editor-bar-submit-shape").assert(
             SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Confirmation requise"))
         compose.runOnIdle {
             host.uploading.value = true; host.progress.value = UploadProgress(1, 3)

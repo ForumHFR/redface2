@@ -3,6 +3,8 @@ package fr.forumhfr.redface2.core.ui.editor
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
@@ -14,6 +16,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
 import androidx.compose.ui.unit.width
@@ -36,9 +39,21 @@ class EditorCompactControlGeometryTest {
     @get:Rule val compose = createComposeRule()
     private val host = EditorScaffoldFixture()
     private fun bounds(tag: String) = compose.onNodeWithTag(tag, useUnmergedTree = true)
-        .getUnclippedBoundsInRoot()
+        .layoutBounds()
     private val submit get() = compose.onNodeWithTag("editor-bar-submit")
     private val event get() = compose.onNode(hasClickAction() and hasContentDescription("Titre manquant, Compléter"))
+    private val statusButton get() = compose.onNode(hasClickAction() and
+        hasAnyAncestor(hasTestTag("editor-bar-FirstStatus")), useUnmergedTree = true)
+
+    // Unlike getUnclippedBoundsInRoot(), these bounds exclude native minimum-touch-target expansion.
+    private fun SemanticsNodeInteraction.layoutBounds(): DpRect {
+        val node = fetchSemanticsNode()
+        val position = node.positionInRoot
+        return with(host.density) {
+            DpRect(position.x.toDp(), position.y.toDp(),
+                (position.x + node.size.width).toDp(), (position.y + node.size.height).toDp())
+        }
+    }
 
     @Test
     fun `ED05 compact visuals are 40 dp with measured 4 dp gaps and 48 dp targets at both scales`() {
@@ -59,6 +74,59 @@ class EditorCompactControlGeometryTest {
         }
     }
 
+    @Test
+    fun `ED05 compact icon layers stay 40 dp when pressed and accept taps 2 dp outside at both scales`() {
+        mount(compact = true)
+        listOf(1f, 1.3f).forEach { scale ->
+            compose.runOnIdle { host.scale.value = scale }
+            listOf(true, false).forEach { top -> assertIconMarginActions(top) }
+        }
+    }
+
+    private fun assertIconMarginActions(top: Boolean) {
+        val chrome = EditorScaffoldChrome(firstStatus = host.statuses[0], secondStatus = host.statuses[1])
+        show(chrome)
+        host.calls.clear()
+        tapIconMargin(compose.onNode(hasClickAction() and hasContentDescription("Smileys")), top)
+        assertEquals(listOf("smileys"), host.calls)
+        show(chrome)
+        host.calls.clear()
+        tapIconMargin(statusButton, top)
+        assertEquals(listOf("quotes"), host.calls)
+        show(chrome.copy(bar = EditorBarState(EditorBarMode.Format)))
+        val format = compose.onNode(hasClickAction() and hasContentDescription("Mise en forme")).assertIsSelected()
+        assertEquals(format.layoutBounds(), bounds("editor-bar-format-shape"))
+        tapIconMargin(format, top)
+        compose.runOnIdle { assertEquals(EditorBarMode.Normal, host.chrome.value.bar.mode) }
+    }
+
+    private fun assertIconLayerBounds(target: SemanticsNodeInteraction) {
+        val shape = target.layoutBounds()
+        val touch = target.fetchSemanticsNode().touchBoundsInRoot
+        val minimumTouchSize = with(host.density) { 48.dp.toPx() }
+        val bar = bounds("editor-scaffold-action-bar")
+        assertEquals(40f, shape.width.value, 0.5f)
+        assertEquals(40f, shape.height.value, 0.5f)
+        assertEquals(4f, (shape.top - bar.top).value, 0.5f)
+        assertEquals(4f, (bar.bottom - shape.bottom).value, 0.5f)
+        assertTrue("Native touch target must stay at least 48 dp wide", touch.width >= minimumTouchSize)
+        assertTrue("Native touch target must stay at least 48 dp high", touch.height >= minimumTouchSize)
+    }
+
+    private fun tapIconMargin(target: SemanticsNodeInteraction, top: Boolean) {
+        assertIconLayerBounds(target)
+        val shape = target.layoutBounds()
+        val bar = bounds("editor-scaffold-action-bar")
+        val point = with(host.density) {
+            val y = if (top) shape.top - 2.dp else shape.bottom + 2.dp
+            Offset((shape.left + shape.width / 2 - bar.left).toPx(), (y - bar.top).toPx())
+        }
+        val barNode = compose.onNodeWithTag("editor-scaffold-action-bar", useUnmergedTree = true)
+        barNode.performTouchInput { down(point) }
+        assertIconLayerBounds(target)
+        barNode.performTouchInput { up() }
+    }
+
     private fun mount(compact: Boolean) {
         host.width.value = 760.dp
         host.metrics.value = EditorWindowMetrics(if (compact) 360.dp else 740.dp, 24.dp, 0.dp)
@@ -70,6 +138,7 @@ class EditorCompactControlGeometryTest {
         show(EditorScaffoldChrome(bar = EditorBarState(EditorBarMode.Format),
             firstStatus = host.statuses[0], secondStatus = host.statuses[1]))
         val initialField = bounds("editor-scaffold-field")
+        compose.onNodeWithTag("editor-bar-submit-shape", useUnmergedTree = true).assert(hasClickAction())
         assertControlBounds(submit, "editor-bar-submit-shape", visibleHeight)
         assertControlBounds(compose.onNodeWithContentDescription("Mise en forme"),
             "editor-bar-format-shape", visibleHeight)

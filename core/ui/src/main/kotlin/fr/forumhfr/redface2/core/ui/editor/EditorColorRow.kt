@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -26,8 +27,10 @@ internal fun EditorColorRow(
     onBack: () -> Unit,
     enabled: Boolean,
     backModifier: Modifier = Modifier,
+    compactHeight: Boolean = false,
 ) {
-    EditorBarIcon(R.drawable.ic_arrow_back, stringResource(R.string.editor_return), onBack, backModifier)
+    EditorBarIcon(R.drawable.ic_arrow_back, stringResource(R.string.editor_return), onBack, backModifier,
+        compactHeight = compactHeight)
     val palette = listOf(
         "#FF0000" to R.string.bbcode_color_red, "#0000FF" to R.string.bbcode_color_blue,
         "#008000" to R.string.bbcode_color_green, "#FF6600" to R.string.bbcode_color_orange,
@@ -38,9 +41,10 @@ internal fun EditorColorRow(
         val click = { onAction(BbcodeAction.Color(hex)) }
         val outline = MaterialTheme.colorScheme.onSurface
         EditorIconTooltip(label) {
+            val target = if (compactHeight) Modifier.minimumInteractiveComponentSize() else Modifier
             IconButton(onClick = click, enabled = enabled,
-                modifier = Modifier.size(EditorChromeMetrics.minimumTargetSize).editorBarActivation(enabled, click)
-                    .semantics { contentDescription = label }) {
+                modifier = target.size(EditorChromeMetrics(compactHeight).controlVisibleHeight)
+                    .editorBarActivation(enabled, click).semantics { contentDescription = label }) {
                 Box(Modifier.size(24.dp).alpha(if (enabled) 1f else DISABLED_SWATCH_ALPHA).clip(CircleShape)
                     .background(Color(android.graphics.Color.parseColor(hex)))
                     .drawBehind { drawCircle(outline, style = Stroke(1.dp.toPx())) })

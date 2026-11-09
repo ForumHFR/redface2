@@ -67,31 +67,32 @@ internal fun EditorBarSubmit(
         end = ButtonDefaults.ContentPadding.calculateEndPadding(direction),
     ) else ButtonDefaults.ContentPadding
     val scrim = MaterialTheme.colorScheme.onTertiary.copy(alpha = 0.16f)
-    Button(onClick = click, enabled = state.enabled,
-        contentPadding = PaddingValues(0.dp),
-        colors = if (state.armed) ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.tertiary,
-            contentColor = MaterialTheme.colorScheme.onTertiary,
-        ) else ButtonDefaults.buttonColors(),
-        modifier = Modifier.height(EditorChromeMetrics.minimumTargetSize).testTag("editor-bar-submit")
-            .editorBarActivation(state.enabled, click)
-            .semantics(mergeDescendants = true) {
-                stateDescription = description; liveRegion = LiveRegionMode.Polite
+    Box(Modifier.testTag("editor-bar-submit")) {
+        Button(onClick = click, enabled = state.enabled,
+            contentPadding = PaddingValues(0.dp),
+            colors = if (state.armed) ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.tertiary,
+                contentColor = MaterialTheme.colorScheme.onTertiary,
+            ) else ButtonDefaults.buttonColors(),
+            modifier = Modifier.height(EditorChromeMetrics.minimumTargetSize)
+                .editorBarActivation(state.enabled, click)
+                .padding(vertical = (EditorChromeMetrics.minimumTargetSize - metrics.controlVisibleHeight) / 2)
+                // Tag M3's drawing Surface, inside the visual inset; native touch expansion stays 48 dp.
+                .testTag("editor-bar-submit-shape").semantics {
+                    stateDescription = description; liveRegion = LiveRegionMode.Polite
+                }
+                .clip(ButtonDefaults.shape)
+                .drawWithContent {
+                    drawContent()
+                    if (state.armed) drawRect(scrim, Offset(size.width * (1f - fraction), 0f),
+                        Size(size.width * fraction, size.height))
+                },
+        ) {
+            Box(Modifier.fillMaxHeight().padding(labelPadding), contentAlignment = Alignment.Center) {
+                Text(submit, Modifier.alpha(0f).clearAndSetSemantics {}, maxLines = 1)
+                Text(confirm, Modifier.alpha(0f).clearAndSetSemantics {}, maxLines = 1)
+                Text(if (state.armed) confirm else submit, maxLines = 1)
             }
-            // Keep outer semantics at 48 dp; M3 expands the inner button's touch target to 48 dp too.
-            .padding(vertical = (EditorChromeMetrics.minimumTargetSize - metrics.controlVisibleHeight) / 2)
-            .clip(ButtonDefaults.shape)
-            .drawWithContent {
-                drawContent()
-                if (state.armed) drawRect(scrim, Offset(size.width * (1f - fraction), 0f),
-                    Size(size.width * fraction, size.height))
-            },
-    ) {
-        Box(Modifier.fillMaxHeight().testTag("editor-bar-submit-shape").padding(labelPadding),
-            contentAlignment = Alignment.Center) {
-            Text(submit, Modifier.alpha(0f).clearAndSetSemantics {}, maxLines = 1)
-            Text(confirm, Modifier.alpha(0f).clearAndSetSemantics {}, maxLines = 1)
-            Text(if (state.armed) confirm else submit, maxLines = 1)
         }
     }
 }

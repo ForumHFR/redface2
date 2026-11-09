@@ -203,7 +203,7 @@ class EditorActionBarTest {
         }
         compose.setContent { CompositionLocalProvider(LocalAccessibilityManager provides manager) { host.Content() } }
         compose.runOnIdle { host.inputMode.requestInputMode(InputMode.Keyboard) }
-        val button = compose.onNodeWithTag("editor-bar-submit")
+        val button = compose.onNodeWithTag("editor-bar-submit-shape")
         fun state(description: String) = button.assert(
             SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, description)).assert(
             SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))
@@ -271,7 +271,7 @@ class EditorActionBarTest {
         compose.runOnIdle { host.event.value = controlEvent(EditorEventContent.InProgress(uploadText(2))) }
         compose.onAllNodes(hasClickAction() and hasAnyAncestor(hasTestTag("bar")))
             .assertCountEquals(1) // disabled Send only; the body is outside the bar
-        compose.onNodeWithTag("editor-bar-submit").assertIsNotEnabled()
+        compose.onNodeWithTag("editor-bar-submit-shape").assertIsNotEnabled()
         compose.onAllNodes(hasContentDescription("Image 2/3…") and hasAnyAncestor(hasTestTag("bar")))
             .assertAny(!hasClickAction()).assertAll(!hasClickAction())
         assertTrue(host.calls.isEmpty())

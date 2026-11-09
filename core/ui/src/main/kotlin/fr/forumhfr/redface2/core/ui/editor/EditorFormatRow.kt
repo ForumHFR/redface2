@@ -17,6 +17,7 @@ internal fun EditorFormatRow(
     onColor: () -> Unit,
     enabled: Boolean,
     colorModifier: Modifier = Modifier,
+    compactHeight: Boolean = false,
 ) {
     val formats = listOf(
         Triple(BbcodeAction.Bold, R.drawable.ic_editor_bold, R.string.bbcode_action_bold),
@@ -30,10 +31,11 @@ internal fun EditorFormatRow(
         Triple(BbcodeAction.Url, R.drawable.ic_editor_link, R.string.bbcode_action_url),
     )
     formats.forEach { (action, icon, label) ->
-        EditorBarIcon(icon, stringResource(label), { onAction(action) }, enabled = enabled)
+        EditorBarIcon(icon, stringResource(label), { onAction(action) },
+            enabled = enabled, compactHeight = compactHeight)
     }
     EditorBarIcon(R.drawable.ic_editor_color, stringResource(R.string.bbcode_action_color), onColor, colorModifier,
-        enabled = enabled)
+        enabled = enabled, compactHeight = compactHeight)
 }
 
 @Composable
@@ -46,9 +48,10 @@ internal fun EditorBarIcon(
     enabled: Boolean = true,
     expanded: Boolean? = null,
     containerModifier: Modifier = Modifier,
+    compactHeight: Boolean = false,
 ) {
     EditorActionIcon(icon, label, onClick, modifier.editorBarActivation(enabled, onClick), enabled, expanded,
-        containerModifier)
+        containerModifier, compactHeight)
 }
 
 /** Consume both halves before a callback can remove its control or return focus to the field. */

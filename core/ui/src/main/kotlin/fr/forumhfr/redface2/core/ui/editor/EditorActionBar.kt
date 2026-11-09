@@ -134,7 +134,7 @@ fun EditorActionBar(
         }
         EditorBarIcon(R.drawable.ic_editor_format, stringResource(R.string.editor_format), toggle,
             focus.modifier(EditorBarFocusTarget.Format).semantics { selected = expanded },
-            enabled = enabled, expanded = expanded,
+            enabled = enabled, expanded = expanded, compactHeight = compactHeight,
             containerModifier = Modifier.size(metrics.controlVisibleHeight).testTag("editor-bar-format-shape")
                 .clip(MaterialTheme.shapes.small)
                 .background(if (expanded) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
@@ -152,7 +152,7 @@ fun EditorActionBar(
                     EditorBarRow(event, armed, mode, allocation, height, compactHeight,
                         actions.onEvent, scroll, slot, format) {
                         EditorBarTools(mode, actions, imageActions, shortcut, enabled, controlsEnabled,
-                            focus, format, external, insert, back)
+                            focus, format, external, insert, back, compactHeight)
                     }
                 })
             EditorBarProgress(uploading, loadingForm, uploadProgress, Modifier.align(Alignment.TopStart))
@@ -234,10 +234,10 @@ private fun EditorBarFixedSlot(
 ) {
     when (fixed) {
         EditorFixedSlot.Header -> EditorBarIcon(R.drawable.ic_editor_header, headerLabel,
-            { onHeader?.let { external(it) } }, enabled = enabled)
+            { onHeader?.let { external(it) } }, enabled = enabled, compactHeight = compactHeight)
         EditorFixedSlot.Preview -> EditorBarIcon(R.drawable.ic_editor_preview,
             stringResource(if (previewVisible) R.string.editor_preview_hide else R.string.editor_preview_show),
-            { external(onPreview) }, enabled = enabled)
+            { external(onPreview) }, enabled = enabled, compactHeight = compactHeight)
         else -> {
             val status = statuses[if (fixed == EditorFixedSlot.FirstStatus) 0 else 1]
             EditorStatusIcon(status?.iconRes ?: R.drawable.ic_editor_restore, status?.label.orEmpty(),
@@ -305,33 +305,35 @@ private fun EditorBarTools(
     external: (() -> Unit) -> Unit,
     insert: (BbcodeAction) -> Unit,
     back: () -> Unit,
+    compactHeight: Boolean,
 ) {
     when (mode) {
         EditorBarMode.Normal -> {
             format()
             EditorBarIcon(R.drawable.ic_editor_smileys, stringResource(R.string.editor_smileys),
-                { external(actions.onSmileys) }, enabled = enabled)
-            shortcut?.let { EditorBarIcon(it.iconRes, it.label, it.onClick, enabled = enabled && it.enabled) }
+                { external(actions.onSmileys) }, enabled = enabled, compactHeight = compactHeight)
+            shortcut?.let { EditorBarIcon(it.iconRes, it.label, it.onClick,
+                enabled = enabled && it.enabled, compactHeight = compactHeight) }
             EditorBarIcon(R.drawable.ic_editor_image, stringResource(R.string.editor_bar_image),
                 { focus.navigate(EditorBarFocusTarget.Image, EditorBarFocusTarget.Return) {
                     actions.onGesture(EditorBarGesture.OpenImage)
-                } }, focus.modifier(EditorBarFocusTarget.Image), enabled = enabled)
+                } }, focus.modifier(EditorBarFocusTarget.Image), enabled = enabled, compactHeight = compactHeight)
             EditorBarIcon(R.drawable.ic_editor_options, stringResource(R.string.editor_options),
-                { external(actions.onOptions) }, enabled = controlsEnabled)
+                { external(actions.onOptions) }, enabled = controlsEnabled, compactHeight = compactHeight)
         }
         EditorBarMode.Format -> EditorFormatRow(insert, {
             focus.navigate(EditorBarFocusTarget.Color, EditorBarFocusTarget.Return) {
                 actions.onGesture(EditorBarGesture.OpenColor)
             }
-        }, enabled, focus.modifier(EditorBarFocusTarget.Color))
+        }, enabled, focus.modifier(EditorBarFocusTarget.Color), compactHeight)
         EditorBarMode.Color -> Row(focus.sublevelModifier()) {
             EditorColorRow({ insert(it); actions.onGesture(EditorBarGesture.ColorChosen) },
-                back, enabled, focus.modifier(EditorBarFocusTarget.Return))
+                back, enabled, focus.modifier(EditorBarFocusTarget.Return), compactHeight)
         }
         EditorBarMode.Image -> Row(focus.sublevelModifier()) {
             EditorImageRow(images, external, {
                 insert(BbcodeAction.Image); actions.onGesture(EditorBarGesture.ImageAction)
-            }, back, enabled, focus.modifier(EditorBarFocusTarget.Return))
+            }, back, enabled, focus.modifier(EditorBarFocusTarget.Return), compactHeight)
         }
     }
 }

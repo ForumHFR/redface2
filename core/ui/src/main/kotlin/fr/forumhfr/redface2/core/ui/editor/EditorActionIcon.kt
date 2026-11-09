@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.ui.editor
 
 import androidx.annotation.DrawableRes
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
@@ -10,6 +11,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TooltipAnchorPosition
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -25,6 +27,7 @@ import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 /**
  * Insertions have no selected state. Only the Format mode trigger supplies [expanded].
  * [containerModifier] styles a background independently of the 48 dp interactive target.
+ * In [compactHeight], the button's state layer is 40 dp; its native touch target still expands to 48 dp.
  * The host dispatches NextGesture before [onClick]'s action and stops when gestureConsumed is true.
  */
 @Composable
@@ -37,17 +40,22 @@ fun EditorActionIcon(
     enabled: Boolean = true,
     expanded: Boolean? = null,
     containerModifier: Modifier = Modifier,
+    compactHeight: Boolean = false,
 ) {
     val modeDescription = expanded?.let {
         stringResource(if (it) R.string.editor_mode_expanded else R.string.editor_mode_collapsed)
     }
     EditorIconTooltip(label) {
-        Box(contentAlignment = Alignment.Center) {
+        Box(
+            modifier = if (compactHeight) Modifier.minimumInteractiveComponentSize() else Modifier,
+            contentAlignment = Alignment.Center,
+        ) {
             Box(containerModifier)
             IconButton(
                 onClick = onClick,
                 enabled = enabled,
-                modifier = modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp).semantics {
+                modifier = (if (compactHeight) modifier.size(EditorChromeMetrics(true).controlVisibleHeight)
+                    else modifier.sizeIn(minWidth = 48.dp, minHeight = 48.dp)).semantics {
                     contentDescription = label
                     modeDescription?.let { stateDescription = it }
                 },
