@@ -7,8 +7,8 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.ui.R
+import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Assert.assertEquals
 import org.junit.Rule
 import org.junit.Test
@@ -49,7 +49,7 @@ class EditorActionBarRoborazziTest {
             compose.runOnIdle { showSample(sample) }
             val target = compose.onNodeWithTag("bar")
             assertEquals(if (compact) 48f else 56f, target.getUnclippedBoundsInRoot().height.value, 0.5f)
-            target.captureRoboImage("build/outputs/roborazzi/editor_action_bar_" +
+            target.captureRoboImage("src/test/screenshots/editor_action_bar_" +
                 "${sample}_${dark}_${scale}_${width.value}_$compact.png")
         }
     }
