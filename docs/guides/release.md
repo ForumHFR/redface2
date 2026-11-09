@@ -51,34 +51,68 @@ du canal et, si Play est activé, tous les APK et AAB prod. Un artefact manquant
 illisible ou dépourvu d'au moins un marqueur attendu arrête le job avant tout upload.
 
 La garde lit `classes*.dex` dans les APK et `base/dex/classes*.dex` dans les AAB.
-Les projets sont dérivés des `include(...)` littéraux de `settings.gradle.kts`, hors
-commentaires. Tous leurs dossiers `src/<set>/` sont parcourus selon ces règles :
+Les projets sont dérivés des `include(...)` littéraux de `settings.gradle(.kts)`,
+hors commentaires. La garde applique une **liste fermée de noms exacts** aux
+dossiers `src/<set>/` de chaque projet inclus :
 
 - Dans `main`, les sources `.kt` et `.java` contribuent si elles déclarent
   `@HiltViewModel`, `@AndroidEntryPoint`, `@HiltAndroidApp` ou `@Module` accompagné
   de `@InstallIn` sur la même déclaration, hors commentaires et littéraux.
-- `test`, `androidTest`, `testFixtures`, `screenshotTest` et tous les noms commençant
-  par `test` ou `androidTest` sont ignorés : leurs sources de test ne sont pas
-  embarquées en release. `debug` et les noms finissant par `Debug` sont également
-  ignorés, car ils ne participent jamais à une release.
-- Tout autre source set (`release`, `prod`, `beta`, `devRelease`, nom inconnu…)
-  est inspecté dans ses fichiers `.kt`, `.kts` et `.java`. Un token `HiltViewModel`,
-  `AndroidEntryPoint`, `HiltAndroidApp` ou `InstallIn`, hors imports, commentaires
-  et littéraux, provoque une erreur localisée « source set <set> hors périmètre de
-  la garde ». Aucune variante n'est déduite pour ces sources.
+- `test`, `androidTest`, `testFixtures`, `debug` : ignorés, sans lire leur contenu.
+- Tout autre dossier (`release`, `prod`, `prodDebug`, `internalDebug`,
+  `screenshotTest`, `devRelease`, nom inconnu…) échoue, même vide ou sans Hilt :
+  `::error::Hilt: source set <module>/src/<set> non supporté par la garde`.
 
-Les `build.gradle.kts` et `build.gradle` de la racine et des projets inclus, ainsi
-que les sources de `build-logic/src/` et son build file, sont aussi lus. Les accès
-Java/Kotlin `srcDir`, `srcDirs`, `setSrcDirs`, `getSrcDirs`, `directories` et `getDirectories`
-(accès directs, getters ou blocs `java { … }` / `kotlin { … }`) sont refusés avec
-« répertoire de sources personnalisé non supporté ». Les commentaires et chaînes
-ne déclenchent pas ce refus ; `assets.directories.add(…)` n'est pas concerné.
-Une seule exception est reconnue : un accès direct à
-`sourceSets.getByName("<nom littéral de test/debug ignoré>").java` ou `.kotlin`.
-Cela laisse passer l'ajout Roborazzi au source set `test` dans `build-logic`, sans
-étendre la portée des sources de release. Les noms dynamiques, alias de récepteur
-et autres sélecteurs ne bénéficient pas de cette exception.
-Les répertoires de projets non inclus ne participent pas à la dérivation.
+**Justification des exclusions :** le contrôle des noms dans AGP **9.5.0**, vérifié
+dans son JAR par l'orchestrateur de cette garde, interdit qu'un flavor porte le
+nom d'un build type (« ProductFlavor names cannot collide with BuildType names »)
+et interdit les préfixes `test` et `androidTest` (« … names cannot start with '%2$s' »).
+`debug` exact désigne donc le build type debug, pas un flavor ; la release du
+projet compile des variantes `<flavor>Release`. Les trois noms de test retenus
+désignent des source sets de test. Ces garanties ne couvrent pas un suffixe
+`Debug` : un flavor `internalDebug` peut participer à `internalDebugRelease`.
+Aucun préfixe ni suffixe ne suffit à élargir la liste fermée.
+
+La configuration inspectée comprend exclusivement :
+
+- `settings.gradle` et `settings.gradle.kts` de la racine ;
+- `build.gradle` et `build.gradle.kts` de la racine et de chaque projet inclus ;
+- `build-logic/settings.gradle(.kts)` et `build-logic/build.gradle(.kts)` ;
+- les fichiers `.kt`, `.kts` et `.java` de `build-logic/src/main/**`.
+
+Les autres source sets de `build-logic`, dont `src/test` et `src/roborazziTest`,
+ne sont pas lus. Les projets non inclus ne participent pas à la dérivation.
+
+Hors commentaires et chaînes, tout identifiant exact parmi `sourceSets`,
+`getSourceSets`, `srcDir`, `srcDirs`, `setSrcDirs`, `getSrcDirs`, `setRoot`, `root`,
+`directories`, `getDirectories`, `sources`, `getSources`, `addSource`,
+`addStaticSourceDirectory`, `addGeneratedSourceDirectory` échoue avec
+« configuration de sources non supportée par la garde ». Dans les seuls fichiers
+`settings.gradle(.kts)`, ce refus couvre aussi `projectDir`, `setProjectDir` et
+`buildFileName`. La garde ne résout ni récepteur implicite, ni sélecteur, ni
+variante Gradle.
+
+Une **liste blanche explicite** dans le bloc `BEGIN` du script autorise seulement
+ces trois couples (chemin relatif, ligne exacte après suppression des blancs de
+début et de fin) :
+
+| Fichier | Ligne autorisée |
+|---|---|
+| `core/database/build.gradle.kts` | `sourceSets {` |
+| `core/database/build.gradle.kts` | `assets.directories.add("$projectDir/schemas")` |
+| `build-logic/src/main/kotlin/fr/forumhfr/redface2/buildlogic/RedfaceAndroidRoborazziConventionPlugin.kt` | `sourceSets.getByName("test").kotlin.directories +=` |
+
+Les deux premières lignes exposent les schémas Room aux tests ; la troisième
+ajoute le helper Roborazzi au source set `test`. Une ligne modifiée, un commentaire
+ajouté à cette ligne ou la même ligne dans un autre fichier ne bénéficie pas de
+l'exception. Les lignes de continuation sont inspectées comme les autres lignes.
+
+Pour étendre les listes, un humain doit vérifier la configuration réelle et sa
+portée en release, modifier explicitement la liste concernée dans le script et
+ajouter des régressions : cas autorisé, ligne ou nom modifié, même ligne dans un
+autre fichier, archive synthétique sans le marqueur d'une contribution cachée.
+Un faux rouge sur une configuration nouvelle est accepté ; la garde ne devine
+pas qu'elle serait sans effet.
 
 - Pour **chaque classe `@HiltViewModel`**, y compris dans `app`, la garde exige les
   octets du descripteur
@@ -103,9 +137,8 @@ modificateurs reconnus et les autres annotations simples peuvent s'intercaler.
 Le lexer retire les chaînes avec échappements, les chaînes Kotlin triples
 multilignes (y compris leurs interpolations), les caractères, les commentaires
 `//` et les commentaires `/* … */` (imbriqués en Kotlin uniquement ; en Java,
-fermeture au premier `*/`). Le contenu des chaînes est conservé
-pour lire les `include(...)` littéraux de `settings.gradle.kts` et les noms
-littéraux de test/debug de l'exception ci-dessus dans les build files.
+fermeture au premier `*/`). Le contenu des chaînes est conservé uniquement
+pour lire les `include(...)` littéraux des settings racine.
 Dans `main`, après analyse, chaque token `HiltViewModel`, `AndroidEntryPoint`, `HiltAndroidApp`
 et `InstallIn` hors imports et littéraux/commentaires doit correspondre à une
 contribution retenue. Les occurrences non appariées sont toutes signalées.
@@ -128,7 +161,8 @@ les APK et AAB finaux, puis rejouer les cas sains et les pertes totales et parti
 définitions de classes ni leur intégration au graphe de composants généré. Les
 autres liaisons `@Module` ne sont pas contrôlées individuellement ; une perte partielle
 de ces liaisons peut donc passer. La lecture statique n'est pas un parseur Kotlin
-ou Java complet et ne résout pas les chemins de projets remappés par Gradle.
+ou Java complet. Les remappages explicites de projets dans les settings inspectés
+sont refusés par les tokens ci-dessus.
 Les sources générées pendant le build et les sources ajoutées par un plugin tiers
 sans configuration de répertoire visible dans les fichiers inspectés restent hors
 de portée ; cette lecture statique ne permet pas de garantir leur couverture.
@@ -144,12 +178,14 @@ bash scripts/release/verify-hilt-artifact.sh /chemin/redface2.apk
 # Dérivation seule, sans APK/AAB (chemin du dépôt facultatif).
 bash scripts/release/verify-hilt-artifact.sh --list-expected
 
-# Régressions du parseur : petits dépôts dans mktemp -d, sans Gradle ni APK.
+# Régressions : dépôts et archives synthétiques dans mktemp -d, sans Gradle.
+# Le test requiert aussi zip ; aucun APK réel n'est construit.
 bash scripts/release/verify-hilt-artifact.test.sh
 ```
 
-Le test compare les listes complètes et les diagnostics localisés ; il s'arrête
-au premier écart. Il n'est pas branché dans un workflow.
+Le test compare les listes complètes et les diagnostics localisés, puis rejoue
+les contournements avec des archives synthétiques sans le marqueur caché. Il
+s'arrête au premier écart et n'est pas branché dans un workflow.
 
 ### Compatibilité Room et rollback
 

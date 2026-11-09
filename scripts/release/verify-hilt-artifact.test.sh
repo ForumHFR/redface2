@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Régressions de dérivation seules : dépôts temporaires, aucun APK ni Gradle.
+# Régressions : dépôts et archives synthétiques temporaires, aucun Gradle.
+# zip est requis pour les replays de bout en bout ; aucun APK réel n'est créé.
 set -euo pipefail
 export LC_ALL=C
 
@@ -408,57 +409,45 @@ class Plain { String text = """
 SOURCE
 expect_unsupported 2 "bloc texte Java"
 
-for source_set in release prod devRelease beta unknown; do
-  new_case "source_set_$source_set" kt "$source_set" <<'SOURCE'
-package p.fixture
-@HiltViewModel class Hidden
-SOURCE
-  expect_unsupported 2 "source set $source_set hors périmètre de la garde"
+expect_source_set() {
+  derive
+  [[ "$rc" -eq 1 ]] || fail "source set non supporté : code attendu 1, obtenu $rc"
+  grep -Fx -- "::error::Hilt: source set $1/src/$2 non supporté par la garde" \
+    "$work_dir/stderr" >/dev/null || fail "diagnostic source set $1/src/$2 absent"
+  echo "OK: $case_name (source set non supporté)"
+}
+
+# Le nom seul suffit : aucune lecture ni présence de Hilt nécessaire.
+for source_set in release prod prodDebug internalDebug screenshotTest devRelease beta unknown testDebug androidTestProd; do
+  new_case "empty_$source_set" kt "$source_set" </dev/null
+  rm -- "$source_file"
+  expect_source_set feature/example "$source_set"
 done
 
-new_case app_prod kt prod app <<'SOURCE'
-package p.app
+for source_set in test androidTest testFixtures debug; do
+  new_case "ignored_$source_set" java "$source_set" <<'SOURCE'
+package p.fixture;
+// Même une syntaxe refusée dans main ne doit pas être analysée ici.
+class Plain { String text = """
 @HiltViewModel class Hidden
-SOURCE
-expect_unsupported 2 "source set prod hors périmètre de la garde"
-
-for source_set in debug prodDebug test androidTest testDebug androidTestProd testFixtures screenshotTest; do
-  new_case "ignored_$source_set" kt "$source_set" <<'SOURCE'
-package p.fixture
-@HiltViewModel class Ignored
+"""; }
 SOURCE
   expect_list
 done
 
-for hilt_token in HiltViewModel AndroidEntryPoint HiltAndroidApp InstallIn; do
-  new_case "release_$hilt_token" kt release <<SOURCE
+new_case release_alias kt release <<'SOURCE'
 package p.fixture
-val entry = $hilt_token::class
+import dagger.hilt.android.lifecycle.HiltViewModel as HV
+@HV class Hidden
 SOURCE
-  expect_unsupported 2 "source set release hors périmètre de la garde"
-done
+expect_source_set feature/example release
 
-new_case release_quoted_noise kt release <<'SOURCE'
-package p.fixture
-import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.AndroidEntryPoint
-import dagger.hilt.android.HiltAndroidApp
-import dagger.hilt.InstallIn
-// @HiltViewModel class Commented
-/* @AndroidEntryPoint @HiltAndroidApp @InstallIn */
-val text = "@HiltViewModel class Quoted"
-val raw = """@AndroidEntryPoint @HiltAndroidApp @InstallIn"""
-class Plain
+new_case app_prod_alias kt prod app <<'SOURCE'
+package p.app
+import dagger.hilt.android.lifecycle.HiltViewModel as HV
+@HV class Hidden
 SOURCE
-expect_list
-
-new_case release_java_comment java release <<'SOURCE'
-package p.fixture;
-/* Example delimiter: /* */
-@HiltViewModel public final class Hidden {}
-// End example: */
-SOURCE
-expect_unsupported 3 "source set release hors périmètre de la garde"
+expect_source_set app prod
 
 new_build_case() {
   local name="$1" path="$2"
@@ -471,69 +460,142 @@ SOURCE
   cat >"$source_file"
 }
 
-new_build_case custom_java_dir feature/example/build.gradle.kts <<'BUILD'
-// A release source directory cannot be enumerated through src/<set>.
-android.sourceSets["main"].java.srcDir("x")
-BUILD
-expect_unsupported 2 "répertoire de sources personnalisé non supporté"
+expect_configuration() {
+  expect_unsupported "$1" "configuration de sources non supportée par la garde"
+}
 
-new_build_case custom_groovy_dir feature/example/build.gradle <<'BUILD'
-sourceSets.main.java.srcDirs = ['x']
-BUILD
-expect_unsupported 1 "répertoire de sources personnalisé non supporté"
-
-new_build_case custom_build_logic build-logic/src/main/kotlin/Convention.kt <<'BUILD'
-sourceSets.getByName("main").kotlin.directories += "x"
-BUILD
-expect_unsupported 1 "répertoire de sources personnalisé non supporté"
-
-new_build_case custom_build_logic_script build-logic/build.gradle.kts <<'BUILD'
-sourceSets.main.java.srcDir("x")
-BUILD
-expect_unsupported 1 "répertoire de sources personnalisé non supporté"
-
-new_build_case custom_root_script build.gradle.kts <<'BUILD'
-subprojects { sourceSets.main.java.srcDir("x") }
-BUILD
-expect_unsupported 1 "répertoire de sources personnalisé non supporté"
-
-custom_accesses=(
-  'java.srcDirs("x")'
-  'kotlin.srcDir("x")'
-  'kotlin.srcDirs("x")'
-  'java.directories.add("x")'
-  'kotlin.directories += "x"'
-  'java.setSrcDirs(listOf("x"))'
-  'getJava().srcDir("x")'
-  'getKotlin().getSrcDirs().add("x")'
-  'java { srcDirs("x") }'
-  'kotlin { directories.add("x") }'
-  'java.apply { srcDir("x") }'
-  'with(kotlin) { srcDirs("x") }'
-  'val extra = java; extra.srcDir("x")'
-  'val extra = kotlin; extra.directories.add("x")'
+# Chaque token est refusé indépendamment du récepteur et du DSL.
+source_tokens=(
+  sourceSets getSourceSets srcDir srcDirs setSrcDirs getSrcDirs setRoot root
+  directories getDirectories sources getSources addSource
+  addStaticSourceDirectory addGeneratedSourceDirectory
 )
-for index in "${!custom_accesses[@]}"; do
-  new_build_case "custom_access_$index" feature/example/build.gradle.kts <<<"${custom_accesses[$index]}"
-  expect_unsupported 1 "répertoire de sources personnalisé non supporté"
+for source_token in "${source_tokens[@]}"; do
+  new_build_case "token_$source_token" feature/example/build.gradle.kts <<BUILD
+val value = $source_token
+BUILD
+  expect_configuration 1
 done
 
-new_build_case custom_multiline feature/example/build.gradle.kts <<'BUILD'
-sourceSets["main"].java
-    .srcDir("x")
+# Tous les fichiers de configuration prévus sont lus, y compris les settings de
+# build-logic ; les settings racine Groovy sont acceptés pour les include littéraux.
+for build_path in \
+  settings.gradle settings.gradle.kts build.gradle build.gradle.kts \
+  feature/example/build.gradle feature/example/build.gradle.kts \
+  build-logic/settings.gradle build-logic/settings.gradle.kts \
+  build-logic/build.gradle build-logic/build.gradle.kts \
+  build-logic/src/main/kotlin/Convention.kt \
+  build-logic/src/main/kotlin/Convention.kts \
+  build-logic/src/main/java/Convention.java; do
+  new_build_case "config_${build_path//\//_}" "$build_path" <<'BUILD'
+// Comment on line one.
+sources.addSource("hidden")
 BUILD
-expect_unsupported 2 "répertoire de sources personnalisé non supporté"
+  expect_configuration 2
+done
 
-new_build_case custom_comment_and_literal feature/example/build.gradle.kts <<'BUILD'
-// java.srcDir("x")
-/* kotlin.srcDirs("x") */
-/* /* nested */ java.directories.add("x") */
-val sample = "java.srcDir(\"x\")"
-val raw = """kotlin.directories += "x""""
+for settings_token in projectDir setProjectDir buildFileName; do
+  for settings_path in settings.gradle settings.gradle.kts build-logic/settings.gradle build-logic/settings.gradle.kts; do
+    new_build_case "settings_${settings_path//\//_}_$settings_token" "$settings_path" <<BUILD
+project(":x").$settings_token = file("y")
+BUILD
+    expect_configuration 1
+  done
+done
+
+new_build_case settings_tokens_in_build feature/example/build.gradle.kts <<'BUILD'
+val path = projectDir
+setProjectDir(file("y"))
+val name = buildFileName
 BUILD
 expect_list "ViewModels : p.fixture.Real"
 
-new_build_case assets_directories core/base/build.gradle.kts <<'BUILD'
+new_build_case implicit_apply feature/example/build.gradle.kts <<'BUILD'
+sourceSets.getByName("main").kotlin.apply { directories += "hidden" }
+BUILD
+expect_configuration 1
+
+new_build_case implicit_with feature/example/build.gradle.kts <<'BUILD'
+with(sourceSets.getByName("main").kotlin) { directories += "hidden" }
+BUILD
+expect_configuration 1
+
+new_build_case release_set_root feature/example/build.gradle.kts <<'BUILD'
+sourceSets.getByName("release").setRoot("hidden")
+BUILD
+expect_configuration 1
+
+new_build_case android_components feature/example/build.gradle.kts <<'BUILD'
+androidComponents { onVariants { it.sources.kotlin?.addStaticSourceDirectory("x") } }
+BUILD
+expect_configuration 1
+
+new_build_case multiline_config feature/example/build.gradle.kts <<'BUILD'
+sourceSets
+    .getByName("main").kotlin
+BUILD
+expect_configuration 1
+
+new_build_case escaped_config_identifier feature/example/build.gradle.kts <<'BUILD'
+`sourceSets`.getByName("main")
+BUILD
+expect_configuration 1
+
+new_build_case groovy_comment feature/example/build.gradle <<'BUILD'
+/* Example delimiter: /* */
+sourceSets.main.java.srcDir('x')
+// End example: */
+BUILD
+expect_configuration 2
+
+new_build_case exact_identifiers feature/example/build.gradle.kts <<'BUILD'
+val sourceSetsExtra = 1
+val resources = 2
+val rootProjectName = 3
+val mydirectories = 4
+BUILD
+expect_list "ViewModels : p.fixture.Real"
+
+new_build_case config_comment_and_literal feature/example/build.gradle.kts <<'BUILD'
+// sourceSets getSourceSets srcDir srcDirs setSrcDirs getSrcDirs setRoot root
+/* directories getDirectories sources getSources addSource
+   addStaticSourceDirectory addGeneratedSourceDirectory */
+/* /* nested */ directories += "x" */
+val sample = "sourceSets.getByName(\"main\").kotlin.directories += \"x\""
+val raw = """sources addGeneratedSourceDirectory root "directories""""
+val interpolated = "${run { /* sources */ "sourceSets" }}"
+BUILD
+expect_list "ViewModels : p.fixture.Real"
+
+new_case settings_comment_and_literal <<'SOURCE'
+package p.fixture
+@HiltViewModel class Real
+SOURCE
+cat >>"$case_root/settings.gradle.kts" <<'SETTINGS'
+// sourceSets root sources projectDir setProjectDir buildFileName
+/* project(":x").projectDir = file("y") */
+val ignored = "projectDir setProjectDir buildFileName srcDir"
+val raw = """sourceSets root sources"""
+SETTINGS
+expect_list "ViewModels : p.fixture.Real"
+
+new_case groovy_settings <<'SOURCE'
+package p.fixture
+@HiltViewModel class Real
+SOURCE
+mv "$case_root/settings.gradle.kts" "$case_root/settings.gradle"
+cat >"$case_root/settings.gradle" <<'SETTINGS'
+// projectDir setProjectDir buildFileName sourceSets
+include(':app', ':core:base', ':feature:example')
+SETTINGS
+expect_list "ViewModels : p.fixture.Real"
+
+database_path=core/database/build.gradle.kts
+roborazzi_path=build-logic/src/main/kotlin/fr/forumhfr/redface2/buildlogic/RedfaceAndroidRoborazziConventionPlugin.kt
+database_line='assets.directories.add("$projectDir/schemas")'
+roborazzi_line='sourceSets.getByName("test").kotlin.directories +='
+
+new_build_case whitelist_database "$database_path" <<'BUILD'
 android {
     sourceSets {
         named("test") {
@@ -542,60 +604,150 @@ android {
     }
 }
 BUILD
+# Ce projet doit être inclus pour que son build file soit effectivement contrôlé.
+echo 'include(":core:database")' >>"$case_root/settings.gradle.kts"
 expect_list "ViewModels : p.fixture.Real"
 
-for source_set in test testDebug androidTest androidTestProd testFixtures screenshotTest debug prodDebug; do
-  new_build_case "custom_ignored_$source_set" build-logic/src/main/kotlin/Convention.kt <<BUILD
-sourceSets.getByName("$source_set").kotlin.directories += "x"
+new_build_case whitelist_roborazzi "$roborazzi_path" <<'BUILD'
+sourceSets.getByName("test").kotlin.directories +=
+    rootProject.layout.projectDirectory.dir("build-logic/src/roborazziTest/kotlin").asFile.absolutePath
+BUILD
+expect_list "ViewModels : p.fixture.Real"
+
+new_build_case whitelist_trim "$roborazzi_path" </dev/null
+printf '\t  %s  \t\n' "$roborazzi_line" >"$source_file"
+expect_list "ViewModels : p.fixture.Real"
+
+new_build_case whitelist_database_changed "$database_path" <<'BUILD'
+assets.directories.add("$projectDir/other-schemas")
+BUILD
+echo 'include(":core:database")' >>"$case_root/settings.gradle.kts"
+expect_configuration 1
+
+new_build_case whitelist_roborazzi_changed "$roborazzi_path" <<'BUILD'
+sourceSets.getByName("main").kotlin.directories +=
+BUILD
+expect_configuration 1
+
+new_build_case whitelist_source_sets_changed "$database_path" <<'BUILD'
+sourceSets{ // Même effet Gradle ; ligne différente.
+BUILD
+echo 'include(":core:database")' >>"$case_root/settings.gradle.kts"
+expect_configuration 1
+
+for whitelist_line in 'sourceSets {' "$database_line" "$roborazzi_line"; do
+  new_build_case "whitelist_wrong_file_$case_count" feature/example/build.gradle.kts <<<"$whitelist_line"
+  expect_configuration 1
+done
+
+new_build_case whitelist_extra_code "$database_path" <<'BUILD'
+sourceSets { srcDir("hidden")
+BUILD
+echo 'include(":core:database")' >>"$case_root/settings.gradle.kts"
+expect_configuration 1
+
+# Les tableaux de lignes et les tokens ne doivent pas fuir entre deux fichiers.
+new_build_case whitelist_then_other_file "$roborazzi_path" <<<"$roborazzi_line"
+mkdir -p "$case_root/build-logic/src/main/kotlin/zz"
+source_file="$case_root/build-logic/src/main/kotlin/zz/Other.kt"
+printf '%s\n' "$roborazzi_line" >"$source_file"
+expect_configuration 1
+
+# Les tests et les autres extensions de build-logic ne sont pas de la configuration.
+for build_path in \
+  build-logic/src/test/java/TextBlockTest.java \
+  build-logic/src/roborazziTest/java/TextBlockTest.java \
+  build-logic/src/debug/java/TextBlockTest.java \
+  build-logic/src/main/ignored.gradle \
+  build-logic/src/main/ignored.groovy; do
+  new_build_case "ignored_${build_path//\//_}" "$build_path" <<'BUILD'
+class TextBlockTest { String text = """
+sourceSets.main.java.srcDir("hidden")
+"""; }
 BUILD
   expect_list "ViewModels : p.fixture.Real"
 done
 
-for source_set in main release prod devRelease unknown; do
-  new_build_case "custom_selected_$source_set" feature/example/build.gradle.kts <<BUILD
-sourceSets.getByName("$source_set").java.srcDir("x")
+new_build_case unincluded_custom_dir not/included/build.gradle.kts <<'BUILD'
+sourceSets.main.java.srcDir("hidden")
 BUILD
-  expect_unsupported 1 "répertoire de sources personnalisé non supporté"
+expect_list "ViewModels : p.fixture.Real"
+
+# Bout en bout : ZIP valide mais DEX factice, avec les seuls marqueurs de l'app et
+# de core:base. Hidden manque délibérément. La copie du script utilise le dépôt du
+# cas comme racine, sans modifier le checkout réel ni invoquer Gradle.
+mkdir -p "$work_dir/archive"
+printf '%s\n' 'Hilt_App' 'Lhilt_aggregated_deps/_p_app_' \
+  'Lhilt_aggregated_deps/_p_base_' >"$work_dir/archive/classes.dex"
+(cd "$work_dir/archive" && zip -q "$work_dir/without-hidden.apk" classes.dex)
+
+run_artifact() {
+  mkdir -p "$case_root/scripts/release"
+  cp "$script_dir/verify-hilt-artifact.sh" "$case_root/scripts/release/"
+  set +e
+  bash "$case_root/scripts/release/verify-hilt-artifact.sh" "$work_dir/without-hidden.apk" \
+    >"$work_dir/stdout" 2>"$work_dir/stderr"
+  rc=$?
+  set -e
+}
+
+expect_artifact_rejected() {
+  run_artifact
+  [[ "$rc" -eq 1 ]] || fail "archive sans Hidden acceptée (rc=$rc)"
+  grep -F -- "$1" "$work_dir/stderr" >/dev/null || fail "diagnostic attendu : $1"
+  echo "OK: $case_name (archive synthétique rejetée)"
+}
+
+new_case artifact_control <<'SOURCE'
+package p.fixture
+class Plain
+SOURCE
+run_artifact
+[[ "$rc" -eq 0 && ! -s "$work_dir/stderr" ]] || fail "archive témoin rejetée (rc=$rc)"
+grep -Fx -- "OK: Hilt: $work_dir/without-hidden.apk (2 modules)" \
+  "$work_dir/stdout" >/dev/null || fail "succès de l'archive témoin absent"
+echo "OK: $case_name"
+
+for source_set in release prod; do
+  module_path=feature/example
+  [[ "$source_set" != prod ]] || module_path=app
+  new_case "artifact_alias_$source_set" kt "$source_set" "$module_path" <<'SOURCE'
+package p.fixture
+import dagger.hilt.android.lifecycle.HiltViewModel as HV
+@HV class Hidden
+SOURCE
+  expect_artifact_rejected "::error::Hilt: source set $module_path/src/$source_set non supporté par la garde"
 done
 
-new_build_case custom_dynamic_selector feature/example/build.gradle.kts <<'BUILD'
-val name = "test"
-sourceSets.getByName(name).java.srcDir("x")
-BUILD
-expect_unsupported 2 "répertoire de sources personnalisé non supporté"
+custom_configs=(
+  'sourceSets.getByName("main").kotlin.apply { directories += "hidden" }'
+  'with(sourceSets.getByName("main").kotlin) { directories += "hidden" }'
+  'sourceSets.getByName("release").setRoot("hidden")'
+)
+for index in "${!custom_configs[@]}"; do
+  new_case "artifact_custom_sources_$index" <<'SOURCE'
+package p.fixture
+class Plain
+SOURCE
+  mkdir -p "$case_root/feature/example/hidden"
+  cat >"$case_root/feature/example/hidden/Hidden.kt" <<'SOURCE'
+package p.fixture
+@HiltViewModel class Hidden
+SOURCE
+  printf '%s\n' "${custom_configs[$index]}" >"$case_root/feature/example/build.gradle.kts"
+  expect_artifact_rejected "::error::Hilt: $case_root/feature/example/build.gradle.kts:1: forme non supportée : configuration de sources non supportée par la garde"
+done
 
-new_build_case custom_interpolated_selector feature/example/build.gradle.kts <<'BUILD'
-sourceSets.getByName("test${suffix}").kotlin.srcDirs("x")
+new_case artifact_flavor_internalDebug kt internalDebug <<'SOURCE'
+package p.fixture
+@HiltViewModel class Hidden
+SOURCE
+cat >"$case_root/feature/example/build.gradle.kts" <<'BUILD'
+android {
+    flavorDimensions += "channel"
+    productFlavors { create("internalDebug") { dimension = "channel" } }
+}
 BUILD
-expect_unsupported 1 "répertoire de sources personnalisé non supporté"
-
-new_build_case custom_other_receiver feature/example/build.gradle.kts <<'BUILD'
-notSourceSets.getByName("test").kotlin.directories += "x"
-BUILD
-expect_unsupported 1 "répertoire de sources personnalisé non supporté"
-
-new_build_case custom_ignored_then_release feature/example/build.gradle.kts <<'BUILD'
-sourceSets.getByName("test").kotlin.directories += "test-helper"
-sourceSets.getByName("release").kotlin.directories += "hidden"
-BUILD
-expect_unsupported 2 "répertoire de sources personnalisé non supporté"
-
-new_build_case custom_groovy_comment feature/example/build.gradle <<'BUILD'
-/* Example delimiter: /* */
-sourceSets.main.java.srcDir('x')
-// End example: */
-BUILD
-expect_unsupported 2 "répertoire de sources personnalisé non supporté"
-
-new_build_case resources_directories feature/example/build.gradle.kts <<'BUILD'
-assets { srcDir("x") }
-resources.srcDirs("x")
-BUILD
-expect_list "ViewModels : p.fixture.Real"
-
-new_build_case unincluded_custom_dir not/included/build.gradle.kts <<'BUILD'
-java.srcDir("x")
-BUILD
-expect_list "ViewModels : p.fixture.Real"
+expect_artifact_rejected "::error::Hilt: source set feature/example/src/internalDebug non supporté par la garde"
 
 echo "OK: $case_count cas de régression Hilt"
