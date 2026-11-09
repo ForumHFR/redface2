@@ -197,7 +197,7 @@ class EditorEventDetailsTest {
     }
 
     @Test
-    fun `ED45 a stale close callback cannot acknowledge a newer open detail`() {
+    fun `ED45 a stale close callback neither closes nor acknowledges a newer open detail`() {
         val old = event(EditorErrors.quoteFetchFailed)
         val newer = event(EditorErrors.formNetwork, sequence = 2)
         receive(old)
@@ -218,11 +218,20 @@ class EditorEventDetailsTest {
         compose.onNodeWithText(requireNotNull(newer.detail).resolve(context)).assertExists()
         compose.onNodeWithText(requireNotNull(old.detail).resolve(context)).assertDoesNotExist()
         compose.runOnIdle { assertEquals(newer.key, model.value.detailKey) }
+        // A stale key neither closes another key's detail nor returns focus (Fable gate on #1583).
         compose.runOnIdle { staleClose() }
-        compose.onNodeWithTag("body").assertIsFocused()
+        compose.onNodeWithText(requireNotNull(newer.detail).resolve(context)).assertExists()
         compose.runOnIdle {
             assertEquals(listOf(old.key, old.key), closed)
             assertEquals(listOf(newer), model.value.events)
+            assertEquals(newer.key, model.value.detailKey)
+            assertEquals(newer, detail.value)
+        }
+        compose.onNodeWithText("Masquer").performClick()
+        compose.onNodeWithTag("body").assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(listOf(old.key, old.key, newer.key), closed)
+            assertTrue(model.value.events.isEmpty())
             assertNull(model.value.detailKey)
             assertNull(detail.value)
         }

@@ -10,20 +10,25 @@ sealed interface EditorEventInput {
     /**
      * Only an accepted, effective launch (send/upload/quote insertion), never the arm tap.
      * Observation is optional; an observed operation may start only before its first occurrence.
+     * ED-44 replaces the displayed error/finish and earlier errors of the same kind, even when hidden.
+     * A send also clears validation errors; information and hidden finishes survive. ED-170 stays separate.
      */
     data class OperationStarted(val event: EditorEvent) : EditorEventInput
+    /** Silent success (ED-45): finish known current work and remove only its progress, rejecting late deliveries. */
+    data class OperationCompleted(val session: EditorSession, val operation: OperationRef) : EditorEventInput
     /**
      * First delivery may register a current operation at lastOccurrence = -1, without launch cleanup.
      * Stale sessions/sequences and repeated or finished occurrences remain rejected.
      */
     data class Received(val event: EditorEvent) : EditorEventInput
-    /** Progress mutates an existing occurrence; it does not create another event/announcement. */
+    /** Nondecreasing progress with a fixed total per occurrence; no new event/announcement. */
     data class UploadAdvanced(val key: EventKey, val progress: UploadProgress) : EditorEventInput
     data class FormLoaded(
         val session: EditorSession,
         val operation: OperationRef.Local,
         val quotesResolved: Boolean = false,
     ) : EditorEventInput
+    /** Clear draft-save information; only DraftSave completes here, a submission may still be sending. */
     data class DurableWriteSucceeded(val session: EditorSession, val operation: OperationRef) : EditorEventInput
     /**
      * Before any tool, arm or send gesture, excluding typing, selection and event activation.
@@ -33,7 +38,7 @@ sealed interface EditorEventInput {
     data class Activate(val key: EventKey) : EditorEventInput
     /** Programmatic visual acknowledgement; gestures use Activate/NextGesture/CloseDetails. No durable write. */
     data class Acknowledge(val key: EventKey) : EditorEventInput
-    /** Close this session's open panel and return to the body; acknowledge only if its detail key matches. */
+    /** Close and acknowledge only the matching open detail; a stale key has no effect, including on focus. */
     data class CloseDetails(val key: EventKey) : EditorEventInput
 }
 
@@ -54,12 +59,15 @@ data class EditorEventTransition(
 /** Pure ED-41/43–45 transitions. No text/selection mapping, clock, persistence, or generated identity. */
 fun reduceEditorEvents(state: EditorEventState, input: EditorEventInput): EditorEventTransition = when (input) {
     is EditorEventInput.OpenSession -> EditorEventTransition(
-        if (input.session == state.session) state else EditorEventState(input.session),
+        openSession(state, input.session),
     )
     is EditorEventInput.ObserveOperation -> EditorEventTransition(
         registerOperation(state, input.session, input.operation) ?: state,
     )
     is EditorEventInput.OperationStarted -> EditorEventTransition(startOperation(state, input.event))
+    is EditorEventInput.OperationCompleted -> EditorEventTransition(
+        completeOperation(state, input.session, input.operation),
+    )
     is EditorEventInput.Received -> EditorEventTransition(receiveEvent(state, input.event))
     is EditorEventInput.UploadAdvanced -> EditorEventTransition(advanceUpload(state, input))
     is EditorEventInput.FormLoaded -> EditorEventTransition(formLoaded(state, input))
@@ -69,6 +77,9 @@ fun reduceEditorEvents(state: EditorEventState, input: EditorEventInput): Editor
     is EditorEventInput.Acknowledge -> EditorEventTransition(acknowledgeEvent(state, input.key))
     is EditorEventInput.CloseDetails -> closeDetails(state, input.key)
 }
+
+private fun openSession(state: EditorEventState, session: EditorSession): EditorEventState =
+    if (session == state.session) state else EditorEventState(session)
 
 private fun registerOperation(
     state: EditorEventState,
@@ -109,12 +120,40 @@ private fun startOperation(state: EditorEventState, event: EditorEvent): EditorE
     } ?: return state
     val operation = currentOperation(registered, event.key.session, event.key.operation)
     return if (operation == null || operation.finished || operation.lastOccurrence != -1L) state else {
-        val cleared = registered.copy(events = registered.events.filter {
-            it.content is EditorEventContent.InProgress ||
-                it.isAmbiguous && event.key.operation !is OperationRef.Submission
+        val visible = state.visibleEvent
+        val cleared = registered.copy(events = registered.events.filterNot {
+            isReplacedByLaunch(it, visible, event.key.operation)
         })
         receiveEvent(cleared, event)
     }
+}
+
+/**
+ * ED-44, XaTriX (2026-11-09, 22:01, #1513): launch clears same-kind errors and send clears validation.
+ * Information, hidden finishes and unrelated hidden errors survive; ED-170 keeps its next-send lifecycle.
+ */
+private fun isReplacedByLaunch(event: EditorEvent, visible: EditorEvent?, operation: OperationRef): Boolean = when {
+    event.isAmbiguous -> operation is OperationRef.Submission
+    event.key == visible?.key -> event.rank == EditorEventRank.Error || event.content is EditorEventContent.Finished
+    event.rank != EditorEventRank.Error -> false
+    event.key.operation.sameKind(operation) -> true
+    operation is OperationRef.Submission ->
+        (event.key.operation as? OperationRef.Local)?.kind == EditorLocalOperation.Validation
+    else -> false
+}
+
+private fun completeOperation(
+    state: EditorEventState,
+    session: EditorSession,
+    ref: OperationRef,
+): EditorEventState {
+    val operation = currentOperation(state, session, ref)?.takeUnless { it.finished } ?: return state
+    return state.copy(
+        currentOperations = state.currentOperations.map { if (it == operation) it.copy(finished = true) else it },
+        events = state.events.filterNot {
+            it.key.operation.sameOperation(ref) && it.content is EditorEventContent.InProgress
+        },
+    )
 }
 
 private fun receiveEvent(state: EditorEventState, event: EditorEvent): EditorEventState {
@@ -146,6 +185,9 @@ private fun advanceUpload(state: EditorEventState, input: EditorEventInput.Uploa
     val operation = currentOperation(state, input.key.session, input.key.operation)
     val content = (state.events.find { it.key == input.key }?.content as? EditorEventContent.InProgress)
         ?.takeIf { operation != null && !operation.finished && operation.ref is OperationRef.Upload }
+        // The first known total fixes the batch size; changing it could make the displayed fraction regress.
+        ?.takeUnless { it.uploadProgress != null && input.progress.total != it.uploadProgress.total }
+        ?.takeUnless { input.progress.completed < (it.uploadProgress?.completed ?: 0) }
         ?: return state
     return state.copy(events = state.events.map {
         if (it.key == input.key) it.copy(content = content.copy(uploadProgress = input.progress)) else it
@@ -156,9 +198,9 @@ private fun formLoaded(state: EditorEventState, input: EditorEventInput.FormLoad
     val operation = currentOperation(state, input.session, input.operation)
         ?.takeIf { it.ref.isRead && !it.finished } ?: return state
     val quotesResolved = input.quotesResolved || input.operation.kind == EditorLocalOperation.QuoteFetch
-    return state.copy(
-        currentOperations = state.currentOperations.map { if (it == operation) it.copy(finished = true) else it },
-        events = state.events.filterNot {
+    val completed = completeOperation(state, input.session, operation.ref)
+    return completed.copy(
+        events = completed.events.filterNot {
             val error = (it.content as? EditorEventContent.Problem)?.error
             it.key.operation.sameKind(input.operation) && error != null &&
                 error.afterFormLoaded(quotesResolved) == null
@@ -172,11 +214,9 @@ private fun durableWriteSucceeded(
 ): EditorEventState {
     if (currentOperation(state, input.session, input.operation) == null) return state
     val finishedSave = (input.operation as? OperationRef.Local)?.kind == EditorLocalOperation.DraftSave
-    return state.copy(
-        currentOperations = state.currentOperations.map {
-            if (it.ref.sameOperation(input.operation) && finishedSave) it.copy(finished = true) else it
-        },
-        events = state.events.filterNot {
+    val completed = if (finishedSave) completeOperation(state, input.session, input.operation) else state
+    return completed.copy(
+        events = completed.events.filterNot {
             (it.content as? EditorEventContent.Problem)?.error?.cause == EditorCause.DraftSaveFailed
         },
     )
@@ -218,9 +258,8 @@ private fun acknowledgeEvent(state: EditorEventState, key: EventKey): EditorEven
 }
 
 private fun closeDetails(state: EditorEventState, key: EventKey): EditorEventTransition {
-    if (key.session != state.session || state.detailKey == null) return EditorEventTransition(state)
-    // Within this session, a stale closure returns focus without acknowledging a newer detail's event.
-    val acknowledged = if (state.detailKey == key) acknowledgeEvent(state, key) else state
+    if (key.session != state.session || state.detailKey != key) return EditorEventTransition(state)
+    val acknowledged = acknowledgeEvent(state, key)
     return EditorEventTransition(
         acknowledged.copy(detailKey = null),
         listOf(EditorEventCommand.ReturnToBody),
