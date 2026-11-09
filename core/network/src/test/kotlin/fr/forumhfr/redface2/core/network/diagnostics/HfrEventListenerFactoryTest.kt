@@ -193,7 +193,7 @@ class HfrEventListenerFactoryTest {
         assertEquals("IOException", fetch.callSnapshot()[1].exceptionClass)
         log.entries.value.forEach { entry ->
             listOf("Secret", "Cookie", "35395", "hash_check", "proxy", "https").forEach {
-                assertFalse(entry.message, entry.message.contains(it))
+                assertFalse(entry.message, entry.message.containsSecret(it))
             }
             // Unknown context bits are allowed; arbitrary query delimiters remain forbidden.
             val unknownBits = Regex("""\b(?:metered|validated|privateDns|foregroundS)=\?(?= |$)""")
@@ -392,7 +392,7 @@ class HfrEventListenerFactoryTest {
             assertTrue(it.message, it.message.contains("failedConnectMs=13200 maxFailedConnectMs=10000"))
             assertTrue(it.message, it.message.contains("failedTlsMs=3000 maxFailedTlsMs=2000"))
             listOf("Secret", "unused", "443", "https", "Cookie").forEach { secret ->
-                assertFalse(it.message, it.message.contains(secret))
+                assertFalse(it.message, it.message.containsSecret(secret))
             }
         }
     }
@@ -750,3 +750,10 @@ class HfrEventListenerFactoryTest {
         return InetSocketAddress(InetAddress.getByAddress(bytes), 443)
     }
 }
+
+/**
+ * A numeric secret (port, post number) must not appear as a whole number; a substring of an unrelated value such as
+ * `uptimeS=1443605` is not a leak and used to fail these tests depending on the machine's uptime.
+ */
+private fun String.containsSecret(secret: String): Boolean =
+    if (secret.all(Char::isDigit)) Regex("(?<!\\d)$secret(?!\\d)").containsMatchIn(this) else contains(secret)
