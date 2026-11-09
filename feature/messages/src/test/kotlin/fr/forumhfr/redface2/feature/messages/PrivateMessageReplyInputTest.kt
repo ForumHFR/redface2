@@ -227,7 +227,13 @@ class PrivateMessageReplyInputTest {
             val saved = registry.performSave().toString()
             assertFalse(saved.contains("private reply body"))
             assertFalse(saved.contains("previous private revision"))
-            assertTrue(savedStateHandle.keys().isEmpty())
+            assertTrue(savedStateHandle.keys().all { key ->
+                val metadata = savedStateHandle.get<Any?>(key)
+                metadata == null || metadata is String || metadata is Int
+            })
+            assertFalse(savedStateHandle.keys().any { key ->
+                savedStateHandle.get<Any?>(key) in listOf(privateBody, previousBody)
+            })
             assertTrue(
                 "Bundle must stay independent of private text and undo history",
                 savedStateSize() < initialBytes + 2_048,

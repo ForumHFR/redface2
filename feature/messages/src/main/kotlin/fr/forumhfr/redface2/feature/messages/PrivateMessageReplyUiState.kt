@@ -17,6 +17,8 @@ import fr.forumhfr.redface2.core.ui.editor.UploadProgress
  * into a state snapshot.
  */
 data class PrivateMessageReplyUiState(
+    /** Owner-bound draft read finishes before a recreated field can accept input. */
+    val isInitializing: Boolean = false,
     /** True while the initial `bddpost.php` form GET is in flight (and during a silent refetch). */
     val isLoadingForm: Boolean = true,
     /** True once a non-anonymous form has been parsed; gates submission. */
@@ -26,8 +28,8 @@ data class PrivateMessageReplyUiState(
     /** Text-only mirror; selection and undo history stay in the ViewModel. */
     val bodyText: String = "",
     /**
-     * True after the first successful form load has consumed `ReplyForm.initialContent`. It prevents
-     * a retry or InvalidHashCheck refetch from duplicating the server-provided quote around edits.
+     * The body is known from a session/attempt or the first successful form load. A resumed body,
+     * including a blank edit, prevents a GET from duplicating the server-provided inline quote.
      */
     val draftHydratedFromForm: Boolean = false,
     /** Exact server quote applied once, unchanged by restore or refetch; empty before hydration. */
@@ -55,8 +57,8 @@ data class PrivateMessageReplyUiState(
     val showSubmitConfirmation: Boolean = false,
     /**
      * #405 — body of a previously-cached private-reply draft for this thread, surfaced on init when
-     * a non-empty draft was found. Non-null means « propose a restore » : « Restaurer » pre-fills
-     * the editor, « Ignorer » clears the cached content. Never silently applied nor lost.
+     * a non-empty draft was found outside a matching session. « Restaurer » pre-fills the editor,
+     * « Ignorer » clears the cached content. A matching ED-81 checkpoint resumes silently instead.
      */
     val restorableDraft: String? = null,
     /**
@@ -94,6 +96,6 @@ data class PrivateMessageReplyUiState(
     val armToken: ArmToken? get() = (submission as? EditorSubmissionState.Armed)?.token
 
     val canSubmit: Boolean
-        get() = formAvailable && !isLoadingForm && !isSubmitting && !isUploading &&
+        get() = !isInitializing && formAvailable && !isLoadingForm && !isSubmitting && !isUploading &&
             !submission.blocksBodyMutation && bodyText.isNotBlank()
 }

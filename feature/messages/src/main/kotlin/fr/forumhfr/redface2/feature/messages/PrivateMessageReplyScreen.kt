@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.messages
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -20,17 +21,22 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
@@ -70,6 +76,26 @@ fun PrivateMessageReplyScreen(
         creationCallback = { factory -> factory.create(request) },
     )
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> viewModel.onStarted()
+                Lifecycle.Event.ON_STOP -> viewModel.onStopped()
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val bodyScroll = viewModel.bodyScrollState
+    val measuredViewport = bodyScroll.maxValue to bodyScroll.viewportSize
+    LaunchedEffect(viewModel, state.isInitializing, measuredViewport) {
+        if (state.isInitializing || measuredViewport.first == Int.MAX_VALUE) return@LaunchedEffect
+        withFrameNanos { }
+        withFrameNanos { }
+        if (measuredViewport == (bodyScroll.maxValue to bodyScroll.viewportSize)) viewModel.restoreBodyScroll()
+    }
     LaunchedEffect(viewModel) {
         viewModel.effects.collect { effect ->
             when (effect) {
@@ -92,6 +118,7 @@ fun PrivateMessageReplyScreen(
         onBack = viewModel::onCloseRequested,
         bodyFieldState = viewModel.bodyFieldState,
         bodyInputTransformation = viewModel.bodyInputTransformation,
+        bodyScrollState = viewModel.bodyScrollState,
         onToolbarAction = viewModel::onToolbarAction,
         onTogglePreview = viewModel::onTogglePreview,
         onToggleSignature = viewModel::onToggleSignature,
@@ -142,6 +169,7 @@ internal fun PrivateMessageReplyContent(
     smileyPicker: SmileyPickerController,
     onSmileySelected: (String) -> Unit,
     modifier: Modifier = Modifier,
+    bodyScrollState: ScrollState = rememberScrollState(),
 ) {
     var optionsSheetOpen by remember { mutableStateOf(false) }
     // #618 — the « Gérer les destinataires » bottom sheet (Bug 1: the member editor no longer stacks
@@ -170,6 +198,7 @@ internal fun PrivateMessageReplyContent(
                         state = state,
                         bodyFieldState = bodyFieldState,
                         bodyInputTransformation = bodyInputTransformation,
+                        bodyScrollState = bodyScrollState,
                         onToolbarAction = onToolbarAction,
                         onTogglePreview = onTogglePreview,
                         onErrorDismissed = onErrorDismissed,
@@ -248,6 +277,7 @@ internal fun ReplyEditorBody(
     onUploadErrorDismissed: () -> Unit,
     onManageRecipients: () -> Unit,
     modifier: Modifier = Modifier,
+    bodyScrollState: ScrollState = rememberScrollState(),
 ) {
     val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode, onImagePickerEvent)
     // #447/#1406 — all variable-height chrome shares one bounded scroller above the BTF2 field.
@@ -353,11 +383,12 @@ internal fun ReplyEditorBody(
             BbcodeTextField(
                 state = bodyFieldState,
                 inputTransformation = bodyInputTransformation,
+                scrollState = bodyScrollState,
                 label = stringResource(R.string.messages_reply_field_label),
                 placeholder = stringResource(R.string.messages_reply_field_placeholder),
                 modifier = Modifier.weight(1f),
                 // #459 — lock editing during a batch (caret must not move between two insertions).
-                readOnly = state.isUploading || state.submission.blocksBodyMutation,
+                readOnly = state.isInitializing || state.isUploading || state.submission.blocksBodyMutation,
             )
         }
     }

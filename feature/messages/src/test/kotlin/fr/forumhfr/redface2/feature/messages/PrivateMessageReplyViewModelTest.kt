@@ -1283,7 +1283,8 @@ class PrivateMessageReplyViewModelTest {
             submissionClock,
             smileyRepository(), favoriteRepository, localCollections, savedStateHandle,
         ).also(::trackViewModel)
-        assertEquals("new live MP\n\nrescued MP", afterRestore.state.value.restorableDraft)
+        assertNull(afterRestore.state.value.restorableDraft)
+        assertEquals("new live MP\n\nrescued MP", afterRestore.bodyFieldState.text.toString())
     }
 
     @Test

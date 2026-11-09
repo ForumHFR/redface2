@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.messages
 
+import android.content.Context
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
@@ -18,14 +19,26 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
+import androidx.test.core.app.ApplicationProvider
+import coil3.ColorImage
+import coil3.ImageLoader
+import coil3.SingletonImageLoader
+import coil3.annotation.DelicateCoilApi
+import coil3.intercept.Interceptor
+import coil3.request.CachePolicy
+import coil3.request.ImageResult
+import coil3.test.FakeImageLoaderEngine
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
+import fr.forumhfr.redface2.core.model.PostBlock
+import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import io.mockk.every
 import io.mockk.mockk
+import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -45,6 +58,44 @@ class PrivateMessageEditorLayoutTest {
 
     @get:Rule
     val compose = createComposeRule()
+
+    @OptIn(DelicateCoilApi::class)
+    @Test fun replyPreviewDisablesCoilDiskReadsAndWrites() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val url = "https://images.example.org/private.jpg"
+        val policy = AtomicReference<CachePolicy?>()
+        val recorder = object : Interceptor {
+            override suspend fun intercept(chain: Interceptor.Chain): ImageResult {
+                policy.set(chain.request.diskCachePolicy)
+                return chain.proceed()
+            }
+        }
+        val engine = FakeImageLoaderEngine.Builder()
+            .intercept(url, ColorImage(0xFF2E7D32.toInt(), width = 80, height = 60)).build()
+        SingletonImageLoader.setUnsafe(ImageLoader.Builder(context).components {
+            add(recorder)
+            add(engine)
+        }.build())
+        try {
+            compose.setContent {
+                RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                    ReplyEditorBody(
+                        state = PrivateMessageReplyUiState(
+                            isLoadingForm = false, formAvailable = true, isPreviewVisible = true,
+                            preview = PostContent(listOf(PostBlock.Image(url, null))),
+                        ),
+                        bodyFieldState = remember { TextFieldState() },
+                        bodyInputTransformation = InputTransformation {},
+                        onToolbarAction = {}, onTogglePreview = {}, onErrorDismissed = {},
+                        onDraftRestore = {}, onDraftDiscard = {}, onImagePickerEvent = {},
+                        onUploadErrorDismissed = {}, onManageRecipients = {},
+                    )
+                }
+            }
+            compose.waitUntil(timeoutMillis = 5_000) { policy.get() != null }
+            assertEquals(CachePolicy.DISABLED, policy.get())
+        } finally { SingletonImageLoader.reset() }
+    }
 
     @Test
     fun `reply body keeps 160 dp field and both draft actions on short viewport`() {
