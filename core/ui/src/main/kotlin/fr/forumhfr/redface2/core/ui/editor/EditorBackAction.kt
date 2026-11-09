@@ -30,16 +30,16 @@ sealed interface EditorBackAction {
 }
 
 /**
- * ED-85, in priority order. Pending maintainer decision: "open" means visibly open, so masked
- * format/sublevels do not consume Back ahead of the arm, despite ED-85's literal order.
+ * ED-85: Back acts on visible layers. XaTriX decision (2026-11-09, 18:12, #1513): disarm before
+ * closing retained Format/Color/Image modes masked by the arm; all other priorities stay unchanged.
  */
 fun resolveEditorBack(state: EditorBackState): EditorBackAction = when {
     state.sheet == EditorSheet.Smileys && state.smileyDetailOpen -> EditorBackAction.ReturnToSmileyGrid
     state.sheet != null -> EditorBackAction.CloseSheet(state.sheet)
     state.tooltipOpen -> EditorBackAction.CloseTooltip
+    state.bar.arm != null -> EditorBackAction.Disarm(state.bar.arm)
     state.bar.visibleMode in setOf(EditorBarMode.Color, EditorBarMode.Image) -> EditorBackAction.CloseSublevel
     state.bar.visibleMode == EditorBarMode.Format -> EditorBackAction.CloseFormat
-    state.bar.arm != null -> EditorBackAction.Disarm(state.bar.arm)
     state.eventDetailKey != null -> EditorBackAction.CloseEventDetails(state.eventDetailKey)
     state.panelOpen -> EditorBackAction.ClosePanel
     state.sharedPreviewOpen -> EditorBackAction.CloseSharedPreview
