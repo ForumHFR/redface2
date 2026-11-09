@@ -59,8 +59,7 @@ class EditorActionBarTest {
 
     @Test
     fun `ED20 ED21 ED22 ED27 opening and scrolling preserve selection and commands use keep`() {
-        compose.setContent { host.Content() }
-        click("Mise en forme")
+        compose.setContent { host.Content() }; click("Mise en forme")
         compose.onNodeWithContentDescription("Mise en forme").assert(
             SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Développé"))
         compose.runOnIdle { assertEquals(TextRange(3, 8), host.body.selection) }
@@ -87,26 +86,27 @@ class EditorActionBarTest {
         }
         compose.onNodeWithTag("body").performKeyInput { pressKey(Key.Tab) }
         compose.onNodeWithContentDescription("Mise en forme").assertIsFocused().performKeyInput { pressKey(Key.Enter) }
-        compose.onNodeWithContentDescription("Mise en forme").performKeyInput { pressKey(Key.Tab) }
+        compose.onNodeWithContentDescription("Mise en forme").assertIsFocused().performKeyInput { pressKey(Key.Tab) }
         compose.onNodeWithContentDescription("Gras").assertIsFocused().performKeyInput { pressKey(Key.Enter) }
         compose.onNodeWithTag("body").assertIsFocused()
         val geometry = compose.onNodeWithTag("bar").getUnclippedBoundsInRoot()
         repeat(50) { compose.onNodeWithTag("body").performTextInput("a") }
         assertEquals(geometry, compose.onNodeWithTag("bar").getUnclippedBoundsInRoot())
         compose.onNodeWithTag("body").performKeyInput { pressKey(Key.Tab) }
-        compose.onNodeWithContentDescription("Mise en forme").assertIsFocused()
-            .performKeyInput { pressKey(Key.Tab) }
+        compose.onNodeWithContentDescription("Mise en forme").assertIsFocused().performKeyInput { pressKey(Key.Tab) }
         compose.onNodeWithContentDescription("Gras").assertIsFocused().performKeyInput {
             keyDown(Key.ShiftLeft); pressKey(Key.Tab); keyUp(Key.ShiftLeft)
         }
+        compose.onNodeWithContentDescription("Mise en forme").assertIsFocused().performKeyInput { pressKey(Key.Enter) }
         compose.onNodeWithContentDescription("Mise en forme").assertIsFocused()
+        assertEquals(EditorBarMode.Normal, host.bar.value.mode)
+        compose.onNodeWithContentDescription("Mise en forme").performKeyInput { pressKey(Key.Enter) }
         assertEquals(EditorBarMode.Format, host.bar.value.mode); assertEquals(listOf("bbcode"), host.calls)
     }
 
     @Test
     fun `ED24 ED85 color and image return one level and color inserts without opening a surface`() {
-        compose.setContent { host.Content() }
-        click("Mise en forme"); click("Couleur"); click("Retour")
+        compose.setContent { host.Content() }; click("Mise en forme"); click("Couleur"); click("Retour")
         assertEquals(EditorBarMode.Format, host.bar.value.mode); click("Couleur")
         click("Bleu"); assertEquals(EditorBarMode.Format, host.bar.value.mode)
         assertTrue(host.body.text.contains("[#0000FF]texte[/#0000FF]"))
@@ -146,10 +146,8 @@ class EditorActionBarTest {
     @Test
     fun `ED38 shortcut is third only in normal mode and does not own a preference`() {
         host.shortcut.value = EditorBarShortcut(R.drawable.ic_editor_bold, "Gras", { host.calls += "shortcut" })
-        compose.setContent { host.Content() }
-        click("Gras"); assertEquals(listOf("shortcut"), host.calls)
-        click("Mise en forme"); click("Gras")
-        assertEquals(listOf("shortcut", "bbcode"), host.calls)
+        compose.setContent { host.Content() }; click("Gras"); assertEquals(listOf("shortcut"), host.calls)
+        click("Mise en forme"); click("Gras"); assertEquals(listOf("shortcut", "bbcode"), host.calls)
         compose.runOnIdle { host.bar.value = EditorBarState(arm = host.arm) }
         compose.onNodeWithContentDescription("Gras").assertDoesNotExist()
         compose.runOnIdle { host.bar.value = EditorBarState(); host.uploading.value = true }
@@ -176,8 +174,7 @@ class EditorActionBarTest {
         val key = host.event.value!!.key; compose.setContent { host.Content() }
         compose.onNodeWithText("Envoyer").performTouchInput { click() }
         assertTrue(host.calls.isEmpty()); assertEquals(listOf(key to EditorEventAction.Dismiss), host.eventActions)
-        compose.onNodeWithText("Envoyer").performTouchInput { click() }
-        assertEquals(listOf("send"), host.calls)
+        compose.onNodeWithText("Envoyer").performTouchInput { click() }; assertEquals(listOf("send"), host.calls)
     }
 
     @Test
@@ -222,8 +219,7 @@ class EditorActionBarTest {
         val key = host.event.value!!.key
         button.performKeyInput { pressKey(Key.Enter) }
         state("Confirmation requise"); assertEquals(listOf(key to EditorEventAction.Dismiss), host.eventActions)
-        assertEquals(listOf("send:8000", "send:8000"), host.calls)
-        compose.runOnIdle { nanos += 400_000_000L }
+        assertEquals(listOf("send:8000", "send:8000"), host.calls); compose.runOnIdle { nanos += 400_000_000L }
         button.performKeyInput { pressKey(Key.NumPadEnter) }
         button.assertIsNotEnabled().performKeyInput { pressKey(Key.Enter); pressKey(Key.Spacebar) }
         button.performTouchInput { click(); click() }
@@ -251,8 +247,7 @@ class EditorActionBarTest {
         compose.setContent { host.Content() }
         listOf(EditorErrors.missingTitle to "Titre manquant, Compléter",
             EditorErrors.network to "Hors connexion, Afficher les détails").forEach { (error, label) ->
-            val event = controlEvent(EditorEventContent.Problem(error))
-            compose.runOnIdle { host.event.value = event }
+            val event = controlEvent(EditorEventContent.Problem(error)); compose.runOnIdle { host.event.value = event }
             compose.onNode(hasClickAction() and hasContentDescription(label)).performTouchInput { click() }
             assertEquals(event.key to event.action, host.eventActions.last())
             compose.onNodeWithContentDescription("Options").assertExists(); assertTrue(host.calls.isEmpty())
@@ -263,8 +258,7 @@ class EditorActionBarTest {
     @Test
     fun `ED40 ED46 progress is non actionable under an error and form load creates no event`() {
         host.loading.value = true
-        compose.setContent { host.Content() }
-        compose.onNodeWithTag("editor-bar-progress").assertExists()
+        compose.setContent { host.Content() }; compose.onNodeWithTag("editor-bar-progress").assertExists()
         compose.onNodeWithContentDescription("Mise en forme").assertExists()
         compose.onNodeWithText("Envoyer").assertIsNotEnabled()
         compose.runOnIdle {

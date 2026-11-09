@@ -17,12 +17,17 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.movableContentOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -60,13 +65,12 @@ data class EditorBarShortcut(
 )
 
 /**
- * B5 chrome only. Width excludes the host's safeDrawing insets; this bar owns its 16 dp gutters.
- * The host reduces gestures with reduceEditorBar, keeps the live selection (keep), applies BBCode,
- * then restores focus/viewport without changing IME visibility. External surfaces restore focus
- * when they close. No field, picker launcher, submission controller or preference lives here.
- * Keep composed across events/arms: the event control and its live node retain their identity.
- * [firstStatus] and [secondStatus] are independent permanent slots, as in [EditorAppBar].
- * Pass null for absence; never compact the second state into the first slot.
+ * B5 chrome: width excludes safeDrawing; this bar owns its 16 dp gutters. The host reduces gestures
+ * with reduceEditorBar, keeps selection (keep), applies BBCode and restores focus/viewport without
+ * changing IME visibility; external surfaces restore focus on close. No field, picker launcher,
+ * submission controller or preference lives here. Keep composed across events/arms for live node identity.
+ * [firstStatus]/[secondStatus] are independent permanent slots (see [EditorAppBar]): null means absent,
+ * never compacted into the other slot.
  */
 @Composable
 @Suppress("LongParameterList") // Stateless rendering inputs, matching the app bar's host boundary.
@@ -122,10 +126,24 @@ fun EditorActionBar(
         EditorBarFixedSlot(fixed, statuses, headerLabel, onOpenHeader, actions.onPreview,
             previewVisible, controlsEnabled, visible, external)
     }
+    val formatFocus = remember { FocusRequester() }
+    val formatFocused = remember { mutableStateOf(false) }
+    val restoreFormatFocus = remember { mutableStateOf(false) }
     val format: @Composable () -> Unit = {
-        EditorBarFormatToggle(mode == EditorBarMode.Format, enabled) {
+        val expanded = mode == EditorBarMode.Format
+        // The trigger changes parent on toggle; restore only the focus it held before that gesture.
+        LaunchedEffect(mode) {
+            if (restoreFormatFocus.value) { restoreFormatFocus.value = false; formatFocus.requestFocus() }
+        }
+        val toggle = {
+            restoreFormatFocus.value = formatFocused.value
             actions.onGesture(EditorBarGesture.ToggleFormat)
         }
+        EditorBarIcon(R.drawable.ic_editor_format, stringResource(R.string.editor_format), toggle,
+            Modifier.focusRequester(formatFocus).onFocusChanged { formatFocused.value = it.isFocused }
+                .clip(MaterialTheme.shapes.small)
+                .background(if (expanded) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+                .semantics { selected = expanded }, enabled = enabled, expanded = expanded)
     }
     Surface(modifier.fillMaxWidth().height(height), color = MaterialTheme.colorScheme.surfaceContainer) {
         Box {
@@ -141,8 +159,7 @@ fun EditorActionBar(
                             format, external, insert, back)
                     }
                 })
-            if (uploading || loadingForm) EditorBarProgress(if (uploading) uploadProgress else null,
-                Modifier.align(Alignment.TopStart))
+            EditorBarProgress(uploading, loadingForm, uploadProgress, Modifier.align(Alignment.TopStart))
         }
     }
 }
@@ -159,20 +176,14 @@ private fun editorBarStatusWidths(statuses: List<EditorAppBarStatus?>): List<Dp?
 }
 
 private fun editorBarSubmitState(
-    state: EditorBarState,
-    submit: ArmedSubmitState,
-    uploading: Boolean,
-    loadingForm: Boolean,
+    state: EditorBarState, submit: ArmedSubmitState, uploading: Boolean, loadingForm: Boolean,
 ): ArmedSubmitState = submit.copy(
     armed = submit.armed || state.arm != null,
     armToken = state.arm ?: submit.armToken,
     enabled = submit.enabled && !uploading && !loadingForm && !submit.showProgress,
 )
 
-private fun consumeEditorBarInformation(
-    event: EditorEvent?,
-    onEvent: (EventKey, EditorEventAction) -> Unit,
-): Boolean {
+private fun consumeEditorBarInformation(event: EditorEvent?, onEvent: (EventKey, EditorEventAction) -> Unit): Boolean {
     val information = event?.content is EditorEventContent.Information ||
         (event?.content as? EditorEventContent.Problem)?.error?.errorClass == EditorErrorClass.Information
     if (information && event != null) onEvent(event.key, EditorEventAction.Dismiss)
@@ -180,22 +191,10 @@ private fun consumeEditorBarInformation(
 }
 
 @Composable
-private fun EditorBarFormatToggle(expanded: Boolean, enabled: Boolean, onToggle: () -> Unit) {
-    EditorBarIcon(R.drawable.ic_editor_format, stringResource(R.string.editor_format), onToggle,
-        Modifier.clip(MaterialTheme.shapes.small)
-            .background(if (expanded) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
-            .semantics { selected = expanded }, enabled = enabled, expanded = expanded)
-}
-
-@Composable
 @Suppress("LongParameterList") // All measured inputs are explicit; no asynchronous width feedback.
 private fun EditorBarEnvelope(
-    height: Dp,
-    compact: Boolean,
-    hasHeader: Boolean,
-    statusWidths: List<Dp?>,
-    mode: EditorBarMode,
-    event: EditorEvent?,
+    height: Dp, compact: Boolean, hasHeader: Boolean, statusWidths: List<Dp?>,
+    mode: EditorBarMode, event: EditorEvent?,
     submit: @Composable () -> Unit,
     content: @Composable (EditorChromeAllocation) -> Unit,
 ) {
@@ -240,14 +239,9 @@ private fun EditorFixedSlot.resolveStatusSlot(statusSlots: List<EditorFixedSlot>
 @Composable
 @Suppress("LongParameterList") // Four independent slots share the exact same fixed/overflow dispatch.
 private fun EditorBarFixedSlot(
-    fixed: EditorFixedSlot,
-    statuses: List<EditorAppBarStatus?>,
-    headerLabel: String,
-    onHeader: (() -> Unit)?,
-    onPreview: () -> Unit,
-    previewVisible: Boolean,
-    enabled: Boolean,
-    visible: Boolean,
+    fixed: EditorFixedSlot, statuses: List<EditorAppBarStatus?>,
+    headerLabel: String, onHeader: (() -> Unit)?,
+    onPreview: () -> Unit, previewVisible: Boolean, enabled: Boolean, visible: Boolean,
     external: (() -> Unit) -> Unit,
 ) {
     when (fixed) {
@@ -269,15 +263,10 @@ private fun EditorBarFixedSlot(
 @Composable
 @Suppress("LongParameterList") // Slots separate permanent event identity from replaceable tools.
 private fun EditorBarRow(
-    event: EditorEvent?,
-    armed: Boolean,
-    mode: EditorBarMode,
-    allocation: EditorChromeAllocation,
-    height: Dp,
-    onEvent: (EventKey, EditorEventAction) -> Unit,
-    scroll: ScrollState,
-    renderSlot: @Composable (EditorFixedSlot, Boolean) -> Unit,
-    format: @Composable () -> Unit,
+    event: EditorEvent?, armed: Boolean, mode: EditorBarMode,
+    allocation: EditorChromeAllocation, height: Dp,
+    onEvent: (EventKey, EditorEventAction) -> Unit, scroll: ScrollState,
+    renderSlot: @Composable (EditorFixedSlot, Boolean) -> Unit, format: @Composable () -> Unit,
     tools: @Composable () -> Unit,
 ) {
     // Move the actual PR 2 nodes, not copies: fixed, scrolling and silent anchors share identity.
@@ -318,8 +307,7 @@ private fun EditorBarTools(
     actions: EditorActionBarActions,
     images: EditorBarImageActions,
     shortcut: EditorBarShortcut?,
-    enabled: Boolean,
-    controlsEnabled: Boolean,
+    enabled: Boolean, controlsEnabled: Boolean,
     format: @Composable () -> Unit,
     external: (() -> Unit) -> Unit,
     insert: (BbcodeAction) -> Unit,
@@ -337,9 +325,8 @@ private fun EditorBarTools(
                 { external(actions.onOptions) }, enabled = controlsEnabled)
         }
         EditorBarMode.Format -> EditorFormatRow(insert, { actions.onGesture(EditorBarGesture.OpenColor) }, enabled)
-        EditorBarMode.Color -> EditorColorRow({
-            insert(it); actions.onGesture(EditorBarGesture.ColorChosen)
-        }, back, enabled)
+        EditorBarMode.Color -> EditorColorRow({ insert(it); actions.onGesture(EditorBarGesture.ColorChosen) },
+            back, enabled)
         EditorBarMode.Image -> EditorImageRow(images, external, {
             insert(BbcodeAction.Image); actions.onGesture(EditorBarGesture.ImageAction)
         }, back, enabled)
@@ -362,10 +349,12 @@ private fun EditorBarScroll(scroll: ScrollState, modifier: Modifier, content: @C
 }
 
 @Composable
-private fun EditorBarProgress(progress: UploadProgress?, modifier: Modifier) {
+private fun EditorBarProgress(uploading: Boolean, loading: Boolean, progress: UploadProgress?, modifier: Modifier) {
+    if (!uploading && !loading) return
+    val current = if (uploading) progress else null
     val track = modifier.fillMaxWidth().height(2.dp).testTag("editor-bar-progress").clearAndSetSemantics {}
-    if (progress == null || progress.total <= 0) {
+    if (current == null || current.total <= 0) {
         LinearProgressIndicator(modifier = track, strokeCap = StrokeCap.Butt, gapSize = 0.dp)
-    } else LinearProgressIndicator(progress = { (progress.completed.toFloat() / progress.total).coerceIn(0f, 1f) },
+    } else LinearProgressIndicator(progress = { (current.completed.toFloat() / current.total).coerceIn(0f, 1f) },
         modifier = track, strokeCap = StrokeCap.Butt, gapSize = 0.dp, drawStopIndicator = {})
 }
