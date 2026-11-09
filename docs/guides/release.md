@@ -43,6 +43,28 @@ Workflow source : [`.github/workflows/release.yml`](https://github.com/ForumHFR/
 - **Routing (`resolve-target`)** : `channel=beta` → Play track `beta` + F-Droid `.beta` ; `channel=dev` → Play track `internal` + F-Droid `.dev`. Le **label** (`-PappLabel`) et le **versionCode** (`-PversionCodeOverride`, calculé depuis le registre) sont injectés au build des deux artefacts ; un **check CI** (`aapt2 dump badging`) vérifie package + label + **versionCode** de chaque APK avant publication.
 - **Sérialisation** : le `concurrency: group: release` (sans `cancel-in-progress`) sérialise les runs pour que deux dispatches n'allouent jamais le même code.
 
+### Garde Hilt des artefacts (#1581)
+
+Après le build signé et avant le staging ou toute publication (GitHub, Play, F-Droid),
+`release.yml` exécute `scripts/release/verify-hilt-artifact.sh` sur tous les APK F-Droid
+du canal et, si Play est activé, tous les APK et AAB prod. Un artefact manquant,
+illisible ou incomplet arrête le job avant tout upload.
+
+La garde lit `classes*.dex` dans les APK et `base/dex/classes*.dex` dans les AAB.
+Elle exige `Hilt_RedfaceApplication` pour `app` (package racine, sans segment `app`)
+et le préfixe Hilt agrégé `_fr_forumhfr_redface2_<chemin_du_module>_` pour chaque
+bibliothèque appliquant `redface.android.hilt.library`, dérivée des `build.gradle.kts`
+du dépôt au moment du contrôle. Aucune bibliothèque n'est exclue pour R8.
+Cette présence par module ne garantit pas l'exhaustivité de tous ses bindings.
+
+Depuis un checkout du code correspondant au binaire, contrôle manuel sans Gradle
+(Bash, `unzip`, `grep`, `find` et outils standard de l'image Android SDK du job) :
+
+```bash
+bash scripts/release/verify-hilt-artifact.sh /chemin/redface2.apk
+# Plusieurs APK/AAB peuvent être passés à la même commande.
+```
+
 ### Compatibilité Room et rollback
 
 Depuis le schéma Room **17**, `redface.db` contient les tables du substrat de cache des conversations
