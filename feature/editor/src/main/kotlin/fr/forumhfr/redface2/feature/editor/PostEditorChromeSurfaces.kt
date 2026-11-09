@@ -16,7 +16,7 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.R as UiR
 
-/** Keep mounted inside EditorScaffold.overlay; PR 3 supplies Quotes and the preview separately. */
+/** Keep mounted inside EditorScaffold.overlay; no production screen consumes this detached host yet. */
 @Composable
 internal fun PostEditorChromeSurfaces(
     adapter: PostEditorChromeAdapter,
@@ -59,7 +59,7 @@ private fun PostEditorHeaderSurface(
     EditorHeaderPanel(adapter.surface == PostEditorChromeSurface.Restore || pending,
         stringResource(title), bodyState, adapter::closeSurface,
         { adapter.returnToBody(onReturnToBody) },
-        body = body) {
+        body = { PostEditorQuotePanel(adapter, bodyState, onReturnToBody, body) }) {
         if (pending) QuoteDecisions(adapter) else DraftRestoreBanner(
             adapter::restoreDraft, adapter::discardDraft,
             restoreEnabled = source.canRestoreDraft && !source.isUploading &&

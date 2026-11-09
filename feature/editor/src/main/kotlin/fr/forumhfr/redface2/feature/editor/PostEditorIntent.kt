@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.editor
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 
 /**
@@ -92,11 +93,11 @@ sealed interface PostEditorIntent {
     /** #405 — user tapped « Ignorer » on the draft banner: delete the cached draft and clear the banner. */
     data object DraftDiscardRequested : PostEditorIntent
 
-    /** #604 lot 3 — remove one quote card (✕). Identified by numreponse, like the sheet. */
-    data class QuoteRemoved(val numreponse: Int) : PostEditorIntent
+    /** ED-52: remove this snapshot, preserving another portion; legacy callers can supply numreponse only. */
+    data class QuoteRemoved(val numreponse: Int, val quote: QuoteSelection? = null) : PostEditorIntent
 
     /** #604 lot 3 — move a quote card one slot up ([delta] = -1) or down (+1) ; out-of-range = no-op. */
-    data class QuoteMoved(val numreponse: Int, val delta: Int) : PostEditorIntent
+    data class QuoteMoved(val numreponse: Int, val delta: Int, val quote: QuoteSelection? = null) : PostEditorIntent
 
     /** #436 (#604 lot 3) — « Tout vider » : drop every quote card. The typed body is untouched. */
     data object QuotesCleared : PostEditorIntent

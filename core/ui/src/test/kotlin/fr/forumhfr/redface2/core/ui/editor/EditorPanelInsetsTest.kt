@@ -73,8 +73,13 @@ class EditorPanelInsetsTest {
             val viewport = compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.VerticalScrollAxisRange))
                 .getUnclippedBoundsInRoot()
             val field = titleNode.getUnclippedBoundsInRoot()
+            val heading = compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading))
+                .getUnclippedBoundsInRoot()
             compose.onNode(hasSetTextAction()).assertIsFocused()
-            assertEquals((400 - maxOf(30, ime)).toFloat(), viewport.height.value, 0.5f)
+            // The title stays pinned above the scrolling content (8 dp gap); the outer column owns the
+            // union and the 16 dp padding, so the viewport ends 16 dp above the union exactly once.
+            assertEquals((400 - maxOf(30, ime) - 16).toFloat(), viewport.bottom.value, 0.5f)
+            assertEquals(heading.bottom.value + 8f, viewport.top.value, 0.5f)
             assertTrue("IME=$ime: field $field must start inside viewport $viewport", field.top >= viewport.top)
             // ScrollTo reveals the target, not the trailing content padding. The whole field must
             // fit above the union; the viewport height above catches missing or double insets.
