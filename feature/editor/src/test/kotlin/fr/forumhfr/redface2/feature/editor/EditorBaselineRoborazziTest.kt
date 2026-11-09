@@ -21,9 +21,9 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
+import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -32,13 +32,13 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * #1509 — record-only baseline of the old post editor and new-topic form before/after the M3 pin.
+ * #1509 — versioned baseline of the old post editor and new-topic form before/after the M3 pin.
  * Uses the real content and routing fixtures from [EditorScreenLayoutTest], without a ViewModel.
  * Reply represents the shared reply/edit post chrome; options, preview, uploads and smileys stay shut.
  * Each surface has eight captures: portrait/landscape × font scale 1.0/1.3 × empty/multiline body.
  * The light app theme is fixed, the IME is closed and focus is cleared before recording.
  *
- * Output: `feature/editor/build/outputs/roborazzi/<surface>_<orientation>_fs<scale>_<state>.png`.
+ * Output: `feature/editor/src/test/screenshots/<surface>_<orientation>_fs<scale>_<state>.png`.
  * This harness deliberately uses no M3 1.5 API so it can also be applied before the pin.
  */
 @RunWith(RobolectricTestRunner::class)
@@ -99,7 +99,7 @@ class EditorBaselineRoborazziTest {
                     .assertWidthIsEqualTo(if (orientation == "portrait") 360.dp else 760.dp)
                     .assertHeightIsEqualTo(if (orientation == "portrait") 760.dp else 360.dp)
                     .captureRoboImage(
-                        filePath = "build/outputs/roborazzi/" +
+                        filePath = "src/test/screenshots/" +
                             "${surface.fileName}_${orientation}_fs${fontScale}_$state.png",
                     )
                 compose.mainClock.autoAdvance = true

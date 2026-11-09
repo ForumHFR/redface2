@@ -58,7 +58,8 @@ data class PostEditorState(
     /**
      * Tracks whether we already prefilled [bodyText] from `ReplyForm.initialContent`.
      * Used by the ViewModel to make sure a stale form refetch (e.g. after
-     * `InvalidHashCheck`) does not overwrite the user's in-progress edit.
+     * `InvalidHashCheck`) does not overwrite the user's in-progress edit. A known
+     * empty server body or a non-blank restored draft also sets this flag.
      */
     val draftHydratedFromForm: Boolean = false,
     /** Exact untouched server prefill, used to distinguish hydration from a user edit (#1415). */
@@ -128,6 +129,10 @@ data class PostEditorState(
     /** #1128 — observed continuously so the next image pick uses the current preference. */
     val imagePickerMode: ImagePickerMode = ImagePickerMode.DEFAULT,
 ) {
+    /** A failed initial edit fetch keeps the body locked until reload or a non-blank restore. */
+    val isAwaitingInitialBody: Boolean
+        get() = mode == PostEditorMode.Edit && !draftHydratedFromForm
+
     /**
      * Submission is allowed when : we know the routing context (page + subcat + topicId),
      * the user has typed something non-blank, the editor is not already submitting,
@@ -150,6 +155,7 @@ data class PostEditorState(
             // sheet : the materialised [quotemsg] blocks ARE the content). Edit keeps
             // requiring a non-blank body — its cards list is always empty.
             (bodyText.isNotBlank() || (mode == PostEditorMode.Reply && quotes.isNotEmpty())) &&
+            !isAwaitingInitialBody &&
             !isSubmitting &&
             !submission.blocksBodyMutation &&
             !isLoadingForm && !quoteStorageUnavailable && pendingQuotes.isEmpty() &&

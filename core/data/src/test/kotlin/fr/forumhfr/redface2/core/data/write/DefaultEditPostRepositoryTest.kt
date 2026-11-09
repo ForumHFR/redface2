@@ -75,6 +75,41 @@ class DefaultEditPostRepositoryTest {
     }
 
     @Test
+    fun `GET edit rejects a missing textarea but accepts a present empty body`() = runTest {
+        val html = fixture("write_edit_form_test_post.html")
+        val textarea = Regex("""(?s)(<textarea[^>]*name="content_form"[^>]*>).*?(</textarea>)""")
+        assertTrue(textarea.containsMatchIn(html))
+        val context = EditPostContext(23, 550, 35395, 20, 2784595)
+        val stripped = html.replace(textarea, "")
+        assertFalse(stripped.contains("content_form\""))
+        server.enqueue(MockResponse().setBody(stripped))
+
+        val failure = runCatching { repository.fetchEditPostForm(context) }.exceptionOrNull()
+        assertTrue(failure is IllegalStateException)
+        assertEquals("content_form textarea missing from edit form", failure?.message)
+
+        val emptied = html.replace(textarea, "$1$2")
+        assertTrue(textarea.containsMatchIn(emptied))
+        server.enqueue(MockResponse().setBody(emptied))
+        assertEquals("", repository.fetchEditPostForm(context).initialContent)
+    }
+
+    @Test
+    fun `GET edit never treats a fallback reply composer as the edited post body`() = runTest {
+        val editHtml = fixture("write_edit_form_test_post.html")
+        val replyHtml = editHtml.replace("action=\"/bdd.php", "action=\"/bddpost.php")
+        assertTrue("The edit form action must be replaced", replyHtml != editHtml)
+        assertTrue(replyHtml.contains("action=\"/bddpost.php"))
+        server.enqueue(MockResponse().setBody(replyHtml))
+        val failure = runCatching {
+            repository.fetchEditPostForm(EditPostContext(23, 550, 35395, 20, 2784595))
+        }.exceptionOrNull()
+
+        assertTrue(failure is IllegalStateException)
+        assertEquals("Reply form not found", failure?.message)
+    }
+
+    @Test
     fun `GET edit form carries numreponse query param and hits message_php`() = runTest {
         server.enqueue(MockResponse().setBody(fixture("write_edit_form_test_post.html")))
         val context = EditPostContext(

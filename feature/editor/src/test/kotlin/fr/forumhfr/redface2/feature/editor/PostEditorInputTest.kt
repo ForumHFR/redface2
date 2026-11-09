@@ -51,6 +51,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.cancel
@@ -87,10 +88,42 @@ class PostEditorInputTest {
     private var uploadGate: CompletableDeferred<Unit>? = null
     private var postStarted = false
     private var postGate: CompletableDeferred<Unit>? = null
+    private var editFormFailure: IOException? = null
 
     @After
     fun tearDown() {
         if (::vm.isInitialized) vm.viewModelScope.cancel()
+    }
+
+    @Test
+    @OptIn(ExperimentalFoundationApi::class)
+    fun editTypingAndPasteStayLockedAfterFailureUntilReloadEvenWithStaleEditableField() {
+        editFormFailure = IOException("offline")
+        setFieldContent(confirmBeforePosting = false, editing = true)
+        compose.runOnIdle {
+            assertTrue(vm.state.value.isAwaitingInitialBody)
+            assertFalse(vm.state.value.canSubmit)
+        }
+        // The composition deliberately keeps readOnly=false: only InputTransformation can reject these.
+        field().performTextInput("partial post")
+        paste()
+        compose.runOnIdle {
+            assertEquals("", vm.bodyFieldState.text.toString())
+            assertFalse(vm.bodyFieldState.undoState.canUndo)
+            editFormFailure = null
+            vm.submit(PostEditorIntent.ReloadRequested)
+        }
+        compose.waitUntil { !vm.state.value.isLoadingForm }
+        compose.runOnIdle {
+            assertEquals("seed", vm.bodyFieldState.text.toString())
+            assertFalse(vm.state.value.isAwaitingInitialBody)
+            assertFalse(vm.bodyFieldState.undoState.canUndo)
+        }
+        field().performTextInput(" complete")
+        paste()
+        compose.runOnIdle {
+            assertEquals("seed complete pasted", vm.bodyFieldState.text.toString())
+        }
     }
 
     @Test
@@ -277,7 +310,10 @@ class PostEditorInputTest {
             hiddenFields = emptyMap(), options = ReplyFormOptions(), msgIcon = "1", isAnonymous = false,
         )
         val editRepository = mockk<EditPostRepository> {
-            coEvery { fetchEditPostForm(any()) } returns form
+            coEvery { fetchEditPostForm(any()) } coAnswers {
+                editFormFailure?.let { throw it }
+                form
+            }
         }
         coEvery { repository.fetchReplyForm(any()) } returns form.copy(initialContent = "")
         coEvery { repository.submitReply(any(), any(), any(), any()) } coAnswers {

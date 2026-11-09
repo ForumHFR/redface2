@@ -8,12 +8,12 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.testing.captureRoboImage
 import java.time.Instant
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -24,9 +24,8 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * #783 — record-only visual review of the reverse-citation sheet in its three user-visible data
- * states and the three static colour schemes. The nine PNGs are inspection artefacts, not
- * versioned baselines.
+ * #783 — screenshot verification and visual review of the reverse-citation sheet in its three user-visible data
+ * states and the three static colour schemes. The nine PNGs are versioned references.
  *
  *     ./scripts/docker-dev.sh ./gradlew :feature:topic:testDebugUnitTest \
  *         --tests '*CitingPostsSheetRoborazziTest*' --console=plain --no-daemon
@@ -81,7 +80,7 @@ class CitingPostsSheetRoborazziTest {
 
     // #783 (gate Fable R1) — proof that the clickable « cité N fois » pill does NOT inflate the post
     // card: minimumInteractiveComponentSize is neutralized around the pill, so the card keeps its #882
-    // density. Record-only, one card per colour scheme for visual review.
+    // density. Verified references, one card per colour scheme for visual review.
     private fun captureCitedCard(darkTheme: Boolean, amoledTheme: Boolean, suffix: String) {
         compose.setContent {
             RedfaceTheme(darkTheme = darkTheme, amoledTheme = amoledTheme, dynamicColor = false) {
@@ -103,7 +102,7 @@ class CitingPostsSheetRoborazziTest {
         }
         compose.waitForIdle()
         compose.onRoot().captureRoboImage(
-            filePath = "build/outputs/roborazzi/topic_cited_card_$suffix.png",
+            filePath = "src/test/screenshots/topic_cited_card_$suffix.png",
         )
     }
 
@@ -129,7 +128,7 @@ class CitingPostsSheetRoborazziTest {
             compose.runOnIdle { scenario.value = next }
             compose.waitForIdle()
             compose.onRoot().captureRoboImage(
-                filePath = "build/outputs/roborazzi/topic_citing_posts_${next.fileName}_$suffix.png",
+                filePath = "src/test/screenshots/topic_citing_posts_${next.fileName}_$suffix.png",
             )
         }
     }

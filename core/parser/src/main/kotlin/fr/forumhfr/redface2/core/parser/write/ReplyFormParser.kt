@@ -34,8 +34,13 @@ import org.jsoup.nodes.Element
  */
 class ReplyFormParser {
 
-    @Suppress("ReturnCount") // Two failure guards + the success return — splitting hurts readability.
-    fun parse(html: String): Result<ReplyForm> {
+    fun parse(html: String): Result<ReplyForm> = parseForm(html, editOnly = false)
+
+    /** An edit GET must carry the edited post's body, never a fallback reply composer. */
+    fun parseEditPost(html: String): Result<ReplyForm> = parseForm(html, editOnly = true)
+
+    @Suppress("ReturnCount") // Fail-safe guards reject incomplete forms before the success return.
+    private fun parseForm(html: String, editOnly: Boolean): Result<ReplyForm> {
         val document = Jsoup.parse(html)
         // HFR ships the reply / quote / create-topic forms with `action="…
         // bddpost.php"` and the edit-post form with `action="…bdd.php"`. The
@@ -43,9 +48,11 @@ class ReplyFormParser {
         // are otherwise identical, so a single parser handles both. We bias
         // toward `bddpost.php` first because four out of five write flows use
         // it ; the `bdd.php` fallback is only reached on an edit form.
-        val replyForm = document.selectFirst("form[action*=bddpost.php]")
-            ?: document.selectFirst("form[action*=bdd.php]")
-            ?: return Result.failure(IllegalStateException("Reply form not found"))
+        val replyForm = if (editOnly) {
+            document.selectFirst("form[action*=bdd.php]")
+        } else {
+            document.selectFirst("form[action*=bddpost.php]") ?: document.selectFirst("form[action*=bdd.php]")
+        } ?: return Result.failure(IllegalStateException("Reply form not found"))
 
         val pseudoInput = replyForm.selectFirst("input[name=pseudo]")
         val pseudoValue = pseudoInput?.attr("value").orEmpty()
@@ -68,9 +75,11 @@ class ReplyFormParser {
         // recomputed client-side. Jsoup's `.text()` would collapse whitespace and HTML-decode
         // entities — we deliberately use `wholeText()` so the user sees the raw BBCode
         // exactly as HFR composed it.
-        val initialContent = replyForm.selectFirst("textarea[name=content_form]")
-            ?.wholeText()
-            .orEmpty()
+        val initialContent = replyForm.selectFirst("textarea[name=content_form]")?.wholeText()
+        // An absent edit body is unknown; a present but empty textarea is a known empty body (#1512).
+        if (replyForm.attr("action").contains("bdd.php") && initialContent == null) {
+            return Result.failure(IllegalStateException("content_form textarea missing from edit form"))
+        }
 
         return Result.success(
             ReplyForm(
@@ -78,7 +87,7 @@ class ReplyFormParser {
                 sujet = sujet,
                 hiddenFields = collection.fields,
                 isAnonymous = isAnonymous,
-                initialContent = initialContent,
+                initialContent = initialContent.orEmpty(),
                 options = parseOptions(replyForm),
                 msgIcon = parseMsgIcon(replyForm),
                 userId = SmileyUserIdExtractor.extract(html),

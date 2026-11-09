@@ -23,7 +23,8 @@ Lancer la validation dans l'environnement Docker épinglé (même image que la C
 
 ```bash
 ./scripts/docker-dev.sh ./gradlew \
-  :app:assembleProdDebug test testDebugUnitTest lintDebug :app:lintProdDebug detektAll \
+  :app:assembleProdDebug test testDebugUnitTest verifyRoborazziDebug \
+  lintDebug :app:lintProdDebug detektAll -Proborazzi.mode=verify \
   --console=plain --no-daemon
 ```
 
@@ -31,7 +32,8 @@ Itératif (modules touchés seulement, plus rapide) :
 
 ```bash
 ./scripts/docker-dev.sh ./gradlew \
-  detektAll :feature:<module>:testDebugUnitTest :feature:<module>:lintDebug --rerun-tasks
+  detektAll :feature:<module>:testDebugUnitTest :feature:<module>:lintDebug \
+  -Proborazzi.mode=verify --rerun-tasks
 ```
 
 ## Règles
@@ -39,6 +41,28 @@ Itératif (modules touchés seulement, plus rapide) :
 - **Jamais `:app:testDevDebugUnitTest` seul** : il COMPILE mais n'EXÉCUTE PAS les tests des modules `feature`/`core` (la CI lance `testDebugUnitTest` global). Vécu sur #588.
 - `detektAll` est une tâche **racine** (pas `:core:ui:detektAll`) ; `lintDebug` peut être ciblé par module.
 - `--rerun-tasks` dès qu'on touche un test ou sa source : le cache Docker peut renvoyer un faux-vert.
+- `verifyRoborazziDebug` est une tâche **racine du dépôt** : elle agrège les tests des six modules
+  de captures sans filtre de classes et refuse le mode record. Les tests ordinaires vérifient aussi
+  par défaut. Mode et références sont déclarés comme entrées Gradle.
+- Références PNG versionnées : `<module>/src/test/screenshots/`. Tolérance : zéro pixel
+  (`changeThreshold = 0f`, `maxDistance = 0f`). Référence absente ou différente → échec.
+- Sur échec visuel, lire les `*_actual.png` / `*_compare.png` sous
+  `<module>/build/outputs/roborazzi/<tâche>/` et les résultats sous
+  `<module>/build/test-results/roborazzi/<tâche>/`. La CI les publie même en échec
+  (`roborazzi-comparisons`). **Ne jamais régénérer automatiquement en CI.**
+- Un changement visuel voulu nécessite un record **explicite sur box dans l'environnement épinglé**,
+  par exemple :
+
+  ```bash
+  ./scripts/docker-dev.sh ./gradlew :core:ui:testDebugUnitTest \
+    -Proborazzi.mode=record --tests '*PostRendererQuoteRoborazziTest*' --rerun-tasks
+  ```
+
+  Relire les PNG **avant/après dans la PR**, puis relancer la validation en verify ; `/roborazzi`
+  détaille la procédure. L'enregistrement initial des six modules et les preuves de garde sont
+  documentés dans `docs/guides/contributing.md` § « Rendu visuel (Roborazzi) ».
+- Le wrapper local `~/bin/rf2-validate` (hors dépôt) n'a rien à ajouter : verify étant le mode par
+  défaut, ses `testDebugUnitTest` comparent déjà les six modules aux références.
 - Ne jamais conclure « vert » sans avoir lu `BUILD SUCCESSFUL` / `BUILD FAILED` dans le log (un `; echo "$?"` en arrière-plan masque l'exit code de Gradle).
 
 ## Format de sortie

@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.parser.write
 
+import org.jsoup.Jsoup
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -9,6 +10,29 @@ import org.junit.Test
 class ReplyFormParserTest {
 
     private val parser = ReplyFormParser()
+
+    @Test
+    fun `edit requires a content textarea even if empty while reply still accepts its absence`() {
+        for (fixture in listOf("write_edit_form_test_post.html", "write_edit_form_bbcode_rich.html")) {
+            val document = Jsoup.parse(readFixture(fixture))
+            val textarea = requireNotNull(document.selectFirst("form[action*=bdd.php] textarea[name=content_form]"))
+
+            textarea.empty()
+            assertEquals("", parser.parseEditPost(document.outerHtml()).getOrThrow().initialContent)
+            textarea.remove()
+
+            val result = parser.parseEditPost(document.outerHtml())
+
+            assertTrue(result.isFailure)
+            assertEquals("content_form textarea missing from edit form", result.exceptionOrNull()?.message)
+            assertTrue(parser.parse(document.outerHtml()).isFailure)
+        }
+        val document = Jsoup.parse(readFixture("write_reply_form_open_topic.html"))
+        requireNotNull(document.selectFirst("form[action*=bddpost.php] textarea[name=content_form]")).remove()
+
+        assertEquals("", parser.parse(document.outerHtml()).getOrThrow().initialContent)
+        assertTrue(parser.parseEditPost(document.outerHtml()).isFailure)
+    }
 
     @Test
     fun `extracts hash_check, hidden fields and sujet from the authenticated reply form`() {

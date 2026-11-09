@@ -21,12 +21,12 @@ import coil3.ColorImage
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.test.FakeImageLoaderEngine
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyKind
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -51,8 +51,8 @@ import org.robolectric.annotation.GraphicsMode
  * first composition is already at the final size (no async-measure timing dependency). Light theme
  * so the coloured boxes read clearly.
  *
- * Not a CI golden gate (the Roborazzi Gradle plugin is not applied — AGP 9, cf. takahirom/roborazzi#781).
- * Run on demand; PNGs land under `core/ui/build/outputs/roborazzi/` (gitignored) :
+ * References under `core/ui/src/test/screenshots/` are compared by default, including in CI.
+ * Add `-Proborazzi.mode=record` only for an intentional visual update:
  *
  *     ./scripts/docker-dev.sh ./gradlew :core:ui:testDebugUnitTest \
  *         --tests '*PostRendererSmileyRoborazziTest*' --console=plain --no-daemon
@@ -203,7 +203,7 @@ class PostRendererSmileyRoborazziTest {
             }
         }
         composeTestRule.onRoot().captureRoboImage(
-            filePath = "build/outputs/roborazzi/$name.png",
+            filePath = "src/test/screenshots/$name.png",
         )
     }
 }
