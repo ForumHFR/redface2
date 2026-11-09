@@ -220,7 +220,7 @@ class EditorEventReducerTest {
     }
 
     @Test
-    fun `observing a retry preserves terminals and launch replaces only the displayed error or finish`() {
+    fun `observing a retry preserves terminals and launch clears the displayed error or finish`() {
         val retries = listOf(
             upload to OperationRef.Upload(EditorUploadToken(2, session)),
             submission to submission.copy(token = SubmissionToken(2, session)),
@@ -362,7 +362,7 @@ class EditorEventReducerTest {
     }
 
     @Test
-    fun `ED44 - launch replaces the displayed error and preserves all unrelated hidden terminals`() {
+    fun `ED44 - send launch clears displayed upload error and hidden validation but preserves lower ranks`() {
         val failedUpload = problem(upload, EditorErrors.tooLarge, 1)
         val hiddenValidation = problem(validation, EditorErrors.missingTitle, 2)
         val information = event(notice, EditorEventContent.Information(text), 3)
@@ -372,18 +372,66 @@ class EditorEventReducerTest {
         assertEquals(failedUpload, state.visibleEvent)
         val sending = event(submission, EditorEventContent.InProgress(text), 6)
         val started = state.step(EditorEventInput.OperationStarted(sending))
-        val retained = listOf(hiddenValidation, information, finished)
+        val retained = listOf(information, finished)
         assertEquals(retained + sending, started.events)
-        assertEquals(hiddenValidation, started.visibleEvent)
-        val acknowledged = started.step(EditorEventInput.Acknowledge(hiddenValidation.key))
-            .step(EditorEventInput.OperationCompleted(session, submission))
-        assertEquals(information, acknowledged.visibleEvent)
-        assertEquals(finished, acknowledged.step(EditorEventInput.Acknowledge(information.key)).visibleEvent)
+        assertEquals(sending, started.visibleEvent)
+        val completed = started.step(EditorEventInput.OperationCompleted(session, submission))
+        assertEquals(information, completed.visibleEvent)
+        assertEquals(finished, completed.step(EditorEventInput.Acknowledge(information.key)).visibleEvent)
         val save = OperationRef.Local(EditorLocalOperation.DraftSave, 1)
         val progress = event(save, EditorEventContent.InProgress(text), 5)
         val withProgress = state.step(EditorEventInput.Received(progress))
             .step(EditorEventInput.OperationStarted(sending))
         assertEquals(retained + progress + sending, withProgress.events)
+    }
+
+    @Test
+    fun `ED44 - retry send clears the earlier send failure hidden behind a quote failure`() {
+        val sending = event(submission, EditorEventContent.InProgress(text), 1)
+        val quoteFailure = problem(quote, EditorErrors.quoteFetchFailed, 2)
+        val sendFailure = problem(submission, EditorErrors.network, 3)
+        val state = EditorEventState(session).step(EditorEventInput.OperationStarted(sending))
+            .step(EditorEventInput.Received(quoteFailure)).step(EditorEventInput.Received(sendFailure))
+        assertEquals(quoteFailure, state.visibleEvent)
+        assertEquals(listOf(quoteFailure, sendFailure), state.events)
+        val retry = submission.copy(token = SubmissionToken(2, session))
+        val running = event(retry, EditorEventContent.InProgress(text), 4)
+        val started = reduceEditorEvents(state, EditorEventInput.OperationStarted(running))
+        assertEquals(listOf(running), started.state.events)
+        assertEquals(running, started.state.visibleEvent)
+        assertTrue(started.commands.isEmpty())
+        assertFalse(started.gestureConsumed)
+        assertEquals(started.state, started.state.step(EditorEventInput.Received(sendFailure)))
+    }
+
+    @Test
+    fun `ED44 - hidden same-kind errors are resolved while hidden finishes and information survive`() {
+        val insertion = OperationRef.Local(EditorLocalOperation.QuoteInsertion, 1)
+        val retries = listOf(
+            submission to submission.copy(token = SubmissionToken(2, session)),
+            upload to OperationRef.Upload(EditorUploadToken(2, session)),
+            insertion to insertion.copy(sequence = 2),
+        )
+        val contents = listOf(
+            EditorEventContent.Problem(EditorErrors.network),
+            EditorEventContent.Finished(text),
+            EditorEventContent.Information(text),
+            EditorEventContent.Problem(EditorErrors.draftSaveFailed),
+        )
+        retries.forEach { (previous, retry) ->
+            contents.forEach { content ->
+                val visible = problem(quote, EditorErrors.quoteFetchFailed, 1)
+                val hidden = event(previous, content, 2)
+                val unrelated = problem(form, EditorErrors.invalidForm, 3)
+                val running = event(retry, EditorEventContent.InProgress(text), 4)
+                val state = containing(visible, hidden, unrelated)
+                assertEquals(visible, state.visibleEvent)
+                val started = state.step(EditorEventInput.OperationStarted(running))
+                val retained = if (hidden.rank == EditorEventRank.Error) emptyList() else listOf(hidden)
+                assertEquals(retained + unrelated + running, started.events)
+                assertEquals(unrelated, started.visibleEvent)
+            }
+        }
     }
 
     @Test
@@ -403,18 +451,20 @@ class EditorEventReducerTest {
     @Test
     fun `ED44 - a new upload resolves its hidden failure but preserves other hidden terminals`() {
         val finished = event(upload, EditorEventContent.Finished(text), 1)
-        val visible = problem(validation, EditorErrors.missingTitle, 2)
+        val visible = problem(quote, EditorErrors.quoteFetchFailed, 2)
         val previous = OperationRef.Upload(EditorUploadToken(2, session))
         val failed = problem(previous, EditorErrors.uploadNetwork, 3)
-        val failedSend = problem(submission, EditorErrors.network, 4)
-        val information = event(notice, EditorEventContent.Information(text), 5)
+        val hiddenValidation = problem(validation, EditorErrors.missingTitle, 4)
+        val failedSend = problem(submission, EditorErrors.network, 5)
+        val information = event(notice, EditorEventContent.Information(text), 6)
         val retry = OperationRef.Upload(EditorUploadToken(3, session))
-        val running = event(retry, EditorEventContent.InProgress(text), 6)
-        val state = containing(finished, visible, failed, failedSend, information).observe(retry)
+        val running = event(retry, EditorEventContent.InProgress(text), 7)
+        val state = containing(finished, visible, failed, hiddenValidation, failedSend, information).observe(retry)
         assertEquals(visible, state.visibleEvent)
         val started = state.step(EditorEventInput.OperationStarted(running))
-        assertEquals(listOf(finished, failedSend, information, running), started.events)
-        assertEquals(failedSend, started.visibleEvent)
+        assertEquals(listOf(finished, hiddenValidation, failedSend, information, running), started.events)
+        assertEquals(hiddenValidation, started.visibleEvent)
+        assertEquals(failedSend, started.step(EditorEventInput.Acknowledge(hiddenValidation.key)).visibleEvent)
     }
 
     @Test
@@ -660,6 +710,11 @@ class EditorEventReducerTest {
         assertEquals(EditorEventTransition(advanced), reduceEditorEvents(advanced, regression))
         val repeated = EditorEventInput.UploadAdvanced(running.key, UploadProgress(2, 3))
         assertEquals(EditorEventTransition(advanced), reduceEditorEvents(advanced, repeated))
+        // A batch cannot shrink or grow within this occurrence, even when completed does not decrease.
+        listOf(UploadProgress(2, 2), UploadProgress(2, 4), UploadProgress(3, 4)).forEach { changedTotal ->
+            val changed = EditorEventInput.UploadAdvanced(running.key, changedTotal)
+            assertEquals(EditorEventTransition(advanced), reduceEditorEvents(advanced, changed))
+        }
         val last = reduceEditorEvents(advanced, EditorEventInput.UploadAdvanced(running.key, UploadProgress(3, 3)))
         assertEquals(
             listOf(running.copy(content = EditorEventContent.InProgress(text, UploadProgress(3, 3)))),
@@ -668,6 +723,27 @@ class EditorEventReducerTest {
         assertEquals(advanced.currentOperations, last.state.currentOperations)
         assertTrue(last.commands.isEmpty())
         assertFalse(last.gestureConsumed)
+    }
+
+    @Test
+    fun `ED43 - first upload progress fixes the total and a new occurrence may choose another total`() {
+        val running = event(upload, EditorEventContent.InProgress(text), 1)
+        val initial = containing(running)
+        val progress = UploadProgress(1, 3)
+        val state = initial.step(EditorEventInput.UploadAdvanced(running.key, progress))
+        assertEquals(listOf(running.copy(content = EditorEventContent.InProgress(text, progress))), state.events)
+        val changed = EditorEventInput.UploadAdvanced(running.key, UploadProgress(2, 4))
+        assertEquals(EditorEventTransition(state), reduceEditorEvents(state, changed))
+        val newer = event(upload, EditorEventContent.InProgress(text, UploadProgress(0, 4)), 2)
+        val replaced = state.step(EditorEventInput.Received(newer))
+        val advanced = reduceEditorEvents(replaced, EditorEventInput.UploadAdvanced(newer.key, UploadProgress(1, 4)))
+        assertEquals(
+            listOf(newer.copy(content = EditorEventContent.InProgress(text, UploadProgress(1, 4)))),
+            advanced.state.events,
+        )
+        assertEquals(replaced.currentOperations, advanced.state.currentOperations)
+        assertTrue(advanced.commands.isEmpty())
+        assertFalse(advanced.gestureConsumed)
     }
 
     @Test

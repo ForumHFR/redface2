@@ -10,7 +10,8 @@ sealed interface EditorEventInput {
     /**
      * Only an accepted, effective launch (send/upload/quote insertion), never the arm tap.
      * Observation is optional; an observed operation may start only before its first occurrence.
-     * ED-44 replaces the displayed error/finish and explicitly resolved errors; hidden events survive.
+     * ED-44 replaces the displayed error/finish and earlier errors of the same kind, even when hidden.
+     * A send also clears validation errors; information and hidden finishes survive. ED-170 stays separate.
      */
     data class OperationStarted(val event: EditorEvent) : EditorEventInput
     /** Silent success (ED-45): finish known current work and remove only its progress, rejecting late deliveries. */
@@ -20,7 +21,7 @@ sealed interface EditorEventInput {
      * Stale sessions/sequences and repeated or finished occurrences remain rejected.
      */
     data class Received(val event: EditorEvent) : EditorEventInput
-    /** Nondecreasing progress mutates an existing occurrence without another event/announcement. */
+    /** Nondecreasing progress with a fixed total per occurrence; no new event/announcement. */
     data class UploadAdvanced(val key: EventKey, val progress: UploadProgress) : EditorEventInput
     data class FormLoaded(
         val session: EditorSession,
@@ -127,12 +128,17 @@ private fun startOperation(state: EditorEventState, event: EditorEvent): EditorE
     }
 }
 
-/** ED-44: hidden terminals survive, except resolved upload failures and uncertainty on a new send. */
+/**
+ * ED-44, XaTriX (2026-11-09, 22:01, #1513): launch clears same-kind errors and send clears validation.
+ * Information, hidden finishes and unrelated hidden errors survive; ED-170 keeps its next-send lifecycle.
+ */
 private fun isReplacedByLaunch(event: EditorEvent, visible: EditorEvent?, operation: OperationRef): Boolean = when {
     event.isAmbiguous -> operation is OperationRef.Submission
     event.key == visible?.key -> event.rank == EditorEventRank.Error || event.content is EditorEventContent.Finished
-    operation is OperationRef.Upload && event.key.operation is OperationRef.Upload ->
-        (event.content as? EditorEventContent.Problem)?.error?.errorClass == EditorErrorClass.Upload
+    event.rank != EditorEventRank.Error -> false
+    event.key.operation.sameKind(operation) -> true
+    operation is OperationRef.Submission ->
+        (event.key.operation as? OperationRef.Local)?.kind == EditorLocalOperation.Validation
     else -> false
 }
 
@@ -179,6 +185,8 @@ private fun advanceUpload(state: EditorEventState, input: EditorEventInput.Uploa
     val operation = currentOperation(state, input.key.session, input.key.operation)
     val content = (state.events.find { it.key == input.key }?.content as? EditorEventContent.InProgress)
         ?.takeIf { operation != null && !operation.finished && operation.ref is OperationRef.Upload }
+        // The first known total fixes the batch size; changing it could make the displayed fraction regress.
+        ?.takeUnless { it.uploadProgress != null && input.progress.total != it.uploadProgress.total }
         ?.takeUnless { input.progress.completed < (it.uploadProgress?.completed ?: 0) }
         ?: return state
     return state.copy(events = state.events.map {
