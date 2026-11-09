@@ -8,7 +8,7 @@ import org.junit.Test
 
 class EditorChromeLayoutPolicyTest {
     private val compact = EditorChromeLayoutRequest(360.dp, 139.dp, compactHeight = true,
-        hasHeader = true, statusWidths = listOf(48.dp, 48.dp))
+        hasHeader = true, firstStatusWidth = 48.dp, secondStatusWidth = 48.dp)
 
     @Test
     fun `ED25 at 360 dp retains header and preview before states and preserves the scrolling target`() {
@@ -39,7 +39,7 @@ class EditorChromeLayoutPolicyTest {
     @Test
     fun `ED25 landscape uses useful width and measured badges rather than orientation`() {
         val landscape = compact.copy(availableWidth = 760.dp - 24.dp - 48.dp,
-            statusWidths = listOf(80.dp, 56.dp))
+            firstStatusWidth = 80.dp, secondStatusWidth = 56.dp)
         val result = allocateEditorChrome(landscape)
         assertEquals(EditorFixedSlot.entries, result.fixedSlots)
         assertEquals(285.dp, result.scrollingWidth)
@@ -61,10 +61,25 @@ class EditorChromeLayoutPolicyTest {
 
     @Test
     fun `ED25 no header and zero states reserve preview only`() {
-        val result = allocateEditorChrome(compact.copy(hasHeader = false, statusWidths = emptyList()))
+        val result = allocateEditorChrome(compact.copy(hasHeader = false,
+            firstStatusWidth = null, secondStatusWidth = null))
         assertEquals(listOf(EditorFixedSlot.Preview), result.fixedSlots)
         assertEquals(141.dp, result.scrollingWidth)
         assertTrue(result.overflowSlots.isEmpty())
+    }
+
+    @Test
+    fun `ED25 second status alone keeps its identity and reserves no absent first status`() {
+        val request = compact.copy(availableWidth = 347.dp, hasHeader = false,
+            firstStatusWidth = null, secondStatusWidth = 80.dp)
+        val exact = allocateEditorChrome(request)
+        assertEquals(listOf(EditorFixedSlot.Preview, EditorFixedSlot.SecondStatus), exact.fixedSlots)
+        assertTrue(exact.overflowSlots.isEmpty())
+        assertEquals(48.dp, exact.scrollingWidth)
+        val below = allocateEditorChrome(request.copy(availableWidth = 346.dp))
+        assertEquals(listOf(EditorFixedSlot.Preview), below.fixedSlots)
+        assertEquals(listOf(EditorFixedSlot.SecondStatus), below.overflowSlots)
+        assertEquals(127.dp, below.scrollingWidth)
     }
 
     @Test

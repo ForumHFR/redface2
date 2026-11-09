@@ -12,7 +12,9 @@ data class EditorChromeLayoutRequest(
     val submitWidth: Dp,
     val compactHeight: Boolean,
     val hasHeader: Boolean = false,
-    val statusWidths: List<Dp> = emptyList(),
+    // Independent identities: null means absent; a present target reserves at least 48 dp.
+    val firstStatusWidth: Dp? = null,
+    val secondStatusWidth: Dp? = null,
     // ED-30/92: events reserve their measured envelope PLUS the send gap, ahead of fixed slots.
     val minimumContentWidth: Dp = 48.dp,
 )
@@ -27,16 +29,15 @@ data class EditorChromeAllocation(
 
 /** ED-25: Send > Header > Preview > states. No orientation or guessed send width. */
 fun allocateEditorChrome(request: EditorChromeLayoutRequest): EditorChromeAllocation {
-    val widths = listOf(request.availableWidth, request.submitWidth, request.minimumContentWidth) + request.statusWidths
+    val widths = listOfNotNull(request.availableWidth, request.submitWidth, request.minimumContentWidth,
+        request.firstStatusWidth, request.secondStatusWidth)
     require(widths.all { it.value.isFinite() && it >= 0.dp })
-    require(request.statusWidths.size <= 2)
     require(request.submitWidth >= 48.dp && request.minimumContentWidth >= 48.dp)
     val candidates = if (request.compactHeight) buildList {
         if (request.hasHeader) add(EditorFixedSlot.Header to 48.dp)
         add(EditorFixedSlot.Preview to 48.dp)
-        request.statusWidths.forEachIndexed { index, width ->
-            add((if (index == 0) EditorFixedSlot.FirstStatus else EditorFixedSlot.SecondStatus) to maxOf(48.dp, width))
-        }
+        request.firstStatusWidth?.let { add(EditorFixedSlot.FirstStatus to maxOf(48.dp, it)) }
+        request.secondStatusWidth?.let { add(EditorFixedSlot.SecondStatus to maxOf(48.dp, it)) }
     } else emptyList()
     var remaining = (request.availableWidth - 32.dp - request.submitWidth).coerceAtLeast(0.dp)
     val fixed = mutableListOf<EditorFixedSlot>()

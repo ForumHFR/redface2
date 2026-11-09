@@ -59,7 +59,7 @@ class EditorAppBarRoborazziTest {
             }
         }
         listOf(false, true).forEach { isDark ->
-            listOf(1f, 1.3f).forEach { fontScale ->
+            listOf(1f, 1.3f, 2f).forEach { fontScale ->
                 (0..3).forEach { sample ->
                     capture(sample, isDark, fontScale)
                 }

@@ -1,7 +1,7 @@
 package fr.forumhfr.redface2.core.ui.editor
 
 import androidx.annotation.DrawableRes
-import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.material3.Badge
@@ -52,9 +52,10 @@ fun EditorStatusIcon(
     val style = MaterialTheme.typography.labelSmall
     val badgeSize = rememberTextMeasurer().measure(badgeCount?.toString().orEmpty(), style = style).size
     val density = LocalDensity.current
-    // Stack rather than overlay: even a large counter never covers the 24 dp glyph.
+    // Stack while both fit; at large font scales overlap the badge instead of clipping either layer.
     val badgeWidth = with(density) { badgeSize.width.toDp() } + 8.dp
-    val height = 24.dp + if (badgeCount == null) 0.dp else maxOf(16.dp, with(density) { badgeSize.height.toDp() })
+    val badgeHeight = maxOf(16.dp, with(density) { badgeSize.height.toDp() })
+    val height = (24.dp + if (badgeCount == null) 0.dp else badgeHeight).coerceAtMost(48.dp)
     // Replace only the tooltip state on masking: its popup/job die, the live anchor keeps its ID.
     val tooltip = key(visible) { rememberTooltipState() }
     val scope = rememberCoroutineScope()
@@ -78,15 +79,17 @@ fun EditorStatusIcon(
     ) {
         IconButton(onClick = onClick, enabled = enabled && visible,
             modifier = (if (!visible) Modifier.size(1.dp) else Modifier.sizeIn(
-                minWidth = maxOf(48.dp, badgeWidth), minHeight = maxOf(48.dp, height),
+                minWidth = maxOf(48.dp, badgeWidth), minHeight = 48.dp,
             )).clearAndSetSemantics {},
         ) {
-            if (visible) Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                RedfaceVectorIcon(iconRes, Modifier.testTag(EDITOR_STATUS_GLYPH_TAG))
+            if (visible) Box(Modifier.size(maxOf(24.dp, badgeWidth), height)) {
+                RedfaceVectorIcon(iconRes, Modifier.align(Alignment.TopCenter).testTag(EDITOR_STATUS_GLYPH_TAG))
                 if (badgeCount != null) Badge(containerColor = MaterialTheme.colorScheme.secondaryContainer,
                     contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
-                    modifier = Modifier.testTag(EDITOR_STATUS_BADGE_TAG).clearAndSetSemantics {},
-                ) { Text(badgeCount.toString(), style = style, maxLines = 1) }
+                    modifier = Modifier.align(Alignment.BottomCenter).testTag(EDITOR_STATUS_BADGE_TAG)
+                        .clearAndSetSemantics {},
+                ) { Text(badgeCount.toString(), style = style, maxLines = 1,
+                    modifier = Modifier.testTag(EDITOR_STATUS_BADGE_TEXT_TAG)) }
             }
         }
     }
@@ -94,3 +97,4 @@ fun EditorStatusIcon(
 
 internal const val EDITOR_STATUS_GLYPH_TAG = "editor-status-glyph"
 internal const val EDITOR_STATUS_BADGE_TAG = "editor-status-badge"
+internal const val EDITOR_STATUS_BADGE_TEXT_TAG = "editor-status-badge-text"

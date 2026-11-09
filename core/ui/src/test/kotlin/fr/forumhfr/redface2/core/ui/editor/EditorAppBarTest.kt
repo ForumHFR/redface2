@@ -41,6 +41,7 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.PlatformTextStyle
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.style.LineHeightStyle
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
@@ -149,7 +150,7 @@ class EditorAppBarTest {
             compose.runOnIdle { inset.value = side }
             val bar = compose.onNodeWithTag("bar").getUnclippedBoundsInRoot()
             assertEquals(360f - 2 * side.value, bar.width.value, 0.5f)
-            val targets = listOf("Retour", "Citations", "Brouillon", "Afficher l’aperçu").map { label ->
+            val targets = listOf("Retour", "Afficher l’aperçu", "Citations", "Brouillon").map { label ->
                 compose.onNode(hasContentDescription(label) and
                     SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
                     .getUnclippedBoundsInRoot().also {
@@ -170,6 +171,47 @@ class EditorAppBarTest {
             assertTrue(targets[0].right <= title.left)
             assertTrue(title.right <= targets[1].left)
             assertTrue(targets[1].right <= targets[2].left && targets[2].right <= targets[3].left)
+        }
+    }
+
+    @Test
+    fun `ED10 badge and 24 dp glyph fit the 48 dp bar through 2x L without text clipping`() {
+        val scale = mutableStateOf(1f)
+        val count = mutableStateOf(12)
+        compose.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, scale.value)) {
+                RedfaceTheme(reading = ReadingDisplaySettings(fontScale = FontScalePreference.L)) {
+                    EditorAppBar("Répondre", "Contexte", {}, {}, Modifier.width(360.dp).testTag("bar"),
+                        firstStatus = EditorAppBarStatus(R.drawable.ic_editor_quote, "Citations", {}, count.value))
+                }
+            }
+        }
+        listOf(1f, 1.3f, 1.5f, 2f).forEach { fontScale ->
+            listOf(12, 123456).forEach { badgeCount ->
+                compose.runOnIdle { scale.value = fontScale; count.value = badgeCount }
+                val barNode = compose.onNodeWithTag("bar")
+                val bar = barNode.getUnclippedBoundsInRoot()
+                assertEquals(48f, bar.height.value, 0.5f)
+                val pixelsPerDp = barNode.fetchSemanticsNode().boundsInRoot.height / bar.height.value
+                listOf(EDITOR_STATUS_GLYPH_TAG, EDITOR_STATUS_BADGE_TAG).forEach { tag ->
+                    val node = compose.onNodeWithTag(tag, useUnmergedTree = true)
+                    val bounds = node.getUnclippedBoundsInRoot()
+                    assertTrue(bounds.top >= bar.top && bounds.bottom <= bar.bottom)
+                    val clipped = node.fetchSemanticsNode().boundsInRoot
+                    assertEquals("$tag must not be clipped", bounds.height.value * pixelsPerDp, clipped.height, 0.5f)
+                    assertEquals(bounds.width.value * pixelsPerDp, clipped.width, 0.5f)
+                    if (tag == EDITOR_STATUS_GLYPH_TAG) {
+                        assertEquals(24f, bounds.height.value, 0.5f)
+                        assertEquals(24f, bounds.width.value, 0.5f)
+                    }
+                }
+                assertRenderedLineFits(EDITOR_STATUS_BADGE_TEXT_TAG, bar)
+                val text = textLayout(EDITOR_STATUS_BADGE_TEXT_TAG)
+                assertEquals(fontScale, text.layoutInput.density.fontScale, 0.001f)
+                assertEquals(11f * FontScalePreference.L.factor, text.layoutInput.style.fontSize.value, 0.001f)
+                assertFalse("All digits must remain visible", text.didOverflowWidth)
+            }
         }
     }
 
@@ -291,7 +333,7 @@ class EditorAppBarTest {
                 val back = compose.onNodeWithContentDescription("Retour").getUnclippedBoundsInRoot()
                 assertTrue(back.width >= 48.dp && back.left >= bar.left && back.right <= header.left)
                 val pxPerDp = barNode.fetchSemanticsNode().boundsInRoot.width / bar.width.value
-                listOf("Citations", "Brouillon", "Afficher l’aperçu").forEach { label ->
+                listOf("Afficher l’aperçu", "Citations", "Brouillon").forEach { label ->
                     val target = compose.onNode(hasContentDescription(label) and
                         SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
                     target.performScrollTo().assertIsDisplayed().performClick()
@@ -307,6 +349,69 @@ class EditorAppBarTest {
         }
         assertEquals(6, headers)
         assertEquals(18, actions)
+    }
+
+    @Test
+    fun `ED25 preview is fully visible at 200 dp with two statuses before any scroll`() {
+        var previews = 0
+        compose.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, 1.3f)) {
+                RedfaceTheme(reading = ReadingDisplaySettings(fontScale = FontScalePreference.L)) {
+                    EditorAppBar("Nouveau sujet", "Titre et catégorie", {}, { previews++ },
+                        Modifier.width(200.dp).testTag("bar"),
+                        firstStatus = EditorAppBarStatus(R.drawable.ic_editor_quote, "Citations", {}, 3),
+                        secondStatus = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon", {}),
+                        onOpenHeader = {}, headerActionLabel = "Modifier le titre")
+                }
+            }
+        }
+        val barNode = compose.onNodeWithTag("bar")
+        val bar = barNode.getUnclippedBoundsInRoot()
+        val header = compose.onNodeWithTag(EDITOR_APP_BAR_TITLE).getUnclippedBoundsInRoot()
+        val preview = compose.onNodeWithContentDescription("Afficher l’aperçu").assertIsDisplayed()
+        val bounds = preview.getUnclippedBoundsInRoot()
+        assertEquals(48f, bounds.width.value, 0.5f)
+        assertEquals(48f, bounds.height.value, 0.5f)
+        assertTrue(bounds.left >= header.right && bounds.right <= bar.right)
+        val pixelsPerDp = barNode.fetchSemanticsNode().boundsInRoot.width / bar.width.value
+        assertEquals(bounds.width.value * pixelsPerDp, preview.fetchSemanticsNode().boundsInRoot.width, 0.5f)
+        preview.performTouchInput { click() }
+        assertEquals(1, previews)
+    }
+
+    @Test
+    fun `ED10 context that would show only an ellipsis is hidden while short context remains`() {
+        val context = mutableStateOf("W".repeat(20))
+        compose.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, 1.3f)) {
+                RedfaceTheme(reading = ReadingDisplaySettings(fontScale = FontScalePreference.L)) {
+                    Column {
+                        EditorAppBar("Nouveau sujet", context.value, {}, {}, Modifier.width(200.dp).testTag("bar"),
+                            firstStatus = EditorAppBarStatus(R.drawable.ic_editor_quote, "Citations", {}, 3),
+                            secondStatus = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon", {}),
+                            onOpenHeader = {}, headerActionLabel = "Modifier le titre")
+                        Text(context.value, style = MaterialTheme.typography.labelMedium, maxLines = 1,
+                            overflow = TextOverflow.Ellipsis, modifier = Modifier.width(24.dp).testTag("reference"))
+                    }
+                }
+            }
+        }
+        val bar = compose.onNodeWithTag("bar").getUnclippedBoundsInRoot()
+        val title = assertRenderedLineFits(EDITOR_APP_BAR_LINE_ONE, bar)
+        assertEquals(24f, title.width.value, 0.5f)
+        val reference = textLayout("reference")
+        assertTrue(reference.isLineEllipsized(0))
+        assertEquals(0, reference.getLineEnd(0, visibleEnd = true))
+        val contextHeight = compose.onNodeWithTag("reference").getUnclippedBoundsInRoot().height
+        assertTrue("Height alone must allow both lines", title.height + contextHeight <= bar.height)
+        compose.onNodeWithTag(EDITOR_APP_BAR_LINE_TWO, useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag(EDITOR_APP_BAR_TITLE)
+            .assert(hasContentDescription("Modifier le titre : Nouveau sujet, ${context.value}"))
+        compose.runOnIdle { context.value = "I" }
+        compose.onNodeWithTag(EDITOR_APP_BAR_LINE_TWO, useUnmergedTree = true).assertIsDisplayed()
+        assertEquals(1, textLayout(EDITOR_APP_BAR_LINE_TWO).getLineEnd(0, visibleEnd = true))
     }
 
     @Test
@@ -352,8 +457,8 @@ class EditorAppBarTest {
         compose.onNodeWithTag(EDITOR_APP_BAR_TITLE)
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
             .assert(hasContentDescription("Modifier les destinataires et le sujet : Nouveau MP, Alice et Bob"))
-            .assert(SemanticsMatcher("MP header action") {
-                it.config[SemanticsActions.OnClick].label == "Modifier les destinataires et le sujet"
+            .assert(SemanticsMatcher("Header action has no duplicate label") {
+                it.config[SemanticsActions.OnClick].label == null
             }).performClick()
         compose.onNodeWithContentDescription("Retour").performClick()
         compose.onNodeWithContentDescription("Afficher l’aperçu").performClick()

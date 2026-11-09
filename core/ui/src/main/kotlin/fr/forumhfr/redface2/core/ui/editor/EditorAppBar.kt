@@ -70,8 +70,8 @@ fun EditorAppBar(
     if (compactHeight) return
     Surface(modifier.fillMaxWidth().height(48.dp), color = MaterialTheme.colorScheme.surfaceContainer) {
         BoxWithConstraints {
-            // Keep Return + at least 48 dp of title/header + a 48 dp action viewport, with 8 dp gutters.
-            // States then Preview scroll in visual/keyboard order instead of crushing the header.
+            // Keep Return + at least 48 dp of title/header + a 48 dp action viewport, with 4 dp gutters.
+            // Preview leads the scrolling actions so it stays visible ahead of states (ED-25).
             // Below 152 dp even this minimum row scrolls; no target is shrunk or removed.
             val rowWidth = maxOf(maxWidth, 152.dp)
             Row(Modifier.horizontalScroll(rememberScrollState()).width(rowWidth).padding(horizontal = 4.dp),
@@ -81,10 +81,10 @@ fun EditorAppBar(
                 EditorAppBarTitle(title, context, onOpenHeader, headerActionLabel, headerEnabled, Modifier.weight(1f))
                 Row(Modifier.widthIn(max = rowWidth - 104.dp).horizontalScroll(rememberScrollState())
                     .testTag(EDITOR_APP_BAR_ACTIONS), verticalAlignment = Alignment.CenterVertically) {
-                    EditorAppBarStatusSlot(firstStatus)
-                    EditorAppBarStatusSlot(secondStatus)
                     EditorActionIcon(R.drawable.ic_editor_preview, stringResource(R.string.editor_preview_show),
                         onPreview, enabled = previewEnabled)
+                    EditorAppBarStatusSlot(firstStatus)
+                    EditorAppBarStatusSlot(secondStatus)
                 }
             }
         }
@@ -111,7 +111,7 @@ private fun EditorAppBarTitle(
     val fullTitle = listOf(title, context).filter { it.isNotEmpty() }.joinToString(", ")
     val headerLabel = stringResource(R.string.editor_app_bar_open_header, headerActionLabel.orEmpty(), fullTitle)
     val action = if (onOpenHeader == null) Modifier else Modifier
-        .clickable(enabled = enabled, role = Role.Button, onClickLabel = headerActionLabel, onClick = onOpenHeader)
+        .clickable(enabled = enabled, role = Role.Button, onClick = onOpenHeader)
         .semantics { contentDescription = headerLabel }
     Row(modifier.height(48.dp).then(action).testTag(EDITOR_APP_BAR_TITLE),
         verticalAlignment = Alignment.CenterVertically) {
@@ -123,9 +123,11 @@ private fun EditorAppBarTitle(
             val contextStyle = MaterialTheme.typography.labelMedium
             val titleHeight = measurer.measure(title, titleStyle, overflow = TextOverflow.Ellipsis,
                 maxLines = 1, constraints = constraints).size.height
-            val contextHeight = measurer.measure(context, contextStyle, overflow = TextOverflow.Ellipsis,
-                maxLines = 1, constraints = constraints).size.height
-            val showContext = context.isNotEmpty() && titleHeight + contextHeight <= with(density) { 48.dp.roundToPx() }
+            val contextLayout = measurer.measure(context, contextStyle, overflow = TextOverflow.Ellipsis,
+                maxLines = 1, constraints = constraints)
+            val hasVisibleContext = contextLayout.getLineEnd(0, visibleEnd = true) > 0
+            val linesFit = titleHeight + contextLayout.size.height <= with(density) { 48.dp.roundToPx() }
+            val showContext = context.isNotEmpty() && hasVisibleContext && linesFit
             Column {
                 Text(title, style = titleStyle, maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.fillMaxWidth().testTag(EDITOR_APP_BAR_LINE_ONE))
