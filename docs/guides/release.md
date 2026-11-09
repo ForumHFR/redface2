@@ -52,8 +52,8 @@ illisible ou dépourvu d'au moins un marqueur attendu arrête le job avant tout 
 
 La garde lit `classes*.dex` dans les APK et `base/dex/classes*.dex` dans les AAB.
 Les projets sont dérivés des `include(...)` littéraux de `settings.gradle.kts`, hors
-commentaires. Dans leurs sources `src/main/**/*.kt` et `.java`, hors commentaires,
-un projet contribue s'il déclare `@HiltViewModel`, `@AndroidEntryPoint`,
+commentaires. Dans leurs sources `src/main/**/*.kt` et `.java`, hors commentaires
+et littéraux, un projet contribue s'il déclare `@HiltViewModel`, `@AndroidEntryPoint`,
 `@HiltAndroidApp` ou `@Module` accompagné de `@InstallIn` sur la même déclaration.
 Les plugins Gradle et les répertoires de projets non inclus ne participent pas à
 cette dérivation.
@@ -69,6 +69,31 @@ cette dérivation.
 - Pour **chaque classe `@HiltAndroidApp`**, elle exige aussi `Hilt_<Classe>`
   (actuellement `Hilt_RedfaceApplication`).
 
+La dérivation est **fail-closed** : les annotations simples (nom court ou qualifié)
+doivent viser une déclaration nommée au premier niveau du fichier. Les formes
+Kotlin `internal class`, Java `public final class`, les arguments d'annotations
+multilignes et les annotations intermédiaires sont reconnus. `@Module` et
+`@InstallIn` peuvent précéder un `object`, une `class` ou une `interface` ; les
+trois autres annotations exigent une `class`. La cible est la première déclaration
+qui suit, même si plusieurs déclarations partagent une ligne ; seuls les
+modificateurs reconnus et les autres annotations simples peuvent s'intercaler.
+
+Le lexer retire les chaînes avec échappements, les chaînes Kotlin triples
+multilignes (y compris leurs interpolations), les caractères, les commentaires
+`//` et les commentaires `/* … */` imbriqués. Le contenu des chaînes est conservé
+uniquement pour lire les `include(...)` littéraux de `settings.gradle.kts`.
+Après analyse, chaque token `HiltViewModel`, `AndroidEntryPoint`, `HiltAndroidApp`
+et `InstallIn` hors imports et littéraux/commentaires doit correspondre à une
+contribution retenue. Les occurrences non appariées sont toutes signalées.
+
+Les annotations Hilt groupées (`@[HiltViewModel …]`), les cibles Hilt imbriquées
+(Kotlin ou Java), les alias d'import Hilt et les syntaxes non reconnues échouent
+avec `::error::`, le fichier, la ligne et « forme non supportée ». La garde ne
+déduit aucun nom de marqueur pour les classes imbriquées. Les noms de cibles
+doivent être des identifiants ASCII simples ; les échappements Unicode et les
+blocs texte Java sont refusés. Un humain doit réécrire la déclaration dans une
+forme reconnue ou étendre le parseur et ses régressions avant publication.
+
 **Hypothèse : DEX non minifié et non obfusqué.** La convention
 `RedfaceConventionPlugins.kt` impose `isMinifyEnabled = false` ; les fixtures
 release v371 à v377 ne sont pas minifiées. Si la minification est activée, cette
@@ -78,9 +103,9 @@ les APK et AAB finaux, puis rejouer les cas sains et les pertes totales et parti
 **Limites :** la recherche porte sur des octets dans les DEX, sans vérifier les
 définitions de classes ni leur intégration au graphe de composants généré. Les
 autres liaisons `@Module` ne sont pas contrôlées individuellement ; une perte partielle
-de ces liaisons peut donc passer. La lecture statique suit les déclarations nommées
-du dépôt ; elle ne résout pas les alias d'annotations ni les chemins de projets
-remappés par Gradle. Utiliser un checkout correspondant au binaire.
+de ces liaisons peut donc passer. La lecture statique n'est pas un parseur Kotlin
+ou Java complet et ne résout pas les chemins de projets remappés par Gradle.
+Utiliser un checkout correspondant au binaire.
 
 Depuis un checkout du code correspondant au binaire, contrôle manuel sans Gradle
 (Bash, `unzip`, `grep`, `find` et outils standard de l'image Android SDK du job) :
@@ -88,7 +113,16 @@ Depuis un checkout du code correspondant au binaire, contrôle manuel sans Gradl
 ```bash
 bash scripts/release/verify-hilt-artifact.sh /chemin/redface2.apk
 # Plusieurs APK/AAB peuvent être passés à la même commande.
+
+# Dérivation seule, sans APK/AAB (chemin du dépôt facultatif).
+bash scripts/release/verify-hilt-artifact.sh --list-expected
+
+# Régressions du parseur : petits dépôts dans mktemp -d, sans Gradle ni APK.
+bash scripts/release/verify-hilt-artifact.test.sh
 ```
+
+Le test compare les listes complètes et les diagnostics localisés ; il s'arrête
+au premier écart. Il n'est pas branché dans un workflow.
 
 ### Compatibilité Room et rollback
 
