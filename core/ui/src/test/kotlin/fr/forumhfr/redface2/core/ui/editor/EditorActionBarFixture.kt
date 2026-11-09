@@ -67,6 +67,9 @@ internal class EditorActionBarFixture {
     val arm get() = ArmToken(1, EditorSession("bar", "alice", "topic:23:42"),
         android.os.SystemClock.elapsedRealtimeNanos(), 60_000L)
 
+    /** Captures only: armed far in the future, the decorative countdown stays at 0 whatever the scheduling. */
+    val frozenArm get() = arm.copy(armedAtNanos = Long.MAX_VALUE / 4)
+
     fun finished() = controlEvent(EditorEventContent.Finished(
         EditorText(R.plurals.editor_event_images_inserted_summary, listOf(3), quantity = 3),
         accessibleSummary = EditorText(R.plurals.editor_event_images_inserted, listOf(3), quantity = 3),

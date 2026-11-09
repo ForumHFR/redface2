@@ -55,7 +55,7 @@ class EditorActionBarRoborazziTest {
     }
 
     private fun showSample(sample: Int) {
-        host.bar.value = EditorBarState(sampleMode(sample), if (sample == 6 || sample == 16) host.arm else null)
+        host.bar.value = EditorBarState(sampleMode(sample), if (sample == 6 || sample == 16) host.frozenArm else null)
         host.enabled.value = sample != 17
         host.imageUrl.value = sample != 5
         host.shortcut.value = if (sample == 1) EditorBarShortcut(R.drawable.ic_editor_bold, "Gras", {}) else null
