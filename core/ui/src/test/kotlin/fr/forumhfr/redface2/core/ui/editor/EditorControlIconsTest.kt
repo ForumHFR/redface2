@@ -205,6 +205,9 @@ class EditorControlIconsTest {
             chip.getUnclippedBoundsInRoot().run { assertTrue(toString(), width.value >= 48f && height.value >= 48f) }
             assertEquals(48f, chip.getUnclippedBoundsInRoot().height.value, 0.5f)
             val state = if (active) "enabled" else "disabled"
+            // The enabled pass leaves a fading press ripple: settle it, a moving overlay is no reference.
+            compose.mainClock.advanceTimeBy(2_000L)
+            compose.waitForIdle()
             chip.captureRoboImage("src/test/screenshots/editor_recipient_$state.png")
         }
     }
