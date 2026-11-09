@@ -30,17 +30,19 @@ sealed interface EditorBackAction {
 }
 
 /**
- * ED-85: Back acts on visible layers. XaTriX decision (2026-11-09, 18:12, #1513): disarm before
- * closing retained Format/Color/Image modes masked by the arm; all other priorities stay unchanged.
+ * ED-85: Back acts on visible layers. XaTriX decisions (2026-11-09, 18:12 and 21:42, #1513):
+ * smiley details, sheets and tooltips stay first, then event details, then the arm, then retained
+ * Format/Color/Image modes masked by the event (ED-82) or arm. Closing details preserves the arm
+ * and saved mode; the next Back disarms if needed before closing the mode.
  */
 fun resolveEditorBack(state: EditorBackState): EditorBackAction = when {
     state.sheet == EditorSheet.Smileys && state.smileyDetailOpen -> EditorBackAction.ReturnToSmileyGrid
     state.sheet != null -> EditorBackAction.CloseSheet(state.sheet)
     state.tooltipOpen -> EditorBackAction.CloseTooltip
+    state.eventDetailKey != null -> EditorBackAction.CloseEventDetails(state.eventDetailKey)
     state.bar.arm != null -> EditorBackAction.Disarm(state.bar.arm)
     state.bar.visibleMode in setOf(EditorBarMode.Color, EditorBarMode.Image) -> EditorBackAction.CloseSublevel
     state.bar.visibleMode == EditorBarMode.Format -> EditorBackAction.CloseFormat
-    state.eventDetailKey != null -> EditorBackAction.CloseEventDetails(state.eventDetailKey)
     state.panelOpen -> EditorBackAction.ClosePanel
     state.sharedPreviewOpen -> EditorBackAction.CloseSharedPreview
     else -> EditorBackAction.Leave(saveDraft = !state.submissionSucceeded)
