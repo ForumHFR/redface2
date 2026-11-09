@@ -9,7 +9,6 @@ import fr.forumhfr.redface2.core.ui.editor.EditorBackAction
 import fr.forumhfr.redface2.core.ui.editor.EditorBackState
 import fr.forumhfr.redface2.core.ui.editor.EditorBarGesture
 import fr.forumhfr.redface2.core.ui.editor.EditorBarMode
-import fr.forumhfr.redface2.core.ui.editor.EditorBarState
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
@@ -84,6 +83,23 @@ class PostEditorChromeAdapterTest {
         assertEquals(1, host.launches)
         assertTrue(host.calls.isEmpty())
         assertTrue(host.events.state.events.isEmpty())
+    }
+
+    @Test fun `ED53 Quotes Restore and PendingQuote panels do not schedule a deferred focus return`() {
+        host.adapter.barActions.onOptions()
+        host.adapter.closeSurface()
+        assertTrue(host.adapter.consumeReturn())
+        val generation = host.adapter.returnGeneration
+        listOf(PostEditorChromeSurface.Quotes, PostEditorChromeSurface.Restore,
+            PostEditorChromeSurface.PendingQuote).forEach { surface ->
+            host.adapter.open(surface)
+            assertEquals(surface, host.adapter.surface)
+            assertEquals(generation, host.adapter.returnGeneration)
+            host.adapter.closeSurface()
+            assertNull(host.adapter.surface)
+            assertEquals(generation, host.adapter.returnGeneration)
+            assertFalse(host.adapter.consumeReturn())
+        }
     }
     @Test fun `ED35 real form evidence and strict post guard are independent`() {
         val source = host.state
@@ -280,8 +296,13 @@ class PostEditorChromeAdapterTest {
 
     @Test fun `ED85 Back disarms each masked mode before the next Back closes it`() {
         val token = ArmToken(1, host.session, 0, 4_000L)
-        listOf(EditorBarMode.Format, EditorBarMode.Color, EditorBarMode.Image).forEach { mode ->
-            host.memory.bar = EditorBarState(mode)
+        val modes = listOf(
+            EditorBarMode.Format to listOf(EditorBarGesture.ToggleFormat),
+            EditorBarMode.Color to listOf(EditorBarGesture.ToggleFormat, EditorBarGesture.OpenColor),
+            EditorBarMode.Image to listOf(EditorBarGesture.OpenImage),
+        )
+        modes.forEach { (mode, gestures) ->
+            gestures.forEach(host.adapter::gesture)
             host.state = host.state.copy(submission = EditorSubmissionState.Armed(token))
             val calls = host.calls.size
             host.adapter.back()
@@ -293,5 +314,22 @@ class PostEditorChromeAdapterTest {
             assertEquals(expected, host.memory.bar.mode)
             assertEquals(calls + 1, host.calls.size)
         }
+    }
+
+    @Test fun `ED85 Back closes event details before disarming and preserves the exact arm`() {
+        val event = host.error(EditorErrors.network)
+        host.adapter.barActions.onEvent(event.key, EditorEventAction.Details)
+        val token = ArmToken(1, host.session, 0, 4_000L)
+        val armed = EditorSubmissionState.Armed(token)
+        host.state = host.state.copy(submission = armed)
+        host.adapter.back()
+        assertNull(host.adapter.detail)
+        assertNull(host.events.state.detailKey)
+        assertNull(host.events.state.visibleEvent)
+        assertEquals(armed, host.state.submission)
+        assertTrue(host.calls.isEmpty())
+        host.adapter.back()
+        assertEquals(EditorSubmissionState.Ready, host.state.submission)
+        assertEquals(listOf(PostEditorIntent.SubmitConfirmationDismissed), host.calls)
     }
 }

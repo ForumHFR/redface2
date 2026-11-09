@@ -14,6 +14,7 @@ import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.editor.EditorHostMemory
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import io.mockk.every
 import io.mockk.mockk
@@ -50,7 +51,7 @@ class EditorSubmitCallbackRestorationTest {
         every { model.bodyCaretRevealResetKey } returns 0
         every { model.bodyInputTransformation } returns InputTransformation {}
         every { model.chromeEvents } returns PostEditorChromeEvents()
-        every { model.chromeMemory } returns PostEditorChromeMemory()
+        every { model.chromeMemory } returns EditorHostMemory<PostEditorChromeSurface>()
         val received = mutableListOf<PostEditorEffect.SubmitSucceeded>()
         restoration.setContent {
             val owner = rememberSubmitAccount(account.value)

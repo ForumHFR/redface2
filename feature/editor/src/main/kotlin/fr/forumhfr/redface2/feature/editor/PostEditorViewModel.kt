@@ -66,6 +66,7 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeFormatResult
 import fr.forumhfr.redface2.core.ui.editor.EditorCause
 import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.EditorHostMemory
 import fr.forumhfr.redface2.core.ui.editor.MAX_IMAGES_PER_UPLOAD
 import fr.forumhfr.redface2.core.ui.editor.SmileyFavoriteMutations
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
@@ -171,7 +172,7 @@ class PostEditorViewModel @AssistedInject constructor(
     )
     val state: StateFlow<PostEditorState> = _state.asStateFlow()
     internal val chromeEvents = PostEditorChromeEvents()
-    internal val chromeMemory = PostEditorChromeMemory()
+    internal val chromeMemory = EditorHostMemory<PostEditorChromeSurface>()
 
     /** Capture operation transitions synchronously; observing StateFlow would lose short operations. */
     private fun updateChromeState(transform: (PostEditorState) -> PostEditorState) {

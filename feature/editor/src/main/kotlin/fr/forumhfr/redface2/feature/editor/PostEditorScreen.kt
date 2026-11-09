@@ -45,6 +45,7 @@ import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.ui.editor.EditorBackAction
 import fr.forumhfr.redface2.core.ui.editor.EditorBackState
 import fr.forumhfr.redface2.core.ui.editor.EditorChromeMetrics
+import fr.forumhfr.redface2.core.ui.editor.EditorHostMemory
 import fr.forumhfr.redface2.core.ui.editor.EditorScaffold
 import fr.forumhfr.redface2.core.ui.editor.EditorTooltipHost
 import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
@@ -137,7 +138,7 @@ internal fun PostEditorContent(
     modifier: Modifier = Modifier,
     bodyScrollState: ScrollState = rememberScrollState(),
     chromeEvents: PostEditorChromeEvents = remember { PostEditorChromeEvents() },
-    chromeMemory: PostEditorChromeMemory = remember { PostEditorChromeMemory() },
+    chromeMemory: EditorHostMemory<PostEditorChromeSurface> = remember { EditorHostMemory() },
     windowMetrics: EditorWindowMetrics? = null,
     bodyCaretRevealResetKey: () -> Int = { 0 },
 ) {

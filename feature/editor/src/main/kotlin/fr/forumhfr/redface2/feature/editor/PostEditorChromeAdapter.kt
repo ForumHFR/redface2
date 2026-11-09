@@ -2,62 +2,50 @@ package fr.forumhfr.redface2.feature.editor
 
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.ui.R as UiR
-import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitActions
-import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitState
-import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
-import fr.forumhfr.redface2.core.ui.editor.EditorActionBarActions
 import fr.forumhfr.redface2.core.ui.editor.EditorAppBarStatus
-import fr.forumhfr.redface2.core.ui.editor.EditorBackAction
-import fr.forumhfr.redface2.core.ui.editor.EditorBackState
-import fr.forumhfr.redface2.core.ui.editor.EditorBarGesture
-import fr.forumhfr.redface2.core.ui.editor.EditorBarImageActions
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorAction
-import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
-import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
-import fr.forumhfr.redface2.core.ui.editor.EditorSheet
+import fr.forumhfr.redface2.core.ui.editor.EditorHost
+import fr.forumhfr.redface2.core.ui.editor.EditorHostActions
+import fr.forumhfr.redface2.core.ui.editor.EditorHostMemory
+import fr.forumhfr.redface2.core.ui.editor.EditorHostSurfaces
 import fr.forumhfr.redface2.core.ui.editor.EventKey
-import fr.forumhfr.redface2.core.ui.editor.reduceEditorBar
-import fr.forumhfr.redface2.core.ui.editor.resolveEditorBack
 
-/** Post host; retain across recompositions. Scaffold owns IME capture/restore, root owns the picker launcher. */
+/** Post projections, quotes and business intents; common gestures live in EditorHost. */
 @Suppress("LongParameterList") // Independent host ports, without a ViewModel dependency in Compose tests.
 internal class PostEditorChromeAdapter(
     private val source: () -> PostEditorState,
-    private val body: TextFieldState,
-    private val events: PostEditorChromeEvents,
+    body: TextFieldState,
+    events: PostEditorChromeEvents,
     private val onIntent: (PostEditorIntent) -> Unit,
-    private val launchPicker: () -> Unit,
-    private val openSmileys: () -> Unit,
-    private val memory: PostEditorChromeMemory = PostEditorChromeMemory(),
+    launchPicker: () -> Unit,
+    openSmileys: () -> Unit,
+    memory: EditorHostMemory<PostEditorChromeSurface> = EditorHostMemory(),
+) : EditorHost<PostEditorChromeSurface>(
+    { PostEditorChromeState(source()).host }, body, events,
+    EditorHostActions(
+        { onIntent(PostEditorIntent.SubmitClicked(it)) },
+        { onIntent(PostEditorIntent.SubmitConfirmed(it)) },
+        { onIntent(PostEditorIntent.SubmitConfirmationDismissed) },
+        { onIntent(PostEditorIntent.ToolbarActionClicked(it)) },
+        { onIntent(PostEditorIntent.TogglePreview) },
+        { onIntent(PostEditorIntent.CloseRequested) },
+        onAcknowledgeUncertain = { onIntent(PostEditorIntent.ErrorDismissed) },
+    ),
+    EditorHostSurfaces(PostEditorChromeSurface.Smileys, PostEditorChromeSurface.Options,
+        PostEditorChromeSurface.Picker, imageUrl = PostEditorChromeSurface.Url, canWrapSelection = true,
+        returnsToBody = { it !in setOf(PostEditorChromeSurface.Restore, PostEditorChromeSurface.Quotes,
+            PostEditorChromeSurface.PendingQuote) }),
+    launchPicker, openSmileys, memory,
 ) {
-    var surface by memory::surface
-        private set
-    var detail by memory::detail
-        private set
-    private var bar by memory::bar
-    private var selection by memory::selection
-    private var textBeforeSurface by memory::textBeforeSurface
-    var returnGeneration by memory::returnGeneration
-        private set
-    fun consumeReturn(): Boolean {
-        if (memory.returnedGeneration == returnGeneration) return false
-        memory.returnedGeneration = returnGeneration
-        return true
-    }
-    val focusMemory get() = memory.focus
     val state: PostEditorChromeState get() = PostEditorChromeState(source())
 
     @Composable
-    fun chrome(quotePanelOnly: Boolean = true) = state.scaffold.copy(
-        bar = bar.withSubmission(source().submission), event = events.visibleEvent,
+    fun chrome(quotePanelOnly: Boolean = true) = scaffoldChrome(
         firstStatus = if (!source().hasDormantQuote && (!quotePanelOnly || source().quotes.isEmpty())) null
         else EditorAppBarStatus(
             UiR.drawable.ic_editor_quote,
@@ -71,60 +59,6 @@ internal class PostEditorChromeAdapter(
         ),
     )
     private val quoteCount get() = source().quotes.size + source().pendingQuotes.size
-    val barActions get() = EditorActionBarActions(::gesture, ::format, {},
-        { open(PostEditorChromeSurface.Smileys, openSmileys) }, { open(PostEditorChromeSurface.Options) },
-        ::preview, ::activate)
-    val imageActions get() = EditorBarImageActions({ open(PostEditorChromeSurface.Picker, launchPicker) },
-        { open(PostEditorChromeSurface.Url) }, true)
-    val submitState get() = ArmedSubmitState(source().armToken != null, state.sendActivatable,
-        armToken = source().armToken)
-    val submitActions: ArmedSubmitActions
-        get() {
-            // A callback retained by an old composition must never borrow a newer arm token.
-            val token = source().armToken
-            return ArmedSubmitActions({ send(4_000L) }, {
-                if (!consumeInformation() && state.postAllowed) onIntent(PostEditorIntent.SubmitConfirmed(token))
-            }, { onIntent(PostEditorIntent.SubmitConfirmationDismissed) }, ::send)
-        }
-    private fun consumeInformation() =
-        events.dispatch(EditorEventInput.NextGesture(events.state.session)).gestureConsumed
-    fun gesture(gesture: EditorBarGesture) {
-        if (gesture != EditorBarGesture.OpenSurface && consumeInformation()) return
-        bar = reduceEditorBar(bar.withSubmission(source().submission), gesture)
-    }
-
-    private fun send(timeout: Long) {
-        if (!consumeInformation() && state.sendActivatable) onIntent(PostEditorIntent.SubmitClicked(timeout))
-    }
-
-    private fun format(action: BbcodeAction) {
-        if (!consumeInformation() && state.canInsert) onIntent(PostEditorIntent.ToolbarActionClicked(action))
-    }
-    private fun open(name: PostEditorChromeSurface, action: () -> Unit = {}) {
-        if (consumeInformation() || !state.scaffold.controlsEnabled) return
-        val insertion = name in setOf(PostEditorChromeSurface.Smileys, PostEditorChromeSurface.Picker,
-            PostEditorChromeSurface.Url)
-        if (insertion && !state.canInsert) return
-        captureBody()
-        surface = name
-        action()
-    }
-    private fun captureBody() {
-        selection = body.selection
-        textBeforeSurface = body.text.toString()
-        bar = reduceEditorBar(bar, EditorBarGesture.OpenSurface)
-    }
-    fun closeSurface() {
-        val closed = surface ?: return
-        surface = null
-        if (closed !in setOf(PostEditorChromeSurface.Restore, PostEditorChromeSurface.Quotes,
-                PostEditorChromeSurface.PendingQuote)) returnGeneration++
-    }
-    fun returnToBody(focus: () -> Unit) {
-        val target = if (body.text.toString() == textBeforeSurface) selection else body.selection
-        focus()
-        if (body.selection != target) body.edit { selection = target }
-    }
     fun signature(enabled: Boolean) = option(PostEditorIntent.ToggleSignature(enabled))
     fun smileyDisabled(disabled: Boolean) = option(PostEditorIntent.ToggleSmileyDisabled(disabled))
     fun notification(enabled: Boolean) = option(PostEditorIntent.ToggleEmailNotification(enabled))
@@ -161,39 +95,6 @@ internal class PostEditorChromeAdapter(
             closeSurface()
         }
     }
-    private fun preview() {
-        if (!consumeInformation() && state.scaffold.controlsEnabled) {
-            captureBody()
-            onIntent(PostEditorIntent.TogglePreview)
-        }
-    }
-    private fun activate(key: EventKey, action: EditorEventAction) {
-        val event = events.state.visibleEvent?.takeIf { it.key == key } ?: return
-        // The bar uses Dismiss for ED-44, even when this information exposes ED-45 details.
-        if (action == EditorEventAction.Dismiss && consumeInformation() || event.action != action) return
-        events.dispatch(EditorEventInput.Activate(key))
-        if (action == EditorEventAction.Dismiss) acknowledgeUncertainty(key)
-        if (action == EditorEventAction.Details) { captureBody(); detail = event }
-    }
-
-    /** Explicit Masquer only; Back and overlay closing keep the durable attempt. */
-    fun dismissDetails(key: EventKey) {
-        if (detail?.key != key) return
-        val current = currentDetail(key) != null
-        closeDetails(key)
-        if (current) acknowledgeUncertainty(key)
-    }
-    private fun acknowledgeUncertainty(key: EventKey) {
-        val attempt = events.uncertainAttempt(key) ?: return
-        if (source().submission == EditorSubmissionState.Uncertain(attempt)) {
-            onIntent(PostEditorIntent.ErrorDismissed)
-        }
-    }
-    fun closeDetails(key: EventKey) {
-        if (detail?.key != key) return
-        events.dispatch(EditorEventInput.CloseDetails(key))
-        detail = null
-    }
     fun resumeQuote(key: EventKey? = null) {
         if (source().hasDormantQuote) quoteDecision(key, PostEditorIntent.PendingQuoteResumed)
     }
@@ -211,7 +112,6 @@ internal class PostEditorChromeAdapter(
     } else {
         currentDetail(key) != null
     }
-    private fun currentDetail(key: EventKey) = detail?.takeIf { it.key == key && it in events.state.events }
     fun reload(key: EventKey) {
         val error = (currentDetail(key)?.content as? EditorEventContent.Problem)?.error ?: return
         val reload = error.action == EditorErrorAction.Reload || source().isAwaitingInitialBody
@@ -219,32 +119,4 @@ internal class PostEditorChromeAdapter(
         onIntent(PostEditorIntent.ReloadRequested)
         closeDetails(key)
     }
-
-    /** Native smiley detail/sheet callbacks supply their actual layers before using this resolver. */
-    fun back(layers: EditorBackState = EditorBackState(), onLayerBack: (EditorBackAction) -> Unit = {}) {
-        val sheet = when (surface) {
-            PostEditorChromeSurface.Smileys -> EditorSheet.Smileys
-            PostEditorChromeSurface.Options -> EditorSheet.Options
-            else -> null
-        }
-        val action = resolveEditorBack(layers.copy(sheet = layers.sheet ?: sheet,
-            bar = bar.withSubmission(source().submission), eventDetailKey = detail?.key,
-            panelOpen = surface != null, sharedPreviewOpen = source().isPreviewVisible,
-            // 22:12: a mode masked by the displayed event is skipped, never closed nor acknowledged.
-            event = events.visibleEvent))
-        when (action) {
-            is EditorBackAction.CloseSublevel, EditorBackAction.CloseFormat -> {
-                bar = reduceEditorBar(bar.withSubmission(source().submission), EditorBarGesture.Back)
-            }
-            is EditorBackAction.Disarm -> onIntent(PostEditorIntent.SubmitConfirmationDismissed)
-            is EditorBackAction.CloseEventDetails -> closeDetails(action.key)
-            is EditorBackAction.ClosePanel, is EditorBackAction.CloseSheet -> { closeSurface(); onLayerBack(action) }
-            is EditorBackAction.CloseSharedPreview -> preview()
-            is EditorBackAction.Leave -> onIntent(PostEditorIntent.CloseRequested)
-            else -> onLayerBack(action)
-        }
-    }
-
-    /** App-bar return bypasses local levels but always uses the awaited save/close intent. */
-    fun closeRequested() = onIntent(PostEditorIntent.CloseRequested)
 }

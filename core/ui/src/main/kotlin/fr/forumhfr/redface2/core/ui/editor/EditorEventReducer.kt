@@ -14,7 +14,7 @@ sealed interface EditorEventInput {
      * A send also clears validation errors; information and hidden finishes survive. ED-170 stays separate.
      */
     data class OperationStarted(val event: EditorEvent) : EditorEventInput
-    /** Silent success (ED-45): finish known current work and remove only its progress, rejecting late deliveries. */
+    /** Silently finish known current work (ED-45) and remove only its progress, rejecting late deliveries. */
     data class OperationCompleted(val session: EditorSession, val operation: OperationRef) : EditorEventInput
     /**
      * First delivery may register a current operation at lastOccurrence = -1, without launch cleanup.
@@ -35,7 +35,8 @@ sealed interface EditorEventInput {
      * The host must stop dispatching that gesture when the transition consumes it (ED-44).
      */
     data class NextGesture(val session: EditorSession) : EditorEventInput
-    data class Activate(val key: EventKey) : EditorEventInput
+    /** Without a completion route, use the event's catalogue detail or visual dismissal instead. */
+    data class Activate(val key: EventKey, val canComplete: Boolean = true) : EditorEventInput
     /** Programmatic visual acknowledgement; gestures use Activate/NextGesture/CloseDetails. No durable write. */
     data class Acknowledge(val key: EventKey) : EditorEventInput
     /** Close and acknowledge only the matching open detail; a stale key has no effect, including on focus. */
@@ -73,7 +74,7 @@ fun reduceEditorEvents(state: EditorEventState, input: EditorEventInput): Editor
     is EditorEventInput.FormLoaded -> EditorEventTransition(formLoaded(state, input))
     is EditorEventInput.DurableWriteSucceeded -> EditorEventTransition(durableWriteSucceeded(state, input))
     is EditorEventInput.NextGesture -> nextGesture(state, input.session)
-    is EditorEventInput.Activate -> activateEvent(state, input.key)
+    is EditorEventInput.Activate -> activateEvent(state, input.key, input.canComplete)
     is EditorEventInput.Acknowledge -> EditorEventTransition(acknowledgeEvent(state, input.key))
     is EditorEventInput.CloseDetails -> closeDetails(state, input.key)
 }
@@ -233,8 +234,9 @@ private fun nextGesture(state: EditorEventState, session: EditorSession): Editor
     }
 }
 
-private fun activateEvent(state: EditorEventState, key: EventKey): EditorEventTransition {
-    val event = state.visibleEvent?.takeIf { it.key == key } ?: return EditorEventTransition(state)
+private fun activateEvent(state: EditorEventState, key: EventKey, canComplete: Boolean): EditorEventTransition {
+    val event = state.visibleEvent?.takeIf { it.key == key }
+        ?.withCompletionCapability(canComplete) ?: return EditorEventTransition(state)
     return when (event.action) {
         EditorEventAction.Complete -> {
             val error = (event.content as EditorEventContent.Problem).error

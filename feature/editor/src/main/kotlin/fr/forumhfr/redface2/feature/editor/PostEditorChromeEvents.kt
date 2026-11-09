@@ -10,10 +10,12 @@ import fr.forumhfr.redface2.core.domain.editor.EditorUploadToken
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.editor.EditorCause
 import fr.forumhfr.redface2.core.ui.editor.EditorError
+import fr.forumhfr.redface2.core.ui.editor.EditorErrorClass
 import fr.forumhfr.redface2.core.ui.editor.EditorEvent
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
 import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
 import fr.forumhfr.redface2.core.ui.editor.EditorEventState
+import fr.forumhfr.redface2.core.ui.editor.EditorHostEvents
 import fr.forumhfr.redface2.core.ui.editor.EditorLocalOperation
 import fr.forumhfr.redface2.core.ui.editor.EditorText
 import fr.forumhfr.redface2.core.ui.editor.EventKey
@@ -22,8 +24,8 @@ import fr.forumhfr.redface2.core.ui.editor.reduceEditorEvents
 import fr.forumhfr.redface2.feature.editor.R as EditorR
 
 /** VM-owned deliveries, reduced synchronously before StateFlow can conflate them. Never saved in a Bundle. */
-internal class PostEditorChromeEvents {
-    var state by mutableStateOf(EditorEventState(EditorSession("unloaded", null, "unloaded")))
+internal class PostEditorChromeEvents : EditorHostEvents {
+    override var state by mutableStateOf(EditorEventState(EditorSession("unloaded", null, "unloaded")))
         private set
     private var sequence = 0L
     private var arrival = 0L
@@ -32,7 +34,7 @@ internal class PostEditorChromeEvents {
     private var sending: OperationRef.Submission? = null
     private var uncertainty: Pair<EventKey, EditorDraftStore.AttemptToken?>? = null
     private var readFailed = false
-    val visibleEvent get() = state.visibleEvent?.let { event ->
+    override val visibleEvent get() = state.visibleEvent?.let { event ->
         val content = event.content as? EditorEventContent.InProgress
         val progress = content?.uploadProgress
         if (content == null || progress == null) event else event.copy(content = content.copy(
@@ -43,7 +45,7 @@ internal class PostEditorChromeEvents {
     fun quoteAlreadyDelivered() = deliver(local(EditorLocalOperation.Notice), EditorEventContent.Information(
         EditorText(EditorR.string.editor_quote_already_delivered)))
     fun pickerProblem(error: EditorError) = problem(error, null)
-    fun dispatch(input: EditorEventInput) = reduceEditorEvents(state, input).also { state = it.state }
+    override fun dispatch(input: EditorEventInput) = reduceEditorEvents(state, input).also { state = it.state }
     fun open(session: EditorSession) {
         if (session == state.session) return
         // Bootstrap notices/read failures precede the first owner-bound opening; transfer local deliveries once.
@@ -57,7 +59,7 @@ internal class PostEditorChromeEvents {
     }
 
     /** Bind the exact delivery to its durable attempt, including restored attempts without a submission token. */
-    fun uncertainAttempt(key: EventKey) = uncertainty?.takeIf {
+    override fun uncertainAttempt(key: EventKey) = uncertainty?.takeIf {
         it.first == key && key.session == state.session
     }?.second
 
@@ -162,10 +164,18 @@ internal class PostEditorChromeEvents {
         }
     }
     private fun problem(error: EditorError, operation: OperationRef?): EventKey {
-        val fallback = if (error.cause == EditorCause.DraftSaveFailed) {
-            EditorLocalOperation.DraftSave
-        } else { EditorLocalOperation.Notice }
-        val active = operation?.takeIf { ref -> state.currentOperations.any { it.ref == ref && !it.finished } }
+        val fallback = when {
+            error.errorClass == EditorErrorClass.Validation -> EditorLocalOperation.Validation
+            error.cause == EditorCause.DraftSaveFailed -> EditorLocalOperation.DraftSave
+            else -> EditorLocalOperation.Notice
+        }
+        if (fallback == EditorLocalOperation.Validation) {
+            (operation as? OperationRef.Submission)?.let {
+                dispatch(EditorEventInput.OperationCompleted(state.session, it))
+            }
+        }
+        val active = operation?.takeUnless { fallback == EditorLocalOperation.Validation }
+            ?.takeIf { ref -> state.currentOperations.any { it.ref == ref && !it.finished } }
         return deliver(active ?: local(fallback), EditorEventContent.Problem(error))
     }
     private fun local(kind: EditorLocalOperation) = OperationRef.Local(kind, ++sequence)

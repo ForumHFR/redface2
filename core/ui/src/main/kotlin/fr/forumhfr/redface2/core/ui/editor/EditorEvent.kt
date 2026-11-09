@@ -85,6 +85,14 @@ data class EditorEvent(val key: EventKey, val content: EditorEventContent, val a
         }
 }
 
+/** Surface projection shared by rendering and activation; identity and catalogue detail stay intact. */
+internal fun EditorEvent.withCompletionCapability(canComplete: Boolean): EditorEvent {
+    val error = (content as? EditorEventContent.Problem)?.error
+        ?.takeIf { !canComplete && it.action == EditorErrorAction.Complete } ?: return this
+    val action = if (error.detail == null) EditorErrorAction.Dismiss else EditorErrorAction.Details
+    return copy(content = EditorEventContent.Problem(error.copy(action = action)))
+}
+
 /** A completed operation remains known so late progress/terminal callbacks cannot revive it. */
 data class EditorEventOperation(
     val ref: OperationRef,
