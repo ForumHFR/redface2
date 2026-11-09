@@ -13,7 +13,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TooltipAnchorPosition
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
-import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.runtime.rememberCoroutineScope
@@ -60,7 +59,7 @@ fun EditorStatusIcon(
     val height = (24.dp + if (badgeCount == null) 0.dp else badgeSize.height)
         .coerceAtMost(EditorChromeMetrics(compactHeight).controlVisibleHeight)
     // Replace only the tooltip state on masking: its popup/job die, the live anchor keeps its ID.
-    val tooltip = key(visible) { rememberTooltipState() }
+    val tooltip = key(visible) { rememberEditorTooltipState() }
     val scope = rememberCoroutineScope()
     TooltipBox(
         positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),

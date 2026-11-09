@@ -11,8 +11,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TooltipAnchorPosition
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
+import androidx.compose.material3.TooltipState
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
@@ -80,8 +82,20 @@ internal fun EditorIconTooltip(label: String, content: @Composable () -> Unit) {
     TooltipBox(
         positionProvider = TooltipDefaults.rememberTooltipPositionProvider(TooltipAnchorPosition.Above),
         tooltip = { PlainTooltip { Text(label) } },
-        state = rememberTooltipState(),
+        state = rememberEditorTooltipState(),
         focusable = false,
         content = content,
     )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun rememberEditorTooltipState(): TooltipState {
+    val state = rememberTooltipState()
+    val host = LocalEditorTooltipHost.current
+    DisposableEffect(host, state) {
+        host?.states?.add(state)
+        onDispose { host?.states?.remove(state) }
+    }
+    return state
 }

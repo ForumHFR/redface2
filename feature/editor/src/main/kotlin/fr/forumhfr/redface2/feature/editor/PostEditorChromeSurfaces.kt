@@ -7,6 +7,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.ui.R as UiR
+import fr.forumhfr.redface2.core.ui.editor.EditorErrorAction
+import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
 import fr.forumhfr.redface2.core.ui.editor.EditorEventDetails
 import fr.forumhfr.redface2.core.ui.editor.EditorHeaderPanel
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
@@ -14,9 +17,8 @@ import fr.forumhfr.redface2.core.ui.editor.EventKey
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
-import fr.forumhfr.redface2.core.ui.R as UiR
 
-/** Keep mounted inside EditorScaffold.overlay; no production screen consumes this detached host yet. */
+/** Keep mounted inside EditorScaffold.overlay, including while the field is covered. */
 @Composable
 internal fun PostEditorChromeSurfaces(
     adapter: PostEditorChromeAdapter,
@@ -27,7 +29,7 @@ internal fun PostEditorChromeSurfaces(
 ) {
     // Run after the overlay/dialog is removed, when the body can accept focus again. Exactly once.
     LaunchedEffect(adapter.returnGeneration) {
-        if (adapter.returnGeneration > 0) adapter.returnToBody(onReturnToBody)
+        if (adapter.consumeReturn()) adapter.returnToBody(onReturnToBody)
     }
     val source = adapter.state.source
     EditorEventDetails(adapter.detail, bodyState, adapter::closeDetails, adapter::reload,
@@ -37,11 +39,20 @@ internal fun PostEditorChromeSurfaces(
             PostEditorHeaderSurface(adapter, source, bodyState, onReturnToBody, body)
         }) { event ->
         if (source.hasDormantQuote) QuoteDecisions(adapter, event.key)
+        val error = (event.content as? EditorEventContent.Problem)?.error
+        // Keep the uncertainty detail intact while offering the missing edit form's GET (#1574).
+        if (source.isAwaitingInitialBody && error != null && error.action != EditorErrorAction.Reload) {
+            TextButton(onClick = { adapter.reload(event.key) }, enabled = !source.isLoadingForm) {
+                Text(stringResource(UiR.string.editor_action_reload))
+            }
+        }
     }
     when (adapter.surface) {
         PostEditorChromeSurface.Options -> PostEditorOptionsSurface(adapter, source)
-        PostEditorChromeSurface.Url -> ImageUrlDialog(adapter::closeSurface, adapter::imageUrl)
-        PostEditorChromeSurface.Smileys -> PostEditorSmileysSurface(adapter, smileys)
+        PostEditorChromeSurface.Url -> if (adapter.state.canInsert) {
+            ImageUrlDialog(adapter::closeSurface, adapter::imageUrl)
+        }
+        PostEditorChromeSurface.Smileys -> if (adapter.state.canInsert) PostEditorSmileysSurface(adapter, smileys)
         else -> Unit
     }
 }
@@ -60,6 +71,9 @@ private fun PostEditorHeaderSurface(
         stringResource(title), bodyState, adapter::closeSurface,
         { adapter.returnToBody(onReturnToBody) },
         body = { PostEditorQuotePanel(adapter, bodyState, onReturnToBody, body) }) {
+        if (!pending && source.restorableDraft != null && source.pendingQuotes.isNotEmpty()) {
+            Text(stringResource(R.string.editor_quote_pending))
+        }
         if (pending) QuoteDecisions(adapter) else DraftRestoreBanner(
             adapter::restoreDraft, adapter::discardDraft,
             restoreEnabled = source.canRestoreDraft && !source.isUploading &&

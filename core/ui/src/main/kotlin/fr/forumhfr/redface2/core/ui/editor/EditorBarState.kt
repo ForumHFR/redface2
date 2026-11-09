@@ -24,6 +24,7 @@ data class EditorBarState(val mode: EditorBarMode = EditorBarMode.Normal, val ar
  */
 fun reduceEditorBar(state: EditorBarState, gesture: EditorBarGesture): EditorBarState = when {
     gesture == EditorBarGesture.OpenSurface -> EditorBarState()
+    // ED-85: the host disarms first; even a retained Back callback must preserve the masked mode.
     state.arm != null -> state
     else -> state.copy(mode = reduceEditorBarMode(state.mode, gesture))
 }

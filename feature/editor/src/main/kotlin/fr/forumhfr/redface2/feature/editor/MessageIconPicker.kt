@@ -45,10 +45,8 @@ internal fun MessageIconPicker(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .testTag(MSG_ICON_PICKER_TOGGLE_TAG)
-                .then(if (alwaysExpanded) Modifier else Modifier.clickable(enabled = enabled, role = Role.Button) {
-                    expanded = !expanded
-                })
+                .then(if (alwaysExpanded) Modifier else Modifier.testTag(MSG_ICON_PICKER_TOGGLE_TAG)
+                    .clickable(enabled = enabled, role = Role.Button) { expanded = !expanded })
                 .padding(vertical = 8.dp),
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
@@ -74,8 +72,8 @@ internal fun MessageIconPicker(
             // Purely decorative affordance : the expand/collapse state is already carried by the
             // clickable Row. `material-icons-core` is out of reach (detekt ForbiddenImport bans
             // `androidx.compose.material.*`), so the glyph is muted for TalkBack instead.
-            Text(
-                text = if (alwaysExpanded) "" else if (expanded) "⌃" else "⌄",
+            if (!alwaysExpanded) Text(
+                text = if (expanded) "⌃" else "⌄",
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.clearAndSetSemantics {},

@@ -38,30 +38,18 @@ class PostEditorOptionsTest {
     }
 
     @Test
-    fun `message tone row starts collapsed then exposes 16 radio targets and emits intent`() {
+    fun `ED71 real post options expose 16 tones immediately and emit intent`() {
         var emitted: PostEditorIntent? = null
         composeTestRule.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                PostEditorOptions(
-                    signatureEnabled = false,
-                    smileyDisabled = false,
-                    emailNotificationEnabled = false,
-                    msgIcon = 1,
-                    enabled = true,
-                    onSignatureChanged = {},
-                    onSmileyDisabledChanged = {},
-                    onEmailNotificationChanged = {},
-                    onMsgIconSelected = { emitted = PostEditorIntent.MsgIconSelected(it) },
-                )
+                PostEditorTestContent(PostEditorState(PostEditorMode.Reply, 23, 42, null, 1, 0),
+                    onIntent = { emitted = it })
             }
         }
 
+        composeTestRule.onNodeWithContentDescription("Options").performClick()
         composeTestRule.onNodeWithText("Ton du message").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Aucun").assertIsDisplayed()
-        composeTestRule.onNodeWithTag("$MSG_ICON_OPTION_TAG_PREFIX$DEFAULT_MSG_ICON")
-            .assertDoesNotExist()
-
-        composeTestRule.onNodeWithTag(MSG_ICON_PICKER_TOGGLE_TAG).performClick()
+        composeTestRule.onNodeWithTag(MSG_ICON_PICKER_TOGGLE_TAG).assertDoesNotExist()
         EDITOR_MSG_ICONS.forEach { icon ->
             composeTestRule.onNodeWithTag("$MSG_ICON_OPTION_TAG_PREFIX$icon").assertExists()
         }

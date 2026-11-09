@@ -26,10 +26,10 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
+import fr.forumhfr.redface2.core.ui.R as UiR
 import fr.forumhfr.redface2.core.ui.editor.EditorHeaderPanel
 import fr.forumhfr.redface2.core.ui.editor.QuoteCard
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardControls
-import fr.forumhfr.redface2.core.ui.R as UiR
 
 /** ED-50/53: keep mounted around the body; the scaffold callback restores the captured IME state. */
 @Composable
@@ -94,22 +94,42 @@ internal fun PostEditorQuoteCards(
     val moved = stringResource(UiR.string.editor_quote_a11y_moved)
     val remainingCount = (quotes.size - 1).coerceAtLeast(0)
     val remaining = pluralStringResource(R.plurals.editor_quotes_remaining, remainingCount, remainingCount)
-    Box(Modifier.size(1.dp).semantics { liveRegion = LiveRegionMode.Polite; contentDescription = announcement })
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        quotes.forEachIndexed { index, quote ->
-            val move: (Int) -> Unit = { delta ->
-                announcement = moved.format(quote.author, index + delta + 1)
-                onIntent(PostEditorIntent.QuoteMoved(quote.numreponse, delta, quote))
+    Box {
+        Box(Modifier.size(1.dp).semantics { liveRegion = LiveRegionMode.Polite; contentDescription = announcement })
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            quotes.forEachIndexed { index, quote ->
+                val move: (Int) -> Unit = { delta ->
+                    announcement = moved.format(quote.author, index + delta + 1)
+                    onIntent(PostEditorIntent.QuoteMoved(quote.numreponse, delta, quote))
+                }
+                key(quote) {
+                    QuoteCard(quote, QuoteCardControls(index > 0, index < quotes.lastIndex, enabled,
+                        { move(-1) }, { move(1) }, {
+                            // Two portions may share an author: the count makes each removal announceable.
+                            announcement = removed.format(quote.author) + ". " + remaining
+                            pendingIndex = index
+                            onIntent(PostEditorIntent.QuoteRemoved(quote.numreponse, quote))
+                        }), focus[index])
+                }
             }
-            key(quote) {
-                QuoteCard(quote, QuoteCardControls(index > 0, index < quotes.lastIndex, enabled,
-                    { move(-1) }, { move(1) }, {
-                        // Two portions may share an author: the count makes each removal announceable.
-                        announcement = removed.format(quote.author) + ". " + remaining
-                        pendingIndex = index
-                        onIntent(PostEditorIntent.QuoteRemoved(quote.numreponse, quote))
-                    }), focus[index])
-            }
+        }
+    }
+}
+
+/** Same clear-all target in the bounded zone and in the panel; no submit action is installed here. */
+@Composable
+internal fun PostEditorClearQuotes(count: Int, enabled: Boolean, onClear: () -> Unit) {
+    var announcement by remember { mutableStateOf("") }
+    val cleared = stringResource(R.string.editor_quotes_cleared)
+    val label = stringResource(R.string.editor_quotes_clear_all_a11y)
+    Box {
+        Box(Modifier.size(1.dp).semantics {
+            liveRegion = LiveRegionMode.Polite
+            contentDescription = announcement
+        })
+        if (count >= 2) TextButton(onClick = { announcement = cleared; onClear() }, enabled = enabled,
+            modifier = Modifier.semantics { contentDescription = label }) {
+            Text(stringResource(R.string.editor_quotes_clear_all))
         }
     }
 }

@@ -66,6 +66,7 @@ data class EditorBarShortcut(
  * [firstStatus]/[secondStatus] are independent permanent slots (see [EditorAppBar]): null means absent,
  * never compacted into the other slot. ED-30 events mask the lowest-priority fixed slots until the
  * full ED-133 envelope fits; retained slots keep their resting positions and return on acknowledgement.
+ * [insertionsEnabled] locks the tools independently of Options and the permanent slots.
  */
 @Composable
 @Suppress("LongParameterList") // Stateless rendering inputs, matching the app bar's host boundary.
@@ -88,6 +89,7 @@ fun EditorActionBar(
     uploading: Boolean = false,
     uploadProgress: UploadProgress? = null,
     loadingForm: Boolean = false,
+    insertionsEnabled: Boolean = true,
 ) {
     val buttonState = editorBarSubmitState(state, submitState, uploading, loadingForm)
     val armed = buttonState.armed
@@ -114,7 +116,7 @@ fun EditorActionBar(
     val backAction = resolveEditorBack(EditorBackState(bar = state, event = event))
     BackHandler(!armed && (backAction == EditorBackAction.CloseSublevel ||
         backAction == EditorBackAction.CloseFormat), onBack = back)
-    val enabled = controlsEnabled && !uploading
+    val enabled = controlsEnabled && insertionsEnabled && !uploading
     val scroll = when (mode) {
         EditorBarMode.Normal -> normalScroll
         EditorBarMode.Format -> formatScroll

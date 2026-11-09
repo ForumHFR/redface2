@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.feature.editor
 
+import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.ScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -19,6 +21,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextInputSelection
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
@@ -29,6 +32,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -46,6 +50,14 @@ class PostEditorChromeComposeTest {
     private val host = PostEditorChromeFixture()
     private val focus = FocusRequester()
     private val scroll = ScrollState(0)
+    private lateinit var back: OnBackPressedDispatcher
+
+    @Composable private fun PostContent() {
+        back = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+        RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+            PostEditorTestContent(host.state, host::dispatch, host.body, host.events)
+        }
+    }
 
     @Composable private fun Content() {
         val scope = rememberCoroutineScope()
@@ -137,6 +149,51 @@ class PostEditorChromeComposeTest {
             assertEquals(host.body.text.length, host.body.selection.end)
             assertFalse(host.adapter.submitState.enabled)
             assertTrue(host.calls.isEmpty())
+        }
+    }
+
+    @Test fun `ED85 post system Back disarms retained Format before closing it`() {
+        compose.setContent { PostContent() }
+        compose.onNodeWithContentDescription("Mise en forme").performClick()
+        compose.onNodeWithContentDescription("Gras").assertExists()
+        compose.runOnIdle {
+            host.state = host.state.copy(submission = EditorSubmissionState.Armed(
+                ArmToken(1, host.session, 0, 4_000L)))
+        }
+        compose.onNodeWithContentDescription("Gras").assertDoesNotExist()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNodeWithContentDescription("Gras").assertExists()
+        compose.runOnIdle {
+            assertNull(host.state.armToken)
+            assertEquals(listOf(PostEditorIntent.SubmitConfirmationDismissed), host.calls)
+            back.onBackPressed()
+        }
+        compose.onNodeWithContentDescription("Gras").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(listOf(PostEditorIntent.SubmitConfirmationDismissed), host.calls)
+        }
+    }
+
+    @Test fun `ED85 post system Back disarms before the local restore panel handler can close it`() {
+        host.state = host.state.copy(restorableDraft = "Brouillon retrouvé")
+        compose.setContent { PostContent() }
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
+        compose.onNode(hasSetTextAction()).assertDoesNotExist()
+        compose.runOnIdle {
+            host.state = host.state.copy(submission = EditorSubmissionState.Armed(
+                ArmToken(1, host.session, 0, 4_000L)))
+        }
+        compose.waitForIdle()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNode(hasSetTextAction()).assertDoesNotExist()
+        compose.runOnIdle {
+            assertNull(host.state.armToken)
+            assertEquals(listOf(PostEditorIntent.SubmitConfirmationDismissed), host.calls)
+            back.onBackPressed()
+        }
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(listOf(PostEditorIntent.SubmitConfirmationDismissed), host.calls)
         }
     }
 }

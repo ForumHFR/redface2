@@ -4,9 +4,12 @@ import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.SubmissionToken
+import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.EditorBackAction
 import fr.forumhfr.redface2.core.ui.editor.EditorBackState
 import fr.forumhfr.redface2.core.ui.editor.EditorBarGesture
+import fr.forumhfr.redface2.core.ui.editor.EditorBarMode
+import fr.forumhfr.redface2.core.ui.editor.EditorBarState
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
@@ -22,6 +25,59 @@ import org.junit.Test
 
 class PostEditorChromeAdapterTest {
     private val host = PostEditorChromeFixture()
+
+    @Test fun `unknown edit body rejects retained insertion callbacks but keeps options and restore`() {
+        val actions = host.adapter.barActions
+        val images = host.adapter.imageActions
+        for (loading in listOf(true, false)) {
+            host.state = host.state.copy(mode = PostEditorMode.Edit, isLoadingForm = loading)
+            assertTrue(host.adapter.state.scaffold.bodyReadOnly)
+            assertFalse(host.adapter.state.canInsert)
+            assertFalse(host.adapter.state.sendActivatable)
+            actions.onBbcode(BbcodeAction.Bold)
+            actions.onSmileys()
+            images.onUpload()
+            images.onInsertUrl!!()
+            host.adapter.smiley(":jap:")
+            host.adapter.imageUrl("https://example.test/image.png")
+            assertNull(host.adapter.surface)
+            assertEquals(0, host.launches)
+            assertTrue(host.calls.isEmpty())
+            actions.onOptions()
+            assertEquals(PostEditorChromeSurface.Options, host.adapter.surface)
+            host.adapter.closeSurface()
+        }
+        host.adapter.signature(true)
+        assertEquals(listOf(PostEditorIntent.ToggleSignature(true)), host.calls)
+        host.state = host.state.copy(bodyText = "", draftRestoreSeed = "", restorableDraft = "Brouillon")
+        assertTrue(host.state.canRestoreDraft)
+        host.adapter.restoreDraft()
+        assertEquals(PostEditorIntent.DraftRestoreRequested, host.calls.last())
+        host.state = host.state.copy(draftHydratedFromForm = true)
+        assertTrue(host.adapter.state.canInsert)
+        assertFalse(host.adapter.state.scaffold.bodyReadOnly)
+        host.state = host.state.copy(mode = PostEditorMode.Reply, draftHydratedFromForm = false, isLoadingForm = true)
+        assertTrue(host.adapter.state.canInsert)
+        assertFalse(host.adapter.state.scaffold.bodyReadOnly)
+    }
+
+    @Test fun `unknown edit body reloads uncertainty only from a current detail after the GET ends`() {
+        host.state = host.state.copy(mode = PostEditorMode.Edit, isLoadingForm = true)
+        val event = host.error(EditorErrors.uncertain)
+        host.adapter.barActions.onEvent(event.key, EditorEventAction.Details)
+        host.adapter.reload(event.key)
+        assertTrue(host.calls.isEmpty())
+        host.state = host.state.copy(isLoadingForm = false, draftHydratedFromForm = true)
+        host.adapter.reload(event.key)
+        assertTrue(host.calls.isEmpty())
+        host.state = host.state.copy(draftHydratedFromForm = false)
+        host.adapter.reload(event.key)
+        assertEquals(listOf(PostEditorIntent.ReloadRequested), host.calls)
+        assertNull(host.adapter.detail)
+        host.adapter.reload(event.key)
+        assertEquals(1, host.calls.size)
+    }
+
     @Test fun `ED31 picker cancellation only returns focus without a delivery or intent`() {
         host.adapter.imageActions.onUpload()
         host.adapter.pickerCancelled()
@@ -108,7 +164,7 @@ class PostEditorChromeAdapterTest {
         assertNull(host.events.state.visibleEvent)
     }
 
-    @Test fun `ED85 closes smiley detail sheet tooltip color format arm detail panel then preview before save`() {
+    @Test fun `ED85 consumes separate layers before preview and save`() {
         val layers = mutableListOf<EditorBackAction>()
         host.adapter.barActions.onSmileys()
         host.adapter.back(EditorBackState(smileyDetailOpen = true), layers::add)
@@ -137,10 +193,29 @@ class PostEditorChromeAdapterTest {
         host.adapter.back()
         assertEquals(listOf(PostEditorIntent.CloseRequested), host.calls)
         assertEquals(event.key, host.events.state.visibleEvent?.key)
+        assertEquals(EditorBarMode.Format, host.memory.bar.mode)
         host.events.dispatch(EditorEventInput.Acknowledge(event.key))
         host.adapter.back() // The retained Format level is visible again and closes locally.
         assertEquals(listOf(PostEditorIntent.CloseRequested), host.calls)
+        assertEquals(EditorBarMode.Normal, host.memory.bar.mode)
         host.adapter.back()
         assertEquals(listOf(PostEditorIntent.CloseRequested, PostEditorIntent.CloseRequested), host.calls)
+    }
+
+    @Test fun `ED85 Back disarms each masked mode before the next Back closes it`() {
+        val token = ArmToken(1, host.session, 0, 4_000L)
+        listOf(EditorBarMode.Format, EditorBarMode.Color, EditorBarMode.Image).forEach { mode ->
+            host.memory.bar = EditorBarState(mode)
+            host.state = host.state.copy(submission = EditorSubmissionState.Armed(token))
+            val calls = host.calls.size
+            host.adapter.back()
+            assertEquals(PostEditorIntent.SubmitConfirmationDismissed, host.calls.last())
+            assertEquals(EditorSubmissionState.Ready, host.state.submission)
+            assertEquals(mode, host.memory.bar.mode)
+            host.adapter.back()
+            val expected = if (mode == EditorBarMode.Color) EditorBarMode.Format else EditorBarMode.Normal
+            assertEquals(expected, host.memory.bar.mode)
+            assertEquals(calls + 1, host.calls.size)
+        }
     }
 }

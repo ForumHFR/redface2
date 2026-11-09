@@ -5,31 +5,43 @@ import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.input.InputModeManager
+import androidx.compose.ui.platform.LocalInputModeManager
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.R as UiR
 import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
-import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -52,103 +64,128 @@ class EditorScreenLayoutTest {
     @Test
     @Config(qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
     fun postEditLocksBodyAndInsertionsThroughFailureUntilHydration() {
-        val state = mutableStateOf(postState().copy(mode = PostEditorMode.Edit, isLoadingForm = true))
+        val state = mutableStateOf(PostEditorState(PostEditorMode.Edit, 23, 42, 101, 1, 0,
+            isLoadingForm = true))
         val body = TextFieldState("seed")
         val intents = mutableListOf<PostEditorIntent>()
+        lateinit var inputMode: InputModeManager
         compose.setContent {
-            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                val scope = rememberCoroutineScope()
-                val picker = remember(scope) {
-                    SmileyPickerController(scope = scope, searchWiki = { _, _ -> emptyList() })
-                }
-                PostEditorContent(state.value, body, InputTransformation {}, { intents += it }, picker)
+            inputMode = LocalInputModeManager.current
+            RedfaceTheme(darkTheme = false, dynamicColor = false) {
+                PostEditorTestContent(state.value, { intents += it }, body)
             }
         }
+        // Panel close buttons can accept focus only outside touch mode (Focusability.SystemDefined).
+        compose.runOnIdle { inputMode.requestInputMode(InputMode.Keyboard) }
+        compose.runOnIdle { assertEquals(InputMode.Keyboard, inputMode.inputMode) }
         assertPostBodyAndInsertionsLocked()
-        compose.onNodeWithText("Options").assertIsEnabled()
+        compose.onNodeWithContentDescription("Options").assertIsEnabled()
         compose.runOnIdle {
             state.value = state.value.copy(isLoadingForm = false, submitError = EditorErrors.formNetwork)
         }
-        assertPostBodyAndInsertionsLocked()
+        // The event masks the tools until its detail closes, as required by the new chrome.
+        assertPostBodyAndInsertionsLocked(toolsVisible = false)
+        compose.onNodeWithContentDescription("Hors connexion, Afficher les détails").performClick()
         compose.onNodeWithText("Recharger").assertIsEnabled().performClick()
         compose.runOnIdle { assertEquals(listOf(PostEditorIntent.ReloadRequested), intents) }
-        // Uncertainty must stay visible, while a blank restored attempt still offers a form reload.
+        assertPostBodyAndInsertionsLocked()
+        compose.onNodeWithContentDescription("Options").assertIsEnabled()
+        // A blank unresolved attempt keeps its uncertainty detail and still offers the form GET.
         compose.runOnIdle { state.value = state.value.copy(submitError = EditorErrors.uncertain) }
+        assertPostBodyAndInsertionsLocked(toolsVisible = false)
+        compose.onNodeWithContentDescription("Envoi incertain, Afficher les détails").performClick()
+        compose.onNodeWithText("Envoi incertain").assertIsDisplayed()
         compose.onNodeWithText("Recharger").assertIsEnabled().performClick()
-        compose.runOnIdle { assertEquals(List(2) { PostEditorIntent.ReloadRequested }, intents) }
+        assertPostBodyAndInsertionsLocked()
+        compose.onNodeWithContentDescription("Options").assertIsEnabled()
         compose.runOnIdle {
+            assertEquals(List(2) { PostEditorIntent.ReloadRequested }, intents)
+            assertEquals("seed", body.text.toString())
             state.value = state.value.copy(draftHydratedFromForm = true, isLoadingForm = true, submitError = null)
         }
         compose.onNode(hasSetTextAction()).performTextInput(" typed")
-        for (label in listOf("Gras", "Citation", "Image", "Uploader", "Smileys")) {
-            compose.onNodeWithText(label).assertIsEnabled()
-        }
+        assertPostInsertionsEnabled()
         compose.runOnIdle { assertEquals("seed typed", body.text.toString()) }
-        // Reply stays editable even with an unknown body and an initial GET still running.
+        // Reply is editable even with an unknown body and an initial GET still running.
         compose.runOnIdle {
             state.value = state.value.copy(mode = PostEditorMode.Reply, draftHydratedFromForm = false)
         }
         compose.onNode(hasSetTextAction()).performTextInput(" reply")
-        compose.onNodeWithTag(POST_EDITOR_TOOLBAR_TAG).assertExists()
+        assertPostInsertionsEnabled()
         compose.runOnIdle { assertEquals("seed typed reply", body.text.toString()) }
     }
 
     @Test
-    fun `post editor keeps 160 dp field and both draft actions on short viewport`() {
+    fun `post ED02 ED05 ED12 ED167 field and send stay fixed after fifty nearby touch edits`() {
+        val host = PostEditorChromeFixture()
         compose.setContent {
-            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                val scope = rememberCoroutineScope()
-                val picker = remember(scope) {
-                    SmileyPickerController(scope = scope, searchWiki = { _, _ -> emptyList() })
-                }
-                PostEditorContent(
-                    bodyFieldState = remember { TextFieldState() },
-                    bodyInputTransformation = null,
-                    state = postState(restorableDraft = "Brouillon à restaurer"),
-                    onIntent = {},
-                    smileyPicker = picker,
-                    modifier = Modifier.fillMaxSize(),
-                )
+            RedfaceTheme(darkTheme = false, dynamicColor = false) {
+                PostEditorTestContent(host.state, host::dispatch, host.body, host.events)
             }
         }
-
-        compose.onNode(hasSetTextAction()).assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT - FIELD_LABEL_HEADROOM)
-        assertDraftActionsFullyVisible()
+        val field = compose.onNode(hasSetTextAction())
+        val bounds = compose.onNodeWithTag("editor-scaffold-field").getUnclippedBoundsInRoot()
+        val send = compose.onNodeWithTag("editor-bar-submit").getUnclippedBoundsInRoot()
+        // Compact mode removes only the visual label, retaining the field's accessible name.
+        compose.onNodeWithContentDescription("Message").assertExists()
+        field.performTouchInput { click(Offset(width - 12f, height - 12f)) }
+        repeat(50) { field.performTextInput("a") }
+        assertEquals(bounds, compose.onNodeWithTag("editor-scaffold-field").getUnclippedBoundsInRoot())
+        assertEquals(send, compose.onNodeWithTag("editor-bar-submit").getUnclippedBoundsInRoot())
+        compose.runOnIdle { assertTrue(host.calls.isEmpty()); assertTrue(host.body.text.length >= 50) }
     }
 
     @Test
-    @Config(sdk = [29], qualifiers = "fr-rFR-w360dp-h330dp-xxhdpi")
-    fun `post editor leaves 12 dp between toolbar and preview without upload or quotes`() {
+    @Config(qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
+    fun `post ED85 system back closes color format preview then requests saved close`() {
+        val host = PostEditorChromeFixture()
+        lateinit var back: androidx.activity.OnBackPressedDispatcher
+        lateinit var previewLabel: String
         compose.setContent {
-            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                val scope = rememberCoroutineScope()
-                val picker = remember(scope) {
-                    SmileyPickerController(scope = scope, searchWiki = { _, _ -> emptyList() })
-                }
-                PostEditorContent(
-                    bodyFieldState = remember { TextFieldState() },
-                    bodyInputTransformation = null,
-                    state = postState(),
-                    onIntent = {},
-                    smileyPicker = picker,
-                    modifier = Modifier.fillMaxSize(),
-                )
+            back = androidx.activity.compose.LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+            previewLabel = stringResource(UiR.string.editor_preview_show)
+            RedfaceTheme(darkTheme = false, dynamicColor = false) {
+                PostEditorTestContent(host.state, host::dispatch, host.body, host.events)
             }
         }
+        compose.onNode(hasSetTextAction()).assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT - FIELD_LABEL_HEADROOM)
+        compose.onNodeWithContentDescription("Mise en forme").performClick()
+        compose.onNodeWithContentDescription("Couleur").performScrollTo().performClick()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNodeWithContentDescription("Gras").assertExists()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNodeWithContentDescription("Options").assertExists()
+        compose.onNodeWithContentDescription(previewLabel).assertIsDisplayed().performClick()
+        compose.onNodeWithTag("post-editor-preview").assertExists()
+        compose.onNode(hasSetTextAction()).assertDoesNotExist()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNode(hasSetTextAction()).assertExists()
+        compose.runOnIdle { back.onBackPressed() }
+        assertEquals(listOf(PostEditorIntent.TogglePreview, PostEditorIntent.TogglePreview,
+            PostEditorIntent.CloseRequested), host.calls)
+    }
 
-        val toolbarBottom = compose.onNodeWithTag(POST_EDITOR_TOOLBAR_TAG)
-            .getUnclippedBoundsInRoot()
-            .bottom
-        val previewTop = compose.onNodeWithTag(POST_EDITOR_PREVIEW_TOGGLE_TAG)
-            .getUnclippedBoundsInRoot()
-            .top
-
-        assertEquals(
-            "Only the arranged spacing may separate the toolbar and preview toggle",
-            12f,
-            (previewTop - toolbarBottom).value,
-            1f,
-        )
+    @Test
+    @Config(sdk = [29, 34], qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
+    fun `post ED85 back dismisses action and status tooltips without requesting close`() {
+        val host = PostEditorChromeFixture()
+        host.state = host.state.copy(restorableDraft = "Brouillon")
+        lateinit var back: androidx.activity.OnBackPressedDispatcher
+        compose.setContent {
+            back = androidx.activity.compose.LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+            RedfaceTheme(darkTheme = false, dynamicColor = false) {
+                PostEditorTestContent(host.state, host::dispatch, host.body, host.events)
+            }
+        }
+        val field = compose.onNode(hasSetTextAction()).fetchSemanticsNode().id
+        for (label in listOf("Mise en forme", "Brouillon retrouvé, restaurer ou ignorer")) {
+            compose.onNodeWithContentDescription(label).performTouchInput { longClick() }
+            compose.onNodeWithText(label, useUnmergedTree = true).assertIsDisplayed()
+            compose.runOnIdle { back.onBackPressed() }
+            compose.onNodeWithText(label, useUnmergedTree = true).assertDoesNotExist()
+            assertEquals(field, compose.onNode(hasSetTextAction()).fetchSemanticsNode().id)
+            compose.runOnIdle { assertTrue(host.calls.isEmpty()) }
+        }
     }
 
     @Test
@@ -271,60 +308,33 @@ class EditorScreenLayoutTest {
         }
     }
 
-    @Test
-    @Config(qualifiers = "fr-rFR-w360dp-h260dp-xxhdpi")
-    fun `post editor keeps both draft actions fully visible below the 220 dp budget threshold`() {
-        compose.setContent {
-            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                val scope = rememberCoroutineScope()
-                val picker = remember(scope) {
-                    SmileyPickerController(scope = scope, searchWiki = { _, _ -> emptyList() })
-                }
-                PostEditorContent(
-                    bodyFieldState = remember { TextFieldState() },
-                    bodyInputTransformation = null,
-                    state = postState(restorableDraft = "Brouillon à restaurer"),
-                    onIntent = {},
-                    smileyPicker = picker,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-        }
-
-        assertDraftActionsFullyVisible()
-    }
-
-    @Test
-    @Config(qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
-    fun `post editor keeps title toolbar and 160 dp field visible on regular viewport`() {
-        compose.setContent {
-            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                val scope = rememberCoroutineScope()
-                val picker = remember(scope) {
-                    SmileyPickerController(scope = scope, searchWiki = { _, _ -> emptyList() })
-                }
-                PostEditorContent(
-                    bodyFieldState = remember { TextFieldState() },
-                    bodyInputTransformation = null,
-                    state = postState(),
-                    onIntent = {},
-                    smileyPicker = picker,
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-        }
-
-        compose.onNodeWithText("Répondre au sujet").assertIsDisplayed()
-        compose.onNodeWithText("Uploader").assertIsDisplayed()
-        compose.onNode(hasSetTextAction()).assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT - FIELD_LABEL_HEADROOM)
-    }
-
-    private fun assertPostBodyAndInsertionsLocked() {
+    private fun assertPostBodyAndInsertionsLocked(toolsVisible: Boolean = true) {
         compose.onAllNodes(hasSetTextAction()).assertCountEquals(0)
-        compose.onNodeWithTag(POST_EDITOR_TOOLBAR_TAG).assertDoesNotExist()
-        for (label in listOf("Gras", "Citation", "Image", "Uploader", "Smileys")) {
-            compose.onNodeWithText(label).assertDoesNotExist()
+        for (label in listOf("Mise en forme", "Smileys", "Image")) {
+            val control = compose.onNodeWithContentDescription(label)
+            if (toolsVisible) control.assertIsNotEnabled() else control.assertDoesNotExist()
         }
+        for (label in listOf("Gras", "Citation", "Insérer par URL", "Uploader une image")) {
+            compose.onNodeWithContentDescription(label).assertDoesNotExist()
+        }
+    }
+
+    private fun assertPostInsertionsEnabled() {
+        for (label in listOf("Mise en forme", "Smileys", "Image")) {
+            compose.onNodeWithContentDescription(label).assertIsEnabled()
+        }
+        compose.onNodeWithContentDescription("Mise en forme").performScrollTo().performClick()
+        for (label in listOf("Gras", "Citation")) {
+            compose.onNodeWithContentDescription(label).assertIsEnabled()
+        }
+        compose.onNodeWithContentDescription("Mise en forme").performClick()
+        compose.onNodeWithContentDescription("Image").performScrollTo().performClick()
+        for (label in listOf("Insérer par URL", "Uploader une image")) {
+            compose.onNodeWithContentDescription(label).assertIsEnabled()
+        }
+        // The app bar also exposes « Retour »: target the action bar's sublevel return only.
+        compose.onNode(hasContentDescription("Retour") and hasAnyAncestor(hasTestTag("editor-scaffold-action-bar")))
+            .performScrollTo().performClick()
     }
 
     private fun assertTopicBodyAndInsertionsLocked() {
@@ -361,16 +371,6 @@ class EditorScreenLayoutTest {
         )
         return unclippedBounds
     }
-
-    private fun postState(restorableDraft: String? = null) = PostEditorState(
-        mode = PostEditorMode.Reply,
-        cat = 23,
-        topicId = 447,
-        numreponse = null,
-        page = 1,
-        subcat = 0,
-        restorableDraft = restorableDraft,
-    )
 
     private fun topicState(restorableDraft: String? = null) = TopicFormState(
         mode = TopicFormMode.New,

@@ -14,10 +14,14 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
@@ -71,7 +75,11 @@ class EditorSubmissionBannerLayoutTest {
             subcat = 0,
             submitError = error,
         )
-        assertBanner("post", label) { PostEditorAlertBanners(state = state, onIntent = {}) }
+        assertBanner("post", label) { PostEditorTestContent(state) }
+        compose.onNodeWithTag("editor-bar-event").performClick()
+        compose.onNodeWithText(label).assertExists()
+        compose.onNodeWithText("Masquer").performClick()
+        compose.onNodeWithTag("editor-scaffold-field").assertExists()
     }
 
     private fun assertTopic(error: EditorError, label: String) {
@@ -110,6 +118,10 @@ class EditorSubmissionBannerLayoutTest {
                     }
                 }
             }
+        }
+        if (surface == "post") {
+            compose.onNodeWithContentDescription("$label, Afficher les détails").assertIsDisplayed()
+            return
         }
         assertSummary(surface, label)
         val summaryBounds = compose.onNodeWithText(label).getUnclippedBoundsInRoot()
