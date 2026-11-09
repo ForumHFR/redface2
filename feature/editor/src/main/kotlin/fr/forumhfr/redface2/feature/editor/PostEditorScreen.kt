@@ -226,6 +226,7 @@ private fun PostEditorChrome(
                 PostEditorChromeSurfaces(host, body, smileys, restore, content)
                 // Registered after the bar and panels: all activity layers use the same ED-85 resolver.
                 // Native sheet/detail/dialog dispatchers still consume their own levels first.
+                // Reducing a sublevel or Format here still returns keyboard focus to its bar trigger.
                 BackHandler(onBack = back)
             })
     }

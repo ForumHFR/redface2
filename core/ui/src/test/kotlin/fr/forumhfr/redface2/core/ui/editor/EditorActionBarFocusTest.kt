@@ -134,6 +134,43 @@ class EditorActionBarFocusTest {
     }
 
     @Test
+    fun `ED85 Back reduced by the host restores the keyboard trigger of a sublevel or Format`() {
+        compose.setContent { host.Content() }
+        compose.runOnIdle { assertTrue(host.inputMode.requestInputMode(InputMode.Keyboard)) }
+        listOf("Couleur" to EditorBarMode.Format, "Image" to EditorBarMode.Normal).forEach { (label, parent) ->
+            compose.runOnIdle { host.bar.value = EditorBarState(parent) }
+            openWithKeyboard(label)
+            compose.onNodeWithContentDescription("Retour").assertIsFocused().performKeyInput { pressKey(Key.Tab) }
+            val firstAction = if (parent == EditorBarMode.Format) "Rouge" else "Uploader une image"
+            compose.onNodeWithContentDescription(firstAction).assertIsFocused()
+            hostBack()
+            assertEquals(parent, host.bar.value.mode)
+            compose.onNodeWithContentDescription(label).assertIsFocused()
+        }
+        openWithKeyboard("Mise en forme")
+        assertEquals(EditorBarMode.Format, host.bar.value.mode)
+        compose.onNodeWithContentDescription("Mise en forme").assertIsFocused()
+        hostBack()
+        assertEquals(EditorBarMode.Normal, host.bar.value.mode)
+        compose.onNodeWithContentDescription("Mise en forme").assertIsFocused()
+        assertTrue(host.calls.isEmpty())
+    }
+
+    @Test
+    fun `a surface opened from a keyboard image action is not restored as a host Back`() {
+        compose.setContent { host.Content() }
+        compose.runOnIdle { assertTrue(host.inputMode.requestInputMode(InputMode.Keyboard)) }
+        openWithKeyboard("Image")
+        compose.onNodeWithContentDescription("Retour").assertIsFocused().performKeyInput { pressKey(Key.Tab) }
+        // Same Image -> Normal transition as Back, with focus still in the row: the bar dispatched it.
+        compose.onNodeWithContentDescription("Uploader une image").assertIsFocused()
+            .performKeyInput { pressKey(Key.Enter) }
+        assertEquals(EditorBarMode.Normal, host.bar.value.mode)
+        compose.onNodeWithContentDescription("Image").assertIsNotFocused()
+        assertEquals(listOf("upload"), host.calls)
+    }
+
+    @Test
     fun `system Back after leaving color keeps body focus when closing Format`() {
         lateinit var back: OnBackPressedDispatcher
         host.bar.value = EditorBarState(EditorBarMode.Format)
@@ -281,6 +318,11 @@ class EditorActionBarFocusTest {
         compose.onNodeWithContentDescription("Mise en forme").assertIsFocused()
         restoration.emulateSavedInstanceStateRestore()
         compose.onNodeWithContentDescription("Mise en forme").assertIsFocused()
+    }
+
+    /** As the post host does: ED-85 is resolved above the bar, whose state is reduced without its handler. */
+    private fun hostBack() {
+        compose.runOnIdle { host.bar.value = reduceEditorBar(host.bar.value, EditorBarGesture.Back) }
     }
 
     private fun openWithKeyboard(label: String) {

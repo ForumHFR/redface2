@@ -7,18 +7,28 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.input.InputModeManager
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextInputSelection
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
@@ -51,9 +61,11 @@ class PostEditorChromeComposeTest {
     private val focus = FocusRequester()
     private val scroll = ScrollState(0)
     private lateinit var back: OnBackPressedDispatcher
+    private lateinit var inputMode: InputModeManager
 
     @Composable private fun PostContent() {
         back = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+        inputMode = LocalInputModeManager.current
         RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
             PostEditorTestContent(host.state, host::dispatch, host.body, host.events)
         }
@@ -174,6 +186,29 @@ class PostEditorChromeComposeTest {
         }
     }
 
+    @Test fun `ED85 post system Back from a keyboard sublevel or Format restores its bar trigger`() {
+        compose.setContent { PostContent() }
+        // The return value reflects the view's focus request, not the mode switch: assert the mode itself.
+        compose.runOnIdle { inputMode.requestInputMode(InputMode.Keyboard) }
+        compose.runOnIdle { assertEquals(InputMode.Keyboard, inputMode.inputMode) }
+        openWithKeyboard("Mise en forme")
+        openWithKeyboard("Couleur")
+        barControl("Retour").assertIsFocused()
+        // The host's handler wins and reduces the bar itself (ED-85); focus must still return to the trigger.
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNodeWithContentDescription("Gras").assertExists()
+        barControl("Couleur").assertIsFocused()
+        barControl("Mise en forme").requestFocus().assertIsFocused()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNodeWithContentDescription("Gras").assertDoesNotExist()
+        barControl("Mise en forme").assertIsFocused()
+        openWithKeyboard("Image")
+        barControl("Retour").assertIsFocused()
+        compose.runOnIdle { back.onBackPressed() }
+        barControl("Image").assertIsFocused()
+        compose.runOnIdle { assertTrue(host.calls.isEmpty()) }
+    }
+
     @Test fun `ED85 post system Back disarms before the local restore panel handler can close it`() {
         host.state = host.state.copy(restorableDraft = "Brouillon retrouvé")
         compose.setContent { PostContent() }
@@ -195,5 +230,13 @@ class PostEditorChromeComposeTest {
         compose.runOnIdle {
             assertEquals(listOf(PostEditorIntent.SubmitConfirmationDismissed), host.calls)
         }
+    }
+
+    /** The app bar also has a « Retour » control: scope lookups to the action bar. */
+    private fun barControl(label: String) = compose.onNode(hasContentDescription(label) and
+        hasAnyAncestor(hasTestTag("editor-scaffold-action-bar")))
+
+    private fun openWithKeyboard(label: String) {
+        barControl(label).requestFocus().assertIsFocused().performKeyInput { pressKey(Key.Enter) }
     }
 }
