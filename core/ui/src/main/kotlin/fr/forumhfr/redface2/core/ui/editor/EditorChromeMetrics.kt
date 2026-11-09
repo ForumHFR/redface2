@@ -5,8 +5,8 @@ import androidx.compose.ui.unit.dp
 
 /** ED-02/05: application envelopes, independent of bar mode, events and keyboard visibility. */
 data class EditorChromeMetrics(val compactHeight: Boolean) {
-    val appBarHeight: Dp get() = if (compactHeight) 0.dp else 48.dp
-    val actionBarHeight: Dp get() = if (compactHeight) 48.dp else 56.dp
+    val appBarHeight: Dp get() = if (compactHeight) 0.dp else minimumTargetSize
+    val actionBarHeight: Dp get() = if (compactHeight) minimumTargetSize else 56.dp
     val columnSpacing: Dp get() = if (compactHeight) 0.dp else 12.dp
     val draftHeightFloor: Dp get() = if (compactHeight) 0.dp else EDITOR_DRAFT_MIN_HEIGHT
     val showFieldLabel: Boolean get() = !compactHeight
@@ -28,6 +28,19 @@ data class EditorChromeMetrics(val compactHeight: Boolean) {
         val height = draftHeight(availableHeight)
         val lines = ((height - decorationHeight).coerceAtLeast(0.dp) / lineHeight).toInt()
         return EditorDraftAllocation(height, lines, height >= draftHeightFloor, lines >= minimumLines)
+    }
+
+    internal companion object {
+        val minimumTargetSize = 48.dp
+        val horizontalGutter = 16.dp
+        val horizontalGutters = horizontalGutter * 2
+        val formatMinimumWidth = minimumTargetSize * 2
+        val eventSubmitGap = 8.dp
+        val eventGutterExtension = 4.dp
+        val minimumEventWidth = 185.dp
+        // ED-30/133: reserve outside the gutter extension whenever a fixed slot precedes the event.
+        val eventContentWidth = minimumEventWidth + eventSubmitGap
+        val minimumContentWidth = minimumTargetSize
     }
 }
 

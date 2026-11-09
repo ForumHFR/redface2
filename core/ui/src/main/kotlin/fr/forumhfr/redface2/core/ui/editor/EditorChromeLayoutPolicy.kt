@@ -15,8 +15,8 @@ data class EditorChromeLayoutRequest(
     // Independent identities: null means absent; a present target reserves at least 48 dp.
     val firstStatusWidth: Dp? = null,
     val secondStatusWidth: Dp? = null,
-    // ED-30/92: events reserve their measured envelope PLUS the send gap, ahead of fixed slots.
-    val minimumContentWidth: Dp = 48.dp,
+    // ED-25/30: scrolling target at rest; full event envelope plus Send gap during an event.
+    val minimumContentWidth: Dp = EditorChromeMetrics.minimumContentWidth,
 )
 
 data class EditorChromeAllocation(
@@ -32,18 +32,21 @@ fun allocateEditorChrome(request: EditorChromeLayoutRequest): EditorChromeAlloca
     val widths = listOfNotNull(request.availableWidth, request.submitWidth, request.minimumContentWidth,
         request.firstStatusWidth, request.secondStatusWidth)
     require(widths.all { it.value.isFinite() && it >= 0.dp })
-    require(request.submitWidth >= 48.dp && request.minimumContentWidth >= 48.dp)
+    val target = EditorChromeMetrics.minimumTargetSize
+    require(request.submitWidth >= target && request.minimumContentWidth >= EditorChromeMetrics.minimumContentWidth)
     val candidates = if (request.compactHeight) buildList {
-        if (request.hasHeader) add(EditorFixedSlot.Header to 48.dp)
-        add(EditorFixedSlot.Preview to 48.dp)
-        request.firstStatusWidth?.let { add(EditorFixedSlot.FirstStatus to maxOf(48.dp, it)) }
-        request.secondStatusWidth?.let { add(EditorFixedSlot.SecondStatus to maxOf(48.dp, it)) }
+        if (request.hasHeader) add(EditorFixedSlot.Header to target)
+        add(EditorFixedSlot.Preview to target)
+        request.firstStatusWidth?.let { add(EditorFixedSlot.FirstStatus to maxOf(target, it)) }
+        request.secondStatusWidth?.let { add(EditorFixedSlot.SecondStatus to maxOf(target, it)) }
     } else emptyList()
-    var remaining = (request.availableWidth - 32.dp - request.submitWidth).coerceAtLeast(0.dp)
+    var remaining = (request.availableWidth - EditorChromeMetrics.horizontalGutters - request.submitWidth)
+        .coerceAtLeast(0.dp)
     val fixed = mutableListOf<EditorFixedSlot>()
     val overflow = mutableListOf<EditorFixedSlot>()
     candidates.forEach { (slot, width) ->
-        if (remaining - width >= request.minimumContentWidth) {
+        // Keep a priority prefix so masking a wide status never shifts a lower-priority status left.
+        if (overflow.isEmpty() && remaining - width >= request.minimumContentWidth) {
             fixed += slot
             remaining -= width
         } else {
