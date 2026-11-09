@@ -38,9 +38,9 @@ import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.unit.height
 import androidx.compose.ui.unit.width
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -85,7 +85,7 @@ class EditorControlIconsTest {
             compose.runOnIdle { index.value = position }
             compose.onNode(hasClickAction()).assert(hasContentDescription(context.getString(label)))
                 .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Selected))
-                .captureRoboImage("build/outputs/roborazzi/editor_action_$position.png")
+                .captureRoboImage("src/test/screenshots/editor_action_$position.png")
         }
     }
     @Test fun `ED32 action name and tooltip agree while only the mode trigger has a state`() {
@@ -167,7 +167,7 @@ class EditorControlIconsTest {
         assertTrue("Badge must not cover glyph", badge.top >= glyph.bottom)
         listOf(false, true).forEach { isDark ->
             compose.runOnIdle { dark.value = isDark }
-            button.captureRoboImage("build/outputs/roborazzi/editor_status_$isDark.png")
+            button.captureRoboImage("src/test/screenshots/editor_status_$isDark.png")
         }
         compose.runOnIdle { count.value = 4 }
         compose.assertLiveNode(id, "4 citations, ouvrir le panneau citations", LiveRegionMode.Polite, view)
@@ -205,7 +205,7 @@ class EditorControlIconsTest {
             chip.getUnclippedBoundsInRoot().run { assertTrue(toString(), width.value >= 48f && height.value >= 48f) }
             assertEquals(48f, chip.getUnclippedBoundsInRoot().height.value, 0.5f)
             val state = if (active) "enabled" else "disabled"
-            chip.captureRoboImage("build/outputs/roborazzi/editor_recipient_$state.png")
+            chip.captureRoboImage("src/test/screenshots/editor_recipient_$state.png")
         }
     }
 }

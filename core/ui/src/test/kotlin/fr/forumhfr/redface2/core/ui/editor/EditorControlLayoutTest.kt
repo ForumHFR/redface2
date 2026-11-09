@@ -28,11 +28,11 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
 import androidx.compose.ui.unit.width
-import com.github.takahirom.roborazzi.captureRoboImage
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
+import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -108,7 +108,7 @@ class EditorControlLayoutTest {
                 if ((content as? EditorEventContent.Problem)?.error?.cause in
                     listOf(EditorCause.Uncertain, EditorCause.DraftWriteFailed)) {
                     compose.onNodeWithTag("control").captureRoboImage(
-                        "build/outputs/roborazzi/editor_budget_${contents.indexOf(content)}_" +
+                        "src/test/screenshots/editor_budget_${contents.indexOf(content)}_" +
                             "${injectedHeight.value}.png",
                     )
                 }
@@ -162,7 +162,7 @@ class EditorControlLayoutTest {
         val bounds = compose.onNode(hasClickAction()).getUnclippedBoundsInRoot()
         assertEquals(90f, bounds.width.value, 0.5f)
         assertTrue(bounds.height.value >= 48f)
-        compose.onNode(hasClickAction()).captureRoboImage("build/outputs/roborazzi/editor_event_narrow.png")
+        compose.onNode(hasClickAction()).captureRoboImage("src/test/screenshots/editor_event_narrow.png")
     }
 
     @Test
@@ -223,7 +223,7 @@ class EditorControlLayoutTest {
                         assertEquals((injectedHeight.value - 48f) / 2, (target.top - control.top).value, 0.5f)
                     }
                     compose.onNodeWithTag("sample").captureRoboImage(
-                        "build/outputs/roborazzi/editor_event_${index}_${isDark}_${injectedHeight.value}.png",
+                        "src/test/screenshots/editor_event_${index}_${isDark}_${injectedHeight.value}.png",
                     )
                 }
             }
