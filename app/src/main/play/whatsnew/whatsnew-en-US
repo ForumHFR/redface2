@@ -1,2 +1,4 @@
-Redface 2 v0.69.9 — dev.
-- Edit a post: text locked until the original message has loaded; fixes a post being replaced by text typed too early.
+Redface 2 v0.69.10 — dev.
+- Fixes the 0.69.9 crash at launch (incomplete build).
+- Images: cancelling the picker no longer shows "No image received".
+- Edit a post: text locked until the original message has loaded.

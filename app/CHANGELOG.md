@@ -16,6 +16,13 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.69.10` — `internal` (dev) — 2026-11-09
+
+Correctif de la 0.69.9 : le build publié `app-v376` démarrait en crash. Il lui manquait les modules Hilt de `feature:topic`, perdus par une régression de KSP 2.3.13 lors de la génération de code ([google/ksp#3286](https://github.com/google/ksp/issues/3286)). Le code de l'app n'est pas en cause.
+
+- **Build** : retour à KSP 2.3.12 ; Dependabot ignore KSP 2.3.13.
+- Contenu fonctionnel identique à la 0.69.9 (#1574), plus deux changements sans effet visible : captures Roborazzi comparées à des références ([#1575](https://github.com/ForumHFR/redface2/pull/1575)) et annulation du sélecteur d'images sans message d'erreur ([#1578](https://github.com/ForumHFR/redface2/pull/1578)).
+
 ## `0.69.9` — `internal` (dev) — 2026-11-09
 
 Refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)), lot R0c ([#1512](https://github.com/ForumHFR/redface2/issues/1512)) : correctif relevé pendant la recette sur appareil ([#1574](https://github.com/ForumHFR/redface2/pull/1574)).
