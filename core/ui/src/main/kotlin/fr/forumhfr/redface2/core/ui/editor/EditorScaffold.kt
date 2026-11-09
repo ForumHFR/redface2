@@ -33,6 +33,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
@@ -74,10 +77,26 @@ data class EditorScaffoldChrome(
     val loadingForm: Boolean = false,
 )
 
-/** Retain the captured editor IME state across rotation, without saving transient surfaces in a Bundle. */
+/**
+ * Retain the captured editor IME state across rotation, without saving transient surfaces in a Bundle.
+ * A host keeps one in its ViewModel; without one, [EditorScaffold] saves the default with [Saver] (R1a-1 behaviour).
+ */
 class EditorSurfaceFocusMemory {
     var imeBeforeSurface: Boolean = false
     var autoFocusConsumed: Boolean = false
+
+    companion object {
+        /** Two booleans only: the default memory of a host without a ViewModel-held one. */
+        val Saver: Saver<EditorSurfaceFocusMemory, Any> = listSaver(
+            save = { listOf(it.imeBeforeSurface, it.autoFocusConsumed) },
+            restore = { saved ->
+                EditorSurfaceFocusMemory().apply {
+                    imeBeforeSurface = saved[0]
+                    autoFocusConsumed = saved[1]
+                }
+            },
+        )
+    }
 }
 
 /** Live, composition-owned tooltips: the screen resolves their ED-85 level before leaving. */
@@ -104,7 +123,7 @@ val LocalEditorTooltipHost = staticCompositionLocalOf<EditorTooltipHost?> { null
  * with a previously closed IME suppresses automatic opening until a completed body tap, accessibility
  * click or surface capture. Suppression is local to this composition and is not saved.
  * [autoFocus] requests body focus on entry. [surfaceFocus] owns the consumed autofocus and the captured
- * IME state across recreation: pass host-retained memory (never a Bundle); the default is composition-local.
+ * IME state across recreation: pass host-retained memory; without one the default saves its two booleans.
  * [overlay] must invoke its body exactly once, unconditionally, at a stable composition site. Wrap it
  * with EditorHeaderPanel / EditorEventDetails, passing [bodyState] and its onReturnToBody callback; their opaque
  * overlay hides and blocks the body without losing its viewport or undo history. Sheets/tooltips are
@@ -136,7 +155,9 @@ fun EditorScaffold(
     inputTransformation: InputTransformation? = null,
     autoFocus: Boolean = false,
     bodyCaretRevealResetKey: () -> Int = { 0 },
-    surfaceFocus: EditorSurfaceFocusMemory = remember(bodyState) { EditorSurfaceFocusMemory() },
+    surfaceFocus: EditorSurfaceFocusMemory = rememberSaveable(bodyState, saver = EditorSurfaceFocusMemory.Saver) {
+        EditorSurfaceFocusMemory()
+    },
     onSystemBack: (() -> Unit)? = null,
     fieldArea: @Composable (field: @Composable () -> Unit) -> Unit = { field -> field() },
     overlay: @Composable (onReturnToBody: () -> Unit, body: @Composable () -> Unit) -> Unit = { _, body -> body() },
@@ -147,7 +168,7 @@ fun EditorScaffold(
     val imeVisible = WindowInsets.isImeVisible
     val armed = submitState.armed || chrome.bar.arm != null
     // R2: EditorSurfaceFocusMemory is the single owner of consumed autofocus and captured IME state across
-    // recreation (host VM memory, never a Bundle); the IME suppression stays local and defaults to open.
+    // recreation (host VM memory, or the saved default); the IME suppression stays local and defaults to open.
     var initialFocus by remember(bodyState, surfaceFocus) {
         mutableStateOf(autoFocus && !surfaceFocus.autoFocusConsumed)
     }
