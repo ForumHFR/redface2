@@ -449,6 +449,52 @@ import dagger.hilt.android.lifecycle.HiltViewModel as HV
 SOURCE
 expect_source_set app prod
 
+expect_symlink() {
+  derive
+  [[ "$rc" -eq 1 ]] || fail "lien symbolique accepté (rc=$rc)"
+  grep -Fx -- "::error::Hilt: $1 : lien symbolique non supporté par la garde" \
+    "$work_dir/stderr" >/dev/null || fail "diagnostic du lien $1 absent"
+  echo "OK: $case_name (lien symbolique refusé)"
+}
+
+# Le fichier déplacé hors de src ne doit jamais disparaître de la dérivation.
+for link_kind in relative absolute broken; do
+  new_case "symlink_source_$link_kind" <<'SOURCE'
+package p.fixture
+@HiltViewModel class Hidden
+SOURCE
+  mkdir -p "$case_root/shared-kotlin"
+  mv -- "$source_file" "$case_root/shared-kotlin/Example.kt"
+  link_target=../../../../shared-kotlin/Example.kt
+  [[ "$link_kind" != absolute ]] || link_target="$case_root/shared-kotlin/Example.kt"
+  [[ "$link_kind" != broken ]] || rm -- "$case_root/shared-kotlin/Example.kt"
+  ln -s "$link_target" "$source_file"
+  expect_symlink feature/example/src/main/Example.kt
+done
+
+# Tous les dossiers traversés, y compris les racines et les source sets ignorés.
+for link_path in \
+  feature/example/src/main/kotlin feature/example/src/main feature/example/src \
+  feature/example feature \
+  feature/example/src/test feature/example/src/androidTest \
+  feature/example/src/testFixtures feature/example/src/debug feature/example/src/unknown \
+  build-logic/src/main/kotlin build-logic/src/main build-logic/src build-logic; do
+  new_case "symlink_directory_${link_path//\//_}" </dev/null
+  mkdir -p "$case_root/$link_path"
+  mv -- "$case_root/$link_path" "$case_root/shared-tree"
+  ln -s "$case_root/shared-tree" "$case_root/$link_path"
+  expect_symlink "$link_path"
+done
+
+# Même les fichiers non Kotlin et les liens cassés dans ces arbres sont refusés.
+for link_path in feature/example/src/test/ignored.txt build-logic/src/main/Convention.kt \
+  build-logic/src/main/ignored.txt feature/example/src/main/kotlin/broken; do
+  new_case "symlink_broken_${link_path//\//_}" </dev/null
+  mkdir -p "$(dirname -- "$case_root/$link_path")"
+  ln -s missing "$case_root/$link_path"
+  expect_symlink "$link_path"
+done
+
 new_build_case() {
   local name="$1" path="$2"
   new_case "$name" <<'SOURCE'
@@ -743,7 +789,19 @@ done
 
 new_build_case uncovered_gradle_symlink gradle/plain.txt </dev/null
 ln -s plain.txt "$case_root/gradle/extra.gradle.kts"
-expect_uncovered_gradle gradle/extra.gradle.kts
+expect_symlink gradle/extra.gradle.kts
+
+for build_path in settings.gradle.kts build.gradle.kts feature/example/build.gradle.kts \
+  build-logic/settings.gradle.kts build-logic/build.gradle.kts gradle/extra.gradle; do
+  new_build_case "symlink_gradle_${build_path//\//_}" "$build_path" </dev/null
+  mv -- "$source_file" "$case_root/shared-build.txt"
+  ln -s "$case_root/shared-build.txt" "$source_file"
+  expect_symlink "$build_path"
+done
+
+new_case symlink_broken_gradle </dev/null
+ln -s missing "$case_root/build.gradle.kts"
+expect_symlink build.gradle.kts
 
 new_case root_build_src <<'SOURCE'
 package p.fixture
@@ -766,7 +824,7 @@ BUILD
 done
 
 # Le chemin Git doit aussi voir les fichiers non suivis non ignorés. Le dépôt
-# factice est initialisé uniquement dans mktemp, sans commit ni ajout à l'index.
+# factice est initialisé uniquement dans mktemp, sans commit.
 if command -v git >/dev/null; then
   new_build_case git_untracked_gradle gradle/extra.gradle.kts </dev/null
   git -C "$case_root" init -q
@@ -778,6 +836,18 @@ BUILD
   git -C "$case_root" init -q
   echo 'local-cache/' >"$case_root/.gitignore"
   expect_list "ViewModels : p.fixture.Real"
+
+  for link_path in feature/example/src/main/Example.kt build.gradle.kts gradle/extra.gradle.kts; do
+    new_case "git_indexed_symlink_${link_path//\//_}" </dev/null
+    mkdir -p "$(dirname -- "$case_root/$link_path")"
+    rm -f -- "$case_root/$link_path"
+    ln -s missing "$case_root/$link_path"
+    git -C "$case_root" init -q
+    git -C "$case_root" add -- "$link_path"
+    [[ "$(git -C "$case_root" ls-files --stage -- "$link_path")" == 120000\ * ]] \
+      || fail "lien non indexé en mode 120000"
+    expect_symlink "$link_path"
+  done
 fi
 
 # Bout en bout : ZIP valide mais DEX factice, avec les seuls marqueurs de l'app et
@@ -883,6 +953,15 @@ plugins { id("redface.android.library"); id("redface.android.hilt.library") }
 apply(from = rootProject.file("gradle/shared-sources.gradle.kts"))
 BUILD
 expect_artifact_rejected "::error::Hilt: gradle/shared-sources.gradle.kts : fichier Gradle non couvert par la garde"
+
+new_case artifact_symlink_astra_r6 <<'SOURCE'
+package p.fixture
+@HiltViewModel class Hidden
+SOURCE
+mkdir -p "$case_root/shared-kotlin"
+mv -- "$source_file" "$case_root/shared-kotlin/Example.kt"
+ln -s ../../../../shared-kotlin/Example.kt "$source_file"
+expect_artifact_rejected "::error::Hilt: feature/example/src/main/Example.kt : lien symbolique non supporté par la garde"
 
 for source_set in release prod; do
   module_path=feature/example

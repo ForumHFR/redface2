@@ -58,7 +58,8 @@ dossiers `src/<set>/` de chaque projet inclus :
 - Dans `main`, les sources `.kt` et `.java` contribuent si elles déclarent
   `@HiltViewModel`, `@AndroidEntryPoint`, `@HiltAndroidApp` ou `@Module` accompagné
   de `@InstallIn` sur la même déclaration, hors commentaires et littéraux.
-- `test`, `androidTest`, `testFixtures`, `debug` : ignorés, sans lire leur contenu.
+- `test`, `androidTest`, `testFixtures`, `debug` : ignorés pour l'analyse Hilt,
+  mais soumis au refus des liens symboliques ci-dessous.
 - Tout autre dossier (`release`, `prod`, `prodDebug`, `internalDebug`,
   `screenshotTest`, `devRelease`, nom inconnu…) échoue, même vide ou sans Hilt :
   `::error::Hilt: source set <module>/src/<set> non supporté par la garde`.
@@ -92,6 +93,13 @@ pas au contrôle. Sans Git, `find` parcourt le dépôt en excluant les dossiers
 `.git`, `build`, `.gradle`, `.gradle-user`, `.gradle-tmp` et `.kotlin`, à toute
 profondeur ; ces mêmes dossiers sont exclus de l'inventaire Git. Ce repli permet
 de contrôler un export sans supposer que ses autres scripts seraient inoffensifs.
+
+Tout lien symbolique, fichier ou dossier, relatif ou absolu, cassé ou non, est
+refusé dans les arbres `src/` des projets inclus, dans `build-logic/src/main/`
+et sur les chemins des fichiers de l'inventaire Gradle. Ce contrôle couvre aussi
+les dossiers parents de ces chemins, notamment le module et son dossier `src`.
+Le diagnostic est `::error::Hilt: <chemin relatif> : lien symbolique non supporté
+par la garde` ; les liens ne sont pas suivis.
 
 Hors fichiers Gradle soumis à cet inventaire, les autres source sets de
 `build-logic`, dont `src/test` et `src/roborazziTest`, ne sont pas lus. Les sources
@@ -183,6 +191,10 @@ autres liaisons `@Module` ne sont pas contrôlées individuellement ; une perte 
 de ces liaisons peut donc passer. La lecture statique n'est pas un parseur Kotlin
 ou Java complet. Les remappages explicites de projets dans les settings inspectés
 sont refusés par les tokens ci-dessus.
+Les init scripts Gradle (`init.gradle`, option `-I`, `~/.gradle/init.d`) restent
+hors de portée, tout comme l'ajout de sources dans une convention par une API
+de tâche non listée (par exemple `KotlinCompile.source(…)`). Ces chemins doivent
+être couverts par la garde et ses régressions avant toute adoption dans le projet.
 Les plugins tiers publiés (leur code n'est pas inspecté) et les sources générées
 pendant le build restent hors de portée. Une source ajoutée par un de ces plugins
 sans configuration de répertoire visible dans les fichiers inspectés peut donc

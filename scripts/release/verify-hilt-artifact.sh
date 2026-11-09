@@ -10,6 +10,8 @@
 # debug ; les releases ne compilent que des variantes <flavor>Release.
 # Configuration : liste fermée des fichiers Gradle (settings/build racine,
 # builds des projets inclus, settings/build de build-logic) ; buildSrc est refusé.
+# Les chemins lus et les arbres src des projets inclus / build-logic/src/main
+# refusent tout lien symbolique, y compris cassé ou dans un dossier parent.
 # Tokens de sources et de délégation interdits dans ces fichiers et dans
 # build-logic/src/main (.kt/.kts/.java), hors commentaires et chaînes. Les seules
 # exceptions sont cinq couples (chemin relatif, ligne exacte sans blancs aux
@@ -52,6 +54,28 @@ done
 
 work_dir="$(mktemp -d)"
 trap 'rm -rf -- "$work_dir"' EXIT
+
+# Tester aussi les parents : -f/-d et find peuvent masquer un lien intermédiaire.
+reject_symlink_path() {
+  local path="$1"
+  while [[ "$path" != "$repo_root" ]]; do
+    if [[ -L "$path" ]]; then
+      echo "::error::Hilt: ${path#"$repo_root/"} : lien symbolique non supporté par la garde" >&2
+      exit 1
+    fi
+    path="${path%/*}"
+  done
+}
+
+reject_tree_symlinks() {
+  local path
+  reject_symlink_path "$1"
+  [[ -d "$1" ]] || return 0
+  find "$1" -type l -print0 | sort -z >"$work_dir/symlinks"
+  while IFS= read -r -d '' path; do
+    reject_symlink_path "$path"
+  done <"$work_dir/symlinks"
+}
 
 # Lexer puis reconnaissance volontairement bornée, en awk POSIX (sans gensub,
 # captures de match, tableaux imbriqués, nextfile ou autre extension GNU).
@@ -418,6 +442,7 @@ fi
 
 settings_files=()
 for settings_file in "$repo_root/settings.gradle"{,.kts}; do
+  reject_symlink_path "$settings_file"
   [[ ! -f "$settings_file" ]] || settings_files+=("$settings_file")
 done
 if [[ "${#settings_files[@]}" -eq 0 ]]; then
@@ -430,12 +455,15 @@ scan_code settings "${settings_files[@]}" | sort -u >"$work_dir/projects"
 # le parcours src/<set>. Ne pas descendre dans les sorties de build-logic.
 build_files=()
 while IFS= read -r module; do
+  reject_tree_symlinks "$repo_root/${module//:/\/}/src"
   for build_file in "$repo_root/${module//:/\/}/build.gradle"{,.kts}; do
+    reject_symlink_path "$build_file"
     [[ ! -f "$build_file" ]] || build_files+=("$build_file")
   done
 done <"$work_dir/projects"
 for build_file in "$repo_root/build.gradle"{,.kts} \
   "$repo_root/build-logic/settings.gradle"{,.kts} "$repo_root/build-logic/build.gradle"{,.kts}; do
+  reject_symlink_path "$build_file"
   [[ ! -f "$build_file" ]] || build_files+=("$build_file")
 done
 # Seuls ces fichiers Gradle sont couverts. Une convention .gradle.kts sous
@@ -461,12 +489,14 @@ while IFS= read -r -d '' gradle_file; do
   case "/$gradle_file/" in
     */.git/*|*/build/*|*/.gradle/*|*/.gradle-user/*|*/.gradle-tmp/*|*/.kotlin/*) continue ;;
   esac
+  reject_symlink_path "$repo_root/$gradle_file"
   if [[ -z "${covered_gradle_files[$gradle_file]:-}" ]]; then
     echo "::error::Hilt: $gradle_file : fichier Gradle non couvert par la garde" >&2
     exit 1
   fi
 done <"$work_dir/gradle-files"
 
+reject_tree_symlinks "$repo_root/build-logic/src/main"
 if [[ -d "$repo_root/build-logic/src/main" ]]; then
   find "$repo_root/build-logic/src/main" -type f \( -name '*.kt' -o -name '*.kts' -o -name '*.java' \) -print0 | sort -z >"$work_dir/build-logic-files"
   while IFS= read -r -d '' build_file; do build_files+=("$build_file"); done <"$work_dir/build-logic-files"
