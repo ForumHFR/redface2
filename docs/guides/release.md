@@ -48,14 +48,39 @@ Workflow source : [`.github/workflows/release.yml`](https://github.com/ForumHFR/
 Après le build signé et avant le staging ou toute publication (GitHub, Play, F-Droid),
 `release.yml` exécute `scripts/release/verify-hilt-artifact.sh` sur tous les APK F-Droid
 du canal et, si Play est activé, tous les APK et AAB prod. Un artefact manquant,
-illisible ou incomplet arrête le job avant tout upload.
+illisible ou dépourvu d'au moins un marqueur attendu arrête le job avant tout upload.
 
 La garde lit `classes*.dex` dans les APK et `base/dex/classes*.dex` dans les AAB.
-Elle exige `Hilt_RedfaceApplication` pour `app` (package racine, sans segment `app`)
-et le préfixe Hilt agrégé `_fr_forumhfr_redface2_<chemin_du_module>_` pour chaque
-bibliothèque appliquant `redface.android.hilt.library`, dérivée des `build.gradle.kts`
-du dépôt au moment du contrôle. Aucune bibliothèque n'est exclue pour R8.
-Cette présence par module ne garantit pas l'exhaustivité de tous ses bindings.
+Les projets sont dérivés des `include(...)` littéraux de `settings.gradle.kts`, hors
+commentaires. Dans leurs sources `src/main/**/*.kt` et `.java`, hors commentaires,
+un projet contribue s'il déclare `@HiltViewModel`, `@AndroidEntryPoint`,
+`@HiltAndroidApp` ou `@Module` accompagné de `@InstallIn` sur la même déclaration.
+Les plugins Gradle et les répertoires de projets non inclus ne participent pas à
+cette dérivation.
+
+- Pour **chaque classe `@HiltViewModel`**, y compris dans `app`, la garde exige les
+  octets du descripteur
+  `Lhilt_aggregated_deps/_<package_avec_des_underscores>_<Classe>_HiltModules_KeyModule;`.
+  Le package et le nom de classe sont lus dans les sources, après l'annotation.
+- Pour un **module contributeur sans ViewModel**, elle exige au moins un descripteur
+  commençant par `Lhilt_aggregated_deps/_<package_commun_avec_des_underscores>_`.
+  Ce package commun est dérivé des déclarations `package` de ses sources, jamais
+  de son chemin Gradle.
+- Pour **chaque classe `@HiltAndroidApp`**, elle exige aussi `Hilt_<Classe>`
+  (actuellement `Hilt_RedfaceApplication`).
+
+**Hypothèse : DEX non minifié et non obfusqué.** La convention
+`RedfaceConventionPlugins.kt` impose `isMinifyEnabled = false` ; les fixtures
+release v371 à v377 ne sont pas minifiées. Si la minification est activée, cette
+garde devra être revue : revérifier la conservation des noms et des marqueurs dans
+les APK et AAB finaux, puis rejouer les cas sains et les pertes totales et partielles.
+
+**Limites :** la recherche porte sur des octets dans les DEX, sans vérifier les
+définitions de classes ni leur intégration au graphe de composants généré. Les
+autres liaisons `@Module` ne sont pas contrôlées individuellement ; une perte partielle
+de ces liaisons peut donc passer. La lecture statique suit les déclarations nommées
+du dépôt ; elle ne résout pas les alias d'annotations ni les chemins de projets
+remappés par Gradle. Utiliser un checkout correspondant au binaire.
 
 Depuis un checkout du code correspondant au binaire, contrôle manuel sans Gradle
 (Bash, `unzip`, `grep`, `find` et outils standard de l'image Android SDK du job) :

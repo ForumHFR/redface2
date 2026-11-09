@@ -1,12 +1,17 @@
 #!/usr/bin/env bash
 # Garde Hilt avant publication (#1581), sans Gradle ni inspection de ses caches.
-# Les modules sont dérivés à chaque run des build.gradle.kts qui appliquent
-# redface.android.hilt.library : leur chemin core/foo ou feature/foo donne le
-# préfixe hilt_aggregated_deps _fr_forumhfr_redface2_core_foo_ (idem feature).
-# app applique redface.android.hilt.application, mais son package est à la racine
-# fr.forumhfr.redface2, sans segment "app" : on exige Hilt_RedfaceApplication.
-# Aucune bibliothèque n'est exemptée pour R8 : tous les préfixes sont présents dans
-# les fixtures release minifiées v377. Toute future exception doit être prouvée.
+# Projets : include(...) littéraux de settings.gradle.kts, hors commentaires.
+# Contributions : annotations Hilt dans src/main/**/*.kt et .java, hors commentaires.
+# Chaque @HiltViewModel exige _<package en _>_<Classe>_HiltModules_KeyModule ;
+# chaque @HiltAndroidApp exige Hilt_<Classe>. Sans ViewModel, un contributeur
+# (@AndroidEntryPoint, @HiltAndroidApp ou @Module + @InstallIn sur une déclaration)
+# exige aussi le préfixe agrégé du package commun lu dans ses sources.
+# Hypothèse : DEX non obfusqué (isMinifyEnabled = false dans les conventions).
+# Les fixtures v371-v377 ne sont pas minifiées. Si la minification est activée,
+# revoir la garde et revérifier la conservation des marqueurs dans les APK/AAB
+# finaux, ainsi que la détection des pertes totales et partielles.
+# Présence d'octets seulement : ni définition de classe ni intégration au graphe
+# de composants garanties ; les autres liaisons @Module ne sont pas exhaustives.
 # APK : classes*.dex ; AAB : base/dex/classes*.dex. Seul le DEX final est lu.
 set -euo pipefail
 export LC_ALL=C
@@ -16,7 +21,7 @@ if [[ "$#" -eq 0 ]]; then
   exit 1
 fi
 
-for tool in unzip grep find sort mktemp rm dirname; do
+for tool in unzip grep find sort mktemp rm dirname awk; do
   command -v "$tool" >/dev/null || {
     echo "::error::Hilt: outil requis introuvable : $tool" >&2
     exit 1
@@ -27,31 +32,150 @@ repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)"
 work_dir="$(mktemp -d)"
 trap 'rm -rf -- "$work_dir"' EXIT
 
-# Matérialiser la liste : une erreur de find/sort doit arrêter la garde.
-find "$repo_root" -type d \( -name .git -o -name build -o -name '.gradle*' \
-  -o -name .kotlin -o -name node_modules \) -prune -o \
-  -type f -name build.gradle.kts -print0 | sort -z >"$work_dir/build-files"
-
-modules=()
-prefixes=()
-application_found=0
-while IFS= read -r -d '' build_file; do
-  module="${build_file#"$repo_root/"}"
-  module="${module%/build.gradle.kts}"
-  if grep -Eq '^[[:space:]]*id\([[:space:]]*"redface\.android\.hilt\.application"[[:space:]]*\)' "$build_file"; then
-    [[ "$module" == app ]] || {
-      echo "::error::Hilt: module application inattendu : $module" >&2
+# Lecture statique adaptée aux include littéraux et déclarations nommées du dépôt.
+# Partager le retrait des commentaires // et /* ... */ entre settings et sources ;
+# préserver les chaînes (notamment les chemins des include et les URL Kotlin).
+scan_code() {
+  local mode="$1"
+  shift
+  awk -v mode="$mode" '
+    function uncomment(line,    result, i, c, next_c) {
+      result = ""
+      for (i = 1; i <= length(line); i++) {
+        c = substr(line, i, 1)
+        next_c = substr(line, i + 1, 1)
+        if (block) {
+          if (c == "*" && next_c == "/") { block = 0; i++ }
+        } else if (quote != "") {
+          result = result c
+          if (escape) escape = 0
+          else if (c == "\\") escape = 1
+          else if (c == quote) quote = ""
+        } else if (c == "/" && next_c == "/") break
+        else if (c == "/" && next_c == "*") { block = 1; i++; result = result " " }
+        else {
+          result = result c
+          if (c == "\"" || c == sprintf("%c", 39)) quote = c
+        }
+      }
+      return result
+    }
+    function annotation(line, name) {
+      return line ~ ("@([[:alnum:]_]+\\.)*" name "([^[:alnum:]_]|$)")
+    }
+    function invalid(message) {
+      print "::error::Hilt: " FILENAME ": " message > "/dev/stderr"
       exit 1
     }
-    application_found=1
-    modules+=(app)
-    prefixes+=(Hilt_RedfaceApplication)
-  elif grep -Eq '^[[:space:]]*id\([[:space:]]*"redface\.android\.hilt\.library"[[:space:]]*\)' "$build_file"; then
-    modules+=("${module//\//:}")
-    # Le séparateur final évite qu'un module foobar masque la perte de foo.
-    prefixes+=("_fr_forumhfr_redface2_${module//\//_}_")
+    FNR == 1 {
+      if (view_model || application) invalid("annotation sans classe nommée")
+      package_name = ""; block = 0; quote = ""; escape = 0
+      view_model = application = entry_point = module = install_in = 0
+    }
+    {
+      line = uncomment($0)
+      if (mode == "settings") { settings = settings " " line; next }
+      if (line ~ /^[[:space:]]*package[[:space:]]+/) {
+        package_name = line
+        sub(/^[[:space:]]*package[[:space:]]+/, "", package_name)
+        sub(/[;[:space:]].*$/, "", package_name)
+        if (!have_package++) common_package = package_name
+        while (common_package != "" && package_name != common_package &&
+               index(package_name, common_package ".") != 1) {
+          if (!sub(/\.[^.]+$/, "", common_package)) common_package = ""
+        }
+      }
+      if (annotation(line, "HiltViewModel")) view_model = 1
+      if (annotation(line, "HiltAndroidApp")) application = 1
+      if (annotation(line, "AndroidEntryPoint")) entry_point = 1
+      if (annotation(line, "Module")) module = 1
+      if (annotation(line, "InstallIn")) install_in = 1
+      if (match(line, /(^|[[:space:]])(class|object|interface)[[:space:]]+[[:alnum:]_]+/)) {
+        class_name = substr(line, RSTART, RLENGTH)
+        sub(/^.*[[:space:]]/, "", class_name)
+        if (view_model || application || entry_point || (module && install_in)) {
+          if (package_name == "") invalid("contribution Hilt sans package")
+          contributor = 1
+          print "contribution\t" package_name "\t" class_name
+          if (view_model) print "viewmodel\t" package_name "\t" class_name
+          if (application) print "application\t" package_name "\t" class_name
+        }
+        view_model = application = entry_point = module = install_in = 0
+      }
+    }
+    END {
+      if (mode == "settings") {
+        while (match(settings, /(^|[^[:alnum:]_])include[[:space:]]*\([^)]*\)/)) {
+          arguments = substr(settings, RSTART, RLENGTH)
+          settings = substr(settings, RSTART + RLENGTH)
+          sub(/^[^(]*\(/, "", arguments); sub(/\)$/, "", arguments)
+          while (match(arguments, /":[[:alnum:]_.:-]+"/)) {
+            project = substr(arguments, RSTART + 2, RLENGTH - 3)
+            print project
+            arguments = substr(arguments, 1, RSTART - 1) substr(arguments, RSTART + RLENGTH)
+          }
+          gsub(/[[:space:],]/, "", arguments)
+          if (arguments != "") invalid("include non littéral non pris en charge")
+        }
+      } else {
+        if (view_model || application) invalid("annotation sans classe nommée")
+        if (contributor) {
+          if (common_package == "") invalid("contributions sans package commun")
+          print "prefix\t" common_package "\t-"
+        }
+      }
+    }
+  ' "$@"
+}
+
+scan_code settings "$repo_root/settings.gradle.kts" | sort -u >"$work_dir/projects"
+
+modules=()
+check_modules=()
+check_names=()
+markers=()
+application_found=0
+while IFS= read -r module; do
+  source_dir="$repo_root/${module//:/\/}/src/main"
+  [[ -d "$source_dir" ]] || continue
+  # Matérialiser les listes : toute erreur find/sort/awk doit arrêter la garde.
+  find "$source_dir" -type f \( -name '*.kt' -o -name '*.java' \) -print0 | sort -z >"$work_dir/source-files"
+  mapfile -d '' -t source_files <"$work_dir/source-files"
+  [[ "${#source_files[@]}" -gt 0 ]] || continue
+  scan_code sources "${source_files[@]}" | sort -u >"$work_dir/contributions"
+  contributor=0
+  module_viewmodels=()
+  module_prefix=''
+  while IFS=$'\t' read -r kind package_name class_name; do
+    case "$kind" in
+      contribution) contributor=1 ;;
+      prefix) module_prefix="_${package_name//./_}_" ;;
+      viewmodel|application)
+        check_modules+=("$module")
+        check_names+=("$package_name.$class_name")
+        if [[ "$kind" == viewmodel ]]; then
+          module_viewmodels+=("$package_name.$class_name")
+          # Le ; borne le descripteur exact : un nom plus long ne peut le masquer.
+          markers+=("Lhilt_aggregated_deps/_${package_name//./_}_${class_name}_HiltModules_KeyModule;")
+        else
+          application_found=1
+          markers+=("Hilt_$class_name")
+        fi
+        ;;
+    esac
+  done <"$work_dir/contributions"
+  if [[ "$contributor" -eq 1 ]]; then
+    modules+=("$module")
+    if [[ "${#module_viewmodels[@]}" -eq 0 ]]; then
+      check_modules+=("$module")
+      check_names+=("préfixe de package $module_prefix")
+      markers+=("Lhilt_aggregated_deps/$module_prefix")
+      echo "Hilt: $module : préfixe $module_prefix"
+    else
+      echo "Hilt: $module : ViewModels : ${module_viewmodels[*]}"
+    fi
   fi
-done <"$work_dir/build-files"
+done <"$work_dir/projects"
 
 if [[ "$application_found" -ne 1 || "${#modules[@]}" -lt 2 ]]; then
   echo "::error::Hilt: dérivation incomplète (app et bibliothèques Hilt attendues)" >&2
@@ -79,9 +203,9 @@ for artifact in "$@"; do
     continue
   fi
   artifact_failed=0
-  for index in "${!modules[@]}"; do
-    if ! grep -aF -- "${prefixes[$index]}" "$work_dir/artifact.dex" >/dev/null; then
-      echo "::error::Hilt: $artifact : module ${modules[$index]} absent du DEX (marqueur ${prefixes[$index]})" >&2
+  for index in "${!markers[@]}"; do
+    if ! grep -aF -- "${markers[$index]}" "$work_dir/artifact.dex" >/dev/null; then
+      echo "::error::Hilt: $artifact : module ${check_modules[$index]} : ${check_names[$index]} absent du DEX (marqueur ${markers[$index]})" >&2
       artifact_failed=1
     fi
   done
