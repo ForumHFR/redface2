@@ -3,6 +3,7 @@
 package fr.forumhfr.redface2.core.ui.editor
 
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
 import fr.forumhfr.redface2.core.ui.R
 
@@ -14,14 +15,16 @@ data class EditorBarImageActions(
 )
 
 @Composable
+@Suppress("LongParameterList") // Host capabilities and Back's focus modifier are independent inputs.
 internal fun EditorImageRow(
     actions: EditorBarImageActions,
     onExternal: (() -> Unit) -> Unit,
     onWrap: () -> Unit,
     onBack: () -> Unit,
     enabled: Boolean,
+    backModifier: Modifier = Modifier,
 ) {
-    EditorBarIcon(R.drawable.ic_arrow_back, stringResource(R.string.editor_return), onBack)
+    EditorBarIcon(R.drawable.ic_arrow_back, stringResource(R.string.editor_return), onBack, backModifier)
     EditorBarIcon(R.drawable.ic_image_upload, stringResource(R.string.editor_bar_upload),
         { onExternal(actions.onUpload) }, enabled = enabled)
     actions.onInsertUrl?.let { insert ->

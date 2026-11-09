@@ -8,6 +8,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
@@ -20,8 +21,13 @@ import fr.forumhfr.redface2.core.ui.R
 
 /** Drawn swatches are the ED-36 exception to the local vector icon family. No popup or IME call. */
 @Composable
-internal fun EditorColorRow(onAction: (BbcodeAction) -> Unit, onBack: () -> Unit, enabled: Boolean) {
-    EditorBarIcon(R.drawable.ic_arrow_back, stringResource(R.string.editor_return), onBack)
+internal fun EditorColorRow(
+    onAction: (BbcodeAction) -> Unit,
+    onBack: () -> Unit,
+    enabled: Boolean,
+    backModifier: Modifier = Modifier,
+) {
+    EditorBarIcon(R.drawable.ic_arrow_back, stringResource(R.string.editor_return), onBack, backModifier)
     val palette = listOf(
         "#FF0000" to R.string.bbcode_color_red, "#0000FF" to R.string.bbcode_color_blue,
         "#008000" to R.string.bbcode_color_green, "#FF6600" to R.string.bbcode_color_orange,
@@ -33,12 +39,14 @@ internal fun EditorColorRow(onAction: (BbcodeAction) -> Unit, onBack: () -> Unit
         val outline = MaterialTheme.colorScheme.onSurface
         EditorIconTooltip(label) {
             IconButton(onClick = click, enabled = enabled,
-                modifier = Modifier.size(48.dp).editorBarActivation(enabled, click)
+                modifier = Modifier.size(EditorChromeMetrics.minimumTargetSize).editorBarActivation(enabled, click)
                     .semantics { contentDescription = label }) {
-                Box(Modifier.size(24.dp).clip(CircleShape)
+                Box(Modifier.size(24.dp).alpha(if (enabled) 1f else DISABLED_SWATCH_ALPHA).clip(CircleShape)
                     .background(Color(android.graphics.Color.parseColor(hex)))
                     .drawBehind { drawCircle(outline, style = Stroke(1.dp.toPx())) })
             }
         }
     }
 }
+
+private const val DISABLED_SWATCH_ALPHA = 0.38f

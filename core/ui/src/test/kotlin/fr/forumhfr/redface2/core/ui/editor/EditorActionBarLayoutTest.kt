@@ -43,7 +43,8 @@ class EditorActionBarLayoutTest {
     @get:Rule val compose = createComposeRule()
     private val host = EditorActionBarFixture()
     private fun bounds(tag: String) = compose.onNodeWithTag(tag).getUnclippedBoundsInRoot()
-    private fun headerBoundary() = bounds("editor-bar-submit").width + 32.dp + 48.dp + 189.dp
+    private fun headerBoundary() = bounds("editor-bar-submit").width + EditorChromeMetrics.horizontalGutters +
+        EditorChromeMetrics.minimumTargetSize + EditorChromeMetrics.eventMinimumContentWidth
 
     @Test
     fun `ED21 ED30 ED38 two formats or three normal actions fit at 360 and 1_3 times L`() {
@@ -83,7 +84,7 @@ class EditorActionBarLayoutTest {
         compose.onNodeWithContentDescription("12 citations").revealEditorControl()
         compose.onNodeWithContentDescription("Brouillon retrouvé").performScrollTo().assertIsDisplayed()
         // Cross the ED-25/92 boundary using measured Send, not an assumed font-dependent width.
-        // Every event's 4 dp gutter extension increases available width and event reserve equally.
+        // A retained header keeps the 16 dp gutter and requires the full unextended event reserve.
         val headerBoundary = headerBoundary()
         // Stay 1 dp either side to avoid pixel/Dp rounding at the exact boundary.
         compose.runOnIdle {
@@ -94,6 +95,8 @@ class EditorActionBarLayoutTest {
         val header = compose.onNodeWithContentDescription("Titre et sous-catégorie").assertIsDisplayed()
         val eventControl = compose.onNode(hasClickAction() and hasContentDescription("Titre manquant, Compléter"))
         val retainedEvent = eventControl.getUnclippedBoundsInRoot()
+        assertEquals(16f, header.getUnclippedBoundsInRoot().left.value, 0.5f)
+        assertEquals(64f, retainedEvent.left.value, 0.5f)
         assertTrue(header.getUnclippedBoundsInRoot().right <= retainedEvent.left)
         assertTrue(retainedEvent.width >= 185.dp)
         assertTrue(bounds("editor-bar-submit").left - retainedEvent.right >= 7.9.dp)
@@ -143,6 +146,47 @@ class EditorActionBarLayoutTest {
         assertEquals(listOf(information.key to action), host.eventActions)
         target.revealEditorControl().performTouchInput { click() }
         assertEquals(listOf(call), host.calls); assertEquals(EditorBarMode.Normal, host.bar.value.mode)
+    }
+
+    @Test
+    fun `ED25 ED41 fixed slots keep their measured positions through an event and its acknowledgement`() {
+        host.compact.value = true; host.header.value = true; host.scale.value = 1.3f
+        host.firstStatus.value = EditorAppBarStatus(R.drawable.ic_editor_quote, "12 citations", {}, 12)
+        host.secondStatus.value = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon retrouvé", {})
+        compose.setContent { host.Content() }
+        val labels = listOf("Titre et sous-catégorie", "Afficher l’aperçu", "12 citations", "Brouillon retrouvé")
+        listOf(360.dp, 760.dp).forEach { width ->
+            compose.runOnIdle { host.width.value = width }
+            val fixed = labels.mapNotNull { label ->
+                val node = compose.onNodeWithContentDescription(label)
+                if (hasAnyAncestor(hasScrollAction()).matches(node.fetchSemanticsNode())) null
+                else label to node.getUnclippedBoundsInRoot()
+            }.toMap()
+            assertTrue(fixed.isNotEmpty())
+            val send = bounds("editor-bar-submit")
+            val body = bounds("body")
+            val events = listOf(host.finished(), controlEvent(EditorEventContent.Problem(EditorErrors.missingTitle)))
+            events.forEach { event ->
+                compose.runOnIdle { host.event.value = event }
+                val retained = labels.filter { label ->
+                    compose.onAllNodes(hasContentDescription(label)).fetchSemanticsNodes().isNotEmpty()
+                }
+                assertEquals(if (width == 760.dp) labels else emptyList<String>(), retained)
+                retained.forEach { label ->
+                    assertEquals(fixed.getValue(label),
+                        compose.onNodeWithContentDescription(label).getUnclippedBoundsInRoot())
+                }
+                assertTrue(bounds("editor-bar-event").width >= 185.dp)
+                assertEquals(send, bounds("editor-bar-submit")); assertEquals(body, bounds("body"))
+                compose.onNode(hasClickAction() and hasAnyAncestor(hasTestTag("editor-bar-event")))
+                    .performTouchInput { click() }
+                fixed.forEach { (label, position) ->
+                    assertEquals(position, compose.onNodeWithContentDescription(label).getUnclippedBoundsInRoot())
+                }
+                assertEquals(send, bounds("editor-bar-submit")); assertEquals(body, bounds("body"))
+                assertEquals(event.key to event.action, host.eventActions.last())
+            }
+        }
     }
 
     @Test
@@ -217,7 +261,7 @@ class EditorActionBarLayoutTest {
     }
 
     @Test
-    fun `ED91 ED92 ED133 all event ranks share the extended envelope in normal and compact height`() {
+    fun `ED91 ED92 ED133 event ranks share an envelope extended only without preceding fixed slots`() {
         host.scale.value = 1.3f; compose.setContent { host.Content() }
         val events = listOf(controlEvent(EditorEventContent.Problem(EditorErrors.draftWriteFailed)),
             controlEvent(EditorEventContent.Problem(EditorErrors.network)),
@@ -231,10 +275,11 @@ class EditorActionBarLayoutTest {
     private fun assertEventEnvelopes(width: Dp, compact: Boolean, events: List<EditorEvent>) {
         compose.runOnIdle { host.width.value = width; host.compact.value = compact; host.event.value = events.first() }
         val event = bounds("editor-bar-event"); val send = bounds("editor-bar-submit")
-        val retainsPreview = compact && width >= send.width + 32.dp + 48.dp + 189.dp
+        val retainsPreview = compact && width >= send.width + EditorChromeMetrics.horizontalGutters +
+            EditorChromeMetrics.minimumTargetSize + EditorChromeMetrics.eventMinimumContentWidth
         val preview = compose.onNodeWithContentDescription("Afficher l’aperçu")
         if (retainsPreview) preview.assertIsDisplayed() else preview.assertDoesNotExist()
-        assertEquals(if (retainsPreview) 60f else 12f, event.left.value, 0.5f)
+        assertEquals(if (retainsPreview) 64f else 12f, event.left.value, 0.5f)
         assertTrue(event.width >= if (width == 360.dp) 185.dp else 48.dp); assertTrue(send.left - event.right >= 7.9.dp)
         assertEquals(if (compact) 48f else 56f, bounds("bar").height.value, 0.5f)
         compose.onNodeWithContentDescription("Brouillon non écrit, Afficher les détails").assertExists()

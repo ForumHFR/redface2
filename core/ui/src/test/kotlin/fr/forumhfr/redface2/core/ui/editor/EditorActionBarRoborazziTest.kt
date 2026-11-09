@@ -45,7 +45,7 @@ class EditorActionBarRoborazziTest {
             host.firstStatus.value = EditorAppBarStatus(R.drawable.ic_editor_quote, "12 citations", {}, 12)
             host.secondStatus.value = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon retrouvé", {})
         }
-        (0..17).forEach { sample ->
+        (0..18).forEach { sample ->
             compose.runOnIdle { showSample(sample) }
             val target = compose.onNodeWithTag("bar")
             assertEquals(if (compact) 48f else 56f, target.getUnclippedBoundsInRoot().height.value, 0.5f)
@@ -56,7 +56,7 @@ class EditorActionBarRoborazziTest {
 
     private fun showSample(sample: Int) {
         host.bar.value = EditorBarState(sampleMode(sample), if (sample == 6 || sample == 16) host.frozenArm else null)
-        host.enabled.value = sample != 17
+        host.enabled.value = sample != 17 && sample != 18
         host.imageUrl.value = sample != 5
         host.shortcut.value = if (sample == 1) EditorBarShortcut(R.drawable.ic_editor_bold, "Gras", {}) else null
         host.loading.value = sample == 7
@@ -68,7 +68,7 @@ class EditorActionBarRoborazziTest {
 
     private fun sampleMode(sample: Int): EditorBarMode = when (sample) {
         2, 6 -> EditorBarMode.Format
-        3 -> EditorBarMode.Color
+        3, 18 -> EditorBarMode.Color
         4, 5 -> EditorBarMode.Image
         else -> EditorBarMode.Normal
     }

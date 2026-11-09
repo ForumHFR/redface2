@@ -12,7 +12,12 @@ import fr.forumhfr.redface2.core.ui.R
 
 /** ED-20: insertion commands only; selection and undo remain owned by the field's host. */
 @Composable
-internal fun EditorFormatRow(onAction: (BbcodeAction) -> Unit, onColor: () -> Unit, enabled: Boolean) {
+internal fun EditorFormatRow(
+    onAction: (BbcodeAction) -> Unit,
+    onColor: () -> Unit,
+    enabled: Boolean,
+    colorModifier: Modifier = Modifier,
+) {
     val formats = listOf(
         Triple(BbcodeAction.Bold, R.drawable.ic_editor_bold, R.string.bbcode_action_bold),
         Triple(BbcodeAction.Italic, R.drawable.ic_editor_italic, R.string.bbcode_action_italic),
@@ -27,7 +32,7 @@ internal fun EditorFormatRow(onAction: (BbcodeAction) -> Unit, onColor: () -> Un
     formats.forEach { (action, icon, label) ->
         EditorBarIcon(icon, stringResource(label), { onAction(action) }, enabled = enabled)
     }
-    EditorBarIcon(R.drawable.ic_editor_color, stringResource(R.string.bbcode_action_color), onColor,
+    EditorBarIcon(R.drawable.ic_editor_color, stringResource(R.string.bbcode_action_color), onColor, colorModifier,
         enabled = enabled)
 }
 

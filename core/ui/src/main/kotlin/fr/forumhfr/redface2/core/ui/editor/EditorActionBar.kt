@@ -17,30 +17,23 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.movableContentOf
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.layout.SubcomposeLayout
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -111,7 +104,11 @@ fun EditorActionBar(
         }
     }
     val insert: (BbcodeAction) -> Unit = { action -> actions.onBbcode(action); actions.onBodyFocus() }
-    val back = { actions.onGesture(EditorBarGesture.Back) }
+    val focus = rememberEditorBarFocus()
+    val back = {
+        val destination = if (mode == EditorBarMode.Color) EditorBarFocusTarget.Color else EditorBarFocusTarget.Image
+        focus.navigate(EditorBarFocusTarget.Return, destination) { actions.onGesture(EditorBarGesture.Back) }
+    }
     val backAction = resolveEditorBack(EditorBackState(bar = state))
     BackHandler(!armed && (backAction == EditorBackAction.CloseSublevel ||
         backAction == EditorBackAction.CloseFormat), onBack = back)
@@ -126,21 +123,15 @@ fun EditorActionBar(
         EditorBarFixedSlot(fixed, statuses, headerLabel, onOpenHeader, actions.onPreview,
             previewVisible, controlsEnabled, visible, external)
     }
-    val formatFocus = remember { FocusRequester() }
-    val formatFocused = remember { mutableStateOf(false) }
-    val restoreFormatFocus = remember { mutableStateOf(false) }
     val format: @Composable () -> Unit = {
         val expanded = mode == EditorBarMode.Format
-        // The trigger changes parent on toggle; restore only the focus it held before that gesture.
-        LaunchedEffect(mode) {
-            if (restoreFormatFocus.value) { restoreFormatFocus.value = false; formatFocus.requestFocus() }
-        }
         val toggle = {
-            restoreFormatFocus.value = formatFocused.value
-            actions.onGesture(EditorBarGesture.ToggleFormat)
+            focus.navigate(EditorBarFocusTarget.Format, EditorBarFocusTarget.Format) {
+                actions.onGesture(EditorBarGesture.ToggleFormat)
+            }
         }
         EditorBarIcon(R.drawable.ic_editor_format, stringResource(R.string.editor_format), toggle,
-            Modifier.focusRequester(formatFocus).onFocusChanged { formatFocused.value = it.isFocused }
+            focus.modifier(EditorBarFocusTarget.Format)
                 .clip(MaterialTheme.shapes.small)
                 .background(if (expanded) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
                 .semantics { selected = expanded }, enabled = enabled, expanded = expanded)
@@ -156,7 +147,7 @@ fun EditorActionBar(
                 content = { allocation ->
                     EditorBarRow(event, armed, mode, allocation, height, actions.onEvent, scroll, slot, format) {
                         EditorBarTools(mode, actions, imageActions, shortcut, enabled, controlsEnabled,
-                            format, external, insert, back)
+                            focus, format, external, insert, back)
                     }
                 })
             EditorBarProgress(uploading, loadingForm, uploadProgress, Modifier.align(Alignment.TopStart))
@@ -166,12 +157,8 @@ fun EditorActionBar(
 
 @Composable
 private fun editorBarStatusWidths(statuses: List<EditorAppBarStatus?>): List<Dp?> {
-    val measurer = rememberTextMeasurer()
-    val style = MaterialTheme.typography.labelSmall
-    val density = LocalDensity.current
     return statuses.map { status -> status?.let {
-        maxOf(48.dp, with(density) { measurer.measure(it.badgeCount?.toString().orEmpty(), style)
-            .size.width.toDp() } + 8.dp)
+        maxOf(EditorChromeMetrics.minimumTargetSize, measureEditorStatusBadge(it.badgeCount).width)
     } }
 }
 
@@ -201,24 +188,31 @@ private fun EditorBarEnvelope(
     SubcomposeLayout(Modifier.fillMaxWidth().height(height)) { constraints ->
         val button = subcompose("submit", submit).single()
             .measure(Constraints(maxWidth = constraints.maxWidth, maxHeight = height.roundToPx()))
-        // ED-133: every event extends into the leading gutter, never toward Send.
-        val extension = if (event != null) 4.dp else 0.dp
+        val minimum = when {
+            event != null -> EditorChromeMetrics.eventMinimumContentWidth
+            mode == EditorBarMode.Format -> EditorChromeMetrics.formatMinimumWidth
+            else -> EditorChromeMetrics.minimumTargetSize
+        }
         val allocation = allocateEditorChrome(EditorChromeLayoutRequest(
-            constraints.maxWidth.toDp() + extension, button.width.toDp(), compact, hasHeader,
+            constraints.maxWidth.toDp(), button.width.toDp(), compact, hasHeader,
             firstStatusWidth = statusWidths[0], secondStatusWidth = statusWidths[1],
-            minimumContentWidth = when {
-                event != null -> 189.dp + extension // event envelope + 8 dp Send gap
-                mode == EditorBarMode.Format -> 96.dp // trigger + one full scroll target
-                else -> 48.dp
-            },
+            minimumContentWidth = minimum,
         ))
-        val leading = (16.dp - extension).roundToPx()
-        val width = (constraints.maxWidth - leading - 16.dp.roundToPx() - button.width).coerceAtLeast(0)
-        val row = subcompose("content") { content(allocation) }.single()
+        // ED-133 extends only an event adjacent to the gutter. ED-25 fixed slots never shift.
+        val extension = if (event != null && allocation.fixedSlots.isEmpty())
+            EditorChromeMetrics.eventGutterExtension else 0.dp
+        val scrollingWidth = allocation.scrollingWidth + extension
+        val leading = (EditorChromeMetrics.horizontalGutter - extension).roundToPx()
+        val trailing = EditorChromeMetrics.horizontalGutter.roundToPx()
+        val width = (constraints.maxWidth - leading - trailing - button.width).coerceAtLeast(0)
+        val row = subcompose("content") {
+            content(allocation.copy(scrollingWidth = scrollingWidth,
+                hasMinimumContentWidth = scrollingWidth >= minimum))
+        }.single()
             .measure(Constraints.fixed(width, height.roundToPx()))
         layout(constraints.maxWidth, height.roundToPx()) {
             row.placeRelative(leading, 0)
-            button.placeRelative(constraints.maxWidth - 16.dp.roundToPx() - button.width,
+            button.placeRelative(constraints.maxWidth - trailing - button.width,
                 (height.roundToPx() - button.height) / 2)
         }
     }
@@ -272,7 +266,9 @@ private fun EditorBarRow(
         allocation.fixedSlots.forEach { slot(it, true) }
         Box(Modifier.weight(1f)) {
             // Permanent call site, including absent events and arm masking.
-            EditorEventControl(event, (allocation.scrollingWidth - 8.dp).coerceAtLeast(48.dp), onEvent,
+            val eventWidth = (allocation.scrollingWidth - EditorChromeMetrics.eventSubmitGap)
+                .coerceAtLeast(EditorChromeMetrics.minimumTargetSize)
+            EditorEventControl(event, eventWidth, onEvent,
                 Modifier.testTag("editor-bar-event").then(if (event == null) Modifier else Modifier.height(height)))
             if (showTools) Row(verticalAlignment = Alignment.CenterVertically) {
                 if (mode == EditorBarMode.Format) format()
@@ -296,6 +292,7 @@ private fun EditorBarTools(
     images: EditorBarImageActions,
     shortcut: EditorBarShortcut?,
     enabled: Boolean, controlsEnabled: Boolean,
+    focus: EditorBarFocus,
     format: @Composable () -> Unit,
     external: (() -> Unit) -> Unit,
     insert: (BbcodeAction) -> Unit,
@@ -308,16 +305,22 @@ private fun EditorBarTools(
                 { external(actions.onSmileys) }, enabled = enabled)
             shortcut?.let { EditorBarIcon(it.iconRes, it.label, it.onClick, enabled = enabled && it.enabled) }
             EditorBarIcon(R.drawable.ic_editor_image, stringResource(R.string.editor_bar_image),
-                { actions.onGesture(EditorBarGesture.OpenImage) }, enabled = enabled)
+                { focus.navigate(EditorBarFocusTarget.Image, EditorBarFocusTarget.Return) {
+                    actions.onGesture(EditorBarGesture.OpenImage)
+                } }, focus.modifier(EditorBarFocusTarget.Image), enabled = enabled)
             EditorBarIcon(R.drawable.ic_editor_options, stringResource(R.string.editor_options),
                 { external(actions.onOptions) }, enabled = controlsEnabled)
         }
-        EditorBarMode.Format -> EditorFormatRow(insert, { actions.onGesture(EditorBarGesture.OpenColor) }, enabled)
+        EditorBarMode.Format -> EditorFormatRow(insert, {
+            focus.navigate(EditorBarFocusTarget.Color, EditorBarFocusTarget.Return) {
+                actions.onGesture(EditorBarGesture.OpenColor)
+            }
+        }, enabled, focus.modifier(EditorBarFocusTarget.Color))
         EditorBarMode.Color -> EditorColorRow({ insert(it); actions.onGesture(EditorBarGesture.ColorChosen) },
-            back, enabled)
+            back, enabled, focus.modifier(EditorBarFocusTarget.Return))
         EditorBarMode.Image -> EditorImageRow(images, external, {
             insert(BbcodeAction.Image); actions.onGesture(EditorBarGesture.ImageAction)
-        }, back, enabled)
+        }, back, enabled, focus.modifier(EditorBarFocusTarget.Return))
     }
 }
 

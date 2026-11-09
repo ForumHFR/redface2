@@ -84,9 +84,11 @@ class EditorChromeLayoutPolicyTest {
 
     @Test
     fun `ED30 event envelope takes priority over fixed slots`() {
-        val result = allocateEditorChrome(compact.copy(minimumContentWidth = 181.dp + 8.dp))
+        val result = allocateEditorChrome(compact.copy(
+            minimumContentWidth = EditorChromeMetrics.eventMinimumContentWidth))
         assertTrue(result.fixedSlots.isEmpty())
         assertEquals(189.dp, result.scrollingWidth)
+        assertFalse(result.hasMinimumContentWidth) // The host adds ED-133's 4 dp only without fixed slots.
         assertEquals(EditorFixedSlot.entries, result.overflowSlots)
     }
 

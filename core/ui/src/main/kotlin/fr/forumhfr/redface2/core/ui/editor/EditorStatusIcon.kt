@@ -32,6 +32,7 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import kotlinx.coroutines.launch
@@ -51,12 +52,11 @@ fun EditorStatusIcon(
 ) {
     require(badgeCount == null || badgeCount > 0)
     val style = MaterialTheme.typography.labelSmall
-    val badgeSize = rememberTextMeasurer().measure(badgeCount?.toString().orEmpty(), style = style).size
-    val density = LocalDensity.current
+    val badgeSize = measureEditorStatusBadge(badgeCount)
     // Stack while both fit; at large font scales overlap the badge instead of clipping either layer.
-    val badgeWidth = with(density) { badgeSize.width.toDp() } + 8.dp
-    val badgeHeight = maxOf(16.dp, with(density) { badgeSize.height.toDp() })
-    val height = (24.dp + if (badgeCount == null) 0.dp else badgeHeight).coerceAtMost(48.dp)
+    val badgeWidth = badgeSize.width
+    val height = (24.dp + if (badgeCount == null) 0.dp else badgeSize.height)
+        .coerceAtMost(EditorChromeMetrics.minimumTargetSize)
     // Replace only the tooltip state on masking: its popup/job die, the live anchor keeps its ID.
     val tooltip = key(visible) { rememberTooltipState() }
     val scope = rememberCoroutineScope()
@@ -81,7 +81,8 @@ fun EditorStatusIcon(
         // The stacked badge reaches the bottom edge; a round button clips its lower corners.
         IconButton(onClick = onClick, enabled = enabled && visible, shape = RectangleShape,
             modifier = (if (!visible) Modifier.size(1.dp) else Modifier.sizeIn(
-                minWidth = maxOf(48.dp, badgeWidth), minHeight = 48.dp,
+                minWidth = maxOf(EditorChromeMetrics.minimumTargetSize, badgeWidth),
+                minHeight = EditorChromeMetrics.minimumTargetSize,
             )).clearAndSetSemantics {},
         ) {
             if (visible) Box(Modifier.size(maxOf(24.dp, badgeWidth), height)) {
@@ -95,6 +96,12 @@ fun EditorStatusIcon(
             }
         }
     }
+}
+
+@Composable
+internal fun measureEditorStatusBadge(count: Int?): DpSize {
+    val size = rememberTextMeasurer().measure(count?.toString().orEmpty(), MaterialTheme.typography.labelSmall).size
+    return with(LocalDensity.current) { DpSize(size.width.toDp() + 8.dp, maxOf(16.dp, size.height.toDp())) }
 }
 
 internal const val EDITOR_STATUS_GLYPH_TAG = "editor-status-glyph"
