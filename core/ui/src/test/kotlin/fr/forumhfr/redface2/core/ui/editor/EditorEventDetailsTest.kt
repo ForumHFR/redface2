@@ -20,7 +20,6 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
@@ -67,6 +66,7 @@ class EditorEventDetailsTest {
     private val reloads = mutableListOf<EventKey>()
     private val ignored = mutableListOf<EventKey>()
     private val closed = mutableListOf<EventKey>()
+    private val hostClose: (EventKey) -> Unit = { closed += it; dispatch(EditorEventInput.CloseDetails(it)) }
     private lateinit var dispatcher: OnBackPressedDispatcher
     private lateinit var inputMode: InputModeManager
     private lateinit var bodyState: TextFieldState
@@ -203,8 +203,8 @@ class EditorEventDetailsTest {
         receive(old)
         setHost()
         activate(old)
-        val staleClose = requireNotNull(compose.onNodeWithText("Masquer").fetchSemanticsNode()
-            .config[SemanticsActions.OnClick].action)
+        // A late callback bound to the old detail (never a click on its disposed node) still names its own key.
+        val staleClose = { hostClose(old.key) }
         compose.runOnIdle { receive(newer) }
         // Equal-rank events stay FIFO: close the old detail before the newer event is actionable.
         compose.onNodeWithText(requireNotNull(old.detail).resolve(context)).assertExists()
@@ -334,7 +334,7 @@ class EditorEventDetailsTest {
             event = detail.value,
             bodyState = bodyState,
             onReturnToBody = { bodyFocus.requestFocus() },
-            onClose = { closed += it; dispatch(EditorEventInput.CloseDetails(it)) },
+            onClose = hostClose,
             onReload = { reloads += it },
             onIgnoreQuote = if (ignoreAvailable) {
                 { key -> ignored += key; quotePending = false }
