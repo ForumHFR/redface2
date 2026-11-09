@@ -592,6 +592,7 @@ expect_list "ViewModels : p.fixture.Real"
 
 database_path=core/database/build.gradle.kts
 roborazzi_path=build-logic/src/main/kotlin/fr/forumhfr/redface2/buildlogic/RedfaceAndroidRoborazziConventionPlugin.kt
+# shellcheck disable=SC2016 # literal Gradle line, $projectDir must not expand
 database_line='assets.directories.add("$projectDir/schemas")'
 roborazzi_line='sourceSets.getByName("test").kotlin.directories +='
 
