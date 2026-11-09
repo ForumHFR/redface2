@@ -15,7 +15,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
@@ -171,7 +170,9 @@ class EditorControlLayoutTest {
         val event = mutableStateOf<EditorEvent?>(null)
         val dark = mutableStateOf(false)
         val height = mutableStateOf(56.dp)
+        var pixelsPerDp = 1f
         compose.setContent { RedfaceTheme(darkTheme = dark.value) { Surface {
+            pixelsPerDp = LocalDensity.current.density
             Row(Modifier.width(360.dp).height(height.value).testTag("sample")
                 .padding(start = 12.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 Box(Modifier.width(185.dp)) {
@@ -208,9 +209,11 @@ class EditorControlLayoutTest {
                     assertEquals(if (sample == null) 1f else injectedHeight.value, control.height.value, 0.5f)
                     assertEquals(12f, (control.left - bounds.left).value, 0.5f)
                     if (sample != null) {
-                        val icon = compose.onNode(SemanticsMatcher.keyIsDefined(EditorEventIconTintKey),
-                            useUnmergedTree = true).getUnclippedBoundsInRoot()
-                        assertEquals(4f, (icon.left - control.left).value, 0.5f)
+                        val node = compose.onNodeWithTag("control").fetchSemanticsNode()
+                        compose.runOnIdle {
+                            val iconStart = node.getAlignmentLinePosition(EditorEventIconStart) / pixelsPerDp
+                            assertEquals(4f, iconStart, 0.5f)
+                        }
                         val submit = compose.onNodeWithTag("submit-slot").getUnclippedBoundsInRoot()
                         assertEquals(8f, (submit.left - control.right).value, 0.5f)
                     }

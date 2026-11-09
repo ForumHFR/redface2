@@ -19,7 +19,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.layout.VerticalAlignmentLine
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
@@ -27,7 +28,6 @@ import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -70,19 +70,22 @@ fun EditorEventControl(
                 .then(if (event == null || action == null) Modifier else Modifier.clickable(
                     role = Role.Button, onClickLabel = actionName, onClick = { onAction(event.key, action) },
                 ))
-                .semantics(mergeDescendants = event != null) {
-                    if (event != null) contentDescription = name
+                // Keep clickable's role/action, but hide children so Android names the live node itself.
+                .clearAndSetSemantics {
+                    if (event != null) {
+                        contentDescription = name
+                        this[EditorEventIconKey] = event.controlIcon()
+                        this[EditorEventIconTintKey] = tint
+                    }
                     if (announce) liveRegion = if (isError) LiveRegionMode.Assertive else LiveRegionMode.Polite
                 }
                 .then(if (event == null) Modifier else Modifier.padding(start = 4.dp)),
             horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically,
         ) {
             if (event == null) return@Row
-            val icon = event.controlIcon()
-            RedfaceVectorIcon(icon, Modifier.testTag("editor-event-icon-$icon")
-                .semantics { this[EditorEventIconTintKey] = tint }, tint = tint, size = 16.dp)
+            RedfaceVectorIcon(event.controlIcon(), Modifier.editorEventIconPlacement(), tint = tint, size = 16.dp)
             Text(text = visualSummary,
-                modifier = Modifier.weight(1f, fill = false).clearAndSetSemantics {},
+                modifier = Modifier.weight(1f, fill = false),
                 style = MaterialTheme.typography.labelSmall, color = tint,
                 maxLines = 1, overflow = TextOverflow.Ellipsis,
                 onTextLayout = { onSummaryTextLayout?.invoke(it) })
@@ -108,8 +111,19 @@ private fun rememberEventAnnouncement(event: EditorEvent?, name: String): Boolea
     return !inProgress || start
 }
 
-/** Internal visual diagnostic, ignored by accessibility services. */
+/** Internal visual diagnostics on the control itself, ignored by accessibility services. */
+internal val EditorEventIconKey = SemanticsPropertyKey<Int>("EditorEventIcon")
 internal val EditorEventIconTintKey = SemanticsPropertyKey<Color>("EditorEventIconTint")
+
+/** Actual glyph start, inherited by parent layouts without creating a semantic child. */
+internal val EditorEventIconStart = VerticalAlignmentLine(::minOf)
+
+private fun Modifier.editorEventIconPlacement(): Modifier = layout { measurable, constraints ->
+    val icon = measurable.measure(constraints)
+    layout(icon.width, icon.height, mapOf(EditorEventIconStart to 0)) {
+        icon.placeRelative(0, 0)
+    }
+}
 
 @Composable
 private fun EditorEventAction.controlLabel(): String = stringResource(when (this) {

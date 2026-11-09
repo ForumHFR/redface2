@@ -199,8 +199,9 @@ class EditorEventControlTest {
             val name = event.accessibleSummary.resolve(context) +
                 (event.action?.let { ", " + actionLabel(it) } ?: "")
             compose.assertLiveNode(id, name, if (tint == 0) LiveRegionMode.Assertive else LiveRegionMode.Polite, view)
-            compose.onNodeWithTag("editor-event-icon-$icon", useUnmergedTree = true)
+            val control = compose.onNode(SemanticsMatcher.expectValue(EditorEventIconKey, icon), useUnmergedTree = true)
                 .assert(SemanticsMatcher.expectValue(EditorEventIconTintKey, tints[tint]))
+            assertEquals(id, control.fetchSemanticsNode().id)
             compose.onAllNodes(hasClickAction()).assertCountEquals(if (event.action == null) 0 else 1)
         }
     }
@@ -222,6 +223,7 @@ internal fun ComposeContentTestRule.assertLiveNode(id: Int, name: String, mode: 
         assertEquals(if (name.isEmpty()) 0 else 1, nodes.count { it.isScreenReaderFocusable })
         assertEquals(name.isNotEmpty(), info.isScreenReaderFocusable)
         assertEquals(name, info.contentDescription?.toString().orEmpty())
+        assertEquals("The live node must be an accessibility leaf", 0, info.childCount)
         if (name.isEmpty()) assertTrue(nodes.all { !it.isFocusable && it.actionList.all { action ->
             action == Action.ACTION_ACCESSIBILITY_FOCUS || action == Action.ACTION_CLEAR_ACCESSIBILITY_FOCUS } })
         assertTrue(info.isVisibleToUser && info.isImportantForAccessibility)
