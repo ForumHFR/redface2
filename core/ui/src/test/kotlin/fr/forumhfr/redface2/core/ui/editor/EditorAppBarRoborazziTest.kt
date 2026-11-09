@@ -10,6 +10,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalDensity
@@ -35,7 +36,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** Record-only component bench. The lower boxes show envelopes, not the future action bar/field. */
+/** Component capture bench. The lower boxes show envelopes, not the future action bar/field. */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "fr-rFR-w800dp-h480dp-xxhdpi")
@@ -54,7 +55,8 @@ class EditorAppBarRoborazziTest {
                 val preset = if (scale.value == 1f) FontScalePreference.M else FontScalePreference.L
                 RedfaceTheme(darkTheme = dark.value, dynamicColor = false,
                     reading = ReadingDisplaySettings(fontScale = preset)) {
-                    AppBarSample(variant.value)
+                    // A fresh case must not inherit the header's remembered scroll or focus state.
+                    key(dark.value, scale.value, variant.value) { AppBarSample(variant.value) }
                 }
             }
         }

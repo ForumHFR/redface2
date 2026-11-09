@@ -8,27 +8,36 @@ enum class EditorBarGesture { ToggleFormat, OpenColor, ColorChosen, OpenImage, I
 
 /** The saved mode survives masking by an event or an arm; neither mask rewrites it. */
 data class EditorBarState(val mode: EditorBarMode = EditorBarMode.Normal, val arm: ArmToken? = null) {
-    val visibleMode: EditorBarMode get() = if (arm == null) mode else EditorBarMode.Normal
+    /** A displayed event masks tools without opening a level or changing the retained mode. */
+    fun visibleMode(event: EditorEvent? = null): EditorBarMode =
+        if (arm == null && event == null) mode else EditorBarMode.Normal
 
     /** Observe the existing controller; do not reproduce its arm timer or acceptance guards. */
     fun withSubmission(submission: EditorSubmissionState): EditorBarState =
         copy(arm = (submission as? EditorSubmissionState.Armed)?.token)
 }
 
-/** ED-23/24/31. The host performs insertion through the existing BBCode API, outside this model. */
-fun reduceEditorBar(state: EditorBarState, gesture: EditorBarGesture): EditorBarState {
-    if (state.arm != null && gesture != EditorBarGesture.OpenSurface) return state
-    val mode = when (gesture) {
-        EditorBarGesture.ToggleFormat -> if (state.mode == EditorBarMode.Normal) {
+/**
+ * ED-23/24/31. The host performs insertion through the existing BBCode API, outside this model.
+ * [EditorBarGesture.OpenSurface] clears the local arm; a host without [EditorScaffold] must also
+ * disarm its submission controller.
+ */
+fun reduceEditorBar(state: EditorBarState, gesture: EditorBarGesture): EditorBarState = when {
+    gesture == EditorBarGesture.OpenSurface -> EditorBarState()
+    state.arm != null -> state
+    else -> state.copy(mode = reduceEditorBarMode(state.mode, gesture))
+}
+
+private fun reduceEditorBarMode(mode: EditorBarMode, gesture: EditorBarGesture): EditorBarMode =
+    when (gesture) {
+        EditorBarGesture.ToggleFormat -> if (mode == EditorBarMode.Normal) {
             EditorBarMode.Format
         } else {
             EditorBarMode.Normal
         }
-        EditorBarGesture.OpenColor -> if (state.mode == EditorBarMode.Format) EditorBarMode.Color else state.mode
-        EditorBarGesture.ColorChosen -> if (state.mode == EditorBarMode.Color) EditorBarMode.Format else state.mode
+        EditorBarGesture.OpenColor -> if (mode == EditorBarMode.Format) EditorBarMode.Color else mode
+        EditorBarGesture.ColorChosen -> if (mode == EditorBarMode.Color) EditorBarMode.Format else mode
         EditorBarGesture.OpenImage -> EditorBarMode.Image
         EditorBarGesture.ImageAction, EditorBarGesture.OpenSurface -> EditorBarMode.Normal
-        EditorBarGesture.Back -> if (state.mode == EditorBarMode.Color) EditorBarMode.Format else EditorBarMode.Normal
+        EditorBarGesture.Back -> if (mode == EditorBarMode.Color) EditorBarMode.Format else EditorBarMode.Normal
     }
-    return state.copy(mode = mode)
-}

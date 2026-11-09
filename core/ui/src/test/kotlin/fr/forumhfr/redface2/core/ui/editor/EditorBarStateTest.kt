@@ -13,22 +13,34 @@ class EditorBarStateTest {
         val format = reduceEditorBar(EditorBarState(), EditorBarGesture.ToggleFormat)
         val armed = format.withSubmission(EditorSubmissionState.Armed(ArmToken(1, session, 0, 5_000)))
         assertEquals(EditorBarMode.Format, armed.mode)
-        assertEquals(EditorBarMode.Normal, armed.visibleMode)
+        assertEquals(EditorBarMode.Normal, armed.visibleMode())
         assertEquals(armed, reduceEditorBar(armed, EditorBarGesture.ToggleFormat))
         val disarmed = armed.withSubmission(EditorSubmissionState.Ready)
         assertEquals(format, disarmed)
-        assertEquals(EditorBarMode.Format, disarmed.visibleMode)
+        assertEquals(EditorBarMode.Format, disarmed.visibleMode())
         assertEquals(EditorBarMode.Normal, reduceEditorBar(disarmed, EditorBarGesture.ToggleFormat).mode)
     }
 
     @Test
-    fun `ED23 - opening a surface while armed closes saved format so disarming cannot reopen it`() {
+    fun `ED23 - opening a surface disarms and closes saved modes before the surface can open`() {
         val session = EditorSession("session", "alice", "topic:23:42")
         val arm = ArmToken(1, session, 0, 5_000)
-        val armed = EditorBarState(EditorBarMode.Format, arm)
-        val closed = reduceEditorBar(armed, EditorBarGesture.OpenSurface)
-        assertEquals(EditorBarState(EditorBarMode.Normal, arm), closed)
-        assertEquals(EditorBarState(), closed.withSubmission(EditorSubmissionState.Ready))
+        EditorBarMode.entries.forEach { mode ->
+            val closed = reduceEditorBar(EditorBarState(mode, arm), EditorBarGesture.OpenSurface)
+            assertEquals(EditorBarState(), closed)
+            assertEquals(EditorBarState(), closed.withSubmission(EditorSubmissionState.Ready))
+        }
+    }
+
+    @Test
+    fun `ED85 - a displayed event masks each retained mode until acknowledgement`() {
+        val event = controlEvent(EditorEventContent.Problem(EditorErrors.network))
+        EditorBarMode.entries.forEach { mode ->
+            val state = EditorBarState(mode)
+            assertEquals(EditorBarMode.Normal, state.visibleMode(event))
+            assertEquals(mode, state.mode)
+            assertEquals(mode, state.visibleMode(event = null))
+        }
     }
 
     @Test

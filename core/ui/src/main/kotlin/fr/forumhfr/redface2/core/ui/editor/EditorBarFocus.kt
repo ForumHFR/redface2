@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.core.ui.editor
 
 import androidx.compose.foundation.focusGroup
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.getValue
@@ -38,7 +39,14 @@ internal class EditorBarFocus(
     var pending by mutableStateOf(saved.value)
         private set
 
-    fun sublevelModifier(): Modifier = Modifier.onFocusChanged { sublevelFocused = it.hasFocus }.focusGroup()
+    @Composable
+    fun sublevelModifier(): Modifier {
+        DisposableEffect(this) {
+            // A focused row can disappear without another focus callback (Back, event or arm).
+            onDispose { sublevelFocused = false }
+        }
+        return Modifier.onFocusChanged { sublevelFocused = it.hasFocus }.focusGroup()
+    }
 
     fun clearUnavailableTarget(mode: EditorBarMode) {
         val available = when (pending) {

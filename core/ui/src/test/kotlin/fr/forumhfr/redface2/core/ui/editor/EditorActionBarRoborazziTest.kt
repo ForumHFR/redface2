@@ -1,5 +1,9 @@
 package fr.forumhfr.redface2.core.ui.editor
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -17,18 +21,18 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** Record-only. Both scales use preset L. Native IME/TalkBack remain device acceptance checks. */
+/** Isolated captures. Both scales use preset L. Native IME/TalkBack remain device acceptance checks. */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "fr-rFR-w800dp-h480dp-xxhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class EditorActionBarRoborazziTest {
     @get:Rule val compose = createComposeRule()
-    private val host = EditorActionBarFixture()
+    private var host by mutableStateOf(EditorActionBarFixture())
 
     @Test
     fun `ED20 to ED95 record all bar states in both themes scales and width classes`() {
-        compose.setContent { host.Content(showBody = false) }
+        compose.setContent { key(host) { host.Content(showBody = false) } }
         listOf(false, true).forEach { dark ->
             listOf(1f, 1.3f).forEach { scale ->
                 listOf(360.dp to false, 360.dp to true, 760.dp to true).forEach { (width, compact) ->
@@ -39,14 +43,16 @@ class EditorActionBarRoborazziTest {
     }
 
     private fun recordSamples(dark: Boolean, scale: Float, width: Dp, compact: Boolean) {
-        compose.runOnIdle {
-            host.dark.value = dark; host.scale.value = scale; host.width.value = width
-            host.compact.value = compact; host.header.value = true
-            host.firstStatus.value = EditorAppBarStatus(R.drawable.ic_editor_quote, "12 citations", {}, 12)
-            host.secondStatus.value = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon retrouvé", {})
-        }
         (0..18).forEach { sample ->
-            compose.runOnIdle { showSample(sample) }
+            compose.runOnIdle {
+                // Reset remembered tool scroll, focus and event-announcement state for every capture.
+                host = EditorActionBarFixture()
+                host.dark.value = dark; host.scale.value = scale; host.width.value = width
+                host.compact.value = compact; host.header.value = true
+                host.firstStatus.value = EditorAppBarStatus(R.drawable.ic_editor_quote, "12 citations", {}, 12)
+                host.secondStatus.value = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon retrouvé", {})
+                showSample(sample)
+            }
             val target = compose.onNodeWithTag("bar")
             assertEquals(if (compact) 48f else 56f, target.getUnclippedBoundsInRoot().height.value, 0.5f)
             target.captureRoboImage("src/test/screenshots/editor_action_bar_" +

@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.verticalScroll
@@ -40,13 +41,15 @@ import fr.forumhfr.redface2.core.ui.R
  * ED-101/113 container only: the host supplies fields, validation and their enabled state.
  * Keep this composable mounted, including when [isOpen] is false, and put the editor in [body].
  * Supply the Message field's [bodyState]. [onReturnToBody] runs once after an open panel closes,
- * when the body is focusable again; it must restore focus synchronously. The host captures IME
+ * when the body is focusable again; restore focus synchronously, or preserve selection explicitly
+ * when deferring it until input options update. The host captures IME
  * visibility BEFORE opening, prevents automatic keyboard opening on body focus when it was closed,
  * then explicitly shows or hides the keyboard to restore that captured state (ED-53).
  * [initialFocusRequester], when supplied, must be attached to a field in [content] (title or recipients);
  * otherwise Return receives focus.
  * The host opens this panel on CompleteHeader and closes it in [onClose]. No CSV mapping lives here.
- * Insets and the editor's outer BackHandler belong to the host, composed before this container.
+ * Top/horizontal insets and the editor's outer BackHandler belong to the host. The panel owns its
+ * bottom navigationBars/IME union, outside its scroll viewport.
  */
 @Composable
 @Suppress("LongParameterList") // Independent slots, visibility, labels, focus targets and close callback.
@@ -109,7 +112,8 @@ internal fun EditorPanelOverlay(
             color = MaterialTheme.colorScheme.surface,
         ) {
             Column(
-                Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+                Modifier.fillMaxSize().windowInsetsPadding(editorBottomInsets())
+                    .verticalScroll(rememberScrollState()).padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Text(title, Modifier.semantics { heading() }, style = MaterialTheme.typography.titleLarge)

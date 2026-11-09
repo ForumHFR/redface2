@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.ui.editor
 
 import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.key.Key
@@ -8,15 +9,19 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -124,6 +129,95 @@ class EditorActionBarFocusTest {
             compose.runOnIdle { back.onBackPressed() }
             assertEquals(parent, host.bar.value.mode)
             compose.onNodeWithContentDescription(label).assertIsFocused()
+        }
+        assertTrue(host.calls.isEmpty())
+    }
+
+    @Test
+    fun `system Back after leaving color keeps body focus when closing Format`() {
+        lateinit var back: OnBackPressedDispatcher
+        host.bar.value = EditorBarState(EditorBarMode.Format)
+        compose.setContent {
+            back = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+            host.Content()
+        }
+        compose.runOnIdle { assertTrue(host.inputMode.requestInputMode(InputMode.Keyboard)) }
+        openWithKeyboard("Couleur")
+        compose.onNodeWithContentDescription("Retour").assertIsFocused()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNodeWithContentDescription("Couleur").assertIsFocused()
+        compose.runOnIdle { host.bodyFocus.requestFocus() }
+        compose.onNodeWithTag("body").assertIsFocused()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNodeWithTag("body").assertIsFocused()
+        compose.onNodeWithContentDescription("Mise en forme").assertIsNotFocused()
+        assertEquals(EditorBarMode.Normal, host.bar.value.mode)
+        assertTrue(host.calls.isEmpty())
+    }
+
+    @Test
+    fun `ED82 ED85 system Back skips an event masked keyboard sublevel without restoring its focus`() {
+        lateinit var back: OnBackPressedDispatcher
+        var nextLevelBacks = 0
+        val event = host.finished()
+        compose.setContent {
+            back = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+            BackHandler { nextLevelBacks++ }
+            host.Content()
+        }
+        compose.runOnIdle { assertTrue(host.inputMode.requestInputMode(InputMode.Keyboard)) }
+        listOf("Couleur" to EditorBarMode.Format, "Image" to EditorBarMode.Normal).forEach { (label, parent) ->
+            compose.runOnIdle {
+                host.bar.value = EditorBarState(parent); host.eventActions.clear(); nextLevelBacks = 0
+            }
+            openWithKeyboard(label)
+            compose.onNodeWithContentDescription("Retour").assertIsFocused()
+            val retained = host.bar.value
+            compose.runOnIdle { host.event.value = event }
+            compose.onNodeWithContentDescription("Retour").assertDoesNotExist()
+            compose.runOnIdle { back.onBackPressed() }
+            compose.runOnIdle {
+                assertEquals(retained, host.bar.value)
+                assertSame(event, host.event.value)
+                assertEquals(1, nextLevelBacks)
+                assertTrue(host.eventActions.isEmpty())
+            }
+            compose.runOnIdle { host.bodyFocus.requestFocus() }
+            compose.onNodeWithTag("body").assertIsFocused()
+            compose.onNode(hasClickAction() and hasContentDescription("3 images insérées, Masquer")).performClick()
+            compose.onNodeWithContentDescription("Retour").assertIsNotFocused()
+            compose.onNodeWithTag("body").assertIsFocused()
+            compose.runOnIdle { back.onBackPressed() }
+            compose.onNodeWithTag("body").assertIsFocused()
+            compose.onNodeWithContentDescription(label).assertIsNotFocused()
+            assertEquals(parent, host.bar.value.mode)
+            assertEquals(1, nextLevelBacks)
+            assertEquals(listOf(event.key to EditorEventAction.Dismiss), host.eventActions)
+        }
+        assertTrue(host.calls.isEmpty())
+    }
+
+    @Test
+    fun `arming a focused keyboard sublevel cannot steal body focus after disarming`() {
+        lateinit var back: OnBackPressedDispatcher
+        compose.setContent {
+            back = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+            host.Content()
+        }
+        compose.runOnIdle { assertTrue(host.inputMode.requestInputMode(InputMode.Keyboard)) }
+        listOf("Couleur" to EditorBarMode.Format, "Image" to EditorBarMode.Normal).forEach { (label, parent) ->
+            compose.runOnIdle { host.bar.value = EditorBarState(parent) }
+            openWithKeyboard(label)
+            compose.onNodeWithContentDescription("Retour").assertIsFocused()
+            compose.runOnIdle { host.bar.value = host.bar.value.copy(arm = host.frozenArm) }
+            compose.onNodeWithContentDescription("Retour").assertDoesNotExist()
+            compose.runOnIdle { host.bodyFocus.requestFocus(); host.bar.value = host.bar.value.copy(arm = null) }
+            compose.onNodeWithContentDescription("Retour").assertIsNotFocused()
+            compose.onNodeWithTag("body").assertIsFocused()
+            compose.runOnIdle { back.onBackPressed() }
+            compose.onNodeWithTag("body").assertIsFocused()
+            compose.onNodeWithContentDescription(label).assertIsNotFocused()
+            assertEquals(parent, host.bar.value.mode)
         }
         assertTrue(host.calls.isEmpty())
     }

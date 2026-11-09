@@ -12,7 +12,9 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -27,12 +29,14 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
@@ -49,7 +53,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** Record-only diagnostics; focus, isolation, geometry and actions are asserted independently. */
+/** Capture diagnostics; focus, isolation, geometry and actions are asserted independently. */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
@@ -59,7 +63,7 @@ class EditorPanelsRoborazziTest {
     private val open = mutableStateOf(false)
     private val dark = mutableStateOf(false)
     private val scale = mutableStateOf(1f)
-    private val bodyFocus = FocusRequester()
+    private lateinit var bodyFocus: FocusRequester
     private lateinit var bodyState: TextFieldState
     private lateinit var inputMode: InputModeManager
     private val event = EditorEvent(
@@ -76,35 +80,16 @@ class EditorPanelsRoborazziTest {
 
     private fun record(details: Boolean) {
         compose.setContent {
-            val density = LocalDensity.current
-            inputMode = LocalInputModeManager.current
-            bodyState = rememberTextFieldState("Corps fourni")
-            CompositionLocalProvider(LocalDensity provides Density(density.density, scale.value)) {
-                RedfaceTheme(darkTheme = dark.value, dynamicColor = false) {
-                    val modifier = Modifier.size(360.dp, 480.dp).testTag("panel-sample")
-                    if (details) EditorEventDetails(
-                        event = event.takeIf { open.value }, bodyState = bodyState,
-                        onReturnToBody = { bodyFocus.requestFocus() },
-                        onClose = { open.value = false }, onReload = {}, onIgnoreQuote = {},
-                        modifier = modifier, body = { Body() },
-                    ) else EditorHeaderPanel(
-                        isOpen = open.value, title = "Titre et sous-catégorie",
-                        bodyState = bodyState,
-                        onReturnToBody = { bodyFocus.requestFocus() },
-                        onClose = { open.value = false }, modifier = modifier, body = { Body() },
-                    ) {
-                        OutlinedTextField("Un titre fourni", {}, Modifier.fillMaxWidth(), label = { Text("Titre") })
-                        Text("Sous-catégorie fournie par l’hôte")
-                    }
-                }
-            }
+            // Open/close is one focus-restoration scenario; isolate it from every other theme/scale pair.
+            key(dark.value, scale.value) { PanelSample(details) }
         }
         compose.runOnIdle { assertTrue(inputMode.requestInputMode(InputMode.Keyboard)) }
         listOf(false, true).forEach { isDark ->
             listOf(1f, 1.3f).forEach { fontScale ->
                 compose.runOnIdle { dark.value = isDark; scale.value = fontScale; open.value = true }
                 compose.onNodeWithText("Message conservé").assertDoesNotExist()
-                compose.onNodeWithTag("body", useUnmergedTree = true).assertExists()
+                compose.onNodeWithTag("body", useUnmergedTree = true).assertExists().assertIsNotFocused()
+                compose.runOnIdle { assertEquals(TextRange.Zero, bodyState.selection) }
                 compose.onAllNodes(hasClickAction()).assertCountEquals(if (details) 3 else 2)
                 val pane = compose.onNode(SemanticsMatcher.keyIsDefined(SemanticsProperties.PaneTitle))
                 pane.assert(SemanticsMatcher.expectValue(SemanticsProperties.IsTraversalGroup, true))
@@ -118,6 +103,33 @@ class EditorPanelsRoborazziTest {
                 compose.onAllNodes(hasClickAction()).assertCountEquals(1)
                 pane.assertDoesNotExist()
                 capture(details, isDark, fontScale, "closed")
+            }
+        }
+    }
+
+    @Composable
+    private fun PanelSample(details: Boolean) {
+        val density = LocalDensity.current
+        inputMode = LocalInputModeManager.current
+        bodyFocus = remember { FocusRequester() }
+        bodyState = rememberTextFieldState("Corps fourni", TextRange.Zero)
+        CompositionLocalProvider(LocalDensity provides Density(density.density, scale.value)) {
+            RedfaceTheme(darkTheme = dark.value, dynamicColor = false) {
+                val modifier = Modifier.size(360.dp, 480.dp).testTag("panel-sample")
+                if (details) EditorEventDetails(
+                    event = event.takeIf { open.value }, bodyState = bodyState,
+                    onReturnToBody = { bodyFocus.requestFocus() },
+                    onClose = { open.value = false }, onReload = {}, onIgnoreQuote = {},
+                    modifier = modifier, body = { Body() },
+                ) else EditorHeaderPanel(
+                    isOpen = open.value, title = "Titre et sous-catégorie",
+                    bodyState = bodyState,
+                    onReturnToBody = { bodyFocus.requestFocus() },
+                    onClose = { open.value = false }, modifier = modifier, body = { Body() },
+                ) {
+                    OutlinedTextField("Un titre fourni", {}, Modifier.fillMaxWidth(), label = { Text("Titre") })
+                    Text("Sous-catégorie fournie par l’hôte")
+                }
             }
         }
     }

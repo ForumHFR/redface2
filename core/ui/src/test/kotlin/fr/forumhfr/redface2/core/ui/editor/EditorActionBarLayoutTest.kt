@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.ui.editor
 
 import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.SemanticsActions
@@ -32,6 +33,7 @@ import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.ui.R
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -338,7 +340,7 @@ class EditorActionBarLayoutTest {
     }
 
     @Test
-    fun `ED85 system back closes color format and image without invoking a surface or send`() {
+    fun `ED85 system back closes visible color format and image without invoking a surface or send`() {
         lateinit var back: OnBackPressedDispatcher
         host.bar.value = EditorBarState(EditorBarMode.Color)
         compose.setContent {
@@ -351,14 +353,49 @@ class EditorActionBarLayoutTest {
         compose.runOnIdle { assertEquals(EditorBarMode.Normal, host.bar.value.mode) }
         compose.onNodeWithContentDescription("Image").performClick(); compose.runOnIdle { back.onBackPressed() }
         compose.runOnIdle { assertEquals(EditorBarMode.Normal, host.bar.value.mode); assertTrue(host.calls.isEmpty()) }
-        compose.runOnIdle {
-            host.bar.value = EditorBarState(EditorBarMode.Format)
-            host.event.value = controlEvent(EditorEventContent.Problem(EditorErrors.network))
+    }
+
+    @Test
+    fun `ED82 ED85 back skips every event masked mode and acknowledgement restores its Back level`() {
+        lateinit var back: OnBackPressedDispatcher
+        var nextLevelBacks = 0
+        val event = host.finished()
+        compose.setContent {
+            back = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+            // Registered before the bar: a masked tool mode must let the next Back level run.
+            BackHandler { nextLevelBacks++ }
+            host.Content()
         }
-        compose.runOnIdle { back.onBackPressed() }
-        compose.runOnIdle {
-            assertEquals(EditorBarMode.Normal, host.bar.value.mode)
-            assertTrue(host.event.value != null) // Closing the stored mode never acknowledges the event.
+        val modes = listOf(EditorBarMode.Format to "Gras", EditorBarMode.Color to "Rouge",
+            EditorBarMode.Image to "Uploader une image")
+        modes.forEach { (mode, label) ->
+            compose.runOnIdle {
+                host.bar.value = EditorBarState(mode); host.event.value = event
+                host.eventActions.clear(); nextLevelBacks = 0
+            }
+            compose.onNodeWithContentDescription(label).assertDoesNotExist()
+            compose.runOnIdle { back.onBackPressed() }
+            compose.runOnIdle {
+                assertEquals(mode, host.bar.value.mode)
+                assertSame(event, host.event.value)
+                assertEquals(1, nextLevelBacks)
+                assertTrue(host.eventActions.isEmpty())
+                assertTrue(host.calls.isEmpty())
+            }
+            compose.onNodeWithContentDescription(label).assertDoesNotExist()
+            compose.onNode(hasClickAction() and hasContentDescription("3 images insérées, Masquer")).performClick()
+            compose.onNodeWithContentDescription(label).assertIsDisplayed()
+            compose.runOnIdle {
+                assertEquals(mode, host.bar.value.mode)
+                assertEquals(listOf(event.key to EditorEventAction.Dismiss), host.eventActions)
+                assertTrue(host.calls.isEmpty())
+            }
+            compose.runOnIdle { back.onBackPressed() }
+            compose.runOnIdle {
+                val parent = if (mode == EditorBarMode.Color) EditorBarMode.Format else EditorBarMode.Normal
+                assertEquals(parent, host.bar.value.mode)
+                assertEquals(1, nextLevelBacks)
+            }
         }
     }
 }

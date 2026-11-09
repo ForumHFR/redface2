@@ -346,6 +346,41 @@ class EditorEventReducerTest {
     }
 
     @Test
+    fun `invariant 2 - local operation aliases from a previous session cannot affect current work`() {
+        val oldProgress = event(quote, EditorEventContent.InProgress(text), 1)
+        val opened = containing(oldProgress)
+        val nextSession = session.copy(id = "opening-b", owner = "bob")
+        val currentProgress = oldProgress.copy(key = oldProgress.key.copy(session = nextSession))
+        val state = opened.step(EditorEventInput.OpenSession(nextSession))
+            .step(EditorEventInput.Received(currentProgress))
+        assertEquals(oldProgress.key.operation, currentProgress.key.operation)
+        assertEquals(listOf(EditorEventOperation(quote, 1)), state.currentOperations)
+        assertEquals(listOf(currentProgress), state.events)
+        val lateFailure = problem(quote, EditorErrors.quoteFetchFailed, 2)
+        val foreign = listOf(
+            EditorEventInput.Received(lateFailure),
+            EditorEventInput.OperationCompleted(session, quote),
+            EditorEventInput.FormLoaded(session, quote),
+        )
+        // A local ref has no embedded session: each callback must check the containing input/key.
+        foreign.forEach { assertEquals(EditorEventTransition(state), reduceEditorEvents(state, it)) }
+        val currentFailure = lateFailure.copy(key = lateFailure.key.copy(session = nextSession))
+        val received = state.step(EditorEventInput.Received(currentFailure))
+        assertEquals(listOf(currentFailure), received.events)
+        assertTrue(received.currentOperations.single().finished)
+        listOf(
+            EditorEventInput.OperationCompleted(nextSession, quote),
+            EditorEventInput.FormLoaded(nextSession, quote),
+        ).forEach { input ->
+            val completed = reduceEditorEvents(state, input)
+            assertEquals(listOf(EditorEventOperation(quote, 1, finished = true)), completed.state.currentOperations)
+            assertTrue(completed.state.events.isEmpty())
+            assertTrue(completed.commands.isEmpty())
+            assertFalse(completed.gestureConsumed)
+        }
+    }
+
+    @Test
     fun `invariant 3 - arming preserves error and only effective launch applies ED44`() {
         val error = problem(validation, EditorErrors.missingTitle, 1)
         val information = event(notice, EditorEventContent.Information(text), 2)
