@@ -50,6 +50,50 @@ class EditorScreenLayoutTest {
     val compose = createComposeRule()
 
     @Test
+    @Config(qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
+    fun postEditLocksBodyAndInsertionsThroughFailureUntilHydration() {
+        val state = mutableStateOf(postState().copy(mode = PostEditorMode.Edit, isLoadingForm = true))
+        val body = TextFieldState("seed")
+        val intents = mutableListOf<PostEditorIntent>()
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                val scope = rememberCoroutineScope()
+                val picker = remember(scope) {
+                    SmileyPickerController(scope = scope, searchWiki = { _, _ -> emptyList() })
+                }
+                PostEditorContent(state.value, body, InputTransformation {}, { intents += it }, picker)
+            }
+        }
+        assertPostBodyAndInsertionsLocked()
+        compose.onNodeWithText("Options").assertIsEnabled()
+        compose.runOnIdle {
+            state.value = state.value.copy(isLoadingForm = false, submitError = EditorErrors.formNetwork)
+        }
+        assertPostBodyAndInsertionsLocked()
+        compose.onNodeWithText("Recharger").assertIsEnabled().performClick()
+        compose.runOnIdle { assertEquals(listOf(PostEditorIntent.ReloadRequested), intents) }
+        // Uncertainty must stay visible, while a blank restored attempt still offers a form reload.
+        compose.runOnIdle { state.value = state.value.copy(submitError = EditorErrors.uncertain) }
+        compose.onNodeWithText("Recharger").assertIsEnabled().performClick()
+        compose.runOnIdle { assertEquals(List(2) { PostEditorIntent.ReloadRequested }, intents) }
+        compose.runOnIdle {
+            state.value = state.value.copy(draftHydratedFromForm = true, isLoadingForm = true, submitError = null)
+        }
+        compose.onNode(hasSetTextAction()).performTextInput(" typed")
+        for (label in listOf("Gras", "Citation", "Image", "Uploader", "Smileys")) {
+            compose.onNodeWithText(label).assertIsEnabled()
+        }
+        compose.runOnIdle { assertEquals("seed typed", body.text.toString()) }
+        // Reply stays editable even with an unknown body and an initial GET still running.
+        compose.runOnIdle {
+            state.value = state.value.copy(mode = PostEditorMode.Reply, draftHydratedFromForm = false)
+        }
+        compose.onNode(hasSetTextAction()).performTextInput(" reply")
+        compose.onNodeWithTag(POST_EDITOR_TOOLBAR_TAG).assertExists()
+        compose.runOnIdle { assertEquals("seed typed reply", body.text.toString()) }
+    }
+
+    @Test
     fun `post editor keeps 160 dp field and both draft actions on short viewport`() {
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
@@ -273,6 +317,14 @@ class EditorScreenLayoutTest {
         compose.onNodeWithText("Répondre au sujet").assertIsDisplayed()
         compose.onNodeWithText("Uploader").assertIsDisplayed()
         compose.onNode(hasSetTextAction()).assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT - FIELD_LABEL_HEADROOM)
+    }
+
+    private fun assertPostBodyAndInsertionsLocked() {
+        compose.onAllNodes(hasSetTextAction()).assertCountEquals(0)
+        compose.onNodeWithTag(POST_EDITOR_TOOLBAR_TAG).assertDoesNotExist()
+        for (label in listOf("Gras", "Citation", "Image", "Uploader", "Smileys")) {
+            compose.onNodeWithText(label).assertDoesNotExist()
+        }
     }
 
     private fun assertTopicBodyAndInsertionsLocked() {

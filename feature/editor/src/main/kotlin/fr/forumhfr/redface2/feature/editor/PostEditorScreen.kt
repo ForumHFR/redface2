@@ -188,7 +188,8 @@ internal fun PostEditorContent(
                         modifier = Modifier.weight(1f),
                         // #275/#410/#447 — BTF2 owns handle scrolling and caret following in
                         // this bounded viewport. Lock while a batch upload inserts its images.
-                        readOnly = state.isUploading || state.submission.blocksBodyMutation,
+                        readOnly = state.isAwaitingInitialBody ||
+                            state.isUploading || state.submission.blocksBodyMutation,
                         // #555 — the editor opens ready to type, including hydrated edit drafts.
                         autoFocus = true,
                     )
@@ -213,7 +214,7 @@ internal fun PostEditorContent(
                         onConfirmSubmit = { onIntent(PostEditorIntent.SubmitConfirmed(state.armToken)) },
                         onDisarmConfirm = { onIntent(PostEditorIntent.SubmitConfirmationDismissed) },
                         onOpenOptions = { optionsSheetOpen = true },
-                        onOpenSmileys = smileyPicker::open,
+                        onOpenSmileys = (smileyPicker::open).takeUnless { state.isAwaitingInitialBody },
                     ),
                 )
             }
@@ -233,7 +234,7 @@ internal fun PostEditorContent(
                 onSmileyClicked = { token -> onIntent(PostEditorIntent.SmileySelected(token)) },
             )
         }
-        if (imageUrlDialogOpen) {
+        if (imageUrlDialogOpen && !state.isAwaitingInitialBody) {
             ImageUrlDialog(
                 onDismiss = { imageUrlDialogOpen = false },
                 onInsert = { url -> onIntent(PostEditorIntent.ImageUrlInserted(url)) },
@@ -354,13 +355,15 @@ private fun PostEditorControlsZone(
             style = MaterialTheme.typography.titleLarge,
             color = MaterialTheme.colorScheme.onSurface,
         )
-        BbcodeToolbar(
-            onAction = { action -> onIntent(PostEditorIntent.ToolbarActionClicked(action)) },
-            modifier = Modifier.testTag(POST_EDITOR_TOOLBAR_TAG),
-            onImageUrlRequested = onImageUrlRequested,
-            onImageUploadRequested = onImageUploadRequested,
-            uploading = state.isUploading,
-        )
+        if (!state.isAwaitingInitialBody) {
+            BbcodeToolbar(
+                onAction = { action -> onIntent(PostEditorIntent.ToolbarActionClicked(action)) },
+                modifier = Modifier.testTag(POST_EDITOR_TOOLBAR_TAG),
+                onImageUrlRequested = onImageUrlRequested,
+                onImageUploadRequested = onImageUploadRequested,
+                uploading = state.isUploading,
+            )
+        }
         state.uploadProgress?.let { progress ->
             UploadProgressLabel(progress)
         }
@@ -451,8 +454,10 @@ internal fun PostEditorAlertBanners(
                 color = MaterialTheme.colorScheme.error,
             )
         }
-        val reload = state.quoteStorageUnavailable || (!quoteAwaitingRestore &&
-            (state.pendingQuotes.isNotEmpty() || error.action == EditorErrorAction.Reload))
+        val reloadForError = !quoteAwaitingRestore &&
+            (state.pendingQuotes.isNotEmpty() || error.action == EditorErrorAction.Reload)
+        // A blank unresolved attempt can preserve its uncertainty banner after the form GET failed.
+        val reload = state.isAwaitingInitialBody || state.quoteStorageUnavailable || reloadForError
         if (!state.hasDormantQuote || state.quoteStorageUnavailable) {
             val action = if (reload) PostEditorIntent.ReloadRequested else PostEditorIntent.ErrorDismissed
             val label = if (reload) {
