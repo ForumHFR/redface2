@@ -1,0 +1,56 @@
+package fr.forumhfr.redface2.core.ui.editor
+
+import fr.forumhfr.redface2.core.domain.editor.ArmToken
+import fr.forumhfr.redface2.core.domain.editor.EditorSession
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
+import org.junit.Assert.assertEquals
+import org.junit.Test
+
+class EditorBarStateTest {
+    @Test
+    fun `ED23 - arming masks format ignores ToggleFormat and disarming restores it`() {
+        val session = EditorSession("session", "alice", "topic:23:42")
+        val format = reduceEditorBar(EditorBarState(), EditorBarGesture.ToggleFormat)
+        val armed = format.withSubmission(EditorSubmissionState.Armed(ArmToken(1, session, 0, 5_000)))
+        assertEquals(EditorBarMode.Format, armed.mode)
+        assertEquals(EditorBarMode.Normal, armed.visibleMode)
+        assertEquals(armed, reduceEditorBar(armed, EditorBarGesture.ToggleFormat))
+        val disarmed = armed.withSubmission(EditorSubmissionState.Ready)
+        assertEquals(format, disarmed)
+        assertEquals(EditorBarMode.Format, disarmed.visibleMode)
+        assertEquals(EditorBarMode.Normal, reduceEditorBar(disarmed, EditorBarGesture.ToggleFormat).mode)
+    }
+
+    @Test
+    fun `ED23 - opening a surface while armed closes saved format so disarming cannot reopen it`() {
+        val session = EditorSession("session", "alice", "topic:23:42")
+        val arm = ArmToken(1, session, 0, 5_000)
+        val armed = EditorBarState(EditorBarMode.Format, arm)
+        val closed = reduceEditorBar(armed, EditorBarGesture.OpenSurface)
+        assertEquals(EditorBarState(EditorBarMode.Normal, arm), closed)
+        assertEquals(EditorBarState(), closed.withSubmission(EditorSubmissionState.Ready))
+    }
+
+    @Test
+    fun `ED24 - color returns to format on choice and on Back`() {
+        val format = EditorBarState(EditorBarMode.Format)
+        val color = reduceEditorBar(format, EditorBarGesture.OpenColor)
+        assertEquals(EditorBarMode.Color, color.mode)
+        assertEquals(format, reduceEditorBar(color, EditorBarGesture.ColorChosen))
+        assertEquals(format, reduceEditorBar(color, EditorBarGesture.Back))
+        assertEquals(EditorBarState(), reduceEditorBar(format, EditorBarGesture.Back))
+        assertEquals(EditorBarState(), reduceEditorBar(EditorBarState(), EditorBarGesture.OpenColor))
+    }
+
+    @Test
+    fun `ED31 - image action and opening another surface close the mode without reopening it`() {
+        val image = reduceEditorBar(EditorBarState(), EditorBarGesture.OpenImage)
+        assertEquals(EditorBarMode.Image, image.mode)
+        assertEquals(EditorBarState(), reduceEditorBar(image, EditorBarGesture.ImageAction))
+        assertEquals(EditorBarState(), reduceEditorBar(image, EditorBarGesture.Back))
+        listOf(EditorBarMode.Format, EditorBarMode.Color, EditorBarMode.Image).forEach { mode ->
+            val closed = reduceEditorBar(EditorBarState(mode), EditorBarGesture.OpenSurface)
+            assertEquals(EditorBarState(), closed.withSubmission(EditorSubmissionState.Ready))
+        }
+    }
+}
