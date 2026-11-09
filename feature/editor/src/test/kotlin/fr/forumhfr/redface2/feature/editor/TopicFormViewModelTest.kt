@@ -76,6 +76,7 @@ import fr.forumhfr.redface2.core.model.write.TopicPollForm
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorAction
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.toEditorError
@@ -134,6 +135,42 @@ class TopicFormViewModelTest {
     fun tearDown() {
         viewModels.forEach { it.viewModelScope.cancel() }
         Dispatchers.resetMain()
+    }
+
+    @Test
+    fun `ED35 incomplete title and subcategory refuse twice without arm or POST in both modes`() = runTest {
+        for (creating in listOf(false, true)) {
+            val preferences = FakeUserPreferencesRepository(confirmBeforePosting = true)
+            val vm = if (creating) newTopicViewModel(null, userPreferencesRepository = preferences)
+                else newViewModel(userPreferencesRepository = preferences)
+            syncBody()
+            vm.editBody(TextFieldValue("Body"))
+            vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue()))
+            repeat(2) {
+                vm.submit(TopicFormIntent.SubmitClicked())
+                assertEquals(EditorErrors.missingTitle, vm.state.value.submitError)
+                assertFalse(vm.state.value.showSubmitConfirmation)
+                assertNull(vm.state.value.armToken)
+                val event = vm.editorEvents.visibleEvent!!
+                vm.editorEvents.dispatch(EditorEventInput.Activate(event.key))
+                assertNull(vm.editorEvents.visibleEvent)
+            }
+            vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Titre")))
+            // A loaded form may still carry the placeholder; exercise the live VM guard, not its projection.
+            vm.submit(TopicFormIntent.SubcatSelected(0))
+            repeat(2) {
+                vm.submit(TopicFormIntent.SubmitClicked())
+                assertEquals(EditorErrors.missingSubcategory, vm.state.value.submitError)
+                assertNull(vm.state.value.armToken)
+                val event = vm.editorEvents.visibleEvent!!
+                vm.editorEvents.dispatch(EditorEventInput.Activate(event.key))
+            }
+            assertEquals(0, topicFormRepository.submitCalls + topicFormRepository.newTopicSubmitCalls)
+            assertEquals(0, draftStore.beginCalls)
+            vm.submit(TopicFormIntent.SubmitConfirmed(null))
+            assertEquals(0, topicFormRepository.submitCalls + topicFormRepository.newTopicSubmitCalls)
+            vm.viewModelScope.cancel()
+        }
     }
 
     @Test

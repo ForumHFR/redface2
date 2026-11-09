@@ -173,6 +173,7 @@ class TopicFormViewModel @AssistedInject constructor(
     val state: StateFlow<TopicFormState> = _state.asStateFlow()
 
     internal val editorEvents = TopicFormEvents()
+    internal val chromeMemory = TopicFormChromeMemory()
 
     /** Deliver transitions before StateFlow can conflate repeated failures or synchronous operations. */
     private fun updateState(transform: (TopicFormState) -> TopicFormState) {
@@ -349,6 +350,7 @@ class TopicFormViewModel @AssistedInject constructor(
                     submission.accountChanged()
                     loadedForm = null
                     restoration.invalidate()
+                    chromeMemory.reset()
                     updateState { it.copy(isUploading = false, uploadProgress = null) }
                 }
                 authObserved = true
@@ -944,12 +946,17 @@ class TopicFormViewModel @AssistedInject constructor(
     private fun onSubmitClicked(intent: TopicFormIntent.SubmitClicked) {
         val snapshot = _state.value.copy(bodyText = bodyFieldState.text.toString())
         val form = loadedForm
-        if (!snapshot.canSubmit || form == null || closeRequested) return
-        if (submission.blocksMutation) return
-        if (form.isAnonymous) {
+        if (form == null || closeRequested || submission.blocksMutation) return
+        if (!TopicFormChromeState(snapshot).sendActivatable) return
+        val headerError = snapshot.headerError
+        if (headerError != null) {
+            // ED-35: deliver every refusal, without allocating an arm or durable attempt.
+            updateState { it.copy(submitError = null) }
+            updateState { it.copy(submitError = headerError) }
+        } else if (form.isAnonymous) {
             updateState { it.copy(submitError = null) }
             updateState { it.copy(submitError = ReplyFailureReason.LoginRequired.toEditorError()) }
-        } else {
+        } else if (snapshot.canSubmit) {
             val permit = submission.request(intent.timeoutMillis, snapshot.canSubmit && !closeRequested)
             if (permit is SubmissionRequest.Accepted) launchSubmission(permit, snapshot, form)
         }

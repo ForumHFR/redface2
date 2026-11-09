@@ -450,11 +450,12 @@ internal fun TopicFormErrorBanners(
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SubcategoryDropdown(
+internal fun SubcategoryDropdown(
     choices: List<fr.forumhfr.redface2.core.model.write.TopicFormSubcategoryChoice>,
     selectedSubcat: Int?,
     enabled: Boolean,
     onSelect: (Int) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val pickable = remember(choices) { choices.filter { it.id != null } }
     val placeholder = stringResource(R.string.editor_topic_subcat_picker_placeholder)
@@ -465,7 +466,7 @@ private fun SubcategoryDropdown(
     ExposedDropdownMenuBox(
         expanded = expanded,
         onExpandedChange = { expanded = menuEnabled && it },
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
     ) {
         OutlinedTextField(
             value = selectedLabel,

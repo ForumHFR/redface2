@@ -150,7 +150,8 @@ data class TopicFormState(
     val canSubmit: Boolean
         get() = hasLoadedForm && !isInitializing && when (mode) {
             TopicFormMode.EditFirstPost ->
-                cat != null &&
+                hasSubcategorySelect &&
+                    cat != null &&
                     (subcat != null && subcat > 0) &&
                     topicId != null &&
                     numreponse != null &&

@@ -55,4 +55,9 @@
         <item quantity="one">%1$d citation restante</item>
         <item quantity="other">%1$d citations restantes</item>
     </plurals>
+    <string name="editor_topic_add_title">Ajouter un titre</string>
+    <string name="editor_topic_header_title_only">Titre</string>
+    <string name="editor_topic_open_title">Modifier le titre</string>
+    <string name="editor_topic_poll_status">Sondage présent, consulter</string>
+    <string name="editor_topic_first_post_unsupported">L’envoi du premier message dans une catégorie sans sous-catégorie n’est pas disponible.</string>
 </resources>

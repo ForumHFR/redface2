@@ -78,6 +78,13 @@ open class EditorHost<S : Any>(
         memory.textBeforeSurface = body.text.toString()
         memory.bar = reduceEditorBar(memory.bar, EditorBarGesture.OpenSurface)
     }
+    /** For the surface's onComplete port or initial opening: the event gesture is already consumed. */
+    fun openHeaderForCompletion() {
+        val header = surfaces.header ?: return
+        if (!source().scaffold.controlsEnabled) return
+        captureBody()
+        memory.surface = header
+    }
     fun closeSurface() {
         val closed = surface ?: return
         memory.surface = null
@@ -155,7 +162,10 @@ open class EditorHost<S : Any>(
             is EditorBackAction.Disarm -> actions.onDisarm()
             is EditorBackAction.CloseEventDetails -> closeDetails(action.key)
             is EditorBackAction.ClosePanel, is EditorBackAction.CloseSheet -> { closeSurface(); onLayerBack(action) }
-            is EditorBackAction.CloseSharedPreview -> preview()
+            is EditorBackAction.CloseSharedPreview -> if (source().scaffold.controlsEnabled) {
+                // Back is not an action gesture: keep both a displayed information and its masked mode.
+                actions.onPreview()
+            }
             is EditorBackAction.Leave -> closeRequested()
             else -> onLayerBack(action)
         }
