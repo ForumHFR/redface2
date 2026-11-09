@@ -9,6 +9,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.ui.R
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -150,6 +151,19 @@ class EditorHostTest {
         assertEquals(event.key, events.state.detailKey)
         assertEquals(event, events.state.visibleEvent)
         assertNull(host.surface)
+        host.closeDetails(event.key)
+        assertNull(host.detail)
+        assertNull(events.state.detailKey)
+        assertNull(events.state.visibleEvent)
+        assertTrue(calls.isEmpty())
+    }
+
+    @Test fun `ED45 retained detail projection acknowledges the current event by key`() {
+        val host = host()
+        val event = error(EditorErrors.network)
+        host.barActions.onEvent(event.key, EditorEventAction.Details)
+        memory.detail = event.copy(arrivalOrder = event.arrivalOrder + 1)
+        assertNotEquals(event, host.detail)
         host.closeDetails(event.key)
         assertNull(host.detail)
         assertNull(events.state.detailKey)

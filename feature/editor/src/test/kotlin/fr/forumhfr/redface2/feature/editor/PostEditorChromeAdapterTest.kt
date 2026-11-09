@@ -218,6 +218,16 @@ class PostEditorChromeAdapterTest {
         assertNull(host.events.state.visibleEvent)
     }
 
+    @Test fun `ED45 retained detail keeps its remedy while the event key is current`() {
+        val event = host.error(EditorErrors.formNetwork)
+        host.adapter.barActions.onEvent(event.key, EditorEventAction.Details)
+        assertEquals(event, host.adapter.detail)
+        host.adapter.reload(event.key)
+        assertEquals(listOf(PostEditorIntent.ReloadRequested), host.calls)
+        assertNull(host.adapter.detail)
+        assertNull(host.events.state.visibleEvent)
+    }
+
     @Test fun `ED82 upload progress and fifty body emissions keep identity and acknowledged terminals stay hidden`() {
         host.transition(host.state.copy(isUploading = true, uploadProgress = UploadProgress(0, 3)))
         val key = host.events.state.visibleEvent!!.key

@@ -23,9 +23,11 @@ sealed interface EditorEventInput {
     data class Received(val event: EditorEvent) : EditorEventInput
     /** Nondecreasing progress with a fixed total per occurrence; no new event/announcement. */
     data class UploadAdvanced(val key: EventKey, val progress: UploadProgress) : EditorEventInput
+    /** Surface policy resolves only the same read kind; ambiguous results always survive (ED-170). */
     data class FormLoaded(
         val session: EditorSession,
         val operation: OperationRef.Local,
+        val resolvesError: (EditorError, Boolean) -> Boolean,
         val quotesResolved: Boolean = false,
     ) : EditorEventInput
     /** Clear draft-save information; only DraftSave completes here, a submission may still be sending. */
@@ -201,10 +203,10 @@ private fun formLoaded(state: EditorEventState, input: EditorEventInput.FormLoad
     val quotesResolved = input.quotesResolved || input.operation.kind == EditorLocalOperation.QuoteFetch
     val completed = completeOperation(state, input.session, operation.ref)
     return completed.copy(
-        events = completed.events.filterNot {
-            val error = (it.content as? EditorEventContent.Problem)?.error
-            it.key.operation.sameKind(input.operation) && error != null &&
-                error.afterFormLoaded(quotesResolved) == null
+        events = completed.events.filterNot { event ->
+            val error = (event.content as? EditorEventContent.Problem)?.error
+            val ownReadError = event.key.operation.sameKind(input.operation) && !event.isAmbiguous
+            ownReadError && error?.let { input.resolvesError(it, quotesResolved) } == true
         },
     )
 }

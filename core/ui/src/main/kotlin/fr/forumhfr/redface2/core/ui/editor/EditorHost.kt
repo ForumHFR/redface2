@@ -135,8 +135,10 @@ open class EditorHost<S : Any>(
         events.dispatch(EditorEventInput.CloseDetails(key))
         memory.detail = null
     }
-    /** The open detail, while its delivery is still current; a replaced or acknowledged one is stale. */
-    protected fun currentDetail(key: EventKey) = detail?.takeIf { it.key == key && it in events.state.events }
+    /** The open detail while its delivery key is current; a replaced or acknowledged delivery is stale. */
+    protected fun currentDetail(key: EventKey) = detail?.takeIf {
+        it.key == key && events.state.events.any { event -> event.key == key }
+    }
 
     /** Native smiley/detail/sheet callbacks supply their actual layers to this same resolver. */
     fun back(layers: EditorBackState = EditorBackState(), onLayerBack: (EditorBackAction) -> Unit = {}) {

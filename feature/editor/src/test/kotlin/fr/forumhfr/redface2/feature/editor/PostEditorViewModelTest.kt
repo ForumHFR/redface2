@@ -84,6 +84,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorAction
 import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
+import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorText
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
@@ -114,6 +115,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -1893,6 +1895,32 @@ class PostEditorViewModelTest {
             )
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `anonymous submit refusals deliver distinct events after acknowledgement`() = runTest {
+        replyRepository.formResult = Result.success(anonymousForm())
+        val vm = newReplyViewModel()
+        vm.editBody(TextFieldValue("Hello!"))
+        val initial = requireNotNull(vm.chromeEvents.state.visibleEvent)
+        vm.chromeEvents.dispatch(EditorEventInput.Acknowledge(initial.key))
+        assertNull(vm.chromeEvents.state.visibleEvent)
+
+        val keys = List(2) {
+            vm.dispatch(PostEditorIntent.SubmitClicked())
+            val event = requireNotNull(vm.chromeEvents.state.visibleEvent)
+            assertEquals(EditorEventContent.Problem(EditorErrors.loginRequired), event.content)
+            assertEquals(listOf(event), vm.chromeEvents.state.events)
+            vm.chromeEvents.dispatch(EditorEventInput.Activate(event.key))
+            assertEquals(event.key, vm.chromeEvents.state.detailKey)
+            vm.chromeEvents.dispatch(EditorEventInput.CloseDetails(event.key))
+            assertNull(vm.chromeEvents.state.visibleEvent)
+            assertEquals(EditorErrors.loginRequired, vm.state.value.submitError)
+            event.key
+        }
+        assertNotEquals(keys.first(), keys.last())
+        assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
+        assertEquals(0, replyRepository.submitCalls)
     }
 
     @Test

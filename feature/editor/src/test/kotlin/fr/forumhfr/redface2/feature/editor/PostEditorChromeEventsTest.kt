@@ -88,4 +88,21 @@ class PostEditorChromeEventsTest {
         host.events.dispatch(EditorEventInput.Acknowledge(failure.key))
         assertNull(host.events.state.visibleEvent)
     }
+
+    @Test fun `post read policy retires existing form and quote errors after successful reloads`() {
+        listOf(EditorErrors.formNetwork, EditorErrors.invalidForm, EditorErrors.quoteFetchFailed).forEach { error ->
+            host.transition(host.state.copy(isLoadingForm = true, submitError = null))
+            host.events.readFailed()
+            host.transition(host.state.copy(isLoadingForm = false, submitError = error))
+            val failure = host.events.state.visibleEvent!!
+            assertEquals(EditorEventContent.Problem(error), failure.content)
+            assertEquals(EditorLocalOperation.FormLoad, (failure.key.operation as OperationRef.Local).kind)
+            host.transition(host.state.copy(isLoadingForm = true))
+            assertEquals(failure, host.events.state.visibleEvent)
+            host.transition(host.state.copy(isLoadingForm = false, submitError = null))
+            assertNull(host.events.state.visibleEvent)
+            assertTrue(host.events.state.events.isEmpty())
+            assertTrue(host.events.state.currentOperations.single().finished)
+        }
+    }
 }

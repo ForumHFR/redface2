@@ -12,6 +12,8 @@ import fr.forumhfr.redface2.core.ui.editor.EditorErrorAction
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
 import fr.forumhfr.redface2.core.ui.editor.EditorEventDetails
 import fr.forumhfr.redface2.core.ui.editor.EditorHeaderPanel
+import fr.forumhfr.redface2.core.ui.editor.EditorOptions
+import fr.forumhfr.redface2.core.ui.editor.EditorOptionsLabels
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
 import fr.forumhfr.redface2.core.ui.editor.EventKey
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
@@ -85,9 +87,15 @@ private fun PostEditorHeaderSurface(
 @Composable
 private fun PostEditorOptionsSurface(adapter: PostEditorChromeAdapter, source: PostEditorState) {
     EditorOptionsSheet(adapter::closeSurface) {
-        PostEditorOptions(source.signatureEnabled, source.smileyDisabled, source.emailNotificationEnabled,
-            source.msgIcon, adapter.state.scaffold.controlsEnabled && !source.isLoadingForm,
-            adapter::signature, adapter::smileyDisabled, adapter::notification, adapter::tone, expandedTone = true)
+        val enabled = adapter.state.scaffold.controlsEnabled && !source.isLoadingForm
+        EditorOptions(source.signatureEnabled, source.smileyDisabled, source.emailNotificationEnabled, enabled,
+            adapter::signature, adapter::smileyDisabled, adapter::notification,
+            EditorOptionsLabels(stringResource(R.string.editor_options_title),
+                stringResource(R.string.editor_option_signature),
+                stringResource(R.string.editor_option_smiley_disabled),
+                stringResource(R.string.editor_option_email_notification))) {
+            MessageIconPicker(source.msgIcon, enabled, adapter::tone, alwaysExpanded = true)
+        }
     }
 }
 

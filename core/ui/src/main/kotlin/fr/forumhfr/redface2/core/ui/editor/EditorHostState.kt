@@ -19,6 +19,7 @@ data class EditorHostState(
 /**
  * Business intents stay in the surface; the host never owns a submission controller or its timer.
  * [onComplete] optionally handles CompleteHeader's cause to focus the relevant field/status.
+ * This port also owns returning focus/selection to the body when its completion UI closes.
  * Completion requires enabled controls. Without this port the host opens the optional header;
  * without either route it presents Details or Dismiss, preserving visual acknowledgement.
  * [onAcknowledgeUncertain] durably acknowledges an uncertain attempt (ED-45/170). The host calls it only for an
@@ -56,7 +57,7 @@ data class EditorHostSurfaces<S : Any>(
     val returnsToBody: (S) -> Boolean = { it != header },
 )
 
-/** Synchronous VM-owned reducer port; deliveries and presentation summaries remain surface-owned. */
+/** Synchronous VM-owned reducer port, supplied by EditorEventCollector or a surface-specific adapter. */
 interface EditorHostEvents {
     val state: EditorEventState
     val visibleEvent: EditorEvent? get() = state.visibleEvent

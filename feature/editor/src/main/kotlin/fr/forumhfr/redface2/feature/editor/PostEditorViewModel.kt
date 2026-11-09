@@ -1379,6 +1379,7 @@ class PostEditorViewModel @AssistedInject constructor(
         val form = loadedForm
         if (!snapshot.canSubmit || form == null || closeRequested) return
         if (form.isAnonymous) {
+            updateChromeState { it.copy(submitError = null) }
             updateChromeState { it.copy(submitError = ReplyFailureReason.LoginRequired.toEditorError()) }
         } else {
             val permit = submission.request(intent.timeoutMillis, snapshot.canSubmit && !closeRequested)
