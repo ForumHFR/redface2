@@ -4,21 +4,27 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
+import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -26,7 +32,10 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** Isolated capture matrix. Insets are synthetic, including the documented insufficient low window. */
+/**
+ * Isolated capture matrix in preset L, plus the J landscape reference at fontScale 1 × M in both themes.
+ * Insets are synthetic, including the documented insufficient low window.
+ */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "fr-rFR-w800dp-h800dp-xxhdpi")
@@ -60,7 +69,30 @@ class EditorScaffoldRoborazziTest {
         matrix.asReversed().forEach { (dark, scale, profile) -> capture(dark, scale, profile, sample = 0) }
     }
 
-    private fun capture(dark: Boolean, scale: Float, profile: Profile, sample: Int) {
+    @Test
+    fun `J landscape S10e at fontScale 1 times M shows three complete lines in both themes`() {
+        compose.setContent { key(host) { host.Content() } }
+        val profile = profiles.single { it.name == "landscape-s10e" }
+        listOf(false, true).forEach { dark ->
+            capture(dark, 1f, profile, sample = 0, fontPreset = FontScalePreference.M)
+            assertThreeCompleteLines()
+        }
+    }
+
+    private fun assertThreeCompleteLines() {
+        val layouts = mutableListOf<TextLayoutResult>()
+        compose.onNode(hasSetTextAction()).performSemanticsAction(SemanticsActions.GetTextLayoutResult) {
+            assertTrue(it(layouts))
+        }
+        val layout = layouts.single()
+        val completeLines = (0 until layout.lineCount).count { line ->
+            layout.getLineTop(line) >= 0 && layout.getLineBottom(line) <= host.scroll.viewportSize
+        }
+        assertTrue("J: the real BTF2 viewport must show three complete lines at 1 × M", completeLines >= 3)
+    }
+
+    private fun capture(dark: Boolean, scale: Float, profile: Profile, sample: Int,
+        fontPreset: FontScalePreference = FontScalePreference.L) {
         compose.runOnIdle {
             // key(host) retains the Android view and its insets holder. Dispatch through the mounted
             // fixture BEFORE replacing it, so the fresh field's first measure sees this profile's insets.
@@ -70,6 +102,7 @@ class EditorScaffoldRoborazziTest {
             host = EditorScaffoldFixture()
             host.metrics.value = EditorWindowMetrics(profile.height.dp, 24.dp, profile.nav.dp)
             host.width.value = profile.width.dp; host.dark.value = dark; host.scale.value = scale
+            host.fontPreset.value = fontPreset
             host.body.edit { selection = TextRange.Zero }
             host.chrome.value = sampleChrome(sample)
             host.panel.value = sample == 16
@@ -87,8 +120,9 @@ class EditorScaffoldRoborazziTest {
         val field = compose.onNodeWithTag("editor-scaffold-field", useUnmergedTree = true)
             .assertExists().getUnclippedBoundsInRoot()
         assertEquals(profile.fieldHeight, field.height.value, 0.5f)
+        val presetSuffix = if (fontPreset == FontScalePreference.L) "" else "_${fontPreset.name.lowercase()}"
         compose.onNodeWithTag("scaffold-bench").captureRoboImage(
-            "src/test/screenshots/editor_scaffold_${profile.name}_${dark}_${scale}_$sample.png")
+            "src/test/screenshots/editor_scaffold_${profile.name}_${dark}_${scale}_$sample$presetSuffix.png")
     }
 
     private fun sampleChrome(sample: Int): EditorScaffoldChrome {

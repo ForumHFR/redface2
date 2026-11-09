@@ -45,8 +45,10 @@ internal fun EditorBarIcon(
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     expanded: Boolean? = null,
+    containerModifier: Modifier = Modifier,
 ) {
-    EditorActionIcon(icon, label, onClick, modifier.editorBarActivation(enabled, onClick), enabled, expanded)
+    EditorActionIcon(icon, label, onClick, modifier.editorBarActivation(enabled, onClick), enabled, expanded,
+        containerModifier)
 }
 
 /** Consume both halves before a callback can remove its control or return focus to the field. */

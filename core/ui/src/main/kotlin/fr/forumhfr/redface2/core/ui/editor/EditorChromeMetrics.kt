@@ -7,6 +7,7 @@ import androidx.compose.ui.unit.dp
 data class EditorChromeMetrics(val compactHeight: Boolean) {
     val appBarHeight: Dp get() = if (compactHeight) 0.dp else minimumTargetSize
     val actionBarHeight: Dp get() = if (compactHeight) minimumTargetSize else 56.dp
+    val controlVisibleHeight: Dp get() = if (compactHeight) 40.dp else minimumTargetSize
     val columnSpacing: Dp get() = if (compactHeight) 0.dp else 12.dp
     val draftHeightFloor: Dp get() = if (compactHeight) 0.dp else EDITOR_DRAFT_MIN_HEIGHT
     val showFieldLabel: Boolean get() = !compactHeight

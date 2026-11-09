@@ -49,6 +49,7 @@ fun EditorStatusIcon(
     badgeCount: Int? = null,
     enabled: Boolean = true,
     visible: Boolean = true,
+    compactHeight: Boolean = false,
 ) {
     require(badgeCount == null || badgeCount > 0)
     val style = MaterialTheme.typography.labelSmall
@@ -56,7 +57,7 @@ fun EditorStatusIcon(
     // Stack while both fit; at large font scales overlap the badge instead of clipping either layer.
     val badgeWidth = badgeSize.width
     val height = (24.dp + if (badgeCount == null) 0.dp else badgeSize.height)
-        .coerceAtMost(EditorChromeMetrics.minimumTargetSize)
+        .coerceAtMost(EditorChromeMetrics(compactHeight).controlVisibleHeight)
     // Replace only the tooltip state on masking: its popup/job die, the live anchor keeps its ID.
     val tooltip = key(visible) { rememberTooltipState() }
     val scope = rememberCoroutineScope()
