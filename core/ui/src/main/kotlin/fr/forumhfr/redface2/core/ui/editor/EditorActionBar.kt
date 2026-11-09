@@ -203,21 +203,15 @@ private fun EditorBarEnvelope(
             .measure(Constraints(maxWidth = constraints.maxWidth, maxHeight = height.roundToPx()))
         // ED-133: every event extends into the leading gutter, never toward Send.
         val extension = if (event != null) 4.dp else 0.dp
-        val statusSlots = listOf(EditorFixedSlot.FirstStatus, EditorFixedSlot.SecondStatus)
-            .filterIndexed { index, _ -> statusWidths[index] != null }
-        val measured = allocateEditorChrome(EditorChromeLayoutRequest(
+        val allocation = allocateEditorChrome(EditorChromeLayoutRequest(
             constraints.maxWidth.toDp() + extension, button.width.toDp(), compact, hasHeader,
-            statusWidths.filterNotNull(),
+            firstStatusWidth = statusWidths[0], secondStatusWidth = statusWidths[1],
             minimumContentWidth = when {
                 event != null -> 189.dp + extension // event envelope + 8 dp Send gap
                 mode == EditorBarMode.Format -> 96.dp // trigger + one full scroll target
                 else -> 48.dp
             },
         ))
-        val allocation = measured.copy(
-            fixedSlots = measured.fixedSlots.map { it.resolveStatusSlot(statusSlots) },
-            overflowSlots = measured.overflowSlots.map { it.resolveStatusSlot(statusSlots) },
-        )
         val leading = (16.dp - extension).roundToPx()
         val width = (constraints.maxWidth - leading - 16.dp.roundToPx() - button.width).coerceAtLeast(0)
         val row = subcompose("content") { content(allocation) }.single()
@@ -228,12 +222,6 @@ private fun EditorBarEnvelope(
                 (height.roundToPx() - button.height) / 2)
         }
     }
-}
-
-private fun EditorFixedSlot.resolveStatusSlot(statusSlots: List<EditorFixedSlot>): EditorFixedSlot = when (this) {
-    EditorFixedSlot.FirstStatus -> statusSlots[0]
-    EditorFixedSlot.SecondStatus -> statusSlots[1]
-    else -> this
 }
 
 @Composable
