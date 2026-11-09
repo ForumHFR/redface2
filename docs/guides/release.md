@@ -52,11 +52,33 @@ illisible ou dépourvu d'au moins un marqueur attendu arrête le job avant tout 
 
 La garde lit `classes*.dex` dans les APK et `base/dex/classes*.dex` dans les AAB.
 Les projets sont dérivés des `include(...)` littéraux de `settings.gradle.kts`, hors
-commentaires. Dans leurs sources `src/main/**/*.kt` et `.java`, hors commentaires
-et littéraux, un projet contribue s'il déclare `@HiltViewModel`, `@AndroidEntryPoint`,
-`@HiltAndroidApp` ou `@Module` accompagné de `@InstallIn` sur la même déclaration.
-Les plugins Gradle et les répertoires de projets non inclus ne participent pas à
-cette dérivation.
+commentaires. Tous leurs dossiers `src/<set>/` sont parcourus selon ces règles :
+
+- Dans `main`, les sources `.kt` et `.java` contribuent si elles déclarent
+  `@HiltViewModel`, `@AndroidEntryPoint`, `@HiltAndroidApp` ou `@Module` accompagné
+  de `@InstallIn` sur la même déclaration, hors commentaires et littéraux.
+- `test`, `androidTest`, `testFixtures`, `screenshotTest` et tous les noms commençant
+  par `test` ou `androidTest` sont ignorés : leurs sources de test ne sont pas
+  embarquées en release. `debug` et les noms finissant par `Debug` sont également
+  ignorés, car ils ne participent jamais à une release.
+- Tout autre source set (`release`, `prod`, `beta`, `devRelease`, nom inconnu…)
+  est inspecté dans ses fichiers `.kt`, `.kts` et `.java`. Un token `HiltViewModel`,
+  `AndroidEntryPoint`, `HiltAndroidApp` ou `InstallIn`, hors imports, commentaires
+  et littéraux, provoque une erreur localisée « source set <set> hors périmètre de
+  la garde ». Aucune variante n'est déduite pour ces sources.
+
+Les `build.gradle.kts` et `build.gradle` de la racine et des projets inclus, ainsi
+que les sources de `build-logic/src/` et son build file, sont aussi lus. Les accès
+Java/Kotlin `srcDir`, `srcDirs`, `setSrcDirs`, `getSrcDirs`, `directories` et `getDirectories`
+(accès directs, getters ou blocs `java { … }` / `kotlin { … }`) sont refusés avec
+« répertoire de sources personnalisé non supporté ». Les commentaires et chaînes
+ne déclenchent pas ce refus ; `assets.directories.add(…)` n'est pas concerné.
+Une seule exception est reconnue : un accès direct à
+`sourceSets.getByName("<nom littéral de test/debug ignoré>").java` ou `.kotlin`.
+Cela laisse passer l'ajout Roborazzi au source set `test` dans `build-logic`, sans
+étendre la portée des sources de release. Les noms dynamiques, alias de récepteur
+et autres sélecteurs ne bénéficient pas de cette exception.
+Les répertoires de projets non inclus ne participent pas à la dérivation.
 
 - Pour **chaque classe `@HiltViewModel`**, y compris dans `app`, la garde exige les
   octets du descripteur
@@ -69,7 +91,7 @@ cette dérivation.
 - Pour **chaque classe `@HiltAndroidApp`**, elle exige aussi `Hilt_<Classe>`
   (actuellement `Hilt_RedfaceApplication`).
 
-La dérivation est **fail-closed** : les annotations simples (nom court ou qualifié)
+Dans `main`, les annotations simples (nom court ou qualifié)
 doivent viser une déclaration nommée au premier niveau du fichier. Les formes
 Kotlin `internal class`, Java `public final class`, les arguments d'annotations
 multilignes et les annotations intermédiaires sont reconnus. `@Module` et
@@ -80,9 +102,11 @@ modificateurs reconnus et les autres annotations simples peuvent s'intercaler.
 
 Le lexer retire les chaînes avec échappements, les chaînes Kotlin triples
 multilignes (y compris leurs interpolations), les caractères, les commentaires
-`//` et les commentaires `/* … */` imbriqués. Le contenu des chaînes est conservé
-uniquement pour lire les `include(...)` littéraux de `settings.gradle.kts`.
-Après analyse, chaque token `HiltViewModel`, `AndroidEntryPoint`, `HiltAndroidApp`
+`//` et les commentaires `/* … */` (imbriqués en Kotlin uniquement ; en Java,
+fermeture au premier `*/`). Le contenu des chaînes est conservé
+pour lire les `include(...)` littéraux de `settings.gradle.kts` et les noms
+littéraux de test/debug de l'exception ci-dessus dans les build files.
+Dans `main`, après analyse, chaque token `HiltViewModel`, `AndroidEntryPoint`, `HiltAndroidApp`
 et `InstallIn` hors imports et littéraux/commentaires doit correspondre à une
 contribution retenue. Les occurrences non appariées sont toutes signalées.
 
@@ -105,6 +129,9 @@ définitions de classes ni leur intégration au graphe de composants généré. 
 autres liaisons `@Module` ne sont pas contrôlées individuellement ; une perte partielle
 de ces liaisons peut donc passer. La lecture statique n'est pas un parseur Kotlin
 ou Java complet et ne résout pas les chemins de projets remappés par Gradle.
+Les sources générées pendant le build et les sources ajoutées par un plugin tiers
+sans configuration de répertoire visible dans les fichiers inspectés restent hors
+de portée ; cette lecture statique ne permet pas de garantir leur couverture.
 Utiliser un checkout correspondant au binaire.
 
 Depuis un checkout du code correspondant au binaire, contrôle manuel sans Gradle

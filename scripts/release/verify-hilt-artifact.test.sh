@@ -20,7 +20,7 @@ new_case() {
   case_name="$1"
   case_count=$((case_count + 1))
   case_root="$work_dir/$case_name"
-  source_file="$case_root/feature/example/src/main/Example.${2:-kt}"
+  source_file="$case_root/${4:-feature/example}/src/${3:-main}/Example.${2:-kt}"
   mkdir -p "$case_root/app/src/main" "$case_root/core/base/src/main" \
     "$(dirname -- "$source_file")"
   cat >"$case_root/settings.gradle.kts" <<'SETTINGS'
@@ -120,6 +120,33 @@ import dagger.hilt.android.lifecycle.HiltViewModel;
 public final class JavaVm extends ViewModel {}
 SOURCE
 expect_list "ViewModels : p.fixture.JavaVm"
+
+new_case java_comment_delimiter java <<'SOURCE'
+package p.fixture;
+import dagger.hilt.android.lifecycle.HiltViewModel;
+/* Example delimiter: /* */
+@HiltViewModel
+public final class Hidden extends ViewModel {
+    @Inject public Hidden() {}
+}
+// End example: */
+SOURCE
+expect_list "ViewModels : p.fixture.Hidden"
+
+new_case java_comment_delimiter_without_end java <<'SOURCE'
+package p.fixture;
+/* Example delimiter: /* */
+@HiltViewModel public final class Hidden extends ViewModel {}
+SOURCE
+expect_list "ViewModels : p.fixture.Hidden"
+
+new_case kotlin_comment_delimiter <<'SOURCE'
+package p.fixture
+/* Example delimiter: /* */
+@HiltViewModel class Hidden
+// End example: */
+SOURCE
+expect_list
 
 new_case quoted_noise <<'SOURCE'
 package p.fixture
@@ -380,5 +407,195 @@ class Plain { String text = """
 """; }
 SOURCE
 expect_unsupported 2 "bloc texte Java"
+
+for source_set in release prod devRelease beta unknown; do
+  new_case "source_set_$source_set" kt "$source_set" <<'SOURCE'
+package p.fixture
+@HiltViewModel class Hidden
+SOURCE
+  expect_unsupported 2 "source set $source_set hors périmètre de la garde"
+done
+
+new_case app_prod kt prod app <<'SOURCE'
+package p.app
+@HiltViewModel class Hidden
+SOURCE
+expect_unsupported 2 "source set prod hors périmètre de la garde"
+
+for source_set in debug prodDebug test androidTest testDebug androidTestProd testFixtures screenshotTest; do
+  new_case "ignored_$source_set" kt "$source_set" <<'SOURCE'
+package p.fixture
+@HiltViewModel class Ignored
+SOURCE
+  expect_list
+done
+
+for hilt_token in HiltViewModel AndroidEntryPoint HiltAndroidApp InstallIn; do
+  new_case "release_$hilt_token" kt release <<SOURCE
+package p.fixture
+val entry = $hilt_token::class
+SOURCE
+  expect_unsupported 2 "source set release hors périmètre de la garde"
+done
+
+new_case release_quoted_noise kt release <<'SOURCE'
+package p.fixture
+import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.AndroidEntryPoint
+import dagger.hilt.android.HiltAndroidApp
+import dagger.hilt.InstallIn
+// @HiltViewModel class Commented
+/* @AndroidEntryPoint @HiltAndroidApp @InstallIn */
+val text = "@HiltViewModel class Quoted"
+val raw = """@AndroidEntryPoint @HiltAndroidApp @InstallIn"""
+class Plain
+SOURCE
+expect_list
+
+new_case release_java_comment java release <<'SOURCE'
+package p.fixture;
+/* Example delimiter: /* */
+@HiltViewModel public final class Hidden {}
+// End example: */
+SOURCE
+expect_unsupported 3 "source set release hors périmètre de la garde"
+
+new_build_case() {
+  local name="$1" path="$2"
+  new_case "$name" <<'SOURCE'
+package p.fixture
+@HiltViewModel class Real
+SOURCE
+  source_file="$case_root/$path"
+  mkdir -p "$(dirname -- "$source_file")"
+  cat >"$source_file"
+}
+
+new_build_case custom_java_dir feature/example/build.gradle.kts <<'BUILD'
+// A release source directory cannot be enumerated through src/<set>.
+android.sourceSets["main"].java.srcDir("x")
+BUILD
+expect_unsupported 2 "répertoire de sources personnalisé non supporté"
+
+new_build_case custom_groovy_dir feature/example/build.gradle <<'BUILD'
+sourceSets.main.java.srcDirs = ['x']
+BUILD
+expect_unsupported 1 "répertoire de sources personnalisé non supporté"
+
+new_build_case custom_build_logic build-logic/src/main/kotlin/Convention.kt <<'BUILD'
+sourceSets.getByName("main").kotlin.directories += "x"
+BUILD
+expect_unsupported 1 "répertoire de sources personnalisé non supporté"
+
+new_build_case custom_build_logic_script build-logic/build.gradle.kts <<'BUILD'
+sourceSets.main.java.srcDir("x")
+BUILD
+expect_unsupported 1 "répertoire de sources personnalisé non supporté"
+
+new_build_case custom_root_script build.gradle.kts <<'BUILD'
+subprojects { sourceSets.main.java.srcDir("x") }
+BUILD
+expect_unsupported 1 "répertoire de sources personnalisé non supporté"
+
+custom_accesses=(
+  'java.srcDirs("x")'
+  'kotlin.srcDir("x")'
+  'kotlin.srcDirs("x")'
+  'java.directories.add("x")'
+  'kotlin.directories += "x"'
+  'java.setSrcDirs(listOf("x"))'
+  'getJava().srcDir("x")'
+  'getKotlin().getSrcDirs().add("x")'
+  'java { srcDirs("x") }'
+  'kotlin { directories.add("x") }'
+  'java.apply { srcDir("x") }'
+  'with(kotlin) { srcDirs("x") }'
+  'val extra = java; extra.srcDir("x")'
+  'val extra = kotlin; extra.directories.add("x")'
+)
+for index in "${!custom_accesses[@]}"; do
+  new_build_case "custom_access_$index" feature/example/build.gradle.kts <<<"${custom_accesses[$index]}"
+  expect_unsupported 1 "répertoire de sources personnalisé non supporté"
+done
+
+new_build_case custom_multiline feature/example/build.gradle.kts <<'BUILD'
+sourceSets["main"].java
+    .srcDir("x")
+BUILD
+expect_unsupported 2 "répertoire de sources personnalisé non supporté"
+
+new_build_case custom_comment_and_literal feature/example/build.gradle.kts <<'BUILD'
+// java.srcDir("x")
+/* kotlin.srcDirs("x") */
+/* /* nested */ java.directories.add("x") */
+val sample = "java.srcDir(\"x\")"
+val raw = """kotlin.directories += "x""""
+BUILD
+expect_list "ViewModels : p.fixture.Real"
+
+new_build_case assets_directories core/base/build.gradle.kts <<'BUILD'
+android {
+    sourceSets {
+        named("test") {
+            assets.directories.add("$projectDir/schemas")
+        }
+    }
+}
+BUILD
+expect_list "ViewModels : p.fixture.Real"
+
+for source_set in test testDebug androidTest androidTestProd testFixtures screenshotTest debug prodDebug; do
+  new_build_case "custom_ignored_$source_set" build-logic/src/main/kotlin/Convention.kt <<BUILD
+sourceSets.getByName("$source_set").kotlin.directories += "x"
+BUILD
+  expect_list "ViewModels : p.fixture.Real"
+done
+
+for source_set in main release prod devRelease unknown; do
+  new_build_case "custom_selected_$source_set" feature/example/build.gradle.kts <<BUILD
+sourceSets.getByName("$source_set").java.srcDir("x")
+BUILD
+  expect_unsupported 1 "répertoire de sources personnalisé non supporté"
+done
+
+new_build_case custom_dynamic_selector feature/example/build.gradle.kts <<'BUILD'
+val name = "test"
+sourceSets.getByName(name).java.srcDir("x")
+BUILD
+expect_unsupported 2 "répertoire de sources personnalisé non supporté"
+
+new_build_case custom_interpolated_selector feature/example/build.gradle.kts <<'BUILD'
+sourceSets.getByName("test${suffix}").kotlin.srcDirs("x")
+BUILD
+expect_unsupported 1 "répertoire de sources personnalisé non supporté"
+
+new_build_case custom_other_receiver feature/example/build.gradle.kts <<'BUILD'
+notSourceSets.getByName("test").kotlin.directories += "x"
+BUILD
+expect_unsupported 1 "répertoire de sources personnalisé non supporté"
+
+new_build_case custom_ignored_then_release feature/example/build.gradle.kts <<'BUILD'
+sourceSets.getByName("test").kotlin.directories += "test-helper"
+sourceSets.getByName("release").kotlin.directories += "hidden"
+BUILD
+expect_unsupported 2 "répertoire de sources personnalisé non supporté"
+
+new_build_case custom_groovy_comment feature/example/build.gradle <<'BUILD'
+/* Example delimiter: /* */
+sourceSets.main.java.srcDir('x')
+// End example: */
+BUILD
+expect_unsupported 2 "répertoire de sources personnalisé non supporté"
+
+new_build_case resources_directories feature/example/build.gradle.kts <<'BUILD'
+assets { srcDir("x") }
+resources.srcDirs("x")
+BUILD
+expect_list "ViewModels : p.fixture.Real"
+
+new_build_case unincluded_custom_dir not/included/build.gradle.kts <<'BUILD'
+java.srcDir("x")
+BUILD
+expect_list "ViewModels : p.fixture.Real"
 
 echo "OK: $case_count cas de régression Hilt"

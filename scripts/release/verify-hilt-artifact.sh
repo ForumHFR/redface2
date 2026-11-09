@@ -2,8 +2,14 @@
 # Garde Hilt avant publication (#1581), sans Gradle ni inspection de ses caches.
 # Projets : include(...) littéraux de settings.gradle.kts, hors commentaires.
 # Contributions : annotations Hilt simples sur des déclarations de premier niveau
-# dans src/main/**/*.kt et .java, hors commentaires et littéraux. Une occurrence
-# Hilt non appariée est une erreur, jamais une contribution devinée ou ignorée.
+# dans src/main/**/*.kt et .java, hors commentaires et littéraux. Les source sets
+# test*/androidTest*/testFixtures/screenshotTest, debug et *Debug sont ignorés.
+# Tout autre src/<set> contenant un token Hilt et tout ajout de sources Java/Kotlin
+# dans les build files inclus ou build-logic sont refusés (pas de calcul de variante).
+# Seule exception pour ces ajouts : sourceSets.getByName("<test/debug ignoré>")
+# avec un nom littéral et un accès java/kotlin direct, sans résoudre de variable.
+# Une occurrence Hilt non appariée est une erreur, jamais une contribution devinée
+# ou ignorée.
 # Chaque @HiltViewModel exige _<package en _>_<Classe>_HiltModules_KeyModule ;
 # chaque @HiltAndroidApp exige Hilt_<Classe>. Sans ViewModel, un contributeur
 # (@AndroidEntryPoint, @HiltAndroidApp ou @Module + @InstallIn sur une déclaration)
@@ -42,12 +48,18 @@ trap 'rm -rf -- "$work_dir"' EXIT
 
 # Lexer puis reconnaissance volontairement bornée, en awk POSIX (sans gensub,
 # captures de match, tableaux imbriqués, nextfile ou autre extension GNU).
-# Les littéraux restent opaques ; seul settings conserve leur contenu pour include.
+# Les littéraux restent opaques ; settings les conserve pour include, build pour
+# reconnaître exclusivement les noms littéraux des source sets test/debug ignorés.
 # Un fichier à la fois ; les numéros de ligne survivent au nettoyage.
 scan_code() {
   local mode="$1"
   shift
-  awk -v mode="$mode" '
+  local source_set=''
+  if [[ "$mode" == other_sources ]]; then
+    source_set="$1"
+    shift
+  fi
+  awk -v mode="$mode" -v source_set="$source_set" '
     function target(word) {
       return word ~ /^(HiltViewModel|AndroidEntryPoint|HiltAndroidApp|InstallIn)$/
     }
@@ -66,7 +78,7 @@ scan_code() {
     }
     function invalid(line, message) {
       error_at(line, message)
-      unpaired()
+      if (mode == "sources") unpaired()
       aborted = 1
       exit 1
     }
@@ -85,7 +97,8 @@ scan_code() {
       depth = 1
       while (pos <= source_length) {
         pair = substr(source, pos, 2)
-        if (pair == "/*") { depth++; pos += 2 }
+        # Seul Kotlin imbrique les commentaires ; Java ferme au premier */.
+        if (kotlin && pair == "/*") { depth++; pos += 2 }
         else if (pair == "*/") { pos += 2; if (!--depth) return }
         else { if (substr(source, pos, 1) == "\n") lex_line++; pos++ }
       }
@@ -157,6 +170,7 @@ scan_code() {
       apostrophe = sprintf("%c", 39)
       backtick = sprintf("%c", 96)
       java = source_file ~ /\.java$/
+      kotlin = source_file ~ /\.(kt|kts)$/
       # Java traite ces échappements avant même les commentaires/littéraux :
       # refuser cette syntaxe plutôt que masquer du code derrière un guillemet.
       if (java && match(source, /\\u/)) {
@@ -171,7 +185,7 @@ scan_code() {
         else if (pair == "//" || pair == "/*") skip_comment()
         else if (c == "\"" || c == apostrophe) {
           skip_literal()
-          emit(mode == "settings" ? substr(source, start, pos - start) : "<literal>", start_line)
+          emit(mode == "settings" || mode == "build" ? substr(source, start, pos - start) : "<literal>", start_line)
         } else if (c == backtick) {
           value = skip_identifier()
           if (target(value) || value == "Module") invalid(start_line, "identifiant Hilt échappé")
@@ -232,7 +246,7 @@ scan_code() {
           if (word == "import") imported[k] = 1
         }
         ignored[i] = 1
-        if (aliased && hilt_import) invalid(token_line[i], "alias d annotation Hilt")
+        if (mode == "sources" && aliased && hilt_import) invalid(token_line[i], "alias d annotation Hilt")
         if (word == "import") validate_import(i + 1, j)
         if (word == "package") {
           if (name == "" || want_name || package_name != "") invalid(token_line[i], "package non littéral")
@@ -323,16 +337,65 @@ scan_code() {
       if (pending) invalid(pending_line, "annotation sans déclaration")
       if (curly || parens || brackets) invalid(lex_line, "délimiteurs non terminés")
     }
+    function ignored_set_literal(value,    quote, name) {
+      quote = substr(value, 1, 1)
+      if ((quote != "\"" && quote != apostrophe) || substr(value, length(value), 1) != quote) return 0
+      name = substr(value, 2, length(value) - 2)
+      # Pas de concaténation, échappement, interpolation ou variable déduite.
+      return identifier(name) && (name ~ /^(test|androidTest)/ || name == "screenshotTest" || name == "debug" || name ~ /Debug$/)
+    }
+    function ignored_directory(receiver) {
+      # Reconnaissance locale de sourceSets.getByName("test").java/kotlin seulement.
+      # Les autres sélecteurs, blocs ou alias restent refusés faute de preuve.
+      return token[receiver - 1] == "." && token[receiver - 2] == ")" &&
+        ignored_set_literal(token[receiver - 3]) && token[receiver - 4] == "(" &&
+        token[receiver - 5] == "getByName" && token[receiver - 6] == "." && token[receiver - 7] == "sourceSets"
+    }
+    function custom_sources(    i, depth, word, receiver, receiver_index, language_scope, resource_scope) {
+      # Accès Kotlin/Groovy directs ou via getters, y compris répartis sur plusieurs
+      # lignes. Les blocs java { srcDirs(...) } / kotlin { directories += ... }
+      # sont aussi refusés ; assets/res/resources restent hors de ces récepteurs.
+      for (i = 1; i <= token_count; i++) {
+        word = token[i]
+        if (word == "{") {
+          language_scope[depth + 1] = language_scope[depth] || token[i - 1] ~ /^(java|kotlin)$/
+          resource_scope[depth + 1] = resource_scope[depth] || token[i - 1] ~ /^(assets|res|resources)$/
+          depth++
+        } else if (word == "}") {
+          if (depth) depth--
+        } else if (word ~ /^(srcDir|srcDirs|setSrcDirs|getSrcDirs|directories|getDirectories)$/) {
+          receiver = ""
+          receiver_index = 0
+          if (token[i - 1] == ".") {
+            receiver_index = i - 2
+            if (token[receiver_index] == ")" && token[i - 3] == "(") receiver_index = i - 4
+            receiver = token[receiver_index]
+          }
+          if (receiver ~ /^(assets|res|resources|getAssets|getRes|getResources)$/) continue
+          if (receiver ~ /^(java|kotlin|getJava|getKotlin)$/ && ignored_directory(receiver_index)) continue
+          # Un récepteur inconnu (alias, configure/apply, etc.) ne prouve pas une
+          # source de test ni une ressource : refuser au lieu de deviner son type.
+          if (receiver != "" || (!resource_scope[depth] &&
+              (language_scope[depth] || word ~ /^(srcDir|srcDirs|setSrcDirs|getSrcDirs)$/))) {
+            invalid(token_line[i], "répertoire de sources personnalisé non supporté")
+          }
+        }
+      }
+    }
     function finish_file(    i, key) {
       if (source_file == "") return
       lex()
       if (mode == "settings") settings_projects()
+      else if (mode == "build") custom_sources()
       else {
         directives()
         for (i = 1; i <= token_count; i++) {
+          if (mode == "other_sources" && !imported[i] && target(token[i])) {
+            invalid(token_line[i], "source set " source_set " hors périmètre de la garde")
+          }
           if (!imported[i] && target(token[i])) occurrences[token[i]]++
         }
-        declarations()
+        if (mode == "sources") declarations()
         # Comptage indépendant de la reconnaissance : un token avalé dans une
         # annotation groupée/autre argument, ou un usage indirect, fait échouer.
         if (unpaired()) { aborted = 1; exit 1 }
@@ -367,13 +430,46 @@ scan_code() {
 
 scan_code settings "$repo_root/settings.gradle.kts" | sort -u >"$work_dir/projects"
 
+# Les chemins personnalisés visibles dans les scripts et conventions invalident
+# le parcours src/<set>. Ne pas descendre dans les sorties de build-logic.
+build_files=()
+while IFS= read -r module; do
+  for build_file in "$repo_root/${module//:/\/}/build.gradle"{,.kts}; do
+    [[ ! -f "$build_file" ]] || build_files+=("$build_file")
+  done
+done <"$work_dir/projects"
+for build_file in "$repo_root/build.gradle"{,.kts} "$repo_root/build-logic/build.gradle"{,.kts}; do
+  [[ ! -f "$build_file" ]] || build_files+=("$build_file")
+done
+if [[ -d "$repo_root/build-logic/src" ]]; then
+  find "$repo_root/build-logic/src" -type f \( -name '*.kt' -o -name '*.kts' -o -name '*.java' -o -name '*.gradle' -o -name '*.groovy' \) -print0 | sort -z >"$work_dir/build-logic-files"
+  while IFS= read -r -d '' build_file; do build_files+=("$build_file"); done <"$work_dir/build-logic-files"
+fi
+if [[ "${#build_files[@]}" -gt 0 ]]; then
+  scan_code build "${build_files[@]}"
+fi
+
 modules=()
 check_modules=()
 check_names=()
 markers=()
 application_found=0
 while IFS= read -r module; do
-  source_dir="$repo_root/${module//:/\/}/src/main"
+  module_dir="$repo_root/${module//:/\/}"
+  [[ -d "$module_dir/src" ]] || continue
+  find "$module_dir/src" -mindepth 1 -maxdepth 1 -type d -print0 | sort -z >"$work_dir/source-sets"
+  while IFS= read -r -d '' source_dir; do
+    source_set="${source_dir##*/}"
+    case "$source_set" in
+      main|test*|androidTest*|screenshotTest|debug|*Debug) continue ;;
+    esac
+    find "$source_dir" -type f \( -name '*.kt' -o -name '*.kts' -o -name '*.java' \) -print0 | sort -z >"$work_dir/other-source-files"
+    mapfile -d '' -t source_files <"$work_dir/other-source-files"
+    if [[ "${#source_files[@]}" -gt 0 ]]; then
+      scan_code other_sources "$source_set" "${source_files[@]}"
+    fi
+  done <"$work_dir/source-sets"
+  source_dir="$module_dir/src/main"
   [[ -d "$source_dir" ]] || continue
   # Matérialiser les listes : toute erreur find/sort/awk doit arrêter la garde.
   find "$source_dir" -type f \( -name '*.kt' -o -name '*.java' \) -print0 | sort -z >"$work_dir/source-files"
