@@ -356,39 +356,46 @@ class EditorActionBarLayoutTest {
     }
 
     @Test
-    fun `ED82 ED85 back skips masked format and its event then acknowledgement reveals format`() {
+    fun `ED82 ED85 back skips every event masked mode and acknowledgement restores its Back level`() {
         lateinit var back: OnBackPressedDispatcher
         var nextLevelBacks = 0
         val event = host.finished()
-        host.bar.value = EditorBarState(EditorBarMode.Format)
-        host.event.value = event
         compose.setContent {
             back = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
             // Registered before the bar: a masked tool mode must let the next Back level run.
             BackHandler { nextLevelBacks++ }
             host.Content()
         }
-        compose.onNodeWithContentDescription("Gras").assertDoesNotExist()
-        compose.runOnIdle { back.onBackPressed() }
-        compose.runOnIdle {
-            assertEquals(EditorBarMode.Format, host.bar.value.mode)
-            assertSame(event, host.event.value)
-            assertEquals(1, nextLevelBacks)
-            assertTrue(host.eventActions.isEmpty())
-            assertTrue(host.calls.isEmpty())
-        }
-        compose.onNodeWithContentDescription("Gras").assertDoesNotExist()
-        compose.onNode(hasClickAction() and hasContentDescription("3 images insérées, Masquer")).performClick()
-        compose.onNodeWithContentDescription("Gras").assertIsDisplayed()
-        compose.runOnIdle {
-            assertEquals(EditorBarMode.Format, host.bar.value.mode)
-            assertEquals(listOf(event.key to EditorEventAction.Dismiss), host.eventActions)
-            assertTrue(host.calls.isEmpty())
-        }
-        compose.runOnIdle { back.onBackPressed() }
-        compose.runOnIdle {
-            assertEquals(EditorBarMode.Normal, host.bar.value.mode)
-            assertEquals(1, nextLevelBacks)
+        val modes = listOf(EditorBarMode.Format to "Gras", EditorBarMode.Color to "Rouge",
+            EditorBarMode.Image to "Uploader une image")
+        modes.forEach { (mode, label) ->
+            compose.runOnIdle {
+                host.bar.value = EditorBarState(mode); host.event.value = event
+                host.eventActions.clear(); nextLevelBacks = 0
+            }
+            compose.onNodeWithContentDescription(label).assertDoesNotExist()
+            compose.runOnIdle { back.onBackPressed() }
+            compose.runOnIdle {
+                assertEquals(mode, host.bar.value.mode)
+                assertSame(event, host.event.value)
+                assertEquals(1, nextLevelBacks)
+                assertTrue(host.eventActions.isEmpty())
+                assertTrue(host.calls.isEmpty())
+            }
+            compose.onNodeWithContentDescription(label).assertDoesNotExist()
+            compose.onNode(hasClickAction() and hasContentDescription("3 images insérées, Masquer")).performClick()
+            compose.onNodeWithContentDescription(label).assertIsDisplayed()
+            compose.runOnIdle {
+                assertEquals(mode, host.bar.value.mode)
+                assertEquals(listOf(event.key to EditorEventAction.Dismiss), host.eventActions)
+                assertTrue(host.calls.isEmpty())
+            }
+            compose.runOnIdle { back.onBackPressed() }
+            compose.runOnIdle {
+                val parent = if (mode == EditorBarMode.Color) EditorBarMode.Format else EditorBarMode.Normal
+                assertEquals(parent, host.bar.value.mode)
+                assertEquals(1, nextLevelBacks)
+            }
         }
     }
 }
