@@ -180,6 +180,7 @@ private fun PrivateMessageReplyChrome(
         // The route's manager entry owns initial focus, including while its owner form is loading.
         // Keep this independent of the one-shot latch, which changes as soon as the manager opens.
         inputTransformation = transformation, autoFocus = autoFocusBody, surfaceFocus = host.focusMemory,
+        bodyFocusRestoreAllowed = host.surface == null && host.detail == null && !host.state.scaffold.previewVisible,
         bodyCaretRevealResetKey = bodyCaretRevealResetKey,
         onSystemBack = back,
         fieldArea = { field -> PrivateMessageReplyChromePreview(host, body, focus, field) },
