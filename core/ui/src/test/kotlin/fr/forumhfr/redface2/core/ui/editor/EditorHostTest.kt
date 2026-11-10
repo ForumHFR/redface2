@@ -291,6 +291,49 @@ class EditorHostTest {
         assertEquals(listOf<Any?>("acknowledge"), calls)
     }
 
+    @Test fun boundUncertaintyWithoutDetailAcknowledgesOnceFromBar() {
+        val host = host()
+        val attempt = EditorDraftStore.AttemptToken("alice", session.key, "attempt", 1)
+        state = state.copy(submission = EditorSubmissionState.Uncertain(attempt))
+        // The catalogue always supplies a detail; construct the host's Dismiss route explicitly.
+        val event = error(EditorErrors.uncertain.copy(detail = null, action = EditorErrorAction.Dismiss))
+        uncertainty = event.key to attempt
+        val displayed = host.scaffoldChrome().event!!
+        assertEquals(event.key, displayed.key)
+        assertNull(displayed.detail)
+        assertEquals(EditorEventAction.Dismiss, displayed.action)
+        host.barActions.onEvent(displayed.key, displayed.action!!)
+        assertEquals(listOf("acknowledge"), calls)
+        assertNull(events.state.visibleEvent)
+        assertNull(host.detail)
+        host.barActions.onEvent(displayed.key, displayed.action!!)
+        assertEquals(listOf("acknowledge"), calls)
+    }
+
+    @Test fun unboundOrReplacedUncertaintyWithoutDetailDoesNotAcknowledge() {
+        val host = host()
+        val attempt = EditorDraftStore.AttemptToken("alice", session.key, "attempt", 1)
+        val cases = listOf(
+            null to EditorSubmissionState.Uncertain(attempt),
+            attempt to EditorSubmissionState.Uncertain(attempt.copy(id = "replacement")),
+        )
+        cases.forEachIndexed { index, (bound, current) ->
+            state = state.copy(submission = current)
+            val event = error(
+                EditorErrors.uncertain.copy(detail = null, action = EditorErrorAction.Dismiss), index + 1L,
+            )
+            uncertainty = bound?.let { event.key to it }
+            val displayed = host.scaffoldChrome().event!!
+            assertEquals(event.key, displayed.key)
+            assertNull(displayed.detail)
+            assertEquals(EditorEventAction.Dismiss, displayed.action)
+            host.barActions.onEvent(displayed.key, displayed.action!!)
+            assertNull(events.state.visibleEvent)
+            assertNull(host.detail)
+            assertTrue("attempt guard $index", calls.isEmpty())
+        }
+    }
+
     @Test fun `ED45 without an acknowledgement port Masquer stays visual`() {
         val host = host(onAcknowledgeUncertain = null)
         val attempt = EditorDraftStore.AttemptToken("alice", session.key, "attempt", 1)
