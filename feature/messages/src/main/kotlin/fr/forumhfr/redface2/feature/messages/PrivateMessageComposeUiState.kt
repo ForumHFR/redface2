@@ -5,15 +5,16 @@ import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.ui.editor.EditorError
+import fr.forumhfr.redface2.core.ui.editor.EditorRecipientState
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 
 /**
  * MVI state of the new-conversation composer (#301 follow-up). Mirrors
- * [PrivateMessageReplyUiState] (the parsed `ReplyForm` stays private to the ViewModel, no private
- * metadata in snapshots) plus the two user-typed routing fields HFR's standalone composer exposes :
+ * [PrivateMessageReplyUiState]: the parsed `ReplyForm` stays private to the ViewModel; UI text lives
+ * only in memory. The two user-typed routing fields HFR's standalone composer exposes are:
  *
  * - [recipients] — HFR's `dest` field. One pseudo, or several separated by commas (a MultiMP),
- *   per HFR's own field help. Plain `String` : no selection/toolbar interplay to preserve.
+ *   per HFR's own field help. Legacy display adapter; [recipientState] preserves chips and buffer.
  * - [subject] — HFR's `sujet` field, capped at [SUBJECT_MAX_LENGTH] like the web composer's
  *   `maxlength=70` (the ViewModel truncates, so the cap holds even through paste).
  *
@@ -22,10 +23,17 @@ import fr.forumhfr.redface2.core.ui.editor.UploadProgress
  * applies identically since the success response was never exercised live.
  */
 data class PrivateMessageComposeUiState(
+    val isInitializing: Boolean = false,
+    /** A successful GET, resumed checkpoint or explicit body edit proves the body is known. */
+    val bodyKnown: Boolean = false,
     val isLoadingForm: Boolean = true,
     val formAvailable: Boolean = false,
     val formError: Boolean = false,
     val recipients: String = "",
+    /** Private representation; recipients adapts the legacy chrome until C4. */
+    val recipientState: EditorRecipientState = EditorRecipientState(
+        recipients.split(',').filter(String::isNotBlank),
+    ),
     /** Exact untouched recipient prefill supplied by routing/HFR, distinct from a user edit. */
     val recipientsHydratedContent: String? = null,
     val subject: String = "",
@@ -43,7 +51,8 @@ data class PrivateMessageComposeUiState(
     /**
      * #405 — body of a previously-cached new-conversation draft, surfaced on init when a non-empty
      * draft was found. [restorableSubject] / [restorableRecipients] carry the cached routing fields.
-     * « Restaurer » pre-fills the composer ; « Ignorer » clears the cached content. Never silently lost.
+     * Matching ED-81 checkpoints resume silently; other rows remain explicit restore offers.
+     * [restorableRecipients] is the private encoded checkpoint (or a historical CSV), never POST data.
      */
     val restorableDraft: String? = null,
     val restorableSubject: String? = null,
@@ -64,8 +73,9 @@ data class PrivateMessageComposeUiState(
     val armToken: ArmToken? get() = (submission as? EditorSubmissionState.Armed)?.token
 
     val canSubmit: Boolean
-        get() = formAvailable && !isLoadingForm && !isSubmitting && !isUploading && !submission.blocksBodyMutation &&
-            recipients.isNotBlank() && subject.isNotBlank() && bodyText.isNotBlank()
+        get() = !isInitializing && formAvailable && !isLoadingForm && !isSubmitting && !isUploading &&
+            !submission.blocksBodyMutation && recipientState.buffer.isBlank() &&
+            recipientState.chips.isNotEmpty() && subject.isNotBlank() && bodyText.isNotBlank()
 
     companion object {
         /** HFR's `maxlength=70` on the composer's `sujet` input (fixture `mp_compose_form.html`). */

@@ -16,14 +16,14 @@ data class EditorRecipientState(val chips: List<String> = emptyList(), val buffe
         // NUL cannot occur in an HFR pseudo, so legacy CSV cannot be mistaken for an envelope.
         private const val PREFIX = "\u0000redface-recipients-v1:"
 
-        /** Existing CSV rows become chips with an empty buffer. Invalid envelopes fail closed. */
+        /** Legacy CSV keeps its final unterminated segment in the buffer (D4). Invalid envelopes fail closed. */
         @Throws(IOException::class)
         fun decode(stored: String?): EditorRecipientState {
             val value = stored.orEmpty()
             if (!value.startsWith(PREFIX)) {
                 if (value.startsWith('\u0000')) invalidCheckpoint()
-                // C1 will settle D4's legacy CSV trailing-segment/buffer policy; preserve it for S3.
-                return EditorRecipientState(value.split(',').map(String::trim).filter(String::isNotBlank))
+                val segments = value.split(',').map(String::trim)
+                return EditorRecipientState(segments.dropLast(1).filter(String::isNotBlank), segments.last())
             }
             val fields = mutableListOf<String>()
             var offset = PREFIX.length

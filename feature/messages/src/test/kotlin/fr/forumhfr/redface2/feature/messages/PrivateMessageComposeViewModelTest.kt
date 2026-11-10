@@ -46,6 +46,7 @@ import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorSurface
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.EditorRecipientState
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import io.mockk.coEvery
@@ -826,7 +827,7 @@ class PrivateMessageComposeViewModelTest {
         val saved = draftStore.saved[key]
         assertEquals("Bonjour.", saved?.body)
         assertEquals("Salut", saved?.subject)
-        assertEquals("bozoleclown", saved?.recipients)
+        assertEquals(EditorRecipientState(listOf("bozoleclown")), EditorRecipientState.decode(saved?.recipients))
         assertTrue("MP drafts must be flagged private for the logout purge", saved?.isPrivate == true)
     }
 
@@ -918,7 +919,7 @@ class PrivateMessageComposeViewModelTest {
             EditorDraftStore.Draft(
                 body = "rescued body",
                 subject = "rescued subject",
-                recipients = "alice",
+                recipients = EditorRecipientState(listOf("alice")).encode(),
                 isPrivate = true,
             ),
         )
@@ -937,7 +938,7 @@ class PrivateMessageComposeViewModelTest {
     }
 
     @Test
-    fun `composer recreation reoffers until decision and typing still autosaves`() = runTest {
+    fun `composer recreation reoffers until decision then resumes its matching autosave`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         val key = EditorDraftKey.mpCompose()
         val savedStateHandle = SavedStateHandle()
@@ -949,7 +950,7 @@ class PrivateMessageComposeViewModelTest {
         val first = viewModel(repository, savedStateHandle = savedStateHandle)
         advanceUntilIdle()
         assertEquals("rescued MP", first.state.value.restorableDraft)
-        assertNull(savedStateHandle.get<String>("draft_restore_offer_fingerprint"))
+        assertNull(savedStateHandle.get<String>("messageComposeEditor.ignoredOfferFingerprint"))
 
         val recreated = viewModel(repository, savedStateHandle = savedStateHandle)
         advanceUntilIdle()
@@ -962,12 +963,13 @@ class PrivateMessageComposeViewModelTest {
 
         recreated.onDraftRestoreRequested()
         advanceUntilIdle()
-        assertNull(savedStateHandle.get<String>("draft_restore_offer_fingerprint"))
+        assertNull(savedStateHandle.get<String>("messageComposeEditor.ignoredOfferFingerprint"))
         assertEquals("new live MP\n\nrescued MP", draftStore.saved[key]?.body)
 
         val afterRestore = viewModel(repository, savedStateHandle = savedStateHandle)
         advanceUntilIdle()
-        assertEquals("new live MP\n\nrescued MP", afterRestore.state.value.restorableDraft)
+        assertNull(afterRestore.state.value.restorableDraft)
+        assertEquals("new live MP\n\nrescued MP", afterRestore.bodyFieldState.text.toString())
     }
 
     @Test
@@ -1079,7 +1081,7 @@ class PrivateMessageComposeViewModelTest {
         viewModel.onDraftDiscardRequested()
         advanceUntilIdle()
 
-        assertTrue(savedStateHandle.get<String>("draft_restore_offer_fingerprint") != null)
+        assertTrue(savedStateHandle.get<String>("messageComposeEditor.ignoredOfferFingerprint") != null)
         val recreated = viewModel(repository, savedStateHandle = savedStateHandle)
         advanceUntilIdle()
         assertNull(recreated.state.value.restorableDraft)
@@ -1125,7 +1127,7 @@ class PrivateMessageComposeViewModelTest {
         val saved = draftStore.saved[EditorDraftKey.mpCompose()]
         assertEquals("the tail of the draft must reach the row before the pop", "dernier mot", saved?.body)
         assertEquals("Salut", saved?.subject)
-        assertEquals("bozoleclown", saved?.recipients)
+        assertEquals(EditorRecipientState(listOf("bozoleclown")), EditorRecipientState.decode(saved?.recipients))
         assertTrue("MP drafts must stay flagged private", saved?.isPrivate == true)
     }
 
@@ -1337,7 +1339,8 @@ class PrivateMessageComposeViewModelTest {
         val saved = draftStore.saved.getValue(EditorDraftKey.mpCompose())
         assertEquals("frozen body", saved.body)
         assertEquals(" title ", saved.subject)
-        assertEquals(" alice, bob ", saved.recipients)
+        assertEquals(" alice, bob ", EditorRecipientState.decode(saved.recipients).csv)
+        assertEquals("", EditorRecipientState.decode(saved.recipients).buffer)
         assertTrue(saved.isPrivate)
         coVerify(exactly = 1) {
             repository.submitNewMessage(any(), "alice, bob", "title", "frozen body", match {
@@ -1375,7 +1378,8 @@ class PrivateMessageComposeViewModelTest {
         val formGate = CompletableDeferred<ReplyForm>()
         coEvery { repository.fetchComposeForm(any()) } coAnswers { formGate.await() }
         draftStore.preload(EditorDraftKey.mpCompose(), EditorDraftStore.Draft(
-            body = "rescued body", subject = "subject", recipients = "alice", isPrivate = true,
+            body = "rescued body", subject = "subject",
+            recipients = EditorRecipientState(listOf("alice")).encode(), isPrivate = true,
         ))
         val vm = viewModel(repository)
         assertEquals("rescued body", vm.state.value.restorableDraft)

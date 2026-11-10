@@ -19,9 +19,12 @@ class EditorRecipientStateTest {
             EditorRecipientState.decode(EditorRecipientState(buffer = "not yet committed").encode()))
     }
 
-    @Test fun `legacy CSV restores chips and an empty buffer without changing internal spaces`() {
+    @Test fun `legacy CSV commits only comma terminated segments and preserves the final buffer`() {
         assertEquals(EditorRecipientState(listOf("Alice", "Bob with spaces")),
             EditorRecipientState.decode(" Alice, Bob with spaces, "))
+        assertEquals(EditorRecipientState(listOf("alice"), "bo"), EditorRecipientState.decode("alice, bo"))
+        assertEquals(EditorRecipientState(listOf("alice", "bo")), EditorRecipientState.decode("alice, bo,"))
+        assertEquals(EditorRecipientState(buffer = "alice"), EditorRecipientState.decode("alice"))
         assertEquals(EditorRecipientState(), EditorRecipientState.decode(null))
         assertEquals(EditorRecipientState(), EditorRecipientState.decode(""))
     }

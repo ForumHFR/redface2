@@ -3,9 +3,19 @@ package fr.forumhfr.redface2.feature.messages
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.os.Bundle
+import android.os.Parcel
+import android.os.Parcelable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
+import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -15,6 +25,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
@@ -32,6 +43,7 @@ import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
+import fr.forumhfr.redface2.core.ui.editor.EditorRecipientState
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -64,6 +76,8 @@ class PrivateMessageComposeInputTest {
     val compose = createComposeRule()
 
     private lateinit var vm: PrivateMessageComposeViewModel
+    private val savedStateHandle = SavedStateHandle()
+    private lateinit var registry: SaveableStateRegistry
     private val store = VersionedEditorDraftStore()
     private val uploads = FakeUploadRepository()
     private val repository = mockk<PrivateMessageWriteRepository>()
@@ -171,6 +185,47 @@ class PrivateMessageComposeInputTest {
         }
     }
 
+    @Test
+    @OptIn(ExperimentalFoundationApi::class)
+    fun bodyHeadersAndUndoStayOutsideTheActualComposeSavedState() {
+        setFieldContent(confirmBeforePosting = false, fullEditor = true)
+        val initialBytes = compose.runOnIdle { savedStateSize() }
+        val body = "private body\n".repeat(1_000)
+        val previous = "previous private revision\n".repeat(1_000)
+        val fragments = listOf("private body", "previous private revision", "private subject", "alice", "bob", "tail")
+        compose.runOnIdle {
+            vm.onSubjectChanged("private subject")
+            vm.onRecipientStateChanged(EditorRecipientState(listOf("alice", "bob"), "tail"))
+            vm.bodyFieldState.edit { replace(0, length, previous) }
+            vm.bodyFieldState.edit { replace(0, length, body) }
+            assertTrue(vm.bodyFieldState.undoState.canUndo)
+        }
+        compose.waitForIdle()
+        compose.runOnIdle {
+            vm.onStopped()
+            val serialized = registry.performSave().toString()
+            fragments.forEach { assertFalse(serialized.contains(it)) }
+            assertEquals(privateMessageComposeCheckpointKeys, savedStateHandle.keys())
+            assertPrivateMessageComposeSavedState(savedStateHandle, fragments)
+            assertTrue(savedStateSize() < initialBytes + 2_048)
+            vm.bodyFieldState.undoState.undo()
+            assertEquals(previous, vm.bodyFieldState.text.toString())
+        }
+    }
+
+    private fun savedStateSize(): Int {
+        val bundle = Bundle()
+        registry.performSave().forEach { (key, values) ->
+            @Suppress("UNCHECKED_CAST")
+            bundle.putParcelableArrayList(key, ArrayList(values) as ArrayList<Parcelable?>)
+        }
+        val parcel = Parcel.obtain()
+        return try {
+            parcel.writeBundle(bundle)
+            parcel.dataSize()
+        } finally { parcel.recycle() }
+    }
+
     private fun assertInputRejected() {
         val selection = compose.runOnIdle { vm.bodyFieldState.selection }
         field().performTextInput(" rejected typing")
@@ -189,7 +244,7 @@ class PrivateMessageComposeInputTest {
 
     private fun field() = compose.onNode(hasSetTextAction())
 
-    private fun setFieldContent(confirmBeforePosting: Boolean) {
+    private fun setFieldContent(confirmBeforePosting: Boolean, fullEditor: Boolean = false) {
         val clipboard = RuntimeEnvironment.getApplication().getSystemService(Context.CLIPBOARD_SERVICE)
             as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("test", " pasted"))
@@ -220,24 +275,43 @@ class PrivateMessageComposeInputTest {
                 smileyRepository = mockk(relaxed = true),
                 hfrFavoriteSmileyRepository = FakeHfrFavoriteSmileyRepository(),
                 smileyLocalCollections = FakeSmileyLocalCollections(),
+                savedStateHandle = savedStateHandle,
             )
             vm.onSubjectChanged("title")
         }
         compose.setContent {
-            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                Box(Modifier.size(320.dp, 240.dp)) {
-                    // Intentionally never collect screen state: the transformation must protect
-                    // the field even while the previous editable composition is still displayed.
-                    BbcodeTextField(
-                        state = vm.bodyFieldState,
-                        inputTransformation = vm.bodyInputTransformation,
-                        label = "Message",
-                        readOnly = false,
-                    )
+            val hostRegistry = requireNotNull(LocalSaveableStateRegistry.current)
+            registry = remember { SaveableStateRegistry(null, hostRegistry::canBeSaved) }
+            CompositionLocalProvider(LocalSaveableStateRegistry provides registry) {
+                RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                    if (fullEditor) ComposerBody() else Box(Modifier.size(320.dp, 240.dp)) {
+                        // Keep the old editable composition: synchronous guards must reject blocked input.
+                        BbcodeTextField(
+                            state = vm.bodyFieldState,
+                            inputTransformation = vm.bodyInputTransformation,
+                            label = "Message",
+                            readOnly = false,
+                        )
+                    }
                 }
             }
         }
         compose.waitUntil { vm.state.value.formAvailable }
-        field().requestFocus()
+        if (!fullEditor) field().requestFocus()
     }
+
+    @Composable
+    private fun ComposerBody() {
+        val state by vm.state.collectAsState()
+        ComposeEditorBody(
+            state = state, bodyFieldState = vm.bodyFieldState,
+            bodyInputTransformation = vm.bodyInputTransformation, bodyScrollState = vm.bodyScrollState,
+            onRecipientsChanged = vm::onRecipientsChanged, onSubjectChanged = vm::onSubjectChanged,
+            onToolbarAction = vm::onToolbarAction, onTogglePreview = vm::onTogglePreview,
+            onErrorDismissed = vm::onErrorDismissed, onDraftRestore = vm::onDraftRestoreRequested,
+            onDraftDiscard = vm::onDraftDiscardRequested, onImagePickerEvent = vm::onImagePickerEvent,
+            onUploadErrorDismissed = vm::onUploadErrorDismissed,
+        )
+    }
+
 }

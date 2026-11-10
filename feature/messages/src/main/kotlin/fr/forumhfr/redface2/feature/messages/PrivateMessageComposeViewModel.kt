@@ -1,10 +1,9 @@
 package fr.forumhfr.redface2.feature.messages
 
-import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.snapshotFlow
-import androidx.compose.ui.text.TextRange
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -52,6 +51,8 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorSurface
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.EditorRecipientState
+import fr.forumhfr.redface2.core.ui.editor.EditorSessionField
 import fr.forumhfr.redface2.core.ui.editor.MAX_IMAGES_PER_UPLOAD
 import fr.forumhfr.redface2.core.ui.editor.SmileyFavoriteMutations
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
@@ -108,21 +109,23 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     smileyRepository: SmileyRepository,
     hfrFavoriteSmileyRepository: HfrFavoriteSmileyRepository,
     smileyLocalCollections: SmileyLocalCollections,
-    private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
+    savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
 
     /** Body and IME state belong to this ViewModel, never to a Bundle saver. */
-    val bodyFieldState = TextFieldState()
-    private var previousBody = bodyFieldState.text.toString()
-
-    private val initialRecipients = initialRecipient.orEmpty().trim()
-    private val _state = MutableStateFlow(
-        PrivateMessageComposeUiState(
-            recipients = initialRecipients,
-            recipientsHydratedContent = initialRecipients.takeIf { it.isNotBlank() },
-        ),
-    )
+    val bodyFieldState: TextFieldState get() = draftSession.bodyFieldState
+    val bodyScrollState: ScrollState get() = draftSession.bodyScrollState
+    private val _state = MutableStateFlow(PrivateMessageComposeUiState(isInitializing = true))
     val state: StateFlow<PrivateMessageComposeUiState> = _state.asStateFlow()
+    internal val editorEvents = PrivateMessageComposeEvents()
+
+    /** Deliver transitions synchronously, including identical refusals before recomposition. */
+    private fun updateState(transform: (PrivateMessageComposeUiState) -> PrivateMessageComposeUiState) {
+        val previous = _state.value
+        _state.update(transform)
+        editorEvents.open(submission.session)
+        editorEvents.observe(previous, _state.value)
+    }
 
     private val _effects: Channel<PrivateMessageComposeEffect> = Channel(capacity = Channel.BUFFERED)
     val effects: Flow<PrivateMessageComposeEffect> = _effects.receiveAsFlow()
@@ -171,7 +174,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         drafts = EditorDraftSession(draftStore, draftKey),
         callbacks = EditorSubmissionCallbacks<PrivateMessageComposeEffect, EditorError>(
             state = { value ->
-                _state.update {
+                updateState {
                     it.copy(
                         submission = value,
                         isSubmitting = value is EditorSubmissionState.PersistingAttempt ||
@@ -180,8 +183,10 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                     )
                 }
             },
-            error = { value -> _state.update { it.copy(submitError = value) } },
+            error = { value -> updateState { it.copy(submitError = value) } },
             success = { value -> _effects.trySend(value) },
+            clearError = { error -> updateState { it.copy(submitError = it.submitError.takeUnless { it == error }) } },
+            durableWriteSucceeded = { editorEvents.durableWriteSucceeded() },
         ),
         errors = EditorSubmissionErrors(
             uncertain = EditorErrors.uncertain(EditorErrorSurface.MessageCompose),
@@ -194,12 +199,18 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         ),
     )
 
+    private val draftSession = PrivateMessageComposeDraftSession(
+        saved = savedStateHandle, submission = submission, scope = viewModelScope, draftKey = draftKey,
+        readState = { _state.value }, updateState = ::updateState,
+    )
+
     /**
      * #459 — lowercased pseudo of the authenticated session, or null when anonymous. The upload
      * providers require an HFR session for the trace ; an anonymous pick is silently ignored.
      * Mirrors `PostEditorViewModel.activeUserId`.
      */
     private var activeUserId: String? = null
+    private var authObserved = false
 
     /** #459 — in-flight image upload job ; one at a time, cancelled on [onCleared]. */
     private var uploadJob: Job? = null
@@ -214,11 +225,15 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     /** Read the live controller on every input, including the frame before readOnly is recomposed. */
     val bodyInputTransformation = InputTransformation {
         // Only synchronous submission metadata changes here; no body edit or intent is dispatched.
+        val changesBody = asCharSequence().toString() != bodyFieldState.text.toString()
         if (!acceptMutation(blockDuringUpload = true)) revertAllChanges()
+        else if (changesBody) draftSession.decide(EditorSessionField.Body)
     }
 
     private fun acceptMutation(blockDuringUpload: Boolean = false): Boolean {
-        if (submission.blocksMutation || (blockDuringUpload && _state.value.isUploading)) return false
+        val resuming = _state.value.isInitializing && draftSession.isRecreation
+        val uploadBlocked = blockDuringUpload && _state.value.isUploading
+        if (resuming || submission.blocksMutation || uploadBlocked) return false
         return submission.tryDisarm()
     }
 
@@ -233,7 +248,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         }
         viewModelScope.launch {
             userPreferencesRepository.observeImagePickerMode().collect { mode ->
-                _state.update { it.copy(imagePickerMode = mode) }
+                updateState { it.copy(imagePickerMode = mode) }
             }
         }
         viewModelScope.launch {
@@ -245,16 +260,23 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                 // #459 — account switched / logged out mid-session: cancel any in-flight upload
                 // and pending autosave so this session's image URL / PRIVATE draft is never
                 // attributed to the new account (same Codex-reviewed rule as PostEditorViewModel).
-                if (activeUserId != null && newUserId != activeUserId) {
+                if (authObserved && newUserId != activeUserId) {
                     uploadJob?.cancel()
                     submission.accountChanged()
-                    _state.update { it.copy(isUploading = false, uploadProgress = null) }
+                    formJob?.cancel()
+                    loadedForm = null
+                    draftSession.invalidate()
+                    updateState {
+                        it.copy(formAvailable = false, isUploading = false, uploadProgress = null,
+                            restorableDraft = null, restorableSubject = null, restorableRecipients = null)
+                    }
                 }
+                authObserved = true
                 activeUserId = newUserId
             }
         }
         viewModelScope.launch {
-            restoreDraftIfAny()
+            draftSession.restore(initialRecipient)
             loadForm()
         }
     }
@@ -262,11 +284,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     private fun observeBody() {
         viewModelScope.launch {
             snapshotFlow { bodyFieldState.text.toString() }.collect { body ->
-                _state.update { it.copy(bodyText = body) }
-                if (body != previousBody) {
-                    previousBody = body
-                    scheduleAutosave()
-                }
+                draftSession.onBodyChanged(body)
             }
         }
     }
@@ -286,7 +304,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                 .collect { parsed ->
                     if (parsed != null && _state.value.isPreviewVisible &&
                         bodyFieldState.text.toString() == parsed.first) {
-                        _state.update { it.copy(preview = parsed.second) }
+                        updateState { it.copy(preview = parsed.second) }
                     }
                 }
         }
@@ -294,80 +312,10 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
 
     fun retryFormLoad() = loadForm()
 
-    /**
-     * #405/#1415 — offer each cached body/subject/recipient version until the user handles it. A
-     * routing or server-side `dest` prefill remains eligible while untouched; a real edit suppresses
-     * the initial offer. The fingerprint is recorded only after Ignore, so a restored row remains
-     * recoverable if process death loses the live editor state before autosave.
-     * ED-81/170: durable status wins over every offer and server prefill.
-     */
-    private suspend fun restoreDraftIfAny() {
-        val entry = submission.restore(draftKey) ?: return
-        if (submission.blocksMutation || (entry.attempt != null && !acceptMutation())) return
-        val draft = entry.draft
-        if (entry.attempt != null) {
-            replaceBody(draft.body)
-            previousBody = draft.body
-            // Automatic opening establishes the baseline; explicit restore below stays undoable.
-            resetUndoBaseline()
-            _state.update {
-                it.copy(
-                    subject = draft.subject.orEmpty(), recipients = draft.recipients.orEmpty(),
-                    restorableSubject = null, restorableRecipients = null,
-                    restorableDraft = null, submitError = EditorErrors.uncertain(EditorErrorSurface.MessageCompose),
-                )
-            }
-        } else {
-            val hasContent = draft.body.isNotBlank() ||
-                !draft.subject.isNullOrBlank() || !draft.recipients.isNullOrBlank()
-            val fingerprint = draft.restoreOfferFingerprint()
-            val ignored = savedStateHandle.get<String>(DRAFT_RESTORE_OFFER_FINGERPRINT_KEY) == fingerprint
-            val liveBody = bodyFieldState.text.toString()
-            if (hasContent && !ignored && _state.value.canOfferDraftRestore(draft, liveBody)) {
-                _state.update {
-                    it.copy(
-                        restorableDraft = draft.body, restorableSubject = draft.subject,
-                        restorableRecipients = draft.recipients,
-                    )
-                }
-            }
-        }
-    }
-
-    @OptIn(ExperimentalFoundationApi::class)
-    private fun resetUndoBaseline() {
-        bodyFieldState.undoState.clearHistory()
-    }
-
-    private fun PrivateMessageComposeUiState.canOfferDraftRestore(
-        cached: EditorDraftStore.Draft,
-        liveBody: String,
-    ): Boolean =
-        !matches(cached, liveBody) &&
-            liveBody.isBlank() &&
-            subject.isBlank() &&
-            (recipients.isBlank() || recipients == recipientsHydratedContent)
-
-    private fun PrivateMessageComposeUiState.matches(cached: EditorDraftStore.Draft, liveBody: String): Boolean =
-        liveBody == cached.body &&
-            subject == cached.subject.orEmpty() &&
-            recipients == cached.recipients.orEmpty()
-
-    /**
-     * #405 — debounced autosave of recipients + subject + body, flagged `isPrivate = true` so the
-     * logout purge wipes it. ED-170: empty content is cleared through CAS, never a blind delete.
-     */
-    private fun scheduleAutosave() = submission.autosave(::draftSnapshot)
-
-    private fun draftSnapshot(): EditorDraftStore.Draft? {
-        val snapshot = _state.value
-        val liveBody = bodyFieldState.text.toString()
-        if (liveBody.isBlank() && snapshot.restorableDraft != null) return null
-        return EditorDraftStore.Draft(
-            body = liveBody, subject = snapshot.subject.ifBlank { null },
-            recipients = snapshot.recipients.ifBlank { null }, isPrivate = true,
-        )
-    }
+    private fun scheduleAutosave() = draftSession.scheduleAutosave()
+    fun onStarted() = draftSession.onStarted()
+    fun onStopped() = draftSession.onStopped()
+    suspend fun restoreBodyScroll() = draftSession.restoreBodyScroll()
 
     /** #803 pattern — one-shot latch : a committed close is never re-emitted. */
     private var closeRequested = false
@@ -397,7 +345,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
             // autosave already persisted the rest) while a rethrow would leave the screen
             // unclosable. CancellationException still propagates (scope teardown is not an error).
             try {
-                submission.flush(draftSnapshot())
+                submission.flush(draftSession::draftSnapshot)
             } catch (e: CancellationException) {
                 throw e
             } catch (_: IOException) {
@@ -407,79 +355,35 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         }
     }
 
-    /** #405 — append the cached body, fill only blank routing fields, and clear the banner. */
     fun onDraftRestoreRequested() {
         if (!acceptMutation(blockDuringUpload = true)) return
-        val snapshot = _state.value
-        val offeredBody = snapshot.restorableDraft ?: return
-        val liveBody = bodyFieldState.text.toString()
-        val body = when {
-            offeredBody.isBlank() -> liveBody
-            liveBody.isBlank() || liveBody == offeredBody -> offeredBody
-            else -> liveBody.trimEnd() + "\n\n" + offeredBody
-        }
-        // A routing-only offer (blank body) fills subject/recipients and leaves the body and its caret alone.
-        if (offeredBody.isNotBlank()) replaceBody(body)
-        _state.update { current ->
-            current.copy(
-                subject = current.subject.ifBlank { current.restorableSubject.orEmpty() },
-                recipients = current.recipients.ifBlank { current.restorableRecipients.orEmpty() },
-                restorableDraft = null,
-                restorableSubject = null,
-                restorableRecipients = null,
-            )
-        }
-        scheduleAutosave()
+        draftSession.restoreOfferedDraft()
     }
 
-    /** Explicit hydration/restore, separate from an insertion into the live selection. */
-    private fun replaceBody(body: String) {
-        bodyFieldState.edit {
-            replace(0, length, body)
-            selection = TextRange(length)
-        }
-    }
-
-    /** ED-170: clear the offered content through CAS, preserving a newer generation. */
     fun onDraftDiscardRequested() {
         if (!acceptMutation()) return
-        val snapshot = _state.value
-        val body = snapshot.restorableDraft ?: return
-        markDraftRestoreOfferIgnored(
-            EditorDraftStore.Draft(
-                body = body,
-                subject = snapshot.restorableSubject,
-                recipients = snapshot.restorableRecipients,
-                isPrivate = true,
-            ),
-        )
-        _state.update {
-            it.copy(restorableDraft = null, restorableSubject = null, restorableRecipients = null)
-        }
-        viewModelScope.launch { submission.flush(EditorDraftStore.Draft(body = "", isPrivate = true)) }
-    }
-
-    private fun markDraftRestoreOfferIgnored(draft: EditorDraftStore.Draft) {
-        savedStateHandle[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] = draft.restoreOfferFingerprint()
+        draftSession.discardOfferedDraft()
     }
 
     private fun loadForm() {
         if (!submission.isInitialized) return
         formJob?.cancel()
         val favoriteStamp = smileyPicker.favoriteFormStamp()
-        _state.update { it.copy(isLoadingForm = true, formError = false) }
+        updateState { it.copy(isLoadingForm = true, formError = false) }
         formJob = viewModelScope.launch {
             try {
                 val form = repository.fetchComposeForm(prefilledRecipient = initialRecipient)
+                if (!submission.isInitialized) return@launch
                 if (form.isAnonymous) {
                     loadedForm = null
-                    _state.update { it.copy(isLoadingForm = false, formAvailable = false, formError = true) }
+                    updateState { it.copy(isLoadingForm = false, formAvailable = false, formError = true) }
                     return@launch
                 }
                 loadedForm = form
                 smileyPicker.refreshFavorites(favoriteStamp)
+                draftSession.hydrate(form)
                 val liveBody = bodyFieldState.text.toString()
-                _state.update { it.withLoadedForm(form, liveBody) }
+                updateState { it.withLoadedForm(form, liveBody) }
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (_: IOException) {
@@ -501,13 +405,8 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         // Mirror of the reply editor's guard.
         if (this@PrivateMessageComposeViewModel.submission.blocksMutation) return copy(isLoadingForm = false)
         val hydrate = !optionsHydratedFromForm
-        val nextRecipients = if (hydrate && recipients.isBlank() &&
-            submission !is EditorSubmissionState.Uncertain) {
-            form.hiddenFields["dest"].orEmpty()
-        } else {
-            recipients
-        }
-        val keepRestoreOffer = restoreOfferDiffersFrom(nextRecipients, liveBody)
+        val nextRecipients = recipients
+        val keepRestoreOffer = restoreOfferDiffersFrom(liveBody)
         return copy(
             isLoadingForm = false,
             formAvailable = true,
@@ -516,10 +415,6 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
             // The composer's `dest` text input comes back through hiddenFields ; a
             // server-side prefill (dest= in the GET) seeds the local field once.
             recipients = nextRecipients,
-            recipientsHydratedContent = hydratedRecipientsContent(
-                nextRecipients = nextRecipients,
-                hydrate = hydrate,
-            ),
             restorableDraft = restorableDraft.takeIf { keepRestoreOffer },
             restorableSubject = restorableSubject.takeIf { keepRestoreOffer },
             restorableRecipients = restorableRecipients.takeIf { keepRestoreOffer },
@@ -543,77 +438,56 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     }
 
     private fun PrivateMessageComposeUiState.restoreOfferDiffersFrom(
-        nextRecipients: String,
         liveBody: String,
     ): Boolean =
         restorableDraft != null &&
             (
                 restorableDraft != liveBody ||
                     restorableSubject.orEmpty() != subject ||
-                    restorableRecipients.orEmpty() != nextRecipients
+                    EditorRecipientState.decode(restorableRecipients) != recipientState
                 )
 
-    private fun PrivateMessageComposeUiState.hydratedRecipientsContent(
-        nextRecipients: String,
-        hydrate: Boolean,
-    ): String? = if (hydrate && recipients.isBlank() && nextRecipients.isNotBlank()) {
-        nextRecipients
-    } else {
-        recipientsHydratedContent
-    }
-
+    /** Legacy CSV chrome until C4; the chip editor supplies its state through onRecipientStateChanged. */
     fun onRecipientsChanged(value: String) {
         if (!acceptMutation()) return
-        _state.update {
-            it.copy(
-                recipients = value,
-                restorableRecipients = if (it.restorableDraft != null) {
-                    value.ifBlank { null }
-                } else {
-                    it.restorableRecipients
-                },
-            )
-        }
-        scheduleAutosave()
+        draftSession.changeRecipients(
+            EditorRecipientState(value.split(',').filter(String::isNotBlank)), value,
+        )
+    }
+
+    fun onRecipientStateChanged(value: EditorRecipientState) {
+        if (!acceptMutation()) return
+        draftSession.changeRecipients(value)
     }
 
     fun onSubjectChanged(value: String) {
         if (!acceptMutation()) return
-        _state.update {
-            // HFR's maxlength=70 — truncate instead of erroring so pasted text just clips.
-            val subject = value.take(PrivateMessageComposeUiState.SUBJECT_MAX_LENGTH)
-            it.copy(
-                subject = subject,
-                restorableSubject = if (it.restorableDraft != null) {
-                    subject.ifBlank { null }
-                } else {
-                    it.restorableSubject
-                },
-            )
-        }
-        scheduleAutosave()
+        draftSession.changeSubject(value.take(PrivateMessageComposeUiState.SUBJECT_MAX_LENGTH))
     }
 
     private fun formLoadFailed() {
+        if (!submission.isInitialized) return
         loadedForm = null
-        _state.update { it.copy(isLoadingForm = false, formAvailable = false, formError = true) }
+        updateState { it.copy(isLoadingForm = false, formAvailable = false, formError = true) }
     }
 
     fun onToolbarAction(action: BbcodeAction) {
         if (!acceptMutation(blockDuringUpload = true)) return
+        draftSession.decide(EditorSessionField.Body)
         bodyFieldState.editBbcode { text, start, end -> applyBbcodeAction(action, text, start, end) }
         scheduleAutosave()
     }
 
     fun onSmileySelected(token: String) {
         if (!acceptMutation(blockDuringUpload = true)) return
+        draftSession.decide(EditorSessionField.Body)
         bodyFieldState.editBbcode { text, start, end -> insertBbcodeToken(token, text, start, end) }
         smileyPicker.dismiss(SmileyPickerCloseCause.INSERTION)
         scheduleAutosave()
     }
 
     fun onTogglePreview() {
-        _state.update {
+        updateState {
             it.copy(
                 isPreviewVisible = !it.isPreviewVisible,
                 preview = if (it.isPreviewVisible) PostContent(blocks = emptyList()) else it.preview,
@@ -623,17 +497,17 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
 
     fun onToggleSignature(enabled: Boolean) {
         if (!acceptMutation()) return
-        _state.update { it.copy(signatureEnabled = enabled) }
+        updateState { it.copy(signatureEnabled = enabled) }
     }
 
     fun onToggleSmileyDisabled(disabled: Boolean) {
         if (!acceptMutation()) return
-        _state.update { it.copy(smileyDisabled = disabled) }
+        updateState { it.copy(smileyDisabled = disabled) }
     }
 
     fun onToggleEmailNotification(enabled: Boolean) {
         if (!acceptMutation()) return
-        _state.update { it.copy(emailNotificationEnabled = enabled) }
+        updateState { it.copy(emailNotificationEnabled = enabled) }
     }
 
     fun onErrorDismissed() = submission.acknowledge(::scheduleAutosave)
@@ -654,9 +528,10 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     fun onSubmit(timeoutMillis: Long = 4_000L) {
         val snapshot = _state.value.copy(bodyText = bodyFieldState.text.toString())
         val form = loadedForm ?: return
-        if (!snapshot.canSubmit || closeRequested) return
+        if (!snapshot.canSubmit || closeRequested || submission.blocksMutation) return
         if (form.isAnonymous) {
-            _state.update { it.copy(submitError = EditorErrors.loginRequired) }
+            updateState { it.copy(submitError = null) }
+            updateState { it.copy(submitError = EditorErrors.loginRequired) }
         } else {
             val permit = submission.request(timeoutMillis, snapshot.canSubmit)
             if (permit is SubmissionRequest.Accepted) launchSubmission(permit, snapshot, form)
@@ -670,14 +545,15 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         form: ReplyForm,
     ) {
         submission.launch(permit, EditorDraftStore.Draft(
-            body = snapshot.bodyText, subject = snapshot.subject, recipients = snapshot.recipients, isPrivate = true,
+            body = snapshot.bodyText, subject = snapshot.subject,
+            recipients = snapshot.recipientState.encode(), isPrivate = true,
         )) {
             val options = ReplyFormOptions(
                 signatureEnabled = snapshot.signatureEnabled, smileyDisabled = snapshot.smileyDisabled,
                 emailNotificationEnabled = snapshot.emailNotificationEnabled,
             )
             val result = repository.submitNewMessage(
-                form = form, recipients = snapshot.recipients.trim(), subject = snapshot.subject.trim(),
+                form = form, recipients = snapshot.recipientState.csv.trim(), subject = snapshot.subject.trim(),
                 bbcodeContent = snapshot.bodyText, options = options,
             )
             submissionDelivery(result)
@@ -719,14 +595,14 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         when (event) {
             is ImagePickerEvent.Launched, is ImagePickerEvent.Cancelled -> Unit
             is ImagePickerEvent.Unavailable -> {
-                _state.update { it.copy(uploadError = EditorErrors.pickerAbsent) }
+                updateState { it.copy(uploadError = EditorErrors.pickerAbsent) }
             }
             is ImagePickerEvent.Result -> {
                 val pickedImages = pickedImagesForUpload(event.contract, event.uris)
                 val showEmptyPickerBanner = pickedImages.isEmpty() && uploadJob?.isActive != true
                 onImagesPicked(event.uris)
                 if (showEmptyPickerBanner) {
-                    _state.update { it.copy(uploadError = EditorErrors.noImageReceived) }
+                    updateState { it.copy(uploadError = EditorErrors.noImageReceived) }
                 }
             }
         }
@@ -751,7 +627,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         if (!canStartUpload(userId, targets)) return
         if (!acceptMutation()) return
         val multiple = targets.size > 1
-        _state.update {
+        updateState {
             it.copy(
                 isUploading = true,
                 uploadError = if (received.size > MAX_IMAGES_PER_UPLOAD) EditorErrors.imageLimit else null,
@@ -786,16 +662,16 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                 }
                 completed += 1
                 if (multiple) {
-                    _state.update { it.copy(uploadProgress = UploadProgress(completed, targets.size)) }
+                    updateState { it.copy(uploadProgress = UploadProgress(completed, targets.size)) }
                 }
             }
-            _state.update { it.copy(isUploading = false, uploadProgress = null) }
+            updateState { it.copy(isUploading = false, uploadProgress = null) }
         }
     }
 
     /** #459 — dismiss the upload-error banner. */
     fun onUploadErrorDismissed() {
-        _state.update { it.copy(uploadError = null) }
+        updateState { it.copy(uploadError = null) }
     }
 
     /**
@@ -807,6 +683,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     private fun insertImageBbcodeAtCaret(bbcode: String, leadingNewline: Boolean) {
         // Authorized upload callbacks may insert during their own upload, unlike user input.
         if (!acceptMutation()) return
+        draftSession.decide(EditorSessionField.Body)
         bodyFieldState.editBbcode { text, start, end ->
             val caret = start.coerceIn(0, text.length)
             val needsNewline = leadingNewline && caret > 0 && text[caret - 1] != '\n'
@@ -822,7 +699,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
 
     private fun handleUploadFailure(error: Throwable) {
         if (error is CancellationException) {
-            _state.update { it.copy(isUploading = false, uploadProgress = null) }
+            updateState { it.copy(isUploading = false, uploadProgress = null) }
             throw error
         }
         val mapped = EditorErrors.stopped(error.toEditorUploadError(), _state.value.uploadProgress)
@@ -831,7 +708,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
             LOG_TAG_UPLOAD,
             UploadFailureDiagnostics.describe(error, mapped.toString()),
         )
-        _state.update { it.copy(isUploading = false, uploadError = mapped, uploadProgress = null) }
+        updateState { it.copy(isUploading = false, uploadError = mapped, uploadProgress = null) }
     }
 
     /**
@@ -849,9 +726,6 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     }
 
     private companion object {
-        private const val DRAFT_RESTORE_OFFER_FINGERPRINT_KEY = "draft_restore_offer_fingerprint"
-
-
         // #459 — diagnostics tag of the upload failures (shared shape with the topic-side editors).
         private const val LOG_TAG_UPLOAD = "MpComposeVM"
     }
