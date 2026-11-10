@@ -9,15 +9,23 @@ import android.os.Parcelable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextInputSelection
@@ -42,6 +50,7 @@ import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
+import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -211,29 +220,69 @@ class PrivateMessageReplyInputTest {
     }
 
     @Test
+    fun invalidHashRefetchKeepsTheSameFieldAndFocus() {
+        val quote = "seed\n"
+        setFieldContent(confirmBeforePosting = false, initialQuote = quote, fullEditor = true)
+        field().performTextInput("body")
+        val node = field().assertIsFocused().fetchSemanticsNode().id
+        val refresh = CompletableDeferred<ReplyForm>()
+        coEvery { repository.fetchReplyForm(any(), any()) } coAnswers { refresh.await() }
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
+
+        compose.runOnIdle { vm.onSubmit() }
+        compose.waitUntil { vm.state.value.isLoadingForm && !vm.state.value.isSubmitting }
+        compose.runOnIdle {
+            assertTrue(vm.state.value.formAvailable)
+            assertFalse(vm.state.value.canSubmit)
+            assertEquals(EditorErrors.invalidHashCheck, vm.state.value.submitError)
+            assertEquals(quote + "body", vm.bodyFieldState.text.toString())
+        }
+        assertEquals(node, field().assertIsFocused().fetchSemanticsNode().id)
+        val context = RuntimeEnvironment.getApplication()
+        val error = context.getString(fr.forumhfr.redface2.core.ui.R.string.editor_error_invalid_hash)
+        val send = context.getString(R.string.messages_reply_submit)
+        compose.onNodeWithText(error).assertIsDisplayed()
+        compose.onNodeWithText(send).assertIsNotEnabled()
+
+        compose.runOnIdle { refresh.complete(replyForm(quote).copy(hashCheck = "refreshed-private-hash")) }
+        compose.waitUntil { !vm.state.value.isLoadingForm }
+        assertEquals(node, field().assertIsFocused().fetchSemanticsNode().id)
+        compose.onNodeWithText(error).assertIsDisplayed()
+        compose.onNodeWithText(send).assertIsEnabled()
+        compose.runOnIdle {
+            assertTrue(vm.state.value.canSubmit)
+            assertEquals(quote + "body", vm.bodyFieldState.text.toString())
+            assertEquals(EditorErrors.invalidHashCheck, vm.state.value.submitError)
+        }
+        coVerify(exactly = 2) { repository.fetchReplyForm(any(), any()) }
+        coVerify(exactly = 1) { repository.submitReply(any(), any(), quote + "body", any(), any()) }
+    }
+
+    @Test
     @OptIn(ExperimentalFoundationApi::class)
     fun bodyAndUndoHistoryStayOutsideSavedState() {
-        setFieldContent(confirmBeforePosting = false)
+        val quote = "[quote=private-correspondent]private quote fragment[/quote]\n"
+        setFieldContent(confirmBeforePosting = false, initialQuote = quote)
         val initialBytes = compose.runOnIdle { savedStateSize() }
         val privateBody = "private reply body\n".repeat(1_000)
         val previousBody = "previous private revision\n".repeat(1_000)
+        val privateFragments = listOf(
+            privateBody, "private reply body", previousBody, "previous private revision", quote,
+            "private-correspondent", "private quote fragment", "private subject", "private-hash-check-token",
+        )
         compose.runOnIdle {
-            vm.bodyFieldState.edit { append(previousBody) }
+            vm.bodyFieldState.edit { replace(0, length, previousBody) }
             vm.bodyFieldState.edit { replace(0, length, privateBody) }
             assertTrue(vm.bodyFieldState.undoState.canUndo)
         }
         compose.waitForIdle()
         compose.runOnIdle {
+            vm.onStopped()
             val saved = registry.performSave().toString()
-            assertFalse(saved.contains("private reply body"))
-            assertFalse(saved.contains("previous private revision"))
-            assertTrue(savedStateHandle.keys().all { key ->
-                val metadata = savedStateHandle.get<Any?>(key)
-                metadata == null || metadata is String || metadata is Int
-            })
-            assertFalse(savedStateHandle.keys().any { key ->
-                savedStateHandle.get<Any?>(key) in listOf(privateBody, previousBody)
-            })
+            privateFragments.forEach { fragment -> assertFalse(saved.contains(fragment)) }
+            assertEquals(privateMessageReplyCheckpointKeys, savedStateHandle.keys())
+            assertPrivateMessageReplySavedState(savedStateHandle, privateFragments)
             assertTrue(
                 "Bundle must stay independent of private text and undo history",
                 savedStateSize() < initialBytes + 2_048,
@@ -276,14 +325,15 @@ class PrivateMessageReplyInputTest {
 
     private fun field() = compose.onNode(hasSetTextAction())
 
-    private fun setFieldContent(confirmBeforePosting: Boolean, initialQuote: String = "") {
+    private fun setFieldContent(
+        confirmBeforePosting: Boolean,
+        initialQuote: String = "",
+        fullEditor: Boolean = false,
+    ) {
         val clipboard = RuntimeEnvironment.getApplication().getSystemService(Context.CLIPBOARD_SERVICE)
             as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("test", " pasted"))
-        coEvery { repository.fetchReplyForm(any(), any()) } returns ReplyForm(
-            hashCheck = "abc", sujet = "", hiddenFields = mapOf("cat" to "prive"),
-            isAnonymous = false, initialContent = initialQuote,
-        )
+        coEvery { repository.fetchReplyForm(any(), any()) } returns replyForm(initialQuote)
         coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Failure(ReplyFailureReason.EmptyMessage)
         val preferences = mockk<UserPreferencesRepository> {
@@ -315,7 +365,9 @@ class PrivateMessageReplyInputTest {
             registry = remember { SaveableStateRegistry(restoredValues = null, canBeSaved = hostRegistry::canBeSaved) }
             CompositionLocalProvider(LocalSaveableStateRegistry provides registry) {
                 RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                    Box(Modifier.size(320.dp, 240.dp)) {
+                    if (fullEditor) {
+                        ReplyContent()
+                    } else Box(Modifier.size(320.dp, 240.dp)) {
                         // Keep editable chrome stale: synchronous guards must reject blocked inputs.
                         BbcodeTextField(
                             state = vm.bodyFieldState,
@@ -330,4 +382,29 @@ class PrivateMessageReplyInputTest {
         compose.waitUntil { vm.state.value.formAvailable }
         field().requestFocus()
     }
+
+    @Composable
+    private fun ReplyContent() {
+        val state by vm.state.collectAsState()
+        PrivateMessageReplyContent(
+            state = state, autoOpenRecipientManager = false, onBack = vm::onCloseRequested,
+            bodyFieldState = vm.bodyFieldState, bodyInputTransformation = vm.bodyInputTransformation,
+            bodyScrollState = vm.bodyScrollState,
+            onToolbarAction = vm::onToolbarAction, onTogglePreview = vm::onTogglePreview,
+            onToggleSignature = vm::onToggleSignature, onToggleSmileyDisabled = vm::onToggleSmileyDisabled,
+            onToggleEmailNotification = vm::onToggleEmailNotification, onErrorDismissed = vm::onErrorDismissed,
+            onSubmit = vm::onSubmit, onSubmitConfirmed = vm::onSubmitConfirmed,
+            onSubmitConfirmationDismissed = vm::onSubmitConfirmationDismissed,
+            onRetryFormLoad = vm::retryFormLoad, onDraftRestore = vm::onDraftRestoreRequested,
+            onDraftDiscard = vm::onDraftDiscardRequested, onImagePickerEvent = vm::onImagePickerEvent,
+            onUploadErrorDismissed = vm::onUploadErrorDismissed, onAddRecipient = vm::onAddRecipient,
+            onRemoveRecipient = vm::onRemoveRecipient, smileyPicker = vm.smileyPicker,
+            onSmileySelected = vm::onSmileySelected,
+        )
+    }
+
+    private fun replyForm(quote: String) = ReplyForm(
+        hashCheck = "private-hash-check-token", sujet = "private subject", hiddenFields = mapOf("cat" to "prive"),
+        isAnonymous = false, initialContent = quote,
+    )
 }

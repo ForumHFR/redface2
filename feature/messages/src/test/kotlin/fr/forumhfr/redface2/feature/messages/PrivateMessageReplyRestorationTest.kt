@@ -100,6 +100,8 @@ class PrivateMessageReplyRestorationTest {
         val first = open(saved)
         settle()
         val body = "private reply\n".repeat(2_000)
+        val previousBody = "previous private revision\n".repeat(2_000)
+        type(first, previousBody)
         type(first, body, TextRange(19, 3))
         first.bodyScrollState.scrollTo(80)
         first.onTogglePreview()
@@ -128,7 +130,12 @@ class PrivateMessageReplyRestorationTest {
         assertFalse(restored.state.value.isPreviewVisible)
         assertNull(restored.state.value.armToken)
         assertEquals(SmileyPickerState.Hidden, restored.smileyPicker.state.value)
-        assertTrue(frozen.keys().all { frozen.get<Any?>(it) !in listOf(body, served.sujet, served.initialContent) })
+        assertEquals(privateMessageReplyCheckpointKeys, frozen.keys())
+        assertPrivateMessageReplySavedState(
+            frozen,
+            listOf(body, "private reply", previousBody, "previous private revision", served.sujet,
+                served.initialContent, "private seed", "alice", served.hashCheck),
+        )
     }
 
     @Test fun recreationWaitsForTheOwnerReadAndRejectsEarlyInput() = runTest(dispatcher) {
@@ -283,6 +290,48 @@ class PrivateMessageReplyRestorationTest {
         coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any(), any()) }
     }
 
+    @Test fun identicalCertainServerRefusalsDeliverDistinctEvents() = runTest(dispatcher) {
+        every { preferences.observeConfirmBeforePosting() } returns flowOf(false)
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.AntiFlood)
+        val editor = open()
+        settle()
+        type(editor, "private reply")
+        settle()
+        val keys = List(2) {
+            editor.onSubmit()
+            settle()
+            assertEquals(EditorErrors.antiFlood, editor.state.value.submitError)
+            assertFalse(editor.state.value.isSubmitting)
+            assertNull(editor.state.value.armToken)
+            assertNull(store.entries[key]?.attempt)
+            editor.editorEvents.state.events.last().also { event ->
+                assertEquals(EditorEventContent.Problem(EditorErrors.antiFlood), event.content)
+            }.key
+        }
+        // A new send retires its predecessor's banner; compare the two deliveries, not queue retention.
+        assertNotEquals(keys.first(), keys.last())
+        assertNotEquals(keys.first().operation, keys.last().operation)
+        coVerify(exactly = 2) { repository.submitReply(any(), any(), "private reply", any(), any()) }
+    }
+
+    @Test fun ignoredOfferPersistsOnlyItsBoundedFingerprint() = runTest(dispatcher) {
+        val body = "private ignored draft"
+        store.preload(key, Draft(body, isPrivate = true))
+        val saved = SavedStateHandle()
+        val editor = open(saved)
+        settle()
+        assertEquals(body, editor.state.value.restorableDraft)
+        editor.onDraftDiscardRequested()
+        settle()
+        assertNull(editor.state.value.restorableDraft)
+        val frozen = freeze(saved)
+        assertTrue("draft_restore_offer_fingerprint" in frozen.keys())
+        assertEquals(Draft(body, isPrivate = true).restoreOfferFingerprint(),
+            frozen.get<String>("draft_restore_offer_fingerprint"))
+        assertPrivateMessageReplySavedState(frozen, listOf(body, "private ignored", served.initialContent))
+    }
+
     @Test fun successfulReadKeepsSendEventsAndFailedReadsStayFullScreen() = runTest(dispatcher) {
         every { preferences.observeConfirmBeforePosting() } returns flowOf(false)
         coEvery { repository.submitReply(any(), any(), any(), any(), any()) } throws
@@ -311,6 +360,24 @@ class PrivateMessageReplyRestorationTest {
         settle()
         assertEquals(EditorErrors.antiFlood, editor.state.value.submitError)
         assertEquals(events, editor.editorEvents.state.events)
+    }
+
+    @Test fun accountChangeRevokesAnAlreadyAvailableForm() = runTest(dispatcher) {
+        val saved = SavedStateHandle()
+        val editor = open(saved)
+        settle()
+        assertTrue(editor.state.value.formAvailable)
+        editor.onStopped()
+        assertTrue("messageReplyEditor.resumeVersion" in saved.keys())
+        store.activeOwner = "other"
+        auth.value = AuthState.Authenticated("other")
+        settle()
+        assertFalse(editor.state.value.formAvailable)
+        assertFalse(editor.state.value.canSubmit)
+        assertFalse("messageReplyEditor.resumeVersion" in saved.keys())
+        editor.onSubmit()
+        settle()
+        coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any(), any()) }
     }
 
     @Test fun accountChangeInvalidatesLateCallbacksEventsAndCheckpoint() = runTest(dispatcher) {
@@ -367,6 +434,9 @@ class PrivateMessageReplyRestorationTest {
     }
     @Suppress("DEPRECATION") // Actual Parcel round-trip of primitives, never TextFieldState or private content.
     private fun freeze(saved: SavedStateHandle): SavedStateHandle {
+        assertPrivateMessageReplySavedState(
+            saved, listOf(served.sujet, served.initialContent, "private seed", "alice", served.hashCheck),
+        )
         val bundle = Bundle()
         for (key in saved.keys()) {
             when (val value = saved.get<Any?>(key)) {
