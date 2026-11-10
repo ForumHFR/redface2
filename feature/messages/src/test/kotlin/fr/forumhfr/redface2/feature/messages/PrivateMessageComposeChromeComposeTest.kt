@@ -58,11 +58,13 @@ import coil3.request.CachePolicy
 import coil3.request.ImageResult
 import coil3.test.FakeImageLoaderEngine
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.EditorBarMode
+import fr.forumhfr.redface2.core.ui.editor.EditorErrorSurface
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorEvent
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
@@ -94,6 +96,7 @@ import org.robolectric.annotation.GraphicsMode
 class PrivateMessageComposeChromeComposeTest {
     @get:Rule val compose = createComposeRule()
     private val f = PrivateMessageComposeChromeFixture()
+    private val uncertain = EditorErrors.uncertain(EditorErrorSurface.MessageCompose)
     private val scroll = ScrollState(0)
     private lateinit var back: OnBackPressedDispatcher
     private lateinit var view: View
@@ -278,6 +281,45 @@ class PrivateMessageComposeChromeComposeTest {
             assertNull(f.adapter.detail)
             assertEquals(0, f.adapter.returnGeneration)
             assertFalse(f.adapter.consumeReturn())
+        }
+    }
+    @Test fun `ED45 explicit Masquer in the MP detail forwards acknowledgement without sending`() {
+        prefill()
+        val attempt = AttemptToken("alice", f.session.key, "attempt", 1)
+        f.transition(f.state.copy(submission = EditorSubmissionState.Uncertain(attempt), submitError = uncertain))
+        compose.setContent { Content() }
+        val summary = uncertain.summary.resolve(RuntimeEnvironment.getApplication())
+        compose.onNodeWithContentDescription("$summary, Afficher les détails").performClick()
+        compose.runOnIdle { assertTrue(f.calls.isEmpty()) }
+        compose.onNodeWithText("Masquer").performClick()
+        bodyField().assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(listOf("acknowledge"), f.calls)
+            assertNull(f.adapter.detail)
+            assertNull(f.events.visibleEvent)
+        }
+    }
+    @Test fun `ED45 ED85 system Back on the MP uncertainty detail and the header return never acknowledge`() {
+        prefill()
+        val attempt = AttemptToken("alice", f.session.key, "attempt", 1)
+        f.transition(f.state.copy(submission = EditorSubmissionState.Uncertain(attempt), submitError = uncertain))
+        compose.setContent { Content() }
+        val summary = uncertain.summary.resolve(RuntimeEnvironment.getApplication())
+        compose.onNodeWithContentDescription("$summary, Afficher les détails").performClick()
+        compose.onNodeWithText("Masquer").assertExists()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNodeWithText("Masquer").assertDoesNotExist()
+        compose.runOnIdle {
+            assertNull(f.adapter.detail)
+            assertNull(f.events.visibleEvent)
+            f.adapter.openHeader()
+        }
+        compose.onNodeWithText("Retour au message").performClick()
+        bodyField().assertIsFocused()
+        compose.runOnIdle {
+            assertNull(f.adapter.surface)
+            assertTrue(f.calls.isEmpty())
+            assertEquals(EditorSubmissionState.Uncertain(attempt), f.state.submission)
         }
     }
     @Test fun `ED71 options have only three toggles and header inputs freeze during sending`() {

@@ -522,6 +522,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         updateState { it.copy(emailNotificationEnabled = enabled) }
     }
 
+    /** ED-45/170: reached only from the host's explicit Masquer of the bound uncertain delivery. */
     fun onErrorDismissed() = submission.acknowledge(::scheduleAutosave)
 
     /** ED-164/166: callbacks carry the identity displayed by the current composition. */

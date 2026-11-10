@@ -18,7 +18,7 @@ internal data class PrivateMessageComposeChromeActions(
 
 internal fun PrivateMessageComposeViewModel.chromeActions() = PrivateMessageComposeChromeActions(
     host = EditorHostActions(::onSubmit, ::onSubmitConfirmed, ::onSubmitConfirmationDismissed,
-        ::onToolbarAction, ::onTogglePreview, ::onCloseRequested),
+        ::onToolbarAction, ::onTogglePreview, ::onCloseRequested, onAcknowledgeUncertain = ::onErrorDismissed),
     signature = ::onToggleSignature, smileyDisabled = ::onToggleSmileyDisabled,
     notification = ::onToggleEmailNotification, smiley = ::onSmileySelected, picker = ::onImagePickerEvent,
     restore = ::onDraftRestoreRequested, discard = ::onDraftDiscardRequested, reload = ::retryFormLoad,

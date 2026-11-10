@@ -20,6 +20,7 @@ import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.EditorBarGesture
 import fr.forumhfr.redface2.core.ui.editor.EditorBarMode
+import fr.forumhfr.redface2.core.ui.editor.EditorErrorSurface
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorEvent
 import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
@@ -34,6 +35,7 @@ import fr.forumhfr.redface2.core.ui.editor.EventKey
 import fr.forumhfr.redface2.core.ui.editor.OperationRef
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -50,6 +52,7 @@ import org.robolectric.annotation.GraphicsMode
 class PrivateMessageComposeChromeAdapterTest {
     @get:Rule val compose = createComposeRule()
     private val f = PrivateMessageComposeChromeFixture()
+    private val uncertain = EditorErrors.uncertain(EditorErrorSurface.MessageCompose)
     @Test fun `ED35 projection separates activation from strict POST and freezes every send phase`() {
         assertTrue(f.adapter.state.host.sendActivatable)
         assertFalse(f.adapter.state.host.postAllowed)
@@ -166,6 +169,93 @@ class PrivateMessageComposeChromeAdapterTest {
         confirm.onConfirmSubmit()
         assertEquals(arm, f.confirmed)
     }
+    @Test fun `ED45 Masquer acknowledges only the exact uncertain delivery once`() {
+        // Every uncertain error carries details (ED-112): Masquer is reached from the detail, never the bar.
+        val attempt = AttemptToken("alice", f.session.key, "attempt", 1)
+        f.transition(f.state.copy(submission = EditorSubmissionState.Uncertain(attempt), submitError = uncertain))
+        val key = f.events.visibleEvent!!.key
+        f.adapter.barActions.onEvent(key, EditorEventAction.Details)
+        assertTrue(f.calls.isEmpty())
+        f.adapter.dismissDetails(key)
+        assertEquals(listOf("acknowledge"), f.calls)
+        assertNull(f.adapter.detail)
+        assertNull(f.events.visibleEvent)
+        f.adapter.dismissDetails(key)
+        assertEquals(listOf("acknowledge"), f.calls)
+    }
+    @Test fun `ED45 ED85 Back and closing the uncertainty detail never acknowledge`() {
+        val attempt = AttemptToken("alice", f.session.key, "attempt", 1)
+        f.transition(f.state.copy(submission = EditorSubmissionState.Uncertain(attempt), submitError = uncertain))
+        val first = f.events.visibleEvent!!.key
+        f.adapter.barActions.onEvent(first, EditorEventAction.Details)
+        f.adapter.back()
+        assertNull(f.adapter.detail)
+        assertNull(f.events.visibleEvent)
+        f.transition(f.state.copy(submitError = null))
+        f.transition(f.state.copy(submitError = uncertain))
+        val second = f.events.visibleEvent!!.key
+        f.adapter.barActions.onEvent(second, EditorEventAction.Details)
+        f.adapter.closeDetails(second)
+        assertNull(f.adapter.detail)
+        f.adapter.openHeader()
+        f.adapter.back()
+        assertNull(f.adapter.surface)
+        assertTrue(f.calls.isEmpty())
+        assertEquals(EditorSubmissionState.Uncertain(attempt), f.state.submission)
+    }
+    @Test fun `ED45 an old uncertainty detail cannot acknowledge a replacement or close its detail`() {
+        val attempt = AttemptToken("alice", f.session.key, "old", 1)
+        f.transition(f.state.copy(submission = EditorSubmissionState.Uncertain(attempt), submitError = uncertain))
+        val old = f.events.visibleEvent!!
+        f.adapter.barActions.onEvent(old.key, EditorEventAction.Details)
+        f.transition(f.state.copy(submission = EditorSubmissionState.PersistingAttempt(SubmissionToken(3, f.session)),
+            submitError = null))
+        f.transition(f.state.copy(submission = EditorSubmissionState.Uncertain(attempt.copy(id = "new")),
+            submitError = uncertain))
+        val replacement = f.events.visibleEvent!!
+        assertNotEquals(old.key, replacement.key)
+        f.adapter.dismissDetails(old.key)
+        assertTrue(f.calls.isEmpty())
+        assertEquals(replacement, f.events.visibleEvent)
+        f.adapter.barActions.onEvent(replacement.key, EditorEventAction.Details)
+        f.adapter.dismissDetails(old.key)
+        assertEquals(replacement, f.adapter.detail)
+        assertTrue(f.calls.isEmpty())
+        f.adapter.dismissDetails(replacement.key)
+        assertEquals(listOf("acknowledge"), f.calls)
+    }
+    @Test fun `ED170 cancellation can deliver uncertainty before its submission state`() {
+        val attempt = AttemptToken("alice", f.session.key, "cancelled", 1)
+        f.transition(f.state.copy(submission = EditorSubmissionState.Sending(attempt), submitError = uncertain))
+        f.transition(f.state.copy(submission = EditorSubmissionState.Uncertain(attempt)))
+        val key = f.events.visibleEvent!!.key
+        f.adapter.barActions.onEvent(key, EditorEventAction.Details)
+        f.adapter.dismissDetails(key)
+        assertEquals(listOf("acknowledge"), f.calls)
+    }
+    @Test fun `ED170 a retained delivery cannot borrow a different or accepted attempt`() {
+        val attempt = AttemptToken("alice", f.session.key, "old", 1)
+        listOf(EditorSubmissionState.Uncertain(attempt.copy(id = "new")),
+            EditorSubmissionState.Uncertain(attempt, accepted = true)).forEachIndexed { index, newer ->
+            f.transition(f.state.copy(submission = EditorSubmissionState.Uncertain(attempt), submitError = null))
+            f.transition(f.state.copy(submitError = uncertain))
+            val key = f.events.visibleEvent!!.key
+            f.adapter.barActions.onEvent(key, EditorEventAction.Details)
+            f.transition(f.state.copy(submission = newer))
+            f.adapter.dismissDetails(key)
+            assertTrue("attempt guard $index", f.calls.isEmpty())
+        }
+    }
+    @Test fun `ED170 a retained detail cannot acknowledge a new session`() {
+        val attempt = AttemptToken("alice", f.session.key, "attempt", 1)
+        f.transition(f.state.copy(submission = EditorSubmissionState.Uncertain(attempt), submitError = uncertain))
+        val key = f.events.visibleEvent!!.key
+        f.adapter.barActions.onEvent(key, EditorEventAction.Details)
+        f.events.open(f.session.copy(id = "new-opening"))
+        f.adapter.dismissDetails(key)
+        assertTrue(f.calls.isEmpty())
+        assertNull(f.events.visibleEvent)
+    }
     @Test fun `ED31 image uses system picker and wrapping without URL and cancellation returns once`() {
         assertTrue(f.adapter.imageActions.canWrapSelection)
         assertNull(f.adapter.imageActions.onInsertUrl)
@@ -195,7 +285,8 @@ internal class PrivateMessageComposeChromeFixture {
     var openSmileys: () -> Unit = {}
     val actions = PrivateMessageComposeChromeActions(
         host = EditorHostActions({ calls += "send" }, { confirmed = it }, { calls += "disarm" },
-            {}, { state = state.copy(isPreviewVisible = !state.isPreviewVisible) }, { calls += "close" }),
+            {}, { state = state.copy(isPreviewVisible = !state.isPreviewVisible) }, { calls += "close" },
+            onAcknowledgeUncertain = { calls += "acknowledge" }),
         signature = { calls += "signature:$it" }, smileyDisabled = {}, notification = {}, smiley = {}, picker = {},
         restore = { calls += "restore" }, discard = { calls += "discard" }, reload = { calls += "reload" })
     val adapter = createAdapter()

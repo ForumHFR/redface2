@@ -9,9 +9,10 @@ import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
 import fr.forumhfr.redface2.core.ui.editor.EditorEventProjection
 import fr.forumhfr.redface2.core.ui.editor.EditorHostEvents
 import fr.forumhfr.redface2.core.ui.editor.EditorLocalOperation
+import fr.forumhfr.redface2.core.ui.editor.EventKey
 import fr.forumhfr.redface2.core.ui.editor.OperationRef
 
-/** C1 session events; GET failures stay full-screen and the existing chrome stays until C4. */
+/** New MP session events; GET failures stay full-screen, Masquer binds only its exact uncertain attempt. */
 internal class PrivateMessageComposeEvents : EditorHostEvents {
     private val collector = EditorEventCollector(EditorErrorMappers(
         // GET failures stay in formError (ED-130); no read can retire a submission event.
@@ -24,6 +25,7 @@ internal class PrivateMessageComposeEvents : EditorHostEvents {
     private var projection = EditorEventProjection(state.session)
 
     override fun dispatch(input: EditorEventInput) = collector.dispatch(input)
+    override fun uncertainAttempt(key: EventKey) = collector.uncertainAttempt(key)
     /** The host opens its header directly; this port only selects the field, without a second gesture. */
     fun completingHeader(onComplete: (EditorCause) -> Unit): EditorHostEvents = object : EditorHostEvents by this {
         override fun dispatch(input: EditorEventInput) = collector.dispatch(input).also { transition ->

@@ -46,7 +46,7 @@ internal fun PrivateMessageComposeChromeSurfaces(
         if (adapter.consumeReturn()) adapter.returnToBody(onReturnToBody)
     }
     EditorEventDetails(adapter.detail, bodyState, adapter::closeDetails, adapter::reload,
-        { adapter.returnToBody(onReturnToBody) }, body = {
+        { adapter.returnToBody(onReturnToBody) }, onDismiss = adapter::dismissDetails, body = {
             ComposeHeader(adapter, bodyState, recipients, subject, onReturnToBody, body)
         })
     when (adapter.surface) {

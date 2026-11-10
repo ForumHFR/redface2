@@ -16,6 +16,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorPreparationException
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionAdapter
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionScenario
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionBodyMutation
 import fr.forumhfr.redface2.core.domain.editor.SubmissionErrorProbe
 import fr.forumhfr.redface2.core.domain.editor.SubmissionProbe
@@ -46,6 +47,8 @@ import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorSurface
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
+import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
 import fr.forumhfr.redface2.core.ui.editor.EditorRecipientState
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
@@ -53,6 +56,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -1588,6 +1592,148 @@ class PrivateMessageComposeViewModelTest {
         runCurrent()
         assertEquals("automatic hydration must not save an identical draft", writesBeforeRestore, draftStore.saveCount)
     }
+
+    @Test
+    fun `ED45 ED170 Masquer acknowledges a restored attempt before recreation`() = runTest {
+        val repository = uncertainRepository()
+        val attempt = seedUncertainAttempt()
+        val vm = viewModel(repository)
+        settle()
+        val adapter = vm.chromeAdapter()
+        val key = vm.editorEvents.state.visibleEvent!!.key
+        adapter.barActions.onEvent(key, EditorEventAction.Details)
+        adapter.dismissDetails(key)
+        settle()
+        assertNull(adapter.detail)
+        assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
+        assertNull(vm.state.value.submitError)
+        // The acknowledgement reserves PersistingAttempt: no « Envoi… » may outlive it.
+        vm.assertNoSendingEvent()
+        assertNull(vm.editorEvents.state.visibleEvent)
+        assertNull(draftStore.entries[attempt.key]?.attempt)
+        assertEquals("uncertain body", vm.bodyFieldState.text.toString())
+        vm.viewModelScope.cancel()
+
+        val recreated = viewModel(repository)
+        settle()
+        assertEquals(EditorSubmissionState.Ready, recreated.state.value.submission)
+        assertNull(recreated.state.value.submitError)
+        assertTrue(recreated.editorEvents.state.events.isEmpty())
+        assertEquals("uncertain body", draftStore.saved[attempt.key]?.body)
+        coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `ED45 ED170 Masquer also acknowledges a freshly failed submission`() = runTest {
+        val repository = uncertainRepository()
+        val vm = viewModel(repository)
+        vm.onRecipientsChanged("alice")
+        vm.onSubjectChanged("Sujet")
+        vm.editBody(TextFieldValue("sent body"))
+        vm.onSubmit()
+        settle()
+        assertTrue(vm.state.value.submission is EditorSubmissionState.Uncertain)
+        val adapter = vm.chromeAdapter()
+        val key = vm.editorEvents.state.visibleEvent!!.key
+        adapter.barActions.onEvent(key, EditorEventAction.Details)
+        adapter.dismissDetails(key)
+        settle()
+        assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
+        assertNull(vm.state.value.submitError)
+        vm.assertNoSendingEvent()
+        assertNull(vm.editorEvents.state.visibleEvent)
+        assertNull(draftStore.entries[EditorDraftKey.mpCompose()]?.attempt)
+        assertEquals("sent body", vm.bodyFieldState.text.toString())
+        coVerify(exactly = 1) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `ED85 ED170 Back closes uncertainty visually and recreation offers it again`() = runTest {
+        val repository = uncertainRepository()
+        val attempt = seedUncertainAttempt()
+        val vm = viewModel(repository)
+        settle()
+        val adapter = vm.chromeAdapter()
+        val key = vm.editorEvents.state.visibleEvent!!.key
+        adapter.barActions.onEvent(key, EditorEventAction.Details)
+        adapter.back()
+        settle()
+        assertNull(adapter.detail)
+        assertNull(vm.editorEvents.state.visibleEvent)
+        assertEquals(EditorSubmissionState.Uncertain(attempt), vm.state.value.submission)
+        assertEquals(attempt, draftStore.entries[attempt.key]?.attempt?.token)
+        vm.viewModelScope.cancel()
+
+        val recreated = viewModel(repository)
+        settle()
+        assertEquals(EditorSubmissionState.Uncertain(attempt), recreated.state.value.submission)
+        assertEquals(uncertainError, recreated.state.value.submitError)
+        assertEquals(EditorEventContent.Problem(uncertainError), recreated.editorEvents.state.visibleEvent?.content)
+        coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `ED170 Masquer preserves uncertainty on failed durable acknowledgement and recreation`() = runTest {
+        val repository = uncertainRepository()
+        val attempt = seedUncertainAttempt()
+        val vm = viewModel(repository)
+        settle()
+        draftStore.finishFailure = IOException("disk unavailable")
+        val finishCalls = draftStore.finishCalls
+        val adapter = vm.chromeAdapter()
+        val key = vm.editorEvents.state.visibleEvent!!.key
+        adapter.barActions.onEvent(key, EditorEventAction.Details)
+        adapter.dismissDetails(key)
+        settle()
+        assertEquals(finishCalls + 1, draftStore.finishCalls)
+        assertEquals(EditorSubmissionState.Uncertain(attempt), vm.state.value.submission)
+        assertEquals(uncertainError, vm.state.value.submitError)
+        // The kept uncertainty is signalled again, bound to its attempt, without a dangling « Envoi… ».
+        vm.assertNoSendingEvent()
+        val again = checkNotNull(vm.editorEvents.state.visibleEvent)
+        assertEquals(EditorEventContent.Problem(uncertainError), again.content)
+        assertEquals(attempt, vm.editorEvents.uncertainAttempt(again.key))
+        assertEquals(attempt, draftStore.entries[attempt.key]?.attempt?.token)
+        assertEquals("uncertain body", vm.bodyFieldState.text.toString())
+        vm.viewModelScope.cancel()
+
+        val recreated = viewModel(repository)
+        settle()
+        assertEquals(EditorSubmissionState.Uncertain(attempt), recreated.state.value.submission)
+        assertEquals(EditorEventContent.Problem(uncertainError), recreated.editorEvents.state.visibleEvent?.content)
+        coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    private val uncertainError = EditorErrors.uncertain(EditorErrorSurface.MessageCompose)
+
+    private fun uncertainRepository(): PrivateMessageWriteRepository {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        return repository
+    }
+
+    private suspend fun seedUncertainAttempt(): EditorDraftStore.AttemptToken {
+        val draft = EditorDraftStore.Draft(body = "uncertain body", subject = "Sujet", recipients = "alice",
+            isPrivate = true)
+        val started = draftStore.beginAttempt("tester", EditorDraftKey.mpCompose(), draft, 0)
+        val attempt = (started as EditorDraftStore.BeginAttemptResult.Started).token
+        draftStore.finishAttempt(attempt, EditorDraftStore.AttemptOutcome.UNCERTAIN)
+        return attempt
+    }
+
+    private fun TestScope.settle() {
+        Snapshot.sendApplyNotifications()
+        advanceUntilIdle()
+    }
+
+    private fun PrivateMessageComposeViewModel.chromeAdapter() = PrivateMessageComposeChromeAdapter(
+        { state.value }, bodyFieldState, editorEvents, chromeActions(), {}, {}, chromeMemory,
+    )
+
+    private fun PrivateMessageComposeViewModel.assertNoSendingEvent() =
+        assertTrue(editorEvents.state.events.none { it.content is EditorEventContent.InProgress })
 
     @Test
     fun previewIsClearedWhenHiddenAndBeforeReopening() = runTest {
