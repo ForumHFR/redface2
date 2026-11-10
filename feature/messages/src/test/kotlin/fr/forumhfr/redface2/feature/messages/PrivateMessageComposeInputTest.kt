@@ -88,6 +88,7 @@ class PrivateMessageComposeInputTest {
     private val store = VersionedEditorDraftStore()
     private val uploads = FakeUploadRepository()
     private val repository = mockk<PrivateMessageWriteRepository>()
+    private var nowNanos = 0L
 
     @Test
     fun chipInputBlocksArmingAndPostUntilCommaThenPreservesNetworkCsv() {
@@ -97,7 +98,7 @@ class PrivateMessageComposeInputTest {
         compose.runOnIdle { vm.bodyFieldState.edit { replace(0, length, "body") } }
         compose.waitForIdle()
         compose.runOnIdle {
-            assertEquals(EditorRecipientState(listOf("alice", " Bob  with spaces"), "tail"),
+            assertEquals(EditorRecipientState(listOf("alice", "Bob  with spaces"), "tail"),
                 vm.state.value.recipientState)
             assertFalse(vm.state.value.canSubmit)
             vm.onSubmit()
@@ -110,11 +111,26 @@ class PrivateMessageComposeInputTest {
             assertTrue(vm.state.value.canSubmit)
             vm.onSubmit()
             assertNotNull(vm.state.value.armToken)
+            val arm = vm.state.value.armToken
+            // ED-164: exercise the real confirmation guard, with the same displayed token.
             vm.onSubmitConfirmed(vm.state.value.armToken)
+            assertEquals(arm, vm.state.value.armToken)
+            nowNanos += 399_000_000L
+            vm.onSubmitConfirmed(arm)
+            assertEquals(arm, vm.state.value.armToken)
         }
+        coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+        val attemptGate = CompletableDeferred<Unit>()
+        store.beginGate = attemptGate
+        compose.runOnIdle {
+            nowNanos += 1_000_000L
+            vm.onSubmitConfirmed(vm.state.value.armToken)
+            assertTrue(vm.state.value.isSubmitting)
+        }
+        compose.runOnIdle { attemptGate.complete(Unit) }
         compose.waitUntil { !vm.state.value.isSubmitting }
         coVerify(exactly = 1) {
-            repository.submitNewMessage(any(), "alice, Bob  with spaces,tail", "title", "body", any())
+            repository.submitNewMessage(any(), "alice,Bob  with spaces,tail", "title", "body", any())
         }
     }
 
@@ -205,7 +221,7 @@ class PrivateMessageComposeInputTest {
         val token = EditorDraftStore.AttemptToken(checkNotNull(store.activeOwner), key, "hydration", 1)
         store.entries[key] = EditorDraftStore.DraftEntry(
             draft = EditorDraftStore.Draft(
-                body = "recovered body", subject = "title", recipients = "alice", isPrivate = true,
+                body = "recovered body", subject = "title", recipients = "alice, bo", isPrivate = true,
             ),
             version = token.version,
             attempt = EditorDraftStore.Attempt(token, EditorDraftStore.AttemptStatus.UNCERTAIN),
@@ -213,6 +229,10 @@ class PrivateMessageComposeInputTest {
         setFieldContent(confirmBeforePosting = false)
 
         compose.runOnIdle {
+            // ED-110: historical CSV has no D4 buffer; both recipients are already committed.
+            assertEquals(EditorRecipientState(listOf("alice", "bo")), vm.state.value.recipientState)
+            assertEquals("alice,bo", vm.state.value.recipientState.csv)
+            assertTrue(vm.state.value.canSubmit)
             val state = vm.bodyFieldState
             assertEquals("recovered body", state.text.toString())
             assertFalse(state.undoState.canUndo)
@@ -330,7 +350,7 @@ class PrivateMessageComposeInputTest {
                 uploadRepository = uploads,
                 imageUploadReader = FakeImageUploadReader(),
                 diagnostics = DiagnosticsLog(),
-                clock = DiagnosticsClock { 0L },
+                clock = DiagnosticsClock { nowNanos },
                 smileyRepository = mockk(relaxed = true),
                 hfrFavoriteSmileyRepository = FakeHfrFavoriteSmileyRepository(),
                 smileyLocalCollections = FakeSmileyLocalCollections(),

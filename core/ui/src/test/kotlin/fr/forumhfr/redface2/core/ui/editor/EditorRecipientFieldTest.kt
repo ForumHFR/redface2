@@ -60,8 +60,12 @@ class EditorRecipientFieldTest {
     private val subject = mutableStateOf("")
     private val enabled = mutableStateOf(true)
     private var accept = true
+    private var subjectChanges = 0
     private val recipientInput = EditorRecipientInput({ recipients.value }, { if (accept) recipients.value = it })
-    private val subjectInput = EditorSubjectInput(70, { subject.value }, { if (accept) subject.value = it })
+    private val subjectInput = EditorSubjectInput(70, { subject.value }, {
+        subjectChanges += 1
+        if (accept) subject.value = it
+    })
     private var connection: InputConnection? = null
     private lateinit var info: EditorInfo
     private val interceptor = PlatformTextInputInterceptor { request, next ->
@@ -93,18 +97,18 @@ class EditorRecipientFieldTest {
         field().assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("")))
     }
 
-    @Test fun `real clipboard CSV keeps spacing order duplicates and unterminated tail`() {
+    @Test fun `real clipboard trims chip edges merges exact duplicates and preserves inner spaces and tail`() {
         show()
-        paste("Alice, Bob  with spaces,Alice, unfinished ")
+        paste(" Alice , Bob  with spaces,Alice, unfinished ")
         compose.runOnIdle {
-            assertEquals(listOf("Alice", " Bob  with spaces", "Alice"), recipients.value.chips)
+            assertEquals(listOf("Alice", "Bob  with spaces"), recipients.value.chips)
             assertEquals(" unfinished ", recipients.value.buffer)
-            assertEquals("Alice, Bob  with spaces,Alice", recipients.value.csv)
+            assertEquals("Alice,Bob  with spaces", recipients.value.csv)
             assertEquals(recipients.value, EditorRecipientState.decode(recipients.value.encode()))
         }
         field().performTextInput(",")
         compose.runOnIdle {
-            assertEquals(" unfinished ", recipients.value.chips.last())
+            assertEquals("unfinished", recipients.value.chips.last())
             assertEquals("", recipients.value.buffer)
         }
     }
@@ -113,9 +117,68 @@ class EditorRecipientFieldTest {
         show()
         paste(", ,Alice,, Bob,")
         compose.runOnIdle {
-            assertEquals(EditorRecipientState(listOf("Alice", " Bob")), recipients.value)
-            assertEquals("Alice, Bob", recipients.value.csv)
+            assertEquals(EditorRecipientState(listOf("Alice", "Bob")), recipients.value)
+            assertEquals("Alice,Bob", recipients.value.csv)
         }
+    }
+
+    @Test fun `IME composition is replaced by committed text with a comma and preserves the remaining caret`() {
+        show()
+        field().requestFocus()
+        compose.runOnIdle {
+            val ime = checkNotNull(connection)
+            ime.setComposingText(" Bob  with spaces ", 1)
+            assertEquals(EditorRecipientState(buffer = " Bob  with spaces "), recipients.value)
+            // commitText replaces the whole composing region, including the final comma.
+            ime.commitText(" Bob  with spaces ,", 1)
+            assertEquals(EditorRecipientState(listOf("Bob  with spaces")), recipients.value)
+            ime.setComposingText("Eve", 1)
+            ime.commitText("Eve,tail", 1)
+            assertEquals(EditorRecipientState(listOf("Bob  with spaces", "Eve"), "tail"), recipients.value)
+            assertEquals("tail", recipientInput.buffer.text.toString())
+            assertEquals(TextRange(4), recipientInput.buffer.selection)
+        }
+        field().assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("tail")))
+    }
+
+    @Test fun `duplicate already committed in an earlier transaction is merged without changing case`() {
+        show()
+        field().performTextInput("Alice,")
+        field().performTextInput(" Alice ,alice,")
+        compose.runOnIdle {
+            assertEquals(EditorRecipientState(listOf("Alice", "alice")), recipients.value)
+        }
+    }
+
+    @Test fun `empty recipient list adds no space above the editable field`() {
+        show()
+        val top = compose.onNodeWithTag("headers").fetchSemanticsNode().positionInRoot.y
+        assertEquals(top, field().fetchSemanticsNode().positionInRoot.y)
+        field().performTextInput("Alice,")
+        assertTrue(field().fetchSemanticsNode().positionInRoot.y > top)
+        compose.onNodeWithContentDescription("Retirer Alice")
+            .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+        assertEquals(top, field().fetchSemanticsNode().positionInRoot.y)
+    }
+
+    @Test fun `accepted addition and removal announce in French on the same live node`() {
+        show()
+        field().performTextInput("Alice,")
+        val added = compose.onNodeWithContentDescription("Destinataire ajouté : Alice.", useUnmergedTree = true)
+        added.assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))
+        val liveNode = added.fetchSemanticsNode().id
+        // Duplicate validation consumes the buffer without emitting another addition.
+        val change = recipientInput.change
+        field().performTextInput(" Alice ,")
+        compose.runOnIdle { assertEquals(change, recipientInput.change) }
+        compose.onNodeWithContentDescription("Retirer Alice")
+            .performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+        val removed = compose.onNodeWithContentDescription("Destinataire retiré : Alice.", useUnmergedTree = true)
+        removed.assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))
+        assertEquals(liveNode, removed.fetchSemanticsNode().id)
+        paste("Alice,Bob,")
+        compose.onNodeWithContentDescription("Destinataires ajoutés : Alice, Bob.", useUnmergedTree = true)
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))
     }
 
     @Test fun `next focuses subject without validating and empty backspace preserves chips`() {
@@ -150,6 +213,13 @@ class EditorRecipientFieldTest {
         val chip = compose.onNodeWithContentDescription("Retirer Alice")
         chip.assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
         assertEquals("Retirer Alice", chip.fetchSemanticsNode().config[SemanticsActions.OnClick].label)
+        compose.runOnIdle { accept = false }
+        chip.performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
+        compose.runOnIdle {
+            assertEquals(EditorRecipientState(listOf("Alice", "Bob"), "tail"), recipients.value)
+            assertEquals(null, recipientInput.change)
+            accept = true
+        }
         chip.performSemanticsAction(SemanticsActions.OnClick) { assertTrue(it()) }
         compose.runOnIdle { assertEquals(EditorRecipientState(listOf("Bob"), "tail"), recipients.value) }
         compose.runOnIdle { enabled.value = false }
@@ -158,20 +228,45 @@ class EditorRecipientFieldTest {
         compose.runOnIdle { assertEquals(listOf("Bob"), recipients.value.chips) }
     }
 
-    @Test fun `subject caps typing and real paste at 70 and announces counter and truncation`() {
+    @Test fun `subject caps typing and real paste at 70 and only truncation is a live region`() {
         show()
         val field = compose.onNodeWithTag("subject")
         field.performTextInput("é".repeat(70))
-        compose.onNodeWithText("70 / 70 caractères", useUnmergedTree = true).assertExists()
+        val counter = compose.onNodeWithText("70 / 70 caractères", useUnmergedTree = true)
+        counter.assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.LiveRegion))
         field.performTextInput("x")
-        val announcement = "70 / 70 caractères Sujet tronqué à 70 caractères."
-        compose.onNodeWithText(announcement, useUnmergedTree = true)
+        val announcement = "Sujet tronqué à 70 caractères."
+        val notice = compose.onNodeWithContentDescription(announcement, useUnmergedTree = true)
+        notice
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))
+        counter.assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.LiveRegion))
+        field.assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.LiveRegion))
         field.assert(SemanticsMatcher.expectValue(SemanticsProperties.MaxTextLength, 70))
+        val changes = subjectChanges
         field.performTextInputSelection(TextRange(0, 70))
+        compose.runOnIdle {
+            assertEquals(changes, subjectChanges)
+            assertTrue(subjectInput.truncated)
+        }
         paste("new subject".repeat(10), "subject")
         compose.runOnIdle { assertEquals("new subject".repeat(10).take(70), subject.value) }
-        compose.onNodeWithText(announcement, useUnmergedTree = true).assertExists()
+        notice.assertExists()
+    }
+
+    @Test fun `subject selection alone never calls the owner even when edits would be refused`() {
+        subject.value = "subject"
+        show()
+        val field = compose.onNodeWithTag("subject")
+        field.requestFocus()
+        for ((acceptEdits, selection) in listOf(true to TextRange(2), false to TextRange(1, 4))) {
+            compose.runOnIdle { accept = acceptEdits }
+            field.performTextInputSelection(selection)
+            compose.runOnIdle {
+                assertEquals(0, subjectChanges)
+                assertEquals("subject", subject.value)
+                assertEquals(selection, subjectInput.buffer.selection)
+            }
+        }
     }
 
     @Test fun `owner refusal and replacement before recomposition never diverge from the editable buffer`() {
@@ -182,6 +277,7 @@ class EditorRecipientFieldTest {
             checkNotNull(connection).commitText("rejected,tail", 1)
             assertEquals(EditorRecipientState(), recipients.value)
             assertEquals("", recipientInput.buffer.text.toString())
+            assertEquals(null, recipientInput.change)
             accept = true
             recipients.value = EditorRecipientState(listOf("restored"), "saved tail")
             checkNotNull(connection).commitText("stale,", 1)
@@ -207,7 +303,7 @@ class EditorRecipientFieldTest {
             InterceptPlatformTextInput(interceptor) {
                 RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
                     val focus = remember { FocusRequester() }
-                    Column {
+                    Column(Modifier.testTag("headers")) {
                         EditorRecipientField(recipients.value, recipientInput, { focus.requestFocus() },
                             Modifier.testTag("recipients"), enabled = enabled.value)
                         EditorSubjectField(subject.value, subjectInput,

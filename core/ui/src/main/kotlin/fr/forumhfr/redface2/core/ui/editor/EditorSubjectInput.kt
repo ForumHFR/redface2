@@ -28,8 +28,10 @@ class EditorSubjectInput(
             val exceedsLimit = length > maxLength
             if (exceedsLimit) replace(maxLength, length, "")
             val next = asCharSequence().toString()
-            onValueChange(next)
-            if (readValue() == next) truncated = exceedsLimit else revertAllChanges()
+            val changed = next != originalText.toString()
+            if (changed) onValueChange(next)
+            if (readValue() != next) revertAllChanges()
+            else if (changed || exceedsLimit) truncated = exceedsLimit
         }
     }
 
