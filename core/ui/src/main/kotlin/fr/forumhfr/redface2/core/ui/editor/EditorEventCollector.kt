@@ -106,12 +106,13 @@ class EditorEventCollector(private val errors: EditorErrorMappers) : EditorHostE
         }?.let { dispatch(EditorEventInput.DurableWriteSucceeded(state.session, it.ref)) }
     }
     private fun observeSubmission(previous: EditorEventProjection, current: EditorEventProjection) {
-        if (previous.submission == current.submission) return
-        if (current.submission is EditorSubmissionState.PersistingAttempt) {
-            sending = OperationRef.Submission(requireNotNull(current.submissionOperation))
+        val operation = current.submissionOperation
+        if (operation != null && operation != previous.submissionOperation) {
+            sending = OperationRef.Submission(operation)
             deliver(requireNotNull(sending), EditorEventContent.InProgress(EditorText(R.string.editor_event_sending)),
                 started = true)
         }
+        if (previous.submission == current.submission) return
         val submission = current.submission
         if (submission is EditorSubmissionState.Succeeded ||
             submission is EditorSubmissionState.Uncertain && submission.accepted
@@ -127,9 +128,9 @@ class EditorEventCollector(private val errors: EditorErrorMappers) : EditorHostE
         }
     }
     /**
-     * ED-45/170: acknowledging an uncertain attempt reserves PersistingAttempt without sending. Leaving it for
-     * Ready or a kept uncertainty retires the dangling « Envoi… » (a delivered problem already finished the
-     * operation, so this is then a no-op), and a failed acknowledgement signals the kept uncertainty again.
+     * ED-45/170: a failed acknowledgement signals the kept uncertainty again, even with an unchanged error.
+     * Leaving PersistingAttempt without Sending also completes any actual send reservation (e.g. a failed
+     * retry preparation); acknowledgement itself never registers a sending operation.
      */
     private fun settleUnsentReservation(previous: EditorEventProjection, current: EditorEventProjection) {
         val uncertain = (current.submission as? EditorSubmissionState.Uncertain)?.takeUnless { it.accepted }

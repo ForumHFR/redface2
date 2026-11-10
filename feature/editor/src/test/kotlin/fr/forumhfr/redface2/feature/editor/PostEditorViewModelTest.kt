@@ -87,6 +87,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
 import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorText
+import fr.forumhfr.redface2.core.ui.editor.OperationRef
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.toEditorError
@@ -1414,12 +1415,17 @@ class PostEditorViewModelTest {
         val adapter = vm.chromeAdapter()
         val key = vm.chromeEvents.state.visibleEvent!!.key
         adapter.barActions.onEvent(key, EditorEventAction.Details)
+        val acknowledgement = CompletableDeferred<Unit>()
+        draftStore.finishGate = acknowledgement
         adapter.dismissDetails(key)
+        assertTrue(vm.state.value.submission is EditorSubmissionState.PersistingAttempt)
+        vm.assertNoSendingEvent(expectedSubmissions = 0)
+        acknowledgement.complete(Unit)
         settleBody()
         assertNull(adapter.detail)
         assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
-        // The acknowledgement reserves PersistingAttempt: no « Envoi… » may outlive it (Fable PR 4 r3 B1).
-        vm.assertNoSendingEvent()
+        // Acknowledgement must never register a send, including while storage is suspended.
+        vm.assertNoSendingEvent(expectedSubmissions = 0)
         assertNull(vm.chromeEvents.state.visibleEvent)
         assertNull(draftStore.entries[attempt.key]?.attempt)
         assertEquals("uncertain body", vm.bodyFieldState.text.toString())
@@ -1446,10 +1452,15 @@ class PostEditorViewModelTest {
         val adapter = vm.chromeAdapter()
         val key = vm.chromeEvents.state.visibleEvent!!.key
         adapter.barActions.onEvent(key, EditorEventAction.Details)
+        val acknowledgement = CompletableDeferred<Unit>()
+        draftStore.finishGate = acknowledgement
         adapter.dismissDetails(key)
+        assertTrue(vm.state.value.submission is EditorSubmissionState.PersistingAttempt)
+        vm.assertNoSendingEvent(expectedSubmissions = 1)
+        acknowledgement.complete(Unit)
         settleBody()
         assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
-        vm.assertNoSendingEvent()
+        vm.assertNoSendingEvent(expectedSubmissions = 1)
         assertNull(vm.chromeEvents.state.visibleEvent)
         assertNull(draftStore.entries[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)]?.attempt)
         assertEquals("sent body", vm.bodyFieldState.text.toString())
@@ -1627,13 +1638,18 @@ class PostEditorViewModelTest {
         val adapter = vm.chromeAdapter()
         val key = vm.chromeEvents.state.visibleEvent!!.key
         adapter.barActions.onEvent(key, EditorEventAction.Details)
+        val acknowledgement = CompletableDeferred<Unit>()
+        draftStore.finishGate = acknowledgement
         adapter.dismissDetails(key)
+        assertTrue(vm.state.value.submission is EditorSubmissionState.PersistingAttempt)
+        vm.assertNoSendingEvent(expectedSubmissions = 0)
+        acknowledgement.complete(Unit)
         settleBody()
         assertEquals(finishCalls + 1, draftStore.finishCalls)
         assertEquals(EditorSubmissionState.Uncertain(attempt), vm.state.value.submission)
         assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
-        // The kept uncertainty is signalled again in this session, without a dangling « Envoi… » (r3 I2).
-        vm.assertNoSendingEvent()
+        // The kept uncertainty is signalled again without ever registering a send for acknowledgement.
+        vm.assertNoSendingEvent(expectedSubmissions = 0)
         assertEquals(EditorEventContent.Problem(EditorErrors.uncertain), vm.chromeEvents.state.visibleEvent?.content)
         assertEquals(attempt, draftStore.entries[attempt.key]?.attempt?.token)
         assertEquals("uncertain body", vm.bodyFieldState.text.toString())
@@ -1697,8 +1713,12 @@ class PostEditorViewModelTest {
             { state.value }, bodyFieldState, chromeEvents, { intents += it; dispatch(it) }, {}, {}, chromeMemory,
         )
 
-    private fun PostEditorViewModel.assertNoSendingEvent() =
+    private fun PostEditorViewModel.assertNoSendingEvent(expectedSubmissions: Int? = null) {
         assertTrue(chromeEvents.state.events.none { it.content is EditorEventContent.InProgress })
+        expectedSubmissions?.let { expected ->
+            assertEquals(expected, chromeEvents.state.currentOperations.count { it.ref is OperationRef.Submission })
+        }
+    }
 
     @Test
     fun `successful draft write preserves a newer form loading error`() = runTest {

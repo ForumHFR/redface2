@@ -48,7 +48,7 @@ class PostEditorChromeEventsTest {
         val other = host.error(EditorErrors.invalidForm, operation = 2)
         assertEquals(network, host.events.state.visibleEvent)
         host.transition(host.state.copy(submission = EditorSubmissionState.PersistingAttempt(
-            SubmissionToken(1, host.session))))
+            SubmissionToken(1, host.session)), submitError = null))
         assertTrue(validation !in host.events.state.events)
         assertTrue(network !in host.events.state.events)
         assertTrue(other in host.events.state.events)
@@ -69,8 +69,26 @@ class PostEditorChromeEventsTest {
             key = progress.key.copy(occurrence = progress.key.occurrence + 1))))
         assertNull(host.events.state.visibleEvent)
         host.transition(host.state.copy(submission = EditorSubmissionState.PersistingAttempt(
-            SubmissionToken(2, host.session))))
+            SubmissionToken(2, host.session)), submitError = null))
         assertTrue(host.events.state.visibleEvent!!.content is EditorEventContent.InProgress)
+    }
+
+    @Test fun `ED44 ED170 post retry starts only when launch resets the reserved error`() {
+        host.transition(host.state.copy(submission = EditorSubmissionState.Uncertain(attempt),
+            submitError = EditorErrors.uncertain))
+        val uncertain = host.events.state.visibleEvent!!
+        host.transition(host.state.copy(submitError = null))
+        host.transition(host.state.copy(submitError = EditorErrors.missingTitle))
+        val retained = host.events.state.events
+        host.transition(host.state.copy(submission = EditorSubmissionState.PersistingAttempt(
+            SubmissionToken(1, host.session))))
+        assertEquals(retained, host.events.state.events)
+        assertEquals(uncertain, host.events.state.visibleEvent)
+        host.transition(host.state.copy(submitError = null))
+        assertTrue(host.events.state.events.single().content is EditorEventContent.InProgress)
+        val sending = host.events.state
+        host.transition(host.state)
+        assertEquals(sending, host.events.state)
     }
 
     @Test fun `missingSubcat remains Certain and completes the submission through its error event`() {
