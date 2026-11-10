@@ -244,13 +244,13 @@ class PrivateMessageReplyInputTest {
         val error = context.getString(fr.forumhfr.redface2.core.ui.R.string.editor_summary_hash) +
             ", Afficher les détails"
         compose.onNodeWithContentDescription(error).assertIsDisplayed()
-        compose.onNodeWithTag("editor-bar-submit").assertIsNotEnabled()
+        compose.onNodeWithTag("editor-bar-submit-shape").assertIsNotEnabled()
 
         compose.runOnIdle { refresh.complete(replyForm(quote).copy(hashCheck = "refreshed-private-hash")) }
         compose.waitUntil { !vm.state.value.isLoadingForm }
         assertEquals(node, field().assertIsFocused().fetchSemanticsNode().id)
         compose.onNodeWithContentDescription(error).assertIsDisplayed()
-        compose.onNodeWithTag("editor-bar-submit").assertIsEnabled()
+        compose.onNodeWithTag("editor-bar-submit-shape").assertIsEnabled()
         compose.runOnIdle {
             assertTrue(vm.state.value.canSubmit)
             assertEquals(quote + "body", vm.bodyFieldState.text.toString())
