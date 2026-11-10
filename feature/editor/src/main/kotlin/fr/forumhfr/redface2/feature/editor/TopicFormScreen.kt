@@ -213,7 +213,9 @@ private fun TopicFormChrome(
         host.submitState, host.submitActions, host.imageActions, host::closeRequested, modifier = modifier,
         onOpenHeader = adapter::openHeader, headerLabel = adapter.headerLabel(), bodyFocusRequester = focus,
         bodyScrollState = scroll, inputTransformation = transformation, autoFocus = true,
-        surfaceFocus = host.focusMemory, bodyCaretRevealResetKey = bodyCaretRevealResetKey, onSystemBack = back,
+        surfaceFocus = host.focusMemory,
+        bodyFocusRestoreAllowed = host.surface == null && host.detail == null && !state.isPreviewVisible,
+        bodyCaretRevealResetKey = bodyCaretRevealResetKey, onSystemBack = back,
         fieldArea = { draft ->
             EditorPreview(state.isPreviewVisible, state.preview, body, focus, PostMediaDiskCachePolicy.ENABLED,
                 stringResource(R.string.editor_preview_title), Modifier.testTag("topic-form-preview"), draft)

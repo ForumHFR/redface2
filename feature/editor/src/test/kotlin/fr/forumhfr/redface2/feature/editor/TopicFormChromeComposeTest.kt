@@ -65,7 +65,9 @@ class TopicFormChromeComposeTest {
             EditorScaffold(fixture.body, EditorWindowMetrics(if (compact) 400.dp else 740.dp, 0.dp, 0.dp),
                 a.title(), a.context(), projected, a.host.barActions, a.host.submitState, a.host.submitActions,
                 a.host.imageActions, a.host::closeRequested, onOpenHeader = a::openHeader,
-                headerLabel = a.headerLabel(), bodyFocusRequester = focus, onSystemBack = { a.back() },
+                headerLabel = a.headerLabel(), bodyFocusRequester = focus,
+                bodyFocusRestoreAllowed = a.host.surface == null && a.host.detail == null,
+                onSystemBack = { a.back() },
                 overlay = { restore, body ->
                     TopicFormEventDetails(a, fixture.body, restore) {
                         TopicFormHeaderPanel(a, fixture.body, restore, body)
