@@ -151,28 +151,41 @@ class EditorBaselineRoborazziTest {
         previewLabel: String,
     ) {
         for (surface in listOf(Surface.NewTopic, Surface.FirstPost)) {
-            for (scene in TopicScene.entries) {
-                val firstPostOnly = scene in setOf(TopicScene.Unsupported, TopicScene.MissingRoute)
-                if (surface == Surface.NewTopic && firstPostOnly) continue
-                for (isDark in listOf(false, true)) {
-                    compose.runOnIdle {
-                        dark.value = isDark
-                        scenario.value = Scenario(surface, filled = true, topicScene = scene)
-                    }
-                    compose.waitForIdle()
-                    when (scene) {
-                        TopicScene.Header, TopicScene.Unsupported, TopicScene.MissingRoute ->
-                            compose.onNodeWithContentDescription("Modifier le titre", substring = true).performClick()
-                        TopicScene.Poll -> compose.onNodeWithContentDescription("Sondage présent, consulter")
-                            .performClick()
-                        TopicScene.Restore -> compose.onNodeWithContentDescription(
-                            "Brouillon retrouvé, restaurer ou ignorer").performClick()
-                        TopicScene.Preview -> compose.onNodeWithContentDescription(previewLabel).performClick()
-                        else -> Unit
-                    }
-                    val name = "${surface.fileName}_${scene.name}_${orientation}_fs${fontScale}_dark$isDark"
-                    record(name, orientation, focus)
+            captureTopicSurface(surface, orientation, fontScale, scenario, dark, focus, previewLabel)
+        }
+    }
+
+    @Suppress("LongParameterList") // One surface plus the same capture environment as captureTopics.
+    private fun captureTopicSurface(
+        surface: Surface,
+        orientation: String,
+        fontScale: Float,
+        scenario: androidx.compose.runtime.MutableState<Scenario>,
+        dark: androidx.compose.runtime.MutableState<Boolean>,
+        focus: FocusManager,
+        previewLabel: String,
+    ) {
+        for (scene in TopicScene.entries) {
+            val firstPostOnly = scene in setOf(TopicScene.Unsupported, TopicScene.MissingRoute)
+            if (surface == Surface.NewTopic && firstPostOnly) continue
+            for (isDark in listOf(false, true)) {
+                compose.runOnIdle {
+                    dark.value = isDark
+                    scenario.value = Scenario(surface, filled = true, topicScene = scene)
                 }
+                compose.waitForIdle()
+                when (scene) {
+                    TopicScene.Header, TopicScene.Unsupported, TopicScene.MissingRoute ->
+                        compose.onNodeWithContentDescription("Modifier le titre", substring = true).performClick()
+                    TopicScene.Poll -> compose.onNodeWithContentDescription("Sondage présent, consulter")
+                        .performClick()
+                    TopicScene.Restore -> compose.onNodeWithContentDescription(
+                        "Brouillon retrouvé, restaurer ou ignorer").performClick()
+                    TopicScene.Preview -> compose.onNodeWithContentDescription(previewLabel).performClick()
+                    else -> Unit
+                }
+                val name = "${surface.fileName}_${scene.name}_${orientation}_fs${fontScale}_dark$isDark"
+                record(name, orientation, focus)
             }
         }
     }

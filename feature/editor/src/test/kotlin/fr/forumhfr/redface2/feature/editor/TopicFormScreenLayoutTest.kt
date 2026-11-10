@@ -22,6 +22,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -44,6 +45,7 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityOptionsCompat
 import androidx.core.graphics.Insets
@@ -105,7 +107,7 @@ class TopicFormScreenLayoutTest {
         compose.onNodeWithText("Titre du sujet").assertIsFocused()
         compose.onNodeWithText("Retour au message").performClick()
         field.assertIsFocused()
-        compose.onNodeWithContentDescription(previewLabel).performScrollTo().performClick()
+        compose.onNodeWithContentDescription(previewLabel).assertIsDisplayed().performClick()
         compose.onNodeWithTag("topic-form-preview").assertExists()
         field.assertDoesNotExist()
         compose.runOnIdle { back.onBackPressed() }
@@ -172,8 +174,15 @@ class TopicFormScreenLayoutTest {
         compose.runOnIdle {
             assertEquals(List(2) { TopicFormIntent.ReloadRequested }, intents)
             assertEquals("Bonjour", fixture.body.text.toString())
+            // Mirror the VM's server hydration: replace the buffer and park the caret at its end.
+            // The shared fixture starts with a reversed selection for the surface-return tests.
+            fixture.body.edit {
+                replace(0, length, "Bonjour")
+                selection = TextRange(length)
+            }
             state.value = state.value.copy(draftHydratedFromServer = true, submitError = null, isLoadingForm = true)
         }
+        compose.runOnIdle { assertEquals(TextRange("Bonjour".length), fixture.body.selection) }
         compose.onNode(hasSetTextAction()).performTextInput(" typed")
         for (label in listOf("Mise en forme", "Smileys", "Image")) {
             compose.onNodeWithContentDescription(label).assertIsEnabled()
@@ -267,7 +276,11 @@ class TopicFormScreenLayoutTest {
         }
     }
 
-    @Test fun optionsAndImageUrlReturnTheSameSourceSelectionAndSmileysOpenTheirSheet() {
+    // Robolectric #8460: Dialog + text field loops with width qualifiers above the default 320 dp.
+    // https://github.com/robolectric/robolectric/issues/8460 — geometry is covered separately at 360 dp.
+    @Test
+    @Config(qualifiers = "fr-rFR-w320dp-h640dp-xxhdpi")
+    fun optionsAndImageUrlReturnTheSameSourceSelectionAndSmileysOpenTheirSheet() {
         compose.setContent { Content() }
         val source = compose.onNode(hasSetTextAction()).fetchSemanticsNode().id
         val selection = fixture.body.selection

@@ -25,6 +25,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.core.graphics.Insets
@@ -32,6 +33,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
@@ -175,6 +177,7 @@ class TopicFormRestorationScreenTest {
 
     private fun checkHydration(keepFocus: Boolean) {
         val gate = CompletableDeferred<TopicForm>()
+        val hydratedBody = "Hydrated line\n".repeat(200)
         var fail = !keepFocus
         coEvery { repository.fetchEditFirstPostForm(any()) } coAnswers {
             if (fail) throw IOException("offline")
@@ -192,11 +195,20 @@ class TopicFormRestorationScreenTest {
                 fail = false
                 model.submit(TopicFormIntent.ReloadRequested)
             }
-            gate.complete(form("Hydrated line\n".repeat(200)))
+            gate.complete(form(hydratedBody))
+        }
+        compose.runOnIdle {
+            assertEquals(hydratedBody, model.bodyFieldState.text.toString())
+            assertEquals(TextRange(hydratedBody.length), model.bodyFieldState.selection)
         }
         if (keepFocus) {
             compose.onNode(hasSetTextAction()).assertIsFocused()
             compose.runOnIdle { assertTrue(inputActive); assertTrue(sessions > 0) }
+            compose.onNode(hasSetTextAction()).performTextInput(" typed")
+            compose.runOnIdle {
+                assertEquals(hydratedBody + " typed", model.bodyFieldState.text.toString())
+                assertEquals(TextRange(hydratedBody.length + " typed".length), model.bodyFieldState.selection)
+            }
         } else {
             compose.onNode(hasSetTextAction()).assertIsNotFocused()
             compose.runOnIdle {
@@ -245,12 +257,13 @@ class TopicFormRestorationScreenTest {
             val (activity, editor) = requireNotNull(displayed)
             key(activity) {
                 CompositionLocalProvider(LocalLifecycleOwner provides activity) {
+                    val state by editor.state.collectAsStateWithLifecycle()
                     focusManager = LocalFocusManager.current
                     back = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
                     view = LocalView.current
                     InterceptPlatformTextInput(input) {
                         RedfaceTheme(darkTheme = false, dynamicColor = false) {
-                            TopicFormScreen(route(editor.state.value.mode), { _, _, _ -> }, { _, _, _, _, _ -> },
+                            TopicFormScreen(route(state.mode), { _, _, _ -> }, { _, _, _, _, _ -> },
                                 viewModel = editor)
                         }
                     }
