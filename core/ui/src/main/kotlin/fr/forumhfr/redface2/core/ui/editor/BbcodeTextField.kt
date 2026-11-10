@@ -39,6 +39,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
@@ -221,7 +222,9 @@ fun BbcodeTextField(
     )
     val context = LocalContext.current
     val fieldContext = remember(context) { createBbcodeTextFieldContext(context) }
-    Box(modifier = modifier.fillMaxWidth()) {
+    // C8: the Box records the range before BTF2's detach-time collapse, the field restores it after.
+    val selectionCheckpoint = remember { SelectionDetachCheckpoint() }
+    Box(modifier = modifier.fillMaxWidth().then(SelectionDetachElement(state, selectionCheckpoint, restore = false))) {
         CompositionLocalProvider(LocalContext provides fieldContext) {
             BasicTextField(
                 state = state,
@@ -235,7 +238,9 @@ fun BbcodeTextField(
                         // A null label lets the native/input-transformation label survive peer merging.
                         onClick(action = onSemanticsClick)
                     })
-                    .focusRequester(focusRequester).onFocusChanged { focused = it.isFocused },
+                    .focusRequester(focusRequester).onFocusChanged { focused = it.isFocused }
+                    // Ahead of BasicTextField's decorator in this chain, so it detaches after the collapse.
+                    .then(SelectionDetachElement(state, selectionCheckpoint, restore = true)),
                 textStyle = LocalTextStyle.current.merge(
                     TextStyle(color = MaterialTheme.colorScheme.onSurface),
                 ),
@@ -337,6 +342,62 @@ private data class BbcodeTextSnapshot(
     val text: String,
     val selection: TextRange,
 )
+
+/**
+ * C8: when a focused field detaches (rotation, recreation, `key` switch), `FocusTargetNode.onDetach`
+ * clears focus and BTF2's decorator collapses an extended selection to its max, in a [TextFieldState]
+ * that outlives the field. `LayoutNode.detach` runs a parent's modifier detach before its children's,
+ * and each chain detaches tail to head. The recorder on the enclosing Box therefore runs before the
+ * collapse, and the restorer, ahead of the decorator in BasicTextField's chain, runs after it. Both
+ * happen in one synchronous detach pass, without any focus operation. Plain holder: never observed.
+ */
+private class SelectionDetachCheckpoint {
+    var recorded: BbcodeTextSnapshot? = null
+}
+
+private data class SelectionDetachElement(
+    val state: TextFieldState,
+    val checkpoint: SelectionDetachCheckpoint,
+    val restore: Boolean,
+) : ModifierNodeElement<SelectionDetachNode>() {
+    override fun create() = SelectionDetachNode(state, checkpoint, restore)
+
+    override fun update(node: SelectionDetachNode) {
+        node.state = state
+        node.checkpoint = checkpoint
+        node.restore = restore
+    }
+}
+
+private class SelectionDetachNode(
+    var state: TextFieldState,
+    var checkpoint: SelectionDetachCheckpoint,
+    var restore: Boolean,
+) : Modifier.Node() {
+    // A record only lives within one detach pass; a reattached recorder drops any leftover.
+    override fun onAttach() {
+        if (!restore) checkpoint.recorded = null
+    }
+
+    override fun onDetach() {
+        if (restore) {
+            restoreCollapsedRange()
+        } else if (!state.selection.collapsed) {
+            checkpoint.recorded = BbcodeTextSnapshot(state.text.toString(), state.selection)
+        }
+    }
+
+    private fun restoreCollapsedRange() {
+        val recorded = checkpoint.recorded ?: return
+        checkpoint.recorded = null
+        val live = BbcodeTextSnapshot(state.text.toString(), state.selection)
+        // Undo only BTF2's bare collapse: same text, caret at the recorded max. Like EditorHeaderPanel,
+        // a selection-only programmatic edit adds no undo entry and bypasses the input transformation.
+        if (live == recorded.copy(selection = TextRange(recorded.selection.max))) {
+            state.edit { selection = recorded.selection }
+        }
+    }
+}
 
 /** Measurement only: unlike ScrollState.viewportSize, this port is available before placement. */
 private fun measuredEditorDecorator(delegate: TextFieldDecorator, onMeasured: ((Int) -> Unit)?): TextFieldDecorator =

@@ -204,6 +204,43 @@ class PostEditorRestorationScreenTest {
         compose.runOnIdle { assertEquals(before, sessions); assertFalse(inputActive) }
     }
 
+    @Test
+    fun ownerRecreationKeepsFocusedReversedBodySelection() {
+        var owner by mutableStateOf(host().get())
+        val model = editor(owner)
+        compose.setContent {
+            key(owner) {
+                CompositionLocalProvider(LocalLifecycleOwner provides owner) {
+                    RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                        PostEditorScreen(request, { _, _, _, _ -> }, viewModel = model)
+                    }
+                }
+            }
+        }
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        val body = "Bonjour le forum"
+        val selection = TextRange(6, 1)
+        // performTextInputSelection sends (min, max): only a field-state edit can pose a reversed range.
+        compose.runOnIdle {
+            model.bodyFieldState.edit {
+                replace(0, length, body)
+                this.selection = selection
+            }
+        }
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(selection, model.bodyFieldState.selection)
+            owner = host().get() // Configuration change: fresh activity owner, same ViewModel.
+        }
+        // The consumed autofocus is not replayed: the focused body was detached, not refocused.
+        compose.onNode(hasSetTextAction()).assertIsNotFocused()
+        compose.runOnIdle {
+            // C8 / R1b-2b: without BbcodeTextField's detach checkpoint, BTF2's collapse would leave (6, 6).
+            assertEquals(body, model.bodyFieldState.text.toString())
+            assertEquals(selection, model.bodyFieldState.selection)
+        }
+    }
+
     @Test fun replyContextComesFromLoadedForm() = checkFormContext(PostEditorMode.Reply, "Sujet de réponse")
     @Test fun editContextComesFromLoadedForm() = checkFormContext(PostEditorMode.Edit, "Sujet modifié")
     @Test fun editContextStaysEmptyWhenFormOmitsSubject() = checkFormContext(PostEditorMode.Edit, "")
