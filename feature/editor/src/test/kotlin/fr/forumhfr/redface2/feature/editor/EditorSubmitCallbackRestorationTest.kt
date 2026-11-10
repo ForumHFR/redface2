@@ -94,6 +94,7 @@ class EditorSubmitCallbackRestorationTest {
         )
         every { model.effects } returns effects.receiveAsFlow()
         every { model.bodyFieldState } returns TextFieldState()
+        every { model.bodyScrollState } returns ScrollState(0)
         every { model.bodyInputTransformation } returns InputTransformation {}
         val received = mutableListOf<TopicFormEffect.SubmitSucceeded>()
         restoration.setContent {

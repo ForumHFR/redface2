@@ -11,7 +11,10 @@ import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.InputModeManager
 import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
@@ -34,6 +37,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptToken
@@ -210,6 +214,76 @@ class EditorScreenLayoutTest {
     }
 
     @Test
+    @Config(qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
+    fun topicInitialDraftReadKeepsBodyComposedAndGeometryStable() {
+        val state = mutableStateOf(topicState())
+        val onIntent: (TopicFormIntent) -> Unit = { intent ->
+            if (intent is TopicFormIntent.SubjectChanged) {
+                state.value = state.value.copy(subject = intent.value)
+            }
+        }
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, dynamicColor = false) {
+                TopicFormContent(
+                    state = state.value,
+                    bodyFieldState = remember { TextFieldState() },
+                    bodyInputTransformation = InputTransformation {},
+                    onIntent = onIntent,
+                    onOpenSmileys = {},
+                )
+            }
+        }
+        for (mode in TopicFormMode.entries) {
+            compose.runOnIdle { state.value = topicState().copy(mode = mode, isInitializing = true) }
+            val field = compose.onNodeWithText("Contenu BBCode").assertIsDisplayed()
+            val fieldId = field.fetchSemanticsNode().id
+            val bounds = field.getUnclippedBoundsInRoot()
+            // Cold open (no restore): the body keeps its pre-restore lock only, so creation accepts early typing.
+            val editableFields = if (mode == TopicFormMode.New) 2 else 1
+            compose.onAllNodes(hasSetTextAction()).assertCountEquals(editableFields)
+            compose.onNodeWithText("Titre du sujet").assertIsEnabled().performTextInput("Titre précoce")
+            compose.runOnIdle {
+                assertEquals("Titre précoce", state.value.subject.text)
+                state.value = state.value.copy(isInitializing = false, isLoadingForm = true)
+            }
+            assertEquals(fieldId, field.fetchSemanticsNode().id)
+            assertEquals(bounds, field.getUnclippedBoundsInRoot())
+            compose.onAllNodes(hasSetTextAction()).assertCountEquals(editableFields)
+        }
+    }
+
+    @Test
+    @Config(qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
+    fun topicRecreationLocksTheTitleUntilTheDraftReadCompletes() {
+        val state = mutableStateOf(topicState())
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, dynamicColor = false) {
+                TopicFormContent(
+                    state = state.value,
+                    bodyFieldState = remember { TextFieldState() },
+                    bodyInputTransformation = InputTransformation {},
+                    onIntent = {},
+                    onOpenSmileys = {},
+                )
+            }
+        }
+        for (mode in TopicFormMode.entries) {
+            compose.runOnIdle {
+                state.value = topicState().copy(mode = mode, isInitializing = true, isRestoringSession = true)
+            }
+            compose.onNodeWithText("Contenu BBCode").assertIsDisplayed()
+            // Read-only but not greyed out: the restore wiring changes nothing visible.
+            compose.onNodeWithText("Titre du sujet").assertIsEnabled().assert(isEditable(false))
+            compose.runOnIdle {
+                state.value = state.value.copy(
+                    isInitializing = false, isRestoringSession = false, subject = TextFieldValue("Titre repris"),
+                )
+            }
+            compose.onNodeWithText("Titre repris").assertIsEnabled().assert(isEditable(true))
+        }
+    }
+
+    @Test
     fun `topic restore is disabled while the seed form loads and during an upload`() {
         val state = mutableStateOf(topicState(restorableDraft = "Brouillon à restaurer").copy(isLoadingForm = true))
         compose.setContent {
@@ -372,6 +446,8 @@ class EditorScreenLayoutTest {
         return unclippedBounds
     }
 
+    private fun isEditable(editable: Boolean) = SemanticsMatcher.expectValue(SemanticsProperties.IsEditable, editable)
+
     private fun topicState(restorableDraft: String? = null) = TopicFormState(
         mode = TopicFormMode.New,
         cat = 23,
@@ -380,6 +456,7 @@ class EditorScreenLayoutTest {
         page = null,
         numreponse = null,
         hasSubcategorySelect = false,
+        hasLoadedForm = true,
         restorableDraft = restorableDraft,
     )
 }

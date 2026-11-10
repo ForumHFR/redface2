@@ -31,6 +31,7 @@ class TopicFormStateTest {
             topicId = null,
             page = null,
             numreponse = null,
+            hasLoadedForm = true,
             subject = TextFieldValue("Titre"),
             bodyText = "Corps",
             hasSubcategorySelect = hasSubcategorySelect,
@@ -45,12 +46,23 @@ class TopicFormStateTest {
             topicId = 35395,
             page = 1,
             numreponse = 1,
+            hasLoadedForm = true,
             subject = TextFieldValue("Titre"),
             bodyText = "Corps",
             selectedSubcat = 401,
             draftHydratedFromServer = true,
             isUploading = isUploading,
         )
+
+    @Test
+    fun contentAloneNeverProvesThatTheFormLoaded() {
+        val states = listOf(newState(false, null), editFirstPostState())
+        states.forEach { state ->
+            assertTrue(state.canSubmit)
+            assertFalse(state.copy(hasLoadedForm = false).canSubmit)
+            assertFalse(state.copy(isInitializing = true).canSubmit)
+        }
+    }
 
     @Test
     fun `New with a cat WITHOUT sub-category allows submit even with a null selectedSubcat`() {

@@ -182,6 +182,7 @@ class EditorBaselineRoborazziTest {
                     page = null,
                     numreponse = null,
                     hasSubcategorySelect = false,
+                    hasLoadedForm = true,
                     subject = TextFieldValue("Sujet de démonstration"),
                     bodyText = draft.text,
                 ),

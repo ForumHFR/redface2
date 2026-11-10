@@ -84,7 +84,9 @@ class EditorSessionRestoration(private val saved: SavedStateHandle, surface: Edi
             allowResume && matches(entry, owner, key) -> EditorSessionRestore.Resume
             else -> EditorSessionRestore.Offer
         }
-        resumed = allowResume && entry?.let { matches(it, owner, key) } == true
+        // Reconciliation may reread a newer revision before the form arrives (D3).
+        // Only invalidate() can revoke a resume already applied by this instance.
+        resumed = resumed || (allowResume && entry?.let { matches(it, owner, key) } == true)
         return result
     }
 

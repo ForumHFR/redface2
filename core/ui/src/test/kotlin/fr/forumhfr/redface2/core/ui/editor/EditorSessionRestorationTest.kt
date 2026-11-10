@@ -297,6 +297,19 @@ class EditorSessionRestorationTest {
         }
     }
 
+    @Test fun `reconciliation before form load keeps the resumed subcategory across another death`() {
+        val saved = checkpoint(subcategory = EditorSessionSubcategory(12))
+        val session = EditorSessionRestoration(saved, surface)
+        assertEquals(EditorSessionRestore.Resume, session.resolve(DraftEntry(draft, 1), owner, key))
+        assertEquals(EditorSessionRestore.Offer,
+            session.resolve(DraftEntry(draft, 2), owner, key, allowResume = false))
+        session.capture(EditorSessionCheckpoint(draft, 3, TextRange.Zero, 0, EditorSessionSubcategory(13)),
+            bodyKnown = true)
+        val next = reopen(saved)
+        assertEquals(EditorSessionRestore.Resume, next.resolve(DraftEntry(draft, 3), owner, key))
+        assertEquals(12, next.subcategoryForForm(setOf(null, 12, 13), 13))
+    }
+
     @Test fun `a decided subcategory replaces the pending choice in the next checkpoint`() {
         val saved = checkpoint(subcategory = EditorSessionSubcategory(12))
         val session = EditorSessionRestoration(saved, surface)

@@ -2489,8 +2489,9 @@ class TopicFormViewModelTest {
         )
         syncBody()
         testScheduler.advanceUntilIdle()
-        assertEquals("new live body\n\nrescued body", afterRestore.state.value.restorableDraft)
-        assertEquals("new live title", afterRestore.state.value.restorableSubject)
+        assertNull(afterRestore.state.value.restorableDraft)
+        assertEquals("new live body\n\nrescued body", afterRestore.bodyFieldState.text.toString())
+        assertEquals("new live title", afterRestore.state.value.subject.text)
     }
 
     @Test

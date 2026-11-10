@@ -54,6 +54,11 @@ data class TopicFormState(
     val emailNotificationEnabled: Boolean = false,
     /** Selected HFR `MsgIcon` radio value. The topic form exposes the current 1..16 choices. */
     val msgIcon: Int = DEFAULT_MSG_ICON,
+    val isInitializing: Boolean = false,
+    /** Lock the title only while a recreated session waits for its authoritative draft read. */
+    val isRestoringSession: Boolean = false,
+    /** Successful GET in this instance; restored content alone never proves a usable form. */
+    val hasLoadedForm: Boolean = false,
     val isLoadingForm: Boolean = false,
     val isSubmitting: Boolean = false,
     /** ED-161/169: terminal success and in-flight reservation are state, never a replayed effect. */
@@ -143,7 +148,7 @@ data class TopicFormState(
     val armToken: ArmToken? get() = (submission as? EditorSubmissionState.Armed)?.token
 
     val canSubmit: Boolean
-        get() = when (mode) {
+        get() = hasLoadedForm && !isInitializing && when (mode) {
             TopicFormMode.EditFirstPost ->
                 cat != null &&
                     (subcat != null && subcat > 0) &&
@@ -187,6 +192,8 @@ data class TopicFormState(
  * intents the post-level editor does not need.
  */
 sealed interface TopicFormIntent {
+    data object Started : TopicFormIntent
+    data object Stopped : TopicFormIntent
     data class SubjectChanged(val value: TextFieldValue) : TopicFormIntent
     data class ToolbarActionClicked(val action: BbcodeAction) : TopicFormIntent
     data object TogglePreview : TopicFormIntent

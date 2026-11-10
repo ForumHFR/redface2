@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.editor
 
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -29,12 +30,14 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -43,6 +46,9 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
@@ -91,6 +97,26 @@ fun TopicFormScreen(
     ),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> viewModel.submit(TopicFormIntent.Started)
+                Lifecycle.Event.ON_STOP -> viewModel.submit(TopicFormIntent.Stopped)
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val bodyScroll = viewModel.bodyScrollState
+    val measuredViewport = bodyScroll.maxValue to bodyScroll.viewportSize
+    LaunchedEffect(viewModel, state.isInitializing, measuredViewport) {
+        if (state.isInitializing || measuredViewport.first == Int.MAX_VALUE) return@LaunchedEffect
+        withFrameNanos { }
+        withFrameNanos { }
+        if (measuredViewport == (bodyScroll.maxValue to bodyScroll.viewportSize)) viewModel.restoreBodyScroll()
+    }
     val currentOnSubmitSucceeded by rememberUpdatedState(onSubmitSucceeded)
     val context = LocalContext.current
     val newTopicCreatedFallback = stringResource(R.string.editor_new_topic_created)
@@ -137,6 +163,7 @@ fun TopicFormScreen(
         state = state,
         bodyFieldState = viewModel.bodyFieldState,
         bodyInputTransformation = viewModel.bodyInputTransformation,
+        bodyScrollState = viewModel.bodyScrollState,
         onIntent = viewModel::submit,
         onOpenSmileys = smileyPicker::open,
         modifier = modifier,
@@ -167,12 +194,15 @@ internal fun TopicFormContent(
     // TopicFormScreen, next to the controller's state collection).
     onOpenSmileys: () -> Unit,
     modifier: Modifier = Modifier,
+    bodyScrollState: ScrollState = rememberScrollState(),
 ) {
     var imageUrlDialogOpen by remember { mutableStateOf(false) }
     var optionsSheetOpen by remember { mutableStateOf(false) }
     val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode) { event ->
         onIntent(TopicFormIntent.ImagePickerEventReceived(event))
     }
+    // Same lock as before the restore wiring, plus the restore itself: a cold open still accepts early typing.
+    val awaitingBody = state.isRestoringSession || state.isAwaitingInitialBody
     Surface(
         modifier = modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.surface,
@@ -206,7 +236,8 @@ internal fun TopicFormContent(
                         modifier = Modifier.weight(1f),
                         // #459 — lock editing during a batch so the caret cannot move between two
                         // programmatic [img] insertions (keeps them in pick order).
-                        readOnly = state.isAwaitingInitialBody ||
+                        scrollState = bodyScrollState,
+                        readOnly = awaitingBody ||
                             state.isUploading || state.submission.blocksBodyMutation,
                     )
                 }
@@ -305,6 +336,8 @@ private fun TopicFormControlsZone(
             singleLine = true,
             modifier = Modifier.fillMaxWidth(),
             enabled = !state.submission.blocksBodyMutation,
+            // Read-only, not disabled, while the draft is read back: no visible change on recreation.
+            readOnly = state.isRestoringSession,
             label = { Text(stringResource(R.string.editor_topic_subject_label)) },
             // #237 — sentence capitalization (parité RF1) like the body field.
             keyboardOptions = KeyboardOptions(
