@@ -1780,8 +1780,9 @@ class PrivateMessageComposeViewModelTest {
         assertEquals(finishCalls + 1, draftStore.finishCalls)
         assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
         assertNull(draftStore.entries[attempt.key]?.attempt)
-        // The acknowledgement reserves without launching: no ED-44 cleanup of the refusal (gate R1b minors r1 m4).
-        assertTrue(vm.editorEvents.state.events.any { it.content == EditorEventContent.Problem(refusal) })
+        // The acknowledgement reserves without launching: no ED-44 cleanup, the refusal is now in front
+        // (gate R1b minors r1 m4, m-c).
+        assertEquals(EditorEventContent.Problem(refusal), vm.editorEvents.state.visibleEvent?.content)
         vm.assertNoSendingEvent()
         coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
     }

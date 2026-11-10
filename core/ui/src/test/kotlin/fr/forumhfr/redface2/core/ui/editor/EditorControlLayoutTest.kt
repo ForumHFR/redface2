@@ -230,9 +230,11 @@ class EditorControlLayoutTest {
     }
 }
 
-/** Cause and surface name a budget capture: a catalogue index shifts with every new sample (gate C3 r3, M1). */
-private fun budgetCaptureName(error: EditorError): String? {
-    if (error.cause != EditorCause.Uncertain && error.cause != EditorCause.DraftWriteFailed) return null
-    val surface = EditorErrorSurface.entries.firstOrNull { EditorErrors.uncertain(it) == error }
-    return listOfNotNull(error.cause.toString(), surface?.name).joinToString("_")
+/**
+ * The cause names a budget capture: a catalogue index shifts with every new sample (gate C3 r3, M1). The surface
+ * uncertainties differ only by their detail, never shown by the control: one capture covers them (gate R1b minors m5).
+ */
+private fun budgetCaptureName(error: EditorError): String? = when {
+    error == EditorErrors.uncertain || error.cause == EditorCause.DraftWriteFailed -> error.cause.toString()
+    else -> null
 }
