@@ -7,6 +7,8 @@ import fr.forumhfr.redface2.core.ui.editor.EditorEventCollector
 import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
 import fr.forumhfr.redface2.core.ui.editor.EditorEventProjection
 import fr.forumhfr.redface2.core.ui.editor.EditorHostEvents
+import fr.forumhfr.redface2.core.ui.editor.EditorLocalOperation
+import fr.forumhfr.redface2.core.ui.editor.OperationRef
 
 /** C1 session events; GET failures stay full-screen and the existing chrome stays until C4. */
 internal class PrivateMessageComposeEvents : EditorHostEvents {
