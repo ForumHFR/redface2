@@ -12,6 +12,7 @@ import androidx.compose.ui.input.InputModeManager
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
@@ -194,16 +195,21 @@ class PostEditorChromeComposeTest {
         openWithKeyboard("Mise en forme")
         openWithKeyboard("Couleur")
         barControl("Retour").assertIsFocused()
-        // The host's handler wins and reduces the bar itself (ED-85); focus must still return to the trigger.
+        // ED-85 closes the focused control's tooltip first. The next Back is resolved and reduced by the
+        // host's handler, which wins over the bar's; focus must still return to the trigger.
+        backClosesFocusTooltip("Retour")
         compose.runOnIdle { back.onBackPressed() }
         compose.onNodeWithContentDescription("Gras").assertExists()
         barControl("Couleur").assertIsFocused()
         barControl("Mise en forme").requestFocus().assertIsFocused()
+        backClosesFocusTooltip("Mise en forme")
+        compose.onNodeWithContentDescription("Gras").assertExists()
         compose.runOnIdle { back.onBackPressed() }
         compose.onNodeWithContentDescription("Gras").assertDoesNotExist()
         barControl("Mise en forme").assertIsFocused()
         openWithKeyboard("Image")
         barControl("Retour").assertIsFocused()
+        backClosesFocusTooltip("Retour")
         compose.runOnIdle { back.onBackPressed() }
         barControl("Image").assertIsFocused()
         compose.runOnIdle { assertTrue(host.calls.isEmpty()) }
@@ -238,5 +244,13 @@ class PostEditorChromeComposeTest {
 
     private fun openWithKeyboard(label: String) {
         barControl(label).requestFocus().assertIsFocused().performKeyInput { pressKey(Key.Enter) }
+    }
+
+    /** material3 shows a keyboard-focused anchor's tooltip: ED-85 closes it first, keeping level and focus. */
+    private fun backClosesFocusTooltip(label: String) {
+        compose.onNodeWithText(label, useUnmergedTree = true).assertIsDisplayed()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNodeWithText(label, useUnmergedTree = true).assertDoesNotExist()
+        barControl(label).assertIsFocused()
     }
 }

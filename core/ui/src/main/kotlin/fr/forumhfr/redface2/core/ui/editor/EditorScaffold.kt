@@ -122,8 +122,9 @@ val LocalEditorTooltipHost = staticCompositionLocalOf<EditorTooltipHost?> { null
  * Other focus requests open the IME by default; only a return
  * with a previously closed IME suppresses automatic opening until a completed body tap, accessibility
  * click or surface capture. Suppression is local to this composition and is not saved.
- * [autoFocus] requests body focus on entry. [surfaceFocus] owns the consumed autofocus and the captured
- * IME state across recreation: pass host-retained memory; without one the default saves its two booleans.
+ * [autoFocus] requests body focus once on entry: a recreation that keeps [surfaceFocus] never repeats it (R2).
+ * [surfaceFocus] owns the consumed autofocus and the captured IME state across recreation: pass host-retained
+ * memory; without one the default saves its two booleans, so it stays consumed even after process death.
  * [overlay] must invoke its body exactly once, unconditionally, at a stable composition site. Wrap it
  * with EditorHeaderPanel / EditorEventDetails, passing [bodyState] and its onReturnToBody callback; their opaque
  * overlay hides and blocks the body without losing its viewport or undo history. Sheets/tooltips are

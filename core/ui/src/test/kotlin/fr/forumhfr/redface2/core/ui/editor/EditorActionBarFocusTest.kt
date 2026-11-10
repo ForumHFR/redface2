@@ -260,6 +260,33 @@ class EditorActionBarFocusTest {
     }
 
     @Test
+    fun `masking a keyboard focused Format by an event or an arm is not a host Back on unmasking`() {
+        val event = host.finished()
+        compose.setContent { host.Content() }
+        compose.runOnIdle { assertTrue(host.inputMode.requestInputMode(InputMode.Keyboard)) }
+        listOf<(Boolean) -> Unit>(
+            { masked -> host.event.value = event.takeIf { masked } },
+            { masked -> host.bar.value = host.bar.value.copy(arm = host.frozenArm.takeIf { masked }) },
+        ).forEach { mask ->
+            compose.runOnIdle { host.bar.value = EditorBarState() }
+            openWithKeyboard("Mise en forme")
+            compose.onNodeWithContentDescription("Mise en forme").assertIsFocused()
+            assertEquals(EditorBarMode.Format, host.bar.value.mode)
+            // Shown Format -> Normal has the shape of a Back: without `masked`, unmasking would refocus Format.
+            compose.runOnIdle { mask(true) }
+            compose.onNodeWithContentDescription("Gras").assertDoesNotExist()
+            compose.runOnIdle { host.bodyFocus.requestFocus() }
+            compose.onNodeWithTag("body").assertIsFocused()
+            compose.runOnIdle { mask(false) }
+            compose.onNodeWithContentDescription("Gras").assertExists()
+            compose.onNodeWithTag("body").assertIsFocused()
+            compose.onNodeWithContentDescription("Mise en forme").assertIsNotFocused()
+            assertEquals(EditorBarMode.Format, host.bar.value.mode)
+        }
+        assertTrue(host.calls.isEmpty())
+    }
+
+    @Test
     fun `refused keyboard opening cannot later steal body focus when the host opens a sublevel`() {
         compose.setContent { host.Content() }
         compose.runOnIdle { assertTrue(host.inputMode.requestInputMode(InputMode.Keyboard)) }

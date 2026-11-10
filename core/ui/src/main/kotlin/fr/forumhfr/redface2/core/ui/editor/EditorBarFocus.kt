@@ -93,7 +93,11 @@ internal class EditorBarFocus(
         }
     }
 
-    /** Gestures dispatched by the bar settle focus themselves: navigation, Back, insertion or surface. */
+    /**
+     * Gestures dispatched by the bar settle focus themselves: navigation, Back, insertion or surface.
+     * The host must reduce them synchronously: the flag only lasts until the bar's next composition, so a
+     * deferred reduction would read as a host Back (an image action would return focus to Image).
+     */
     fun ownGestures(onGesture: (EditorBarGesture) -> Unit): (EditorBarGesture) -> Unit = { gesture ->
         ownGesture = true
         onGesture(gesture)
