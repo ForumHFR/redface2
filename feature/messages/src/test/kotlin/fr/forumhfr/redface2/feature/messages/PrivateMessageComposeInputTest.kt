@@ -51,6 +51,7 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.EditorRecipientField
 import fr.forumhfr.redface2.core.ui.editor.EditorRecipientState
 import fr.forumhfr.redface2.core.ui.editor.EditorSubjectField
+import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -91,7 +92,7 @@ class PrivateMessageComposeInputTest {
     private var nowNanos = 0L
 
     @Test
-    fun chipInputBlocksArmingAndPostUntilCommaThenPreservesNetworkCsv() {
+    fun chipInputBlocksArmingAndPostUntilCommaThenSendsTrimmedChipCsv() {
         setFieldContent(confirmBeforePosting = true, recipientFields = true)
         val recipients = compose.onNodeWithTag("recipients")
         recipients.performTextInput(" Bob  with spaces,tail")
@@ -280,7 +281,8 @@ class PrivateMessageComposeInputTest {
             vm.onStopped()
             val serialized = registry.performSave().toString()
             fragments.forEach { assertFalse(serialized.contains(it)) }
-            assertEquals(privateMessageComposeCheckpointKeys, savedStateHandle.keys())
+            assertEquals(privateMessageComposeCheckpointKeys + PrivateMessageComposeChromeMemory.INITIAL_HEADER_HANDLED,
+                savedStateHandle.keys())
             assertPrivateMessageComposeSavedState(savedStateHandle, fragments)
             assertTrue(savedStateSize() < initialBytes + 2_048)
             vm.bodyFieldState.undoState.undo()
@@ -381,7 +383,7 @@ class PrivateMessageComposeInputTest {
         else if (!fullEditor) field().requestFocus()
     }
 
-    /** C2 components and C1 callbacks; production chrome is deliberately still the old screen. */
+    /** Isolated inputs keep the synchronous mutation guard tests independent of surface focus. */
     @Composable
     private fun RecipientFields() {
         val state by vm.state.collectAsState()
@@ -397,15 +399,10 @@ class PrivateMessageComposeInputTest {
     @Composable
     private fun ComposerBody() {
         val state by vm.state.collectAsState()
-        ComposeEditorBody(
-            state = state, bodyFieldState = vm.bodyFieldState,
-            bodyInputTransformation = vm.bodyInputTransformation, bodyScrollState = vm.bodyScrollState,
-            onRecipientsChanged = vm::onRecipientsChanged, onSubjectChanged = vm::onSubjectChanged,
-            onToolbarAction = vm::onToolbarAction, onTogglePreview = vm::onTogglePreview,
-            onErrorDismissed = vm::onErrorDismissed, onDraftRestore = vm::onDraftRestoreRequested,
-            onDraftDiscard = vm::onDraftDiscardRequested, onImagePickerEvent = vm::onImagePickerEvent,
-            onUploadErrorDismissed = vm::onUploadErrorDismissed,
-        )
+        PrivateMessageComposeContent(state, vm.bodyFieldState, vm.bodyInputTransformation,
+            vm.recipientInput, vm.subjectInput, remember(vm) { vm.chromeActions() }, vm.smileyPicker,
+            bodyScrollState = vm.bodyScrollState, chromeEvents = vm.editorEvents, chromeMemory = vm.chromeMemory,
+            windowMetrics = EditorWindowMetrics(640.dp, 0.dp, 0.dp))
     }
 
 }

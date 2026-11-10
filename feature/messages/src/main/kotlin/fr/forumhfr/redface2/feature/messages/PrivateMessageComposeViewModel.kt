@@ -210,6 +210,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         saved = savedStateHandle, submission = submission, scope = viewModelScope, draftKey = draftKey,
         readState = { _state.value }, updateState = ::updateState,
     )
+    internal val bodyCaretRevealResetKey get() = draftSession.bodyCaretRevealResetKey
     internal val chromeMemory = PrivateMessageComposeChromeMemory(savedStateHandle, draftSession.isRecreation)
 
     /**

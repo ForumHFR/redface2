@@ -1,17 +1,25 @@
 package fr.forumhfr.redface2.feature.messages
 
+import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.SoftwareKeyboardController
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertHeightIsEqualTo
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isToggleable
@@ -21,9 +29,11 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.height
 import coil3.ColorImage
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
@@ -32,14 +42,22 @@ import coil3.intercept.Interceptor
 import coil3.request.CachePolicy
 import coil3.request.ImageResult
 import coil3.test.FakeImageLoaderEngine
+import fr.forumhfr.redface2.core.domain.editor.ArmToken
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.editor.EditorBarMode
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.EditorEvent
+import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
+import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
+import fr.forumhfr.redface2.core.ui.editor.EditorLocalOperation
 import fr.forumhfr.redface2.core.ui.editor.EditorRecipientState
-import fr.forumhfr.redface2.core.ui.editor.EditorScaffold
 import fr.forumhfr.redface2.core.ui.editor.EditorScaffoldChrome
 import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
+import fr.forumhfr.redface2.core.ui.editor.EventKey
+import fr.forumhfr.redface2.core.ui.editor.OperationRef
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.Assert.assertEquals
@@ -61,7 +79,8 @@ import org.robolectric.annotation.GraphicsMode
 class PrivateMessageComposeChromeComposeTest {
     @get:Rule val compose = createComposeRule()
     private val f = PrivateMessageComposeChromeFixture()
-    private val focus = FocusRequester()
+    private val scroll = ScrollState(0)
+    private lateinit var back: OnBackPressedDispatcher
     private var renderedChrome: EditorScaffoldChrome? = null
     private var hides = 0
     private var shows = 0
@@ -69,22 +88,21 @@ class PrivateMessageComposeChromeComposeTest {
         override fun show() { shows++ }
         override fun hide() { hides++ }
     }
-    @Composable private fun Content() {
+    @Composable private fun Content(
+        window: EditorWindowMetrics = EditorWindowMetrics(740.dp, 0.dp, 0.dp),
+        modifier: Modifier = Modifier,
+    ) {
+        back = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
         val scope = rememberCoroutineScope()
         val smileys = remember { SmileyPickerController(scope, searchWiki = { _, _ -> emptyList() }) }
         f.openSmileys = { smileys.open() }
-        val a = f.adapter
-        val chrome = a.chrome().also { renderedChrome = it }
+        // The production chrome of this state, as the screen passes it to EditorScaffold.
+        renderedChrome = f.adapter.chrome()
         CompositionLocalProvider(LocalSoftwareKeyboardController provides keyboard) {
             RedfaceTheme {
-                EditorScaffold(f.body, EditorWindowMetrics(740.dp, 0.dp, 0.dp), a.title(), a.context(), chrome,
-                    a.barActions, a.submitState, a.submitActions, a.imageActions, a::closeRequested,
-                    bodyFocusRequester = focus, surfaceFocus = a.focusMemory, onSystemBack = { a.back() },
-                    onOpenHeader = a::openHeader, headerLabel = stringResource(R.string.messages_compose_header_open),
-                    fieldArea = { body -> PrivateMessageComposeChromePreview(a, f.body, focus, body) },
-                    overlay = { restore, body ->
-                        PrivateMessageComposeChromeSurfaces(a, f.body, f.recipients, f.subject, smileys, restore, body)
-                    })
+                PrivateMessageComposeContent(f.state, f.body, InputTransformation {}, f.recipients, f.subject,
+                    f.actions, smileys, modifier, bodyScrollState = scroll, chromeEvents = f.events,
+                    chromeMemory = f.memory, windowMetrics = window)
             }
         }
     }
@@ -111,7 +129,7 @@ class PrivateMessageComposeChromeComposeTest {
     @Test fun `ED113 prefilled summary has no recipients status and completion focuses the cause field`() {
         prefill()
         compose.setContent { Content() }
-        compose.onNodeWithText("Nouveau message").assertExists()
+        compose.onNodeWithText("Nouveau MP").assertExists()
         compose.onNodeWithText("1 destinataire · Sujet privé").assertExists()
         compose.runOnIdle { assertNull(requireNotNull(renderedChrome).secondStatus); assertNull(f.adapter.surface) }
         listOf(EditorErrors.unknownRecipient to "Destinataires", EditorErrors.missingSubject to "Sujet")
@@ -164,6 +182,125 @@ class PrivateMessageComposeChromeComposeTest {
         compose.setContent { Content() }
         compose.runOnIdle { f.adapter.barActions.onSmileys() }
         compose.onNodeWithTag("smiley_picker_sheet").assertExists()
+    }
+    @Test fun `information delays initial header without consuming its saved entry latch`() {
+        val info = EditorEvent(EventKey(f.session, OperationRef.Local(EditorLocalOperation.Notice, 1), 0),
+            EditorEventContent.Information(EditorErrors.imageLimit.summary), 1)
+        f.events.dispatch(EditorEventInput.Received(info))
+        compose.setContent { Content() }
+        compose.onNodeWithTag("editor-scaffold-field").assertExists()
+        compose.onNodeWithText("Retour au message").assertDoesNotExist()
+        compose.runOnIdle {
+            assertTrue(f.saved.keys().isEmpty())
+            assertEquals(info, f.events.visibleEvent)
+            f.events.dispatch(EditorEventInput.NextGesture(f.session))
+        }
+        compose.onNode(hasSetTextAction() and hasText("Destinataires")).assertIsFocused()
+        compose.runOnIdle { assertEquals(true, f.saved.get<Boolean>(
+            PrivateMessageComposeChromeMemory.INITIAL_HEADER_HANDLED)) }
+    }
+
+    @Test fun `loading and error retain the retry screen before the first automatic header`() {
+        f.state = f.state.copy(isLoadingForm = true, formAvailable = false)
+        compose.setContent { Content() }
+        compose.onNodeWithText("Nouveau MP").assertExists()
+        compose.onNodeWithTag("editor-scaffold-field").assertDoesNotExist()
+        compose.runOnIdle { assertTrue(f.saved.keys().isEmpty()) }
+        compose.runOnIdle { f.state = f.state.copy(isLoadingForm = false, formError = true) }
+        compose.onNodeWithText("Impossible d'ouvrir le formulaire de nouveau message. Réessayez.").assertExists()
+        compose.onNodeWithText("Réessayer").performClick()
+        compose.runOnIdle {
+            assertEquals(listOf("reload"), f.calls)
+            f.state = f.state.copy(formError = false, formAvailable = true)
+        }
+        compose.onNode(hasSetTextAction() and hasText("Destinataires")).assertIsFocused()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNodeWithTag("editor-scaffold-field").assertIsFocused()
+        compose.runOnIdle { assertEquals(listOf("reload"), f.calls) }
+    }
+
+    @Test fun `normal geometry reserves 48 dp header and 56 dp bar`() = checkGeometry(compact = false)
+    @Test fun `compact geometry moves header action into the 48 dp bar`() = checkGeometry(compact = true)
+
+    private fun checkGeometry(compact: Boolean) {
+        prefill()
+        val height = if (compact) 330.dp else 740.dp
+        compose.setContent { Content(EditorWindowMetrics(height, 0.dp, 0.dp), Modifier.size(760.dp, height)) }
+        compose.onNodeWithTag("editor-scaffold-action-bar").assertHeightIsEqualTo(if (compact) 48.dp else 56.dp)
+        val appBar = compose.onNodeWithTag("editor-scaffold-app-bar")
+        if (compact) {
+            appBar.assertDoesNotExist()
+            compose.onNodeWithContentDescription("Modifier les destinataires et le sujet").assertExists()
+        } else appBar.assertHeightIsEqualTo(48.dp)
+        val field = compose.onNodeWithTag("editor-scaffold-field").getUnclippedBoundsInRoot()
+        val bar = compose.onNodeWithTag("editor-scaffold-action-bar").getUnclippedBoundsInRoot()
+        assertTrue(field.height >= 160.dp)
+        assertTrue(field.bottom <= bar.top)
+        compose.onNodeWithTag("editor-bar-submit").assertIsDisplayed()
+    }
+
+    @Test fun `activity Back closes detail before disarm then visible tools preview and awaited exit`() {
+        prefill()
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Image").performClick()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.runOnIdle { assertEquals(EditorBarMode.Normal, f.memory.host.bar.mode) }
+        compose.onNodeWithContentDescription("Mise en forme").performClick()
+        compose.onNodeWithContentDescription("Couleur").performScrollTo().performClick()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.runOnIdle {
+            assertEquals(EditorBarMode.Format, f.memory.host.bar.mode)
+            f.transition(f.state.copy(submitError = EditorErrors.antiFlood))
+        }
+        val summary = EditorErrors.antiFlood.summary.resolve(RuntimeEnvironment.getApplication())
+        compose.onNodeWithContentDescription("$summary, Afficher les détails").performClick()
+        compose.runOnIdle {
+            // The real event tap emits OpenSurface, as in dev (ED-23 pending).
+            assertEquals(EditorBarMode.Normal, f.memory.host.bar.mode)
+            f.state = f.state.copy(submission = EditorSubmissionState.Armed(ArmToken(1, f.session, 0, 4_000)))
+        }
+        compose.runOnIdle { back.onBackPressed() }
+        compose.runOnIdle { assertNull(f.adapter.detail); assertTrue(f.calls.isEmpty()); back.onBackPressed() }
+        compose.runOnIdle {
+            assertEquals(listOf("disarm"), f.calls)
+            f.state = f.state.copy(submission = EditorSubmissionState.Ready)
+            assertNull(f.events.visibleEvent)
+        }
+        compose.onNodeWithContentDescription("Mise en forme").performClick()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.runOnIdle { assertEquals(EditorBarMode.Normal, f.memory.host.bar.mode) }
+        compose.runOnIdle { f.state = f.state.copy(isPreviewVisible = true) }
+        compose.runOnIdle { back.onBackPressed() }
+        compose.runOnIdle { assertFalse(f.state.isPreviewVisible); back.onBackPressed() }
+        compose.runOnIdle { assertEquals(listOf("disarm", "close"), f.calls) }
+    }
+
+    @OptIn(ExperimentalFoundationApi::class)
+    @Test fun `C7 header overlays the mounted body without changing its identity or height`() {
+        prefill()
+        f.body.edit { replace(0, length, "Bonjour privé"); selection = TextRange(6, 1) }
+        compose.setContent { Content() }
+        compose.runOnIdle { f.body.edit { selection = TextRange(6, 1) } }
+        val field = compose.onNodeWithTag("editor-scaffold-field")
+        val id = field.fetchSemanticsNode().id
+        val bounds = field.getUnclippedBoundsInRoot()
+        val viewport = compose.runOnIdle { scroll.viewportSize }
+        compose.runOnIdle { f.adapter.openHeader() }
+        compose.onNodeWithText("Retour au message").assertExists()
+        compose.onNodeWithTag("editor-scaffold-field").assertDoesNotExist()
+        compose.runOnIdle { assertTrue(viewport > 0); assertEquals(viewport, scroll.viewportSize) }
+        compose.onNode(hasSetTextAction() and hasText("Destinataires")).performTextInput("bob,tail")
+        compose.onNodeWithText("Retour au message").performClick()
+        field.assertIsFocused()
+        assertEquals(id, field.fetchSemanticsNode().id)
+        assertEquals(bounds, field.getUnclippedBoundsInRoot())
+        compose.runOnIdle {
+            assertEquals("Bonjour privé", f.body.text.toString())
+            assertEquals(TextRange(6, 1), f.body.selection)
+            assertTrue(f.body.undoState.canUndo)
+            f.body.undoState.undo()
+            assertEquals("Bonjour", f.body.text.toString())
+        }
     }
     @OptIn(DelicateCoilApi::class)
     @Test fun `ED60 preview image requests disable disk reads and writes`() {

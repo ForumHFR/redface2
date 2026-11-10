@@ -84,7 +84,7 @@ class MessageSubmissionBannerLayoutTest {
                     darkTheme = false,
                     reading = ReadingDisplaySettings(fontScale = FontScalePreference.L),
                 ) {
-                    // ReplyEditorBody / ComposeEditorBody give this shared banner 16 dp gutters.
+                    // The legacy reply body gives this shared banner 16 dp gutters.
                     Column(
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
                         verticalArrangement = Arrangement.spacedBy(12.dp),

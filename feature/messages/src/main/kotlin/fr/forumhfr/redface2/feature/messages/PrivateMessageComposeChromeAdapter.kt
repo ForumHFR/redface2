@@ -35,12 +35,13 @@ internal class PrivateMessageComposeChromeAdapter(
     launchPicker, openSmileys, memory.host,
 ) {
     val state get() = PrivateMessageComposeChromeState(source())
+    val waitingForInformation get() = events.visibleEvent?.rank == EditorEventRank.Information
     fun openInitialHeader() {
         if (!state.scaffold.controlsEnabled || source().isLoadingForm || !source().formAvailable) return
-        if (!memory.claimInitialEntry()) return
+        if (waitingForInformation || !memory.claimInitialEntry()) return
         // Automatic entry must not consume an information without a user gesture.
         val empty = source().recipientState.let { it.chips.none(String::isNotBlank) && it.buffer.isBlank() }
-        if (empty && events.visibleEvent?.rank != EditorEventRank.Information) openHeader()
+        if (empty) openHeader()
     }
     fun openHeader() = open(PrivateMessageComposeChromeSurface.Header) {
         memory.complete(EditorCause.MissingRecipients)
@@ -75,6 +76,7 @@ internal class PrivateMessageComposeChromeAdapter(
     fun discardDraft() {
         if (state.scaffold.controlsEnabled) { actions.discard(); closeSurface() }
     }
+    fun retryFormLoad() = actions.reload()
     fun reload(key: EventKey) {
         val current = events.state.events.any { it.key == key }
         val error = (detail?.takeIf { it.key == key && current }?.content as? EditorEventContent.Problem)?.error

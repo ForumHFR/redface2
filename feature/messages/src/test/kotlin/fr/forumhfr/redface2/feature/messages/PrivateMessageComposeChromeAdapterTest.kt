@@ -78,10 +78,16 @@ class PrivateMessageComposeChromeAdapterTest {
         f.state = f.state.copy(isLoadingForm = false)
         f.adapter.openInitialHeader()
         assertEquals(PrivateMessageComposeChromeSurface.Header, f.adapter.surface)
+        val entryKey = PrivateMessageComposeChromeMemory.INITIAL_HEADER_HANDLED
+        assertEquals(setOf(entryKey), f.saved.keys())
+        assertEquals(true, f.saved.get<Boolean>(entryKey))
         assertEquals(f.adapter.surface, f.createAdapter().surface)
         f.adapter.closeSurface()
         f.adapter.openInitialHeader()
         assertNull(f.adapter.surface)
+        val fromSavedLatch = f.createAdapter(PrivateMessageComposeChromeMemory(f.saved))
+        fromSavedLatch.openInitialHeader()
+        assertNull(fromSavedLatch.surface)
         val recreated = f.createAdapter(PrivateMessageComposeChromeMemory(SavedStateHandle(), recreated = true))
         recreated.openInitialHeader()
         assertNull(recreated.surface)
@@ -187,13 +193,13 @@ internal class PrivateMessageComposeChromeFixture {
     var confirmed: ArmToken? = null
     var launches = 0
     var openSmileys: () -> Unit = {}
+    val actions = PrivateMessageComposeChromeActions(
+        host = EditorHostActions({ calls += "send" }, { confirmed = it }, { calls += "disarm" },
+            {}, { state = state.copy(isPreviewVisible = !state.isPreviewVisible) }, { calls += "close" }),
+        signature = { calls += "signature:$it" }, smileyDisabled = {}, notification = {}, smiley = {}, picker = {},
+        restore = { calls += "restore" }, discard = { calls += "discard" }, reload = { calls += "reload" })
     val adapter = createAdapter()
     fun createAdapter(memory: PrivateMessageComposeChromeMemory = this.memory) = PrivateMessageComposeChromeAdapter(
-        { state }, body, events, PrivateMessageComposeChromeActions(
-            host = EditorHostActions({ calls += "send" }, { confirmed = it }, { calls += "disarm" },
-                {}, { state = state.copy(isPreviewVisible = !state.isPreviewVisible) }, { calls += "close" }),
-            signature = { calls += "signature:$it" }, smileyDisabled = {}, notification = {}, smiley = {}, picker = {},
-            restore = { calls += "restore" }, discard = { calls += "discard" }, reload = { calls += "reload" }),
-        { launches++ }, { openSmileys() }, memory)
+        { state }, body, events, actions, { launches++ }, { openSmileys() }, memory)
     fun transition(next: PrivateMessageComposeUiState) { events.observe(state, next); state = next }
 }

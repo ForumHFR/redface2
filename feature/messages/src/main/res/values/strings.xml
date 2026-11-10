@@ -43,11 +43,8 @@
     <string name="messages_multi_quote_add_short">+ Citer</string>
     <string name="messages_multi_quote_remove_short">✓ Cité</string>
     <string name="messages_reply_title">Répondre</string>
-    <string name="messages_compose_title">Nouveau message</string>
+    <string name="messages_compose_title">Nouveau MP</string>
     <string name="messages_compose_new">Nouveau</string>
-    <string name="messages_compose_recipients_placeholder">Pseudo(s), séparés par des virgules…</string>
-    <string name="messages_compose_subject_label">Sujet</string>
-    <string name="messages_compose_subject_counter">%1$d/%2$d</string>
     <string name="messages_compose_form_error">Impossible d\'ouvrir le formulaire de nouveau message. Réessayez.</string>
     <string name="messages_reply_field_label">Votre réponse</string>
     <string name="messages_reply_field_placeholder">Écrivez votre message…</string>
@@ -79,10 +76,6 @@
     <string name="messages_members_add">Ajouter</string>
     <string name="messages_members_remove">Retirer %1$s</string>
     <string name="messages_members_admin_warning">Retirer « Administration » d\'une discussion de groupe est déconseillé.</string>
-
-    <!-- #606 — libellé du champ destinataires du nouveau message (compose). -->
-    <string name="messages_compose_recipients_label_v2">Pseudo des destinataires</string>
-    <string name="messages_compose_recipients_help">Plusieurs pseudos séparés par des virgules = discussion de groupe.</string>
 
     <!-- #612 — liste des participants d'une discussion de groupe (bottom sheet). -->
     <string name="messages_roster_action">Participants</string>
@@ -139,6 +132,7 @@
          libellé que le topic (topic_post_ego_state_description), possédé par chaque feature. -->
     <string name="messages_post_ego_state_description">Votre message</string>
     <string name="messages_post_moderation_state_description">Message de la modération</string>
+    <string name="messages_compose_restore_title">Brouillon retrouvé</string>
     <string name="messages_compose_header">Destinataires et sujet</string>
     <string name="messages_compose_header_open">Modifier les destinataires et le sujet</string>
     <string name="messages_compose_add_recipients">Ajouter des destinataires</string>

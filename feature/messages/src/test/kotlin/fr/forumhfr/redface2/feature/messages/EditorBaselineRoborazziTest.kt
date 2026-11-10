@@ -1,22 +1,16 @@
 package fr.forumhfr.redface2.feature.messages
 
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.text.input.InputTransformation
-import androidx.compose.foundation.text.input.TextFieldState
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Modifier
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.focus.FocusManager
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
-import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.assertWidthIsEqualTo
@@ -36,6 +30,9 @@ import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.EditorRecipientState
+import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Rule
 import org.junit.Test
@@ -45,10 +42,10 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * Actual reply content on the common scaffold; the new-message baseline keeps its legacy assembly until C4.
+ * Actual reply and new-MP content on the common scaffold.
  * Reply: portrait/landscape × font scale 1.0/1.3 × light/dark × empty/multiline, plus restore/event/preview/
  * owner states, an armed send, both statuses at rest and under an event, and the full-screen form failure.
- * Light names are historical; dark reply names end in `_dark`. The new-message form stays light only.
+ * Light names are historical; dark reply names end in `_dark`. The new-MP matrix bodies stay light only.
  * Deterministic local text only. PNG references are explicitly recorded by the maintainer.
  */
 @RunWith(RobolectricTestRunner::class)
@@ -106,7 +103,7 @@ class EditorBaselineRoborazziTest {
             }
         }
 
-        // The legacy new-message form (other lot) keeps its light references only.
+        // The new-MP matrix bodies keep their light references only; its panels are in captureComposeStates.
         val surfaces = if (dark) listOf(EditorSurface.Reply) else EditorSurface.entries
         val cases = surfaces.flatMap { surface ->
             listOf(false, true).map { Scenario(surface, it) }
@@ -141,46 +138,7 @@ class EditorBaselineRoborazziTest {
             PrivateMessageReplyTestContent(replyState(scenario.chrome, draft.text))
             return
         }
-        val newMessage = PrivateMessageComposeUiState(
-            isLoadingForm = false,
-            formAvailable = true,
-            recipients = "CorrespondantTest",
-            subject = "Conversation de démonstration",
-            bodyText = draft.text,
-        )
-        Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
-            Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
-                MessageEditorHeader(
-                    title = stringResource(R.string.messages_compose_title),
-                    onBack = {},
-                )
-                ComposeEditorBody(
-                    state = newMessage,
-                    onRecipientsChanged = {},
-                    onSubjectChanged = {},
-                    bodyFieldState = remember { TextFieldState(draft.text) },
-                    bodyInputTransformation = InputTransformation {},
-                    onToolbarAction = {},
-                    onTogglePreview = {},
-                    onErrorDismissed = {},
-                    onDraftRestore = {},
-                    onDraftDiscard = {},
-                    onImagePickerEvent = {},
-                    onUploadErrorDismissed = {},
-                    modifier = Modifier.weight(1f),
-                )
-                MessageSubmitBar(
-                    canSubmit = newMessage.canSubmit,
-                    isSubmitting = false,
-                    confirmArmed = false,
-                    onSubmit = {},
-                    onConfirmSubmit = {},
-                    onDisarmConfirm = {},
-                    onOpenOptions = {},
-                    onOpenSmileys = {},
-                )
-            }
-        }
+        ComposeChrome(draft.text)
     }
 
     private fun replyState(chrome: ReplyChrome, body: String) = PrivateMessageReplyUiState(
@@ -229,6 +187,64 @@ class EditorBaselineRoborazziTest {
         val antiFlood get() = this in setOf(Error, Details, EventStatuses)
         val failure get() = this in setOf(Failure, FailureDraft)
     }
+
+    @Test fun composePanelsPortrait() = captureComposeStates("portrait", 1f)
+    @Test fun composePanelsPortraitLargeFont() = captureComposeStates("portrait", 1.3f)
+    @Test @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
+    fun composePanelsLandscape() = captureComposeStates("landscape", 1f)
+    @Test @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
+    fun composePanelsLandscapeLargeFont() = captureComposeStates("landscape", 1.3f)
+
+    private fun captureComposeStates(orientation: String, scale: Float) {
+        val scenario = mutableStateOf(false to ComposeCapture.Header)
+        lateinit var focus: FocusManager
+        compose.setContent {
+            focus = LocalFocusManager.current
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, scale)) {
+                RedfaceTheme(darkTheme = scenario.value.first, dynamicColor = false) {
+                    key(scenario.value) { ComposeChrome(MULTILINE_DRAFT, scenario.value.second) }
+                }
+            }
+        }
+        listOf(false, true).forEach { dark ->
+            ComposeCapture.entries.forEach { state ->
+                compose.runOnIdle { scenario.value = dark to state }
+                compose.waitForIdle()
+                compose.runOnIdle { focus.clearFocus(force = true) }
+                compose.mainClock.advanceTimeBy(1_000L)
+                compose.mainClock.autoAdvance = false
+                compose.onRoot().captureRoboImage(filePath = "src/test/screenshots/" +
+                    "private_message_new_${state}_${orientation}_fs${scale}_dark$dark.png")
+                compose.mainClock.autoAdvance = true
+            }
+        }
+    }
+
+    @Composable
+    private fun ComposeChrome(body: String, capture: ComposeCapture = ComposeCapture.Normal) {
+        val f = remember { PrivateMessageComposeChromeFixture().apply {
+            state = state.copy(recipients = "CorrespondantTest", subject = "Conversation de démonstration",
+                recipientState = EditorRecipientState(listOf("CorrespondantTest")),
+                bodyText = body, isPreviewVisible = capture == ComposeCapture.Preview,
+                preview = PostContent(listOf(PostBlock.Paragraph(listOf(PostInline.Text("Aperçu du message privé"))))),
+                restorableDraft = if (capture == ComposeCapture.Restore) "Brouillon privé" else null)
+            this.body.edit { replace(0, length, body) }
+            when (capture) {
+                ComposeCapture.Header -> adapter.openHeader()
+                ComposeCapture.Restore -> adapter.open(PrivateMessageComposeChromeSurface.Restore)
+                else -> Unit
+            }
+        } }
+        val scope = rememberCoroutineScope()
+        val smileys = remember { SmileyPickerController(scope, searchWiki = { _, _ -> emptyList() }) }
+        val height = LocalConfiguration.current.screenHeightDp.dp
+        PrivateMessageComposeContent(f.state, f.body, InputTransformation {}, f.recipients, f.subject,
+            f.actions, smileys, chromeEvents = f.events, chromeMemory = f.memory,
+            windowMetrics = EditorWindowMetrics(height, 0.dp, 0.dp))
+    }
+
+    private enum class ComposeCapture { Normal, Header, Preview, Restore }
 
     private enum class EditorSurface(val fileName: String) {
         Reply("private_message_reply"),

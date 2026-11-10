@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.messages
 
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -24,7 +25,7 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.post.PostMediaDiskCachePolicy
 
-/** C4 will mount this in EditorScaffold.overlay; the body retains its composition and viewport (C7). */
+/** EditorScaffold.overlay keeps the body in composition with its original viewport (C7). */
 @Composable
 @Suppress("LongParameterList") // Live input owners and overlay slots, without private-text savers.
 internal fun PrivateMessageComposeChromeSurfaces(
@@ -37,7 +38,8 @@ internal fun PrivateMessageComposeChromeSurfaces(
     body: @Composable () -> Unit,
 ) {
     val source = adapter.state.source
-    LaunchedEffect(source.isInitializing, source.isLoadingForm, adapter.state.scaffold.controlsEnabled) {
+    LaunchedEffect(source.isInitializing, source.isLoadingForm, adapter.state.scaffold.controlsEnabled,
+        adapter.waitingForInformation) {
         adapter.openInitialHeader()
     }
     LaunchedEffect(adapter.returnGeneration) {
@@ -82,7 +84,7 @@ private fun ComposeHeader(
     val restore = adapter.surface == PrivateMessageComposeChromeSurface.Restore
     val header = adapter.surface == PrivateMessageComposeChromeSurface.Header
     val focus = if (adapter.memory.field == PrivateMessageComposeHeaderField.Subject) subjectFocus else recipientFocus
-    EditorHeaderPanel(header || restore, stringResource(if (restore) R.string.messages_draft_restore_message
+    EditorHeaderPanel(header || restore, stringResource(if (restore) R.string.messages_compose_restore_title
         else R.string.messages_compose_header), bodyState, adapter::closeSurface,
         { adapter.returnToBody(onReturnToBody) }, initialFocusRequester = focus.takeIf { header }, body = body) {
         if (restore) MessageDraftRestoreBanner(adapter::restoreDraft, adapter::discardDraft,
@@ -90,8 +92,8 @@ private fun ComposeHeader(
         else {
             EditorRecipientField(adapter.state.source.recipientState, recipients, { subjectFocus.requestFocus() },
                 Modifier.focusRequester(recipientFocus), enabled = adapter.state.scaffold.controlsEnabled)
-            EditorSubjectField(adapter.state.source.subject, subject, Modifier.focusRequester(subjectFocus),
-                enabled = adapter.state.scaffold.controlsEnabled)
+            EditorSubjectField(adapter.state.source.subject, subject,
+                Modifier.fillMaxWidth().focusRequester(subjectFocus), enabled = adapter.state.scaffold.controlsEnabled)
         }
     }
 }

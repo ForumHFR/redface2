@@ -10,7 +10,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorHostMemory
 import fr.forumhfr.redface2.core.ui.editor.EditorHostState
 import fr.forumhfr.redface2.core.ui.editor.EditorScaffoldChrome
 
-/** C3 projection only; the legacy screen remains mounted until C4. */
+/** Live projection of the new-conversation form onto the shared chrome. */
 internal data class PrivateMessageComposeChromeState(val source: PrivateMessageComposeUiState) {
     private val busy = source.isSubmitting || source.submission.blocksBodyMutation
     val scaffold = EditorScaffoldChrome(

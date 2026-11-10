@@ -1,12 +1,8 @@
 package fr.forumhfr.redface2.feature.messages
 
 import android.content.Context
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.text.input.InputTransformation
-import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsEnabled
@@ -40,7 +36,14 @@ import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
+import fr.forumhfr.redface2.core.ui.editor.EditorRecipientState
+import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
+import io.mockk.every
+import io.mockk.mockk
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -173,9 +176,10 @@ class PrivateMessageEditorLayoutTest {
 
     @Test
     fun `new message keeps 160 dp body and both draft actions on short viewport`() {
-        setComposeContent()
-        compose.onNodeWithText("Votre réponse")
+        setComposeContent(openRestore = false)
+        compose.onNodeWithTag("editor-scaffold-field")
             .assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT - FIELD_LABEL_HEADROOM)
+        openComposeRestore()
         assertDraftActionsFullyVisible()
     }
 
@@ -237,32 +241,29 @@ class PrivateMessageEditorLayoutTest {
     private fun setComposeContent(
         isUploading: Boolean = false,
         submission: EditorSubmissionState = EditorSubmissionState.Ready,
+        openRestore: Boolean = true,
     ) {
+        val f = PrivateMessageComposeChromeFixture()
+        f.state = f.state.copy(recipients = "alice", subject = "Sujet privé",
+            recipientState = EditorRecipientState(listOf("alice")),
+            restorableDraft = "Brouillon à restaurer", isUploading = isUploading)
+        val picker = mockk<SmileyPickerController>(relaxed = true)
+        every { picker.state } returns MutableStateFlow<SmileyPickerState>(SmileyPickerState.Hidden)
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                ComposeEditorBody(
-                    state = PrivateMessageComposeUiState(
-                        isLoadingForm = false,
-                        formAvailable = true,
-                        restorableDraft = "Brouillon à restaurer",
-                        isUploading = isUploading,
-                        submission = submission,
-                    ),
-                    bodyFieldState = remember { TextFieldState() },
-                    bodyInputTransformation = InputTransformation {},
-                    onRecipientsChanged = {},
-                    onSubjectChanged = {},
-                    onToolbarAction = {},
-                    onTogglePreview = {},
-                    onErrorDismissed = {},
-                    onDraftRestore = {},
-                    onDraftDiscard = {},
-                    onImagePickerEvent = {},
-                    onUploadErrorDismissed = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
+                PrivateMessageComposeContent(f.state, f.body, InputTransformation {}, f.recipients, f.subject,
+                    f.actions, picker, chromeEvents = f.events, chromeMemory = f.memory,
+                    windowMetrics = EditorWindowMetrics(330.dp, 0.dp, 0.dp))
             }
         }
+        if (openRestore) openComposeRestore()
+        // An already open panel remains readable while submission disables its controls.
+        compose.runOnIdle { f.state = f.state.copy(submission = submission) }
+    }
+
+    private fun openComposeRestore() {
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
+        compose.onNodeWithText("Restaurer").performScrollTo()
     }
 
     private fun assertDraftActionsFullyVisible() {
