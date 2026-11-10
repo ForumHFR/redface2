@@ -8,6 +8,7 @@ import android.os.Parcel
 import android.os.Parcelable
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -17,10 +18,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.LocalSaveableStateRegistry
 import androidx.compose.runtime.saveable.SaveableStateRegistry
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.requestFocus
@@ -43,7 +48,9 @@ import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
+import fr.forumhfr.redface2.core.ui.editor.EditorRecipientField
 import fr.forumhfr.redface2.core.ui.editor.EditorRecipientState
+import fr.forumhfr.redface2.core.ui.editor.EditorSubjectField
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -81,6 +88,54 @@ class PrivateMessageComposeInputTest {
     private val store = VersionedEditorDraftStore()
     private val uploads = FakeUploadRepository()
     private val repository = mockk<PrivateMessageWriteRepository>()
+
+    @Test
+    fun chipInputBlocksArmingAndPostUntilCommaThenPreservesNetworkCsv() {
+        setFieldContent(confirmBeforePosting = true, recipientFields = true)
+        val recipients = compose.onNodeWithTag("recipients")
+        recipients.performTextInput(" Bob  with spaces,tail")
+        compose.runOnIdle { vm.bodyFieldState.edit { replace(0, length, "body") } }
+        compose.waitForIdle()
+        compose.runOnIdle {
+            assertEquals(EditorRecipientState(listOf("alice", " Bob  with spaces"), "tail"),
+                vm.state.value.recipientState)
+            assertFalse(vm.state.value.canSubmit)
+            vm.onSubmit()
+            vm.onSubmitConfirmed(null)
+            assertNull(vm.state.value.armToken)
+        }
+        coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+        recipients.performTextInput(",")
+        compose.runOnIdle {
+            assertTrue(vm.state.value.canSubmit)
+            vm.onSubmit()
+            assertNotNull(vm.state.value.armToken)
+            vm.onSubmitConfirmed(vm.state.value.armToken)
+        }
+        compose.waitUntil { !vm.state.value.isSubmitting }
+        coVerify(exactly = 1) {
+            repository.submitNewMessage(any(), "alice, Bob  with spaces,tail", "title", "body", any())
+        }
+    }
+
+    @Test
+    fun chipFieldsPersistSeparatelyThroughC1WithoutComposeOrHandleContent() {
+        setFieldContent(confirmBeforePosting = false, recipientFields = true)
+        compose.onNodeWithTag("recipients").performTextInput("Bob with spaces,unfinished")
+        compose.onNodeWithTag("subject").performTextInput(" privé".repeat(20))
+        compose.runOnIdle { vm.onStopped() }
+        compose.waitForIdle()
+        compose.runOnIdle {
+            val checkpoint = checkNotNull(store.saved[EditorDraftKey.mpCompose()])
+            assertEquals(EditorRecipientState(listOf("alice", "Bob with spaces"), "unfinished"),
+                EditorRecipientState.decode(checkpoint.recipients))
+            assertEquals(("title" + " privé".repeat(20)).take(70), checkpoint.subject)
+            val fragments = listOf("alice", "Bob with spaces", "unfinished", "title", "privé")
+            val serialized = registry.performSave().toString()
+            fragments.forEach { assertFalse(serialized.contains(it)) }
+            assertPrivateMessageComposeSavedState(savedStateHandle, fragments)
+        }
+    }
 
     @After
     fun tearDown() {
@@ -244,7 +299,11 @@ class PrivateMessageComposeInputTest {
 
     private fun field() = compose.onNode(hasSetTextAction())
 
-    private fun setFieldContent(confirmBeforePosting: Boolean, fullEditor: Boolean = false) {
+    private fun setFieldContent(
+        confirmBeforePosting: Boolean,
+        fullEditor: Boolean = false,
+        recipientFields: Boolean = false,
+    ) {
         val clipboard = RuntimeEnvironment.getApplication().getSystemService(Context.CLIPBOARD_SERVICE)
             as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("test", " pasted"))
@@ -284,7 +343,8 @@ class PrivateMessageComposeInputTest {
             registry = remember { SaveableStateRegistry(null, hostRegistry::canBeSaved) }
             CompositionLocalProvider(LocalSaveableStateRegistry provides registry) {
                 RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                    if (fullEditor) ComposerBody() else Box(Modifier.size(320.dp, 240.dp)) {
+                    if (recipientFields) RecipientFields() else if (fullEditor) ComposerBody()
+                    else Box(Modifier.size(320.dp, 240.dp)) {
                         // Keep the old editable composition: synchronous guards must reject blocked input.
                         BbcodeTextField(
                             state = vm.bodyFieldState,
@@ -297,7 +357,21 @@ class PrivateMessageComposeInputTest {
             }
         }
         compose.waitUntil { vm.state.value.formAvailable }
-        if (!fullEditor) field().requestFocus()
+        if (recipientFields) compose.onNodeWithTag("recipients").requestFocus()
+        else if (!fullEditor) field().requestFocus()
+    }
+
+    /** C2 components and C1 callbacks; production chrome is deliberately still the old screen. */
+    @Composable
+    private fun RecipientFields() {
+        val state by vm.state.collectAsState()
+        val subjectFocus = remember { FocusRequester() }
+        Column {
+            EditorRecipientField(state.recipientState, vm.recipientInput, { subjectFocus.requestFocus() },
+                Modifier.testTag("recipients"))
+            EditorSubjectField(state.subject, vm.subjectInput,
+                Modifier.testTag("subject").focusRequester(subjectFocus))
+        }
     }
 
     @Composable

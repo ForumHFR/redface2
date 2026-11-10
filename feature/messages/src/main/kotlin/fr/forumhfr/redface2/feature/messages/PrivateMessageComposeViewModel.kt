@@ -51,8 +51,10 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorSurface
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.EditorRecipientInput
 import fr.forumhfr.redface2.core.ui.editor.EditorRecipientState
 import fr.forumhfr.redface2.core.ui.editor.EditorSessionField
+import fr.forumhfr.redface2.core.ui.editor.EditorSubjectInput
 import fr.forumhfr.redface2.core.ui.editor.MAX_IMAGES_PER_UPLOAD
 import fr.forumhfr.redface2.core.ui.editor.SmileyFavoriteMutations
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
@@ -117,6 +119,11 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     val bodyScrollState: ScrollState get() = draftSession.bodyScrollState
     private val _state = MutableStateFlow(PrivateMessageComposeUiState(isInitializing = true))
     val state: StateFlow<PrivateMessageComposeUiState> = _state.asStateFlow()
+    /** C2 input, consumed by the header at C4; C1 remains the sole content/persistence owner. */
+    val recipientInput = EditorRecipientInput({ state.value.recipientState }, ::onRecipientStateChanged)
+    val subjectInput = EditorSubjectInput(
+        PrivateMessageComposeUiState.SUBJECT_MAX_LENGTH, { state.value.subject }, ::onSubjectChanged,
+    )
     internal val editorEvents = PrivateMessageComposeEvents()
 
     /** Deliver transitions synchronously, including identical refusals before recomposition. */
