@@ -21,7 +21,6 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
-import androidx.compose.ui.test.performTextInputSelection
 import androidx.compose.ui.text.TextRange
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -170,9 +169,21 @@ class PrivateMessageReplyRestorationScreenTest {
         // sheet bypasses captureBody and lets BTF2 collapse an uncaptured range during disposal.
         compose.runOnIdle { back.onBackPressed() }
         compose.onNode(hasSetTextAction()).performClick().performTextInput("Bonjour")
-        compose.onNode(hasSetTextAction()).performTextInputSelection(selection)
+        // performTextInputSelection sends SetSelection(selection.min, selection.max) (ui-test TextActions),
+        // so it can only pose (1, 6). Reverse the live focused range directly, as the ED86 Compose test does.
+        compose.runOnIdle { model.bodyFieldState.edit { this.selection = selection } }
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            assertEquals("Bonjour", model.bodyFieldState.text.toString())
+            assertEquals("Reversed range before opening", selection, model.bodyFieldState.selection)
+        }
         compose.onNodeWithContentDescription("2 destinataires, gérer").performClick()
         compose.onNodeWithText("Membres de la discussion").assertIsDisplayed()
+        // Diagnostic: the body keeps its range while the sheet window is open, before the owner recreation.
+        compose.runOnIdle {
+            assertEquals("Bonjour", model.bodyFieldState.text.toString())
+            assertEquals("Live range after opening the manager", selection, model.bodyFieldState.selection)
+        }
         compose.runOnIdle {
             model.chromeMemory.host.focus.imeBeforeSurface = false
             owner = host().get() // Fresh composition/activity owner, same VM as a configuration change.

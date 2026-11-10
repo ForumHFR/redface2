@@ -132,7 +132,9 @@ class PrivateMessageEditorLayoutTest {
         compose.onNodeWithText("Réessayer").assertIsEnabled()
         assertDraftActionsFullyVisible()
         compose.runOnIdle { state.value = state.value.copy(formAvailable = true, formError = false) }
-        // The same host memory keeps the restore panel across the full-screen form failure.
+        // The full-screen failure closed the panel: the retry returns to the bare editor, whose ↺ reopens it.
+        compose.onNodeWithText("Restaurer").assertDoesNotExist()
+        openRestore()
         compose.onNodeWithText("Restaurer").assertIsEnabled()
         compose.runOnIdle { state.value = state.value.copy(isLoadingForm = true) }
         compose.onNodeWithText("Restaurer").assertIsNotEnabled()

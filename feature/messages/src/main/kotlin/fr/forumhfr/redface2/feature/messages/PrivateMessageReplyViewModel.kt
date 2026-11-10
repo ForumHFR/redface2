@@ -741,11 +741,6 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         }
     }
 
-    /** #459 — dismiss the upload-error banner. */
-    fun onUploadErrorDismissed() {
-        updateState { it.copy(uploadError = null) }
-    }
-
     /**
      * #459 — inserts an already-built image BBCode fragment at the caret, WITHOUT surrounding
      * spaces (an image is self-contained). [leadingNewline] prefixes a newline when the caret is

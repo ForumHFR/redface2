@@ -6,12 +6,14 @@ import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -142,7 +144,7 @@ internal fun PrivateMessageReplyContent(
         state.isInitializing || window == null -> Surface(modifier.fillMaxSize()) {
             Box(contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         }
-        state.formError -> ReplyFormFailure(host, modifier)
+        state.formError -> ReplyFormFailure(host, smileyPicker, modifier)
         else -> CompositionLocalProvider(LocalEditorTooltipHost provides remember { EditorTooltipHost() }) {
             PrivateMessageReplyChrome(host, bodyFieldState, bodyInputTransformation, bodyScrollState,
                 smileyPicker, autoOpenRecipientManager && !recipientEntryHandled, window, modifier,
@@ -190,14 +192,24 @@ private fun PrivateMessageReplyChrome(
 
 /** Inline MP quote materialization failures keep the full-screen retry and draft offer. */
 @Composable
-private fun ReplyFormFailure(host: PrivateMessageReplyChromeAdapter, modifier: Modifier) {
+private fun ReplyFormFailure(
+    host: PrivateMessageReplyChromeAdapter,
+    smileys: SmileyPickerController,
+    modifier: Modifier,
+) {
     val state = host.state
+    // The retry returns to the bare editor; the ↺ status still offers the draft (gate R1b R3, minor 3).
+    LaunchedEffect(host) { host.closeLayersForFormFailure { smileys.dismiss() } }
     BackHandler { host.closeRequested() }
     Surface(modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             MessageEditorHeader(host.title(), host::closeRequested)
-            if (state.source.restorableDraft != null) Box(Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
-                MessageDraftRestoreBanner(host::restoreDraft, host::discardDraft, restoreEnabled = state.restoreEnabled)
+            if (state.source.restorableDraft != null) Surface(
+                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest, tonalElevation = 2.dp,
+            ) {
+                ReplyDraftRestoreChoice(host::restoreDraft, host::discardDraft, state.restoreEnabled,
+                    Modifier.padding(start = 8.dp, top = 8.dp, end = 8.dp))
             }
             MessageFormErrorState(onRetry = host::retryFormLoad)
         }

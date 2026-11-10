@@ -477,9 +477,6 @@ class PrivateMessageReplyViewModelTest {
             expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
-        viewModel.onUploadErrorDismissed()
-        advanceUntilIdle()
-        assertNull(viewModel.state.value.uploadError)
     }
 
     @Test

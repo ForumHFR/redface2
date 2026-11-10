@@ -1,14 +1,21 @@
 package fr.forumhfr.redface2.feature.messages
 
 import android.content.Context
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Density
 import androidx.test.core.app.ApplicationProvider
 import coil3.ColorImage
 import coil3.ImageLoader
@@ -61,6 +68,52 @@ class PrivateMessageReplyChromeSurfacesTest {
                 assertEquals(0, f.adapter.returnGeneration)
                 assertFalse(f.adapter.consumeReturn())
             }
+        }
+    }
+
+    @Test
+    @Config(qualifiers = "fr-rFR-w360dp-h760dp-port-xxhdpi")
+    fun `restore panel states its offer once and never ellipsizes it at font scale 1_3`() {
+        f.state = f.state.copy(restorableDraft = "Brouillon privé")
+        compose.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density = density.density, fontScale = 1.3f)) {
+                RedfaceTheme { PrivateMessageReplyTestContent(f.state, f.body, f.actions, f.events, f.memory) }
+            }
+        }
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
+        compose.onNodeWithText("Brouillon retrouvé").assertIsDisplayed()
+        val offer = "Un brouillon non envoyé a été retrouvé."
+        compose.onAllNodesWithText(offer, useUnmergedTree = true).assertCountEquals(1)
+        val layouts = mutableListOf<TextLayoutResult>()
+        val read = requireNotNull(compose.onNodeWithText(offer, useUnmergedTree = true).fetchSemanticsNode()
+            .config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action)
+        assertTrue(read(layouts))
+        val layout = layouts.single()
+        val last = layout.lineCount - 1
+        assertEquals(1.3f, layout.layoutInput.density.fontScale, 0.001f)
+        assertFalse("The offer must not exceed a line cap", layout.multiParagraph.didExceedMaxLines)
+        assertFalse("The offer must not be ellipsized", layout.isLineEllipsized(last))
+        assertEquals("Every character must be laid out", offer.length, layout.getLineEnd(last, visibleEnd = true))
+    }
+
+    @Test fun `a full-screen form failure closes the open sheet instead of restoring it after the retry`() {
+        content()
+        compose.onNodeWithContentDescription("Options").performClick()
+        compose.onNodeWithText("Activer la signature").assertExists()
+        compose.runOnIdle { f.state = f.state.copy(formError = true, formAvailable = false) }
+        compose.onNodeWithText("Réessayer").assertIsDisplayed()
+        compose.runOnIdle {
+            assertNull(f.adapter.surface)
+            f.state = f.state.copy(formError = false, formAvailable = true)
+        }
+        compose.onNodeWithText("Activer la signature").assertDoesNotExist()
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            assertNull(f.adapter.surface)
+            assertEquals(1, f.adapter.returnGeneration)
+            assertFalse(f.adapter.consumeReturn())
+            assertTrue(f.calls.isEmpty())
         }
     }
 

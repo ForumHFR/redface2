@@ -101,7 +101,7 @@ internal fun MessageEditorHeader(title: String, onBack: () -> Unit) {
 }
 
 /**
- * #405 — non-destructive draft-restore banner shared by the two private-message editors.
+ * #405 — non-destructive draft-restore banner of the new-message editor (the reply uses ReplyDraftRestoreChoice).
  * « Restaurer » pre-fills the editor from the cached draft ; « Ignorer » deletes the cached row.
  * The draft is never silently applied nor lost.
  */

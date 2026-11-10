@@ -81,6 +81,12 @@ internal class PrivateMessageReplyChromeAdapter(
     }
     fun pickerCancelled() { closeSurface() }
     fun retryFormLoad() { actions.reloadForm() }
+    /** ED-130 replaces the whole editor: no panel, sheet or detail comes back after « Réessayer ». */
+    fun closeLayersForFormFailure(dismissSmileys: () -> Unit) {
+        if (surface == PrivateMessageReplyChromeSurface.Smileys) dismissSmileys()
+        detail?.let { closeDetails(it.key) }
+        closeSurface()
+    }
     fun restoreDraft() {
         if (state.restoreEnabled) { actions.restoreDraft(); closeSurface() }
     }

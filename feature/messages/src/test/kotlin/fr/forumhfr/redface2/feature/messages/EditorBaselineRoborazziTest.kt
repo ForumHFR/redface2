@@ -28,6 +28,9 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.domain.editor.ArmToken
+import fr.forumhfr.redface2.core.domain.editor.EditorSession
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
@@ -43,7 +46,9 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * Actual reply content on the common scaffold; the new-message baseline keeps its legacy assembly until C4.
- * Portrait/landscape × font scale 1.0/1.3 × empty/multiline, plus reply restore/event/preview/owner states.
+ * Reply: portrait/landscape × font scale 1.0/1.3 × light/dark × empty/multiline, plus restore/event/preview/
+ * owner states, an armed send, both statuses at rest and under an event, and the full-screen form failure.
+ * Light names are historical; dark reply names end in `_dark`. The new-message form stays light only.
  * Deterministic local text only. PNG references are explicitly recorded by the maintainer.
  */
 @RunWith(RobolectricTestRunner::class)
@@ -56,20 +61,34 @@ class EditorBaselineRoborazziTest {
     val compose = createComposeRule()
 
     @Test
-    fun portraitFontScale1_0() = captureMatrix(orientation = "portrait", fontScale = 1.0f)
+    fun portraitFontScale1_0() = captureMatrix(orientation = "portrait", fontScale = 1.0f, dark = false)
 
     @Test
-    fun portraitFontScale1_3() = captureMatrix(orientation = "portrait", fontScale = 1.3f)
-
-    @Test
-    @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
-    fun landscapeFontScale1_0() = captureMatrix(orientation = "landscape", fontScale = 1.0f)
+    fun portraitFontScale1_3() = captureMatrix(orientation = "portrait", fontScale = 1.3f, dark = false)
 
     @Test
     @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
-    fun landscapeFontScale1_3() = captureMatrix(orientation = "landscape", fontScale = 1.3f)
+    fun landscapeFontScale1_0() = captureMatrix(orientation = "landscape", fontScale = 1.0f, dark = false)
 
-    private fun captureMatrix(orientation: String, fontScale: Float) {
+    @Test
+    @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
+    fun landscapeFontScale1_3() = captureMatrix(orientation = "landscape", fontScale = 1.3f, dark = false)
+
+    @Test
+    fun portraitFontScale1_0Dark() = captureMatrix(orientation = "portrait", fontScale = 1.0f, dark = true)
+
+    @Test
+    fun portraitFontScale1_3Dark() = captureMatrix(orientation = "portrait", fontScale = 1.3f, dark = true)
+
+    @Test
+    @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
+    fun landscapeFontScale1_0Dark() = captureMatrix(orientation = "landscape", fontScale = 1.0f, dark = true)
+
+    @Test
+    @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
+    fun landscapeFontScale1_3Dark() = captureMatrix(orientation = "landscape", fontScale = 1.3f, dark = true)
+
+    private fun captureMatrix(orientation: String, fontScale: Float, dark: Boolean) {
         val scenario = mutableStateOf(Scenario(EditorSurface.Reply, filled = false))
         lateinit var focusManager: FocusManager
         compose.setContent {
@@ -78,7 +97,7 @@ class EditorBaselineRoborazziTest {
             CompositionLocalProvider(
                 LocalDensity provides Density(density = density.density, fontScale = fontScale),
             ) {
-                RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                RedfaceTheme(darkTheme = dark, amoledTheme = false, dynamicColor = false) {
                     val current = scenario.value
                     key(current) {
                         EditorChrome(current)
@@ -87,55 +106,39 @@ class EditorBaselineRoborazziTest {
             }
         }
 
-        val cases = EditorSurface.entries.flatMap { surface ->
+        // The legacy new-message form (other lot) keeps its light references only.
+        val surfaces = if (dark) listOf(EditorSurface.Reply) else EditorSurface.entries
+        val cases = surfaces.flatMap { surface ->
             listOf(false, true).map { Scenario(surface, it) }
         } + ReplyChrome.entries.filter { it != ReplyChrome.Ready }.map {
             Scenario(EditorSurface.Reply, filled = true, chrome = it)
         }
         cases.forEach { current ->
-            val surface = current.surface
-            val filled = current.filled
             compose.runOnIdle { scenario.value = current }
             compose.waitForIdle()
-            val action = when (current.chrome) {
-                ReplyChrome.Restore -> "Brouillon retrouvé, restaurer ou ignorer"
-                ReplyChrome.Manager -> "2 destinataires, gérer"
-                ReplyChrome.Options -> "Options"
-                ReplyChrome.Details -> "Anti-flood HFR, Afficher les détails"
-                else -> null
-            }
-            action?.let { compose.onNodeWithContentDescription(it).performClick() }
+            current.chrome.tap?.let { compose.onNodeWithContentDescription(it).performClick() }
             compose.runOnIdle { focusManager.clearFocus(force = true) }
             compose.mainClock.advanceTimeBy(1_000L)
             compose.waitForIdle()
             compose.mainClock.autoAdvance = false
-            val state = if (current.chrome != ReplyChrome.Ready) current.chrome.name.lowercase()
-                else if (filled) "multiline" else "empty"
-            val capture = if (current.chrome in setOf(ReplyChrome.Manager, ReplyChrome.Options)) {
+            val capture = if (current.chrome.sheet) {
                 compose.onNode(isDialog())
             } else compose.onRoot()
                 .assertWidthIsEqualTo(if (orientation == "portrait") 360.dp else 760.dp)
                 .assertHeightIsEqualTo(if (orientation == "portrait") 760.dp else 360.dp)
             capture.captureRoboImage(filePath = "src/test/screenshots/" +
-                "${surface.fileName}_${orientation}_fs${fontScale}_$state.png")
+                "${current.surface.fileName}_${orientation}_fs${fontScale}_${current.state}${theme(dark)}.png")
             compose.mainClock.autoAdvance = true
         }
     }
+
+    private fun theme(dark: Boolean) = if (dark) "_dark" else ""
 
     @Composable
     private fun EditorChrome(scenario: Scenario) {
         val draft = TextFieldValue(if (scenario.filled) MULTILINE_DRAFT else "")
         if (scenario.surface == EditorSurface.Reply) {
-            val state = PrivateMessageReplyUiState(isLoadingForm = false, formAvailable = true,
-                bodyText = draft.text, conversationTitle = "Conversation de démonstration",
-                canManageRecipients = scenario.chrome in setOf(ReplyChrome.Owner, ReplyChrome.Manager),
-                recipients = listOf("CorrespondantTest", "Administration"),
-                restorableDraft = if (scenario.chrome == ReplyChrome.Restore) "Brouillon privé" else null,
-                submitError = if (scenario.chrome in setOf(ReplyChrome.Error, ReplyChrome.Details))
-                    EditorErrors.antiFlood else null,
-                isPreviewVisible = scenario.chrome == ReplyChrome.Preview,
-                preview = PostContent(listOf(PostBlock.Paragraph(listOf(PostInline.Text("Aperçu de la réponse."))))))
-            PrivateMessageReplyTestContent(state)
+            PrivateMessageReplyTestContent(replyState(scenario.chrome, draft.text))
             return
         }
         val newMessage = PrivateMessageComposeUiState(
@@ -180,13 +183,52 @@ class EditorBaselineRoborazziTest {
         }
     }
 
+    private fun replyState(chrome: ReplyChrome, body: String) = PrivateMessageReplyUiState(
+        isLoadingForm = false, formAvailable = !chrome.failure, formError = chrome.failure,
+        bodyText = body, conversationTitle = "Conversation de démonstration",
+        canManageRecipients = chrome.owner, recipients = listOf("CorrespondantTest", "Administration"),
+        restorableDraft = if (chrome.draftOffer) "Brouillon privé" else null,
+        submitError = if (chrome.antiFlood) EditorErrors.antiFlood else null,
+        // Far-future arm, as in the post baseline: the countdown scrim stays frozen at its start.
+        submission = if (chrome == ReplyChrome.Armed) {
+            EditorSubmissionState.Armed(ArmToken(1, ARM_SESSION, Long.MAX_VALUE / 4, 60_000L))
+        } else EditorSubmissionState.Ready,
+        isPreviewVisible = chrome == ReplyChrome.Preview,
+        preview = PostContent(listOf(PostBlock.Paragraph(listOf(PostInline.Text("Aperçu de la réponse."))))),
+    )
+
     private data class Scenario(
         val surface: EditorSurface,
         val filled: Boolean,
         val chrome: ReplyChrome = ReplyChrome.Ready,
-    )
+    ) {
+        val state get() = chrome.scene ?: if (filled) "multiline" else "empty"
+    }
 
-    private enum class ReplyChrome { Ready, Restore, Owner, Manager, Options, Error, Details, Preview }
+    /** [scene] names the PNG; [tap] is the content description opened before capture; sheets capture their dialog. */
+    private enum class ReplyChrome(val scene: String?, val tap: String? = null, val sheet: Boolean = false) {
+        Ready(null),
+        Restore("restore", tap = "Brouillon retrouvé, restaurer ou ignorer"),
+        Owner("owner"),
+        Manager("manager", tap = "2 destinataires, gérer", sheet = true),
+        Options("options", tap = "Options", sheet = true),
+        Error("error"),
+        Details("details", tap = "Anti-flood HFR, Afficher les détails"),
+        Preview("preview"),
+        Armed("armed"),
+        // ↺ and recipients at rest, without a tap: the app bar in portrait, the action bar in landscape.
+        Statuses("statuses"),
+        // Same statuses beside the anti-flood event (ED-30/41).
+        EventStatuses("event_statuses"),
+        Failure("failure"),
+        FailureDraft("failure_draft"),
+        ;
+
+        val owner get() = this in setOf(Owner, Manager, Statuses, EventStatuses)
+        val draftOffer get() = this in setOf(Restore, Statuses, EventStatuses, FailureDraft)
+        val antiFlood get() = this in setOf(Error, Details, EventStatuses)
+        val failure get() = this in setOf(Failure, FailureDraft)
+    }
 
     private enum class EditorSurface(val fileName: String) {
         Reply("private_message_reply"),
@@ -194,6 +236,7 @@ class EditorBaselineRoborazziTest {
     }
 
     private companion object {
+        val ARM_SESSION = EditorSession("baseline", "tester", "mp-reply:42")
         val MULTILINE_DRAFT = (1..24).joinToString("\n") { line ->
             "Ligne $line — Texte de démonstration pour remplir le champ et observer le retour à la ligne."
         }
