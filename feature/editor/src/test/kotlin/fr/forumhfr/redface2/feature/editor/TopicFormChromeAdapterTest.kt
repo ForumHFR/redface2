@@ -74,6 +74,18 @@ class TopicFormChromeAdapterTest {
             }
         }
     }
+    @Test fun `ED35 missing first post route disables the send button and retained send callbacks`() {
+        val f = TopicFormChromeFixture(TopicFormMode.EditFirstPost)
+        val ready = f.state
+        val retained = f.adapter.host.submitActions
+        listOf(ready.copy(cat = null), ready.copy(subcat = null), ready.copy(topicId = null),
+            ready.copy(numreponse = null), ready.copy(page = null)).forEach { incomplete ->
+            f.state = incomplete
+            assertFalse(f.adapter.host.submitState.enabled)
+            retained.onSubmit()
+            assertTrue(f.calls.isEmpty())
+        }
+    }
     @Test fun `ED100 no select allows creation only and never invents a subcategory`() {
         TopicFormMode.entries.forEach { mode ->
             val f = TopicFormChromeFixture(mode)
@@ -101,6 +113,33 @@ class TopicFormChromeAdapterTest {
             recreated.openInitialHeader()
             assertFalse(f.memory.headerOpen)
         }
+    }
+    @Test fun `ED101 a refused initial opening is retried once controls become available`() {
+        val f = TopicFormChromeFixture()
+        f.state = f.state.copy(subject = TextFieldValue(), isSubmitting = true)
+        f.adapter.openInitialHeader()
+        assertFalse(f.memory.headerOpen)
+        f.state = f.state.copy(isSubmitting = false)
+        f.adapter.openInitialHeader()
+        assertTrue(f.memory.headerOpen)
+        f.adapter.closeHeader()
+        f.adapter.openInitialHeader()
+        assertFalse(f.memory.headerOpen)
+    }
+    @Test fun `restoring a session keeps its header enabled and read only without accepting callbacks`() {
+        val f = TopicFormChromeFixture()
+        f.adapter.openHeader()
+        f.state = f.state.copy(isInitializing = true, isRestoringSession = true)
+        assertTrue(f.adapter.state.headerEnabled)
+        assertTrue(f.adapter.state.headerReadOnly)
+        assertFalse(f.adapter.state.subcategoryEnabled)
+        f.adapter.subject(TextFieldValue("Refusé"))
+        f.adapter.subcategory(1)
+        f.adapter.restoreDraft()
+        assertTrue(f.calls.isEmpty())
+        f.state = f.state.copy(isInitializing = false, isRestoringSession = false)
+        f.adapter.subject(TextFieldValue("Accepté"))
+        assertEquals(listOf(TopicFormIntent.SubjectChanged(TextFieldValue("Accepté"))), f.calls)
     }
     @Test fun `ED45 CompleteHeader forwards the exact cause and acknowledges only that delivery`() {
         TopicFormMode.entries.forEach { mode ->

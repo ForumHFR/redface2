@@ -65,6 +65,18 @@ class TopicFormStateTest {
     }
 
     @Test
+    fun `ED35 missing first post route context disables activation as well as POST`() {
+        val ready = editFirstPostState()
+        assertTrue(ready.sendActivatable)
+        listOf(ready.copy(cat = null), ready.copy(subcat = null), ready.copy(topicId = null),
+            ready.copy(numreponse = null), ready.copy(page = null)).forEach { incomplete ->
+            assertFalse(incomplete.sendActivatable)
+            assertFalse(incomplete.canSubmit)
+        }
+        assertFalse(newState(false, null).copy(cat = null).sendActivatable)
+    }
+
+    @Test
     fun `New with a cat WITHOUT sub-category allows submit even with a null selectedSubcat`() {
         assertTrue(newState(hasSubcategorySelect = false, selectedSubcat = null).canSubmit)
     }

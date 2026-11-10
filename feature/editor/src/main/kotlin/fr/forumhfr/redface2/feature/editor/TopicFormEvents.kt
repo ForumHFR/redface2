@@ -9,7 +9,13 @@ import fr.forumhfr.redface2.core.ui.editor.EditorEventProjection
 import fr.forumhfr.redface2.core.ui.editor.EditorHostEvents
 import fr.forumhfr.redface2.core.ui.editor.afterFormLoaded
 
-/** Prepared for T2; the existing screen keeps its banners until the T3 chrome switch. */
+/**
+ * Prepared for T2; the existing screen keeps its banners until the T3 chrome switch.
+ * [EditorEventProjection] contract for anonymous forms: every send tap synchronously observes a null
+ * submitError reset, then LoginRequired, so two taps deliver two distinct refusals without arming.
+ * A successful reload of an unchanged anonymous form retains LoginRequired without resetting it:
+ * it is the same form fact, not another send refusal, even after the displayed event was acknowledged.
+ */
 internal class TopicFormEvents : EditorHostEvents {
     private val collector = EditorEventCollector(EditorErrorMappers(
         isReadError = { it.cause in setOf(EditorCause.FormNetwork, EditorCause.InvalidForm) },

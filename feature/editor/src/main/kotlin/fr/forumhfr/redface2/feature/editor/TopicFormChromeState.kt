@@ -12,9 +12,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorScaffoldChrome
 /** ED-35: activation exposes incomplete headers; canSubmit remains the strict POST guard. */
 internal data class TopicFormChromeState(val source: TopicFormState) {
     private val busy = source.isSubmitting || source.submission.blocksBodyMutation
-    private val formReady = source.hasLoadedForm && !source.isLoadingForm && !source.isInitializing
-    private val bodyReady = !source.isAwaitingInitialBody && source.bodyText.isNotBlank()
-    val sendActivatable = formReady && bodyReady && !busy && !source.isUploading
+    val sendActivatable = source.sendActivatable
     val postAllowed = source.canSubmit
     val categoryId = source.cat // Routing context, never inferred from an edited title or sub-category.
     val scaffold = EditorScaffoldChrome(
@@ -24,8 +22,10 @@ internal data class TopicFormChromeState(val source: TopicFormState) {
         uploading = source.isUploading, uploadProgress = source.uploadProgress, loadingForm = source.isLoadingForm,
     )
     val host = EditorHostState(scaffold, source.submission, sendActivatable, postAllowed)
-    val headerEnabled = scaffold.controlsEnabled && !source.isRestoringSession
-    val subcategoryEnabled = headerEnabled && !source.isLoadingForm
+    val headerEnabled = !busy && (!source.isInitializing || source.isRestoringSession)
+    val headerReadOnly = source.isRestoringSession
+    val showSubcategory = source.hasSubcategorySelect && source.subcategoryChoices.isNotEmpty()
+    val subcategoryEnabled = headerEnabled && !headerReadOnly && !source.isLoadingForm
     val unsupportedFirstPost = source.mode == TopicFormMode.EditFirstPost && !source.hasSubcategorySelect
     val selectedSubcategory = source.subcategoryChoices.firstOrNull {
         it.id != null && it.id == source.selectedSubcat
@@ -48,11 +48,9 @@ internal class TopicFormChromeMemory {
     var headerField by mutableStateOf(TopicFormHeaderField.Title)
         private set
     private var entryHandled = false
-    fun initial(source: TopicFormState): Boolean {
-        if (entryHandled || source.isInitializing || source.isRestoringSession) return false
-        entryHandled = true
-        return source.mode == TopicFormMode.New && source.subject.text.isBlank()
-    }
+    fun initial(source: TopicFormState) = !entryHandled && !source.isRestoringSession &&
+        TopicFormChromeState(source).scaffold.controlsEnabled
+    fun finishEntry() { entryHandled = true }
     fun complete(cause: EditorCause) {
         headerField = if (cause == EditorCause.MissingSubcategory) TopicFormHeaderField.Subcategory
             else TopicFormHeaderField.Title

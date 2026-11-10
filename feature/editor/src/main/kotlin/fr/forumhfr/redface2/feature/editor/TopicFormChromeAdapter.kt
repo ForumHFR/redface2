@@ -51,12 +51,18 @@ internal class TopicFormChromeAdapter(
         host.openHeaderForCompletion()
     }
     fun openInitialHeader() {
-        if (memory.initial(source())) completeHeader(EditorCause.MissingTitle)
+        val source = source()
+        if (!memory.initial(source)) return
+        if (source.mode == TopicFormMode.New && source.subject.text.isBlank()) {
+            completeHeader(EditorCause.MissingTitle)
+            if (memory.headerOpen) memory.finishEntry()
+        } else memory.finishEntry()
     }
     fun openHeader() = host.open(TopicFormChromeSurface.Header) { memory.complete(EditorCause.MissingTitle) }
     fun closeHeader() = host.closeSurface()
     fun restoreDraft() {
-        val enabled = state.headerEnabled && !source().isLoadingForm && !source().isUploading
+        val headerWritable = state.headerEnabled && !state.headerReadOnly
+        val enabled = headerWritable && !source().isLoadingForm && !source().isUploading
         if (enabled) { onIntent(TopicFormIntent.DraftRestoreRequested); host.closeSurface() }
     }
     fun discardDraft() {
@@ -81,7 +87,7 @@ internal class TopicFormChromeAdapter(
         return listOfNotNull(title.takeIf { it.isNotEmpty() }, state.selectedSubcategory).joinToString(" · ")
     }
     @Composable
-    fun headerLabel() = stringResource(if (source().hasSubcategorySelect) UiR.string.editor_app_bar_open_topic_header
+    fun headerLabel() = stringResource(if (state.showSubcategory) UiR.string.editor_app_bar_open_topic_header
         else R.string.editor_topic_open_title)
     @Composable
     fun chrome() = host.scaffoldChrome(
@@ -94,7 +100,7 @@ internal class TopicFormChromeAdapter(
             { host.open(TopicFormChromeSurface.Restore) }, enabled = state.scaffold.controlsEnabled),
     )
     fun subject(value: TextFieldValue) {
-        if (state.headerEnabled) onIntent(TopicFormIntent.SubjectChanged(value))
+        if (state.headerEnabled && !state.headerReadOnly) onIntent(TopicFormIntent.SubjectChanged(value))
     }
     fun subcategory(id: Int) {
         val offered = source().subcategoryChoices.any { it.id == id && id > 0 }

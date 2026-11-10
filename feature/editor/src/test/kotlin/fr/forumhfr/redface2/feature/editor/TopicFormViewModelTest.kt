@@ -64,6 +64,7 @@ import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.write.EditFirstPostContext
+import fr.forumhfr.redface2.core.model.write.MissingFirstPostSubcategoryException
 import fr.forumhfr.redface2.core.model.write.NewTopicContext
 import fr.forumhfr.redface2.core.model.write.NewTopicSubmitResult
 import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
@@ -76,7 +77,9 @@ import fr.forumhfr.redface2.core.model.write.TopicPollForm
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorAction
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
 import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
+import fr.forumhfr.redface2.core.ui.editor.EventKey
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.toEditorError
@@ -103,6 +106,7 @@ import java.util.concurrent.TimeUnit
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -171,6 +175,89 @@ class TopicFormViewModelTest {
             assertEquals(0, topicFormRepository.submitCalls + topicFormRepository.newTopicSubmitCalls)
             vm.viewModelScope.cancel()
         }
+    }
+
+    @Test
+    fun `ED100 parser refusal reaches first post chrome and a supported reload clears it`() = runTest {
+        // Same typed failure as the real no-select response in TopicFormParserTest and repository test.
+        topicFormRepository.formFailure = MissingFirstPostSubcategoryException()
+        val vm = newViewModel()
+        val refused = vm.state.value
+        assertFalse(refused.hasLoadedForm)
+        assertFalse(refused.hasSubcategorySelect)
+        assertTrue(TopicFormChromeState(refused).unsupportedFirstPost)
+        assertFalse(TopicFormChromeState(refused).showSubcategory)
+        assertFalse(refused.sendActivatable)
+        assertEquals(EditorErrors.invalidForm, refused.submitError)
+        vm.submit(TopicFormIntent.SubmitClicked())
+        vm.submit(TopicFormIntent.SubmitConfirmed(null))
+        assertNull(vm.state.value.armToken)
+        assertEquals(0, draftStore.beginCalls)
+        assertEquals(0, topicFormRepository.submitCalls)
+
+        topicFormRepository.formFailure = java.io.IOException("offline")
+        vm.submit(TopicFormIntent.ReloadRequested)
+        assertTrue(TopicFormChromeState(vm.state.value).unsupportedFirstPost)
+        topicFormRepository.formFailure = null
+        vm.submit(TopicFormIntent.ReloadRequested)
+        syncBody()
+        assertTrue(vm.state.value.hasSubcategorySelect)
+        assertFalse(TopicFormChromeState(vm.state.value).unsupportedFirstPost)
+        assertTrue(TopicFormChromeState(vm.state.value).showSubcategory)
+        assertTrue(vm.state.value.canSubmit)
+    }
+
+    @Test
+    fun `anonymous complete forms deliver two send refusals without arming or durable attempt`() = runTest {
+        for (creating in listOf(false, true)) {
+            topicFormRepository.formResult = topicFormRepository.formResult.copy(isAnonymous = true)
+            topicFormRepository.newTopicFormResult = topicFormRepository.newTopicFormResult.copy(isAnonymous = true)
+            val preferences = FakeUserPreferencesRepository(confirmBeforePosting = true)
+            val vm = if (creating) newTopicViewModel(SAMPLE_SUBCAT, userPreferencesRepository = preferences)
+                else newViewModel(userPreferencesRepository = preferences)
+            vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Titre")))
+            vm.editBody(TextFieldValue("Body"))
+            vm.editorEvents.dispatch(EditorEventInput.Acknowledge(vm.editorEvents.visibleEvent!!.key))
+            val keys = mutableListOf<EventKey>()
+            repeat(2) {
+                assertTrue(vm.state.value.sendActivatable)
+                vm.submit(TopicFormIntent.SubmitClicked())
+                assertEquals(EditorErrors.loginRequired, vm.state.value.submitError)
+                val event = vm.editorEvents.visibleEvent!!
+                assertEquals(EditorErrors.loginRequired, (event.content as EditorEventContent.Problem).error)
+                keys += event.key
+                assertNull(vm.state.value.armToken)
+                assertFalse(vm.state.value.showSubmitConfirmation)
+                vm.editorEvents.dispatch(EditorEventInput.Acknowledge(keys.last()))
+                assertNull(vm.editorEvents.visibleEvent)
+            }
+            assertNotEquals(keys.first(), keys.last())
+            vm.submit(TopicFormIntent.SubmitConfirmed(null))
+            assertEquals(0, draftStore.beginCalls)
+            assertEquals(0, topicFormRepository.submitCalls + topicFormRepository.newTopicSubmitCalls)
+            vm.viewModelScope.cancel()
+        }
+    }
+
+    @Test
+    fun `unchanged anonymous reload retains its refusal without redelivery even after acknowledgement`() = runTest {
+        for (creating in listOf(false, true)) {
+            topicFormRepository.formResult = topicFormRepository.formResult.copy(isAnonymous = true)
+            topicFormRepository.newTopicFormResult = topicFormRepository.newTopicFormResult.copy(isAnonymous = true)
+            val vm = if (creating) newTopicViewModel(SAMPLE_SUBCAT) else newViewModel()
+            val original = vm.editorEvents.visibleEvent!!
+            vm.submit(TopicFormIntent.ReloadRequested)
+            assertEquals(original, vm.editorEvents.visibleEvent)
+            vm.editorEvents.dispatch(EditorEventInput.Acknowledge(original.key))
+            vm.submit(TopicFormIntent.ReloadRequested)
+            assertNull(vm.editorEvents.visibleEvent)
+            assertEquals(EditorErrors.loginRequired, vm.state.value.submitError)
+            assertNull(vm.state.value.armToken)
+            assertEquals(0, draftStore.beginCalls)
+            vm.viewModelScope.cancel()
+        }
+        assertEquals(3, topicFormRepository.formFetches)
+        assertEquals(3, topicFormRepository.newTopicFormFetches)
     }
 
     @Test

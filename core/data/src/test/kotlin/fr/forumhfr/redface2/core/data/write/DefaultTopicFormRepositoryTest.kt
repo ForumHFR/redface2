@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.smiley.SmileyUsageFailure
 import fr.forumhfr.redface2.core.domain.smiley.SmileyUsageMutationResult
 import fr.forumhfr.redface2.core.model.write.EditFirstPostContext
+import fr.forumhfr.redface2.core.model.write.MissingFirstPostSubcategoryException
 import fr.forumhfr.redface2.core.model.write.NewTopicContext
 import fr.forumhfr.redface2.core.model.write.NewTopicSubmitResult
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -98,6 +99,17 @@ class DefaultTopicFormRepositoryTest {
         assertEquals("388", url.queryParameter("subcat"))
         assertEquals("1", url.queryParameter("page"))
         assertEquals("2523829", url.queryParameter("numreponse"))
+    }
+
+    @Test
+    fun `GET FP forwards the typed parser refusal for a real response without subcat selector`() = runTest {
+        server.enqueue(MockResponse().setBody(fixture("write_edit_form_test_post.html")))
+
+        val error = runCatching {
+            repository.fetchEditFirstPostForm(EditFirstPostContext(10, 388, 148_749, 1, 2_523_829))
+        }.exceptionOrNull()
+
+        assertTrue(error is MissingFirstPostSubcategoryException)
     }
 
     @Test

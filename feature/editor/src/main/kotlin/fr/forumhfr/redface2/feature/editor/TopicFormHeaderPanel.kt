@@ -32,9 +32,9 @@ internal fun TopicFormHeaderPanel(
     val titleFocus = remember { FocusRequester() }
     val subcategoryFocus = remember { FocusRequester() }
     val focusSubcategory = adapter.memory.headerField == TopicFormHeaderField.Subcategory &&
-        source.hasSubcategorySelect
-    LaunchedEffect(source.isInitializing, source.isRestoringSession) { adapter.openInitialHeader() }
-    val title = if (source.hasSubcategorySelect) UiR.string.editor_header_topic
+        adapter.state.showSubcategory
+    LaunchedEffect(adapter.state.scaffold.controlsEnabled, source.isRestoringSession) { adapter.openInitialHeader() }
+    val title = if (adapter.state.showSubcategory) UiR.string.editor_header_topic
         else R.string.editor_topic_header_title_only
     EditorHeaderPanel(adapter.memory.headerOpen, stringResource(title),
         bodyState, adapter::closeHeader,
@@ -43,15 +43,16 @@ internal fun TopicFormHeaderPanel(
         OutlinedTextField(
             value = source.subject, onValueChange = adapter::subject, singleLine = true,
             modifier = Modifier.fillMaxWidth().focusRequester(titleFocus), enabled = adapter.state.headerEnabled,
+            readOnly = adapter.state.headerReadOnly,
             label = { Text(stringResource(R.string.editor_topic_subject_label)) },
             keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
         )
-        if (source.hasSubcategorySelect) SubcategoryDropdown(
+        if (adapter.state.showSubcategory) SubcategoryDropdown(
             source.subcategoryChoices, source.selectedSubcat, adapter.state.subcategoryEnabled, adapter::subcategory,
             Modifier.focusRequester(subcategoryFocus),
         )
         if (adapter.state.unsupportedFirstPost) Text(stringResource(R.string.editor_topic_first_post_unsupported))
-        if (source.pollPresent) Text(stringResource(R.string.editor_topic_poll_readonly_note))
+        if (source.pollPresent && !source.pollEditable) Text(stringResource(R.string.editor_topic_poll_readonly_note))
     }
 }
 

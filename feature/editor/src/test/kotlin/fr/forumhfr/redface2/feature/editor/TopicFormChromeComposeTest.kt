@@ -5,7 +5,11 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
@@ -14,6 +18,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
@@ -112,7 +117,38 @@ class TopicFormChromeComposeTest {
         }
         compose.onNodeWithContentDescription("Sondage présent, consulter").performClick()
         compose.onNodeWithText("Ce sujet contient un sondage.", substring = true).assertExists()
+        compose.runOnIdle { fixture.state = fixture.state.copy(pollEditable = true) }
+        compose.onNodeWithText("Ce sujet contient un sondage.", substring = true).assertDoesNotExist()
         compose.runOnIdle { assertTrue(fixture.calls.isEmpty()) }
+    }
+    @Test fun `restoring a topic session leaves the title enabled but read only`() {
+        fixture.adapter.openHeader()
+        fixture.state = fixture.state.copy(isInitializing = true, isRestoringSession = true)
+        compose.setContent { Content() }
+        val title = compose.onNodeWithText("Titre du sujet").assertIsEnabled()
+        val setText = title.fetchSemanticsNode().config.getOrNull(SemanticsActions.SetText)?.action
+        compose.runOnIdle {
+            assertFalse(setText?.invoke(AnnotatedString("Refusé")) == true)
+            assertEquals("Titre", fixture.state.subject.text)
+        }
+        compose.onNodeWithText("Divers").assertIsNotEnabled()
+        compose.runOnIdle {
+            fixture.state = fixture.state.copy(isInitializing = false, isRestoringSession = false)
+        }
+        compose.onNodeWithText("Titre du sujet").assertIsEnabled().assert(hasSetTextAction())
+    }
+    @Test fun `ED101 initial creation hides an unknown selector until real choices arrive`() {
+        val loaded = fixture.state
+        fixture.state = loaded.copy(subject = TextFieldValue(), hasLoadedForm = false,
+            isLoadingForm = true, subcategoryChoices = emptyList())
+        compose.setContent { Content() }
+        compose.onNodeWithText("Titre du sujet").assertIsFocused()
+        compose.onNodeWithText("Sous-catégorie").assertDoesNotExist()
+        compose.runOnIdle { fixture.state = fixture.state.copy(isLoadingForm = false, hasLoadedForm = true,
+            hasSubcategorySelect = false) }
+        compose.onNodeWithText("Sous-catégorie").assertDoesNotExist()
+        compose.runOnIdle { fixture.state = loaded }
+        compose.onNodeWithText("Divers").assertExists()
     }
     @Test fun `ED101 compact header entry works without a subcategory in creation`() {
         fixture.state = fixture.state.copy(hasSubcategorySelect = false)

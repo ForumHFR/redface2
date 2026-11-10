@@ -44,7 +44,9 @@ data class TopicFormState(
      * which posts with `subcat=0`). Drives the [canSubmit] branch for the New
      * mode : a sub-category-less cat is submittable with `subcat=0` and no
      * explicit pick, while a cat WITH sub-categories still requires
-     * `selectedSubcat > 0`. Defaults to `true` so the historical contract holds.
+     * `selectedSubcat > 0`. Also false after the strict first-post parser rejects
+     * a missing selector; the failed GET never makes that form submittable.
+     * Defaults to `true` so the historical contract holds.
      */
     val hasSubcategorySelect: Boolean = true,
     val pollPresent: Boolean = false,
@@ -122,6 +124,27 @@ data class TopicFormState(
     /** A failed initial fetch leaves the first post unknown until reload or explicit restore. */
     val isAwaitingInitialBody: Boolean
         get() = mode == TopicFormMode.EditFirstPost && !draftHydratedFromServer
+
+    /** ED-35: incomplete headers and anonymous forms remain activatable for a local refusal. */
+    val sendActivatable: Boolean
+        get() {
+            val formReady = hasLoadedForm && !isLoadingForm && !isInitializing
+            val bodyReady = !isAwaitingInitialBody && bodyText.isNotBlank()
+            val idle = !isSubmitting && !submission.blocksBodyMutation && !isUploading
+            val supported = mode == TopicFormMode.New || hasSubcategorySelect
+            val available = formReady && bodyReady && idle
+            return available && supported && hasSubmitContext
+        }
+
+    /** Same route requirements as the context builders; no enabled send can silently lack its route. */
+    private val hasSubmitContext: Boolean
+        get() = when (mode) {
+            TopicFormMode.New -> (cat ?: 0) > 0
+            TopicFormMode.EditFirstPost -> {
+                val topicKnown = cat != null && (subcat ?: 0) > 0 && (topicId ?: 0) > 0
+                topicKnown && (numreponse ?: 0) > 0 && page == 1
+            }
+        }
 
     /**
      * Submit is allowed when the mode-specific routing context is complete,

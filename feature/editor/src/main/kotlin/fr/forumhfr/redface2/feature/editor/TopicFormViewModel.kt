@@ -44,6 +44,7 @@ import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.write.EditFirstPostContext
+import fr.forumhfr.redface2.core.model.write.MissingFirstPostSubcategoryException
 import fr.forumhfr.redface2.core.model.write.NewTopicContext
 import fr.forumhfr.redface2.core.model.write.NewTopicSubmitResult
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -929,6 +930,7 @@ class TopicFormViewModel @AssistedInject constructor(
         updateState {
             it.copy(
                 isLoadingForm = false,
+                hasSubcategorySelect = it.hasSubcategorySelect && error !is MissingFirstPostSubcategoryException,
                 submitError = if (it.submitError == EditorErrors.uncertain) it.submitError else mapped,
             )
         }
@@ -947,7 +949,7 @@ class TopicFormViewModel @AssistedInject constructor(
         val snapshot = _state.value.copy(bodyText = bodyFieldState.text.toString())
         val form = loadedForm
         if (form == null || closeRequested || submission.blocksMutation) return
-        if (!TopicFormChromeState(snapshot).sendActivatable) return
+        if (!snapshot.sendActivatable) return
         val headerError = snapshot.headerError
         if (headerError != null) {
             // ED-35: deliver every refusal, without allocating an arm or durable attempt.
@@ -1202,6 +1204,8 @@ class TopicFormViewModel @AssistedInject constructor(
             // Anti-clobber : do not overwrite once set, so a silent `InvalidHashCheck`
             // refetch on an anonymous fallback does not erase a previously known id.
             userId = userId ?: form.userId,
+            // An unchanged anonymous reload retains this fact without delivering another refusal.
+            // Each send tap observes its own null reset in onSubmitClicked (EditorEventProjection contract).
             submitError = submitError.afterFormLoaded() ?: EditorErrors.loginRequired.takeIf { form.isAnonymous },
         )
     }
