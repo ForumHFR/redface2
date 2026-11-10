@@ -171,7 +171,8 @@ private fun ComposeChrome(
         onSystemBack = back,
         fieldArea = { field -> PrivateMessageComposeChromePreview(host, body, focus, field) },
         overlay = { restore, content ->
-            PrivateMessageComposeChromeSurfaces(host, body, recipients, subject, smileys, restore, content)
+            PrivateMessageComposeChromeSurfaces(host, body, recipients, subject, smileys, restore,
+                window.compactHeight, content)
             // Last handler: use the common ED-85 resolver after bar, details, sheets and panels.
             BackHandler(onBack = back)
         })

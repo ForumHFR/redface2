@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
@@ -78,27 +80,52 @@ internal fun MessageEditorHeader(title: String, onBack: () -> Unit) {
  * #405 — non-destructive draft offer shared by both editors: the ↺ panel of the reply and of the new message,
  * and the reply's full-screen form failure. « Restaurer » pre-fills the editor from the cached draft ;
  * « Ignorer » deletes the cached row. The draft is never silently applied nor lost. The sentence has no line
- * cap above the two 48 dp actions, so font scale 1.3 never ellipsizes it (gates R1b R3 m2, C4 m8).
+ * cap nor ellipsis, so font scale 1.3 never truncates it (gates R1b R3 m2, C4 m8). It sits above the two 48 dp
+ * actions; at a [compactHeight] (EditorWindowMetrics.compactHeight) it takes the rest of their row instead, as
+ * the post and topic offer does, so a landscape ↺ panel above the keyboard still shows both actions (gate R1b
+ * minors r1 C1).
  */
 @Composable
 internal fun MessageDraftRestoreChoice(
     onRestore: () -> Unit,
     onDiscard: () -> Unit,
     restoreEnabled: Boolean,
+    compactHeight: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(stringResource(R.string.messages_draft_restore_message), style = MaterialTheme.typography.bodyMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onRestore, Modifier.heightIn(min = 48.dp), enabled = restoreEnabled) {
-                Text(stringResource(R.string.messages_draft_restore))
-            }
-            TextButton(onDiscard, Modifier.heightIn(min = 48.dp)) {
-                Text(stringResource(R.string.messages_draft_discard))
+    val offer = stringResource(R.string.messages_draft_restore_message)
+    if (compactHeight) {
+        Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(offer, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            // The narrower padding leaves the sentence its room in a 760 dp landscape at font scale 1.3.
+            MessageDraftRestoreActions(onRestore, onDiscard, restoreEnabled, CompactDraftActionPadding)
+        }
+    } else {
+        Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(offer, style = MaterialTheme.typography.bodyMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MessageDraftRestoreActions(onRestore, onDiscard, restoreEnabled,
+                    ButtonDefaults.TextButtonContentPadding)
             }
         }
     }
 }
+
+/** Emits « Restaurer » then « Ignorer » into the caller's row. */
+@Composable
+private fun MessageDraftRestoreActions(
+    onRestore: () -> Unit, onDiscard: () -> Unit, restoreEnabled: Boolean, padding: PaddingValues,
+) {
+    TextButton(onRestore, Modifier.heightIn(min = 48.dp), enabled = restoreEnabled, contentPadding = padding) {
+        Text(stringResource(R.string.messages_draft_restore))
+    }
+    TextButton(onDiscard, Modifier.heightIn(min = 48.dp), contentPadding = padding) {
+        Text(stringResource(R.string.messages_draft_discard))
+    }
+}
+
+private val CompactDraftActionPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
 
 /**
  * #606 — DT/MultiMP member editor, shown only to the conversation OWNER (gated by
