@@ -382,8 +382,10 @@ private class SelectionDetachNode(
     override fun onDetach() {
         if (restore) {
             restoreCollapsedRange()
-        } else if (!state.selection.collapsed) {
+        } else {
+            // Always overwrite: a collapsed field leaves no stale record of an earlier pass behind.
             checkpoint.recorded = BbcodeTextSnapshot(state.text.toString(), state.selection)
+                .takeUnless { it.selection.collapsed }
         }
     }
 
