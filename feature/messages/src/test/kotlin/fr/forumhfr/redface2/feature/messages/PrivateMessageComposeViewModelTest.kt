@@ -47,9 +47,14 @@ import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorSurface
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.EditorEvent
 import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
+import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
+import fr.forumhfr.redface2.core.ui.editor.EditorLocalOperation
 import fr.forumhfr.redface2.core.ui.editor.EditorRecipientState
+import fr.forumhfr.redface2.core.ui.editor.EventKey
+import fr.forumhfr.redface2.core.ui.editor.OperationRef
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import io.mockk.coEvery
@@ -1702,6 +1707,101 @@ class PrivateMessageComposeViewModelTest {
         assertEquals(EditorSubmissionState.Uncertain(attempt), recreated.state.value.submission)
         assertEquals(EditorEventContent.Problem(uncertainError), recreated.editorEvents.state.visibleEvent?.content)
         coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `ED45 ED170 local Masquer in Ready allows the next failed autosave to deliver information`() = runTest {
+        assertLocalMasquerReleasesAutosave(rearm = false)
+    }
+
+    @Test
+    fun `ED45 ED170 local Masquer after rearming allows the next failed autosave to deliver information`() = runTest {
+        assertLocalMasquerReleasesAutosave(rearm = true)
+    }
+
+    @Test
+    fun `ED45 local Masquer keeps a restored uncertain attempt unresolved`() = runTest {
+        val repository = uncertainRepository()
+        val attempt = seedUncertainAttempt()
+        val vm = viewModel(repository)
+        settle()
+        val entry = draftStore.entries[attempt.key]
+        val writes = draftStore.writes
+        val finishCalls = draftStore.finishCalls
+        val uncertain = checkNotNull(vm.editorEvents.state.visibleEvent)
+        // An unrelated local delivery cannot use Masquer to acknowledge the durable uncertainty.
+        val local = EditorEvent(
+            EventKey(vm.editorEvents.state.session, OperationRef.Local(EditorLocalOperation.Notice, 1_000), 0),
+            EditorEventContent.Problem(EditorErrors.draftWriteFailed), 1_000,
+        )
+        vm.editorEvents.dispatch(EditorEventInput.Received(local))
+        vm.editorEvents.dispatch(EditorEventInput.Acknowledge(uncertain.key))
+        assertEquals(local, vm.editorEvents.state.visibleEvent)
+        val adapter = vm.chromeAdapter()
+        adapter.barActions.onEvent(local.key, EditorEventAction.Details)
+        adapter.dismissDetails(local.key)
+        settle()
+        assertNull(adapter.detail)
+        assertEquals(EditorSubmissionState.Uncertain(attempt), vm.state.value.submission)
+        assertEquals(uncertainError, vm.state.value.submitError)
+        assertEquals(entry, draftStore.entries[attempt.key])
+        assertEquals(writes, draftStore.writes)
+        assertEquals(finishCalls, draftStore.finishCalls)
+        vm.assertNoSendingEvent()
+        coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    private fun TestScope.assertLocalMasquerReleasesAutosave(rearm: Boolean) {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val vm = viewModel(repository, confirmBeforePosting = rearm)
+        vm.onRecipientsChanged("alice")
+        vm.onSubjectChanged("Sujet")
+        vm.editBody(TextFieldValue("unsent body"))
+        settle()
+        draftStore.beginFailure = IOException("disk full")
+        vm.onSubmit()
+        if (rearm) {
+            advanceTimeBy(401)
+            vm.onSubmitConfirmed(vm.state.value.armToken)
+        }
+        settle()
+        assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
+        assertEquals(EditorErrors.draftWriteFailed, vm.state.value.submitError)
+        assertEquals(1, draftStore.beginCalls)
+        val adapter = vm.chromeAdapter()
+        if (rearm) {
+            // No settle while armed: the arm must not expire before Masquer.
+            adapter.submitActions.onSubmit()
+            runCurrent()
+            assertTrue(vm.state.value.submission is EditorSubmissionState.Armed)
+        }
+        val submission = vm.state.value.submission
+        val activity = listOf(draftStore.writes, draftStore.beginCalls, draftStore.finishCalls, draftStore.saveCount)
+        val key = vm.editorEvents.state.visibleEvent!!.key
+        assertEquals(EditorEventContent.Problem(EditorErrors.draftWriteFailed),
+            vm.editorEvents.state.visibleEvent?.content)
+        adapter.barActions.onEvent(key, EditorEventAction.Details)
+        adapter.dismissDetails(key)
+        runCurrent()
+        assertEquals(submission, vm.state.value.submission)
+        assertNull(vm.state.value.submitError)
+        assertNull(adapter.detail)
+        assertNull(vm.editorEvents.state.visibleEvent)
+        assertEquals(activity,
+            listOf(draftStore.writes, draftStore.beginCalls, draftStore.finishCalls, draftStore.saveCount))
+        vm.assertNoSendingEvent()
+
+        draftStore.saveFailure = IOException("still full")
+        vm.editBody(TextFieldValue("continued composition"))
+        settle()
+        assertEquals(EditorErrors.draftSaveFailed, vm.state.value.submitError)
+        assertEquals(EditorEventContent.Problem(EditorErrors.draftSaveFailed),
+            vm.editorEvents.state.visibleEvent?.content)
+        assertEquals("continued composition", vm.bodyFieldState.text.toString())
+        assertEquals(0, draftStore.finishCalls)
+        coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+        vm.assertNoSendingEvent()
     }
 
     private val uncertainError = EditorErrors.uncertain(EditorErrorSurface.MessageCompose)

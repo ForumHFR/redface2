@@ -299,6 +299,21 @@ class PrivateMessageComposeChromeComposeTest {
             assertNull(f.events.visibleEvent)
         }
     }
+    @Test fun `ED45 explicit Masquer of the MP failed attempt write forwards only the local acknowledgement`() {
+        prefill()
+        f.transition(f.state.copy(submitError = EditorErrors.draftWriteFailed))
+        compose.setContent { Content() }
+        val summary = EditorErrors.draftWriteFailed.summary.resolve(RuntimeEnvironment.getApplication())
+        compose.onNodeWithContentDescription("$summary, Afficher les détails").performClick()
+        compose.runOnIdle { assertTrue(f.calls.isEmpty()) }
+        compose.onNodeWithText("Masquer").performClick()
+        bodyField().assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(listOf("acknowledge local"), f.calls)
+            assertNull(f.adapter.detail)
+            assertNull(f.events.visibleEvent)
+        }
+    }
     @Test fun `ED45 ED85 system Back on the MP uncertainty detail and the header return never acknowledge`() {
         prefill()
         val attempt = AttemptToken("alice", f.session.key, "attempt", 1)

@@ -525,6 +525,9 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     /** ED-45/170: reached only from the host's explicit Masquer of the bound uncertain delivery. */
     fun onErrorDismissed() = submission.acknowledge(::scheduleAutosave)
 
+    /** ED-45/170: explicit Masquer of a failed attempt write; releases deferred draft information, no write. */
+    fun onDraftWriteFailureDismissed() = submission.acknowledgeLocal()
+
     /** ED-164/166: callbacks carry the identity displayed by the current composition. */
     fun onSubmitConfirmed(token: ArmToken?) {
         val snapshot = _state.value.copy(bodyText = bodyFieldState.text.toString())

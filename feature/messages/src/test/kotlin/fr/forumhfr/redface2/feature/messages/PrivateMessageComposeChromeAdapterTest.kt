@@ -256,6 +256,39 @@ class PrivateMessageComposeChromeAdapterTest {
         assertTrue(f.calls.isEmpty())
         assertNull(f.events.visibleEvent)
     }
+    @Test fun `ED45 local Masquer of a failed attempt write calls only the local port once`() {
+        f.transition(f.state.copy(submitError = EditorErrors.draftWriteFailed))
+        val event = f.events.visibleEvent!!
+        assertEquals(EditorEventAction.Details, event.action)
+        // The bar cannot dismiss a delivery whose action opens its detail.
+        f.adapter.barActions.onEvent(event.key, EditorEventAction.Dismiss)
+        f.adapter.barActions.onEvent(event.key, EditorEventAction.Details)
+        assertEquals(event, f.adapter.detail)
+        assertTrue(f.calls.isEmpty())
+        f.adapter.dismissDetails(event.key)
+        f.adapter.dismissDetails(event.key)
+        assertEquals(listOf("acknowledge local"), f.calls)
+        assertNull(f.adapter.detail)
+        assertNull(f.events.visibleEvent)
+    }
+    @Test fun `ED45 ED85 Back and closing the failed attempt write detail never acknowledge locally`() {
+        f.transition(f.state.copy(submitError = EditorErrors.draftWriteFailed))
+        val first = f.events.visibleEvent!!.key
+        f.adapter.barActions.onEvent(first, EditorEventAction.Details)
+        f.adapter.back()
+        assertNull(f.adapter.detail)
+        assertNull(f.events.visibleEvent)
+        f.transition(f.state.copy(submitError = null))
+        f.transition(f.state.copy(submitError = EditorErrors.draftWriteFailed))
+        val second = f.events.visibleEvent!!.key
+        assertNotEquals(first, second)
+        f.adapter.barActions.onEvent(second, EditorEventAction.Details)
+        f.adapter.closeDetails(second)
+        assertNull(f.adapter.detail)
+        assertNull(f.events.visibleEvent)
+        f.adapter.dismissDetails(second)
+        assertTrue(f.calls.isEmpty())
+    }
     @Test fun `ED31 image uses system picker and wrapping without URL and cancellation returns once`() {
         assertTrue(f.adapter.imageActions.canWrapSelection)
         assertNull(f.adapter.imageActions.onInsertUrl)
@@ -286,7 +319,7 @@ internal class PrivateMessageComposeChromeFixture {
     val actions = PrivateMessageComposeChromeActions(
         host = EditorHostActions({ calls += "send" }, { confirmed = it }, { calls += "disarm" },
             {}, { state = state.copy(isPreviewVisible = !state.isPreviewVisible) }, { calls += "close" },
-            onAcknowledgeUncertain = { calls += "acknowledge" }),
+            onAcknowledgeUncertain = { calls += "acknowledge" }, onAcknowledgeLocal = { calls += "acknowledge local" }),
         signature = { calls += "signature:$it" }, smileyDisabled = {}, notification = {}, smiley = {}, picker = {},
         restore = { calls += "restore" }, discard = { calls += "discard" }, reload = { calls += "reload" })
     val adapter = createAdapter()
