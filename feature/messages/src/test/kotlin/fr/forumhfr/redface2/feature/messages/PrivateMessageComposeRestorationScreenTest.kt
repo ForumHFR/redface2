@@ -184,7 +184,7 @@ class PrivateMessageComposeRestorationScreenTest {
         // Capture a body edited before opening the header; replacing text behind it bypasses captureBody.
         compose.runOnIdle { back.onBackPressed() }
         compose.onNode(hasSetTextAction()).performClick().performTextInput("Bonjour")
-            .performTextInputSelection(selection)
+        compose.onNode(hasSetTextAction()).performTextInputSelection(selection)
         compose.onNodeWithContentDescription("Modifier les destinataires et le sujet").performClick()
         compose.onNodeWithText("Retour au message").assertIsDisplayed()
         compose.runOnIdle {
