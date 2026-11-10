@@ -385,6 +385,47 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `ED52 duplicate notice survives a CAS conflict and waits for the marker replay commit`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val quote = "[quotemsg=101]same portion[/quotemsg]"
+        val notice = EditorEventContent.Information(EditorText(R.string.editor_quote_already_delivered))
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
+        replyRepository.formResult = Result.success(authenticatedForm(quote))
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        vm.editBody(TextFieldValue(quote, TextRange(7, 2)))
+        val other = EditorDraftSession(draftStore, key)
+        other.load()
+        assertTrue(other.save(EditorDraftStore.Draft(quote)) is EditorDraftStore.StoreWriteResult.Written)
+        get.complete(Unit)
+        syncBody()
+        assertTrue(vm.state.value.quoteStorageUnavailable)
+        assertNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        assertEquals(0, vm.chromeEvents.state.events.count { it.content == notice })
+
+        val write = CompletableDeferred<Unit>()
+        draftStore.saveReturnGate = write
+        vm.dispatch(PostEditorIntent.ReloadRequested)
+        assertTrue(vm.state.value.isLoadingForm)
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        assertEquals(quote, draftStore.saved[key]?.body)
+        assertEquals(listOf(101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
+        assertEquals(0, vm.chromeEvents.state.events.count { it.content == notice })
+        write.complete(Unit)
+        settleBody()
+        assertEquals(quote, vm.bodyFieldState.text.toString())
+        assertEquals(TextRange(7, 2), vm.bodyFieldState.selection)
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        assertFalse(vm.state.value.quoteStorageUnavailable)
+        assertEquals(1, vm.chromeEvents.state.events.count { it.content == notice })
+        vm.editBody(TextFieldValue("$quote\nRéponse"))
+        settleBody()
+        assertEquals(1, vm.chromeEvents.state.events.count { it.content == notice })
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
     fun `ED52 restore retains duplicate blocks verbatim`() = runTest {
         val quote = "[quotemsg=101]same portion[/quotemsg]"
         val restored = "$quote\n\n$quote\nRéponse"
@@ -803,6 +844,60 @@ class PostEditorViewModelTest {
         assertFalse(vm.chromeEvents.state.events.any {
             it.content == EditorEventContent.Information(EditorText(R.string.editor_quote_already_delivered))
         })
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `ED52 rereading a different request forgets the marker before an equal request returns`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val quote = "[quotemsg=101]portion A[/quotemsg]"
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm(quote)),
+            202 to Result.failure(IOException("offline")),
+        )
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        val other = EditorDraftSession(draftStore, key)
+        other.load()
+        val original = checkNotNull(other.pendingInlineQuoteRequest)
+        assertTrue(other.consumeInlineQuoteRequest(original) is EditorDraftStore.StoreWriteResult.Written)
+        val different = PendingInlineQuoteRequest(SAMPLE_CAT, SAMPLE_TOPIC_ID,
+            listOf(PendingInlineQuoteRequest.Quote(202, SAMPLE_PAGE)))
+        assertTrue(other.enqueueInlineQuoteRequest(different) is EditorDraftStore.StoreWriteResult.Written)
+        get.complete(Unit)
+        syncBody()
+        assertTrue(vm.state.value.quoteStorageUnavailable)
+        assertEquals("$quote\n", vm.bodyFieldState.text.toString())
+
+        // Remove A in memory, then reread B. Its failed GET must not retain A's delivery marker.
+        vm.editBody(TextFieldValue(""))
+        vm.dispatch(PostEditorIntent.ReloadRequested)
+        assertEquals(listOf(202), vm.state.value.pendingQuotes.map { it.numreponse })
+        assertEquals(EditorErrors.quoteFetchFailed(inline = true), vm.state.value.submitError)
+        vm.dispatch(PostEditorIntent.ReloadRequested)
+        assertTrue(vm.state.value.canIgnorePendingQuote)
+        assertEquals(listOf(101, 202, 202), replyRepository.fetchedContexts.map { it.quotedNumreponse })
+
+        // A returns as a new value-equal request before Ignore's CAS, causing a second conflict.
+        assertTrue(other.consumeInlineQuoteRequest(different) is EditorDraftStore.StoreWriteResult.Written)
+        val returned = PendingInlineQuoteRequest(original.cat, original.topicId, original.quotes)
+        assertEquals(original, returned)
+        assertTrue(other.enqueueInlineQuoteRequest(returned) is EditorDraftStore.StoreWriteResult.Written)
+        vm.dispatch(PostEditorIntent.PendingQuoteIgnored)
+        assertTrue(vm.state.value.quoteStorageUnavailable)
+        assertEquals("", vm.bodyFieldState.text.toString())
+        assertEquals(returned, draftStore.saved[key]?.pendingInlineQuoteRequest)
+        vm.dispatch(PostEditorIntent.ReloadRequested)
+        settleBody()
+        assertEquals(listOf(101, 202, 202, 101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
+        assertEquals("$quote\n", vm.bodyFieldState.text.toString())
+        assertEquals("$quote\n", draftStore.saved[key]?.body)
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        assertFalse(vm.state.value.quoteStorageUnavailable)
+        assertFalse(vm.chromeEvents.state.events.any { it.content is EditorEventContent.Information })
         assertEquals(0, replyRepository.submitCalls)
     }
 
@@ -4089,6 +4184,39 @@ class PostEditorViewModelTest {
         assertEquals(1, vm.chromeEvents.state.events.count {
             it.content == EditorEventContent.Information(EditorText(R.string.editor_quote_already_delivered))
         })
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `ED52 offline process replay then Ignore keeps restored portion A exactly once`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val quote = "[quotemsg=101]portion A[/quotemsg]"
+        val body = "$quote\n\nrescued reply"
+        val pending = PendingInlineQuoteRequest(SAMPLE_CAT, SAMPLE_TOPIC_ID,
+            listOf(PendingInlineQuoteRequest.Quote(101, SAMPLE_PAGE)))
+        draftStore.preload(key, EditorDraftStore.Draft(body, pendingInlineQuoteRequest = pending))
+        replyRepository.formException = IOException("offline")
+        val vm = newReplyViewModel(quoteAction = false,
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        assertEquals(body, vm.state.value.restorableDraft)
+        assertEquals(0, replyRepository.formFetches)
+        vm.dispatch(PostEditorIntent.DraftRestoreRequested)
+        assertEquals(body, vm.bodyFieldState.text.toString())
+        assertEquals(EditorErrors.quoteFetchFailed(inline = true), vm.state.value.submitError)
+        assertEquals(pending, draftStore.saved[key]?.pendingInlineQuoteRequest)
+        vm.dispatch(PostEditorIntent.ReloadRequested)
+        assertEquals(2, vm.state.value.quoteFetchFailures)
+        assertTrue(vm.state.value.canIgnorePendingQuote)
+        vm.dispatch(PostEditorIntent.PendingQuoteIgnored)
+        settleBody()
+        assertEquals(body, vm.bodyFieldState.text.toString())
+        assertEquals(body, draftStore.saved[key]?.body)
+        assertEquals(1, Regex("\\[quotemsg=101]").findAll(vm.bodyFieldState.text).count())
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        assertFalse(vm.state.value.canIgnorePendingQuote)
+        assertEquals(listOf(101, 101, null), replyRepository.fetchedContexts.map { it.quotedNumreponse })
+        assertFalse(vm.chromeEvents.state.events.any { it.content is EditorEventContent.Information })
         assertEquals(0, replyRepository.submitCalls)
     }
 

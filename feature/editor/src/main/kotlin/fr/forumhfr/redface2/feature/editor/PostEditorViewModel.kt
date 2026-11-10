@@ -367,6 +367,7 @@ class PostEditorViewModel @AssistedInject constructor(
                     loadedForm = null
                     restoration.invalidate()
                     inlineQuoteDeferredByUpload = false
+                    deliveredInlineQuoteRequest = null
                     updateChromeState { it.copy(isUploading = false, uploadProgress = null) }
                 }
                 authObserved = true
@@ -710,6 +711,7 @@ class PostEditorViewModel @AssistedInject constructor(
             }
         }
         val pending = submission.drafts.pendingInlineQuoteRequest
+        if (pending != deliveredInlineQuoteRequest) deliveredInlineQuoteRequest = null
         val requestResolved = submission.isInitialized && pending == null
         if (requestResolved) savedStateHandle.remove<Int>(QUOTE_FAILURES_KEY)
         updateChromeState {
