@@ -328,16 +328,22 @@ internal class BodyFocusHostActivity : ComponentActivity() {
     }
 
     override fun onPause() {
-        super.onPause() // The editor freezes BEFORE the window's teardown hide/insets.
+        super.onPause() // Exercise hide after pause; the memory tests also cover insets before pause.
         hideIme()
     }
 
     fun hideIme() { setImeVisible(false) }
 
     fun setImeVisible(visible: Boolean) {
-        ViewCompat.dispatchApplyWindowInsets(view, WindowInsetsCompat.Builder()
-            .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, if (visible) 120 else 0))
-            .setVisible(WindowInsetsCompat.Type.ime(), visible).build())
+        // API 29 loses compat-only IME overrides when dispatch unwraps to native WindowInsets.
+        // Encode its legacy system-window bottom via systemBars: compat infers the IME from the
+        // excess over stable bars (adjustResize), as on a device. Keep the real stable bar sizes.
+        val rootInsets = requireNotNull(ViewCompat.getRootWindowInsets(view))
+        val bars = rootInsets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.systemBars())
+        val bottom = bars.bottom + if (visible) 120 else 0
+        ViewCompat.dispatchApplyWindowInsets(view, WindowInsetsCompat.Builder(rootInsets)
+            .setInsets(WindowInsetsCompat.Type.systemBars(), Insets.of(bars.left, bars.top, bars.right, bottom))
+            .build())
     }
 
     @Composable

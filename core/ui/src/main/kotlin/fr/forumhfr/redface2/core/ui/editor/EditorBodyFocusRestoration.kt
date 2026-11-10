@@ -2,6 +2,7 @@
 
 package fr.forumhfr.redface2.core.ui.editor
 
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -36,7 +37,10 @@ internal class EditorBodyFocusMemory {
 internal data class EditorBodyFocusSnapshot(val focused: Boolean = false, val imeVisible: Boolean = false)
 
 /** One field attachment. Old window callbacks cannot overwrite the next attachment's snapshot. */
-internal class EditorBodyFocusObservation(private val memory: EditorBodyFocusMemory, imeVisible: Boolean) {
+internal class EditorBodyFocusObservation(
+    private val memory: EditorBodyFocusMemory, imeVisible: Boolean,
+    private val isChangingConfigurations: () -> Boolean = { false },
+) {
     val restore = memory.snapshot.takeIf { it.focused }
     val showImeOnRestore = restore?.imeVisible != false
     private val generation = ++memory.generation
@@ -56,7 +60,9 @@ internal class EditorBodyFocusObservation(private val memory: EditorBodyFocusMem
     suspend fun awaitResumed() { frozen.first { !it } }
 
     private fun record() {
-        if (!canRestore || restoring) return
+        // The outgoing window can report closed IME insets before ON_PAUSE freezes this attachment.
+        // Query the Activity at callback time; preserve the last live snapshot throughout relaunch.
+        if (!canRestore || restoring || isChangingConfigurations()) return
         memory.snapshot = EditorBodyFocusSnapshot(focused, imeVisible)
     }
 }
@@ -66,11 +72,14 @@ internal fun rememberEditorBodyFocus(
     state: TextFieldState, memory: EditorBodyFocusMemory, imeVisible: Boolean,
 ): EditorBodyFocusObservation {
     val owner = LocalLifecycleOwner.current
-    val observation = remember(state, memory, owner) { EditorBodyFocusObservation(memory, imeVisible) }
+    val activity = LocalActivity.current
+    val observation = remember(state, memory, owner, activity) {
+        EditorBodyFocusObservation(memory, imeVisible) { activity?.isChangingConfigurations == true }
+    }
     DisposableEffect(owner, observation) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                // Before focus release, disappearing IME insets and BTF2's detach-time collapse.
+                // Also protects pauses without a configuration change, before descendant detach.
                 Lifecycle.Event.ON_PAUSE -> observation.freeze()
                 Lifecycle.Event.ON_RESUME -> observation.resume()
                 else -> Unit

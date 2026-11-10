@@ -9,6 +9,37 @@ import org.junit.Test
 
 class EditorBodyFocusMemoryTest {
     @Test
+    fun configurationChangePreservesOpenImeWhenInsetsDisappearBeforePause() {
+        val memory = EditorBodyFocusMemory()
+        var changingConfigurations = false
+        val field = EditorBodyFocusObservation(memory, imeVisible = true) { changingConfigurations }
+        field.focusChanged(true)
+        changingConfigurations = true
+        field.imeChanged(false)
+        field.focusChanged(false)
+        assertEquals(EditorBodyFocusSnapshot(true, true), memory.snapshot)
+        field.freeze()
+        field.detach()
+        assertEquals(EditorBodyFocusSnapshot(true, true), memory.snapshot)
+        assertEquals(memory.snapshot, EditorBodyFocusObservation(memory, imeVisible = false).restore)
+    }
+
+    @Test
+    fun imeClosedByTheUserBeforeConfigurationChangeStaysClosed() {
+        val memory = EditorBodyFocusMemory()
+        var changingConfigurations = false
+        val field = EditorBodyFocusObservation(memory, imeVisible = true) { changingConfigurations }
+        field.focusChanged(true)
+        field.imeChanged(false)
+        changingConfigurations = true
+        field.imeChanged(false)
+        field.focusChanged(false)
+        field.freeze()
+        field.detach()
+        assertEquals(EditorBodyFocusSnapshot(true, false), memory.snapshot)
+    }
+
+    @Test
     fun pauseFreezesActualFocusAndImeBeforeDestructionNotifications() {
         val memory = EditorBodyFocusMemory()
         val field = EditorBodyFocusObservation(memory, imeVisible = true)
