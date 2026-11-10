@@ -323,6 +323,27 @@ class EditorSubmissionBindingTest {
     }
 
     @Test
+    fun localAcknowledgementPreservesNewerError() = runTest {
+        val store = VersionedEditorDraftStore()
+        val failures = mutableListOf<String?>()
+        val binding = failedAttemptBinding(store, failures)
+        // Match a feature-local submitError replacing the attempt failure before Masquer is handled.
+        failures += "quote"
+        val displayed = failures.toList()
+        val activity = store.storageActivity()
+        binding.acknowledgeLocal()
+        runCurrent()
+        assertEquals(displayed, failures)
+        assertEquals(EditorSubmissionState.Ready, binding.state)
+        assertEquals(activity, store.storageActivity())
+        binding.acknowledgeLocal()
+        assertEquals(displayed, failures)
+        // The local flag was still released: a later draft failure is delivered immediately.
+        binding.resolveDraftWrite(EditorDraftStore.StoreWriteResult.Failed(IOException("disk full")))
+        assertEquals(displayed + "save", failures)
+    }
+
+    @Test
     fun `local acknowledgement ignores a reserved retry with a previous attempt write failure`() = runTest {
         val store = VersionedEditorDraftStore()
         val failures = mutableListOf<String?>()

@@ -149,7 +149,7 @@ class EditorSubmissionBinding<E, F>(
             controller.state is EditorSubmissionState.Armed
         if (attemptWriteFailed && !uncertainError && editable) {
             attemptWriteFailed = false
-            showPendingDraftFailure()
+            if (pendingDraftFailure) showPendingDraftFailure() else callbacks.clearError(errors.draftWriteFailed)
         }
     }
 
