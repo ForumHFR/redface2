@@ -10,7 +10,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorHostEvents
 import fr.forumhfr.redface2.core.ui.editor.afterFormLoaded
 
 /**
- * Prepared for T2; the existing screen keeps its banners until the T3 chrome switch.
+ * Topic delivery policy for the shared chrome, including reload remedies and durable warnings.
  * [EditorEventProjection] contract for anonymous forms: every send tap synchronously observes a null
  * submitError reset, then LoginRequired, so two taps deliver two distinct refusals without arming.
  * A successful reload of an unchanged anonymous form retains LoginRequired without resetting it:

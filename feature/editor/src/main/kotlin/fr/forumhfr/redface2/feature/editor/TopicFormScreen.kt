@@ -2,34 +2,26 @@ package fr.forumhfr.redface2.feature.editor
 
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.ScrollState
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.BoxWithConstraints
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
-import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenu
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
 import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.ExposedDropdownMenuDefaults
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -40,44 +32,34 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
-import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
-import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
-import fr.forumhfr.redface2.core.ui.editor.BbcodeToolbar
-import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
-import fr.forumhfr.redface2.core.ui.editor.EditorError
-import fr.forumhfr.redface2.core.ui.editor.EditorErrorAction
-import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
-import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummary
-import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
-import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
-import fr.forumhfr.redface2.core.ui.editor.UploadProgressLabel
-import fr.forumhfr.redface2.core.ui.editor.bannerText
-import fr.forumhfr.redface2.core.ui.editor.editorControlsMaxHeight
-import fr.forumhfr.redface2.core.ui.editor.hasSubmissionSummary
+import fr.forumhfr.redface2.core.ui.editor.EditorBackAction
+import fr.forumhfr.redface2.core.ui.editor.EditorBackState
+import fr.forumhfr.redface2.core.ui.editor.EditorPreview
+import fr.forumhfr.redface2.core.ui.editor.EditorScaffold
+import fr.forumhfr.redface2.core.ui.editor.EditorTooltipHost
+import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
+import fr.forumhfr.redface2.core.ui.editor.LocalEditorTooltipHost
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.rememberEditorImagePicker
+import fr.forumhfr.redface2.core.ui.editor.rememberEditorWindowMetrics
+import fr.forumhfr.redface2.core.ui.post.PostMediaDiskCachePolicy
 
 /**
  * Topic-level form screen. Live for [TopicFormMode.EditFirstPost] (Phase 2D
  * #148) and [TopicFormMode.New] (Phase 2E #149).
  *
- * Shared surface :
- * - Subject field (writable).
- * - Subcategory dropdown for both EditFirstPost and New.
- * - BBCode toolbar + draft field + optional preview.
- * - Per-post options (signature / smileys / email / ton) identical to the post-level editor.
- * - Poll : if `state.pollPresent`, a sober note that mutation is not in this version.
- * - Submit button + error banner.
+ * The shared chrome keeps the body mounted beneath preview, header and event panels.
+ * The ViewModel owns the session, picker and transient host memory across rotation.
  */
 @Composable
 @Suppress("LongParameterList") // One callback per navigation outcome — each wired to a distinct :app pop.
@@ -88,8 +70,7 @@ fun TopicFormScreen(
     // listing so it can highlight the freshly-created row (HFR never returns the new id).
     onNewTopicCreated: (cat: Int, subcat: Int, newTopicId: Int?, newNumreponse: Int?, subject: String) -> Unit,
     // #803 pattern (state-hygiene audit 2026-07-05) — pops this form AFTER the ViewModel flushed
-    // the draft (CloseCommitted). Default keeps callers without the wiring on the platform back
-    // (no flush) — `:app` wires it. Mirrors PostEditorScreen.onClose.
+    // the draft (CloseCommitted). `:app` supplies the navigation callback, as for the post.
     onClose: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     viewModel: TopicFormViewModel = hiltViewModel<TopicFormViewModel, TopicFormViewModel.Factory>(
@@ -117,6 +98,8 @@ fun TopicFormScreen(
         withFrameNanos { }
         if (measuredViewport == (bodyScroll.maxValue to bodyScroll.viewportSize)) viewModel.restoreBodyScroll()
     }
+    val currentOnClose by rememberUpdatedState(onClose)
+    val currentOnNewTopicCreated by rememberUpdatedState(onNewTopicCreated)
     val currentOnSubmitSucceeded by rememberUpdatedState(onSubmitSucceeded)
     val context = LocalContext.current
     val newTopicCreatedFallback = stringResource(R.string.editor_new_topic_created)
@@ -136,7 +119,7 @@ fun TopicFormScreen(
                         // will highlight the freshly-created row by exact-title match.
                         Toast.makeText(context, newTopicCreatedFallback, Toast.LENGTH_LONG).show()
                     }
-                    onNewTopicCreated(
+                    currentOnNewTopicCreated(
                         effect.cat,
                         effect.subcat,
                         effect.newTopicId,
@@ -144,299 +127,101 @@ fun TopicFormScreen(
                         effect.subject,
                     )
                 }
-                TopicFormEffect.CloseCommitted -> onClose?.invoke()
+                TopicFormEffect.CloseCommitted -> currentOnClose?.invoke()
             }
         }
     }
 
-    // #803 pattern — route the system back through the ViewModel so the pending autosave debounce
-    // is flushed BEFORE the pop (trading the predictive-back preview for never losing the last
-    // < 750 ms of typing — same trade-off as PostEditorScreen). Only armed when `:app` wired the pop.
-    if (onClose != null) {
-        BackHandler { viewModel.submit(TopicFormIntent.CloseRequested) }
-    }
-
-    // #441 — the picker is driven by the shared controller (same wiring as the MP composers
-    // and PostEditorScreen) ; only SmileySelected stays an intent (draft mutation).
-    val smileyPicker = viewModel.smileyPicker
     TopicFormContent(
         state = state,
         bodyFieldState = viewModel.bodyFieldState,
         bodyInputTransformation = viewModel.bodyInputTransformation,
         bodyScrollState = viewModel.bodyScrollState,
-        onIntent = viewModel::submit,
-        onOpenSmileys = smileyPicker::open,
+        onIntent = remember(viewModel) { { intent: TopicFormIntent -> viewModel.submit(intent) } },
+        smileyPicker = viewModel.smileyPicker,
         modifier = modifier,
+        chromeEvents = viewModel.editorEvents,
+        chromeMemory = viewModel.chromeMemory,
+        bodyCaretRevealResetKey = remember(viewModel) { { viewModel.bodyCaretRevealResetKey } },
     )
-
-    // Sheet hoisted as a sibling of the scrollable content : if it lived inside
-    // the `Column.verticalScroll`, the bottom sheet would get squashed by the
-    // scroll container's measurement. Same rationale as `PostEditorScreen`.
-    val pickerState by smileyPicker.state.collectAsStateWithLifecycle()
-    (pickerState as? SmileyPickerState.Open)?.let { picker ->
-        SmileyPickerSheet(
-            state = picker,
-            onDismiss = smileyPicker::dismiss,
-            onQueryChange = smileyPicker::onQueryChanged,
-            onSmileyClicked = { viewModel.submit(TopicFormIntent.SmileySelected(it)) },
-        )
-    }
 }
 
 @Composable
-@Suppress("LongParameterList") // Live body and its synchronous guard accompany the UI projection.
+@Suppress("LongParameterList") // Same live body, launcher and host ports as PostEditorContent.
 internal fun TopicFormContent(
     state: TopicFormState,
     bodyFieldState: TextFieldState,
-    bodyInputTransformation: InputTransformation,
+    bodyInputTransformation: InputTransformation?,
     onIntent: (TopicFormIntent) -> Unit,
-    // #441 — opens the shared smiley picker controller (the sheet host lives in
-    // TopicFormScreen, next to the controller's state collection).
-    onOpenSmileys: () -> Unit,
+    smileyPicker: SmileyPickerController,
     modifier: Modifier = Modifier,
     bodyScrollState: ScrollState = rememberScrollState(),
+    chromeEvents: TopicFormEvents = remember { TopicFormEvents() },
+    chromeMemory: TopicFormChromeMemory = remember { TopicFormChromeMemory() },
+    windowMetrics: EditorWindowMetrics? = null,
+    bodyCaretRevealResetKey: () -> Int = { 0 },
 ) {
-    var imageUrlDialogOpen by remember { mutableStateOf(false) }
-    var optionsSheetOpen by remember { mutableStateOf(false) }
-    val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode) { event ->
-        onIntent(TopicFormIntent.ImagePickerEventReceived(event))
+    val source = rememberUpdatedState(state)
+    val dispatch = rememberUpdatedState(onIntent)
+    // Register before initialization and outside every transient surface, as for the post.
+    val adapter = remember { arrayOfNulls<TopicFormChromeAdapter>(1) }
+    val launchPicker = rememberEditorImagePicker(state.imagePickerMode,
+        onCancelled = { adapter[0]?.host?.closeSurface() }, onEvent = { adapter[0]?.picker(it) })
+    val currentLaunch = rememberUpdatedState(launchPicker)
+    val host = remember(bodyFieldState, chromeEvents, chromeMemory, smileyPicker) {
+        TopicFormChromeAdapter({ source.value }, bodyFieldState, chromeEvents, { dispatch.value(it) },
+            { currentLaunch.value() }, smileyPicker::open, chromeMemory)
     }
-    // Same lock as before the restore wiring, plus the restore itself: a cold open still accepts early typing.
-    val awaitingBody = state.isRestoringSession || state.isAwaitingInitialBody
-    Surface(
-        modifier = modifier.fillMaxSize(),
-        color = MaterialTheme.colorScheme.surface,
-    ) {
-        Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
-            BoxWithConstraints(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 12.dp),
-            ) {
-                val controlsMaxHeight = editorControlsMaxHeight(
-                    available = maxHeight,
-                    fieldMin = EDITOR_DRAFT_MIN_HEIGHT,
-                )
-                Column(
-                    modifier = Modifier.fillMaxSize(),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    TopicFormControlsZone(
-                        state = state,
-                        onIntent = onIntent,
-                        maxHeight = controlsMaxHeight,
-                        onImageUrlRequested = { imageUrlDialogOpen = true },
-                        onImageUploadRequested = launchImagePicker,
-                    )
-                    BbcodeTextField(
-                        state = bodyFieldState,
-                        inputTransformation = bodyInputTransformation,
-                        label = stringResource(R.string.editor_field_label),
-                        modifier = Modifier.weight(1f),
-                        // #459 — lock editing during a batch so the caret cannot move between two
-                        // programmatic [img] insertions (keeps them in pick order).
-                        scrollState = bodyScrollState,
-                        readOnly = awaitingBody ||
-                            state.isUploading || state.submission.blocksBodyMutation,
-                    )
-                }
-            }
-            // Send-button accessibility — pin « Envoyer » to the bottom, above the IME, so the user
-            // never has to dismiss the keyboard to submit a new topic / first-post edit (shared
-            // EditorSubmitBar with PostEditorScreen).
-            EditorSubmitBar(
-                state = EditorSubmitState(
-                    canSubmit = state.canSubmit,
-                    isSubmitting = state.isSubmitting,
-                    isLoadingForm = state.isLoadingForm,
-                    confirmArmed = state.showSubmitConfirmation,
-                    armToken = state.armToken,
-                    controlsEnabled = !state.submission.blocksBodyMutation,
-                ),
-                actions = EditorSubmitActions(
-                    onSubmit = { timeout -> onIntent(TopicFormIntent.SubmitClicked(timeout)) },
-                    onConfirmSubmit = { onIntent(TopicFormIntent.SubmitConfirmed(state.armToken)) },
-                    onDisarmConfirm = { onIntent(TopicFormIntent.SubmitConfirmationDismissed) },
-                    onOpenOptions = { optionsSheetOpen = true },
-                    onOpenSmileys = onOpenSmileys.takeUnless { state.isAwaitingInitialBody },
-                ),
-            )
+    adapter[0] = host
+    val activity = LocalActivity.current
+    val measuredWindow = activity?.let { rememberEditorWindowMetrics(it).value }
+    val window = windowMetrics ?: measuredWindow
+    if (state.isInitializing || window == null) {
+        Surface(modifier.fillMaxSize()) {
+            Box(contentAlignment = Alignment.Center) { CircularProgressIndicator() }
         }
+        return
     }
-    // HFR per-topic controls, moved behind the bottom bar's « Options » trigger
-    // (shared EditorOptionsSheet with PostEditorScreen).
-    if (optionsSheetOpen) {
-        EditorOptionsSheet(onDismiss = { optionsSheetOpen = false }) {
-            TopicFormOptionsBlock(
-                signatureEnabled = state.signatureEnabled,
-                smileyDisabled = state.smileyDisabled,
-                emailNotificationEnabled = state.emailNotificationEnabled,
-                msgIcon = state.msgIcon,
-                enabled = !state.submission.blocksBodyMutation && !state.isLoadingForm,
-                onSignatureChanged = { onIntent(TopicFormIntent.ToggleSignature(it)) },
-                onSmileyDisabledChanged = { onIntent(TopicFormIntent.ToggleSmileyDisabled(it)) },
-                onEmailNotificationChanged = { onIntent(TopicFormIntent.ToggleEmailNotification(it)) },
-                onMsgIconSelected = { onIntent(TopicFormIntent.MsgIconSelected(it)) },
-            )
-        }
-    }
-    if (imageUrlDialogOpen && !state.isAwaitingInitialBody) {
-        ImageUrlDialog(
-            onDismiss = { imageUrlDialogOpen = false },
-            onInsert = { url -> onIntent(TopicFormIntent.ImageUrlInserted(url)) },
-        )
+    CompositionLocalProvider(LocalEditorTooltipHost provides remember { EditorTooltipHost() }) {
+        TopicFormChrome(host, bodyFieldState, bodyInputTransformation, bodyScrollState, smileyPicker, window,
+            modifier, bodyCaretRevealResetKey)
     }
 }
 
-/**
- * #447/#555/#1406 — every variable-height element competes inside one capped scroller. Alerts are
- * emitted first, followed by the title, subject controls, toolbar, upload state, preview and poll.
- * The weighted BBCode field in [TopicFormContent] therefore keeps its real viewport when banners
- * and the IME are all visible.
- */
 @Composable
-private fun TopicFormControlsZone(
-    state: TopicFormState,
-    onIntent: (TopicFormIntent) -> Unit,
-    maxHeight: Dp,
-    onImageUrlRequested: () -> Unit,
-    onImageUploadRequested: () -> Unit,
+@Suppress("LongParameterList") // Screen assembly retains the live field, scroll and host-owned surfaces.
+private fun TopicFormChrome(
+    adapter: TopicFormChromeAdapter,
+    body: TextFieldState,
+    transformation: InputTransformation?,
+    scroll: ScrollState,
+    smileys: SmileyPickerController,
+    window: EditorWindowMetrics,
+    modifier: Modifier,
+    bodyCaretRevealResetKey: () -> Int,
 ) {
-    val controlsScroll = rememberScrollState()
-    val hasRestorableDraft =
-        state.restorableDraft != null || state.restorableSubject != null
-    val hasAlert = hasRestorableDraft ||
-        state.submitError != null || state.uploadError != null
-    LaunchedEffect(hasRestorableDraft, state.submitError, state.uploadError) {
-        if (hasAlert) controlsScroll.animateScrollTo(0)
-    }
-    Column(
-        modifier = Modifier
-            .heightIn(max = maxHeight)
-            .verticalScroll(controlsScroll),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        if (hasRestorableDraft) {
-            DraftRestoreBanner(
-                onRestore = { onIntent(TopicFormIntent.DraftRestoreRequested) },
-                onDiscard = { onIntent(TopicFormIntent.DraftDiscardRequested) },
-                restoreEnabled = state.restoreEnabled,
-            )
-        }
-        TopicFormErrorBanners(state = state, onIntent = onIntent)
-        Text(
-            text = stringResource(state.mode.titleResId),
-            style = MaterialTheme.typography.titleLarge,
-            color = MaterialTheme.colorScheme.onSurface,
-        )
-        OutlinedTextField(
-            value = state.subject,
-            onValueChange = { onIntent(TopicFormIntent.SubjectChanged(it)) },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth(),
-            enabled = !state.submission.blocksBodyMutation,
-            // Read-only, not disabled, while the draft is read back: no visible change on recreation.
-            readOnly = state.isRestoringSession,
-            label = { Text(stringResource(R.string.editor_topic_subject_label)) },
-            // #237 — sentence capitalization (parité RF1) like the body field.
-            keyboardOptions = KeyboardOptions(
-                capitalization = KeyboardCapitalization.Sentences,
-            ),
-        )
-        // #213 — categories without a sub-category have no HFR select.
-        if (state.hasSubcategorySelect) {
-            SubcategoryDropdown(
-                choices = state.subcategoryChoices,
-                selectedSubcat = state.selectedSubcat,
-                enabled = !state.submission.blocksBodyMutation && !state.isLoadingForm,
-                onSelect = { id -> onIntent(TopicFormIntent.SubcatSelected(id)) },
-            )
-        }
-        if (!state.isAwaitingInitialBody) {
-            BbcodeToolbar(
-                onAction = { onIntent(TopicFormIntent.ToolbarActionClicked(it)) },
-                onImageUrlRequested = onImageUrlRequested,
-                // #459 — upload wiring, same affordance as the reply editor.
-                onImageUploadRequested = onImageUploadRequested,
-                uploading = state.isUploading,
-            )
-        }
-        // #459 — « n/N » batch counter while a multi-image upload is in flight.
-        state.uploadProgress?.let { progress ->
-            UploadProgressLabel(progress)
-        }
-        TextButton(onClick = { onIntent(TopicFormIntent.TogglePreview) }) {
-            Text(
-                text = if (state.isPreviewVisible) {
-                    stringResource(R.string.editor_preview_hide)
-                } else {
-                    stringResource(R.string.editor_preview_show)
-                },
-            )
-        }
-        if (state.isPreviewVisible) {
-            BbcodePreview(content = state.preview, modifier = Modifier.fillMaxWidth())
-        }
-        if (state.pollPresent && !state.pollEditable) {
-            // Honest copy : the topic has a poll, but Phase 2D #148 does
-            // not edit poll fields — they are preserved verbatim on POST.
-            Text(
-                text = stringResource(R.string.editor_topic_poll_readonly_note),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+    val host = adapter.host
+    val state = adapter.state.source
+    val tooltips = requireNotNull(LocalEditorTooltipHost.current)
+    val back = {
+        adapter.back(EditorBackState(tooltipOpen = tooltips.isVisible)) {
+            if (it == EditorBackAction.CloseTooltip) tooltips.dismiss()
         }
     }
-}
-
-/**
- * Dismissible error banners of the topic composer: the submit failure (typed [EditorError]) and the
- * #459 upload failure (typed `EditorError`, same rendering as `PostEditorContent`). Extracted so
- * [TopicFormContent] stays under detekt's cyclomatic-complexity budget (same rationale as
- * `UploadProgressLabel`).
- */
-@Composable
-internal fun TopicFormErrorBanners(
-    state: TopicFormState,
-    onIntent: (TopicFormIntent) -> Unit,
-) {
-    state.submitError?.let { error ->
-        val summary = error.takeIf { it.hasSubmissionSummary }
-        if (summary != null) {
-            EditorSubmissionSummary(summary)
-            Text(
-                text = error.bannerText(), style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
-        } else {
-            Text(
-                text = error.bannerText(),
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.error,
-            )
-        }
-        val reload = error.action == EditorErrorAction.Reload
-        TextButton(onClick = {
-            onIntent(if (reload) TopicFormIntent.ReloadRequested else TopicFormIntent.ErrorDismissed)
-        }) {
-            Text(text = stringResource(if (reload) {
-                fr.forumhfr.redface2.core.ui.R.string.editor_action_reload
-            } else {
-                R.string.editor_error_dismiss
-            }))
-        }
-    }
-    state.uploadError?.let { error ->
-        Text(
-            text = error.bannerText(),
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.error,
-        )
-        TextButton(onClick = { onIntent(TopicFormIntent.UploadErrorDismissed) }) {
-            Text(text = stringResource(R.string.editor_error_dismiss))
-        }
-    }
+    val focus = remember { FocusRequester() }
+    EditorScaffold(body, window, adapter.title(), adapter.context(), adapter.chrome(), host.barActions,
+        host.submitState, host.submitActions, host.imageActions, host::closeRequested, modifier = modifier,
+        onOpenHeader = adapter::openHeader, headerLabel = adapter.headerLabel(), bodyFocusRequester = focus,
+        bodyScrollState = scroll, inputTransformation = transformation, autoFocus = true,
+        surfaceFocus = host.focusMemory, bodyCaretRevealResetKey = bodyCaretRevealResetKey, onSystemBack = back,
+        fieldArea = { draft ->
+            EditorPreview(state.isPreviewVisible, state.preview, body, focus, PostMediaDiskCachePolicy.ENABLED,
+                stringResource(R.string.editor_preview_title), Modifier.testTag("topic-form-preview"), draft)
+        }, overlay = { restore, content ->
+            TopicFormChromeSurfaces(adapter, body, smileys, restore, content)
+            // Register after bar/panels so activity Back uses the same ED-85 resolver on every level.
+            BackHandler(onBack = back)
+        })
 }
 
 /**
@@ -497,86 +282,3 @@ internal fun SubcategoryDropdown(
         }
     }
 }
-
-@Composable
-@Suppress("LongParameterList") // state-hoisted Composable
-private fun TopicFormOptionsBlock(
-    signatureEnabled: Boolean,
-    smileyDisabled: Boolean,
-    emailNotificationEnabled: Boolean,
-    msgIcon: Int,
-    enabled: Boolean,
-    onSignatureChanged: (Boolean) -> Unit,
-    onSmileyDisabledChanged: (Boolean) -> Unit,
-    onEmailNotificationChanged: (Boolean) -> Unit,
-    onMsgIconSelected: (Int) -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = stringResource(R.string.editor_options_title),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        OptionToggleRow(
-            label = stringResource(R.string.editor_option_signature),
-            checked = signatureEnabled,
-            enabled = enabled,
-            onCheckedChange = onSignatureChanged,
-        )
-        OptionToggleRow(
-            label = stringResource(R.string.editor_option_smiley_disabled),
-            checked = smileyDisabled,
-            enabled = enabled,
-            onCheckedChange = onSmileyDisabledChanged,
-        )
-        OptionToggleRow(
-            label = stringResource(R.string.editor_option_email_notification),
-            checked = emailNotificationEnabled,
-            enabled = enabled,
-            onCheckedChange = onEmailNotificationChanged,
-        )
-        MessageIconPicker(
-            selectedIcon = msgIcon,
-            enabled = enabled,
-            onIconSelected = onMsgIconSelected,
-        )
-    }
-}
-
-@Composable
-private fun OptionToggleRow(
-    label: String,
-    checked: Boolean,
-    enabled: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.padding(end = 16.dp),
-        )
-        Switch(
-            checked = checked,
-            enabled = enabled,
-            onCheckedChange = onCheckedChange,
-        )
-    }
-}
-
-private val TopicFormMode.titleResId: Int
-    get() = when (this) {
-        TopicFormMode.New -> R.string.editor_topic_new_title
-        TopicFormMode.EditFirstPost -> R.string.editor_topic_edit_first_post_title
-    }
-
-/**
- * Same refusals as the ViewModel: unknown seed while the form loads, body locked during an upload or by the
- * submission (sending, accepted uncertain attempt). Kept out of [TopicFormControlsZone] for detekt.
- */
-private val TopicFormState.restoreEnabled: Boolean
-    get() = !isUploading && !isLoadingForm && !submission.blocksBodyMutation

@@ -1,13 +1,8 @@
 package fr.forumhfr.redface2.feature.editor
 
 import android.content.res.Configuration
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -23,6 +18,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.width
@@ -75,7 +71,7 @@ class EditorSubmissionBannerLayoutTest {
             subcat = 0,
             submitError = error,
         )
-        assertBanner("post", label) { PostEditorTestContent(state) }
+        assertBanner(label) { PostEditorTestContent(state) }
         compose.onNodeWithTag("editor-bar-event").performClick()
         compose.onNodeWithText(label).assertExists()
         compose.onNodeWithText("Masquer").performClick()
@@ -92,10 +88,15 @@ class EditorSubmissionBannerLayoutTest {
             numreponse = null,
             submitError = error,
         )
-        assertBanner("topic", label) { TopicFormErrorBanners(state = state, onIntent = {}) }
+        assertBanner(label) { TopicFormTestContent(state.copy(subject =
+            TextFieldValue("Titre"))) }
+        compose.onNodeWithTag("editor-bar-event").performClick()
+        compose.onNodeWithText(label).assertExists()
+        compose.onNodeWithText("Masquer").performClick()
+        compose.onNodeWithTag("editor-scaffold-field").assertExists()
     }
 
-    private fun assertBanner(surface: String, label: String, content: @Composable () -> Unit) {
+    private fun assertBanner(label: String, content: @Composable () -> Unit) {
         compose.setContent {
             val density = LocalDensity.current
             val configuration = Configuration(LocalConfiguration.current).apply { fontScale = 1.3f }
@@ -109,58 +110,28 @@ class EditorSubmissionBannerLayoutTest {
                     darkTheme = false,
                     reading = ReadingDisplaySettings(fontScale = FontScalePreference.L),
                 ) {
-                    // PostEditorContent and TopicFormContent: 16 dp gutters, then the controls column.
-                    Column(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(12.dp),
-                    ) {
-                        content()
-                    }
+                    content()
                 }
             }
         }
-        if (surface == "post") {
-            compose.onNodeWithContentDescription("$label, Afficher les détails").assertIsDisplayed()
-            return
-        }
-        assertSummary(surface, label)
-        val summaryBounds = compose.onNodeWithText(label).getUnclippedBoundsInRoot()
-        val dismissBounds = compose.onNodeWithText("Masquer").getUnclippedBoundsInRoot()
-        assertTrue("$surface: dismiss follows summary vertically", dismissBounds.top >= summaryBounds.bottom)
-    }
-
-    private fun assertSummary(surface: String, label: String) {
-        val layout = textLayout(label)
+        val event = compose.onNodeWithContentDescription("$label, Afficher les détails").assertIsDisplayed()
+        assertEquals(360.dp, compose.onRoot().getUnclippedBoundsInRoot().width)
+        val layouts = mutableListOf<TextLayoutResult>()
+        val read = requireNotNull(compose.onNodeWithText(label, useUnmergedTree = true).fetchSemanticsNode()
+            .config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action)
+        assertTrue(read(layouts))
+        val layout = layouts.single()
         val density = layout.layoutInput.density.density
         val available = layout.layoutInput.constraints.maxWidth / density
-        val intrinsic = layout.multiParagraph.intrinsics.maxIntrinsicWidth / density
-        val message = "$surface / $label: intrinsic=${intrinsic}dp, available=${available}dp"
-        assertEquals("$message: screen width", 360f, compose.onRoot().getUnclippedBoundsInRoot().width.value, 0.5f)
-        assertEquals("$message: xxhdpi density", 3f, density, 0.001f)
-        assertEquals("$message: system fontScale", 1.3f, layout.layoutInput.density.fontScale, 0.001f)
-        assertEquals(
-            "$message: preset L", 11f * FontScalePreference.L.factor, layout.layoutInput.style.fontSize.value, 0.001f,
-        )
-        assertEquals("$message: text budget after gutters and icon", 308f, available, 0.5f)
-        assertTrue("$message: intrinsic width exceeds budget", intrinsic <= available)
-        assertEquals("$message: one line", 1, layout.lineCount)
-        // Text may measure to its content while MultiParagraph retains the full constraint.
-        // hasVisualOverflow compares those different widths and is not a clipping oracle here.
-        val lineRight = layout.getLineRight(0) / density
-        assertTrue("$message: lineRight=${lineRight}dp", lineRight <= available)
-        assertFalse("$message: max lines exceeded", layout.multiParagraph.didExceedMaxLines)
-        assertFalse("$message: ellipsis", layout.isLineEllipsized(0))
-        assertEquals("$message: all characters laid out", label.length, layout.getLineEnd(0))
-    }
-
-    private fun textLayout(label: String): TextLayoutResult {
-        val layouts = mutableListOf<TextLayoutResult>()
-        val read = requireNotNull(
-            compose.onNodeWithText(label, useUnmergedTree = true).fetchSemanticsNode()
-                .config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action,
-        ) { "$label: Text must expose its layout" }
-        assertTrue("$label: layout action", read(layouts))
-        assertEquals("$label: layout count", 1, layouts.size)
-        return layouts.single()
+        assertEquals(3f, density, 0.001f)
+        assertEquals(1.3f, layout.layoutInput.density.fontScale, 0.001f)
+        assertTrue(layout.multiParagraph.intrinsics.maxIntrinsicWidth / density <= available)
+        assertTrue(layout.getLineRight(0) / density <= available)
+        assertEquals(11f * FontScalePreference.L.factor, layout.layoutInput.style.fontSize.value, 0.001f)
+        assertEquals(1, layout.lineCount)
+        assertFalse(layout.multiParagraph.didExceedMaxLines)
+        assertFalse(layout.isLineEllipsized(0))
+        assertEquals(label.length, layout.getLineEnd(0))
+        assertTrue(event.getUnclippedBoundsInRoot().width >= layout.size.width.dp / layout.layoutInput.density.density)
     }
 }

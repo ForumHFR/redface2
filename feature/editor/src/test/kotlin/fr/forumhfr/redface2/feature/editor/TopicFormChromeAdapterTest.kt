@@ -1,11 +1,20 @@
 package fr.forumhfr.redface2.feature.editor
 
+import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSession
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.write.TopicFormSubcategoryChoice
@@ -17,6 +26,11 @@ import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
+import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
+import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.editBbcode
+import fr.forumhfr.redface2.core.ui.editor.insertBbcodeToken
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -35,12 +49,19 @@ internal class TopicFormChromeFixture(mode: TopicFormMode = TopicFormMode.New) {
     val body = TextFieldState("Bonjour", TextRange(6, 1))
     val calls = mutableListOf<TopicFormIntent>()
     val adapter = TopicFormChromeAdapter({ state }, body, events, ::dispatch, {}, {}, memory)
-    private fun dispatch(intent: TopicFormIntent) {
+    fun dispatch(intent: TopicFormIntent) {
         calls += intent
         when (intent) {
             TopicFormIntent.SubmitConfirmationDismissed -> state = state.copy(submission = EditorSubmissionState.Ready)
             is TopicFormIntent.SubjectChanged -> state = state.copy(subject = intent.value)
             is TopicFormIntent.SubcatSelected -> state = state.copy(selectedSubcat = intent.id)
+            TopicFormIntent.TogglePreview -> state = state.copy(isPreviewVisible = !state.isPreviewVisible)
+            is TopicFormIntent.ToolbarActionClicked -> body.editBbcode { text, start, end ->
+                applyBbcodeAction(intent.action, text, start, end)
+            }
+            is TopicFormIntent.SmileySelected -> body.editBbcode { text, start, end ->
+                insertBbcodeToken(intent.token, text, start, end)
+            }
             else -> Unit
         }
     }
@@ -49,6 +70,33 @@ internal class TopicFormChromeFixture(mode: TopicFormMode = TopicFormMode.New) {
         events.observe(previous, previous.copy(submitError = null))
         state = state.copy(submitError = error)
         events.observe(previous.copy(submitError = null), state)
+    }
+}
+
+/** Render the production topic chrome with deterministic window metrics and real picker registration. */
+@Composable
+internal fun TopicFormTestContent(
+    state: TopicFormState,
+    onIntent: (TopicFormIntent) -> Unit = {},
+    body: TextFieldState = remember { TextFieldState(state.bodyText) },
+    events: TopicFormEvents? = null,
+    memory: TopicFormChromeMemory = remember { TopicFormChromeMemory() },
+) {
+    val scope = rememberCoroutineScope()
+    val smileys = remember { SmileyPickerController(scope, searchWiki = { _, _ -> emptyList() }) }
+    val localEvents = remember { TopicFormEvents() }
+    val eventStore = events ?: localEvents
+    // VM-like fixtures already deliver occurrences synchronously; project only standalone UI state here.
+    if (events == null) {
+        val previous = remember { arrayOf(state.copy(submitError = null, uploadError = null)) }
+        SideEffect { eventStore.observe(previous[0], state); previous[0] = state }
+    }
+    val height = LocalConfiguration.current.screenHeightDp
+    val fallback = remember { PostEditorTestActivityResultOwner() }
+    val owner = LocalActivityResultRegistryOwner.current ?: fallback
+    CompositionLocalProvider(LocalActivityResultRegistryOwner provides owner) {
+        TopicFormContent(state, body, null, onIntent, smileys, chromeEvents = eventStore, chromeMemory = memory,
+            windowMetrics = EditorWindowMetrics(height.dp, 0.dp, 0.dp))
     }
 }
 
@@ -301,6 +349,26 @@ class TopicFormChromeAdapterTest {
         assertEquals(listOf(TopicFormIntent.TogglePreview), f.calls)
         assertEquals(information, f.events.visibleEvent)
         assertEquals(EditorBarMode.Format, f.memory.host.bar.mode)
+    }
+
+    @Test fun `ED85 event detail precedes disarm which precedes the open header`() {
+        val f = TopicFormChromeFixture()
+        f.adapter.openHeader()
+        f.error(EditorErrors.network)
+        val key = f.events.visibleEvent!!.key
+        f.adapter.host.barActions.onEvent(key, EditorEventAction.Details)
+        f.state = f.state.copy(submission = EditorSubmissionState.Armed(
+            ArmToken(1, f.session, 0, 4_000L)))
+        f.adapter.back()
+        assertNull(f.adapter.host.detail)
+        assertTrue(f.state.armToken != null)
+        assertTrue(f.memory.headerOpen)
+        f.adapter.back()
+        assertNull(f.state.armToken)
+        assertTrue(f.memory.headerOpen)
+        f.adapter.back()
+        assertFalse(f.memory.headerOpen)
+        assertEquals(listOf(TopicFormIntent.SubmitConfirmationDismissed), f.calls)
     }
 
 }

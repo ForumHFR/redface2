@@ -4,6 +4,7 @@ import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.TextFieldValue
+import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.ui.R as UiR
 import fr.forumhfr.redface2.core.ui.editor.EditorAppBarStatus
 import fr.forumhfr.redface2.core.ui.editor.EditorBackAction
@@ -16,7 +17,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorHostActions
 import fr.forumhfr.redface2.core.ui.editor.EditorHostSurfaces
 import fr.forumhfr.redface2.core.ui.editor.EventKey
 
-/** T2 projection only: TopicFormScreen switches to this host in T3. */
+/** Topic projections and business intents; gestures, selection and focus live in the shared host. */
 @Suppress("LongParameterList") // Independent ports, matching the post adapter without depending on a VM.
 internal class TopicFormChromeAdapter(
     private val source: () -> TopicFormState,
@@ -91,7 +92,7 @@ internal class TopicFormChromeAdapter(
         else R.string.editor_topic_open_title)
     @Composable
     fun chrome() = host.scaffoldChrome(
-        firstStatus = if (!source().pollPresent) null else EditorAppBarStatus(
+        firstStatus = if (!source().pollPresent || source().pollEditable) null else EditorAppBarStatus(
             UiR.drawable.ic_editor_poll, stringResource(R.string.editor_topic_poll_status),
             { openHeader() }, enabled = state.scaffold.controlsEnabled,
         ),
@@ -99,6 +100,19 @@ internal class TopicFormChromeAdapter(
         else EditorAppBarStatus(UiR.drawable.ic_editor_restore, stringResource(UiR.string.editor_status_restore),
             { host.open(TopicFormChromeSurface.Restore) }, enabled = state.scaffold.controlsEnabled),
     )
+    fun option(intent: TopicFormIntent) {
+        if (state.scaffold.controlsEnabled && !source().isLoadingForm) onIntent(intent)
+    }
+    fun smiley(token: String) = insert(TopicFormIntent.SmileySelected(token))
+    fun imageUrl(url: String) = insert(TopicFormIntent.ImageUrlInserted(url))
+    private fun insert(intent: TopicFormIntent) {
+        if (state.host.canInsert) onIntent(intent)
+        host.closeSurface()
+    }
+    fun picker(event: ImagePickerEvent) {
+        if (event !is ImagePickerEvent.Launched) host.closeSurface()
+        onIntent(TopicFormIntent.ImagePickerEventReceived(event))
+    }
     fun subject(value: TextFieldValue) {
         if (state.headerEnabled && !state.headerReadOnly) onIntent(TopicFormIntent.SubjectChanged(value))
     }

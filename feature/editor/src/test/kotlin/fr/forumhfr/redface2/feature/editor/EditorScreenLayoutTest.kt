@@ -1,27 +1,19 @@
 package fr.forumhfr.redface2.feature.editor
 
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.InputModeManager
 import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.SemanticsMatcher
-import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.click
-import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
@@ -32,16 +24,11 @@ import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.text.input.TextFieldValue
-import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
-import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptToken
-import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.R as UiR
 import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
@@ -192,230 +179,6 @@ class EditorScreenLayoutTest {
         }
     }
 
-    @Test
-    fun `topic form keeps 160 dp field and both draft actions on short viewport`() {
-        compose.setContent {
-            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                TopicFormContent(
-                    state = topicState(restorableDraft = "Brouillon à restaurer"),
-                    bodyFieldState = remember { TextFieldState() },
-                    bodyInputTransformation = InputTransformation {},
-                    onIntent = {},
-                    onOpenSmileys = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-        }
-
-        // The subject is the first editable node; the weighted BBCode field is the second.
-        compose.onAllNodes(hasSetTextAction())[1]
-            .assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT - FIELD_LABEL_HEADROOM)
-        assertDraftActionsFullyVisible()
-    }
-
-    @Test
-    @Config(qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
-    fun topicInitialDraftReadKeepsBodyComposedAndGeometryStable() {
-        val state = mutableStateOf(topicState())
-        val onIntent: (TopicFormIntent) -> Unit = { intent ->
-            if (intent is TopicFormIntent.SubjectChanged) {
-                state.value = state.value.copy(subject = intent.value)
-            }
-        }
-        compose.setContent {
-            RedfaceTheme(darkTheme = false, dynamicColor = false) {
-                TopicFormContent(
-                    state = state.value,
-                    bodyFieldState = remember { TextFieldState() },
-                    bodyInputTransformation = InputTransformation {},
-                    onIntent = onIntent,
-                    onOpenSmileys = {},
-                )
-            }
-        }
-        for (mode in TopicFormMode.entries) {
-            compose.runOnIdle { state.value = topicState().copy(mode = mode, isInitializing = true) }
-            val field = compose.onNodeWithText("Contenu BBCode").assertIsDisplayed()
-            val fieldId = field.fetchSemanticsNode().id
-            val bounds = field.getUnclippedBoundsInRoot()
-            // Cold open (no restore): the body keeps its pre-restore lock only, so creation accepts early typing.
-            val editableFields = if (mode == TopicFormMode.New) 2 else 1
-            compose.onAllNodes(hasSetTextAction()).assertCountEquals(editableFields)
-            compose.onNodeWithText("Titre du sujet").assertIsEnabled().performTextInput("Titre précoce")
-            compose.runOnIdle {
-                assertEquals("Titre précoce", state.value.subject.text)
-                state.value = state.value.copy(isInitializing = false, isLoadingForm = true)
-            }
-            assertEquals(fieldId, field.fetchSemanticsNode().id)
-            assertEquals(bounds, field.getUnclippedBoundsInRoot())
-            compose.onAllNodes(hasSetTextAction()).assertCountEquals(editableFields)
-        }
-    }
-
-    @Test
-    @Config(qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
-    fun topicRecreationLocksTheTitleUntilTheDraftReadCompletes() {
-        val state = mutableStateOf(topicState())
-        compose.setContent {
-            RedfaceTheme(darkTheme = false, dynamicColor = false) {
-                TopicFormContent(
-                    state = state.value,
-                    bodyFieldState = remember { TextFieldState() },
-                    bodyInputTransformation = InputTransformation {},
-                    onIntent = {},
-                    onOpenSmileys = {},
-                )
-            }
-        }
-        for (mode in TopicFormMode.entries) {
-            compose.runOnIdle {
-                state.value = topicState().copy(mode = mode, isInitializing = true, isRestoringSession = true)
-            }
-            compose.onNodeWithText("Contenu BBCode").assertIsDisplayed()
-            // Read-only but not greyed out: the restore wiring changes nothing visible.
-            compose.onNodeWithText("Titre du sujet").assertIsEnabled().assert(isEditable(false))
-            compose.runOnIdle {
-                state.value = state.value.copy(
-                    isInitializing = false, isRestoringSession = false, subject = TextFieldValue("Titre repris"),
-                )
-            }
-            compose.onNodeWithText("Titre repris").assertIsEnabled().assert(isEditable(true))
-        }
-    }
-
-    @Test
-    fun `topic restore is disabled while the seed form loads and during an upload`() {
-        val state = mutableStateOf(topicState(restorableDraft = "Brouillon à restaurer").copy(isLoadingForm = true))
-        compose.setContent {
-            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                TopicFormContent(
-                    state = state.value,
-                    bodyFieldState = remember { TextFieldState() },
-                    bodyInputTransformation = InputTransformation {},
-                    onIntent = {},
-                    onOpenSmileys = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-        }
-
-        compose.onNodeWithText("Restaurer").assertIsNotEnabled()
-        compose.onNodeWithText("Ignorer").assertIsEnabled()
-        compose.runOnIdle { state.value = state.value.copy(isLoadingForm = false) }
-        compose.onNodeWithText("Restaurer").assertIsEnabled()
-        compose.runOnIdle { state.value = state.value.copy(isUploading = true) }
-        compose.onNodeWithText("Restaurer").assertIsNotEnabled()
-        compose.onNodeWithText("Ignorer").assertIsEnabled()
-        compose.runOnIdle {
-            state.value = state.value.copy(
-                isUploading = false,
-                submission = EditorSubmissionState.Uncertain(AttemptToken("tester", "key", "id", 1), accepted = true),
-            )
-        }
-        compose.onNodeWithText("Restaurer").assertIsNotEnabled()
-    }
-
-    @Test
-    @Config(qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
-    fun topicFirstPostRefusalKeepsTheLegacyEmptySubcategorySelector() {
-        val state = mutableStateOf(topicState().copy(
-            mode = TopicFormMode.EditFirstPost, hasLoadedForm = false,
-            hasSubcategorySelect = true, isLoadingForm = true,
-        ))
-        lateinit var invalidFormText: String
-        lateinit var unsupportedText: String
-        compose.setContent {
-            invalidFormText = stringResource(UiR.string.editor_error_unknown)
-            unsupportedText = stringResource(R.string.editor_topic_first_post_unsupported)
-            RedfaceTheme(darkTheme = false, dynamicColor = false) {
-                TopicFormContent(
-                    state = state.value,
-                    bodyFieldState = remember { TextFieldState() },
-                    bodyInputTransformation = InputTransformation {},
-                    onIntent = {},
-                    onOpenSmileys = {},
-                )
-            }
-        }
-        compose.onNodeWithText("Sous-catégorie").assertExists()
-        compose.runOnIdle {
-            state.value = state.value.copy(
-                isLoadingForm = false, firstPostSubcategoryRefused = true, submitError = EditorErrors.invalidForm,
-            )
-        }
-        compose.onNodeWithText("Sous-catégorie").assertExists()
-        compose.onNodeWithText("Choisir une sous-catégorie").assertExists()
-        compose.onNodeWithText(invalidFormText).assertExists()
-        compose.onNodeWithText(unsupportedText).assertDoesNotExist()
-    }
-
-    @Test
-    @Config(qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
-    fun topicFormLocksBodyAndInsertionControlsWhileSeedUnknown() {
-        val state = mutableStateOf(topicState().copy(mode = TopicFormMode.EditFirstPost, isLoadingForm = true))
-        val body = TextFieldState("seed")
-        val intents = mutableListOf<TopicFormIntent>()
-        var smileyOpens = 0
-        compose.setContent {
-            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                TopicFormContent(
-                    state = state.value,
-                    bodyFieldState = body,
-                    bodyInputTransformation = InputTransformation {},
-                    onIntent = { intents += it },
-                    onOpenSmileys = { smileyOpens += 1 },
-                )
-            }
-        }
-        assertTopicBodyAndInsertionsLocked()
-        compose.onNodeWithText("Options").assertIsEnabled()
-
-        // Failure ends the spinner, but does not make the missing first post editable.
-        compose.runOnIdle {
-            state.value = state.value.copy(isLoadingForm = false, submitError = EditorErrors.formNetwork)
-        }
-        assertTopicBodyAndInsertionsLocked()
-        compose.onNodeWithText("Recharger").assertIsEnabled().performClick()
-        compose.runOnIdle { assertEquals(listOf(TopicFormIntent.ReloadRequested), intents) }
-
-        // Once known, the body and insertions remain available even during a later refetch.
-        compose.runOnIdle {
-            state.value = state.value.copy(
-                draftHydratedFromServer = true, isLoadingForm = true, submitError = null,
-            )
-        }
-        compose.onAllNodes(hasSetTextAction()).assertCountEquals(2)
-        compose.onAllNodes(hasSetTextAction())[1].performTextInput(" typed")
-        for (label in listOf("Gras", "Citation", "Image", "Uploader", "Smileys")) {
-            compose.onNodeWithText(label).assertIsEnabled()
-        }
-        compose.onNodeWithText("Smileys").performClick()
-        compose.runOnIdle {
-            assertEquals("seed typed", body.text.toString())
-            assertEquals(1, smileyOpens)
-        }
-    }
-
-    @Test
-    @Config(qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
-    fun topicFormNewKeepsBodyAndInsertionControlsWhileLoading() {
-        compose.setContent {
-            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                TopicFormContent(
-                    state = topicState().copy(isLoadingForm = true),
-                    bodyFieldState = remember { TextFieldState() },
-                    bodyInputTransformation = InputTransformation {},
-                    onIntent = {},
-                    onOpenSmileys = {},
-                )
-            }
-        }
-        compose.onAllNodes(hasSetTextAction()).assertCountEquals(2)
-        for (label in listOf("Gras", "Citation", "Image", "Uploader", "Smileys")) {
-            compose.onNodeWithText(label).assertIsEnabled()
-        }
-    }
-
     private fun assertPostBodyAndInsertionsLocked(toolsVisible: Boolean = true) {
         compose.onAllNodes(hasSetTextAction()).assertCountEquals(0)
         for (label in listOf("Mise en forme", "Smileys", "Image")) {
@@ -445,55 +208,7 @@ class EditorScreenLayoutTest {
             .performScrollTo().performClick()
     }
 
-    private fun assertTopicBodyAndInsertionsLocked() {
-        // Only the subject retains SetText; the read-only body must not expose this action.
-        compose.onAllNodes(hasSetTextAction()).assertCountEquals(1)
-        for (label in listOf("Gras", "Citation", "Image", "Uploader", "Smileys")) {
-            compose.onNodeWithText(label).assertDoesNotExist()
-        }
-    }
-
-    private fun assertDraftActionsFullyVisible() {
-        val restoreBounds = assertFullyVisibleAction("Restaurer")
-        val discardBounds = assertFullyVisibleAction("Ignorer")
-        assertTrue(
-            "Draft actions must be separated by at least 8 dp",
-            discardBounds.left - restoreBounds.right >= 8.dp,
-        )
-    }
-
-    private fun assertFullyVisibleAction(label: String): DpRect {
-        val action = compose.onNodeWithText(label)
-            .assertHeightIsAtLeast(48.dp)
-        val clippedBounds = action.getBoundsInRoot()
-        val unclippedBounds = action.getUnclippedBoundsInRoot()
-        assertEquals("Action $label is clipped", unclippedBounds, clippedBounds)
-
-        val windowBounds = compose.onRoot().getUnclippedBoundsInRoot()
-        assertTrue(
-            "Action $label must stay entirely inside the window",
-            unclippedBounds.left >= windowBounds.left &&
-                unclippedBounds.top >= windowBounds.top &&
-                unclippedBounds.right <= windowBounds.right &&
-                unclippedBounds.bottom <= windowBounds.bottom,
-        )
-        return unclippedBounds
-    }
-
-    private fun isEditable(editable: Boolean) = SemanticsMatcher.expectValue(SemanticsProperties.IsEditable, editable)
-
-    private fun topicState(restorableDraft: String? = null) = TopicFormState(
-        mode = TopicFormMode.New,
-        cat = 23,
-        subcat = null,
-        topicId = null,
-        page = null,
-        numreponse = null,
-        hasSubcategorySelect = false,
-        hasLoadedForm = true,
-        restorableDraft = restorableDraft,
-    )
 }
 
-/** The editable node sits under the 8 dp floating-label headroom reserved inside the 160 dp slot. */
+/** The editable node sits under the floating-label headroom inside the 160 dp slot. */
 private val FIELD_LABEL_HEADROOM = 8.dp

@@ -4,7 +4,11 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
@@ -139,6 +143,9 @@ class TopicFormViewModel @AssistedInject constructor(
     /** Live body and IME state belong to the ViewModel, outside the Bundle. */
     val bodyFieldState = TextFieldState()
     val bodyScrollState = ScrollState(0)
+    /** ED-14: hydration/restoration resets reveal without taking ownership of ED-81 scroll. */
+    var bodyCaretRevealResetKey by mutableIntStateOf(0)
+        private set
     private val restoration = EditorSessionRestoration(savedStateHandle, when (request.mode) {
         TopicFormMode.New -> EditorSessionSurface.TopicCreation
         TopicFormMode.EditFirstPost -> EditorSessionSurface.TopicFirstPost
@@ -673,9 +680,12 @@ class TopicFormViewModel @AssistedInject constructor(
 
     /** Explicit restore/hydration is one undoable edit, independent of the current selection. */
     private fun replaceBody(body: String) {
-        bodyFieldState.edit {
-            replace(0, length, body)
-            selection = TextRange(length)
+        Snapshot.withMutableSnapshot {
+            bodyCaretRevealResetKey++
+            bodyFieldState.edit {
+                replace(0, length, body)
+                selection = TextRange(length)
+            }
         }
     }
 

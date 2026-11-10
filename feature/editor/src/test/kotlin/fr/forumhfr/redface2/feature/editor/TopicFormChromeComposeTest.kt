@@ -18,6 +18,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
@@ -99,6 +100,9 @@ class TopicFormChromeComposeTest {
             fixture.state = fixture.state.copy(firstPostSubcategoryRefused = true, isSubmitting = false)
             fixture.adapter.openHeader()
         }
+        compose.onNodeWithText("Titre du sujet").assertIsEnabled().assert(hasSetTextAction())
+            .performTextInput("Modifié ")
+        compose.runOnIdle { assertTrue(fixture.state.subject.text.contains("Modifié")) }
         compose.onNodeWithText("Sous-catégorie").assertDoesNotExist()
         compose.onNodeWithText("L’envoi du premier message dans une catégorie sans sous-catégorie " +
             "n’est pas disponible.").assertExists()
@@ -122,7 +126,17 @@ class TopicFormChromeComposeTest {
         compose.onNodeWithText("Ce sujet contient un sondage.", substring = true).assertExists()
         compose.runOnIdle { fixture.state = fixture.state.copy(pollEditable = true) }
         compose.onNodeWithText("Ce sujet contient un sondage.", substring = true).assertDoesNotExist()
-        compose.runOnIdle { assertTrue(fixture.calls.isEmpty()) }
+        compose.runOnIdle { assertTrue(chrome.firstStatus == null); assertTrue(fixture.calls.isEmpty()) }
+    }
+    @Test fun `missing route shows a writable header without the unsupported first post notice`() {
+        fixture = TopicFormChromeFixture(TopicFormMode.EditFirstPost)
+        fixture.state = fixture.state.copy(subcat = null, hasSubcategorySelect = false)
+        fixture.adapter.openHeader()
+        compose.setContent { Content() }
+        compose.onNodeWithText("Titre du sujet").assertIsEnabled().assert(hasSetTextAction())
+        compose.onNodeWithText("Sous-catégorie").assertDoesNotExist()
+        compose.onNodeWithText("L’envoi du premier message", substring = true).assertDoesNotExist()
+        compose.runOnIdle { assertFalse(fixture.adapter.state.sendActivatable) }
     }
     @Test fun `restoring a topic session leaves the title enabled but read only`() {
         fixture.adapter.openHeader()

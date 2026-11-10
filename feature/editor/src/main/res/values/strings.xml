@@ -2,15 +2,9 @@
     <string name="editor_post_reply_title">Répondre</string>
     <string name="editor_post_edit_title">Modifier</string>
     <string name="editor_topic_new_title">Nouveau sujet</string>
-    <string name="editor_topic_edit_first_post_title">Modifier le premier message</string>
-    <string name="editor_field_label">Contenu BBCode</string>
     <!-- #436 (#604 lot 3) : cartes de citation dans l'éditeur plein écran. -->
     <string name="editor_quotes_clear_all">Tout vider</string>
     <string name="editor_quotes_clear_all_a11y">Retirer toutes les citations</string>
-    <string name="editor_preview_show">Afficher l\'aperçu</string>
-    <string name="editor_preview_hide">Masquer l\'aperçu</string>
-    <string name="editor_submit">Envoyer</string>
-    <string name="editor_error_dismiss">Masquer</string>
     <string name="editor_options_title">Options du message</string>
     <string name="editor_option_signature">Activer votre signature</string>
     <string name="editor_option_smiley_disabled">Désactiver les smilies</string>
@@ -24,16 +18,12 @@
     <string name="editor_topic_subcat_picker_placeholder">Choisir une sous-catégorie</string>
     <string name="editor_topic_poll_readonly_note">Ce sujet contient un sondage. Son édition n\'est pas encore disponible dans cette version ; vos réponses utilisateurs et options de vote restent inchangées.</string>
     <string name="editor_new_topic_created">Sujet créé. Rafraîchis la liste si besoin pour le retrouver.</string>
-    <string name="editor_actions_options">Options</string>
-    <string name="editor_submit_confirm">Confirmer</string>
     <string name="editor_image_url_title">Insérer une image</string>
     <string name="editor_image_url_label">URL de l’image</string>
     <string name="editor_image_url_help">URL http:// ou https:// uniquement.</string>
     <string name="editor_image_url_error">Seules les URL http:// et https:// sont acceptées.</string>
     <string name="editor_image_url_insert">Insérer</string>
     <string name="editor_image_url_cancel">Annuler</string>
-    <!-- Label du bouton « Smileys » de la barre éditeur (le sheet vit dans :core:ui, #387). -->
-    <string name="editor_smiley_open">Smileys</string>
     <!-- #405 — bannière de restauration de brouillon. -->
     <string name="editor_draft_restore_message">Un brouillon non envoyé a été retrouvé pour ce message.</string>
     <string name="editor_draft_restore">Restaurer</string>
