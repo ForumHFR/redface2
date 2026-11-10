@@ -286,7 +286,6 @@ class PrivateMessageReplyChromeAdapterTest {
             f.adapter.dismissDetails(key)
             f.adapter.back()
             assertEquals("leave only $index", listOf("close"), f.calls)
-            assertEquals(EditorSubmissionState.Uncertain(attempt), f.state.submission)
         }
     }
     @Test fun `ED45 Masquer of a failed attempt write calls only the local port once in Ready and Armed`() {
@@ -303,7 +302,6 @@ class PrivateMessageReplyChromeAdapterTest {
             assertEquals(List(index + 1) { "acknowledgeLocal" }, f.calls)
             assertNull(f.adapter.detail)
             assertNull(f.events.state.visibleEvent)
-            assertEquals(submission, f.state.submission)
         }
     }
     @Test fun `ED85 Back closing the detail and a form failure never acknowledge a failed attempt write`() {

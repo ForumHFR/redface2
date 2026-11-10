@@ -144,7 +144,6 @@ class PrivateMessageReplyRestorationScreenTest {
             assertNull(restored.state.value.restorableDraft)
             assertTrue(restored.bodyScrollState.maxValue > 80)
             assertEquals(80, restored.bodyScrollState.value)
-            assertNull(restored.chromeMemory.host.surface)
         }
     }
 

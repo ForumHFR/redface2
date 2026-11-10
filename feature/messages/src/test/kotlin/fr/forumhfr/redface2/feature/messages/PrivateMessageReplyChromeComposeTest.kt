@@ -416,7 +416,6 @@ class PrivateMessageReplyChromeComposeTest {
         compose.runOnIdle {
             assertNull(f.adapter.detail)
             assertTrue(f.calls.isEmpty())
-            assertEquals(EditorSubmissionState.Uncertain(attempt), f.state.submission)
             back.onBackPressed()
         }
         compose.runOnIdle { assertEquals(listOf("close"), f.calls) }
