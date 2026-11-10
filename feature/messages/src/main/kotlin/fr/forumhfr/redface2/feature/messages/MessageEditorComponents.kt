@@ -39,13 +39,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import fr.forumhfr.redface2.core.ui.editor.EditorCause
-import fr.forumhfr.redface2.core.ui.editor.EditorError
-import fr.forumhfr.redface2.core.ui.editor.EditorErrorSurface
-import fr.forumhfr.redface2.core.ui.editor.EditorErrors
-import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummary
-import fr.forumhfr.redface2.core.ui.editor.bannerText
-import fr.forumhfr.redface2.core.ui.editor.hasSubmissionSummary
 
 /**
  * Building blocks shared by the two private-message editors — the conversation reply
@@ -265,18 +258,3 @@ internal fun RecipientManagerSheet(
 
 /** #606 — HFR's system member of a group conversation ; removing it warrants a warning, not a block. */
 private const val ADMIN_PSEUDO = "Administration"
-
-/** ED-112: the catalogue owns both MP verification details. */
-@Composable
-internal fun MessageSubmissionError(error: EditorError, composing: Boolean) {
-    val displayed = if (error.cause == EditorCause.Uncertain) {
-        EditorErrors.uncertain(if (composing) EditorErrorSurface.MessageCompose else EditorErrorSurface.MessageReply)
-    } else {
-        error
-    }
-    if (displayed.hasSubmissionSummary) EditorSubmissionSummary(displayed)
-    Text(
-        text = displayed.bannerText(), style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.error,
-    )
-}
