@@ -105,11 +105,10 @@ class EditorControlLayoutTest {
                 val bounds = compose.onNodeWithTag("control").getUnclippedBoundsInRoot()
                 assertEquals(185f, bounds.width.value, 0.5f)
                 assertEquals(48f, bounds.height.value, 0.5f)
-                if ((content as? EditorEventContent.Problem)?.error?.cause in
-                    listOf(EditorCause.Uncertain, EditorCause.DraftWriteFailed)) {
+                val capture = (content as? EditorEventContent.Problem)?.error?.let(::budgetCaptureName)
+                if (capture != null) {
                     compose.onNodeWithTag("control").captureRoboImage(
-                        "src/test/screenshots/editor_budget_${contents.indexOf(content)}_" +
-                            "${injectedHeight.value}.png",
+                        "src/test/screenshots/editor_budget_${capture}_${injectedHeight.value}.png",
                     )
                 }
             }
@@ -229,4 +228,11 @@ class EditorControlLayoutTest {
             }
         }
     }
+}
+
+/** Cause and surface name a budget capture: a catalogue index shifts with every new sample (gate C3 r3, M1). */
+private fun budgetCaptureName(error: EditorError): String? {
+    if (error.cause != EditorCause.Uncertain && error.cause != EditorCause.DraftWriteFailed) return null
+    val surface = EditorErrorSurface.entries.firstOrNull { EditorErrors.uncertain(it) == error }
+    return listOfNotNull(error.cause.toString(), surface?.name).joinToString("_")
 }

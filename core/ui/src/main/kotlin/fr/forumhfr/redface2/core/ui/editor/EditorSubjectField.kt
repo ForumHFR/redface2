@@ -30,35 +30,39 @@ fun EditorSubjectField(
     enabled: Boolean = true,
 ) {
     SideEffect { input.synchronizeBuffer() }
-    Column {
-        OutlinedTextField(
-            state = input.buffer,
-            inputTransformation = input.transformation,
-            lineLimits = TextFieldLineLimits.SingleLine,
-            enabled = enabled,
-            label = { Text(stringResource(R.string.editor_subject_label)) },
-            supportingText = {
-                Text(stringResource(R.string.editor_subject_counter, value.length, input.maxLength))
-            },
-            modifier = modifier.semantics { maxTextLength = input.maxLength },
-        )
-        SubjectTruncationNotice(input.truncated, input.maxLength)
+    Box {
+        Column {
+            OutlinedTextField(
+                state = input.buffer,
+                inputTransformation = input.transformation,
+                lineLimits = TextFieldLineLimits.SingleLine,
+                enabled = enabled,
+                label = { Text(stringResource(R.string.editor_subject_label)) },
+                supportingText = {
+                    Text(stringResource(R.string.editor_subject_counter, value.length, input.maxLength))
+                },
+                modifier = modifier.semantics { maxTextLength = input.maxLength },
+            )
+            // Visual only: the overlaid live node below speaks the same notice.
+            if (input.truncated) Text(
+                stringResource(R.string.editor_subject_truncated, input.maxLength),
+                Modifier.padding(horizontal = 16.dp).clearAndSetSemantics {},
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        SubjectTruncationAnnouncement(input.truncated, input.maxLength)
     }
 }
 
-/** Keep the live node outside M3's merging field so typing never announces the counter. */
+/**
+ * Stable node outside M3's merging field, so typing never announces the counter. Overlaid like the
+ * recipients' announcement: it exists before any truncation without adding height below the field.
+ */
 @Composable
-private fun SubjectTruncationNotice(truncated: Boolean, maxLength: Int) {
+private fun SubjectTruncationAnnouncement(truncated: Boolean, maxLength: Int) {
     val notice = if (truncated) stringResource(R.string.editor_subject_truncated, maxLength) else ""
-    Box(
-        modifier = (if (truncated) Modifier else Modifier.size(1.dp)).clearAndSetSemantics {
-            liveRegion = LiveRegionMode.Polite
-            if (notice.isNotEmpty()) contentDescription = notice
-        },
-    ) {
-        if (truncated) Text(
-            notice, Modifier.padding(horizontal = 16.dp),
-            style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
+    Box(Modifier.size(1.dp).clearAndSetSemantics {
+        liveRegion = LiveRegionMode.Polite
+        if (notice.isNotEmpty()) contentDescription = notice
+    })
 }

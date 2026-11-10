@@ -25,6 +25,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -141,6 +142,30 @@ class EditorRecipientFieldTest {
         field().assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("tail")))
     }
 
+    @Test fun `IME comma inside a composing region or after finishing it commits the chip exactly once`() {
+        show()
+        field().requestFocus()
+        compose.runOnIdle {
+            val ime = checkNotNull(connection)
+            // Some keyboards keep punctuation inside the composing region.
+            ime.setComposingText("Bob,", 1)
+            assertEquals(EditorRecipientState(listOf("Bob")), recipients.value)
+            assertEquals("", recipientInput.buffer.text.toString())
+            ime.finishComposingText()
+            assertEquals(EditorRecipientState(listOf("Bob")), recipients.value)
+            // Others finish the word first, then commit the comma on its own.
+            ime.setComposingText("Eve", 1)
+            assertEquals(EditorRecipientState(listOf("Bob"), "Eve"), recipients.value)
+            ime.finishComposingText()
+            assertEquals(EditorRecipientState(listOf("Bob"), "Eve"), recipients.value)
+            ime.commitText(",", 1)
+            assertEquals(EditorRecipientState(listOf("Bob", "Eve")), recipients.value)
+            assertEquals("", recipientInput.buffer.text.toString())
+            assertEquals(TextRange.Zero, recipientInput.buffer.selection)
+        }
+        field().assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("")))
+    }
+
     @Test fun `duplicate already committed in an earlier transaction is merged without changing case`() {
         show()
         field().performTextInput("Alice,")
@@ -251,6 +276,20 @@ class EditorRecipientFieldTest {
         paste("new subject".repeat(10), "subject")
         compose.runOnIdle { assertEquals("new subject".repeat(10).take(70), subject.value) }
         notice.assertExists()
+    }
+
+    @Test fun `untruncated subject adds no space below its field and only a truncation shows the notice`() {
+        show()
+        val headers = compose.onNodeWithTag("headers")
+        val field = compose.onNodeWithTag("subject")
+        // The live node overlays the field (gate C2 r2, §2): no 1 dp strip below the subject.
+        assertEquals(field.getUnclippedBoundsInRoot().bottom.value, headers.getUnclippedBoundsInRoot().bottom.value,
+            0.01f)
+        field.performTextInput("x".repeat(71))
+        compose.runOnIdle { assertTrue(subjectInput.truncated) }
+        assertTrue(headers.getUnclippedBoundsInRoot().bottom > field.getUnclippedBoundsInRoot().bottom)
+        compose.onNodeWithContentDescription("Sujet tronqué à 70 caractères.", useUnmergedTree = true)
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))
     }
 
     @Test fun `subject selection alone never calls the owner even when edits would be refused`() {
