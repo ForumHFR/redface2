@@ -170,7 +170,7 @@ class PrivateMessageReplyRestorationScreenTest {
         // sheet bypasses captureBody and lets BTF2 collapse an uncaptured range during disposal.
         compose.runOnIdle { back.onBackPressed() }
         compose.onNode(hasSetTextAction()).performClick().performTextInput("Bonjour")
-            .performTextInputSelection(selection)
+        compose.onNode(hasSetTextAction()).performTextInputSelection(selection)
         compose.onNodeWithContentDescription("2 destinataires, gérer").performClick()
         compose.onNodeWithText("Membres de la discussion").assertIsDisplayed()
         compose.runOnIdle {
