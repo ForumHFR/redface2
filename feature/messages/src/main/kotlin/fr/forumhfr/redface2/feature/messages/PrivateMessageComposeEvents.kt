@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorSession
 import fr.forumhfr.redface2.core.ui.editor.EditorCause
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorMappers
 import fr.forumhfr.redface2.core.ui.editor.EditorEventCollector
+import fr.forumhfr.redface2.core.ui.editor.EditorEventCommand
 import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
 import fr.forumhfr.redface2.core.ui.editor.EditorEventProjection
 import fr.forumhfr.redface2.core.ui.editor.EditorHostEvents
@@ -16,9 +17,6 @@ internal class PrivateMessageComposeEvents : EditorHostEvents {
         // GET failures stay in formError (ED-130); no read can retire a submission event.
         isReadError = { false },
         resolvesReadError = { _, _ -> false },
-        uploadError = { it.takeUnless { error ->
-            error.cause in setOf(EditorCause.PickerAbsent, EditorCause.NoImageReceived)
-        } },
         isUploadSuccessful = { it == null || it.cause == EditorCause.ImageLimit },
     ))
     override val state get() = collector.state
@@ -26,6 +24,14 @@ internal class PrivateMessageComposeEvents : EditorHostEvents {
     private var projection = EditorEventProjection(state.session)
 
     override fun dispatch(input: EditorEventInput) = collector.dispatch(input)
+    /** The host opens its header directly; this port only selects the field, without a second gesture. */
+    fun completingHeader(onComplete: (EditorCause) -> Unit): EditorHostEvents = object : EditorHostEvents by this {
+        override fun dispatch(input: EditorEventInput) = collector.dispatch(input).also { transition ->
+            transition.commands.filterIsInstance<EditorEventCommand.CompleteHeader>().forEach {
+                onComplete(it.cause)
+            }
+        }
+    }
     fun open(session: EditorSession) {
         if (session != state.session) projection = EditorEventProjection(session)
         collector.open(session)

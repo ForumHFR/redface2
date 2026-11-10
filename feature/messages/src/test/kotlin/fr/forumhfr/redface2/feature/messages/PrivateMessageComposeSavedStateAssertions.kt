@@ -15,7 +15,8 @@ internal val privateMessageComposeCheckpointKeys = setOf(
 
 /** A closed metadata schema, with a content check on every value independently of Compose's registry. */
 internal fun assertPrivateMessageComposeSavedState(saved: SavedStateHandle, privateFragments: List<String>) {
-    val allowedKeys = privateMessageComposeCheckpointKeys + "messageComposeEditor.ignoredOfferFingerprint"
+    val entryKey = PrivateMessageComposeChromeMemory.INITIAL_HEADER_HANDLED
+    val allowedKeys = privateMessageComposeCheckpointKeys + "messageComposeEditor.ignoredOfferFingerprint" + entryKey
     val integerKeys = setOf(
         "messageComposeEditor.selectionStart", "messageComposeEditor.selectionEnd", "messageComposeEditor.scroll",
     )
@@ -28,7 +29,9 @@ internal fun assertPrivateMessageComposeSavedState(saved: SavedStateHandle, priv
             require(fragment.isNotEmpty())
             assertFalse("Private content in SavedStateHandle[$key]", value.toString().contains(fragment))
         }
-        if (key in integerKeys) {
+        if (key == entryKey) {
+            assertTrue("Automatic header latch must be a Boolean", value is Boolean)
+        } else if (key in integerKeys) {
             assertTrue("Viewport metadata must be an Int: $key", value is Int)
         } else {
             assertTrue("Compose identity metadata must be a String: $key", value is String)

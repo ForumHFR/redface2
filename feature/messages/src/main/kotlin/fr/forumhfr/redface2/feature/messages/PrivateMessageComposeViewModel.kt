@@ -210,6 +210,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         saved = savedStateHandle, submission = submission, scope = viewModelScope, draftKey = draftKey,
         readState = { _state.value }, updateState = ::updateState,
     )
+    internal val chromeMemory = PrivateMessageComposeChromeMemory(savedStateHandle, draftSession.isRecreation)
 
     /**
      * #459 — lowercased pseudo of the authenticated session, or null when anonymous. The upload
@@ -270,6 +271,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                 if (authObserved && newUserId != activeUserId) {
                     uploadJob?.cancel()
                     submission.accountChanged()
+                    chromeMemory.reset()
                     formJob?.cancel()
                     loadedForm = null
                     draftSession.invalidate()
@@ -537,10 +539,11 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     fun onSubmit(timeoutMillis: Long = 4_000L) {
         val snapshot = _state.value.copy(bodyText = bodyFieldState.text.toString())
         val form = loadedForm ?: return
-        if (!snapshot.canSubmit || closeRequested || submission.blocksMutation) return
-        if (form.isAnonymous) {
-            updateState { it.copy(submitError = null) }
-            updateState { it.copy(submitError = EditorErrors.loginRequired) }
+        if (!snapshot.sendActivatable || closeRequested || submission.blocksMutation) return
+        updateState { it.copy(submitError = null) }
+        val error = snapshot.headerError ?: EditorErrors.loginRequired.takeIf { form.isAnonymous }
+        if (error != null) {
+            updateState { it.copy(submitError = error) }
         } else {
             val permit = submission.request(timeoutMillis, snapshot.canSubmit)
             if (permit is SubmissionRequest.Accepted) launchSubmission(permit, snapshot, form)

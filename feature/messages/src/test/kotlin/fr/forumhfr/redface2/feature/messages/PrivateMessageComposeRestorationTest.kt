@@ -15,7 +15,6 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.Attempt
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptStatus
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptToken
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.Draft
-import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.DraftEntry
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
@@ -130,6 +129,24 @@ class PrivateMessageComposeRestorationTest {
         assertFalse(restored.state.value.isPreviewVisible)
         assertNull(restored.state.value.armToken)
         assertEquals(privateMessageComposeCheckpointKeys, frozen.keys())
+    }
+
+    @Test fun automaticHeaderLatchSurvivesParcelAndDoesNotReopenEvenWithoutARecipient() = runTest(dispatcher) {
+        val saved = SavedStateHandle()
+        val first = open(saved)
+        settle()
+        fun adapter(vm: PrivateMessageComposeViewModel) = PrivateMessageComposeChromeAdapter(
+            { vm.state.value }, vm.bodyFieldState, vm.editorEvents, vm.chromeActions(), {}, {}, vm.chromeMemory)
+        val initial = adapter(first)
+        initial.openInitialHeader()
+        assertEquals(PrivateMessageComposeChromeSurface.Header, initial.surface)
+        val frozen = freeze(saved)
+        first.viewModelScope.cancel()
+        val recreated = adapter(open(frozen))
+        settle()
+        recreated.openInitialHeader()
+        assertNull(recreated.surface)
+        assertNull(recreated.detail)
     }
 
     @Test fun bundleAloneHasNoContentAndNewerOrChangedHeadersRequireAnOffer() = runTest(dispatcher) {
@@ -394,6 +411,8 @@ class PrivateMessageComposeRestorationTest {
         assertEquals("saved body", editor.state.value.restorableDraft)
         editor.onDraftRestoreRequested()
         settle()
+        assertEquals("saved body", editor.bodyFieldState.text.toString())
+        assertEquals("private subject", editor.state.value.subject)
         assertEquals(EditorRecipientState(listOf("alice", "bo")), editor.state.value.recipientState)
         assertTrue(editor.state.value.canSubmit)
         editor.onSubmit()
@@ -568,6 +587,7 @@ class PrivateMessageComposeRestorationTest {
             when (val value = saved.get<Any?>(key)) {
                 is String -> bundle.putString(key, value)
                 is Int -> bundle.putInt(key, value)
+                is Boolean -> bundle.putBoolean(key, value)
                 else -> error("Unexpected metadata: $key")
             }
         }

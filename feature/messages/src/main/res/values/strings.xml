@@ -139,4 +139,12 @@
          libellé que le topic (topic_post_ego_state_description), possédé par chaque feature. -->
     <string name="messages_post_ego_state_description">Votre message</string>
     <string name="messages_post_moderation_state_description">Message de la modération</string>
+    <string name="messages_compose_header">Destinataires et sujet</string>
+    <string name="messages_compose_header_open">Modifier les destinataires et le sujet</string>
+    <string name="messages_compose_add_recipients">Ajouter des destinataires</string>
+    <string name="messages_compose_add_subject">Ajouter un sujet</string>
+    <plurals name="messages_compose_recipient_count">
+        <item quantity="one">%1$d destinataire</item>
+        <item quantity="other">%1$d destinataires</item>
+    </plurals>
 </resources>

@@ -636,6 +636,30 @@ class PrivateMessageComposeViewModelTest {
     }
 
     @Test
+    fun `ED35 missing headers and D4 buffer refuse twice without arming or posting`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val vm = viewModel(repository, confirmBeforePosting = true)
+        vm.editBody(TextFieldValue("corps"))
+        listOf(EditorRecipientState() to EditorErrors.missingRecipients,
+            EditorRecipientState(buffer = "sans virgule") to EditorErrors.incompleteRecipient,
+            EditorRecipientState(listOf("alice"), "suite") to EditorErrors.incompleteRecipient,
+            EditorRecipientState(listOf("alice")) to EditorErrors.missingSubject).forEach { (recipients, error) ->
+            vm.onRecipientStateChanged(recipients)
+            val keys = List(2) {
+                vm.onSubmit()
+                assertEquals(error, vm.state.value.submitError)
+                assertNull(vm.state.value.armToken)
+                assertTrue(vm.state.value.sendActivatable)
+                assertFalse(vm.state.value.canSubmit)
+                vm.editorEvents.state.events.last().key
+            }
+            assertFalse(keys.first() == keys.last())
+        }
+        coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `subject is truncated to HFR's 70-char maxlength`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchComposeForm(any()) } returns composeForm()

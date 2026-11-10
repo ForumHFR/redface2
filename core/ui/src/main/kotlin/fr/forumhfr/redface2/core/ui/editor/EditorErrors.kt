@@ -76,6 +76,10 @@ object EditorErrors {
         EditorCause.MissingRecipients, EditorErrorClass.Validation,
         R.string.editor_summary_recipients, null, EditorErrorAction.Complete,
     )
+    val incompleteRecipient = create(
+        EditorCause.MissingRecipients, EditorErrorClass.Validation,
+        R.string.editor_summary_recipient_incomplete, null, EditorErrorAction.Complete,
+    )
     val missingSubject = create(
         EditorCause.MissingSubject, EditorErrorClass.Validation,
         R.string.editor_summary_subject, null, EditorErrorAction.Complete,

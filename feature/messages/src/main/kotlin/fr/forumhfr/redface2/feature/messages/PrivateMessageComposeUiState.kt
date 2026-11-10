@@ -67,13 +67,17 @@ data class PrivateMessageComposeUiState(
     /** #1128 — observed continuously so the next image pick uses the current preference. */
     val imagePickerMode: ImagePickerMode = ImagePickerMode.DEFAULT,
 ) {
-    /** All three user-typed fields are required — HFR's « remplir tous les champs » rule. */
     val armToken: ArmToken? get() = (submission as? EditorSubmissionState.Armed)?.token
 
-    val canSubmit: Boolean
+    /** ED-35: missing routing fields are explained before arming, while POST remains strict. */
+    val sendActivatable: Boolean
         get() = !isInitializing && formAvailable && !isLoadingForm && !isSubmitting && !isUploading &&
-            !submission.blocksBodyMutation && recipientState.buffer.isBlank() &&
-            recipientState.chips.any(String::isNotBlank) && subject.isNotBlank() && bodyText.isNotBlank()
+            !submission.blocksBodyMutation && bodyText.isNotBlank()
+
+    /** All three user-typed fields are required — HFR's « remplir tous les champs » rule. */
+    val canSubmit: Boolean
+        get() = sendActivatable && recipientState.buffer.isBlank() &&
+            recipientState.chips.any(String::isNotBlank) && subject.isNotBlank()
 
     companion object {
         /** HFR's `maxlength=70` on the composer's `sujet` input (fixture `mp_compose_form.html`). */
