@@ -69,7 +69,8 @@ private fun PostEditorHeaderSurface(
     body: @Composable () -> Unit,
 ) {
     val pending = adapter.surface == PostEditorChromeSurface.PendingQuote
-    val title = if (pending) R.string.editor_quote_pending else R.string.editor_draft_restore_message
+    // Short title: the offer sentence appears once, in the panel body (gate R1b T3 r1, minor 3).
+    val title = if (pending) R.string.editor_quote_pending else R.string.editor_draft_restore_title
     EditorHeaderPanel(adapter.surface == PostEditorChromeSurface.Restore || pending,
         stringResource(title), bodyState, adapter::closeSurface,
         { adapter.returnToBody(onReturnToBody) },
@@ -77,7 +78,7 @@ private fun PostEditorHeaderSurface(
         if (!pending && source.restorableDraft != null && source.pendingQuotes.isNotEmpty()) {
             Text(stringResource(R.string.editor_quote_pending))
         }
-        if (pending) QuoteDecisions(adapter) else DraftRestoreBanner(
+        if (pending) QuoteDecisions(adapter) else DraftRestoreChoice(
             adapter::restoreDraft, adapter::discardDraft,
             restoreEnabled = source.canRestoreDraft && !source.isUploading &&
                 adapter.state.scaffold.controlsEnabled)

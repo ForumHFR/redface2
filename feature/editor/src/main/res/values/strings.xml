@@ -24,7 +24,8 @@
     <string name="editor_image_url_error">Seules les URL http:// et https:// sont acceptées.</string>
     <string name="editor_image_url_insert">Insérer</string>
     <string name="editor_image_url_cancel">Annuler</string>
-    <!-- #405 — bannière de restauration de brouillon. -->
+    <!-- #405 — panneau ↺ de restauration de brouillon : titre court, phrase une seule fois dans le corps. -->
+    <string name="editor_draft_restore_title">Brouillon retrouvé</string>
     <string name="editor_draft_restore_message">Un brouillon non envoyé a été retrouvé pour ce message.</string>
     <string name="editor_draft_restore">Restaurer</string>
     <string name="editor_draft_discard">Ignorer</string>

@@ -28,10 +28,11 @@ internal fun TopicFormChromeSurfaces(
     }
     TopicFormEventDetails(adapter, bodyState, onReturnToBody) {
         TopicFormHeaderPanel(adapter, bodyState, onReturnToBody) {
+            // Short title: the offer sentence appears once, in the panel body (gate R1b T3 r1, minor 3).
             EditorHeaderPanel(host.surface == TopicFormChromeSurface.Restore,
-                stringResource(R.string.editor_draft_restore_message), bodyState, host::closeSurface,
+                stringResource(R.string.editor_draft_restore_title), bodyState, host::closeSurface,
                 { host.returnToBody(onReturnToBody) }, body = body) {
-                DraftRestoreBanner(adapter::restoreDraft, adapter::discardDraft,
+                DraftRestoreChoice(adapter::restoreDraft, adapter::discardDraft,
                     restoreEnabled = adapter.state.scaffold.controlsEnabled &&
                         !adapter.state.source.isLoadingForm && !adapter.state.source.isUploading)
             }

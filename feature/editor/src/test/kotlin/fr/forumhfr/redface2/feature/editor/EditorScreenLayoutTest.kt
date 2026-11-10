@@ -1,12 +1,17 @@
 package fr.forumhfr.redface2.feature.editor
 
 import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.InputModeManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
@@ -21,6 +26,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -28,12 +34,15 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.R as UiR
 import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -154,6 +163,52 @@ class EditorScreenLayoutTest {
         compose.runOnIdle { back.onBackPressed() }
         assertEquals(listOf(PostEditorIntent.TogglePreview, PostEditorIntent.TogglePreview,
             PostEditorIntent.CloseRequested), host.calls)
+    }
+
+    @Test
+    @Config(qualifiers = "fr-rFR-w360dp-h760dp-port-xxhdpi")
+    fun `post restore panel states its offer once and never ellipsizes it at font scale 1_3`() {
+        val host = PostEditorChromeFixture()
+        host.state = host.state.copy(restorableDraft = "Brouillon conservé")
+        setLargeFontContent { PostEditorTestContent(host.state, host::dispatch, host.body, host.events) }
+        assertRestoreOfferStatedOnce()
+    }
+
+    @Test
+    @Config(qualifiers = "fr-rFR-w360dp-h760dp-port-xxhdpi")
+    fun `topic restore panel states its offer once and never ellipsizes it at font scale 1_3`() {
+        val fixture = TopicFormChromeFixture()
+        fixture.state = fixture.state.copy(restorableDraft = "Brouillon conservé")
+        setLargeFontContent {
+            TopicFormTestContent(fixture.state, fixture::dispatch, fixture.body, fixture.events, fixture.memory)
+        }
+        assertRestoreOfferStatedOnce()
+    }
+
+    private fun setLargeFontContent(content: @Composable () -> Unit) = compose.setContent {
+        val density = LocalDensity.current
+        CompositionLocalProvider(LocalDensity provides Density(density = density.density, fontScale = 1.3f)) {
+            RedfaceTheme(darkTheme = false, dynamicColor = false) { content() }
+        }
+    }
+
+    /** Gate R1b T3 r1 m3: a short panel title, then the offer once, uncapped above both 48 dp actions. */
+    private fun assertRestoreOfferStatedOnce() {
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
+        compose.onNodeWithText("Brouillon retrouvé").assertIsDisplayed()
+        val offer = "Un brouillon non envoyé a été retrouvé pour ce message."
+        compose.onAllNodesWithText(offer, useUnmergedTree = true).assertCountEquals(1)
+        val layouts = mutableListOf<TextLayoutResult>()
+        val read = requireNotNull(compose.onNodeWithText(offer, useUnmergedTree = true).fetchSemanticsNode()
+            .config.getOrNull(SemanticsActions.GetTextLayoutResult)?.action)
+        assertTrue(read(layouts))
+        val layout = layouts.single()
+        val last = layout.lineCount - 1
+        assertEquals(1.3f, layout.layoutInput.density.fontScale, 0.001f)
+        assertFalse("The offer must not exceed a line cap", layout.multiParagraph.didExceedMaxLines)
+        assertFalse("The offer must not be ellipsized", layout.isLineEllipsized(last))
+        assertEquals("Every character must be laid out", offer.length, layout.getLineEnd(last, visibleEnd = true))
+        for (label in listOf("Restaurer", "Ignorer")) compose.onNodeWithText(label).assertHeightIsAtLeast(48.dp)
     }
 
     @Test
