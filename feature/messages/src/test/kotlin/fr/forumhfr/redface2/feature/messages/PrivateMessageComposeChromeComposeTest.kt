@@ -38,6 +38,7 @@ import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorRecipientState
 import fr.forumhfr.redface2.core.ui.editor.EditorScaffold
+import fr.forumhfr.redface2.core.ui.editor.EditorScaffoldChrome
 import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import java.util.concurrent.CopyOnWriteArrayList
@@ -61,6 +62,7 @@ class PrivateMessageComposeChromeComposeTest {
     @get:Rule val compose = createComposeRule()
     private val f = PrivateMessageComposeChromeFixture()
     private val focus = FocusRequester()
+    private var renderedChrome: EditorScaffoldChrome? = null
     private var hides = 0
     private var shows = 0
     private val keyboard = object : SoftwareKeyboardController {
@@ -72,9 +74,10 @@ class PrivateMessageComposeChromeComposeTest {
         val smileys = remember { SmileyPickerController(scope, searchWiki = { _, _ -> emptyList() }) }
         f.openSmileys = { smileys.open() }
         val a = f.adapter
+        val chrome = a.chrome().also { renderedChrome = it }
         CompositionLocalProvider(LocalSoftwareKeyboardController provides keyboard) {
             RedfaceTheme {
-                EditorScaffold(f.body, EditorWindowMetrics(740.dp, 0.dp, 0.dp), a.title(), a.context(), a.chrome(),
+                EditorScaffold(f.body, EditorWindowMetrics(740.dp, 0.dp, 0.dp), a.title(), a.context(), chrome,
                     a.barActions, a.submitState, a.submitActions, a.imageActions, a::closeRequested,
                     bodyFocusRequester = focus, surfaceFocus = a.focusMemory, onSystemBack = { a.back() },
                     onOpenHeader = a::openHeader, headerLabel = stringResource(R.string.messages_compose_header_open),
@@ -110,7 +113,7 @@ class PrivateMessageComposeChromeComposeTest {
         compose.setContent { Content() }
         compose.onNodeWithText("Nouveau message").assertExists()
         compose.onNodeWithText("1 destinataire · Sujet privé").assertExists()
-        compose.runOnIdle { assertNull(f.adapter.scaffoldChrome().secondStatus); assertNull(f.adapter.surface) }
+        compose.runOnIdle { assertNull(requireNotNull(renderedChrome).secondStatus); assertNull(f.adapter.surface) }
         listOf(EditorErrors.unknownRecipient to "Destinataires", EditorErrors.missingSubject to "Sujet")
             .forEach { (error, label) ->
                 compose.runOnIdle {
