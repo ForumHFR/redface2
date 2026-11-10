@@ -73,7 +73,7 @@ internal fun PostEditorQuotePanel(
     }
 }
 
-/** The panel and capped zone share exact-snapshot actions, order, announcements and removal focus. */
+/** Exact-snapshot actions, insertion order, announcements and removal focus inside the panel. */
 @Composable
 internal fun PostEditorQuoteCards(
     quotes: List<QuoteSelection>,
@@ -112,24 +112,6 @@ internal fun PostEditorQuoteCards(
                         }), focus[index])
                 }
             }
-        }
-    }
-}
-
-/** Same clear-all target in the bounded zone and in the panel; no submit action is installed here. */
-@Composable
-internal fun PostEditorClearQuotes(count: Int, enabled: Boolean, onClear: () -> Unit) {
-    var announcement by remember { mutableStateOf("") }
-    val cleared = stringResource(R.string.editor_quotes_cleared)
-    val label = stringResource(R.string.editor_quotes_clear_all_a11y)
-    Box {
-        Box(Modifier.size(1.dp).semantics {
-            liveRegion = LiveRegionMode.Polite
-            contentDescription = announcement
-        })
-        if (count >= 2) TextButton(onClick = { announcement = cleared; onClear() }, enabled = enabled,
-            modifier = Modifier.semantics { contentDescription = label }) {
-            Text(stringResource(R.string.editor_quotes_clear_all))
         }
     }
 }

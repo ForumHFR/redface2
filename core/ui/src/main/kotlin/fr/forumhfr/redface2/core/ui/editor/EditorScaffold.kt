@@ -210,17 +210,21 @@ fun EditorScaffold(
         if (armed) submitActions.onDisarm()
     }
     val onReturnToBody: () -> Unit = {
-        val imeBeforeSurface = surfaceFocus.imeBeforeSurface
-        // An initially open panel has no capture to prepare the field's closed-IME options.
-        pendingBodyFocus = !imeBeforeSurface && (initialFocus || restoreImeOnFocus)
         initialFocus = false
-        restoreImeOnFocus = imeBeforeSurface
-        if (!pendingBodyFocus) bodyFocusRequester.requestFocus()
-        if (!imeBeforeSurface) keyboard?.hide()
+        restoreImeOnFocus = surfaceFocus.imeBeforeSurface
+        pendingBodyFocus = true
     }
-    // Captured returns focus synchronously; an initial panel waits for the closed-IME options,
-    // preserving the selection explicitly. BTF2 starts the session when options change to true.
-    RestoreEditorBodyFocus(pendingBodyFocus, bodyState, bodyFocusRequester) { pendingBodyFocus = false }
+    // Wait until the input options and host guard have recomposed after closing the surface.
+    // Use H's selection-preserving path; an already focused field still needs explicit IME restore.
+    LaunchedEffect(pendingBodyFocus) {
+        if (pendingBodyFocus) {
+            if (bodyFocusRestoreAllowed) {
+                requestEditorBodyFocus(bodyState, bodyFocusRequester)
+                if (restoreImeOnFocus) keyboard?.show() else keyboard?.hide()
+            }
+            pendingBodyFocus = false // A covered body must not receive a deferred return later.
+        }
+    }
     val actions = barActions.withScaffoldFocus(captureIme, bodyFocusRequester)
     val open: (() -> Unit) -> Unit = { action ->
         if (!consumeEditorBarInformation(chrome.event, actions.onEvent)) {
@@ -330,18 +334,6 @@ private fun Modifier.onEditorBodyTap(state: TextFieldState, onTap: () -> Unit): 
         if (up != null && up.uptimeMillis - down.uptimeMillis < timeout &&
             (up.position - down.position).getDistance() <= viewConfiguration.touchSlop) {
             onTap()
-        }
-    }
-}
-
-@Composable
-private fun RestoreEditorBodyFocus(
-    requested: Boolean, state: TextFieldState, focus: FocusRequester, onRestored: () -> Unit,
-) {
-    LaunchedEffect(requested) {
-        if (requested) {
-            requestEditorBodyFocus(state, focus)
-            onRestored()
         }
     }
 }

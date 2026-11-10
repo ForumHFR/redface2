@@ -480,7 +480,8 @@ class PostEditorViewModelTest {
         assertEquals(listOf(portion, first, card(202)), vm.state.value.quotes)
         vm.dispatch(PostEditorIntent.QuoteRemoved(101, portion))
         assertEquals(listOf(first, card(202)), vm.state.value.quotes)
-        assertEquals(1, vm.chromeEvents.state.events.count { it.content is EditorEventContent.Information })
+        assertEquals(listOf(EditorEventContent.Information(EditorText(R.string.editor_quote_already_delivered))),
+            vm.chromeEvents.state.events.map { it.content }.filterIsInstance<EditorEventContent.Information>())
         assertEquals(0, replyRepository.submitCalls)
     }
 

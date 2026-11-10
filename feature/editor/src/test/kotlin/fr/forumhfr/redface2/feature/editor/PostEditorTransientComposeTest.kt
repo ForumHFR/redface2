@@ -3,20 +3,15 @@ package fr.forumhfr.redface2.feature.editor
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
-import androidx.compose.foundation.layout.Box
+import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
@@ -32,7 +27,6 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.PlatformTextInputInterceptor
 import androidx.compose.ui.platform.SoftwareKeyboardController
-import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -71,10 +65,6 @@ import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.R as UiR
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
-import fr.forumhfr.redface2.core.ui.editor.EditorChromeMetrics
-import fr.forumhfr.redface2.core.ui.editor.EditorScaffold
-import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
-import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -100,10 +90,10 @@ class PostEditorTransientComposeTest {
         compose.setContent {
             RedfaceTheme {
                 inputMode = LocalInputModeManager.current
-                TransientPanelHost(host, focus)
+                PostEditorTestContent(host.state, host::dispatch, host.body, host.events, host.memory)
             }
         }
-        compose.runOnIdle { focus.requestFocus() }
+        compose.onNode(hasSetTextAction()).requestFocus()
         val source = compose.onNode(hasSetTextAction()).fetchSemanticsNode().id
         val selection = host.body.selection
         compose.onNodeWithContentDescription("3 citations, ouvrir le panneau citations").performClick()
@@ -137,7 +127,9 @@ class PostEditorTransientComposeTest {
 
     @Test fun `ED50 removing the final card retains its announcement and gives focus to the empty panel`() {
         host.state = host.state.copy(quotes = host.state.quotes.take(1))
-        compose.setContent { RedfaceTheme { TransientPanelHost(host, focus) } }
+        compose.setContent {
+            RedfaceTheme { PostEditorTestContent(host.state, host::dispatch, host.body, host.events, host.memory) }
+        }
         compose.onNodeWithContentDescription("1 citation, ouvrir le panneau citations").performClick()
         compose.onNodeWithText("Tout vider").assertDoesNotExist()
         compose.onNodeWithContentDescription("Retirer la citation de Alice").performScrollTo().performClick()
@@ -145,51 +137,30 @@ class PostEditorTransientComposeTest {
         compose.onNodeWithContentDescription("Citation de Alice retirée. 0 citation restante").assertExists()
     }
 
-    @Test fun `ED140 actual card is measured before the field and clearing keeps opening geometry`() {
-        var allocation: PostEditorQuoteAllocation? = null
-        var cards by mutableStateOf(host.state.quotes)
-        compose.setContent {
-            RedfaceTheme {
-                Box(Modifier.size(360.dp, 300.dp)) {
-                    PostEditorQuoteLayout(cards, EditorChromeMetrics(false),
-                        PostEditorFieldMetrics(24.dp, 32.dp, 3), true, {}, {}) {
-                        allocation = it
-                        Box(Modifier.fillMaxSize().testTag("field-slot"))
-                    }
-                }
-            }
-        }
-        val field = compose.onNodeWithTag("field-slot").getUnclippedBoundsInRoot()
-        compose.runOnIdle {
-            assertEquals(112.dp, allocation?.zoneHeight)
-            assertFalse(requireNotNull(allocation).panelOnly)
-            assertTrue(requireNotNull(allocation).fieldHeight >= 160.dp)
-            cards = emptyList()
-        }
-        assertEquals(field, compose.onNodeWithTag("field-slot").getUnclippedBoundsInRoot())
-    }
+    @Test fun `R2a portrait exposes quotes only in the panel without reducing the field`() = quoteGeometry()
 
-    @Test fun `P22 a compact field area with less than a complete card exposes only the panel route`() {
-        var allocation: PostEditorQuoteAllocation? = null
-        var hasStatus = false
-        compose.setContent {
-            RedfaceTheme {
-                Box(Modifier.size(360.dp, 100.dp)) {
-                    PostEditorQuoteLayout(host.state.quotes, EditorChromeMetrics(true),
-                        PostEditorFieldMetrics(24.dp, 16.dp, 3), true, {}, {}) {
-                        allocation = it
-                        hasStatus = host.adapter.chrome(quotePanelOnly = it.panelOnly).firstStatus != null
-                        Box(Modifier.fillMaxSize().testTag("field-slot"))
-                    }
-                }
-            }
-        }
-        compose.runOnIdle {
-            assertEquals(PostEditorQuoteAllocation(0.dp, 100.dp, true), allocation)
-            assertTrue(hasStatus)
-        }
-        val field = compose.onNodeWithTag("field-slot").getUnclippedBoundsInRoot()
-        assertEquals(100.dp, field.bottom - field.top)
+    @Test
+    @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
+    fun `R2a compact height keeps the same panel route and field geometry`() = quoteGeometry()
+
+    private fun quoteGeometry() {
+        compose.setContent { RedfaceTheme { PostEditorTestContent(host.state, host::dispatch,
+            host.body, host.events, host.memory) } }
+        val field = compose.onNodeWithTag("editor-scaffold-field")
+        val bounds = field.getUnclippedBoundsInRoot()
+        val node = compose.onNode(hasSetTextAction()).fetchSemanticsNode().id
+        compose.onNodeWithText("Extrait du message de Alice").assertDoesNotExist()
+        compose.onNodeWithText("Tout vider").assertDoesNotExist()
+        compose.onNodeWithContentDescription("3 citations, ouvrir le panneau citations")
+            .assertIsDisplayed().performClick()
+        compose.onNodeWithText("Extrait du message de Alice").assertExists()
+        compose.onNodeWithText("Tout vider").performClick()
+        compose.onNodeWithText("Aucune citation").assertIsFocused()
+        compose.onNodeWithText("Retour au message").performScrollTo().performClick()
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        assertEquals(node, compose.onNode(hasSetTextAction()).fetchSemanticsNode().id)
+        assertEquals(bounds, field.getUnclippedBoundsInRoot())
+        compose.onNodeWithContentDescription("3 citations, ouvrir le panneau citations").assertDoesNotExist()
     }
 
     @Test fun `ED53 panel returns exactly once to an initially open keyboard`() = panelKeyboard(true)
@@ -197,8 +168,17 @@ class PostEditorTransientComposeTest {
 
     private fun panelKeyboard(initiallyOpen: Boolean) {
         val input = TransientInput()
+        val keyboard = TransientKeyboard()
+        lateinit var back: OnBackPressedDispatcher
         compose.setContent {
-            input.Content { RedfaceTheme { TransientPanelHost(host, focus) } }
+            back = requireNotNull(LocalOnBackPressedDispatcherOwner.current).onBackPressedDispatcher
+            input.Content {
+                CompositionLocalProvider(LocalSoftwareKeyboardController provides keyboard) {
+                    RedfaceTheme {
+                        PostEditorTestContent(host.state, host::dispatch, host.body, host.events, host.memory)
+                    }
+                }
+            }
         }
         val field = compose.onNode(hasSetTextAction())
         val node = field.fetchSemanticsNode().id
@@ -209,18 +189,20 @@ class PostEditorTransientComposeTest {
             compose.runOnIdle { input.insets(open) }
             compose.onNodeWithContentDescription("3 citations, ouvrir le panneau citations").performClick()
             field.assertDoesNotExist()
+            compose.onNode(hasSetTextAction(), useUnmergedTree = true).requestFocus().assertIsNotFocused()
+            val keyboardBefore = keyboard.calls.toList()
             val sessions = compose.runOnIdle {
                 assertNull(input.connection)
                 input.insets(!open) // The return must use the opening snapshot, not these new insets.
                 input.sessions
             }
             if (index == 0) compose.onNodeWithText("Retour au message").performClick()
-            else compose.runOnIdle { host.adapter.back() }
+            else compose.runOnIdle { back.onBackPressed() }
             field.assertIsFocused()
             assertEquals(node, field.fetchSemanticsNode().id)
             compose.runOnIdle {
-                assertEquals(selection.min, host.body.selection.min)
-                assertEquals(selection.max, host.body.selection.max)
+                assertEquals(selection, host.body.selection)
+                assertEquals(keyboardBefore + if (open) listOf("show") else listOf("hide"), keyboard.calls)
                 assertEquals(open, input.connection != null)
                 assertEquals(sessions + if (open) 1 else 0, input.sessions)
                 if (open) {
@@ -371,19 +353,4 @@ internal fun transientHost() = PostEditorChromeFixture().apply {
     state = state.copy(quotes = listOf("Alice", "Bob", "Chloé").mapIndexed { index, author ->
         QuoteSelection(QuoteLocator(1, 101 + index, null), author, "Extrait du message de $author")
     })
-}
-
-@Composable
-internal fun TransientPanelHost(host: PostEditorChromeFixture, focus: FocusRequester, compact: Boolean = false) {
-    val scope = rememberCoroutineScope()
-    val smileys = remember { SmileyPickerController(scope, searchWiki = { _, _ -> emptyList() }) }
-    EditorScaffold(host.body, EditorWindowMetrics(if (compact) 360.dp else 760.dp, 24.dp, 24.dp),
-        "Répondre", "Sujet de démonstration", host.adapter.chrome(), host.adapter.barActions,
-        host.adapter.submitState, host.adapter.submitActions, host.adapter.imageActions,
-        host.adapter::closeRequested, bodyFocusRequester = focus,
-        bodyFocusRestoreAllowed = host.adapter.surface == null && host.adapter.detail == null &&
-            !host.state.isPreviewVisible,
-        overlay = { restore, body ->
-            PostEditorChromeSurfaces(host.adapter, host.body, smileys, restore, compact, body)
-        })
 }

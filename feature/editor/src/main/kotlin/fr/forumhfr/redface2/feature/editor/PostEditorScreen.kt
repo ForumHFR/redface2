@@ -3,18 +3,11 @@ package fr.forumhfr.redface2.feature.editor
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.ScrollState
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -28,9 +21,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -39,14 +30,12 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.ui.editor.EditorBackAction
 import fr.forumhfr.redface2.core.ui.editor.EditorBackState
-import fr.forumhfr.redface2.core.ui.editor.EditorChromeMetrics
 import fr.forumhfr.redface2.core.ui.editor.EditorHostMemory
 import fr.forumhfr.redface2.core.ui.editor.EditorScaffold
 import fr.forumhfr.redface2.core.ui.editor.EditorTooltipHost
 import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
 import fr.forumhfr.redface2.core.ui.editor.LocalEditorTooltipHost
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
-import fr.forumhfr.redface2.core.ui.editor.editorBottomInsets
 import fr.forumhfr.redface2.core.ui.editor.rememberEditorImagePicker
 import fr.forumhfr.redface2.core.ui.editor.rememberEditorWindowMetrics
 
@@ -184,49 +173,25 @@ private fun PostEditorChrome(
         }
     }
     val focus = remember { FocusRequester() }
-    val metrics = EditorChromeMetrics(window.compactHeight)
-    val density = LocalDensity.current
-    val top = WindowInsets.safeDrawing.getTop(density)
-    val bottom = editorBottomInsets().getBottom(density)
-    // Same insets and fixed envelopes as Scaffold; no second padding is applied here.
-    PostEditorMeasuredQuotes(state.quotes, metrics, modifier,
-        availableHeight = { metrics.draftHeight((it - with(density) { (top + bottom).toDp() })
-            .coerceAtLeast(0.dp)) }) { allocation ->
-        EditorScaffold(body, window, stringResource(state.mode.titleResId),
-            state.topicTitle.takeUnless { state.isLoadingForm }.orEmpty(),
-            host.chrome(allocation.panelOnly), host.barActions, host.submitState, host.submitActions,
-            host.imageActions, host::closeRequested, bodyFocusRequester = focus, bodyScrollState = scroll,
-            inputTransformation = transformation, autoFocus = true, surfaceFocus = host.focusMemory,
-            bodyFocusRestoreAllowed = host.surface == null && host.detail == null && !state.isPreviewVisible,
-            bodyCaretRevealResetKey = bodyCaretRevealResetKey,
-            onSystemBack = back,
-            fieldArea = { draft ->
-                PostEditorPreview(state.isPreviewVisible, state.preview, body, focus) {
-                    Column(Modifier.fillMaxSize()) {
-                        Box(Modifier.fillMaxWidth().height(allocation.zoneHeight)
-                            .verticalScroll(rememberScrollState())) {
-                            if (allocation.zoneHeight > 0.dp) Column(
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                PostEditorClearQuotes(state.quotes.size, host.state.scaffold.controlsEnabled) {
-                                    host.clearQuotes()
-                                    focus.requestFocus()
-                                }
-                                PostEditorQuoteCards(state.quotes, host.state.scaffold.controlsEnabled,
-                                    host::quoteIntent, { focus.requestFocus() })
-                            }
-                        }
-                        Box(Modifier.weight(1f)) { draft() }
-                    }
-                }
-            }, overlay = { restore, content ->
-                PostEditorChromeSurfaces(host, body, smileys, restore, window.compactHeight, content)
-                // Registered after the bar and panels: all activity layers use the same ED-85 resolver.
-                // Native sheet/detail/dialog dispatchers still consume their own levels first.
-                // Reducing a sublevel or Format here still returns keyboard focus to its bar trigger.
-                BackHandler(onBack = back)
-            })
-    }
+    EditorScaffold(body, window, stringResource(state.mode.titleResId),
+        state.topicTitle.takeUnless { state.isLoadingForm }.orEmpty(),
+        host.chrome(), host.barActions, host.submitState, host.submitActions,
+        host.imageActions, host::closeRequested, bodyFocusRequester = focus, bodyScrollState = scroll,
+        modifier = modifier, inputTransformation = transformation, autoFocus = true, surfaceFocus = host.focusMemory,
+        bodyFocusRestoreAllowed = host.surface == null && host.detail == null && !state.isPreviewVisible,
+        bodyCaretRevealResetKey = bodyCaretRevealResetKey,
+        onSystemBack = back,
+        fieldArea = { draft ->
+            PostEditorPreview(state.isPreviewVisible, state.preview, body, focus) {
+                draft()
+            }
+        }, overlay = { restore, content ->
+            PostEditorChromeSurfaces(host, body, smileys, restore, window.compactHeight, content)
+            // Registered after the bar and panels: all activity layers use the same ED-85 resolver.
+            // Native sheet/detail/dialog dispatchers still consume their own levels first.
+            // Reducing a sublevel or Format here still returns keyboard focus to its bar trigger.
+            BackHandler(onBack = back)
+        })
 }
 
 private val PostEditorMode.titleResId: Int

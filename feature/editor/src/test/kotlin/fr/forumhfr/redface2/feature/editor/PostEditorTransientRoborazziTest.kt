@@ -12,6 +12,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.Density
@@ -28,7 +29,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** Existing :feature:editor record-only configuration; no plugin or #1571 dependency. */
+/** R2a uses the integrated post screen; the transitional preview remains covered until R2b. */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "fr-rFR-w360dp-h760dp-port-xxhdpi")
@@ -58,7 +59,7 @@ class PostEditorTransientRoborazziTest {
                         )), host.body, focus) {
                             BbcodeTextField(host.body, "Message", Modifier.fillMaxSize().focusRequester(focus),
                                 showKeyboardOnFocus = false)
-                        } else TransientPanelHost(host, focus, compact)
+                        } else PostEditorTestContent(host.state, host::dispatch, host.body, host.events, host.memory)
                     }
                 }
             }
@@ -67,17 +68,24 @@ class PostEditorTransientRoborazziTest {
             listOf(false, true).forEach { preview ->
                 compose.runOnIdle { scenario.value = dark to preview }
                 compose.waitForIdle()
-                if (!preview) compose.onNodeWithContentDescription("3 citations, ouvrir le panneau citations")
-                    .performClick()
-                compose.mainClock.advanceTimeBy(1_000L)
-                compose.waitForIdle()
-                compose.mainClock.autoAdvance = false
-                val surface = if (preview) "preview" else "quotes"
                 val direction = if (compact) "compact" else "portrait"
-                compose.onRoot().captureRoboImage(filePath = "src/test/screenshots/" +
-                    "post_${surface}_${direction}_fs${fontScale}_dark$dark.png")
-                compose.mainClock.autoAdvance = true
+                val suffix = "${direction}_fs${fontScale}_dark$dark"
+                if (preview) capture("post_preview_$suffix") else {
+                    capture("post_cards_$suffix")
+                    compose.onNodeWithContentDescription("3 citations, ouvrir le panneau citations").performClick()
+                    capture("post_quotes_$suffix")
+                    compose.onNodeWithText("Tout vider").performClick()
+                    capture("post_quotes_empty_$suffix")
+                }
             }
         }
+    }
+
+    private fun capture(name: String) {
+        compose.mainClock.advanceTimeBy(1_000L)
+        compose.waitForIdle()
+        compose.mainClock.autoAdvance = false
+        compose.onRoot().captureRoboImage(filePath = "src/test/screenshots/$name.png")
+        compose.mainClock.autoAdvance = true
     }
 }

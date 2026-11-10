@@ -46,8 +46,8 @@ internal class PostEditorChromeAdapter(
     val state: PostEditorChromeState get() = PostEditorChromeState(source())
 
     @Composable
-    fun chrome(quotePanelOnly: Boolean = true) = scaffoldChrome(
-        firstStatus = if (!source().hasDormantQuote && (!quotePanelOnly || source().quotes.isEmpty())) null
+    fun chrome() = scaffoldChrome(
+        firstStatus = if (!source().hasDormantQuote && source().quotes.isEmpty()) null
         else EditorAppBarStatus(
             UiR.drawable.ic_editor_quote,
             pluralStringResource(UiR.plurals.editor_status_quotes, quoteCount, quoteCount),
