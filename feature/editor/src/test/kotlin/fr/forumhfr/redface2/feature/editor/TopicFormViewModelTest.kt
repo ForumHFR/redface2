@@ -1903,6 +1903,49 @@ class TopicFormViewModelTest {
     }
 
     @Test
+    fun `ED35 ED170 a missing title refusal keeps the restored uncertainty bound until its Masquer`() = runTest {
+        for (mode in TopicFormMode.entries) {
+            draftStore = FakeEditorDraftStore()
+            val key = topicDraftKey(mode)
+            val attempt = restoredUncertainAttempt(mode)
+            val posts = postCount()
+            val vm = openTopic(mode)
+            val intents = mutableListOf<TopicFormIntent>()
+            val adapter = chromeAdapter(vm, intents)
+            val uncertain = vm.editorEvents.state.visibleEvent!!.key
+            assertEquals("$mode", attempt, vm.editorEvents.uncertainAttempt(uncertain))
+            vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue()))
+            adapter.host.submitActions.onSubmit()
+            syncBody()
+            // The local refusal is delivered behind the earlier warning, without arm, reservation or POST.
+            assertEquals("$mode", listOf(TopicFormIntent.SubmitClicked()), intents)
+            assertEquals(EditorErrors.missingTitle, vm.state.value.submitError)
+            assertTrue(vm.editorEvents.state.events.any {
+                it.content == EditorEventContent.Problem(EditorErrors.missingTitle)
+            })
+            assertNull(vm.state.value.armToken)
+            assertEquals(EditorSubmissionState.Uncertain(attempt), vm.state.value.submission)
+            assertEquals(uncertain, vm.editorEvents.state.visibleEvent?.key)
+            assertEquals(attempt, vm.editorEvents.uncertainAttempt(uncertain))
+            assertEquals(attempt, draftStore.entries[key]?.attempt?.token)
+            assertEquals(posts, postCount())
+
+            // Masquer of the still bound warning acknowledges the same attempt durably.
+            adapter.host.barActions.onEvent(uncertain, EditorEventAction.Details)
+            adapter.host.dismissDetails(uncertain)
+            syncBody()
+            assertEquals(listOf(TopicFormIntent.SubmitClicked(), TopicFormIntent.ErrorDismissed), intents)
+            assertNull(adapter.host.detail)
+            assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
+            assertNull(draftStore.entries[key]?.attempt)
+            assertTrue(vm.editorEvents.state.events.none { it.key == uncertain })
+            assertNoSendingEvent(vm)
+            assertEquals(posts, postCount())
+            vm.viewModelScope.cancel()
+        }
+    }
+
+    @Test
     fun `ED45 ED170 local topic Masquer in Ready allows the next failed autosave to deliver information`() = runTest {
         for (mode in TopicFormMode.entries) assertLocalMasquerReleasesAutosave(mode, rearm = false)
     }
