@@ -17,6 +17,7 @@ import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorSession
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionPurpose
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionToken
 import fr.forumhfr.redface2.core.model.write.TopicFormSubcategoryChoice
@@ -456,9 +457,9 @@ class TopicFormChromeAdapterTest {
             val first = f.events.visibleEvent!!.key
             f.adapter.host.barActions.onEvent(first, EditorEventAction.Details)
             f.adapter.host.dismissDetails(first)
-            // The ViewModel reserves without sending and keeps submitError; the failed write keeps the attempt.
+            // The ViewModel reserves an Acknowledge without sending; the failed write keeps the attempt.
             f.transition(f.state.copy(submission = EditorSubmissionState.PersistingAttempt(
-                SubmissionToken(3, f.session))))
+                SubmissionToken(3, f.session), EditorSubmissionPurpose.Acknowledge)))
             f.transition(f.state.copy(submission = uncertain))
             assertTrue(f.events.state.events.none { it.content is EditorEventContent.InProgress })
             val kept = f.events.visibleEvent!!
@@ -469,7 +470,7 @@ class TopicFormChromeAdapterTest {
             f.adapter.host.barActions.onEvent(kept.key, EditorEventAction.Details)
             f.adapter.host.dismissDetails(kept.key)
             f.transition(f.state.copy(submission = EditorSubmissionState.PersistingAttempt(
-                SubmissionToken(4, f.session))))
+                SubmissionToken(4, f.session), EditorSubmissionPurpose.Acknowledge)))
             f.transition(f.state.copy(submission = EditorSubmissionState.Ready))
             f.transition(f.state.copy(submitError = null))
             assertEquals(listOf(TopicFormIntent.ErrorDismissed, TopicFormIntent.ErrorDismissed), f.calls)
