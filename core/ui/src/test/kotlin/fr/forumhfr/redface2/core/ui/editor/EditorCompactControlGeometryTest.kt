@@ -45,7 +45,7 @@ class EditorCompactControlGeometryTest {
     private val statusButton get() = compose.onNode(hasClickAction() and
         hasAnyAncestor(hasTestTag("editor-bar-FirstStatus")), useUnmergedTree = true)
 
-    // The node's own placed size; native minimum-touch-target expansion only shows in touchBoundsInRoot.
+    // The node's own placed size (positionInRoot + size), never widened by native minimum-touch-target expansion.
     private fun SemanticsNodeInteraction.layoutBounds(): DpRect {
         val node = fetchSemanticsNode()
         val position = node.positionInRoot
