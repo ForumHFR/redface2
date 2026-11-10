@@ -39,7 +39,7 @@ internal class PrivateMessageComposeChromeAdapter(
         if (!state.scaffold.controlsEnabled || source().isLoadingForm || !source().formAvailable) return
         if (!memory.claimInitialEntry()) return
         // Automatic entry must not consume an information without a user gesture.
-        val empty = source().recipientState.let { it.chips.isEmpty() && it.buffer.isBlank() }
+        val empty = source().recipientState.let { it.chips.none(String::isNotBlank) && it.buffer.isBlank() }
         if (empty && events.visibleEvent?.rank != EditorEventRank.Information) openHeader()
     }
     fun openHeader() = open(PrivateMessageComposeChromeSurface.Header) {

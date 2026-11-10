@@ -96,7 +96,7 @@ class PrivateMessageComposeChromeComposeTest {
         compose.onNode(hasSetTextAction() and hasText("Sujet")).assertIsFocused()
         compose.runOnIdle { f.adapter.focusMemory.imeBeforeSurface = false; hides = 0; shows = 0 }
         compose.onNodeWithText("Retour au message").performClick()
-        compose.onNodeWithTag("editor-scaffold-field").assertIsFocused()
+        compose.onNode(hasSetTextAction()).assertIsFocused()
         compose.runOnIdle {
             assertEquals("sans virgule", f.state.recipientState.buffer)
             assertEquals(TextRange(6, 1), f.body.selection)
@@ -121,7 +121,7 @@ class PrivateMessageComposeChromeComposeTest {
                 compose.onNode(hasSetTextAction() and hasText(label)).assertIsFocused()
                 compose.runOnIdle { f.adapter.focusMemory.imeBeforeSurface = true; hides = 0 }
                 compose.onNodeWithText("Retour au message").performClick()
-                compose.onNodeWithTag("editor-scaffold-field").assertIsFocused()
+                compose.onNode(hasSetTextAction()).assertIsFocused()
                 compose.runOnIdle { assertEquals(0, hides); assertEquals(TextRange(6, 1), f.body.selection) }
             }
     }
@@ -130,9 +130,9 @@ class PrivateMessageComposeChromeComposeTest {
         f.state = f.state.copy(restorableDraft = "brouillon", restorableSubject = "titre",
             restorableRecipients = "bob")
         compose.setContent { Content() }
-        compose.runOnIdle { f.adapter.scaffoldChrome().firstStatus!!.onClick() }
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
         compose.onNodeWithText("Restaurer").performClick()
-        compose.runOnIdle { f.adapter.scaffoldChrome().firstStatus!!.onClick() }
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
         compose.onNodeWithText("Ignorer").performClick()
         compose.runOnIdle {
             f.transition(f.state.copy(submitError = EditorErrors.invalidForm))

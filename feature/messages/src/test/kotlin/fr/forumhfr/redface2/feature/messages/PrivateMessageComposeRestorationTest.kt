@@ -309,6 +309,7 @@ class PrivateMessageComposeRestorationTest {
             editor.onRecipientsChanged(csv)
             assertFalse(editor.state.value.canSubmit)
             editor.onSubmit()
+            assertEquals(EditorErrors.missingRecipients, editor.state.value.submitError)
             assertNull(editor.state.value.armToken)
         }
         assertEquals(0, store.beginCalls)

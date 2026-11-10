@@ -1,9 +1,13 @@
 package fr.forumhfr.redface2.feature.messages
 
 import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.text.TextRange
 import androidx.lifecycle.SavedStateHandle
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
@@ -13,11 +17,12 @@ import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionToken
 import fr.forumhfr.redface2.core.model.editor.ImagePickerContract
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
+import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.EditorBarGesture
 import fr.forumhfr.redface2.core.ui.editor.EditorBarMode
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
-import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
 import fr.forumhfr.redface2.core.ui.editor.EditorEvent
+import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
 import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
 import fr.forumhfr.redface2.core.ui.editor.EditorHostActions
@@ -31,9 +36,19 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Rule
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 
+@OptIn(ExperimentalTestApi::class)
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [34], qualifiers = "fr-rFR")
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class PrivateMessageComposeChromeAdapterTest {
+    @get:Rule val compose = createComposeRule()
     private val f = PrivateMessageComposeChromeFixture()
     @Test fun `ED35 projection separates activation from strict POST and freezes every send phase`() {
         assertTrue(f.adapter.state.host.sendActivatable)
@@ -78,16 +93,39 @@ class PrivateMessageComposeChromeAdapterTest {
         f.adapter.openInitialHeader()
         assertNull(f.adapter.surface)
     }
+    @Test fun `ED113 blank chips open the initial header only without an uncommitted pseudo`() {
+        for (buffer in listOf("", "alice")) {
+            val fixture = PrivateMessageComposeChromeFixture()
+            fixture.state = fixture.state.copy(recipientState = EditorRecipientState(listOf("", " ", "\t"), buffer))
+            fixture.adapter.openInitialHeader()
+            assertEquals(if (buffer.isBlank()) PrivateMessageComposeChromeSurface.Header else null,
+                fixture.adapter.surface)
+        }
+    }
+    @Test fun `ED113 summary ignores blank chips and counts only nonblank recipients`() {
+        f.state = f.state.copy(recipientState = EditorRecipientState(listOf("", " ", "\t")), subject = "Sujet privé")
+        compose.setContent { RedfaceTheme { Text(f.adapter.context()) } }
+        compose.onNodeWithText("Ajouter des destinataires · Sujet privé").assertExists()
+        compose.runOnIdle {
+            f.state = f.state.copy(recipientState = EditorRecipientState(listOf("", "alice", " ", "bob", "\t")))
+        }
+        compose.onNodeWithText("2 destinataires · Sujet privé").assertExists()
+    }
     @Test fun `ED45 completion targets recipients or subject without consuming the next information`() {
         listOf(EditorErrors.unknownRecipient, EditorErrors.incompleteRecipient, EditorErrors.missingSubject)
             .forEachIndexed { index, error ->
                 f.transition(f.state.copy(submitError = null))
                 f.transition(f.state.copy(submitError = error))
                 val event = f.events.visibleEvent!!
+                // UnknownRecipient already delivered a terminal Notice; a later notice needs a fresh sequence.
+                val sequence = f.events.state.currentOperations.map { it.ref }
+                    .filterIsInstance<OperationRef.Local>().maxOf { it.sequence } + 1
                 val info = EditorEvent(EventKey(f.session,
-                    OperationRef.Local(EditorLocalOperation.Notice, index.toLong()), 0),
+                    OperationRef.Local(EditorLocalOperation.Notice, sequence), 0),
                     EditorEventContent.Information(EditorErrors.imageLimit.summary), 100L + index)
                 f.events.dispatch(EditorEventInput.Received(info))
+                assertEquals(listOf(event, info), f.events.state.events)
+                assertEquals(event, f.events.visibleEvent)
                 f.adapter.barActions.onEvent(event.key, EditorEventAction.Complete)
                 assertEquals(PrivateMessageComposeChromeSurface.Header, f.adapter.surface)
                 assertEquals(if (error == EditorErrors.missingSubject) PrivateMessageComposeHeaderField.Subject
