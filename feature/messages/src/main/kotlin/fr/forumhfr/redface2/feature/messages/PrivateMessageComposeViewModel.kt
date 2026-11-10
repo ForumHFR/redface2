@@ -267,7 +267,9 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                     loadedForm = null
                     draftSession.invalidate()
                     updateState {
-                        it.copy(formAvailable = false, isUploading = false, uploadProgress = null,
+                        // This owner-bound editor is revoked; navigation opens the next account's editor.
+                        it.copy(isLoadingForm = false, formAvailable = false,
+                            isUploading = false, uploadProgress = null,
                             restorableDraft = null, restorableSubject = null, restorableRecipients = null)
                     }
                 }
@@ -447,11 +449,11 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                     EditorRecipientState.decode(restorableRecipients) != recipientState
                 )
 
-    /** Legacy CSV chrome until C4; the chip editor supplies its state through onRecipientStateChanged. */
+    /** Legacy CSV chrome until C4: preserve empty segments instead of silently changing the submitted CSV. */
     fun onRecipientsChanged(value: String) {
         if (!acceptMutation()) return
         draftSession.changeRecipients(
-            EditorRecipientState(value.split(',').filter(String::isNotBlank)), value,
+            EditorRecipientState(value.takeIf(String::isNotBlank)?.split(',').orEmpty()), value,
         )
     }
 

@@ -32,10 +32,8 @@ data class PrivateMessageComposeUiState(
     val recipients: String = "",
     /** Private representation; recipients adapts the legacy chrome until C4. */
     val recipientState: EditorRecipientState = EditorRecipientState(
-        recipients.split(',').filter(String::isNotBlank),
+        recipients.takeIf(String::isNotBlank)?.split(',').orEmpty(),
     ),
-    /** Exact untouched recipient prefill supplied by routing/HFR, distinct from a user edit. */
-    val recipientsHydratedContent: String? = null,
     val subject: String = "",
     val bodyText: String = "",
     val isPreviewVisible: Boolean = false,
@@ -75,7 +73,7 @@ data class PrivateMessageComposeUiState(
     val canSubmit: Boolean
         get() = !isInitializing && formAvailable && !isLoadingForm && !isSubmitting && !isUploading &&
             !submission.blocksBodyMutation && recipientState.buffer.isBlank() &&
-            recipientState.chips.isNotEmpty() && subject.isNotBlank() && bodyText.isNotBlank()
+            recipientState.chips.any(String::isNotBlank) && subject.isNotBlank() && bodyText.isNotBlank()
 
     companion object {
         /** HFR's `maxlength=70` on the composer's `sujet` input (fixture `mp_compose_form.html`). */

@@ -109,7 +109,9 @@ class PrivateMessageComposeRestorationTest {
         val body = first.bodyFieldState.text.toString()
         assertNotEquals(body, first.state.value.bodyText)
         first.onStopped()
+        mainImmediateTurn()
         assertEquals(body, store.saved[key]?.body)
+        assertNotEquals(body, first.state.value.bodyText)
         val frozen = freeze(saved)
         first.onStarted()
         assertEquals(TextRange(19, 3), first.bodyFieldState.selection)
@@ -173,6 +175,7 @@ class PrivateMessageComposeRestorationTest {
     }
 
     @Test fun twoDeathsBeforeGetPreserveResumedBlankAndHeadersDespiteFailureAndRoute() = runTest(dispatcher) {
+        // checkpoint() writes an envelope: its separate D4 buffer must survive both deaths.
         val saved = checkpoint(body = "")
         formGate = CompletableDeferred()
         val first = open(saved, initial = "route-default")
@@ -180,6 +183,7 @@ class PrivateMessageComposeRestorationTest {
         assertResumed(first, "")
         assertFalse(first.state.value.formAvailable)
         first.onStopped()
+        mainImmediateTurn()
         val frozen = freeze(saved)
         first.viewModelScope.cancel()
         failure = IOException("offline")
@@ -189,6 +193,7 @@ class PrivateMessageComposeRestorationTest {
         assertTrue(second.state.value.formError)
         assertEquals(recipients, second.state.value.recipientState)
         second.onStopped()
+        mainImmediateTurn()
         failure = null
         formGate = null
         second.retryFormLoad()
@@ -220,6 +225,79 @@ class PrivateMessageComposeRestorationTest {
         assertEquals(EditorRecipientState(), editor.state.value.recipientState)
     }
 
+    @Test fun resumedClearedRecipientsDefeatInitialRecipientAndLateGetDefaults() = runTest(dispatcher) {
+        val saved = SavedStateHandle()
+        val first = open(saved, initial = "alice")
+        settle()
+        assertEquals(EditorRecipientState(listOf("alice")), first.state.value.recipientState)
+        first.onSubjectChanged("private subject")
+        type(first, "saved body")
+        first.onRecipientsChanged("")
+        first.onStopped()
+        mainImmediateTurn()
+        val frozen = freeze(saved)
+        first.viewModelScope.cancel()
+        formGate = CompletableDeferred()
+        val restored = open(frozen, initial = "route-default")
+        settle()
+        assertResumed(restored)
+        assertEquals(EditorRecipientState(), restored.state.value.recipientState)
+        assertEquals("", restored.state.value.recipients)
+        formGate?.complete(form(dest = "get-default"))
+        settle()
+        assertTrue(restored.state.value.formAvailable)
+        assertEquals(EditorRecipientState(), restored.state.value.recipientState)
+        assertEquals("", restored.state.value.recipients)
+        assertFalse(restored.state.value.canSubmit)
+    }
+
+    @Test fun legacyCsvAdapterPreservesEmptySegmentsAcrossDeathAndPost() = runTest(dispatcher) {
+        every { preferences.observeConfirmBeforePosting() } returns flowOf(false)
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.AntiFlood)
+        for (csv in listOf("alice,", "alice,,bob", ",alice")) {
+            store.entries.clear()
+            val saved = SavedStateHandle()
+            val first = open(saved)
+            settle()
+            first.onSubjectChanged("private subject")
+            first.onRecipientsChanged(csv)
+            type(first, "saved body")
+            first.onStopped()
+            mainImmediateTurn()
+            val frozen = freeze(saved)
+            first.viewModelScope.cancel()
+            val restored = open(frozen)
+            settle()
+            assertResumed(restored)
+            assertEquals(EditorRecipientState(csv.split(',')), restored.state.value.recipientState)
+            assertEquals(csv, restored.state.value.recipients)
+            restored.onSubmit()
+            settle()
+            assertEquals(EditorErrors.antiFlood, restored.state.value.submitError)
+            coVerify(exactly = 1) {
+                repository.submitNewMessage(any(), csv, "private subject", "saved body", any())
+            }
+            restored.viewModelScope.cancel()
+        }
+    }
+
+    @Test fun emptyCsvSegmentsAloneNeverEnableSubmit() = runTest(dispatcher) {
+        val editor = open()
+        settle()
+        editor.onSubjectChanged("private subject")
+        type(editor, "saved body")
+        settle()
+        for (csv in listOf(",", ", ,")) {
+            editor.onRecipientsChanged(csv)
+            assertFalse(editor.state.value.canSubmit)
+            editor.onSubmit()
+            assertNull(editor.state.value.armToken)
+        }
+        assertEquals(0, store.beginCalls)
+        coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
     @Test fun failedAndCancelledReadsDoNotCertifyUnknownBodyOrClaimFormLoaded() = runTest(dispatcher) {
         for (error in listOf(IOException("offline"), CancellationException("cancelled"))) {
             failure = error
@@ -233,7 +311,11 @@ class PrivateMessageComposeRestorationTest {
             assertFalse(editor.state.value.formAvailable)
             assertEquals(error is IOException, editor.state.value.formError)
             assertEquals(error is CancellationException, editor.state.value.isLoadingForm)
-            assertTrue(editor.editorEvents.state.currentOperations.none { it.finished })
+            val read = editor.editorEvents.state.currentOperations.single {
+                (it.ref as? OperationRef.Local)?.kind == EditorLocalOperation.FormLoad
+            }
+            assertEquals(error is IOException, read.finished)
+            assertTrue(editor.editorEvents.state.events.isEmpty())
             editor.viewModelScope.cancel()
         }
     }
@@ -270,13 +352,61 @@ class PrivateMessageComposeRestorationTest {
         assertTrue(editor.state.value.isLoadingForm)
     }
 
-    @Test fun legacyCsvRestoresAnUncommittedTailAndBlocksBothSendPaths() = runTest(dispatcher) {
+    @Test fun failedReadFinishesItsOperationAndRetriesKeepSubmissionErrors() = runTest(dispatcher) {
+        every { preferences.observeConfirmBeforePosting() } returns flowOf(false)
+        coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Failure(ReplyFailureReason.AntiFlood)
+        val editor = open(initial = "alice")
+        settle()
+        editor.onSubjectChanged("private subject")
+        type(editor, "saved body")
+        editor.onSubmit()
+        settle()
+        val events = editor.editorEvents.state.events
+        assertEquals(EditorEventContent.Problem(EditorErrors.antiFlood), events.last().content)
+        failure = IOException("offline")
+        editor.retryFormLoad()
+        settle()
+        assertTrue(editor.state.value.formError)
+        assertFalse(editor.state.value.formAvailable)
+        assertEquals(events, editor.editorEvents.state.events)
+        val failedRead = editor.editorEvents.state.currentOperations.single {
+            (it.ref as? OperationRef.Local)?.kind == EditorLocalOperation.FormLoad
+        }
+        assertTrue(failedRead.finished)
+        failure = null
+        editor.retryFormLoad()
+        settle()
+        assertTrue(editor.state.value.formAvailable)
+        assertEquals(EditorErrors.antiFlood, editor.state.value.submitError)
+        assertEquals(events, editor.editorEvents.state.events)
+        assertTrue(editor.editorEvents.state.currentOperations.single {
+            (it.ref as? OperationRef.Local)?.kind == EditorLocalOperation.FormLoad
+        }.finished)
+    }
+
+    @Test fun legacyCsvRestoresEveryRecipientAsAChipAndAllowsArming() = runTest(dispatcher) {
         store.preload(key, Draft("saved body", "private subject", "alice, bo", isPrivate = true))
         val editor = open()
         settle()
         assertEquals("saved body", editor.state.value.restorableDraft)
         editor.onDraftRestoreRequested()
-        assertEquals(EditorRecipientState(listOf("alice"), "bo"), editor.state.value.recipientState)
+        settle()
+        assertEquals(EditorRecipientState(listOf("alice", "bo")), editor.state.value.recipientState)
+        assertTrue(editor.state.value.canSubmit)
+        editor.onSubmit()
+        assertNotNull(editor.state.value.armToken)
+        assertEquals(0, store.beginCalls)
+        coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test fun envelopeRestoresAnUncommittedTailAndBlocksBothSendPaths() = runTest(dispatcher) {
+        store.preload(key, Draft("saved body", "private subject", recipients.encode(), isPrivate = true))
+        val editor = open()
+        settle()
+        editor.onDraftRestoreRequested()
+        settle()
+        assertEquals(recipients, editor.state.value.recipientState)
         assertFalse(editor.state.value.canSubmit)
         editor.onSubmit()
         editor.onSubmitConfirmed(null)
@@ -336,6 +466,9 @@ class PrivateMessageComposeRestorationTest {
             ReplySubmitResult.Failure(ReplyFailureReason.AntiFlood)
         val server = List(2) {
             editor.onSubmit()
+            assertNotNull(editor.state.value.armToken)
+            // ED-164 rejects confirmation before 400 ms; keep the real confirmation path.
+            dispatcher.scheduler.advanceTimeBy(500)
             editor.onSubmitConfirmed(editor.state.value.armToken)
             settle()
             assertEquals(EditorErrors.antiFlood, editor.state.value.submitError)
@@ -371,14 +504,20 @@ class PrivateMessageComposeRestorationTest {
         store.activeOwner = "other"
         auth.value = AuthState.Authenticated("other")
         settle()
+        assertFalse(editor.state.value.isLoadingForm)
+        assertFalse(editor.state.value.formAvailable)
+        assertTrue(editor.editorEvents.state.currentOperations.isEmpty())
         formGate?.complete(served)
+        editor.retryFormLoad()
         type(editor, "foreign edit")
         editor.onStopped()
         settle()
+        assertFalse(editor.state.value.isLoadingForm)
         assertFalse(editor.state.value.formAvailable)
         assertFalse(editor.state.value.canSubmit)
         assertTrue(editor.editorEvents.state.events.isEmpty())
         assertFalse(saved.keys().any { it.endsWith("resumeVersion") })
+        coVerify(exactly = 2) { repository.fetchComposeForm(any()) }
         val foreign = open(freeze(saved))
         settle()
         assertEquals("", foreign.bodyFieldState.text.toString())
@@ -394,6 +533,7 @@ class PrivateMessageComposeRestorationTest {
         type(editor, body)
         editor.bodyScrollState.scrollTo(80)
         editor.onStopped()
+        mainImmediateTurn()
         val frozen = freeze(saved)
         editor.viewModelScope.cancel()
         return frozen
@@ -409,6 +549,8 @@ class PrivateMessageComposeRestorationTest {
         Snapshot.sendApplyNotifications()
         dispatcher.scheduler.runCurrent()
     }
+    /** Match Main.immediate's cancelled debounce completion, without advancing time or notifying the body mirror. */
+    private fun mainImmediateTurn() = dispatcher.scheduler.runCurrent()
     private fun assertResumed(editor: PrivateMessageComposeViewModel, body: String = "saved body") {
         assertFalse(editor.state.value.isInitializing)
         assertEquals(body, editor.bodyFieldState.text.toString())

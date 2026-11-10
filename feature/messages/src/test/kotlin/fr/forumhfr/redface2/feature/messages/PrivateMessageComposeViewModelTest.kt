@@ -919,7 +919,7 @@ class PrivateMessageComposeViewModelTest {
             EditorDraftStore.Draft(
                 body = "rescued body",
                 subject = "rescued subject",
-                recipients = EditorRecipientState(listOf("alice")).encode(),
+                recipients = "alice",
                 isPrivate = true,
             ),
         )
@@ -1379,7 +1379,7 @@ class PrivateMessageComposeViewModelTest {
         coEvery { repository.fetchComposeForm(any()) } coAnswers { formGate.await() }
         draftStore.preload(EditorDraftKey.mpCompose(), EditorDraftStore.Draft(
             body = "rescued body", subject = "subject",
-            recipients = EditorRecipientState(listOf("alice")).encode(), isPrivate = true,
+            recipients = "alice", isPrivate = true,
         ))
         val vm = viewModel(repository)
         assertEquals("rescued body", vm.state.value.restorableDraft)

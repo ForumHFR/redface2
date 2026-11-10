@@ -34,8 +34,15 @@ internal class PrivateMessageComposeEvents : EditorHostEvents {
         projection = written
     }
     fun observe(previous: PrivateMessageComposeUiState, current: PrivateMessageComposeUiState) {
+        val before = previous.project()
         val next = current.project()
-        collector.observe(previous.project(), next)
+        collector.observe(before, next)
+        // Full-screen GET failures finish their work without claiming FormLoaded or retiring send errors.
+        if (before.isLoadingForm && !next.isLoadingForm && next.readFailed) {
+            state.currentOperations.lastOrNull {
+                (it.ref as? OperationRef.Local)?.kind == EditorLocalOperation.FormLoad && !it.finished
+            }?.let { collector.dispatch(EditorEventInput.OperationCompleted(state.session, it.ref)) }
+        }
         projection = next
     }
     private fun PrivateMessageComposeUiState.project() = EditorEventProjection(

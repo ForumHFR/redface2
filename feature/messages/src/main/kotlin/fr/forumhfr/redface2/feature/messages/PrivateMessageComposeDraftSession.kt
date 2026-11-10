@@ -111,7 +111,8 @@ internal class PrivateMessageComposeDraftSession(
             draft.subject.orEmpty() == snapshot.subject && recipients == snapshot.recipientState
         val untouched = bodyFieldState.text.isBlank() && snapshot.subject.isBlank() && !edited
         val ignored = saved.get<String>(IGNORED_OFFER) == draft.restoreOfferFingerprint()
-        if (hasContent && !matches && untouched && !ignored) {
+        val shouldOffer = hasContent && !matches
+        if (shouldOffer && untouched && !ignored) {
             updateState {
                 it.copy(restorableDraft = draft.body, restorableSubject = draft.subject,
                     restorableRecipients = draft.recipients)
@@ -155,7 +156,7 @@ internal class PrivateMessageComposeDraftSession(
         val hydrate = restoration.canHydrate(EditorSessionField.Recipients, snapshot.recipients.isBlank())
         if (hydrate && value.isNotBlank() && snapshot.submission !is EditorSubmissionState.Uncertain) {
             val recipients = EditorRecipientState(value.split(',').map(String::trim).filter(String::isNotBlank))
-            updateState { it.withRecipients(recipients).copy(recipientsHydratedContent = display(recipients)) }
+            updateState { it.withRecipients(recipients) }
         }
     }
 
