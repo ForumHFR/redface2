@@ -147,6 +147,7 @@ internal class EditorScaffoldFixture {
                 modifier = Modifier.size(width.value, metrics.value.windowHeight).testTag("scaffold-bench"),
                 onOpenHeader = { panel.value = true }, bodyFocusRequester = focus, bodyScrollState = scroll,
                 headerLabel = headerLabel.value,
+                bodyFocusRestoreAllowed = !panel.value && detail.value == null && !chrome.value.previewVisible,
                 autoFocus = autoFocus.value,
                 inputTransformation = inputTransformation,
                 overlay = { onReturnToBody, bodyContent ->

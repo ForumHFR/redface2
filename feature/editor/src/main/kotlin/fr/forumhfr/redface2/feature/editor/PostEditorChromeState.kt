@@ -48,7 +48,6 @@ internal class PostEditorChromeMemory {
         textBeforeSurface = ""
         returnGeneration = 0
         returnedGeneration = 0
-        focus.imeBeforeSurface = false
-        focus.autoFocusConsumed = false
+        focus.reset()
     }
 }

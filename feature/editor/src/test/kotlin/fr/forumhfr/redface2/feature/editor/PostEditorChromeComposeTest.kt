@@ -80,6 +80,8 @@ class PostEditorChromeComposeTest {
             EditorScaffold(host.body, EditorWindowMetrics(740.dp, 24.dp, 30.dp), "Répondre", "Sujet",
                 host.adapter.chrome(), host.adapter.barActions, host.adapter.submitState, host.adapter.submitActions,
                 host.adapter.imageActions, host.adapter::closeRequested, bodyFocusRequester = focus,
+                bodyFocusRestoreAllowed = host.adapter.surface == null && host.adapter.detail == null &&
+                    !host.state.isPreviewVisible,
                 bodyScrollState = scroll, overlay = { restore, body ->
                     PostEditorChromeSurfaces(host.adapter, host.body, smileys, restore, body)
                 })

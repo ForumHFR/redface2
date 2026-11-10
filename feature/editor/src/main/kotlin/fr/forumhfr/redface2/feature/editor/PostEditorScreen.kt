@@ -201,6 +201,7 @@ private fun PostEditorChrome(
             host.chrome(allocation.panelOnly), host.barActions, host.submitState, host.submitActions,
             host.imageActions, host::closeRequested, bodyFocusRequester = focus, bodyScrollState = scroll,
             inputTransformation = transformation, autoFocus = true, surfaceFocus = host.focusMemory,
+            bodyFocusRestoreAllowed = host.surface == null && host.detail == null && !state.isPreviewVisible,
             bodyCaretRevealResetKey = bodyCaretRevealResetKey,
             onSystemBack = back,
             fieldArea = { draft ->

@@ -78,15 +78,24 @@ data class EditorScaffoldChrome(
 )
 
 /**
- * Retain the captured editor IME state across rotation, without saving transient surfaces in a Bundle.
- * A host keeps one in its ViewModel; without one, [EditorScaffold] saves the default with [Saver] (R1a-1 behaviour).
+ * Retain entry consumption, surface IME and actual body focus/IME across rotation.
+ * A host keeps one in its ViewModel; the default [Saver] only saves the entry/surface booleans (R1a-1).
  */
 class EditorSurfaceFocusMemory {
     var imeBeforeSurface: Boolean = false
     var autoFocusConsumed: Boolean = false
+    internal var body by mutableStateOf(EditorBodyFocusMemory())
+        private set
+
+    fun reset() {
+        imeBeforeSurface = false
+        autoFocusConsumed = false
+        body.reset()
+        body = EditorBodyFocusMemory()
+    }
 
     companion object {
-        /** Two booleans only: the default memory of a host without a ViewModel-held one. */
+        /** Entry/surface booleans only; the body focus/IME snapshot never survives process death. */
         val Saver: Saver<EditorSurfaceFocusMemory, Any> = listSaver(
             save = { listOf(it.imeBeforeSurface, it.autoFocusConsumed) },
             restore = { saved ->
@@ -119,12 +128,16 @@ val LocalEditorTooltipHost = staticCompositionLocalOf<EditorTooltipHost?> { null
  * guards [onCloseRequested] (save/leave). Inline insertions restore [bodyFocusRequester] here.
  * Surface gestures capture IME visibility before dispatch; captured returns restore focus synchronously
  * and restore that visibility. An initial panel preserves selection while waiting for closed-IME options.
- * Other focus requests open the IME by default; only a return
+ * Other focus requests open the IME by default; a return or recreation
  * with a previously closed IME suppresses automatic opening until a completed body tap, accessibility
  * click or surface capture. Suppression is local to this composition and is not saved.
  * [autoFocus] requests body focus once on entry: a recreation that keeps [surfaceFocus] never repeats it (R2).
  * [surfaceFocus] owns the consumed autofocus and the captured IME state across recreation: pass host-retained
  * memory; without one the default saves its two booleans, so it stays consumed even after process death.
+ * [bodyFocusRestoreAllowed] is supplied explicitly by every host: false while any panel, sheet,
+ * external surface or preview covers the body. A retained body's focus is restored once after detach,
+ * with its actual pre-pause IME visibility; a blocked restoration is discarded, leaving panel returns
+ * to their existing callbacks. This rotation snapshot is never saved by [EditorSurfaceFocusMemory.Saver].
  * [overlay] must invoke its body exactly once, unconditionally, at a stable composition site. Wrap it
  * with EditorHeaderPanel / EditorEventDetails, passing [bodyState] and its onReturnToBody callback; their opaque
  * overlay hides and blocks the body without losing its viewport or undo history. Sheets/tooltips are
@@ -148,6 +161,7 @@ fun EditorScaffold(
     submitActions: ArmedSubmitActions,
     imageActions: EditorBarImageActions,
     onCloseRequested: () -> Unit,
+    bodyFocusRestoreAllowed: Boolean,
     modifier: Modifier = Modifier,
     onOpenHeader: (() -> Unit)? = null,
     headerLabel: String = stringResource(R.string.editor_header_topic),
@@ -167,17 +181,21 @@ fun EditorScaffold(
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val imeVisible = WindowInsets.isImeVisible
+    val bodyFocus = rememberEditorBodyFocus(bodyState, surfaceFocus.body, imeVisible)
     val armed = submitState.armed || chrome.bar.arm != null
-    // R2: EditorSurfaceFocusMemory is the single owner of consumed autofocus and captured IME state across
-    // recreation (host VM memory, or the saved default); the IME suppression stays local and defaults to open.
-    var initialFocus by remember(bodyState, surfaceFocus) {
+    // Entry autofocus stays consumed across recreation. Restoring a retained body's actual focus is
+    // separate; its IME option is local to this attachment and initialized from the session snapshot.
+    var initialFocus by remember(bodyState, surfaceFocus, bodyFocus) {
         mutableStateOf(autoFocus && !surfaceFocus.autoFocusConsumed)
     }
-    LaunchedEffect(bodyState, surfaceFocus) {
+    LaunchedEffect(bodyState, surfaceFocus, bodyFocus) {
         if (autoFocus) surfaceFocus.autoFocusConsumed = true
     }
-    // Focus opens the IME by default; only a closed surface return suppresses the next session.
-    var restoreImeOnFocus by remember(bodyState) { mutableStateOf(true) }
+    // Apply the pre-rotation IME option before the restoration effect can request focus.
+    var restoreImeOnFocus by remember(bodyState, bodyFocus) {
+        mutableStateOf(bodyFocus.restore?.imeVisible ?: true)
+    }
+    RestoreRecreatedEditorBodyFocus(bodyFocus, bodyFocusRestoreAllowed, bodyState, bodyFocusRequester)
     var pendingBodyFocus by remember(bodyState) { mutableStateOf(false) }
     val captureIme = {
         initialFocus = false
@@ -230,6 +248,7 @@ fun EditorScaffold(
                             BbcodeTextField(bodyState, stringResource(R.string.editor_scaffold_message),
                                 modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)
                                     .testTag("editor-scaffold-field").focusRequester(bodyFocusRequester)
+                                    .observeEditorBodyFocus(bodyFocus)
                                     .semantics { isTraversalGroup = true; traversalIndex = 1f }
                                     .tabMovesFocus(focusManager)
                                     .onEditorBodyTap(bodyState) { restoreImeOnFocus = true },
@@ -308,9 +327,7 @@ private fun RestoreEditorBodyFocus(
 ) {
     LaunchedEffect(requested) {
         if (requested) {
-            val selectionBeforeFocus = state.selection
-            focus.requestFocus()
-            if (state.selection != selectionBeforeFocus) state.edit { selection = selectionBeforeFocus }
+            requestEditorBodyFocus(state, focus)
             onRestored()
         }
     }

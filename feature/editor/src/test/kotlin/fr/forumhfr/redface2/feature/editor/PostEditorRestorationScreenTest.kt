@@ -1,9 +1,12 @@
 package fr.forumhfr.redface2.feature.editor
 
+import android.content.ComponentName
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
+import androidx.activity.compose.setContent
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
@@ -25,6 +28,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.TextLayoutResult
@@ -38,6 +42,9 @@ import androidx.lifecycle.createSavedStateHandle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import androidx.test.core.app.ActivityScenario
+import androidx.test.core.app.ApplicationProvider
+import androidx.test.platform.app.InstrumentationRegistry
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
@@ -69,7 +76,9 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
@@ -77,6 +86,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.android.controller.ActivityController
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
@@ -105,6 +115,7 @@ class PostEditorRestorationScreenTest {
 
     @After
     fun tearDown() {
+        PostEditorRotationHostActivity.render = {}
         hosts.forEach { it.close() }
         editors.forEach { it.viewModelScope.cancel() }
         dispatcher.scheduler.runCurrent()
@@ -206,38 +217,92 @@ class PostEditorRestorationScreenTest {
 
     @Test
     fun ownerRecreationKeepsFocusedReversedBodySelection() {
-        var owner by mutableStateOf(host().get())
-        val model = editor(owner)
-        compose.setContent {
-            key(owner) {
-                CompositionLocalProvider(LocalLifecycleOwner provides owner) {
-                    RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+        var sessions = 0
+        prepareRotationHost { sessions++ }
+        ActivityScenario.launch(PostEditorRotationHostActivity::class.java).use { scenario ->
+            compose.onNode(hasSetTextAction()).assertIsFocused()
+            lateinit var original: PostEditorRotationHostActivity
+            scenario.onActivity { original = it }
+            val model = original.model
+            val body = "Bonjour le forum"
+            val selection = TextRange(6, 1)
+            compose.runOnIdle {
+                model.bodyFieldState.edit {
+                    replace(0, length, body)
+                    this.selection = selection
+                }
+                // Actual visibility is captured independently of the input session. Keep the body focused.
+                ViewCompat.dispatchApplyWindowInsets(original.view, WindowInsetsCompat.Builder()
+                    .setInsets(WindowInsetsCompat.Type.ime(), Insets.NONE)
+                    .setVisible(WindowInsetsCompat.Type.ime(), false).build())
+            }
+            val before = compose.runOnIdle { assertTrue(model.chromeMemory.focus.autoFocusConsumed); sessions }
+            repeat(2) {
+                scenario.recreate()
+                compose.onNode(hasSetTextAction()).assertIsFocused()
+                scenario.onActivity {
+                    assertNotSame(original, it)
+                    assertTrue(original.isChangingConfigurations)
+                    assertSame(model, it.model)
+                    original = it
+                }
+                compose.runOnIdle {
+                    assertEquals(body, model.bodyFieldState.text.toString())
+                    assertEquals(selection, model.bodyFieldState.selection)
+                    assertEquals(before, sessions) // Restored focus, but no new closed-IME session.
+                }
+                assertCaretVisible(model, expected = true)
+            }
+        }
+    }
+
+    @Test fun rotationKeepsPostRestorePanelFocused() = checkCoveredPost(PostEditorChromeSurface.Restore)
+    @Test fun rotationKeepsPostOptionsOverTheBody() = checkCoveredPost(PostEditorChromeSurface.Options)
+    @Test fun rotationKeepsPostPreviewOverTheBody() = checkCoveredPost(null)
+
+    private fun checkCoveredPost(surface: PostEditorChromeSurface?) {
+        store.preload(EditorDraftKey.reply(23, 35421), EditorDraftStore.Draft(body = "Brouillon"))
+        prepareRotationHost()
+        ActivityScenario.launch(PostEditorRotationHostActivity::class.java).use { scenario ->
+            compose.onNode(hasSetTextAction()).assertIsFocused()
+            val action = when (surface) {
+                PostEditorChromeSurface.Restore -> "Brouillon retrouvé, restaurer ou ignorer"
+                PostEditorChromeSurface.Options -> "Options"
+                else -> "Afficher l’aperçu"
+            }
+            compose.onNodeWithContentDescription(action).performClick()
+            compose.waitForIdle()
+            scenario.recreate()
+            compose.waitForIdle()
+            compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
+            when (surface) {
+                PostEditorChromeSurface.Restore -> compose.onNodeWithText("Retour au message").assertIsFocused()
+                PostEditorChromeSurface.Options -> compose.onNodeWithText("Options du message").assertIsDisplayed()
+                else -> compose.onNodeWithTag("post-editor-preview").assertIsDisplayed()
+            }
+        }
+    }
+
+    private fun prepareRotationHost(onInput: () -> Unit = {}) {
+        InstrumentationRegistry.getInstrumentation().setInTouchMode(true)
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        shadowOf(context.packageManager)
+            .addActivityIfNotPresent(ComponentName(context, PostEditorRotationHostActivity::class.java))
+        val input = PlatformTextInputInterceptor { request, next ->
+            onInput()
+            next.startInputMethod(request)
+        }
+        PostEditorRotationHostActivity.render = { activity ->
+            val model = editor(activity)
+            activity.model = model
+            activity.setContent {
+                activity.view = LocalView.current
+                InterceptPlatformTextInput(input) {
+                    RedfaceTheme(darkTheme = false, dynamicColor = false) {
                         PostEditorScreen(request, { _, _, _, _ -> }, viewModel = model)
                     }
                 }
             }
-        }
-        compose.onNode(hasSetTextAction()).assertIsFocused()
-        val body = "Bonjour le forum"
-        val selection = TextRange(6, 1)
-        // performTextInputSelection sends (min, max): only a field-state edit can pose a reversed range.
-        compose.runOnIdle {
-            model.bodyFieldState.edit {
-                replace(0, length, body)
-                this.selection = selection
-            }
-        }
-        compose.onNode(hasSetTextAction()).assertIsFocused()
-        compose.runOnIdle {
-            assertEquals(selection, model.bodyFieldState.selection)
-            owner = host().get() // Configuration change: fresh activity owner, same ViewModel.
-        }
-        // The consumed autofocus is not replayed: the focused body was detached, not refocused.
-        compose.onNode(hasSetTextAction()).assertIsNotFocused()
-        compose.runOnIdle {
-            // C8 / R1b-2b: without BbcodeTextField's detach checkpoint, BTF2's collapse would leave (6, 6).
-            assertEquals(body, model.bodyFieldState.text.toString())
-            assertEquals(selection, model.bodyFieldState.selection)
         }
     }
 
@@ -388,6 +453,8 @@ class PostEditorRestorationScreenTest {
         }
         val restoredHost = host(bundle)
         val restored = editor(restoredHost.get())
+        assertNotSame(first.chromeMemory, restored.chromeMemory)
+        assertFalse(restored.chromeMemory.focus.autoFocusConsumed) // New VM: entry autofocus is unchanged.
         compose.runOnIdle { displayed = restoredHost.get() to restored }
         compose.onAllNodes(hasSetTextAction()).assertCountEquals(0)
         compose.runOnIdle {
@@ -396,7 +463,7 @@ class PostEditorRestorationScreenTest {
             assertEquals(0, restored.bodyScrollState.value)
             store.loadGate?.complete(Unit)
         }
-        compose.onNode(hasSetTextAction()).assertIsDisplayed()
+        compose.onNode(hasSetTextAction()).assertIsDisplayed().assertIsFocused()
         compose.runOnIdle {
             assertEquals(savedBody, restored.bodyFieldState.text.toString())
             assertNull(restored.state.value.restorableDraft)
@@ -440,4 +507,19 @@ class PostEditorRestorationScreenTest {
             ).also(editors::add)
         }
     })[PostEditorViewModel::class.java]
+}
+
+/** Test-only Activity: onCreate mounts a new screen against its retained ViewModelStore. */
+internal class PostEditorRotationHostActivity : ComponentActivity() {
+    lateinit var model: PostEditorViewModel
+    lateinit var view: android.view.View
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        render(this)
+    }
+
+    companion object {
+        var render: (PostEditorRotationHostActivity) -> Unit = {}
+    }
 }

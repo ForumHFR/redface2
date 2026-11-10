@@ -337,7 +337,10 @@ internal fun TransientPanelHost(host: PostEditorChromeFixture, focus: FocusReque
     EditorScaffold(host.body, EditorWindowMetrics(if (compact) 360.dp else 760.dp, 24.dp, 24.dp),
         "Répondre", "Sujet de démonstration", host.adapter.chrome(), host.adapter.barActions,
         host.adapter.submitState, host.adapter.submitActions, host.adapter.imageActions,
-        host.adapter::closeRequested, bodyFocusRequester = focus, overlay = { restore, body ->
+        host.adapter::closeRequested, bodyFocusRequester = focus,
+        bodyFocusRestoreAllowed = host.adapter.surface == null && host.adapter.detail == null &&
+            !host.state.isPreviewVisible,
+        overlay = { restore, body ->
             PostEditorChromeSurfaces(host.adapter, host.body, smileys, restore, body)
         })
 }
