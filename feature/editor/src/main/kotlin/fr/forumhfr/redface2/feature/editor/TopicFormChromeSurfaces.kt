@@ -13,13 +13,18 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 
-/** Stable overlay site: every panel keeps the live source composed, including its undo/viewport. */
+/**
+ * Stable overlay site: every panel keeps the live source composed, including its undo/viewport.
+ * [compactHeight] is the host's EditorWindowMetrics.compactHeight, the scaffold's own signal.
+ */
 @Composable
+@Suppress("LongParameterList") // Overlay slots plus the host's compact-height signal.
 internal fun TopicFormChromeSurfaces(
     adapter: TopicFormChromeAdapter,
     bodyState: TextFieldState,
     smileys: SmileyPickerController,
     onReturnToBody: () -> Unit,
+    compactHeight: Boolean,
     body: @Composable () -> Unit,
 ) {
     val host = adapter.host
@@ -32,7 +37,7 @@ internal fun TopicFormChromeSurfaces(
             EditorHeaderPanel(host.surface == TopicFormChromeSurface.Restore,
                 stringResource(R.string.editor_draft_restore_title), bodyState, host::closeSurface,
                 { host.returnToBody(onReturnToBody) }, body = body) {
-                DraftRestoreChoice(adapter::restoreDraft, adapter::discardDraft,
+                DraftRestoreChoice(adapter::restoreDraft, adapter::discardDraft, compactHeight,
                     restoreEnabled = adapter.state.scaffold.controlsEnabled &&
                         !adapter.state.source.isLoadingForm && !adapter.state.source.isUploading)
             }

@@ -218,7 +218,7 @@ private fun TopicFormChrome(
             EditorPreview(state.isPreviewVisible, state.preview, body, focus, PostMediaDiskCachePolicy.ENABLED,
                 stringResource(R.string.editor_preview_title), Modifier.testTag("topic-form-preview"), draft)
         }, overlay = { restore, content ->
-            TopicFormChromeSurfaces(adapter, body, smileys, restore, content)
+            TopicFormChromeSurfaces(adapter, body, smileys, restore, window.compactHeight, content)
             // Register after bar/panels so activity Back uses the same ED-85 resolver on every level.
             BackHandler(onBack = back)
         })

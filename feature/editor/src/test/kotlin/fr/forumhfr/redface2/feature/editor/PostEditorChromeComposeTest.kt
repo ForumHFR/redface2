@@ -83,7 +83,7 @@ class PostEditorChromeComposeTest {
                 bodyFocusRestoreAllowed = host.adapter.surface == null && host.adapter.detail == null &&
                     !host.state.isPreviewVisible,
                 bodyScrollState = scroll, overlay = { restore, body ->
-                    PostEditorChromeSurfaces(host.adapter, host.body, smileys, restore, body)
+                    PostEditorChromeSurfaces(host.adapter, host.body, smileys, restore, compactHeight = false, body)
                 })
         }
     }
