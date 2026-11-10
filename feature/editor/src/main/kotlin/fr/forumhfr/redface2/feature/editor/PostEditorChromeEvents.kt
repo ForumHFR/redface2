@@ -72,6 +72,7 @@ internal class PostEditorChromeEvents {
         }
         observeUpload(previous, current)
         observeErrors(previous, current)
+        settleUnsentReservation(previous, current)
         // Cancellation may deliver the error before publishing the uncertain state. Bind once, never to a retry.
         uncertainty = uncertainty?.let { (key, attempt) ->
             key to (attempt ?: (current.submission as? EditorSubmissionState.Uncertain)?.attempt)
@@ -120,6 +121,21 @@ internal class PostEditorChromeEvents {
             // ED-88: terminal success is relayed by the existing effect, never an event. The reducer ends the
             // operation silently (R1a-1 PR 1b), so a late delivery for it is dropped.
             sending?.let { dispatch(EditorEventInput.OperationCompleted(state.session, it)) }
+        }
+    }
+    /**
+     * ED-45/170: acknowledging an uncertain attempt reserves PersistingAttempt without sending. Leaving it for
+     * Ready or a kept uncertainty retires the dangling « Envoi… » (a delivered problem already finished the
+     * operation, so this is then a no-op), and a failed acknowledgement signals the kept uncertainty again.
+     */
+    private fun settleUnsentReservation(previous: PostEditorState, current: PostEditorState) {
+        val uncertain = (current.submission as? EditorSubmissionState.Uncertain)?.takeUnless { it.accepted }
+        val unsent = current.submission == EditorSubmissionState.Ready || uncertain != null
+        if (previous.submission !is EditorSubmissionState.PersistingAttempt || !unsent) return
+        sending?.let { dispatch(EditorEventInput.OperationCompleted(state.session, it)) }
+        val error = current.submitError
+        if (uncertain != null && error?.cause == EditorCause.Uncertain && error == previous.submitError) {
+            uncertainty = problem(error, null) to uncertain.attempt
         }
     }
     private fun observeUpload(previous: PostEditorState, current: PostEditorState) {

@@ -1414,6 +1414,9 @@ class PostEditorViewModelTest {
         settleBody()
         assertNull(adapter.detail)
         assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
+        // The acknowledgement reserves PersistingAttempt: no « Envoi… » may outlive it (Fable PR 4 r3 B1).
+        vm.assertNoSendingEvent()
+        assertNull(vm.chromeEvents.state.visibleEvent)
         assertNull(draftStore.entries[attempt.key]?.attempt)
         assertEquals("uncertain body", vm.bodyFieldState.text.toString())
         vm.viewModelScope.cancel()
@@ -1442,6 +1445,8 @@ class PostEditorViewModelTest {
         adapter.dismissDetails(key)
         settleBody()
         assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
+        vm.assertNoSendingEvent()
+        assertNull(vm.chromeEvents.state.visibleEvent)
         assertNull(draftStore.entries[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)]?.attempt)
         assertEquals("sent body", vm.bodyFieldState.text.toString())
         assertEquals(1, replyRepository.submitCalls)
@@ -1487,6 +1492,9 @@ class PostEditorViewModelTest {
         assertEquals(finishCalls + 1, draftStore.finishCalls)
         assertEquals(EditorSubmissionState.Uncertain(attempt), vm.state.value.submission)
         assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
+        // The kept uncertainty is signalled again in this session, without a dangling « Envoi… » (r3 I2).
+        vm.assertNoSendingEvent()
+        assertEquals(EditorEventContent.Problem(EditorErrors.uncertain), vm.chromeEvents.state.visibleEvent?.content)
         assertEquals(attempt, draftStore.entries[attempt.key]?.attempt?.token)
         assertEquals("uncertain body", vm.bodyFieldState.text.toString())
         vm.viewModelScope.cancel()
@@ -1508,11 +1516,16 @@ class PostEditorViewModelTest {
         assertTrue(vm.state.value.hasDormantQuote)
         val finishCalls = draftStore.finishCalls
         val pending = draftStore.saved[attempt.key]?.pendingInlineQuoteRequest
-        val adapter = vm.chromeAdapter()
+        val intents = mutableListOf<PostEditorIntent>()
+        val adapter = vm.chromeAdapter(intents)
+        assertEquals(EditorEventContent.Problem(EditorErrors.uncertain), vm.chromeEvents.state.visibleEvent?.content)
         val key = vm.chromeEvents.state.visibleEvent!!.key
         adapter.barActions.onEvent(key, EditorEventAction.Details)
         adapter.dismissDetails(key)
         settleBody()
+        // Masquer did ask for the acknowledgement; the dormant quote guard of the ViewModel refused it (r3 I1).
+        assertTrue(PostEditorIntent.ErrorDismissed in intents)
+        vm.assertNoSendingEvent()
         assertEquals(finishCalls, draftStore.finishCalls)
         assertEquals(EditorSubmissionState.Uncertain(attempt), vm.state.value.submission)
         assertEquals(attempt, draftStore.entries[attempt.key]?.attempt?.token)
@@ -1539,9 +1552,13 @@ class PostEditorViewModelTest {
         return attempt
     }
 
-    private fun PostEditorViewModel.chromeAdapter() = PostEditorChromeAdapter(
-        { state.value }, bodyFieldState, chromeEvents, { dispatch(it) }, {}, {}, chromeMemory,
-    )
+    private fun PostEditorViewModel.chromeAdapter(intents: MutableList<PostEditorIntent> = mutableListOf()) =
+        PostEditorChromeAdapter(
+            { state.value }, bodyFieldState, chromeEvents, { intents += it; dispatch(it) }, {}, {}, chromeMemory,
+        )
+
+    private fun PostEditorViewModel.assertNoSendingEvent() =
+        assertTrue(chromeEvents.state.events.none { it.content is EditorEventContent.InProgress })
 
     @Test
     fun `successful draft write preserves a newer form loading error`() = runTest {
