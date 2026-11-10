@@ -8,6 +8,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorCause
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorHostMemory
 import fr.forumhfr.redface2.core.ui.editor.EditorHostState
+import fr.forumhfr.redface2.core.ui.editor.EditorRecipientState
 import fr.forumhfr.redface2.core.ui.editor.EditorScaffoldChrome
 
 /** Live projection of the new-conversation form onto the shared chrome. */
@@ -38,8 +39,15 @@ internal enum class PrivateMessageComposeHeaderField { Recipients, Subject }
 internal class PrivateMessageComposeChromeMemory(private val saved: SavedStateHandle, recreated: Boolean = false) {
     val host = EditorHostMemory<PrivateMessageComposeChromeSurface>()
     private var entryHandled = recreated || saved.get<Boolean>(INITIAL_HEADER_HANDLED) == true
+    private var focusBodyOnEntry: Boolean? = null
     var field by mutableStateOf(PrivateMessageComposeHeaderField.Recipients)
         private set
+    // ED-113: retain the initial focus policy across recipient edits, panel closure and rotation.
+    fun autoFocusBody(recipients: EditorRecipientState): Boolean {
+        val focus = focusBodyOnEntry ?: (recipients.chips.any(String::isNotBlank) || recipients.buffer.isNotBlank())
+        focusBodyOnEntry = focus
+        return focus
+    }
     fun claimInitialEntry(): Boolean {
         val initial = !entryHandled
         entryHandled = true

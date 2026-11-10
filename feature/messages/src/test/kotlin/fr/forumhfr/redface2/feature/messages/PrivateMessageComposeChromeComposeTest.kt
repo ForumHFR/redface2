@@ -1,5 +1,8 @@
 package fr.forumhfr.redface2.feature.messages
 
+import android.text.InputType
+import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InputConnection
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -8,10 +11,14 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.PlatformTextInputInterceptor
 import androidx.compose.ui.platform.SoftwareKeyboardController
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
@@ -19,8 +26,11 @@ import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -84,6 +94,21 @@ class PrivateMessageComposeChromeComposeTest {
     private var renderedChrome: EditorScaffoldChrome? = null
     private var hides = 0
     private var shows = 0
+    private var bodyInputStarts = 0
+    private val bodyInputs = mutableSetOf<InputConnection>()
+    private val input = PlatformTextInputInterceptor { request, next ->
+        val info = EditorInfo()
+        val connection = request.createInputConnection(info)
+        // Header fields are single-line; only the multiline body must stay out of the IME on empty entry.
+        if (info.inputType and InputType.TYPE_TEXT_FLAG_MULTI_LINE != 0) {
+            bodyInputStarts++
+            bodyInputs += connection
+        }
+        try { next.startInputMethod(request) } finally {
+            bodyInputs -= connection
+            connection.closeConnection()
+        }
+    }
     private val keyboard = object : SoftwareKeyboardController {
         override fun show() { shows++ }
         override fun hide() { hides++ }
@@ -99,31 +124,51 @@ class PrivateMessageComposeChromeComposeTest {
         // The production chrome of this state, as the screen passes it to EditorScaffold.
         renderedChrome = f.adapter.chrome()
         CompositionLocalProvider(LocalSoftwareKeyboardController provides keyboard) {
-            RedfaceTheme {
-                PrivateMessageComposeContent(f.state, f.body, InputTransformation {}, f.recipients, f.subject,
-                    f.actions, smileys, modifier, bodyScrollState = scroll, chromeEvents = f.events,
-                    chromeMemory = f.memory, windowMetrics = window)
+            InterceptPlatformTextInput(input) {
+                RedfaceTheme {
+                    PrivateMessageComposeContent(f.state, f.body, InputTransformation {}, f.recipients, f.subject,
+                        f.actions, smileys, modifier, bodyScrollState = scroll, chromeEvents = f.events,
+                        chromeMemory = f.memory, windowMetrics = window)
+                }
             }
         }
     }
+    private fun bodyField() = compose.onNode(
+        hasSetTextAction() and hasAnyAncestor(hasTestTag("editor-scaffold-field")))
     private fun prefill() {
         f.state = f.state.copy(recipientState = EditorRecipientState(listOf("alice")), subject = "Sujet privé")
     }
     @Test fun `ED113 empty entry opens chips and Next preserves buffer then returns selection and closed IME`() {
-        compose.setContent { Content() }
+        val generation = mutableStateOf(0)
+        compose.setContent { key(generation.value) { Content() } }
         val recipients = compose.onNode(hasSetTextAction() and hasText("Destinataires"))
         recipients.assertIsFocused().performTextInput("sans virgule")
         recipients.performImeAction()
         compose.onNode(hasSetTextAction() and hasText("Sujet")).assertIsFocused()
-        compose.runOnIdle { f.adapter.focusMemory.imeBeforeSurface = false; hides = 0; shows = 0 }
+        compose.runOnIdle {
+            assertFalse(f.adapter.focusMemory.imeBeforeSurface)
+            assertEquals(0, bodyInputStarts)
+            hides = 0
+            shows = 0
+        }
         compose.onNodeWithText("Retour au message").performClick()
-        compose.onNode(hasSetTextAction()).assertIsFocused()
+        bodyField().assertIsFocused()
         compose.runOnIdle {
             assertEquals("sans virgule", f.state.recipientState.buffer)
             assertEquals(TextRange(6, 1), f.body.selection)
             assertTrue(hides > 0)
             assertEquals(0, shows)
+            assertEquals(0, bodyInputStarts)
+            assertTrue(bodyInputs.isEmpty())
             assertFalse(f.adapter.consumeReturn())
+            generation.value++
+        }
+        compose.onNodeWithText("Retour au message").assertDoesNotExist()
+        bodyField().assertIsNotFocused()
+        compose.runOnIdle {
+            assertEquals("sans virgule", f.state.recipientState.buffer)
+            assertEquals(0, bodyInputStarts)
+            assertTrue(bodyInputs.isEmpty())
         }
     }
     @Test fun `ED113 prefilled summary has no recipients status and completion focuses the cause field`() {
@@ -131,7 +176,12 @@ class PrivateMessageComposeChromeComposeTest {
         compose.setContent { Content() }
         compose.onNodeWithText("Nouveau MP").assertExists()
         compose.onNodeWithText("1 destinataire · Sujet privé").assertExists()
-        compose.runOnIdle { assertNull(requireNotNull(renderedChrome).secondStatus); assertNull(f.adapter.surface) }
+        bodyField().assertIsFocused()
+        compose.runOnIdle {
+            assertNull(requireNotNull(renderedChrome).secondStatus)
+            assertNull(f.adapter.surface)
+            assertTrue(bodyInputs.isNotEmpty())
+        }
         listOf(EditorErrors.unknownRecipient to "Destinataires", EditorErrors.missingSubject to "Sujet")
             .forEach { (error, label) ->
                 compose.runOnIdle {
@@ -214,9 +264,15 @@ class PrivateMessageComposeChromeComposeTest {
             f.state = f.state.copy(formError = false, formAvailable = true)
         }
         compose.onNode(hasSetTextAction() and hasText("Destinataires")).assertIsFocused()
+        compose.runOnIdle { assertEquals(0, bodyInputStarts) }
         compose.runOnIdle { back.onBackPressed() }
-        compose.onNodeWithTag("editor-scaffold-field").assertIsFocused()
-        compose.runOnIdle { assertEquals(listOf("reload"), f.calls) }
+        bodyField().assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(listOf("reload"), f.calls)
+            assertEquals(0, bodyInputStarts)
+            assertTrue(bodyInputs.isEmpty())
+            assertFalse(f.adapter.consumeReturn())
+        }
     }
 
     @Test fun `normal geometry reserves 48 dp header and 56 dp bar`() = checkGeometry(compact = false)
@@ -283,6 +339,7 @@ class PrivateMessageComposeChromeComposeTest {
         compose.runOnIdle { f.body.edit { selection = TextRange(6, 1) } }
         val field = compose.onNodeWithTag("editor-scaffold-field")
         val id = field.fetchSemanticsNode().id
+        val inputId = bodyField().fetchSemanticsNode().id
         val bounds = field.getUnclippedBoundsInRoot()
         val viewport = compose.runOnIdle { scroll.viewportSize }
         compose.runOnIdle { f.adapter.openHeader() }
@@ -291,8 +348,9 @@ class PrivateMessageComposeChromeComposeTest {
         compose.runOnIdle { assertTrue(viewport > 0); assertEquals(viewport, scroll.viewportSize) }
         compose.onNode(hasSetTextAction() and hasText("Destinataires")).performTextInput("bob,tail")
         compose.onNodeWithText("Retour au message").performClick()
-        field.assertIsFocused()
+        bodyField().assertIsFocused()
         assertEquals(id, field.fetchSemanticsNode().id)
+        assertEquals(inputId, bodyField().fetchSemanticsNode().id)
         assertEquals(bounds, field.getUnclippedBoundsInRoot())
         compose.runOnIdle {
             assertEquals("Bonjour privé", f.body.text.toString())

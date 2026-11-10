@@ -157,7 +157,9 @@ private fun ComposeChrome(
         host.submitState, host.submitActions, host.imageActions, host::closeRequested, modifier = modifier,
         onOpenHeader = host::openHeader, headerLabel = stringResource(R.string.messages_compose_header_open),
         bodyFocusRequester = focus, bodyScrollState = scroll, inputTransformation = transformation,
-        autoFocus = true, surfaceFocus = host.focusMemory, bodyCaretRevealResetKey = bodyCaretRevealResetKey,
+        // An empty entry belongs to the automatic header, without a body IME for the scaffold to restore.
+        autoFocus = host.memory.autoFocusBody(host.state.source.recipientState), surfaceFocus = host.focusMemory,
+        bodyCaretRevealResetKey = bodyCaretRevealResetKey,
         onSystemBack = back,
         fieldArea = { field -> PrivateMessageComposeChromePreview(host, body, focus, field) },
         overlay = { restore, content ->

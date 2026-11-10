@@ -13,6 +13,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -20,6 +21,8 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextInputSelection
 import androidx.compose.ui.text.TextRange
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -178,9 +181,15 @@ class PrivateMessageComposeRestorationScreenTest {
         }
         compose.onNodeWithText("Retour au message").assertIsDisplayed()
         val selection = TextRange(6, 1)
+        // Capture a body edited before opening the header; replacing text behind it bypasses captureBody.
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNode(hasSetTextAction()).performClick().performTextInput("Bonjour")
+            .performTextInputSelection(selection)
+        compose.onNodeWithContentDescription("Modifier les destinataires et le sujet").performClick()
+        compose.onNodeWithText("Retour au message").assertIsDisplayed()
         compose.runOnIdle {
-            model.bodyFieldState.edit { replace(0, length, "Bonjour"); this.selection = selection }
-            model.chromeMemory.host.focus.imeBeforeSurface = false
+            assertEquals(selection, model.bodyFieldState.selection)
+            assertFalse(model.chromeMemory.host.focus.imeBeforeSurface)
             owner = host().get() // Fresh composition/activity owner, same VM as a configuration change.
         }
         compose.onNodeWithText("Retour au message").assertIsDisplayed()
@@ -189,10 +198,11 @@ class PrivateMessageComposeRestorationScreenTest {
         compose.runOnIdle {
             assertEquals(selection, model.bodyFieldState.selection)
             assertFalse(model.chromeMemory.host.focus.imeBeforeSurface)
-            assertTrue(model.chromeMemory.host.focus.autoFocusConsumed)
+            assertFalse(model.chromeMemory.host.focus.autoFocusConsumed)
             owner = host().get()
         }
         compose.onNodeWithText("Retour au message").assertDoesNotExist()
+        compose.onNode(hasSetTextAction()).assertIsNotFocused()
         compose.runOnIdle { assertNull(model.chromeMemory.host.surface) }
         val bundle = Bundle()
         compose.runOnIdle {
