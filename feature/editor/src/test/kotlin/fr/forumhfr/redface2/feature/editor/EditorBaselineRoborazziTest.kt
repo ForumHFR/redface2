@@ -99,8 +99,10 @@ class EditorBaselineRoborazziTest {
                     reading = ReadingDisplaySettings(fontScale = FontScalePreference.L)) {
                     val current = scenario.value
                     // Recreate field/scroll/picker state for every capture, never inherit a caret
-                    // position or a controls offset from the preceding surface or draft.
-                    key(current) {
+                    // position or a controls offset from the preceding surface or draft. The theme is
+                    // part of the key: topic scenes capture one scenario in light then dark, and the
+                    // panel opened by the light pass would otherwise stay open over the dark pass.
+                    key(current, dark.value) {
                         EditorChrome(current)
                     }
                 }
