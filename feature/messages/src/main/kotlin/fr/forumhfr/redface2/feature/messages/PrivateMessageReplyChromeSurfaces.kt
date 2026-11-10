@@ -36,8 +36,9 @@ internal fun PrivateMessageReplyChromeSurfaces(
     onReturnToBody: () -> Unit,
     body: @Composable () -> Unit,
 ) {
+    // ED-45/170: only the detail's Masquer may acknowledge; its closing, Back and reload stay visual.
     EditorEventDetails(adapter.detail, bodyState, adapter::closeDetails, adapter::reload,
-        { adapter.returnToBody(onReturnToBody) }, body = {
+        { adapter.returnToBody(onReturnToBody) }, onDismiss = adapter::dismissDetails, body = {
             // Short title: the offer sentence appears once, in the panel body (gate R1b R3, minor 2).
             EditorHeaderPanel(adapter.surface == PrivateMessageReplyChromeSurface.Restore,
                 stringResource(R.string.messages_draft_restore_title), bodyState, adapter::closeSurface,

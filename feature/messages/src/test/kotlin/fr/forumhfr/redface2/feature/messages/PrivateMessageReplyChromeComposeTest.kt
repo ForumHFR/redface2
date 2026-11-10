@@ -43,9 +43,11 @@ import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.EditorBarMode
+import fr.forumhfr.redface2.core.ui.editor.EditorErrorSurface
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorScaffoldChrome
 import org.junit.Assert.assertEquals
@@ -67,6 +69,7 @@ import org.robolectric.annotation.GraphicsMode
 class PrivateMessageReplyChromeComposeTest {
     @get:Rule val compose = createComposeRule()
     private val f = PrivateMessageReplyChromeFixture()
+    private val uncertain = EditorErrors.uncertain(EditorErrorSurface.MessageReply)
     private lateinit var back: androidx.activity.OnBackPressedDispatcher
     private lateinit var inputMode: InputModeManager
     private lateinit var chrome: EditorScaffoldChrome
@@ -350,4 +353,58 @@ class PrivateMessageReplyChromeComposeTest {
         compose.runOnIdle { assertEquals(listOf("reload"), f.calls) }
     }
 
+    @Test fun `ED45 details reload and hide return focus without any submission acknowledgement`() {
+        f.transition(f.state.copy(submitError = EditorErrors.invalidForm))
+        compose.setContent { Content() }
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        val selection = compose.runOnIdle { f.body.selection }
+        compose.onNodeWithContentDescription("Réponse illisible, Afficher les détails").performClick()
+        compose.onNodeWithText("Recharger").performClick()
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(selection, f.body.selection)
+            assertEquals(listOf("reload"), f.calls)
+            // An uncertainty without a durable attempt can only be hidden visually.
+            f.transition(f.state.copy(submission = EditorSubmissionState.Uncertain(null), submitError = null))
+            f.transition(f.state.copy(submitError = uncertain))
+        }
+        compose.onNodeWithContentDescription("Envoi incertain, Afficher les détails").performClick()
+        compose.onNodeWithText("Masquer").performClick()
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(listOf("reload"), f.calls)
+            assertNull(f.events.state.visibleEvent)
+        }
+    }
+
+    @Test fun `ED45 explicit Masquer in the reply detail forwards acknowledgement without sending`() {
+        val attempt = AttemptToken("alice", f.session.key, "attempt", 1)
+        f.transition(f.state.copy(submission = EditorSubmissionState.Uncertain(attempt), submitError = uncertain))
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Envoi incertain, Afficher les détails").performClick()
+        compose.runOnIdle { assertTrue(f.calls.isEmpty()) }
+        compose.onNodeWithText("Masquer").performClick()
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(listOf("acknowledge"), f.calls)
+            assertNull(f.adapter.detail)
+            assertNull(f.events.state.visibleEvent)
+        }
+    }
+
+    @Test fun `ED85 ED170 system Back closes the uncertainty detail without acknowledgement`() {
+        val attempt = AttemptToken("alice", f.session.key, "attempt", 1)
+        f.transition(f.state.copy(submission = EditorSubmissionState.Uncertain(attempt), submitError = uncertain))
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Envoi incertain, Afficher les détails").performClick()
+        compose.onNodeWithText("Masquer").assertExists()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.runOnIdle {
+            assertNull(f.adapter.detail)
+            assertTrue(f.calls.isEmpty())
+            assertEquals(EditorSubmissionState.Uncertain(attempt), f.state.submission)
+            back.onBackPressed()
+        }
+        compose.runOnIdle { assertEquals(listOf("close"), f.calls) }
+    }
 }

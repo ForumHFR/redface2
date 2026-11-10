@@ -7,8 +7,12 @@ import fr.forumhfr.redface2.core.ui.editor.EditorEventCollector
 import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
 import fr.forumhfr.redface2.core.ui.editor.EditorEventProjection
 import fr.forumhfr.redface2.core.ui.editor.EditorHostEvents
+import fr.forumhfr.redface2.core.ui.editor.EventKey
 
-/** Prepared for R2; form/quote failures remain full-screen and the existing banners stay until R3. */
+/**
+ * Reply projection for the shared collector; form/quote failures remain full-screen (ED-130).
+ * The collector binds each uncertain delivery to its durable attempt for the host's explicit Masquer (ED-45/170).
+ */
 internal class PrivateMessageReplyEvents : EditorHostEvents {
     private val collector = EditorEventCollector(EditorErrorMappers(
         // GET/quote failures stay in formError (ED-130); no read can retire a submission event.
@@ -24,6 +28,7 @@ internal class PrivateMessageReplyEvents : EditorHostEvents {
     private var projection = EditorEventProjection(state.session)
 
     override fun dispatch(input: EditorEventInput) = collector.dispatch(input)
+    override fun uncertainAttempt(key: EventKey) = collector.uncertainAttempt(key)
     fun open(session: EditorSession) {
         if (session != state.session) projection = EditorEventProjection(session)
         collector.open(session)

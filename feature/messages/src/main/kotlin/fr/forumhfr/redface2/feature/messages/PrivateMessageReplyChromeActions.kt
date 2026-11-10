@@ -22,7 +22,9 @@ internal data class PrivateMessageReplyChromeActions(
 internal fun PrivateMessageReplyViewModel.chromeActions() = PrivateMessageReplyChromeActions(
     host = EditorHostActions(onArm = ::onSubmit, onConfirm = ::onSubmitConfirmed,
         onDisarm = ::onSubmitConfirmationDismissed, onFormat = ::onToolbarAction,
-        onPreview = ::onTogglePreview, onClose = ::onCloseRequested),
+        onPreview = ::onTogglePreview, onClose = ::onCloseRequested,
+        // ED-45/170: the host calls it only for the explicit Masquer of the bound uncertain delivery.
+        onAcknowledgeUncertain = ::onErrorDismissed),
     signature = ::onToggleSignature,
     smileyDisabled = ::onToggleSmileyDisabled,
     notification = ::onToggleEmailNotification,
