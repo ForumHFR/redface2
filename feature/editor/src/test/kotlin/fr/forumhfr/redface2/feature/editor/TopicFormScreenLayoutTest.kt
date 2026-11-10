@@ -20,7 +20,6 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.PlatformTextInputInterceptor
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
@@ -34,6 +33,7 @@ import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
@@ -293,7 +293,7 @@ class TopicFormScreenLayoutTest {
         compose.onNodeWithContentDescription("Options").performClick()
         compose.onNodeWithText("Ton du message").assertExists()
         compose.onNodeWithTag("${MSG_ICON_OPTION_TAG_PREFIX}16").assertExists()
-        switchBeside("Activer votre signature").assertIsDisplayed().assertIsEnabled().assertIsOff().performClick()
+        optionRow("Activer votre signature").assertIsDisplayed().assertIsEnabled().assertIsOff().performClick()
         compose.runOnIdle { fixture.adapter.host.closeSurface() }
         compose.onNode(hasSetTextAction()).assertIsFocused()
         compose.onNodeWithContentDescription("Image").performScrollTo().performClick()
@@ -311,14 +311,8 @@ class TopicFormScreenLayoutTest {
         compose.onNodeWithText("Standard").assertExists()
     }
 
-    // EditorOptions lays each label out as a plain Text beside its Switch: only the switch is a click target.
-    private fun switchBeside(label: String): SemanticsNodeInteraction {
-        val row = compose.onNodeWithText(label).fetchSemanticsNode().boundsInRoot
-        val switches = compose.onAllNodes(isToggleable())
-        val index = switches.fetchSemanticsNodes().indexOfFirst { it.boundsInRoot.center.y in row.top..row.bottom }
-        assertTrue("No switch on the « $label » row", index >= 0)
-        return switches[index]
-    }
+    // EditorOptions makes each option row one toggleable node named by its label (R1b A1).
+    private fun optionRow(label: String) = compose.onNode(isToggleable() and hasText(label))
 
     @Test fun pickerCancellationRestoresClosedImeAndSelection() = checkPickerCancellation(imeOpen = false)
     @Test fun pickerCancellationRestoresOpenImeAndSelection() = checkPickerCancellation(imeOpen = true)
