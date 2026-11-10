@@ -33,13 +33,18 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.PlatformTextInputInterceptor
 import androidx.compose.ui.platform.SoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -64,6 +69,7 @@ import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.R as UiR
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.EditorChromeMetrics
 import fr.forumhfr.redface2.core.ui.editor.EditorScaffold
@@ -239,17 +245,26 @@ class PostEditorTransientComposeTest {
             ))),
         )))
         lateinit var inputMode: InputModeManager
+        lateinit var previewLabel: String
         compose.setContent {
             RedfaceTheme {
                 inputMode = LocalInputModeManager.current
+                // feature/editor overrides core/ui's typographic apostrophe in the merged resources.
+                previewLabel = stringResource(UiR.string.editor_preview_show)
                 PostEditorTestContent(host.state, host::dispatch, host.body, host.events)
             }
         }
         compose.runOnIdle { inputMode.requestInputMode(InputMode.Keyboard) }
-        val toggle = compose.onNodeWithContentDescription("Afficher l’aperçu")
+        compose.runOnIdle { assertEquals(InputMode.Keyboard, inputMode.inputMode) }
+        val toggle = compose.onNode(hasContentDescription(previewLabel) and
+            hasAnyAncestor(hasTestTag("editor-scaffold-app-bar")))
+        toggle.assertIsDisplayed()
         toggle.requestFocus().assertIsFocused().performKeyInput { pressKey(Key.Spacebar) }
         compose.runOnIdle { assertTrue(host.state.isPreviewVisible) }
+        compose.onNodeWithTag("post-editor-preview").assertIsDisplayed()
         compose.onNodeWithText("Contenu révélé").assertDoesNotExist()
+        // With no quote/restore statuses, this is the last app-bar focus target. Tab enters fieldArea
+        // to reach the preview's only clickable: guarding the whole slot would cancel that entry.
         toggle.assertIsFocused().performKeyInput { pressKey(Key.Tab) }
         compose.onNodeWithText("Secret").assertIsFocused().performKeyInput { pressKey(Key.Spacebar) }
         compose.onNodeWithText("Contenu révélé").assertExists()
