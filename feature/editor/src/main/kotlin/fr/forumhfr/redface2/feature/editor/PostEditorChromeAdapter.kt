@@ -35,6 +35,7 @@ internal class PostEditorChromeAdapter(
         { onIntent(PostEditorIntent.TogglePreview) },
         { onIntent(PostEditorIntent.CloseRequested) },
         onAcknowledgeUncertain = { onIntent(PostEditorIntent.ErrorDismissed) },
+        onAcknowledgeLocal = { onIntent(PostEditorIntent.DraftWriteFailureDismissed) },
     ),
     EditorHostSurfaces(PostEditorChromeSurface.Smileys, PostEditorChromeSurface.Options,
         PostEditorChromeSurface.Picker, imageUrl = PostEditorChromeSurface.Url, canWrapSelection = true,

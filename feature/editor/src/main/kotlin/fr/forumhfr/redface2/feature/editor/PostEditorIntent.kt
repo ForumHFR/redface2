@@ -31,6 +31,9 @@ sealed interface PostEditorIntent {
     /** User dismissed an in-flight error banner. Clears [PostEditorState.submitError]. */
     data object ErrorDismissed : PostEditorIntent
 
+    /** Explicit Masquer of a failed attempt write; releases deferred draft information without storage. */
+    data object DraftWriteFailureDismissed : PostEditorIntent
+
     /** ED-132: GET only; never shares the submit intent or its arm identity. */
     data object ReloadRequested : PostEditorIntent
 

@@ -140,6 +140,19 @@ class EditorSubmissionBinding<E, F>(
             controller.confirm(token).also(::requested)
         }
 
+    /**
+     * Hiding a failed attempt write releases deferred draft information without a durable write.
+     * Only Ready/Armed may clear it; a displayed uncertainty still wins over a local failure.
+     */
+    fun acknowledgeLocal() {
+        val editable = controller.state == EditorSubmissionState.Ready ||
+            controller.state is EditorSubmissionState.Armed
+        if (attemptWriteFailed && !uncertainError && editable) {
+            attemptWriteFailed = false
+            showPendingDraftFailure()
+        }
+    }
+
     /** ED-170: hiding uncertainty acknowledges its durable attempt before ordinary autosaves resume. */
     fun acknowledge(onAcknowledged: () -> Unit) {
         if (controller.state !is EditorSubmissionState.Uncertain) {

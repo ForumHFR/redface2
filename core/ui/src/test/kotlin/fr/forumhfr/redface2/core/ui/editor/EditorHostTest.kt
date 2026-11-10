@@ -32,12 +32,13 @@ class EditorHostTest {
         header: Surface? = null,
         onComplete: ((EditorCause) -> Unit)? = null,
         onAcknowledgeUncertain: (() -> Unit)? = { calls.add("acknowledge") },
+        onAcknowledgeLocal: (() -> Unit)? = { calls.add("acknowledge local") },
     ) = EditorHost(
         { state }, body, events,
         EditorHostActions({ calls.add(it) }, { calls.add(it) }, {
             calls.add("disarm"); state = state.copy(submission = EditorSubmissionState.Ready)
         }, { calls.add(it) }, { calls.add("preview") }, { calls.add("close") }, onComplete = onComplete,
-            onAcknowledgeUncertain = onAcknowledgeUncertain),
+            onAcknowledgeUncertain = onAcknowledgeUncertain, onAcknowledgeLocal = onAcknowledgeLocal),
         EditorHostSurfaces(Surface.Smileys, Surface.Options, Surface.Picker, header = header),
         { calls.add("picker") }, { calls.add("smileys") }, memory,
     )
@@ -299,6 +300,99 @@ class EditorHostTest {
         host.barActions.onEvent(event.key, EditorEventAction.Details)
         host.dismissDetails(event.key)
         assertNull(host.detail)
+        assertNull(events.state.visibleEvent)
+        assertTrue(calls.isEmpty())
+    }
+
+    @Test fun `ED45 local attempt failure Masquer calls only the local port once in Ready and Armed`() {
+        val host = host()
+        val armed = EditorSubmissionState.Armed(ArmToken(1, session, 0, 4_000L))
+        listOf(EditorSubmissionState.Ready, armed).forEachIndexed { index, submission ->
+            state = state.copy(submission = submission)
+            val event = error(EditorErrors.draftWriteFailed, index + 1L)
+            assertEquals(EditorEventAction.Details, host.scaffoldChrome().event!!.action)
+            // The bar cannot dismiss a delivery whose current action opens Details.
+            host.barActions.onEvent(event.key, EditorEventAction.Dismiss)
+            assertEquals(index, calls.size)
+            host.barActions.onEvent(event.key, EditorEventAction.Details)
+            assertEquals(event, host.detail)
+            assertEquals(index, calls.size)
+            host.dismissDetails(event.key)
+            host.dismissDetails(event.key)
+            assertEquals(List(index + 1) { "acknowledge local" }, calls)
+            assertEquals(submission, state.submission)
+            assertNull(host.detail)
+            assertNull(events.state.visibleEvent)
+        }
+    }
+
+    @Test fun `ED45 local attempt failure without detail also routes bar Masquer once`() {
+        val host = host()
+        // The catalogue currently always supplies a detail; exercise the host's Dismiss route explicitly.
+        val event = error(EditorErrors.draftWriteFailed.copy(detail = null, action = EditorErrorAction.Dismiss))
+        assertEquals(EditorEventAction.Dismiss, host.scaffoldChrome().event!!.action)
+        host.barActions.onEvent(event.key, EditorEventAction.Dismiss)
+        host.barActions.onEvent(event.key, EditorEventAction.Dismiss)
+        assertEquals(listOf("acknowledge local"), calls)
+        assertNull(events.state.visibleEvent)
+    }
+
+    @Test fun `ED85 Back and closeDetails never acknowledge a local attempt write failure`() {
+        val host = host()
+        val first = error(EditorErrors.draftWriteFailed)
+        host.barActions.onEvent(first.key, EditorEventAction.Details)
+        host.back()
+        assertNull(host.detail)
+        assertNull(events.state.visibleEvent)
+        val second = error(EditorErrors.draftWriteFailed, 2)
+        host.barActions.onEvent(second.key, EditorEventAction.Details)
+        host.closeDetails(second.key)
+        assertNull(host.detail)
+        assertNull(events.state.visibleEvent)
+        assertTrue(calls.isEmpty())
+    }
+
+    @Test fun `ED45 stale local failure keys cannot call either acknowledgement port`() {
+        val host = host()
+        val stale = error(EditorErrors.draftWriteFailed)
+        host.barActions.onEvent(stale.key, EditorEventAction.Details)
+        events.dispatch(EditorEventInput.Acknowledge(stale.key))
+        // The overlay snapshot still exists, but its delivery is no longer current.
+        host.dismissDetails(stale.key)
+        assertNull(host.detail)
+        assertTrue(calls.isEmpty())
+        val current = error(EditorErrors.draftWriteFailed, 2)
+        host.barActions.onEvent(stale.key, EditorEventAction.Dismiss)
+        assertEquals(current, events.state.visibleEvent)
+        host.barActions.onEvent(current.key, EditorEventAction.Details)
+        host.dismissDetails(stale.key)
+        assertEquals(current, host.detail)
+        assertEquals(current, events.state.visibleEvent)
+        assertTrue(calls.isEmpty())
+    }
+
+    @Test fun `ED45 Masquer of another cause never calls the local acknowledgement port`() {
+        val host = host()
+        listOf(EditorErrors.network, EditorErrors.draftSaveFailed, EditorErrors.uncertain)
+            .forEachIndexed { index, problem ->
+                val event = error(problem, index + 1L)
+                host.barActions.onEvent(event.key, EditorEventAction.Details)
+                host.dismissDetails(event.key)
+                assertNull(host.detail)
+                assertNull(events.state.visibleEvent)
+                assertTrue(calls.isEmpty())
+            }
+    }
+
+    @Test fun `ED45 without the local port attempt failure Masquer stays visual on detail and bar`() {
+        val host = host(onAcknowledgeLocal = null)
+        val detail = error(EditorErrors.draftWriteFailed)
+        host.barActions.onEvent(detail.key, EditorEventAction.Details)
+        host.dismissDetails(detail.key)
+        assertNull(host.detail)
+        assertNull(events.state.visibleEvent)
+        val bar = error(EditorErrors.draftWriteFailed.copy(detail = null, action = EditorErrorAction.Dismiss), 2)
+        host.barActions.onEvent(bar.key, EditorEventAction.Dismiss)
         assertNull(events.state.visibleEvent)
         assertTrue(calls.isEmpty())
     }

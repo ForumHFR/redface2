@@ -10,7 +10,8 @@ import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
  * contents, picker/smiley launchers, business remedies and awaited saving/closing. EditorScaffold owns
  * IME capture/restore via [focusMemory]; pass its return callback to [returnToBody] after overlays close.
  * Wire EditorEventDetails' Masquer to [dismissDetails] and its closing to [closeDetails]: only the former
- * acknowledges a bound uncertain attempt, through [EditorHostActions.onAcknowledgeUncertain] (ED-45/170).
+ * acknowledges a bound uncertain attempt through [EditorHostActions.onAcknowledgeUncertain] (ED-45/170),
+ * or a failed attempt write locally through [EditorHostActions.onAcknowledgeLocal].
  * Subclasses may bind business intents without copying these common gestures.
  */
 @Suppress("LongParameterList") // Independent screen ports; no ViewModel dependency in core/ui.
@@ -111,20 +112,25 @@ open class EditorHost<S : Any>(
                 is EditorEventCommand.ReturnToBody -> Unit
             }
         }
-        // ED-45: an explicit Masquer acknowledges durably; opening the detail never does.
-        if (action == EditorEventAction.Dismiss) acknowledgeUncertainty(key)
+        // ED-45: only an explicit Masquer reaches acknowledgement ports, never opening the detail.
+        if (action == EditorEventAction.Dismiss) acknowledgeDismissal(event)
     }
     private fun complete(cause: EditorCause) {
         captureBody()
         val onComplete = actions.onComplete
         if (onComplete == null) memory.surface = surfaces.header else onComplete(cause)
     }
-    /** Explicit Masquer only; Back and overlay closing keep the durable attempt. */
+    /** Explicit Masquer only; Back and overlay closing never acknowledge submission failures. */
     fun dismissDetails(key: EventKey) {
         if (detail?.key != key) return
-        val current = currentDetail(key) != null
+        val current = currentDetail(key)
         closeDetails(key)
-        if (current) acknowledgeUncertainty(key)
+        if (current != null) acknowledgeDismissal(current)
+    }
+    private fun acknowledgeDismissal(event: EditorEvent) {
+        val cause = (event.content as? EditorEventContent.Problem)?.error?.cause
+        if (cause == EditorCause.DraftWriteFailed) actions.onAcknowledgeLocal?.invoke()
+        else acknowledgeUncertainty(event.key)
     }
     private fun acknowledgeUncertainty(key: EventKey) {
         val attempt = events.uncertainAttempt(key) ?: return

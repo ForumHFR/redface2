@@ -303,6 +303,119 @@ class EditorSubmissionBindingTest {
     }
 
     @Test
+    fun `local acknowledgement in Ready releases deferred draft failure without storage`() = runTest {
+        assertLocalAttemptAcknowledgement(rearm = false, deferFailure = true)
+    }
+
+    @Test
+    fun `local acknowledgement in Armed releases deferred draft failure without storage`() = runTest {
+        assertLocalAttemptAcknowledgement(rearm = true, deferFailure = true)
+    }
+
+    @Test
+    fun `local acknowledgement clears the attempt error when no draft failure is deferred`() = runTest {
+        assertLocalAttemptAcknowledgement(rearm = false, deferFailure = false)
+    }
+
+    @Test
+    fun `local acknowledgement clears the attempt error without disarming`() = runTest {
+        assertLocalAttemptAcknowledgement(rearm = true, deferFailure = false)
+    }
+
+    @Test
+    fun `local acknowledgement ignores a reserved retry with a previous attempt write failure`() = runTest {
+        val store = VersionedEditorDraftStore()
+        val failures = mutableListOf<String?>()
+        val binding = failedAttemptBinding(store, failures)
+        binding.resolveDraftWrite(EditorDraftStore.StoreWriteResult.Failed(IOException("still full")))
+        assertTrue(binding.request(4_000, true) is SubmissionRequest.Accepted)
+        assertTrue(binding.state is EditorSubmissionState.PersistingAttempt)
+        assertEquals("draft", failures.last())
+        assertLocalAcknowledgementIgnored(binding, store, failures)
+    }
+
+    @Test
+    fun `local acknowledgement ignores Sending and preserves its draft information`() = runTest {
+        val store = VersionedEditorDraftStore()
+        val failures = mutableListOf<String?>()
+        val binding = binding(store, failures = failures)
+        binding.restore("key")
+        binding.setPreference(false)
+        val send = CompletableDeferred<Unit>()
+        val permit = binding.request(4_000, true) as SubmissionRequest.Accepted
+        binding.launch(permit, Draft("body")) {
+            send.await()
+            EditorDelivery(outcome = EditorSendOutcome.UNCERTAIN)
+        }
+        runCurrent()
+        assertTrue(binding.state is EditorSubmissionState.Sending)
+        binding.resolveDraftWrite(EditorDraftStore.StoreWriteResult.Failed(IOException("disk full")))
+        assertEquals("save", failures.last())
+        assertLocalAcknowledgementIgnored(binding, store, failures)
+        send.complete(Unit)
+        runCurrent()
+    }
+
+    @Test
+    fun `local acknowledgement ignores restored uncertainty even after an attempt write failure`() = runTest {
+        val store = VersionedEditorDraftStore()
+        val failures = mutableListOf<String?>()
+        val binding = failedAttemptBinding(store, failures)
+        val attempt = EditorDraftStore.AttemptToken("tester", "key", "restored", 1)
+        store.entries["key"] = EditorDraftStore.DraftEntry(
+            Draft("restored body"), 1, EditorDraftStore.Attempt(attempt, AttemptStatus.UNCERTAIN),
+        )
+        binding.restore("key")
+        binding.resolveDraftWrite(EditorDraftStore.StoreWriteResult.Failed(IOException("disk full")))
+        assertEquals(EditorSubmissionState.Uncertain(attempt), binding.state)
+        assertEquals("uncertain", failures.last())
+        assertLocalAcknowledgementIgnored(binding, store, failures)
+
+        // Arming does not replace the displayed uncertainty with a local failure.
+        binding.setPreference(true)
+        assertTrue(binding.request(4_000, true) is SubmissionRequest.Armed)
+        assertLocalAcknowledgementIgnored(binding, store, failures)
+    }
+
+    @Test
+    fun `local acknowledgement ignores uncertainty without a matching durable token`() = runTest {
+        val store = object : VersionedEditorDraftStore() {
+            override suspend fun beginAttempt(
+                owner: String?, key: String, snapshot: Draft, expectedVersion: Long, attemptId: String,
+            ): EditorDraftStore.BeginAttemptResult {
+                val started = super.beginAttempt(owner, key, snapshot, expectedVersion, attemptId)
+                    as EditorDraftStore.BeginAttemptResult.Started
+                return started.copy(token = started.token.copy(key = "another editor"))
+            }
+        }
+        val failures = mutableListOf<String?>()
+        val binding = binding(store, failures = failures)
+        binding.restore("key")
+        binding.setPreference(false)
+        val permit = binding.request(4_000, true) as SubmissionRequest.Accepted
+        binding.launch(permit, Draft("body")) { error("a mismatched token cannot send") }
+        runCurrent()
+        assertEquals(EditorSubmissionState.Uncertain(null), binding.state)
+        assertTrue("draft" in failures) // recordFailure(ATTEMPT) did set the local flag.
+        binding.resolveDraftWrite(EditorDraftStore.StoreWriteResult.Failed(IOException("disk full")))
+        assertLocalAcknowledgementIgnored(binding, store, failures)
+    }
+
+    @Test
+    fun `local acknowledgement without an attempt write failure preserves the displayed error`() = runTest {
+        val store = VersionedEditorDraftStore()
+        val failures = mutableListOf<String?>()
+        val binding = binding(store, failures = failures)
+        binding.restore("key")
+        binding.resolveDraftWrite(EditorDraftStore.StoreWriteResult.Failed(IOException("disk full")))
+        assertEquals("save", failures.last())
+        assertLocalAcknowledgementIgnored(binding, store, failures)
+        binding.setPreference(true)
+        assertTrue(binding.request(4_000, true) is SubmissionRequest.Armed)
+        assertLocalAcknowledgementIgnored(binding, store, failures)
+    }
+
+    @Test
     fun `successful fresh attempt outcome purges draft information without hiding uncertainty`() = runTest {
         val store = VersionedEditorDraftStore().apply { finishGate = CompletableDeferred() }
         val failures = mutableListOf<String?>()
@@ -357,6 +470,69 @@ class EditorSubmissionBindingTest {
         runCurrent()
         assertNull(failures.last())
     }
+
+    private suspend fun TestScope.assertLocalAttemptAcknowledgement(rearm: Boolean, deferFailure: Boolean) {
+        val store = VersionedEditorDraftStore()
+        val failures = mutableListOf<String?>()
+        val binding = failedAttemptBinding(store, failures)
+        store.saveFailure = IOException("still full")
+        if (deferFailure) binding.flush(Draft("edited body"))
+        if (rearm) {
+            binding.setPreference(true)
+            assertTrue(binding.request(4_000, true) is SubmissionRequest.Armed)
+        }
+        assertEquals("draft", failures.last())
+        val state = binding.state
+        val activity = store.storageActivity()
+        binding.acknowledgeLocal()
+        runCurrent()
+        assertEquals(state, binding.state)
+        assertEquals(activity, store.storageActivity())
+        assertEquals(if (deferFailure) "save" else null, failures.last())
+        // A second Masquer cannot clear the newly delivered information.
+        val delivered = failures.toList()
+        binding.acknowledgeLocal()
+        assertEquals(delivered, failures)
+        // A later failed write is immediately visible: attemptWriteFailed was reset.
+        binding.flush(Draft("next edit"))
+        assertEquals(delivered + "save", failures)
+        binding.disarm()
+    }
+
+    private suspend fun TestScope.failedAttemptBinding(
+        store: VersionedEditorDraftStore,
+        failures: MutableList<String?>,
+    ): EditorSubmissionBinding<Unit, String> {
+        store.beginFailure = IOException("disk full")
+        val binding = binding(store, failures = failures)
+        binding.restore("key")
+        binding.setPreference(false)
+        val permit = binding.request(4_000, true) as SubmissionRequest.Accepted
+        binding.launch(permit, Draft("body")) { error("no POST after failed attempt write") }
+        runCurrent()
+        assertEquals(EditorSubmissionState.Ready, binding.state)
+        assertEquals("draft", failures.last())
+        return binding
+    }
+
+    private fun TestScope.assertLocalAcknowledgementIgnored(
+        binding: EditorSubmissionBinding<Unit, String>,
+        store: VersionedEditorDraftStore,
+        failures: MutableList<String?>,
+    ) {
+        val state = binding.state
+        val activity = store.storageActivity()
+        val entries = store.entries.toMap()
+        val displayed = failures.toList()
+        binding.acknowledgeLocal()
+        runCurrent()
+        assertEquals(state, binding.state)
+        assertEquals(activity, store.storageActivity())
+        assertEquals(entries, store.entries)
+        assertEquals(displayed, failures)
+    }
+
+    private fun VersionedEditorDraftStore.storageActivity() = listOf(writes, beginCalls, finishCalls, saveCount)
 
     private suspend fun TestScope.retryRejectedBegin(confirmation: Boolean) {
         val store = VersionedEditorDraftStore().apply { beginFailure = IOException("disk") }

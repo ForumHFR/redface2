@@ -941,6 +941,7 @@ class PostEditorViewModel @AssistedInject constructor(
                     }
                 }
             }
+            PostEditorIntent.DraftWriteFailureDismissed -> submission.acknowledgeLocal()
             PostEditorIntent.ReloadRequested -> reloadForm()
             PostEditorIntent.PendingQuoteIgnored -> ignorePendingQuote()
             PostEditorIntent.PendingQuoteResumed -> resumeDormantQuote()

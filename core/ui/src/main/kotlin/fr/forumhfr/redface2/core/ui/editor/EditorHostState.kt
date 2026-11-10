@@ -24,8 +24,10 @@ data class EditorHostState(
  * without either route it presents Details or Dismiss, preserving visual acknowledgement.
  * [onAcknowledgeUncertain] durably acknowledges an uncertain attempt (ED-45/170). The host calls it only for an
  * explicit Masquer of the delivery bound by [EditorHostEvents.uncertainAttempt], while that exact attempt is
- * still the surface's Uncertain submission; Back and closing the detail never call it. Without it, Masquer
- * stays a visual acknowledgement.
+ * still the surface's Uncertain submission.
+ * [onAcknowledgeLocal] synchronously acknowledges a failed attempt write, without durable storage. The host
+ * calls it only for an explicit Masquer of [EditorCause.DraftWriteFailed]; the binding guards its real state.
+ * Back and closing the detail never call either port. Without the relevant port, Masquer stays visual.
  */
 @Suppress("LongParameterList") // Independent intent ports at the surface boundary.
 data class EditorHostActions(
@@ -37,6 +39,7 @@ data class EditorHostActions(
     val onClose: () -> Unit,
     val onComplete: ((EditorCause) -> Unit)? = null,
     val onAcknowledgeUncertain: (() -> Unit)? = null,
+    val onAcknowledgeLocal: (() -> Unit)? = null,
 )
 
 /**
