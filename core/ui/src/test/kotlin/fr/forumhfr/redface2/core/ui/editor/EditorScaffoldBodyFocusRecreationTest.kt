@@ -20,12 +20,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.InputModeManager
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalInputModeManager
@@ -33,16 +35,21 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.PlatformTextInputInterceptor
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
@@ -77,7 +84,7 @@ import org.robolectric.annotation.GraphicsMode
  * Explicit insets supply the visibility captured before each pause, independently of a live session.
  * The post screen also covers recreation on API 34. Device H remains required.
  */
-@OptIn(ExperimentalFoundationApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [29], qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -172,10 +179,34 @@ class EditorScaffoldBodyFocusRecreationTest {
     @Test fun previewPreventsBodyRefocusAcrossRecreation() = checkCover(BodyFocusCover.Preview)
 
     @Test
+    fun previewAllowsKeyboardTraversalWhileTheCoveredBodyRefusesFreshFocus() {
+        ActivityScenario.launch(BodyFocusHostActivity::class.java).use { scenario ->
+            lateinit var activity: BodyFocusHostActivity
+            scenario.onActivity {
+                activity = it
+                it.inputMode.requestInputMode(InputMode.Keyboard)
+                it.model.cover = BodyFocusCover.Preview
+            }
+            val toggle = compose.onNodeWithContentDescription("Afficher l’aperçu")
+            val preview = compose.onNodeWithTag("cover-focus")
+            toggle.requestFocus().assertIsFocused()
+            compose.runOnIdle { assertTrue(activity.focusManager.moveFocus(FocusDirection.Next)) }
+            preview.assertIsFocused()
+            compose.runOnIdle { assertFalse(activity.bodyFocus.requestFocus()) }
+            compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
+            preview.assertIsFocused()
+            toggle.requestFocus().assertIsFocused().performKeyInput { pressKey(Key.Tab) }
+            preview.assertIsFocused()
+            compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
+        }
+    }
+
+    @Test
     fun blockedRestorationIsConsumedEvenWhenTheHostLaterAllowsBodyFocus() {
         ActivityScenario.launch(BodyFocusHostActivity::class.java).use { scenario ->
             compose.onNode(hasSetTextAction()).assertIsFocused()
             scenario.onActivity { it.model.restoreAllowed = false }
+            compose.onNode(hasSetTextAction()).assertIsFocused()
             scenario.recreate()
             compose.onNode(hasSetTextAction()).assertIsNotFocused()
             scenario.onActivity { it.model.restoreAllowed = true }
@@ -307,6 +338,7 @@ internal class BodyFocusHostActivity : ComponentActivity() {
     lateinit var view: View
     lateinit var focusManager: FocusManager
     lateinit var inputMode: InputModeManager
+    val bodyFocus = FocusRequester()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -354,18 +386,18 @@ internal class BodyFocusHostActivity : ComponentActivity() {
             ArmedSubmitState(false, false), ArmedSubmitActions({}, {}, {}), EditorBarImageActions({}, {}), {},
             bodyFocusRestoreAllowed = model.restoreAllowed && model.cover == BodyFocusCover.None,
             autoFocus = true, surfaceFocus = model.focus, bodyScrollState = model.scroll,
+            bodyFocusRequester = bodyFocus,
             onOpenHeader = { model.cover = BodyFocusCover.Panel },
             fieldArea = { field ->
-                Box(Modifier.fillMaxSize().onFocusChanged { if (it.isFocused) model.focusGains++ }) { field() }
+                Box(Modifier.fillMaxSize()) {
+                    // Observe only the field's focus group, never the sibling preview control.
+                    Box(Modifier.fillMaxSize().onFocusChanged { if (it.hasFocus) model.focusGains++ }) { field() }
+                    if (model.cover == BodyFocusCover.Preview) CoverFocus()
+                }
             },
             overlay = { restore, field ->
                 EditorHeaderPanel(model.cover == BodyFocusCover.Panel, "En-tête", model.body,
-                    { model.cover = BodyFocusCover.None }, restore, body = {
-                        Box(Modifier.fillMaxSize()) {
-                            field()
-                            if (model.cover == BodyFocusCover.Preview) CoverFocus()
-                        }
-                    }) { Text("En-tête du sujet") }
+                    { model.cover = BodyFocusCover.None }, restore, body = field) { Text("En-tête du sujet") }
                 if (model.cover == BodyFocusCover.Sheet) EditorOptionsSheet({ model.cover = BodyFocusCover.None }) {
                     CoverFocus()
                 }

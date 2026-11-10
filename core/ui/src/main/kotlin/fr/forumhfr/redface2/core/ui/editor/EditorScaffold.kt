@@ -137,8 +137,9 @@ val LocalEditorTooltipHost = staticCompositionLocalOf<EditorTooltipHost?> { null
  * [surfaceFocus] owns the consumed autofocus and the captured IME state across recreation: pass host-retained
  * memory; without one the default saves its two booleans, so it stays consumed even after process death.
  * [bodyFocusRestoreAllowed] is supplied explicitly by every host: false while any panel, sheet,
- * external surface or preview covers the body. The covered body also refuses fresh focus entry from
- * the new window. A retained body's focus is restored once after detach,
+ * external surface or preview covers the body. Only the editable body passed to [fieldArea] is guarded:
+ * it refuses fresh focus entry, including from the new window; other [fieldArea] controls remain reachable.
+ * A retained body's focus is restored once after detach,
  * with its actual pre-pause IME visibility; a blocked restoration is discarded, leaving panel returns
  * to their existing callbacks. This rotation snapshot is never saved by [EditorSurfaceFocusMemory.Saver].
  * [overlay] must invoke its body exactly once, unconditionally, at a stable composition site. Wrap it
@@ -248,25 +249,27 @@ fun EditorScaffold(
                         onOpenHeader = header, headerActionLabel = headerLabel, compactHeight = metrics.compactHeight,
                         previewEnabled = chrome.controlsEnabled, headerEnabled = chrome.controlsEnabled)
                     Spacer(Modifier.height(metrics.columnSpacing / 2))
-                    Box(Modifier.weight(1f).fillMaxWidth().guardEditorBodyFocus(bodyFocusRestoreAllowed)) {
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
                         fieldArea {
-                            BbcodeTextField(bodyState, stringResource(R.string.editor_scaffold_message),
-                                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)
-                                    .testTag("editor-scaffold-field").focusRequester(bodyFocusRequester)
-                                    .observeEditorBodyFocus(bodyFocus)
-                                    .semantics { isTraversalGroup = true; traversalIndex = 1f }
-                                    .tabMovesFocus(focusManager)
-                                    .onEditorBodyTap(bodyState) { restoreImeOnFocus = true },
-                                inputTransformation = inputTransformation,
-                                readOnly = chrome.uploading || chrome.bodyReadOnly,
-                                placeholder = stringResource(R.string.editor_scaffold_placeholder),
-                                revealCaretOnChange = true,
-                                scrollState = bodyScrollState, showLabel = metrics.showFieldLabel,
-                                autoFocus = initialFocus, showKeyboardOnFocus = initialFocus || restoreImeOnFocus,
-                                caretRevealResetKey = bodyCaretRevealResetKey,
-                                onSemanticsClick = editorBodyClick(restoreImeOnFocus, bodyFocusRequester) {
-                                    restoreImeOnFocus = true
-                                })
+                            Box(Modifier.guardEditorBodyFocus(bodyFocusRestoreAllowed)) {
+                                BbcodeTextField(bodyState, stringResource(R.string.editor_scaffold_message),
+                                    modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)
+                                        .testTag("editor-scaffold-field").focusRequester(bodyFocusRequester)
+                                        .observeEditorBodyFocus(bodyFocus)
+                                        .semantics { isTraversalGroup = true; traversalIndex = 1f }
+                                        .tabMovesFocus(focusManager)
+                                        .onEditorBodyTap(bodyState) { restoreImeOnFocus = true },
+                                    inputTransformation = inputTransformation,
+                                    readOnly = chrome.uploading || chrome.bodyReadOnly,
+                                    placeholder = stringResource(R.string.editor_scaffold_placeholder),
+                                    revealCaretOnChange = true,
+                                    scrollState = bodyScrollState, showLabel = metrics.showFieldLabel,
+                                    autoFocus = initialFocus, showKeyboardOnFocus = initialFocus || restoreImeOnFocus,
+                                    caretRevealResetKey = bodyCaretRevealResetKey,
+                                    onSemanticsClick = editorBodyClick(restoreImeOnFocus, bodyFocusRequester) {
+                                        restoreImeOnFocus = true
+                                    })
+                            }
                         }
                     }
                     Spacer(Modifier.height(metrics.columnSpacing / 2))

@@ -36,6 +36,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasSetTextAction
@@ -50,13 +51,16 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInputSelection
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
@@ -227,6 +231,30 @@ class PostEditorTransientComposeTest {
 
     @Test fun `ED140 preview keeps the focused source instance selection and IME commands`() = preview(false)
     @Test fun `ED140 preview returns from a focused keyboard control without IME commands`() = preview(true)
+
+    @Test fun `ED140 Tab reaches and toggles a real preview spoiler while the body stays unfocused`() {
+        host.state = host.state.copy(quotes = emptyList(), preview = PostContent(listOf(
+            PostBlock.Spoiler("Secret", PostContent(listOf(
+                PostBlock.Paragraph(listOf(PostInline.Text("Contenu révélé"))),
+            ))),
+        )))
+        lateinit var inputMode: InputModeManager
+        compose.setContent {
+            RedfaceTheme {
+                inputMode = LocalInputModeManager.current
+                PostEditorTestContent(host.state, host::dispatch, host.body, host.events)
+            }
+        }
+        compose.runOnIdle { inputMode.requestInputMode(InputMode.Keyboard) }
+        val toggle = compose.onNodeWithContentDescription("Afficher l’aperçu")
+        toggle.requestFocus().assertIsFocused().performKeyInput { pressKey(Key.Spacebar) }
+        compose.runOnIdle { assertTrue(host.state.isPreviewVisible) }
+        compose.onNodeWithText("Contenu révélé").assertDoesNotExist()
+        toggle.assertIsFocused().performKeyInput { pressKey(Key.Tab) }
+        compose.onNodeWithText("Secret").assertIsFocused().performKeyInput { pressKey(Key.Spacebar) }
+        compose.onNodeWithText("Contenu révélé").assertExists()
+        compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
+    }
 
     private fun preview(fromControl: Boolean) {
         var mounts = 0
