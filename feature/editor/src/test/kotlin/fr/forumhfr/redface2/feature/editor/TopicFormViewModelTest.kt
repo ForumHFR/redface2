@@ -1939,10 +1939,10 @@ class TopicFormViewModelTest {
             assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
             assertNull(draftStore.entries[key]?.attempt)
             assertTrue(vm.editorEvents.state.events.none { it.key == uncertain })
-            // The acknowledgement reserves without launching: no ED-44 cleanup of the refusal (gate R1b minors r1 m4).
-            assertTrue("$mode", vm.editorEvents.state.events.any {
-                it.content == EditorEventContent.Problem(EditorErrors.missingTitle)
-            })
+            // The acknowledgement reserves without launching: no ED-44 cleanup, the refusal is now in front
+            // (gate R1b minors r1 m4, m-c).
+            assertEquals("$mode", EditorEventContent.Problem(EditorErrors.missingTitle),
+                vm.editorEvents.state.visibleEvent?.content)
             assertNoSendingEvent(vm)
             assertEquals(posts, postCount())
             vm.viewModelScope.cancel()
