@@ -67,6 +67,8 @@ class EditorErrorCatalogTest {
                 R.string.editor_summary_subcategory, R.string.editor_detail_subcategory, EditorErrorAction.Complete),
             Row(EditorErrors.missingRecipients, EditorCause.MissingRecipients, EditorErrorClass.Validation,
                 R.string.editor_summary_recipients, null, EditorErrorAction.Complete),
+            Row(EditorErrors.incompleteRecipient, EditorCause.MissingRecipients, EditorErrorClass.Validation,
+                R.string.editor_summary_recipient_incomplete, null, EditorErrorAction.Complete),
             Row(EditorErrors.missingSubject, EditorCause.MissingSubject, EditorErrorClass.Validation,
                 R.string.editor_summary_subject, null, EditorErrorAction.Complete),
             Row(EditorErrors.noImageReceived, EditorCause.NoImageReceived, EditorErrorClass.Information,

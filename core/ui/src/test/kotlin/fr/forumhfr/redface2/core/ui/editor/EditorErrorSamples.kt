@@ -23,6 +23,7 @@ internal val editorErrorSamples: List<EditorError> = listOf(
     EditorErrors.missingTitle,
     EditorErrors.missingSubcategory,
     EditorErrors.missingRecipients,
+    EditorErrors.incompleteRecipient,
     EditorErrors.missingSubject,
     EditorErrors.noImageReceived,
     EditorErrors.tooLarge,

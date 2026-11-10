@@ -47,7 +47,7 @@ internal class PrivateMessageComposeChromeAdapter(
     }
     @Composable fun title() = stringResource(R.string.messages_compose_title)
     @Composable fun context(): String {
-        val count = source().recipientState.chips.size
+        val count = source().recipientState.chips.count(String::isNotBlank)
         val recipients = if (count == 0) stringResource(R.string.messages_compose_add_recipients)
             else pluralStringResource(R.plurals.messages_compose_recipient_count, count, count)
         val subject = source().subject.ifBlank { stringResource(R.string.messages_compose_add_subject) }

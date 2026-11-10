@@ -540,9 +540,10 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         val snapshot = _state.value.copy(bodyText = bodyFieldState.text.toString())
         val form = loadedForm ?: return
         if (!snapshot.sendActivatable || closeRequested || submission.blocksMutation) return
-        updateState { it.copy(submitError = null) }
         val error = snapshot.headerError ?: EditorErrors.loginRequired.takeIf { form.isAnonymous }
         if (error != null) {
+            // ED-35/170: only a local refusal resets the slot, so a repeat is a new event and arming keeps the warning.
+            updateState { it.copy(submitError = null) }
             updateState { it.copy(submitError = error) }
         } else {
             val permit = submission.request(timeoutMillis, snapshot.canSubmit)

@@ -26,7 +26,7 @@ internal data class PrivateMessageComposeChromeState(val source: PrivateMessageC
 /** D4: an uncommitted pseudo wins over missing chips; no implicit comma is ever inserted. */
 internal val PrivateMessageComposeUiState.headerError get() = when {
     recipientState.buffer.isNotBlank() -> EditorErrors.incompleteRecipient
-    recipientState.chips.isEmpty() -> EditorErrors.missingRecipients
+    recipientState.chips.none(String::isNotBlank) -> EditorErrors.missingRecipients
     subject.isBlank() -> EditorErrors.missingSubject
     else -> null
 }
