@@ -152,10 +152,12 @@ class PrivateMessageReplyRestorationScreenTest {
         var owner by mutableStateOf(host().get())
         val model = editor(owner, route)
         lateinit var back: androidx.activity.OnBackPressedDispatcher
+        lateinit var focus: FocusManager
         compose.setContent {
             key(owner) {
                 CompositionLocalProvider(LocalLifecycleOwner provides owner) {
                     back = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+                    focus = LocalFocusManager.current
                     RedfaceTheme(darkTheme = false, dynamicColor = false) {
                         PrivateMessageReplyScreen(route, { _, _ -> }, {}, viewModel = model)
                     }
@@ -195,6 +197,17 @@ class PrivateMessageReplyRestorationScreenTest {
             assertFalse(model.chromeMemory.host.focus.imeBeforeSurface)
             owner = host().get()
         }
+        compose.onNodeWithText("Membres de la discussion").assertDoesNotExist()
+        // H / ED-86 restores the real focus from the closed-IME return, without reopening the manager.
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(selection, model.bodyFieldState.selection)
+            assertTrue(model.chromeMemory.recipientEntryHandled)
+            focus.clearFocus(force = true)
+        }
+        // Only an unfocused body must stay unfocused: entry autofocus has already been consumed.
+        compose.onNode(hasSetTextAction()).assertIsNotFocused()
+        compose.runOnIdle { owner = host().get() }
         compose.onNodeWithText("Membres de la discussion").assertDoesNotExist()
         compose.onNode(hasSetTextAction()).assertIsNotFocused()
         compose.runOnIdle { assertTrue(model.chromeMemory.recipientEntryHandled) }
