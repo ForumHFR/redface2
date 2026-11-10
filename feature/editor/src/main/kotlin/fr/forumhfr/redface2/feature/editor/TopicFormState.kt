@@ -44,11 +44,17 @@ data class TopicFormState(
      * which posts with `subcat=0`). Drives the [canSubmit] branch for the New
      * mode : a sub-category-less cat is submittable with `subcat=0` and no
      * explicit pick, while a cat WITH sub-categories still requires
-     * `selectedSubcat > 0`. Also false after the strict first-post parser rejects
-     * a missing selector; the failed GET never makes that form submittable.
+     * `selectedSubcat > 0`.
      * Defaults to `true` so the historical contract holds.
      */
     val hasSubcategorySelect: Boolean = true,
+    /**
+     * ED-100: the strict first-post parser refused a missing selector. Only the chrome
+     * uses this refusal; [hasSubcategorySelect] keeps mirroring the last loaded form.
+     * Like that mirror, it is not saved in the ED-81 checkpoint and is rebuilt by GET.
+     * A successful form load clears it; other fetch failures keep the refusal.
+     */
+    val firstPostSubcategoryRefused: Boolean = false,
     val pollPresent: Boolean = false,
     val pollEditable: Boolean = false,
     val signatureEnabled: Boolean = false,
@@ -131,7 +137,7 @@ data class TopicFormState(
             val formReady = hasLoadedForm && !isLoadingForm && !isInitializing
             val bodyReady = !isAwaitingInitialBody && bodyText.isNotBlank()
             val idle = !isSubmitting && !submission.blocksBodyMutation && !isUploading
-            val supported = mode == TopicFormMode.New || hasSubcategorySelect
+            val supported = mode == TopicFormMode.New || !firstPostSubcategoryRefused
             val available = formReady && bodyReady && idle
             return available && supported && hasSubmitContext
         }

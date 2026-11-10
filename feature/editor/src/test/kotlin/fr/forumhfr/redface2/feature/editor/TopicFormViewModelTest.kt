@@ -184,7 +184,8 @@ class TopicFormViewModelTest {
         val vm = newViewModel()
         val refused = vm.state.value
         assertFalse(refused.hasLoadedForm)
-        assertFalse(refused.hasSubcategorySelect)
+        assertTrue(refused.firstPostSubcategoryRefused)
+        assertTrue(refused.hasSubcategorySelect)
         assertTrue(TopicFormChromeState(refused).unsupportedFirstPost)
         assertFalse(TopicFormChromeState(refused).showSubcategory)
         assertFalse(refused.sendActivatable)
@@ -197,11 +198,14 @@ class TopicFormViewModelTest {
 
         topicFormRepository.formFailure = java.io.IOException("offline")
         vm.submit(TopicFormIntent.ReloadRequested)
+        assertTrue(vm.state.value.firstPostSubcategoryRefused)
+        assertTrue(vm.state.value.hasSubcategorySelect)
         assertTrue(TopicFormChromeState(vm.state.value).unsupportedFirstPost)
         topicFormRepository.formFailure = null
         vm.submit(TopicFormIntent.ReloadRequested)
         syncBody()
         assertTrue(vm.state.value.hasSubcategorySelect)
+        assertFalse(vm.state.value.firstPostSubcategoryRefused)
         assertFalse(TopicFormChromeState(vm.state.value).unsupportedFirstPost)
         assertTrue(TopicFormChromeState(vm.state.value).showSubcategory)
         assertTrue(vm.state.value.canSubmit)

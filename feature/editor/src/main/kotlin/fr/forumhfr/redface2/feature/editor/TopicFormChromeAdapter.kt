@@ -104,7 +104,7 @@ internal class TopicFormChromeAdapter(
     }
     fun subcategory(id: Int) {
         val offered = source().subcategoryChoices.any { it.id == id && id > 0 }
-        if (state.subcategoryEnabled && source().hasSubcategorySelect && offered) {
+        if (state.subcategoryEnabled && state.showSubcategory && offered) {
             onIntent(TopicFormIntent.SubcatSelected(id))
         }
     }

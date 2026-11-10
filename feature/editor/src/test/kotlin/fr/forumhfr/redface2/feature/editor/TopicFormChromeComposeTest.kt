@@ -96,13 +96,16 @@ class TopicFormChromeComposeTest {
         compose.onNodeWithText("Divers").assertIsNotEnabled()
         compose.runOnIdle {
             fixture.adapter.closeHeader()
-            fixture.state = fixture.state.copy(hasSubcategorySelect = false, isSubmitting = false)
+            fixture.state = fixture.state.copy(firstPostSubcategoryRefused = true, isSubmitting = false)
             fixture.adapter.openHeader()
         }
         compose.onNodeWithText("Sous-catégorie").assertDoesNotExist()
         compose.onNodeWithText("L’envoi du premier message dans une catégorie sans sous-catégorie " +
             "n’est pas disponible.").assertExists()
-        compose.runOnIdle { assertFalse(fixture.adapter.state.postAllowed) }
+        compose.runOnIdle {
+            assertFalse(fixture.adapter.state.postAllowed)
+            assertFalse(fixture.adapter.state.sendActivatable)
+        }
     }
     @Test fun `ED102 poll and restoration occupy distinct slots with accessible header summary`() {
         fixture = TopicFormChromeFixture(TopicFormMode.EditFirstPost)

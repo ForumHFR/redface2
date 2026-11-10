@@ -86,17 +86,35 @@ class TopicFormChromeAdapterTest {
             assertTrue(f.calls.isEmpty())
         }
     }
-    @Test fun `ED100 no select allows creation only and never invents a subcategory`() {
-        TopicFormMode.entries.forEach { mode ->
-            val f = TopicFormChromeFixture(mode)
-            f.state = f.state.copy(hasSubcategorySelect = false,
-                selectedSubcat = if (mode == TopicFormMode.New) null else 1)
-            assertNull(f.adapter.state.selectedSubcategory)
-            assertEquals(mode == TopicFormMode.New, f.adapter.state.postAllowed)
-            assertEquals(mode == TopicFormMode.EditFirstPost, f.adapter.state.unsupportedFirstPost)
-            f.adapter.subcategory(1)
-            assertTrue(f.calls.isEmpty())
-        }
+    @Test fun `ED100 creation without a subcategory stays supported and never invents a choice`() {
+        val f = TopicFormChromeFixture()
+        f.state = f.state.copy(hasSubcategorySelect = false, selectedSubcat = null)
+        assertNull(f.adapter.state.selectedSubcategory)
+        assertFalse(f.adapter.state.showSubcategory)
+        assertTrue(f.adapter.state.postAllowed)
+        assertTrue(f.adapter.state.sendActivatable)
+        assertFalse(f.adapter.state.unsupportedFirstPost)
+        assertNull(f.state.headerError)
+        f.adapter.subcategory(1)
+        assertTrue(f.calls.isEmpty())
+    }
+    @Test fun `ED100 first post refusal hides a retained selector and rejects its callbacks`() {
+        val f = TopicFormChromeFixture(TopicFormMode.EditFirstPost)
+        f.state = f.state.copy(hasSubcategorySelect = false)
+        assertFalse(f.adapter.state.unsupportedFirstPost) // Absence alone is not a parser refusal.
+        f.state = f.state.copy(hasSubcategorySelect = true, firstPostSubcategoryRefused = true)
+        assertTrue(f.state.hasSubcategorySelect)
+        assertTrue(f.adapter.state.unsupportedFirstPost)
+        assertNull(f.adapter.state.selectedSubcategory)
+        assertFalse(f.adapter.state.showSubcategory)
+        assertFalse(f.adapter.state.postAllowed)
+        assertFalse(f.adapter.state.sendActivatable)
+        f.adapter.subcategory(1)
+        assertTrue(f.calls.isEmpty())
+        f.state = f.state.copy(selectedSubcat = null)
+        assertNull(f.state.headerError)
+        f.state = f.state.copy(subject = TextFieldValue())
+        assertEquals(EditorErrors.missingTitle, f.state.headerError)
     }
     @Test fun `ED101 initial blank title opens once only in creation and survives adapter recreation`() {
         TopicFormMode.entries.forEach { mode ->

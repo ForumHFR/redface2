@@ -930,7 +930,8 @@ class TopicFormViewModel @AssistedInject constructor(
         updateState {
             it.copy(
                 isLoadingForm = false,
-                hasSubcategorySelect = it.hasSubcategorySelect && error !is MissingFirstPostSubcategoryException,
+                firstPostSubcategoryRefused = it.firstPostSubcategoryRefused ||
+                    error is MissingFirstPostSubcategoryException,
                 submitError = if (it.submitError == EditorErrors.uncertain) it.submitError else mapped,
             )
         }
@@ -1186,6 +1187,7 @@ class TopicFormViewModel @AssistedInject constructor(
             // without sub-category (false) is submittable with subcat=0 ; a cat
             // with sub-categories (true) keeps requiring an explicit pick.
             hasSubcategorySelect = form.hasSubcategorySelect,
+            firstPostSubcategoryRefused = false,
             pollPresent = form.poll.present,
             pollEditable = form.poll.editableInThisVersion,
             signatureEnabled = signatureEnabled.hydratedValue(form.options.signatureEnabled, hydrateOptions),

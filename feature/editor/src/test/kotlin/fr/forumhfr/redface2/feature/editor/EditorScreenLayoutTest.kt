@@ -317,6 +317,40 @@ class EditorScreenLayoutTest {
 
     @Test
     @Config(qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
+    fun topicFirstPostRefusalKeepsTheLegacyEmptySubcategorySelector() {
+        val state = mutableStateOf(topicState().copy(
+            mode = TopicFormMode.EditFirstPost, hasLoadedForm = false,
+            hasSubcategorySelect = true, isLoadingForm = true,
+        ))
+        lateinit var invalidFormText: String
+        lateinit var unsupportedText: String
+        compose.setContent {
+            invalidFormText = stringResource(UiR.string.editor_error_unknown)
+            unsupportedText = stringResource(R.string.editor_topic_first_post_unsupported)
+            RedfaceTheme(darkTheme = false, dynamicColor = false) {
+                TopicFormContent(
+                    state = state.value,
+                    bodyFieldState = remember { TextFieldState() },
+                    bodyInputTransformation = InputTransformation {},
+                    onIntent = {},
+                    onOpenSmileys = {},
+                )
+            }
+        }
+        compose.onNodeWithText("Sous-catégorie").assertExists()
+        compose.runOnIdle {
+            state.value = state.value.copy(
+                isLoadingForm = false, firstPostSubcategoryRefused = true, submitError = EditorErrors.invalidForm,
+            )
+        }
+        compose.onNodeWithText("Sous-catégorie").assertExists()
+        compose.onNodeWithText("Choisir une sous-catégorie").assertExists()
+        compose.onNodeWithText(invalidFormText).assertExists()
+        compose.onNodeWithText(unsupportedText).assertDoesNotExist()
+    }
+
+    @Test
+    @Config(qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
     fun topicFormLocksBodyAndInsertionControlsWhileSeedUnknown() {
         val state = mutableStateOf(topicState().copy(mode = TopicFormMode.EditFirstPost, isLoadingForm = true))
         val body = TextFieldState("seed")
