@@ -126,15 +126,18 @@ class PostEditorChromeAdapterTest {
         assertNull(host.adapter.detail)
     }
 
-    @Test fun `ED45 bar Masquer acknowledges only the exact uncertain delivery once`() {
+    @Test fun `ED45 Masquer acknowledges only the exact uncertain delivery once`() {
+        // Every uncertain error carries details (ED-112): Masquer is reached from the detail, never the bar.
         val attempt = EditorDraftStore.AttemptToken("alice", host.session.key, "attempt", 1)
         host.transition(host.state.copy(submission = EditorSubmissionState.Uncertain(attempt),
-            submitError = EditorErrors.uncertain.copy(detail = null)))
+            submitError = EditorErrors.uncertain))
         val key = host.events.state.visibleEvent!!.key
-        host.adapter.barActions.onEvent(key, EditorEventAction.Dismiss)
+        host.adapter.barActions.onEvent(key, EditorEventAction.Details)
+        host.adapter.dismissDetails(key)
         assertEquals(listOf(PostEditorIntent.ErrorDismissed), host.calls)
+        assertNull(host.adapter.detail)
         assertNull(host.events.state.visibleEvent)
-        host.adapter.barActions.onEvent(key, EditorEventAction.Dismiss)
+        host.adapter.dismissDetails(key)
         assertEquals(listOf(PostEditorIntent.ErrorDismissed), host.calls)
     }
 

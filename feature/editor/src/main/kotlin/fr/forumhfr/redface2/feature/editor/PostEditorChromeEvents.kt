@@ -88,10 +88,7 @@ internal class PostEditorChromeEvents {
         val error = current.submitError
         val failedRead = readEnded && readFailed && error?.isReadError == true
         if (error != null && (error != previous.submitError || failedRead)) {
-            val key = problem(error, if (error.isReadError && readEnded) read else sending)
-            if (error.cause == EditorCause.Uncertain) {
-                uncertainty = key to (current.submission as? EditorSubmissionState.Uncertain)?.attempt
-            }
+            bindUncertainty(error, problem(error, if (error.isReadError && readEnded) read else sending), current)
         }
         if (readEnded && !readFailed) read?.let {
             dispatch(EditorEventInput.FormLoaded(state.session, it, current.pendingQuotes.isEmpty()))
@@ -121,6 +118,11 @@ internal class PostEditorChromeEvents {
             // ED-88: terminal success is relayed by the existing effect, never an event. The reducer ends the
             // operation silently (R1a-1 PR 1b), so a late delivery for it is dropped.
             sending?.let { dispatch(EditorEventInput.OperationCompleted(state.session, it)) }
+        }
+    }
+    private fun bindUncertainty(error: EditorError, key: EventKey, current: PostEditorState) {
+        if (error.cause == EditorCause.Uncertain) {
+            uncertainty = key to (current.submission as? EditorSubmissionState.Uncertain)?.attempt
         }
     }
     /**
