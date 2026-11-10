@@ -209,7 +209,7 @@ private fun ReplyFormFailure(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHighest, tonalElevation = 2.dp,
             ) {
-                ReplyDraftRestoreChoice(host::restoreDraft, host::discardDraft, state.restoreEnabled,
+                MessageDraftRestoreChoice(host::restoreDraft, host::discardDraft, state.restoreEnabled,
                     Modifier.padding(start = 8.dp, top = 8.dp, end = 8.dp))
             }
             MessageFormErrorState(onRetry = host::retryFormLoad)

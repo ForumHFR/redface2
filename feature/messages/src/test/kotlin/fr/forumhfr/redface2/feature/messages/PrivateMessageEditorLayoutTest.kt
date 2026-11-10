@@ -53,7 +53,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** Reply uses the shared chrome budget; new-message checks retain the legacy body until C4. */
+/** Both MP editors use the shared chrome budget; their ↺ panels render the same [MessageDraftRestoreChoice]. */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "fr-rFR-w360dp-h330dp-xxhdpi")
@@ -171,6 +171,8 @@ class PrivateMessageEditorLayoutTest {
     }
 
     private fun readyReply() = PrivateMessageReplyUiState(isLoadingForm = false, formAvailable = true)
+
+    /** Same ↺ status and offer on both surfaces. */
     private fun openRestore() =
         compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
 
@@ -261,8 +263,9 @@ class PrivateMessageEditorLayoutTest {
         compose.runOnIdle { f.state = f.state.copy(submission = submission) }
     }
 
+    /** The offer stacks its sentence above both actions: scroll the panel to them, as the reply does at 200 dp. */
     private fun openComposeRestore() {
-        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
+        openRestore()
         compose.onNodeWithText("Restaurer").performScrollTo()
     }
 

@@ -1,19 +1,10 @@
 package fr.forumhfr.redface2.feature.messages
 
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.text.input.TextFieldState
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.ui.editor.EditorEventDetails
 import fr.forumhfr.redface2.core.ui.editor.EditorHeaderPanel
@@ -43,7 +34,7 @@ internal fun PrivateMessageReplyChromeSurfaces(
             EditorHeaderPanel(adapter.surface == PrivateMessageReplyChromeSurface.Restore,
                 stringResource(R.string.messages_draft_restore_title), bodyState, adapter::closeSurface,
                 { adapter.returnToBody(onReturnToBody) }, body = body) {
-                ReplyDraftRestoreChoice(adapter::restoreDraft, adapter::discardDraft, adapter.state.restoreEnabled)
+                MessageDraftRestoreChoice(adapter::restoreDraft, adapter::discardDraft, adapter.state.restoreEnabled)
             }
         })
     PrivateMessageReplyChromeSheets(adapter, autoOpenRecipients, onReturnToBody)
@@ -87,30 +78,6 @@ internal fun PrivateMessageReplyChromeSheets(
                     stringResource(R.string.messages_reply_option_email_notification)))
         }
         else -> Unit
-    }
-}
-
-/**
- * Reply draft offer for the ↺ panel and the full-screen form failure. Unlike the one-row banner kept by
- * the new-message editor, the sentence has no line cap, so font scale 1.3 never ellipsizes it.
- */
-@Composable
-internal fun ReplyDraftRestoreChoice(
-    onRestore: () -> Unit,
-    onDiscard: () -> Unit,
-    restoreEnabled: Boolean,
-    modifier: Modifier = Modifier,
-) {
-    Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(stringResource(R.string.messages_draft_restore_message), style = MaterialTheme.typography.bodyMedium)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            TextButton(onRestore, Modifier.heightIn(min = 48.dp), enabled = restoreEnabled) {
-                Text(stringResource(R.string.messages_draft_restore))
-            }
-            TextButton(onDiscard, Modifier.heightIn(min = 48.dp)) {
-                Text(stringResource(R.string.messages_draft_discard))
-            }
-        }
     }
 }
 

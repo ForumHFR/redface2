@@ -42,7 +42,8 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * Actual reply and new-MP content on the common scaffold.
+ * Actual reply and new-MP content on the common scaffold; the legacy submit bar and options were removed at
+ * the R3/C4 junction, and both ↺ panels render [MessageDraftRestoreChoice].
  * Reply: portrait/landscape × font scale 1.0/1.3 × light/dark × empty/multiline, plus restore/event/preview/
  * owner states, an armed send, both statuses at rest and under an event, and the full-screen form failure.
  * Light names are historical; dark reply names end in `_dark`.

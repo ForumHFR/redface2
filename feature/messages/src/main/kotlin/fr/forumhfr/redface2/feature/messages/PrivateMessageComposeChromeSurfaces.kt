@@ -84,13 +84,13 @@ private fun ComposeHeader(
     val restore = adapter.surface == PrivateMessageComposeChromeSurface.Restore
     val header = adapter.surface == PrivateMessageComposeChromeSurface.Header
     val focus = if (adapter.memory.field == PrivateMessageComposeHeaderField.Subject) subjectFocus else recipientFocus
-    EditorHeaderPanel(header || restore, stringResource(if (restore) R.string.messages_compose_restore_title
+    EditorHeaderPanel(header || restore, stringResource(if (restore) R.string.messages_draft_restore_title
         else R.string.messages_compose_header), bodyState, adapter::closeSurface,
         { adapter.returnToBody(onReturnToBody) }, initialFocusRequester = focus.takeIf { header }, body = body) {
-        // The panel has the full height: never ellipsize the offer at 1.3 (gate C4 m8).
-        if (restore) MessageDraftRestoreBanner(adapter::restoreDraft, adapter::discardDraft,
-            restoreEnabled = adapter.state.restoreEnabled, messageMaxLines = Int.MAX_VALUE)
-        else {
+        // Same short title and uncapped offer as the reply's ↺ panel (gate C4 r2, minor 2).
+        if (restore) {
+            MessageDraftRestoreChoice(adapter::restoreDraft, adapter::discardDraft, adapter.state.restoreEnabled)
+        } else {
             EditorRecipientField(adapter.state.source.recipientState, recipients, { subjectFocus.requestFocus() },
                 Modifier.focusRequester(recipientFocus), enabled = adapter.state.scaffold.controlsEnabled)
             EditorSubjectField(adapter.state.source.subject, subject,
