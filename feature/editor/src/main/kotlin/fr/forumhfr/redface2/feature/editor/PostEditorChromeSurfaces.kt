@@ -35,6 +35,7 @@ internal fun PostEditorChromeSurfaces(
     EditorEventDetails(adapter.detail, bodyState, adapter::closeDetails, adapter::reload,
         { adapter.returnToBody(onReturnToBody) },
         onIgnoreQuote = if (source.canIgnorePendingQuote && !source.hasDormantQuote) adapter::ignoreQuote else null,
+        onDismiss = adapter::dismissDetails,
         body = {
             PostEditorHeaderSurface(adapter, source, bodyState, onReturnToBody, body)
         }) { event ->

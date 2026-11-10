@@ -1403,6 +1403,147 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `ED45 ED170 Masquer acknowledges a restored attempt before recreation`() = runTest {
+        val attempt = seedUncertainAttempt()
+        val vm = newReplyViewModel()
+        settleBody()
+        val adapter = vm.chromeAdapter()
+        val key = vm.chromeEvents.state.visibleEvent!!.key
+        adapter.barActions.onEvent(key, EditorEventAction.Details)
+        adapter.dismissDetails(key)
+        settleBody()
+        assertNull(adapter.detail)
+        assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
+        assertNull(draftStore.entries[attempt.key]?.attempt)
+        assertEquals("uncertain body", vm.bodyFieldState.text.toString())
+        vm.viewModelScope.cancel()
+
+        val recreated = newReplyViewModel()
+        settleBody()
+        assertEquals(EditorSubmissionState.Ready, recreated.state.value.submission)
+        assertNull(recreated.state.value.submitError)
+        assertTrue(recreated.chromeEvents.state.events.isEmpty())
+        assertEquals("uncertain body", draftStore.saved[attempt.key]?.body)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `ED45 ED170 Masquer also acknowledges a freshly failed submission`() = runTest {
+        replyRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        val vm = newReplyViewModel()
+        settleBody()
+        vm.editBody(TextFieldValue("sent body"))
+        vm.dispatch(PostEditorIntent.SubmitClicked())
+        settleBody()
+        assertTrue(vm.state.value.submission is EditorSubmissionState.Uncertain)
+        val adapter = vm.chromeAdapter()
+        val key = vm.chromeEvents.state.visibleEvent!!.key
+        adapter.barActions.onEvent(key, EditorEventAction.Details)
+        adapter.dismissDetails(key)
+        settleBody()
+        assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
+        assertNull(draftStore.entries[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)]?.attempt)
+        assertEquals("sent body", vm.bodyFieldState.text.toString())
+        assertEquals(1, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `ED85 ED170 Back closes uncertainty visually and recreation offers it again`() = runTest {
+        val attempt = seedUncertainAttempt()
+        val vm = newReplyViewModel()
+        settleBody()
+        val adapter = vm.chromeAdapter()
+        val key = vm.chromeEvents.state.visibleEvent!!.key
+        adapter.barActions.onEvent(key, EditorEventAction.Details)
+        adapter.back()
+        settleBody()
+        assertNull(adapter.detail)
+        assertNull(vm.chromeEvents.state.visibleEvent)
+        assertEquals(EditorSubmissionState.Uncertain(attempt), vm.state.value.submission)
+        assertEquals(attempt, draftStore.entries[attempt.key]?.attempt?.token)
+        vm.viewModelScope.cancel()
+
+        val recreated = newReplyViewModel()
+        settleBody()
+        assertEquals(EditorSubmissionState.Uncertain(attempt), recreated.state.value.submission)
+        assertEquals(EditorErrors.uncertain, recreated.state.value.submitError)
+        assertEquals(EditorEventContent.Problem(EditorErrors.uncertain),
+            recreated.chromeEvents.state.visibleEvent?.content)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `ED170 Masquer preserves uncertainty on failed durable acknowledgement and recreation`() = runTest {
+        val attempt = seedUncertainAttempt()
+        val vm = newReplyViewModel()
+        settleBody()
+        draftStore.finishFailure = IOException("disk unavailable")
+        val finishCalls = draftStore.finishCalls
+        val adapter = vm.chromeAdapter()
+        val key = vm.chromeEvents.state.visibleEvent!!.key
+        adapter.barActions.onEvent(key, EditorEventAction.Details)
+        adapter.dismissDetails(key)
+        settleBody()
+        assertEquals(finishCalls + 1, draftStore.finishCalls)
+        assertEquals(EditorSubmissionState.Uncertain(attempt), vm.state.value.submission)
+        assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
+        assertEquals(attempt, draftStore.entries[attempt.key]?.attempt?.token)
+        assertEquals("uncertain body", vm.bodyFieldState.text.toString())
+        vm.viewModelScope.cancel()
+
+        val recreated = newReplyViewModel()
+        settleBody()
+        assertEquals(EditorSubmissionState.Uncertain(attempt), recreated.state.value.submission)
+        assertEquals(EditorEventContent.Problem(EditorErrors.uncertain),
+            recreated.chromeEvents.state.visibleEvent?.content)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `ED132 ED170 Masquer leaves a dormant quote and its uncertain attempt unresolved`() = runTest {
+        val attempt = seedUncertainAttempt()
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        settleBody()
+        assertTrue(vm.state.value.hasDormantQuote)
+        val finishCalls = draftStore.finishCalls
+        val pending = draftStore.saved[attempt.key]?.pendingInlineQuoteRequest
+        val adapter = vm.chromeAdapter()
+        val key = vm.chromeEvents.state.visibleEvent!!.key
+        adapter.barActions.onEvent(key, EditorEventAction.Details)
+        adapter.dismissDetails(key)
+        settleBody()
+        assertEquals(finishCalls, draftStore.finishCalls)
+        assertEquals(EditorSubmissionState.Uncertain(attempt), vm.state.value.submission)
+        assertEquals(attempt, draftStore.entries[attempt.key]?.attempt?.token)
+        assertEquals(pending, draftStore.saved[attempt.key]?.pendingInlineQuoteRequest)
+        assertTrue(vm.state.value.hasDormantQuote)
+        assertEquals(0, replyRepository.formFetches)
+        vm.viewModelScope.cancel()
+
+        val recreated = newReplyViewModel(
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        settleBody()
+        assertTrue(recreated.state.value.hasDormantQuote)
+        assertEquals(EditorSubmissionState.Uncertain(attempt), recreated.state.value.submission)
+        assertEquals(EditorEventContent.Problem(EditorErrors.uncertain),
+            recreated.chromeEvents.state.visibleEvent?.content)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    private suspend fun seedUncertainAttempt(): EditorDraftStore.AttemptToken {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val attempt = (draftStore.beginAttempt("tester", key, EditorDraftStore.Draft("uncertain body"), 0)
+            as EditorDraftStore.BeginAttemptResult.Started).token
+        draftStore.finishAttempt(attempt, EditorDraftStore.AttemptOutcome.UNCERTAIN)
+        return attempt
+    }
+
+    private fun PostEditorViewModel.chromeAdapter() = PostEditorChromeAdapter(
+        { state.value }, bodyFieldState, chromeEvents, { dispatch(it) }, {}, {}, chromeMemory,
+    )
+
+    @Test
     fun `successful draft write preserves a newer form loading error`() = runTest {
         val vm = newReplyViewModel()
         settleBody()

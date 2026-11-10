@@ -16,7 +16,8 @@ import fr.forumhfr.redface2.core.ui.R
  * for the open snapshot: a replacement must not be acknowledged by an older close callback.
  * [onClose] must dispatch CloseDetails(key), then consume ReturnToBody by closing the overlay;
  * [onReturnToBody] runs once after [event] becomes null. This is visual acknowledgement only, not resolution of
- * a durable submission or abandonment of a quote. CompleteHeader is handled by EditorHeaderPanel.
+ * a durable submission or abandonment of a quote. [onDismiss] handles the explicit Masquer remedy separately;
+ * the host owns any durable acknowledgement. CompleteHeader is handled by EditorHeaderPanel.
  * Supply the Message field's [bodyState] so focus transfers preserve its selection. As with
  * [EditorHeaderPanel], the host captures IME visibility before opening, prevents automatic keyboard
  * reopening if it was closed, and restores focus synchronously and that IME state in [onReturnToBody].
@@ -35,6 +36,7 @@ fun EditorEventDetails(
     onReturnToBody: () -> Unit,
     modifier: Modifier = Modifier,
     onIgnoreQuote: ((EventKey) -> Unit)? = null,
+    onDismiss: (EventKey) -> Unit = onClose,
     body: @Composable () -> Unit,
     content: @Composable ColumnScope.(EditorEvent) -> Unit = {},
 ) {
@@ -65,7 +67,7 @@ fun EditorEventDetails(
                     Text(stringResource(R.string.editor_action_ignore_quote))
                 }
             }
-            TextButton(onClick = close, modifier = Modifier.focusRequester(closeFocus)) {
+            TextButton(onClick = { onDismiss(event.key) }, modifier = Modifier.focusRequester(closeFocus)) {
                 Text(stringResource(R.string.editor_action_dismiss))
             }
         }

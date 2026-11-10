@@ -33,6 +33,7 @@ import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
@@ -144,6 +145,22 @@ class PostEditorChromeComposeTest {
         compose.runOnIdle {
             assertEquals(listOf(PostEditorIntent.ReloadRequested, PostEditorIntent.PendingQuoteIgnored,
                 PostEditorIntent.PendingQuoteResumed), host.calls)
+        }
+    }
+
+    @Test fun `ED45 explicit Masquer in the post detail forwards acknowledgement without sending`() {
+        val attempt = EditorDraftStore.AttemptToken("alice", host.session.key, "attempt", 1)
+        host.transition(host.state.copy(submission = EditorSubmissionState.Uncertain(attempt),
+            submitError = EditorErrors.uncertain))
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Envoi incertain, Afficher les détails").performClick()
+        compose.runOnIdle { assertTrue(host.calls.isEmpty()) }
+        compose.onNodeWithText("Masquer").performClick()
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(listOf(PostEditorIntent.ErrorDismissed), host.calls)
+            assertNull(host.adapter.detail)
+            assertNull(host.events.state.visibleEvent)
         }
     }
 

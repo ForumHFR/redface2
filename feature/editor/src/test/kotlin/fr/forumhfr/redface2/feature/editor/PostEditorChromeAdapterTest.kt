@@ -126,6 +126,79 @@ class PostEditorChromeAdapterTest {
         assertNull(host.adapter.detail)
     }
 
+    @Test fun `ED45 bar Masquer acknowledges only the exact uncertain delivery once`() {
+        val attempt = EditorDraftStore.AttemptToken("alice", host.session.key, "attempt", 1)
+        host.transition(host.state.copy(submission = EditorSubmissionState.Uncertain(attempt),
+            submitError = EditorErrors.uncertain.copy(detail = null)))
+        val key = host.events.state.visibleEvent!!.key
+        host.adapter.barActions.onEvent(key, EditorEventAction.Dismiss)
+        assertEquals(listOf(PostEditorIntent.ErrorDismissed), host.calls)
+        assertNull(host.events.state.visibleEvent)
+        host.adapter.barActions.onEvent(key, EditorEventAction.Dismiss)
+        assertEquals(listOf(PostEditorIntent.ErrorDismissed), host.calls)
+    }
+
+    @Test fun `ED45 an old uncertainty detail cannot acknowledge a replacement or close its detail`() {
+        val attempt = EditorDraftStore.AttemptToken("alice", host.session.key, "old", 1)
+        host.transition(host.state.copy(submission = EditorSubmissionState.Uncertain(attempt),
+            submitError = EditorErrors.uncertain))
+        val old = host.events.state.visibleEvent!!
+        host.adapter.barActions.onEvent(old.key, EditorEventAction.Details)
+        host.transition(host.state.copy(submission = EditorSubmissionState.PersistingAttempt(
+            SubmissionToken(3, host.session)), submitError = null))
+        host.transition(host.state.copy(submission = EditorSubmissionState.Uncertain(attempt.copy(id = "new")),
+            submitError = EditorErrors.uncertain))
+        val replacement = host.events.state.visibleEvent!!
+        assertNotEquals(old.key, replacement.key)
+        host.adapter.dismissDetails(old.key)
+        assertTrue(host.calls.isEmpty())
+        assertEquals(replacement, host.events.state.visibleEvent)
+        host.adapter.barActions.onEvent(replacement.key, EditorEventAction.Details)
+        host.adapter.dismissDetails(old.key)
+        assertEquals(replacement, host.adapter.detail)
+        assertTrue(host.calls.isEmpty())
+        host.adapter.dismissDetails(replacement.key)
+        assertEquals(listOf(PostEditorIntent.ErrorDismissed), host.calls)
+    }
+
+    @Test fun `ED170 cancellation can deliver uncertainty before its submission state`() {
+        val attempt = EditorDraftStore.AttemptToken("alice", host.session.key, "cancelled", 1)
+        host.transition(host.state.copy(submission = EditorSubmissionState.Sending(attempt),
+            submitError = EditorErrors.uncertain))
+        host.transition(host.state.copy(submission = EditorSubmissionState.Uncertain(attempt)))
+        val key = host.events.state.visibleEvent!!.key
+        host.adapter.barActions.onEvent(key, EditorEventAction.Details)
+        host.adapter.dismissDetails(key)
+        assertEquals(listOf(PostEditorIntent.ErrorDismissed), host.calls)
+    }
+
+    @Test fun `ED170 a retained delivery cannot borrow a different or accepted attempt`() {
+        val attempt = EditorDraftStore.AttemptToken("alice", host.session.key, "old", 1)
+        listOf(EditorSubmissionState.Uncertain(attempt.copy(id = "new")),
+            EditorSubmissionState.Uncertain(attempt, accepted = true)).forEachIndexed { index, newer ->
+            host.transition(host.state.copy(submission = EditorSubmissionState.Uncertain(attempt),
+                submitError = null))
+            host.transition(host.state.copy(submitError = EditorErrors.uncertain))
+            val key = host.events.state.visibleEvent!!.key
+            host.adapter.barActions.onEvent(key, EditorEventAction.Details)
+            host.transition(host.state.copy(submission = newer))
+            host.adapter.dismissDetails(key)
+            assertTrue("attempt guard $index", host.calls.isEmpty())
+        }
+    }
+
+    @Test fun `ED170 a retained detail cannot acknowledge a new session`() {
+        val attempt = EditorDraftStore.AttemptToken("alice", host.session.key, "attempt", 1)
+        host.transition(host.state.copy(submission = EditorSubmissionState.Uncertain(attempt),
+            submitError = EditorErrors.uncertain))
+        val key = host.events.state.visibleEvent!!.key
+        host.adapter.barActions.onEvent(key, EditorEventAction.Details)
+        host.events.open(host.session.copy(id = "new-opening"))
+        host.adapter.dismissDetails(key)
+        assertTrue(host.calls.isEmpty())
+        assertNull(host.events.state.visibleEvent)
+    }
+
     @Test fun `ED82 upload progress and fifty body emissions keep identity and acknowledged terminals stay hidden`() {
         host.transition(host.state.copy(isUploading = true, uploadProgress = UploadProgress(0, 3)))
         val key = host.events.state.visibleEvent!!.key

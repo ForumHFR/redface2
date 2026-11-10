@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.editor
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorSession
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.EditorUploadToken
@@ -29,6 +30,7 @@ internal class PostEditorChromeEvents {
     private var read: OperationRef.Local? = null
     private var upload: OperationRef.Upload? = null
     private var sending: OperationRef.Submission? = null
+    private var uncertainty: Pair<EventKey, EditorDraftStore.AttemptToken?>? = null
     private var readFailed = false
     val visibleEvent get() = state.visibleEvent?.let { event ->
         val content = event.content as? EditorEventContent.InProgress
@@ -51,7 +53,13 @@ internal class PostEditorChromeEvents {
         read = null
         upload = null
         sending = null
+        uncertainty = null
     }
+
+    /** Bind the exact delivery to its durable attempt, including restored attempts without a submission token. */
+    fun uncertainAttempt(key: EventKey) = uncertainty?.takeIf {
+        it.first == key && key.session == state.session
+    }?.second
 
     /** Text, selection, previews and arm observations do not deliver an occurrence. */
     fun observe(previous: PostEditorState, current: PostEditorState) {
@@ -64,6 +72,10 @@ internal class PostEditorChromeEvents {
         }
         observeUpload(previous, current)
         observeErrors(previous, current)
+        // Cancellation may deliver the error before publishing the uncertain state. Bind once, never to a retry.
+        uncertainty = uncertainty?.let { (key, attempt) ->
+            key to (attempt ?: (current.submission as? EditorSubmissionState.Uncertain)?.attempt)
+        }
         if (current.legacyQuoteRequestDropped && !previous.legacyQuoteRequestDropped) {
             deliver(local(EditorLocalOperation.Notice), EditorEventContent.Information(
                 EditorText(EditorR.string.editor_chrome_legacy_quote_summary),
@@ -75,7 +87,10 @@ internal class PostEditorChromeEvents {
         val error = current.submitError
         val failedRead = readEnded && readFailed && error?.isReadError == true
         if (error != null && (error != previous.submitError || failedRead)) {
-            problem(error, if (error.isReadError && readEnded) read else sending)
+            val key = problem(error, if (error.isReadError && readEnded) read else sending)
+            if (error.cause == EditorCause.Uncertain) {
+                uncertainty = key to (current.submission as? EditorSubmissionState.Uncertain)?.attempt
+            }
         }
         if (readEnded && !readFailed) read?.let {
             dispatch(EditorEventInput.FormLoaded(state.session, it, current.pendingQuotes.isEmpty()))
@@ -128,18 +143,19 @@ internal class PostEditorChromeEvents {
             ))
         }
     }
-    private fun problem(error: EditorError, operation: OperationRef?) {
+    private fun problem(error: EditorError, operation: OperationRef?): EventKey {
         val fallback = if (error.cause == EditorCause.DraftSaveFailed) {
             EditorLocalOperation.DraftSave
         } else { EditorLocalOperation.Notice }
         val active = operation?.takeIf { ref -> state.currentOperations.any { it.ref == ref && !it.finished } }
-        deliver(active ?: local(fallback), EditorEventContent.Problem(error))
+        return deliver(active ?: local(fallback), EditorEventContent.Problem(error))
     }
     private fun local(kind: EditorLocalOperation) = OperationRef.Local(kind, ++sequence)
-    private fun deliver(operation: OperationRef, content: EditorEventContent, started: Boolean = false) {
+    private fun deliver(operation: OperationRef, content: EditorEventContent, started: Boolean = false): EventKey {
         val occurrence = state.currentOperations.find { it.ref == operation }?.lastOccurrence?.plus(1) ?: 0L
         val event = EditorEvent(EventKey(state.session, operation, occurrence), content, ++arrival)
         dispatch(if (started) EditorEventInput.OperationStarted(event) else EditorEventInput.Received(event))
+        return event.key
     }
 }
 

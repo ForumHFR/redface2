@@ -6,6 +6,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.ui.R as UiR
 import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitActions
@@ -171,9 +172,23 @@ internal class PostEditorChromeAdapter(
         // The bar uses Dismiss for ED-44, even when this information exposes ED-45 details.
         if (action == EditorEventAction.Dismiss && consumeInformation() || event.action != action) return
         events.dispatch(EditorEventInput.Activate(key))
+        if (action == EditorEventAction.Dismiss) acknowledgeUncertainty(key)
         if (action == EditorEventAction.Details) { captureBody(); detail = event }
     }
 
+    /** Explicit Masquer only; Back and overlay closing keep the durable attempt. */
+    fun dismissDetails(key: EventKey) {
+        if (detail?.key != key) return
+        val current = currentDetail(key) != null
+        closeDetails(key)
+        if (current) acknowledgeUncertainty(key)
+    }
+    private fun acknowledgeUncertainty(key: EventKey) {
+        val attempt = events.uncertainAttempt(key) ?: return
+        if (source().submission == EditorSubmissionState.Uncertain(attempt)) {
+            onIntent(PostEditorIntent.ErrorDismissed)
+        }
+    }
     fun closeDetails(key: EventKey) {
         if (detail?.key != key) return
         events.dispatch(EditorEventInput.CloseDetails(key))
