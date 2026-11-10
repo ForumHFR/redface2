@@ -146,7 +146,7 @@ internal fun PrivateMessageReplyContent(
         else -> CompositionLocalProvider(LocalEditorTooltipHost provides remember { EditorTooltipHost() }) {
             PrivateMessageReplyChrome(host, bodyFieldState, bodyInputTransformation, bodyScrollState,
                 smileyPicker, autoOpenRecipientManager && !recipientEntryHandled, window, modifier,
-                bodyCaretRevealResetKey)
+                bodyCaretRevealResetKey, autoFocusBody = !autoOpenRecipientManager)
         }
     }
 }
@@ -163,6 +163,7 @@ private fun PrivateMessageReplyChrome(
     window: EditorWindowMetrics,
     modifier: Modifier,
     bodyCaretRevealResetKey: () -> Int,
+    autoFocusBody: Boolean,
 ) {
     val tooltips = requireNotNull(LocalEditorTooltipHost.current)
     val back = {
@@ -174,7 +175,9 @@ private fun PrivateMessageReplyChrome(
     EditorScaffold(body, window, host.title(), host.state.context, host.chrome(),
         host.barActions, host.submitState, host.submitActions, host.imageActions, host::closeRequested,
         modifier = modifier, bodyFocusRequester = focus, bodyScrollState = scroll,
-        inputTransformation = transformation, autoFocus = true, surfaceFocus = host.focusMemory,
+        // The route's manager entry owns initial focus, including while its owner form is loading.
+        // Keep this independent of the one-shot latch, which changes as soon as the manager opens.
+        inputTransformation = transformation, autoFocus = autoFocusBody, surfaceFocus = host.focusMemory,
         bodyCaretRevealResetKey = bodyCaretRevealResetKey,
         onSystemBack = back,
         fieldArea = { field -> PrivateMessageReplyChromePreview(host, body, focus, field) },

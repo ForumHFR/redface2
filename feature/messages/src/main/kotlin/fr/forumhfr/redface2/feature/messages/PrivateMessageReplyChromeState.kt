@@ -10,7 +10,7 @@ internal data class PrivateMessageReplyChromeState(val source: PrivateMessageRep
     private val busy = source.isSubmitting || source.submission.blocksBodyMutation
     val sendActivatable = source.canSubmit
     val postAllowed = source.canSubmit
-    val context = source.conversationTitle.takeIf { source.formAvailable && !source.isLoadingForm }.orEmpty()
+    val context = source.conversationTitle.takeIf { source.formAvailable }.orEmpty()
     val scaffold = EditorScaffoldChrome(
         previewVisible = source.isPreviewVisible,
         controlsEnabled = !source.isInitializing && !busy,

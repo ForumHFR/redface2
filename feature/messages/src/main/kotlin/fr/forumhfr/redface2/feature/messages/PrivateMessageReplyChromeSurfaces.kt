@@ -50,14 +50,19 @@ internal fun PrivateMessageReplyChromeSheets(
     autoOpenRecipients: Boolean,
     onReturnToBody: () -> Unit,
 ) {
-    LaunchedEffect(adapter, autoOpenRecipients, adapter.state.recipientsEnabled) {
+    val source = adapter.state.source
+    LaunchedEffect(adapter, autoOpenRecipients, adapter.state.recipientsEnabled, adapter.scaffoldChrome().event?.key) {
         adapter.openInitialRecipients(autoOpenRecipients)
+    }
+    LaunchedEffect(adapter, source.canManageRecipients) {
+        if (!source.canManageRecipients && adapter.surface == PrivateMessageReplyChromeSurface.Recipients) {
+            adapter.closeSurface()
+        }
     }
     // The sheet must be removed before the body can take focus and restore its captured IME state.
     LaunchedEffect(adapter.returnGeneration) {
         if (adapter.consumeReturn()) adapter.returnToBody(onReturnToBody)
     }
-    val source = adapter.state.source
     when (adapter.surface) {
         PrivateMessageReplyChromeSurface.Recipients -> if (source.canManageRecipients) RecipientManagerSheet(
             source.recipients, adapter.state.recipientsEnabled,

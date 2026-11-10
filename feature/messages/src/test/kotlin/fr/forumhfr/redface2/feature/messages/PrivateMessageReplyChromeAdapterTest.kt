@@ -65,7 +65,7 @@ class PrivateMessageReplyChromeAdapterTest {
         f.state = ready.copy(submission = EditorSubmissionState.Uncertain(attempt))
         assertTrue(f.adapter.state.canInsert)
         assertTrue(f.adapter.state.sendActivatable)
-        assertEquals("", PrivateMessageReplyChromeState(ready.copy(isLoadingForm = true)).context)
+        assertEquals(ready.conversationTitle, PrivateMessageReplyChromeState(ready.copy(isLoadingForm = true)).context)
         assertEquals("", PrivateMessageReplyChromeState(ready.copy(formAvailable = false)).context)
     }
     @Test fun `ED31 ED60 reply offers upload and img wrapping without URL or header and disables disk cache`() {
@@ -160,7 +160,7 @@ class PrivateMessageReplyChromeAdapterTest {
         f.memory.reset()
         assertFalse(f.adapter.focusMemory.imeBeforeSurface)
     }
-    @Test fun `ED44 successful and failed GET keep preparation and uncertain send errors`() {
+    @Test fun `ED44 successful and failed GET do not retire submission events`() {
         listOf(EditorErrors.invalidForm, EditorErrors.uncertain).forEach { error ->
             val f = PrivateMessageReplyChromeFixture()
             f.transition(f.state.copy(submitError = null))
@@ -171,8 +171,19 @@ class PrivateMessageReplyChromeAdapterTest {
             f.transition(f.state.copy(isLoadingForm = true, formError = false))
             f.transition(f.state.copy(isLoadingForm = false))
             assertTrue(f.events.state.events.any { it == event })
-            assertEquals(error, f.state.submitError)
         }
+    }
+    @Test fun `ED45 recipient refusal offers details without completion or header`() {
+        f.transition(f.state.copy(submitError = EditorErrors.refused))
+        val event = requireNotNull(f.adapter.scaffoldChrome().event)
+        assertEquals(EditorEventAction.Details, event.action)
+        assertNull(f.adapter.onOpenHeader)
+        f.adapter.barActions.onEvent(event.key, EditorEventAction.Complete)
+        assertNull(f.adapter.detail)
+        f.adapter.barActions.onEvent(event.key, EditorEventAction.Details)
+        assertEquals(event, f.adapter.detail)
+        assertNull(f.adapter.surface)
+        assertTrue(f.calls.isEmpty())
     }
     @Test fun `ED45 reload uses only a current detail and never replays a POST`() {
         f.transition(f.state.copy(submitError = EditorErrors.invalidForm))

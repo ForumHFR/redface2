@@ -263,10 +263,12 @@ class PrivateMessageReplyViewModelTest {
         assertEquals("Titre privé du formulaire", vm.state.value.conversationTitle)
         vm.chromeMemory.finishRecipientEntry()
         vm.chromeMemory.host.focus.imeBeforeSurface = true
-        coEvery { repository.fetchReplyForm(any(), any()) } returns form().copy(sujet = "Titre actualisé")
+        coEvery { repository.fetchReplyForm(any(), any()) } returns ownerForm().copy(sujet = "Titre actualisé")
         vm.retryFormLoad()
         advanceUntilIdle()
         assertEquals("Titre actualisé", vm.state.value.conversationTitle)
+        assertTrue(vm.state.value.canManageRecipients)
+        assertEquals(listOf("alice", "bob", "Bébé Yoda", "stitch+", "Administration"), vm.state.value.recipients)
         auth.value = AuthState.Anonymous
         advanceUntilIdle()
         assertEquals("", vm.state.value.conversationTitle)

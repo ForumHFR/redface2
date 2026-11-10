@@ -448,7 +448,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             conversationTitle = form.sujet,
             formError = false,
             // InvalidForm here is a submission preparation failure, never a failed GET (ED-44).
-            // Keep its banner aligned with the send event until acknowledgement or the next send.
+            // A GET clears neither submitError nor its event; visual acknowledgement only retires the event.
             signatureEnabled = if (hydrateOptions) {
                 form.options.signatureEnabled || form.hiddenFields["signature"] == "1"
             } else {

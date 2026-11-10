@@ -9,6 +9,7 @@ import fr.forumhfr.redface2.core.ui.R as UiR
 import fr.forumhfr.redface2.core.ui.editor.EditorAppBarStatus
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorAction
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
+import fr.forumhfr.redface2.core.ui.editor.EditorEventRank
 import fr.forumhfr.redface2.core.ui.editor.EditorHost
 import fr.forumhfr.redface2.core.ui.editor.EditorHostSurfaces
 import fr.forumhfr.redface2.core.ui.editor.EventKey
@@ -50,6 +51,8 @@ internal class PrivateMessageReplyChromeAdapter(
     }
     fun openInitialRecipients(requested: Boolean) {
         if (!requested || memory.recipientEntryHandled || !state.recipientsEnabled) return
+        // Automatic entry is not a gesture: leave information visible until the user acknowledges it.
+        if (events.visibleEvent?.rank == EditorEventRank.Information) return
         openRecipients()
         if (surface == PrivateMessageReplyChromeSurface.Recipients) memory.finishRecipientEntry()
     }

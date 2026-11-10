@@ -13,12 +13,15 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextInputSelection
 import androidx.compose.ui.text.TextRange
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -163,8 +166,14 @@ class PrivateMessageReplyRestorationScreenTest {
         }
         compose.onNodeWithText("Membres de la discussion").assertIsDisplayed()
         val selection = TextRange(6, 1)
+        // Populate the body before opening a manager, as a user would. Editing behind the initial
+        // sheet bypasses captureBody and lets BTF2 collapse an uncaptured range during disposal.
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNode(hasSetTextAction()).performClick().performTextInput("Bonjour")
+            .performTextInputSelection(selection)
+        compose.onNodeWithContentDescription("2 destinataires, gérer").performClick()
+        compose.onNodeWithText("Membres de la discussion").assertIsDisplayed()
         compose.runOnIdle {
-            model.bodyFieldState.edit { replace(0, length, "Bonjour"); this.selection = selection }
             model.chromeMemory.host.focus.imeBeforeSurface = false
             owner = host().get() // Fresh composition/activity owner, same VM as a configuration change.
         }
@@ -174,10 +183,10 @@ class PrivateMessageReplyRestorationScreenTest {
         compose.runOnIdle {
             assertEquals(selection, model.bodyFieldState.selection)
             assertFalse(model.chromeMemory.host.focus.imeBeforeSurface)
-            assertTrue(model.chromeMemory.host.focus.autoFocusConsumed)
             owner = host().get()
         }
         compose.onNodeWithText("Membres de la discussion").assertDoesNotExist()
+        compose.onNode(hasSetTextAction()).assertIsNotFocused()
         compose.runOnIdle { assertTrue(model.chromeMemory.recipientEntryHandled) }
     }
 

@@ -20,9 +20,17 @@ internal data class PrivateMessageReplyChromeActions(
 )
 
 internal fun PrivateMessageReplyViewModel.chromeActions() = PrivateMessageReplyChromeActions(
-    EditorHostActions(::onSubmit, ::onSubmitConfirmed, ::onSubmitConfirmationDismissed,
-        ::onToolbarAction, ::onTogglePreview, ::onCloseRequested),
-    ::onToggleSignature, ::onToggleSmileyDisabled, ::onToggleEmailNotification, ::onSmileySelected,
-    ::onImagePickerEvent, ::onDraftRestoreRequested, ::onDraftDiscardRequested, ::onAddRecipient, ::onRemoveRecipient,
-    ::retryFormLoad,
+    host = EditorHostActions(onArm = ::onSubmit, onConfirm = ::onSubmitConfirmed,
+        onDisarm = ::onSubmitConfirmationDismissed, onFormat = ::onToolbarAction,
+        onPreview = ::onTogglePreview, onClose = ::onCloseRequested),
+    signature = ::onToggleSignature,
+    smileyDisabled = ::onToggleSmileyDisabled,
+    notification = ::onToggleEmailNotification,
+    smiley = ::onSmileySelected,
+    picker = ::onImagePickerEvent,
+    restoreDraft = ::onDraftRestoreRequested,
+    discardDraft = ::onDraftDiscardRequested,
+    addRecipient = ::onAddRecipient,
+    removeRecipient = ::onRemoveRecipient,
+    reloadForm = ::retryFormLoad,
 )
