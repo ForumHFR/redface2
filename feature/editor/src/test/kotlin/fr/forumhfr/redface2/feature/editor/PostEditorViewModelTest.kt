@@ -1085,6 +1085,8 @@ class PostEditorViewModelTest {
         get.complete(Unit)
         settleBody()
         assertNull(vm.state.value.submitError)
+        // Resuming the quote acknowledges through PersistingAttempt too: no « Envoi… » may remain.
+        vm.assertNoSendingEvent()
     }
 
     @Test
