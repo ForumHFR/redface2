@@ -19,6 +19,8 @@ import androidx.compose.ui.node.ModifierNodeElement
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 
 /** Session memory only: neither this snapshot nor an observation belongs in a Saver/checkpoint. */
 internal class EditorBodyFocusMemory {
@@ -36,25 +38,26 @@ internal data class EditorBodyFocusSnapshot(val focused: Boolean = false, val im
 /** One field attachment. Old window callbacks cannot overwrite the next attachment's snapshot. */
 internal class EditorBodyFocusObservation(private val memory: EditorBodyFocusMemory, imeVisible: Boolean) {
     val restore = memory.snapshot.takeIf { it.focused }
+    val showImeOnRestore = restore?.imeVisible != false
     private val generation = ++memory.generation
     private var focused = false
     private var imeVisible = imeVisible
-    private var frozen = false
+    private val frozen = MutableStateFlow(false)
     private var detached = false
     private var restoring = restore != null
-    val canRestore: Boolean get() = !frozen && !detached && generation == memory.generation
+    val canRestore: Boolean get() = !frozen.value && !detached && generation == memory.generation
 
     fun focusChanged(value: Boolean) { focused = value; record() }
     fun imeChanged(value: Boolean) { imeVisible = value; record() }
     fun restored() { restoring = false; record() }
-    fun resume() { frozen = false; record() }
-    fun freeze() { record(); frozen = true }
+    fun resume() { frozen.value = false; record() }
+    fun freeze() { record(); frozen.value = true }
     fun detach() { freeze(); detached = true }
+    suspend fun awaitResumed() { frozen.first { !it } }
 
     private fun record() {
-        if (!frozen && !detached && !restoring && generation == memory.generation) {
-            memory.snapshot = EditorBodyFocusSnapshot(focused, imeVisible)
-        }
+        if (!canRestore || restoring) return
+        memory.snapshot = EditorBodyFocusSnapshot(focused, imeVisible)
     }
 }
 
@@ -121,6 +124,9 @@ internal fun RestoreRecreatedEditorBodyFocus(
             // Input options are already composed. Finish the old synchronous detach/Y' pass and let
             // the new field attach before requesting focus; do not race its selection checkpoint.
             withFrameNanos { }
+            // A pause without stop can leave this composition alive when the frame arrives.
+            // Keep the snapshot pending until resume rather than consuming it while frozen.
+            observation.awaitResumed()
             if (currentAllowed && observation.canRestore) requestEditorBodyFocus(state, focus)
         }
         observation.restored()

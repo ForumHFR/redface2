@@ -13,8 +13,11 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.focus.FocusManager
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.input.InputModeManager
 import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.PlatformTextInputInterceptor
 import androidx.compose.ui.semantics.SemanticsActions
@@ -60,6 +63,7 @@ import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.R as UiR
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
@@ -215,14 +219,20 @@ class PostEditorRestorationScreenTest {
         compose.runOnIdle { assertEquals(before, sessions); assertFalse(inputActive) }
     }
 
-    @Test
-    fun ownerRecreationKeepsFocusedReversedBodySelection() {
+    @Test fun ownerRecreationKeepsFocusedReversedBodySelection() = checkFocusedBodyRecreation(imeOpen = false)
+    @Test fun ownerRecreationKeepsFocusedReversedBodySelectionWithOpenKeyboard() =
+        checkFocusedBodyRecreation(imeOpen = true)
+
+    private fun checkFocusedBodyRecreation(imeOpen: Boolean) {
         var sessions = 0
         prepareRotationHost { sessions++ }
         ActivityScenario.launch(PostEditorRotationHostActivity::class.java).use { scenario ->
             compose.onNode(hasSetTextAction()).assertIsFocused()
             lateinit var original: PostEditorRotationHostActivity
-            scenario.onActivity { original = it }
+            scenario.onActivity {
+                original = it
+                assertEquals(InputMode.Touch, it.inputMode.inputMode)
+            }
             val model = original.model
             val body = "Bonjour le forum"
             val selection = TextRange(6, 1)
@@ -231,55 +241,75 @@ class PostEditorRestorationScreenTest {
                     replace(0, length, body)
                     this.selection = selection
                 }
-                // Actual visibility is captured independently of the input session. Keep the body focused.
-                ViewCompat.dispatchApplyWindowInsets(original.view, WindowInsetsCompat.Builder()
-                    .setInsets(WindowInsetsCompat.Type.ime(), Insets.NONE)
-                    .setVisible(WindowInsetsCompat.Type.ime(), false).build())
+                // Visibility is captured independently of the input session. Keep the body focused.
+                original.setImeVisible(imeOpen)
             }
-            val before = compose.runOnIdle { assertTrue(model.chromeMemory.focus.autoFocusConsumed); sessions }
-            repeat(2) {
+            val before = compose.runOnIdle {
+                assertTrue(model.chromeMemory.focus.autoFocusConsumed)
+                assertTrue(sessions > 0)
+                sessions
+            }
+            repeat(2) { recreation ->
                 scenario.recreate()
                 compose.onNode(hasSetTextAction()).assertIsFocused()
                 scenario.onActivity {
                     assertNotSame(original, it)
                     assertTrue(original.isChangingConfigurations)
                     assertSame(model, it.model)
+                    assertEquals(InputMode.Touch, it.inputMode.inputMode)
                     original = it
                 }
                 compose.runOnIdle {
                     assertEquals(body, model.bodyFieldState.text.toString())
                     assertEquals(selection, model.bodyFieldState.selection)
-                    assertEquals(before, sessions) // Restored focus, but no new closed-IME session.
+                    assertEquals(before + if (imeOpen) recreation + 1 else 0, sessions)
                 }
                 assertCaretVisible(model, expected = true)
+                // Robolectric has no real IME: seed visibility for the NEXT pause, after the assertions.
+                scenario.onActivity { it.setImeVisible(imeOpen) }
+                compose.waitForIdle()
             }
         }
     }
 
-    @Test fun rotationKeepsPostRestorePanelFocused() = checkCoveredPost(PostEditorChromeSurface.Restore)
+    @Test fun rotationKeepsPostRestorePanelOverTheBody() = checkCoveredPost(PostEditorChromeSurface.Restore)
     @Test fun rotationKeepsPostOptionsOverTheBody() = checkCoveredPost(PostEditorChromeSurface.Options)
     @Test fun rotationKeepsPostPreviewOverTheBody() = checkCoveredPost(null)
 
     private fun checkCoveredPost(surface: PostEditorChromeSurface?) {
         store.preload(EditorDraftKey.reply(23, 35421), EditorDraftStore.Draft(body = "Brouillon"))
-        prepareRotationHost()
+        var sessions = 0
+        prepareRotationHost { sessions++ }
         ActivityScenario.launch(PostEditorRotationHostActivity::class.java).use { scenario ->
             compose.onNode(hasSetTextAction()).assertIsFocused()
+            lateinit var model: PostEditorViewModel
+            scenario.onActivity { model = it.model }
             val action = when (surface) {
                 PostEditorChromeSurface.Restore -> "Brouillon retrouvé, restaurer ou ignorer"
                 PostEditorChromeSurface.Options -> "Options"
-                else -> "Afficher l’aperçu"
+                else -> ApplicationProvider.getApplicationContext<Context>().getString(UiR.string.editor_preview_show)
             }
             compose.onNodeWithContentDescription(action).performClick()
             compose.waitForIdle()
+            assertPostCover(surface)
+            val before = compose.runOnIdle { sessions }
             scenario.recreate()
             compose.waitForIdle()
             compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
-            when (surface) {
-                PostEditorChromeSurface.Restore -> compose.onNodeWithText("Retour au message").assertIsFocused()
-                PostEditorChromeSurface.Options -> compose.onNodeWithText("Options du message").assertIsDisplayed()
-                else -> compose.onNodeWithTag("post-editor-preview").assertIsDisplayed()
+            assertPostCover(surface)
+            compose.runOnIdle {
+                assertEquals(surface, model.chromeMemory.surface)
+                assertEquals(surface == null, model.state.value.isPreviewVisible)
+                assertEquals(before, sessions)
             }
+        }
+    }
+
+    private fun assertPostCover(surface: PostEditorChromeSurface?) {
+        when (surface) {
+            PostEditorChromeSurface.Restore -> compose.onNodeWithText("Retour au message").assertIsDisplayed()
+            PostEditorChromeSurface.Options -> compose.onNodeWithText("Options du message").assertIsDisplayed()
+            else -> compose.onNodeWithTag("post-editor-preview").assertIsDisplayed()
         }
     }
 
@@ -297,6 +327,7 @@ class PostEditorRestorationScreenTest {
             activity.model = model
             activity.setContent {
                 activity.view = LocalView.current
+                activity.inputMode = LocalInputModeManager.current
                 InterceptPlatformTextInput(input) {
                     RedfaceTheme(darkTheme = false, dynamicColor = false) {
                         PostEditorScreen(request, { _, _, _, _ -> }, viewModel = model)
@@ -513,10 +544,17 @@ class PostEditorRestorationScreenTest {
 internal class PostEditorRotationHostActivity : ComponentActivity() {
     lateinit var model: PostEditorViewModel
     lateinit var view: android.view.View
+    lateinit var inputMode: InputModeManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         render(this)
+    }
+
+    fun setImeVisible(visible: Boolean) {
+        ViewCompat.dispatchApplyWindowInsets(view, WindowInsetsCompat.Builder()
+            .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, if (visible) 120 else 0))
+            .setVisible(WindowInsetsCompat.Type.ime(), visible).build())
     }
 
     companion object {

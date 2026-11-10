@@ -4,7 +4,6 @@ import android.content.ComponentName
 import android.content.Context
 import android.os.Bundle
 import android.view.View
-import android.view.inputmethod.InputMethodManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -34,11 +33,11 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.PlatformTextInputInterceptor
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
-import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -74,9 +73,9 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * H / ED-86: new Activity, window and composition, retained VM, explicit touch mode. No refocus or
- * field action after recreate. IMM's shadow observes real platform show/hide calls; its visibility
- * handler supplies the corresponding insets (Robolectric has no real IME). API 29 takes the IMM path
- * rather than WindowInsetsController; the post screen also covers recreation on API 34. Device H remains required.
+ * field action after recreate. Observe BTF2's input sessions, since Robolectric has no real IME.
+ * Explicit insets supply the visibility captured before each pause, independently of a live session.
+ * The post screen also covers recreation on API 34. Device H remains required.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -104,11 +103,19 @@ class EditorScaffoldBodyFocusRecreationTest {
             lateinit var original: BodyFocusHostActivity
             scenario.onActivity { original = it }
             val model = original.model
-            compose.runOnIdle { model.body.edit { this.selection = selection } }
-            if (!open) compose.runOnIdle { original.hideIme() }
+            compose.runOnIdle {
+                assertEquals(InputMode.Touch, original.inputMode.inputMode)
+                model.body.edit { this.selection = selection }
+                original.setImeVisible(open)
+            }
             compose.waitForIdle()
-            assertBody(model, selection, open)
-            val sessions = compose.runOnIdle { model.sessions }
+            assertBody(model, selection)
+            val sessions = compose.runOnIdle {
+                assertTrue(model.sessions > 0)
+                assertTrue(model.inputActive) // Hiding the keyboard does not close the input connection.
+                assertEquals(EditorBodyFocusSnapshot(true, open), model.focus.body.snapshot)
+                model.sessions
+            }
             val gains = compose.runOnIdle { model.focusGains }
 
             repeat(2) { recreation ->
@@ -121,11 +128,15 @@ class EditorScaffoldBodyFocusRecreationTest {
                     assertEquals(InputMode.Touch, it.inputMode.inputMode)
                     original = it
                 }
-                assertBody(model, selection, open)
+                assertBody(model, selection)
                 compose.runOnIdle {
                     assertEquals(gains + recreation + 1, model.focusGains)
                     assertEquals(sessions + if (open) recreation + 1 else 0, model.sessions)
+                    assertEquals(open, model.inputActive)
                 }
+                // Supply the next pre-pause visibility only AFTER observing restored focus/session.
+                scenario.onActivity { it.setImeVisible(open) }
+                compose.waitForIdle()
             }
             compose.runOnIdle {
                 // Exactly the initial user edit remains in undo; rotation adds none and clears none.
@@ -151,14 +162,14 @@ class EditorScaffoldBodyFocusRecreationTest {
             compose.onNode(hasSetTextAction()).assertIsNotFocused()
             scenario.onActivity {
                 assertEquals(sessions, it.model.sessions)
-                assertFalse(shadowOf(it.imm).isSoftInputVisible)
+                assertFalse(it.model.inputActive)
             }
         }
     }
 
-    @Test fun panelKeepsFocusAcrossRecreation() = checkCover(BodyFocusCover.Panel)
-    @Test fun sheetKeepsFocusAcrossRecreation() = checkCover(BodyFocusCover.Sheet)
-    @Test fun previewKeepsFocusAcrossRecreation() = checkCover(BodyFocusCover.Preview)
+    @Test fun panelPreventsBodyRefocusAcrossRecreation() = checkCover(BodyFocusCover.Panel)
+    @Test fun sheetPreventsBodyRefocusAcrossRecreation() = checkCover(BodyFocusCover.Sheet)
+    @Test fun previewPreventsBodyRefocusAcrossRecreation() = checkCover(BodyFocusCover.Preview)
 
     @Test
     fun blockedRestorationIsConsumedEvenWhenTheHostLaterAllowsBodyFocus() {
@@ -182,7 +193,36 @@ class EditorScaffoldBodyFocusRecreationTest {
             compose.waitForIdle()
             scenario.recreate()
             compose.onNode(hasSetTextAction()).assertIsFocused()
-            scenario.onActivity { assertFalse(shadowOf(it.imm).isSoftInputVisible) }
+            scenario.onActivity { assertFalse(it.model.inputActive) }
+        }
+    }
+
+    @Test
+    fun newSessionAfterClosedImePanelReturnDoesNotReopenIme() {
+        ActivityScenario.launch(BodyFocusHostActivity::class.java).use { scenario ->
+            compose.onNode(hasSetTextAction()).assertIsFocused()
+            scenario.onActivity { it.hideIme() }
+            compose.waitForIdle()
+            compose.onNodeWithTag(EDITOR_APP_BAR_TITLE).performClick()
+            compose.onNodeWithText("Retour au message").performClick()
+            compose.onNode(hasSetTextAction()).assertIsFocused()
+            lateinit var model: BodyFocusModel
+            scenario.onActivity {
+                model = it.model
+                assertFalse(model.inputActive)
+            }
+            val sessions = compose.runOnIdle { model.sessions }
+            scenario.onActivity { model.focus.reset() }
+            compose.waitForIdle()
+            compose.onNode(hasSetTextAction()).assertIsFocused()
+            compose.runOnIdle {
+                assertEquals(sessions, model.sessions)
+                assertFalse(model.inputActive)
+                assertEquals(EditorBodyFocusSnapshot(true, false), model.focus.body.snapshot)
+            }
+            scenario.recreate()
+            compose.onNode(hasSetTextAction()).assertIsFocused()
+            compose.runOnIdle { assertEquals(sessions, model.sessions); assertFalse(model.inputActive) }
         }
     }
 
@@ -191,12 +231,25 @@ class EditorScaffoldBodyFocusRecreationTest {
             compose.onNode(hasSetTextAction()).assertIsFocused()
             scenario.onActivity { it.model.cover = cover }
             compose.waitForIdle()
+            assertCover(cover)
+            lateinit var model: BodyFocusModel
+            scenario.onActivity { model = it.model }
+            val sessions = compose.runOnIdle { model.sessions }
             scenario.recreate()
             compose.waitForIdle()
             compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
-            if (cover == BodyFocusCover.Panel) compose.onNodeWithText("Retour au message").assertIsFocused()
-            else compose.onNodeWithTag("cover-focus").assertIsFocused()
+            assertCover(cover)
+            compose.runOnIdle {
+                assertEquals(cover, model.cover)
+                assertEquals(sessions, model.sessions)
+                assertFalse(model.inputActive)
+            }
         }
+    }
+
+    private fun assertCover(cover: BodyFocusCover) {
+        if (cover == BodyFocusCover.Panel) compose.onNodeWithText("Retour au message").assertIsDisplayed()
+        else compose.onNodeWithTag("cover-focus").assertIsDisplayed()
     }
 
     @Test
@@ -205,7 +258,7 @@ class EditorScaffoldBodyFocusRecreationTest {
             compose.onNode(hasSetTextAction()).assertIsFocused()
             scenario.onActivity { it.hideIme() }
             compose.waitForIdle()
-            compose.onNodeWithContentDescription("Titre et sous-catégorie").performClick()
+            compose.onNodeWithTag(EDITOR_APP_BAR_TITLE).performClick()
             lateinit var model: BodyFocusModel
             scenario.onActivity { model = it.model }
             val sessions = compose.runOnIdle {
@@ -213,14 +266,14 @@ class EditorScaffoldBodyFocusRecreationTest {
                 model.sessions
             }
             scenario.recreate()
-            compose.onNodeWithText("Retour au message").assertIsFocused().performClick()
+            compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
+            compose.onNodeWithText("Retour au message").performClick()
             compose.onNode(hasSetTextAction()).assertIsFocused()
-            compose.runOnIdle { assertEquals(sessions, model.sessions) }
-            scenario.onActivity { assertFalse(shadowOf(it.imm).isSoftInputVisible) }
+            compose.runOnIdle { assertEquals(sessions, model.sessions); assertFalse(model.inputActive) }
         }
     }
 
-    private fun assertBody(model: BodyFocusModel, selection: TextRange, imeOpen: Boolean) {
+    private fun assertBody(model: BodyFocusModel, selection: TextRange) {
         val field = compose.onNode(hasSetTextAction()).assertIsFocused()
         val layouts = mutableListOf<TextLayoutResult>()
         field.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { assertTrue(it(layouts)) }
@@ -232,8 +285,6 @@ class EditorScaffoldBodyFocusRecreationTest {
             assertTrue(model.scroll.viewportSize > 0)
             assertTrue(caret.top >= model.scroll.value - 1f)
             assertTrue(caret.bottom <= model.scroll.value + model.scroll.viewportSize + 1f)
-            val context = ApplicationProvider.getApplicationContext<Context>()
-            assertEquals(imeOpen, shadowOf(context.getSystemService(InputMethodManager::class.java)).isSoftInputVisible)
         }
     }
 }
@@ -247,6 +298,7 @@ internal class BodyFocusModel : ViewModel() {
     var cover by mutableStateOf(BodyFocusCover.None)
     var restoreAllowed by mutableStateOf(true)
     var sessions = 0
+    var inputActive = false
     var focusGains = 0
 }
 
@@ -255,24 +307,19 @@ internal class BodyFocusHostActivity : ComponentActivity() {
     lateinit var view: View
     lateinit var focusManager: FocusManager
     lateinit var inputMode: InputModeManager
-    val imm: InputMethodManager get() = getSystemService(InputMethodManager::class.java)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val factory = viewModelFactory { initializer { BodyFocusModel() } }
         model = ViewModelProvider(this, factory)[BodyFocusModel::class.java]
-        shadowOf(imm).setSoftInputVisibilityHandler { visible ->
-            if (::view.isInitialized) ViewCompat.dispatchApplyWindowInsets(view, WindowInsetsCompat.Builder()
-                .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, if (visible) 120 else 0))
-                .setVisible(WindowInsetsCompat.Type.ime(), visible).build())
-        }
         setContent {
             view = LocalView.current
             focusManager = LocalFocusManager.current
             inputMode = LocalInputModeManager.current
             val input = remember { PlatformTextInputInterceptor { request, next ->
                 model.sessions++
-                next.startInputMethod(request) // Reach Android/IMM, not just an intercepted session counter.
+                model.inputActive = true
+                try { next.startInputMethod(request) } finally { model.inputActive = false }
             } }
             RedfaceTheme(darkTheme = false, dynamicColor = false) {
                 InterceptPlatformTextInput(input) { Content() }
@@ -285,7 +332,13 @@ internal class BodyFocusHostActivity : ComponentActivity() {
         hideIme()
     }
 
-    fun hideIme() { imm.hideSoftInputFromWindow(view.windowToken, 0) }
+    fun hideIme() { setImeVisible(false) }
+
+    fun setImeVisible(visible: Boolean) {
+        ViewCompat.dispatchApplyWindowInsets(view, WindowInsetsCompat.Builder()
+            .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, if (visible) 120 else 0))
+            .setVisible(WindowInsetsCompat.Type.ime(), visible).build())
+    }
 
     @Composable
     private fun Content() {

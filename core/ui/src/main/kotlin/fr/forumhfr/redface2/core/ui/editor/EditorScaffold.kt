@@ -4,6 +4,7 @@ package fr.forumhfr.redface2.core.ui.editor
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -42,6 +43,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -135,7 +137,8 @@ val LocalEditorTooltipHost = staticCompositionLocalOf<EditorTooltipHost?> { null
  * [surfaceFocus] owns the consumed autofocus and the captured IME state across recreation: pass host-retained
  * memory; without one the default saves its two booleans, so it stays consumed even after process death.
  * [bodyFocusRestoreAllowed] is supplied explicitly by every host: false while any panel, sheet,
- * external surface or preview covers the body. A retained body's focus is restored once after detach,
+ * external surface or preview covers the body. The covered body also refuses fresh focus entry from
+ * the new window. A retained body's focus is restored once after detach,
  * with its actual pre-pause IME visibility; a blocked restoration is discarded, leaving panel returns
  * to their existing callbacks. This rotation snapshot is never saved by [EditorSurfaceFocusMemory.Saver].
  * [overlay] must invoke its body exactly once, unconditionally, at a stable composition site. Wrap it
@@ -185,15 +188,17 @@ fun EditorScaffold(
     val armed = submitState.armed || chrome.bar.arm != null
     // Entry autofocus stays consumed across recreation. Restoring a retained body's actual focus is
     // separate; its IME option is local to this attachment and initialized from the session snapshot.
-    var initialFocus by remember(bodyState, surfaceFocus, bodyFocus) {
+    // Resetting session memory must not rearm entry autofocus on an already mounted field.
+    var initialFocus by remember(bodyState, surfaceFocus) {
         mutableStateOf(autoFocus && !surfaceFocus.autoFocusConsumed)
     }
     LaunchedEffect(bodyState, surfaceFocus, bodyFocus) {
         if (autoFocus) surfaceFocus.autoFocusConsumed = true
     }
     // Apply the pre-rotation IME option before the restoration effect can request focus.
-    var restoreImeOnFocus by remember(bodyState, bodyFocus) {
-        mutableStateOf(bodyFocus.restore?.imeVisible ?: true)
+    // A session reset replaces the observation, but must preserve this mounted field's IME policy.
+    var restoreImeOnFocus by remember(bodyState) {
+        mutableStateOf(bodyFocus.showImeOnRestore)
     }
     RestoreRecreatedEditorBodyFocus(bodyFocus, bodyFocusRestoreAllowed, bodyState, bodyFocusRequester)
     var pendingBodyFocus by remember(bodyState) { mutableStateOf(false) }
@@ -243,7 +248,7 @@ fun EditorScaffold(
                         onOpenHeader = header, headerActionLabel = headerLabel, compactHeight = metrics.compactHeight,
                         previewEnabled = chrome.controlsEnabled, headerEnabled = chrome.controlsEnabled)
                     Spacer(Modifier.height(metrics.columnSpacing / 2))
-                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                    Box(Modifier.weight(1f).fillMaxWidth().guardEditorBodyFocus(bodyFocusRestoreAllowed)) {
                         fieldArea {
                             BbcodeTextField(bodyState, stringResource(R.string.editor_scaffold_message),
                                 modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)
@@ -284,6 +289,11 @@ fun EditorScaffold(
         }
     }
 }
+
+/** A new window can attempt native focus entry independently of our restoration effect. */
+private fun Modifier.guardEditorBodyFocus(allowed: Boolean): Modifier = focusProperties {
+    onEnter = { if (!allowed) cancelFocusChange() }
+}.focusGroup()
 
 /** Keep surface capture before host dispatch, including events which open their own surface. */
 private fun EditorActionBarActions.withScaffoldFocus(captureIme: () -> Unit, focus: FocusRequester) = copy(
