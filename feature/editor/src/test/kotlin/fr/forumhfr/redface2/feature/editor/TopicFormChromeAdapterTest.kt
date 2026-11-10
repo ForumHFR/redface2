@@ -429,13 +429,7 @@ class TopicFormChromeAdapterTest {
 
     @Test fun `ED170 Back detail closing and reload never acknowledge a bound uncertain attempt`() {
         TopicFormMode.entries.forEach { mode ->
-            val closings = mutableListOf<(TopicFormChromeFixture, EventKey) -> Unit>(
-                { f, _ -> f.adapter.back() }, { f, key -> f.adapter.host.closeDetails(key) })
-            if (mode == TopicFormMode.EditFirstPost) closings.add { f, key ->
-                f.state = f.state.copy(draftHydratedFromServer = false)
-                f.adapter.reload(key)
-            }
-            closings.forEachIndexed { index, close ->
+            detailClosings(mode).forEachIndexed { index, (close, expected) ->
                 val f = TopicFormChromeFixture(mode)
                 val attempt = EditorDraftStore.AttemptToken("alice", f.session.key, "attempt", 1)
                 val uncertain = EditorSubmissionState.Uncertain(attempt)
@@ -445,10 +439,10 @@ class TopicFormChromeAdapterTest {
                 f.adapter.host.barActions.onEvent(key, EditorEventAction.Details)
                 close(f, key)
                 assertNull("$mode closing $index", f.adapter.host.detail)
-                // Only the first post reload reaches the ViewModel: neither ErrorDismissed nor a disarm.
-                assertTrue("$mode closing $index", f.calls.all { it == TopicFormIntent.ReloadRequested })
+                // Neither ErrorDismissed nor a disarm: the exact intents, not a filter (gate R1b minors r1 m1).
+                assertEquals("$mode closing $index", expected, f.calls.toList())
                 f.adapter.host.dismissDetails(key) // A closed detail has no Masquer left.
-                assertFalse("$mode closing $index", TopicFormIntent.ErrorDismissed in f.calls)
+                assertEquals("$mode closing $index", expected, f.calls.toList())
             }
         }
     }
@@ -505,13 +499,7 @@ class TopicFormChromeAdapterTest {
 
     @Test fun `ED85 Back detail closing and reload never acknowledge a local attempt write failure`() {
         TopicFormMode.entries.forEach { mode ->
-            val closings = mutableListOf<(TopicFormChromeFixture, EventKey) -> Unit>(
-                { f, _ -> f.adapter.back() }, { f, key -> f.adapter.host.closeDetails(key) })
-            if (mode == TopicFormMode.EditFirstPost) closings.add { f, key ->
-                f.state = f.state.copy(draftHydratedFromServer = false)
-                f.adapter.reload(key)
-            }
-            closings.forEachIndexed { index, close ->
+            detailClosings(mode).forEachIndexed { index, (close, expected) ->
                 val f = TopicFormChromeFixture(mode)
                 f.error(EditorErrors.draftWriteFailed)
                 val key = f.events.visibleEvent!!.key
@@ -519,8 +507,8 @@ class TopicFormChromeAdapterTest {
                 close(f, key)
                 assertNull("$mode closing $index", f.adapter.host.detail)
                 f.adapter.host.dismissDetails(key) // A closed detail has no Masquer left.
-                assertFalse("$mode closing $index", TopicFormIntent.DraftWriteFailureDismissed in f.calls)
-                assertFalse("$mode closing $index", TopicFormIntent.ErrorDismissed in f.calls)
+                // Neither DraftWriteFailureDismissed nor ErrorDismissed: the exact intents (gate R1b minors r1 m1).
+                assertEquals("$mode closing $index", expected, f.calls.toList())
             }
         }
     }
@@ -589,3 +577,21 @@ class TopicFormChromeAdapterTest {
         assertNull(f.adapter.host.surface)
     }
 }
+
+/**
+ * Back, the detail's closing and, on the first post, its reload: none acknowledges. Each comes with the exact intents
+ * it sends; only the first post reload reaches the ViewModel.
+ */
+private fun detailClosings(mode: TopicFormMode): List<Pair<DetailClosing, List<TopicFormIntent>>> {
+    val back: DetailClosing = { f, _ -> f.adapter.back() }
+    val close: DetailClosing = { f, key -> f.adapter.host.closeDetails(key) }
+    val reload: DetailClosing = { f, key ->
+        f.state = f.state.copy(draftHydratedFromServer = false)
+        f.adapter.reload(key)
+    }
+    val reloads = if (mode == TopicFormMode.EditFirstPost) listOf(reload to listOf(TopicFormIntent.ReloadRequested))
+        else emptyList()
+    return listOf(back to emptyList<TopicFormIntent>(), close to emptyList()) + reloads
+}
+
+private typealias DetailClosing = (TopicFormChromeFixture, EventKey) -> Unit
