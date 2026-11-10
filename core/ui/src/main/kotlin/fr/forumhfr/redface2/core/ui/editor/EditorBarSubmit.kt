@@ -2,7 +2,12 @@ package fr.forumhfr.redface2.core.ui.editor
 
 import android.os.SystemClock
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.calculateEndPadding
+import androidx.compose.foundation.layout.calculateStartPadding
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
@@ -21,6 +26,7 @@ import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.platform.LocalAccessibilityManager
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -38,6 +44,7 @@ import kotlinx.coroutines.isActive
 internal fun EditorBarSubmit(
     state: ArmedSubmitState,
     actions: ArmedSubmitActions,
+    compactHeight: Boolean,
     consumeInformation: () -> Boolean,
 ) {
     val timeout = LocalAccessibilityManager.current?.calculateRecommendedTimeoutMillis(
@@ -52,6 +59,46 @@ internal fun EditorBarSubmit(
             else actions.onSubmitWithTimeout?.invoke(timeout) ?: actions.onSubmit()
         }
     }
+    val fraction = rememberEditorBarArmFraction(state)
+    val metrics = EditorChromeMetrics(compactHeight)
+    val direction = LocalLayoutDirection.current
+    val labelPadding = if (compactHeight) PaddingValues(
+        start = ButtonDefaults.ContentPadding.calculateStartPadding(direction),
+        end = ButtonDefaults.ContentPadding.calculateEndPadding(direction),
+    ) else ButtonDefaults.ContentPadding
+    val scrim = MaterialTheme.colorScheme.onTertiary.copy(alpha = 0.16f)
+    Box(Modifier.testTag("editor-bar-submit")) {
+        Button(onClick = click, enabled = state.enabled,
+            contentPadding = PaddingValues(0.dp),
+            colors = if (state.armed) ButtonDefaults.buttonColors(
+                containerColor = MaterialTheme.colorScheme.tertiary,
+                contentColor = MaterialTheme.colorScheme.onTertiary,
+            ) else ButtonDefaults.buttonColors(),
+            modifier = Modifier.height(EditorChromeMetrics.minimumTargetSize)
+                .editorBarActivation(state.enabled, click)
+                .padding(vertical = (EditorChromeMetrics.minimumTargetSize - metrics.controlVisibleHeight) / 2)
+                // Tag M3's drawing Surface, inside the visual inset; native touch expansion stays 48 dp.
+                .testTag("editor-bar-submit-shape").semantics {
+                    stateDescription = description; liveRegion = LiveRegionMode.Polite
+                }
+                .clip(ButtonDefaults.shape)
+                .drawWithContent {
+                    drawContent()
+                    if (state.armed) drawRect(scrim, Offset(size.width * (1f - fraction), 0f),
+                        Size(size.width * fraction, size.height))
+                },
+        ) {
+            Box(Modifier.fillMaxHeight().padding(labelPadding), contentAlignment = Alignment.Center) {
+                Text(submit, Modifier.alpha(0f).clearAndSetSemantics {}, maxLines = 1)
+                Text(confirm, Modifier.alpha(0f).clearAndSetSemantics {}, maxLines = 1)
+                Text(if (state.armed) confirm else submit, maxLines = 1)
+            }
+        }
+    }
+}
+
+@Composable
+private fun rememberEditorBarArmFraction(state: ArmedSubmitState): Float {
     var fraction by remember(state.armToken, state.armed) { mutableFloatStateOf(0f) }
     val token = state.armToken
     LaunchedEffect(token, state.armed) {
@@ -62,26 +109,5 @@ internal fun EditorBarSubmit(
             delay(16L)
         }
     }
-    val scrim = MaterialTheme.colorScheme.onTertiary.copy(alpha = 0.16f)
-    Button(onClick = click, enabled = state.enabled,
-        colors = if (state.armed) ButtonDefaults.buttonColors(
-            containerColor = MaterialTheme.colorScheme.tertiary,
-            contentColor = MaterialTheme.colorScheme.onTertiary,
-        ) else ButtonDefaults.buttonColors(),
-        modifier = Modifier.height(48.dp).testTag("editor-bar-submit")
-            .editorBarActivation(state.enabled, click)
-            .semantics { stateDescription = description; liveRegion = LiveRegionMode.Polite }
-            .clip(ButtonDefaults.shape)
-            .drawWithContent {
-                drawContent()
-                if (state.armed) drawRect(scrim, Offset(size.width * (1f - fraction), 0f),
-                    Size(size.width * fraction, size.height))
-            },
-    ) {
-        Box(contentAlignment = Alignment.Center) {
-            Text(submit, Modifier.alpha(0f).clearAndSetSemantics {}, maxLines = 1)
-            Text(confirm, Modifier.alpha(0f).clearAndSetSemantics {}, maxLines = 1)
-            Text(if (state.armed) confirm else submit, maxLines = 1)
-        }
-    }
+    return fraction
 }

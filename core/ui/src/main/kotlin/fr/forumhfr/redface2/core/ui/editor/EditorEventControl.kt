@@ -1,11 +1,15 @@
 package fr.forumhfr.redface2.core.ui.editor
 
+import androidx.compose.foundation.LocalIndication
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -42,18 +46,20 @@ import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
  * Without an event its semantic node keeps a 1 dp footprint. [width] includes the 4 dp start-gutter
  * extension only without preceding fixed slots; the host reserves at least 185 dp at 360 dp,
  * respects insets/Submit spacing and centers the 48 dp
- * target in any taller [modifier]. [onAction] dispatches Activate with the displayed key; honor gestureConsumed.
+ * target in any taller [modifier]. In [compactHeight], its visible shape is 40 dp, centered in that target.
+ * [onAction] dispatches Activate with the displayed key; honor gestureConsumed.
  */
 @Composable
+@Suppress("LongParameterList") // Event contract, modifier and text callback plus the optional compact variant.
 fun EditorEventControl(
     event: EditorEvent?,
     width: Dp,
     onAction: (EventKey, EditorEventAction) -> Unit,
     modifier: Modifier = Modifier,
     onSummaryTextLayout: ((TextLayoutResult) -> Unit)? = null,
+    compactHeight: Boolean = false,
 ) {
     require(width >= 48.dp)
-    val visualSummary = event?.summary?.resolve().orEmpty()
     val summary = event?.accessibleSummary?.resolve().orEmpty()
     val action = event?.action
     val actionName = action?.controlLabel()
@@ -61,15 +67,15 @@ fun EditorEventControl(
     val announce = rememberEventAnnouncement(event, name)
     val isError = event?.rank == EditorEventRank.Error
     val tint = event.controlTint()
+    val interactions = remember { MutableInteractionSource() }
     Box(
         modifier = if (event == null) modifier else modifier.width(width).heightIn(min = 48.dp),
         contentAlignment = Alignment.CenterStart,
     ) {
-        Row(
+        Box(
             modifier = (if (event == null) Modifier.size(1.dp) else Modifier.fillMaxWidth().heightIn(min = 48.dp))
-                .clip(MaterialTheme.shapes.small)
-                .background(if (action != null) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
                 .then(if (event == null || action == null) Modifier else Modifier.clickable(
+                    interactionSource = interactions, indication = null,
                     role = Role.Button, onClickLabel = actionName, onClick = { onAction(event.key, action) },
                 ))
                 // Keep clickable's role/action, but hide children so Android names the live node itself.
@@ -80,18 +86,36 @@ fun EditorEventControl(
                         this[EditorEventIconTintKey] = tint
                     }
                     if (announce) liveRegion = if (isError) LiveRegionMode.Assertive else LiveRegionMode.Polite
-                }
-                .then(if (event == null) Modifier else Modifier.padding(start = 4.dp)),
-            horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically,
+                },
+            contentAlignment = Alignment.CenterStart,
         ) {
-            if (event == null) return@Row
-            RedfaceVectorIcon(event.controlIcon(), Modifier.editorEventIconPlacement(), tint = tint, size = 16.dp)
-            Text(text = visualSummary,
-                modifier = Modifier.weight(1f, fill = false).testTag(EDITOR_EVENT_SUMMARY_TAG),
-                style = MaterialTheme.typography.labelSmall, color = tint,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-                onTextLayout = { onSummaryTextLayout?.invoke(it) })
+            if (event != null) EditorEventSummary(event, compactHeight, interactions, onSummaryTextLayout)
         }
+    }
+}
+
+@Composable
+private fun EditorEventSummary(
+    event: EditorEvent,
+    compactHeight: Boolean,
+    interactions: MutableInteractionSource,
+    onTextLayout: ((TextLayoutResult) -> Unit)?,
+) {
+    val tint = event.controlTint()
+    Row(
+        Modifier.fillMaxWidth().height(EditorChromeMetrics(compactHeight).controlVisibleHeight)
+            .testTag("editor-bar-event-shape").clip(MaterialTheme.shapes.small)
+            .background(if (event.action != null) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent)
+            .indication(interactions, LocalIndication.current)
+            .padding(start = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically,
+    ) {
+        RedfaceVectorIcon(event.controlIcon(), Modifier.editorEventIconPlacement(), tint = tint, size = 16.dp)
+        Text(text = event.summary.resolve(),
+            modifier = Modifier.weight(1f, fill = false).testTag(EDITOR_EVENT_SUMMARY_TAG),
+            style = MaterialTheme.typography.labelSmall, color = tint,
+            maxLines = 1, overflow = TextOverflow.Ellipsis,
+            onTextLayout = { onTextLayout?.invoke(it) })
     }
 }
 

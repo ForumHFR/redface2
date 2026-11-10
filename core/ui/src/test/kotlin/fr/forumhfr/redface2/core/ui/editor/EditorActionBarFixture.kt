@@ -32,6 +32,7 @@ import androidx.compose.ui.test.hasScrollAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSession
@@ -119,6 +120,18 @@ internal class EditorActionBarFixture {
                 }
             }
         }
+    }
+}
+
+/**
+ * ED-05/W8-1 target: the native touch bounds. A compact icon's semantics node is its 40 dp state layer;
+ * Compose expands its touch target to 48 dp, which is what the bar's slots reserve.
+ */
+internal fun SemanticsNodeInteraction.targetBounds(): DpRect {
+    val node = fetchSemanticsNode()
+    val touch = node.touchBoundsInRoot
+    return with(node.layoutInfo.density) {
+        DpRect(touch.left.toDp(), touch.top.toDp(), touch.right.toDp(), touch.bottom.toDp())
     }
 }
 

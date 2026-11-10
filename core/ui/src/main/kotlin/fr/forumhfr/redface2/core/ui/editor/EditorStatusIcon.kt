@@ -32,6 +32,7 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.text.rememberTextMeasurer
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
@@ -49,6 +50,7 @@ fun EditorStatusIcon(
     badgeCount: Int? = null,
     enabled: Boolean = true,
     visible: Boolean = true,
+    compactHeight: Boolean = false,
 ) {
     require(badgeCount == null || badgeCount > 0)
     val style = MaterialTheme.typography.labelSmall
@@ -56,7 +58,7 @@ fun EditorStatusIcon(
     // Stack while both fit; at large font scales overlap the badge instead of clipping either layer.
     val badgeWidth = badgeSize.width
     val height = (24.dp + if (badgeCount == null) 0.dp else badgeSize.height)
-        .coerceAtMost(EditorChromeMetrics.minimumTargetSize)
+        .coerceAtMost(EditorChromeMetrics(compactHeight).controlVisibleHeight)
     // Replace only the tooltip state on masking: its popup/job die, the live anchor keeps its ID.
     val tooltip = key(visible) { rememberTooltipState() }
     val scope = rememberCoroutineScope()
@@ -78,26 +80,37 @@ fun EditorStatusIcon(
             }
         }, focusable = false, enableUserInput = visible,
     ) {
-        // The stacked badge reaches the bottom edge; a round button clips its lower corners.
-        IconButton(onClick = onClick, enabled = enabled && visible, shape = RectangleShape,
-            modifier = (if (!visible) Modifier.size(1.dp) else Modifier.sizeIn(
-                minWidth = maxOf(EditorChromeMetrics.minimumTargetSize, badgeWidth),
-                minHeight = EditorChromeMetrics.minimumTargetSize,
-            )).clearAndSetSemantics {},
-        ) {
-            if (visible) Box(Modifier.size(maxOf(24.dp, badgeWidth), height)) {
-                RedfaceVectorIcon(iconRes, Modifier.align(Alignment.TopCenter).testTag(EDITOR_STATUS_GLYPH_TAG))
-                val badgeAlpha = if (enabled) 1f else DISABLED_BADGE_ALPHA
-                if (badgeCount != null) Badge(
-                    containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = badgeAlpha),
-                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = badgeAlpha),
-                    modifier = Modifier.align(Alignment.BottomCenter).testTag(EDITOR_STATUS_BADGE_TAG)
-                        .clearAndSetSemantics {},
-                ) { Text(badgeCount.toString(), style = style, maxLines = 1,
-                    modifier = Modifier.testTag(EDITOR_STATUS_BADGE_TEXT_TAG)) }
+        // Masking reattaches this movable node: one stable chain keeps its 40 dp layer's bounds exact.
+        Box(Modifier.editorCompactTargetSlot(visible && compactHeight), contentAlignment = Alignment.Center) {
+            // The stacked badge reaches the bottom edge; a round button clips its lower corners.
+            IconButton(onClick = onClick, enabled = enabled && visible, shape = RectangleShape,
+                modifier = editorStatusButtonModifier(visible, compactHeight, badgeWidth),
+            ) {
+                if (visible) Box(Modifier.size(maxOf(24.dp, badgeWidth), height)) {
+                    RedfaceVectorIcon(iconRes, Modifier.align(Alignment.TopCenter).testTag(EDITOR_STATUS_GLYPH_TAG))
+                    val badgeAlpha = if (enabled) 1f else DISABLED_BADGE_ALPHA
+                    if (badgeCount != null) Badge(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = badgeAlpha),
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = badgeAlpha),
+                        modifier = Modifier.align(Alignment.BottomCenter).testTag(EDITOR_STATUS_BADGE_TAG)
+                            .clearAndSetSemantics {},
+                    ) { Text(badgeCount.toString(), style = style, maxLines = 1,
+                        modifier = Modifier.testTag(EDITOR_STATUS_BADGE_TEXT_TAG)) }
+                }
             }
         }
     }
+}
+
+private fun editorStatusButtonModifier(visible: Boolean, compactHeight: Boolean, badgeWidth: Dp): Modifier = when {
+    !visible -> Modifier.size(1.dp).clearAndSetSemantics {}
+    // Keep native click semantics under the clearing live anchor; touch expansion is still 48 dp.
+    compactHeight -> Modifier.size(maxOf(EditorChromeMetrics(true).controlVisibleHeight, badgeWidth),
+        EditorChromeMetrics(true).controlVisibleHeight)
+    else -> Modifier.sizeIn(
+        minWidth = maxOf(EditorChromeMetrics.minimumTargetSize, badgeWidth),
+        minHeight = EditorChromeMetrics.minimumTargetSize,
+    ).clearAndSetSemantics {}
 }
 
 @Composable

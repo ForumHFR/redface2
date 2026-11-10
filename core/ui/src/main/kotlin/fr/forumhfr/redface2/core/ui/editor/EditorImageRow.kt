@@ -23,14 +23,16 @@ internal fun EditorImageRow(
     onBack: () -> Unit,
     enabled: Boolean,
     backModifier: Modifier = Modifier,
+    compactHeight: Boolean = false,
 ) {
-    EditorBarIcon(R.drawable.ic_arrow_back, stringResource(R.string.editor_return), onBack, backModifier)
+    EditorBarIcon(R.drawable.ic_arrow_back, stringResource(R.string.editor_return), onBack, backModifier,
+        compactHeight = compactHeight)
     EditorBarIcon(R.drawable.ic_image_upload, stringResource(R.string.editor_bar_upload),
-        { onExternal(actions.onUpload) }, enabled = enabled)
+        { onExternal(actions.onUpload) }, enabled = enabled, compactHeight = compactHeight)
     actions.onInsertUrl?.let { insert ->
         EditorBarIcon(R.drawable.ic_editor_link, stringResource(R.string.editor_bar_image_url),
-            { onExternal(insert) }, enabled = enabled)
+            { onExternal(insert) }, enabled = enabled, compactHeight = compactHeight)
     }
     if (actions.canWrapSelection) EditorBarIcon(R.drawable.ic_editor_image,
-        stringResource(R.string.editor_bar_image_selection), onWrap, enabled = enabled)
+        stringResource(R.string.editor_bar_image_selection), onWrap, enabled = enabled, compactHeight = compactHeight)
 }
