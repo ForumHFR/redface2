@@ -150,6 +150,7 @@ class TopicFormChromeAdapterTest {
         val f = TopicFormChromeFixture(TopicFormMode.EditFirstPost)
         f.state = f.state.copy(hasSubcategorySelect = false)
         assertFalse(f.adapter.state.unsupportedFirstPost) // Absence alone is not a parser refusal.
+        assertFalse(f.adapter.state.postAllowed) // But the strict first post POST guard still needs the select.
         f.state = f.state.copy(hasSubcategorySelect = true, firstPostSubcategoryRefused = true)
         assertTrue(f.state.hasSubcategorySelect)
         assertTrue(f.adapter.state.unsupportedFirstPost)

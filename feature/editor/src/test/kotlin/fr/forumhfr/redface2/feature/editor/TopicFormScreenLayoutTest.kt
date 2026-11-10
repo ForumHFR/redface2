@@ -20,18 +20,21 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.PlatformTextInputInterceptor
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -276,8 +279,11 @@ class TopicFormScreenLayoutTest {
         }
     }
 
-    // Robolectric #8460: Dialog + text field loops with width qualifiers above the default 320 dp.
-    // https://github.com/robolectric/robolectric/issues/8460 — geometry is covered separately at 360 dp.
+    // Robolectric #8460 (https://github.com/robolectric/robolectric/issues/8460): a platform-width Dialog holding a
+    // text field never idles above the default 320 dp. Box probe of 2026-11-10: the production ImageUrlDialog
+    // alone, without any editor chrome, also freezes at 360 and 411 dp (its window lays out again on every frame)
+    // and idles at 320 dp, as does a text field Dialog without the platform default width at 360 dp; the chrome
+    // is inert here. Geometry is covered separately at 360 dp.
     @Test
     @Config(qualifiers = "fr-rFR-w320dp-h640dp-xxhdpi")
     fun optionsAndImageUrlReturnTheSameSourceSelectionAndSmileysOpenTheirSheet() {
@@ -287,7 +293,7 @@ class TopicFormScreenLayoutTest {
         compose.onNodeWithContentDescription("Options").performClick()
         compose.onNodeWithText("Ton du message").assertExists()
         compose.onNodeWithTag("${MSG_ICON_OPTION_TAG_PREFIX}16").assertExists()
-        compose.onNodeWithText("Activer votre signature").performClick()
+        switchBeside("Activer votre signature").assertIsDisplayed().assertIsEnabled().assertIsOff().performClick()
         compose.runOnIdle { fixture.adapter.host.closeSurface() }
         compose.onNode(hasSetTextAction()).assertIsFocused()
         compose.onNodeWithContentDescription("Image").performScrollTo().performClick()
@@ -303,6 +309,15 @@ class TopicFormScreenLayoutTest {
         compose.onNodeWithContentDescription("Smileys").performScrollTo().performClick()
         compose.onNodeWithTag("smiley_picker_sheet").assertExists()
         compose.onNodeWithText("Standard").assertExists()
+    }
+
+    // EditorOptions lays each label out as a plain Text beside its Switch: only the switch is a click target.
+    private fun switchBeside(label: String): SemanticsNodeInteraction {
+        val row = compose.onNodeWithText(label).fetchSemanticsNode().boundsInRoot
+        val switches = compose.onAllNodes(isToggleable())
+        val index = switches.fetchSemanticsNodes().indexOfFirst { it.boundsInRoot.center.y in row.top..row.bottom }
+        assertTrue("No switch on the « $label » row", index >= 0)
+        return switches[index]
     }
 
     @Test fun pickerCancellationRestoresClosedImeAndSelection() = checkPickerCancellation(imeOpen = false)

@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.editor
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -51,9 +52,19 @@ internal fun TopicFormHeaderPanel(
             source.subcategoryChoices, source.selectedSubcat, adapter.state.subcategoryEnabled, adapter::subcategory,
             Modifier.focusRequester(subcategoryFocus),
         )
-        if (adapter.state.unsupportedFirstPost) Text(stringResource(R.string.editor_topic_first_post_unsupported))
-        if (source.pollPresent && !source.pollEditable) Text(stringResource(R.string.editor_topic_poll_readonly_note))
+        if (adapter.state.unsupportedFirstPost) {
+            HeaderNote(stringResource(R.string.editor_topic_first_post_unsupported))
+        }
+        if (source.pollPresent && !source.pollEditable) {
+            HeaderNote(stringResource(R.string.editor_topic_poll_readonly_note))
+        }
     }
+}
+
+/** Secondary note under the header fields, styled like the former form's poll note. */
+@Composable
+private fun HeaderNote(text: String) {
+    Text(text, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
 /** The GET remedy remains available, including beside an uncertain attempt with an unknown FP body. */

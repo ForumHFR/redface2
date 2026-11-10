@@ -282,6 +282,27 @@ class TopicFormViewModelTest {
     }
 
     @Test
+    fun `cancelled form fetch clears loading without an error in new topic and first post modes`() = runTest {
+        for (creating in listOf(false, true)) {
+            topicFormRepository.formFailure = kotlinx.coroutines.CancellationException("GET cancelled")
+            val vm = if (creating) newTopicViewModel(entrySubcat = SAMPLE_SUBCAT) else newViewModel()
+            syncBody()
+            testScheduler.advanceUntilIdle()
+            assertFalse(vm.state.value.isLoadingForm)
+            assertFalse(vm.state.value.hasLoadedForm)
+            assertNull(vm.state.value.submitError)
+            assertNull(vm.editorEvents.visibleEvent) // A cancellation is not a read failure.
+            topicFormRepository.formFailure = null
+            vm.submit(TopicFormIntent.ReloadRequested)
+            syncBody()
+            testScheduler.advanceUntilIdle()
+            assertTrue(vm.state.value.hasLoadedForm)
+            assertNull(vm.state.value.submitError)
+            vm.viewModelScope.cancel()
+        }
+    }
+
+    @Test
     fun `successful reload keeps uncertainty in new topic and first post modes`() = runTest {
         topicFormRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
         topicFormRepository.newTopicSubmitResult = NewTopicSubmitResult.Failure(ReplyFailureReason.Unknown)

@@ -51,7 +51,8 @@ import org.robolectric.annotation.GraphicsMode
  * Uses the real content and routing fixtures from [EditorScreenLayoutTest], without a ViewModel.
  * Reply represents the shared reply/edit post chrome; transient states use the production adapter.
  * Post: portrait/compact × light/dark × scale 1/1.3 × normal/format/arm/event/restore/cards/panel/preview.
- * Topic: both modes, header, poll, restore and preview; refused/missing FP context; historical names kept.
+ * Topic: both modes, header, poll, restore, preview, event, arm and app bar states (poll + restore, no tap);
+ * refused/missing FP context; historical names kept, each byte-identical capture recorded under one name only.
  *
  * Output: `feature/editor/build/outputs/roborazzi/<surface>_<orientation>_fs<scale>_<state>.png`.
  * This harness deliberately uses no M3 1.5 API so it can also be applied before the pin.
@@ -166,9 +167,7 @@ class EditorBaselineRoborazziTest {
         previewLabel: String,
     ) {
         for (scene in TopicScene.entries) {
-            val firstPostOnly = scene in setOf(TopicScene.Unsupported, TopicScene.MissingRoute)
-            if (surface == Surface.NewTopic && firstPostOnly) continue
-            for (isDark in listOf(false, true)) {
+            for (isDark in listOf(false, true).filter { scene.recorded(surface, orientation, it) }) {
                 compose.runOnIdle {
                     dark.value = isDark
                     scenario.value = Scenario(surface, filled = true, topicScene = scene)
@@ -182,11 +181,29 @@ class EditorBaselineRoborazziTest {
                     TopicScene.Restore -> compose.onNodeWithContentDescription(
                         "Brouillon retrouvé, restaurer ou ignorer").performClick()
                     TopicScene.Preview -> compose.onNodeWithContentDescription(previewLabel).performClick()
-                    else -> Unit
+                    else -> Unit // Normal, EmptyTitle, Event, Armed and States are recorded without a tap.
                 }
                 val name = "${surface.fileName}_${scene.name}_${orientation}_fs${fontScale}_dark$isDark"
                 record(name, orientation, focus)
             }
+        }
+    }
+
+    /**
+     * Gate r1 (R1b T3) found 40 byte-identical topic captures; each image now keeps one unchanged name.
+     * Header, Poll and Restore panels match across modes. Landscape hides the app bar: there the first post
+     * Normal and EmptyTitle match the new topic Normal (only creation auto-opens the header on an empty title)
+     * and Preview matches across modes. The light new topic Normal is the historical
+     * `new_topic_<orientation>_fs<scale>_multiline`. Event and Armed only change the action bar, as on the
+     * post's single surface; an existing poll (Poll, States) only occurs when editing a first post.
+     */
+    private fun TopicScene.recorded(surface: Surface, orientation: String, isDark: Boolean): Boolean {
+        val newTopic = surface == Surface.NewTopic
+        return when (this) {
+            TopicScene.Normal -> if (newTopic) isDark else orientation == "portrait"
+            TopicScene.EmptyTitle, TopicScene.Preview -> newTopic || orientation == "portrait"
+            TopicScene.Header, TopicScene.Restore, TopicScene.Event, TopicScene.Armed -> newTopic
+            TopicScene.Poll, TopicScene.States, TopicScene.Unsupported, TopicScene.MissingRoute -> !newTopic
         }
     }
 
@@ -224,23 +241,39 @@ class EditorBaselineRoborazziTest {
             Surface.NewTopic, Surface.FirstPost -> {
                 val host = remember { TopicFormChromeFixture(if (scenario.surface == Surface.NewTopic)
                     TopicFormMode.New else TopicFormMode.EditFirstPost) }
-                remember(scenario) { host.apply { state = state.copy(
-                    subject = TextFieldValue(if (scenario.topicScene == TopicScene.EmptyTitle) ""
-                        else "Sujet de démonstration"), bodyText = draft.text,
-                    preview = PostContent(listOf(PostBlock.Paragraph(listOf(PostInline.Text("Aperçu du sujet."))))),
-                    restorableDraft = if (scenario.topicScene == TopicScene.Restore) "Brouillon conservé" else null,
-                    pollPresent = scenario.topicScene == TopicScene.Poll,
-                    firstPostSubcategoryRefused = scenario.topicScene == TopicScene.Unsupported,
-                    subcat = if (scenario.topicScene == TopicScene.MissingRoute) null else 1,
-                    hasSubcategorySelect = scenario.topicScene != TopicScene.MissingRoute) } }
+                remember(scenario) { stageTopic(host, scenario.topicScene, draft.text) }
                 val body = remember { TextFieldState(draft.text, draft.selection) }
                 TopicFormTestContent(host.state, host::dispatch, body, host.events, host.memory)
             }
         }
     }
 
+    /**
+     * Stages one topic scene and returns the host (RememberReturnType). The content renders the host's event
+     * store without projecting state, so the Event scene delivers its error through that store, like the VM.
+     */
+    private fun stageTopic(host: TopicFormChromeFixture, scene: TopicScene, draft: String): TopicFormChromeFixture {
+        host.state = host.state.copy(
+            subject = TextFieldValue(if (scene == TopicScene.EmptyTitle) "" else "Sujet de démonstration"),
+            bodyText = draft,
+            preview = PostContent(listOf(PostBlock.Paragraph(listOf(PostInline.Text("Aperçu du sujet."))))),
+            restorableDraft = "Brouillon conservé".takeIf { scene in setOf(TopicScene.Restore, TopicScene.States) },
+            pollPresent = scene in setOf(TopicScene.Poll, TopicScene.States),
+            firstPostSubcategoryRefused = scene == TopicScene.Unsupported,
+            subcat = if (scene == TopicScene.MissingRoute) null else 1,
+            hasSubcategorySelect = scene != TopicScene.MissingRoute,
+            submission = if (scene == TopicScene.Armed) EditorSubmissionState.Armed(
+                ArmToken(1, host.session, Long.MAX_VALUE / 4, 60_000L)) // Far-future arm: frozen countdown.
+            else EditorSubmissionState.Ready,
+        )
+        if (scene == TopicScene.Event) host.error(EditorErrors.formNetwork)
+        return host
+    }
+
     private enum class PostScene { Normal, Format, Armed, Event, Restore, Cards, Panel, Preview }
-    private enum class TopicScene { Normal, EmptyTitle, Header, Poll, Restore, Preview, Unsupported, MissingRoute }
+    private enum class TopicScene {
+        Normal, EmptyTitle, Header, Poll, Restore, Preview, Unsupported, MissingRoute, Event, Armed, States,
+    }
     private data class Scenario(
         val surface: Surface, val filled: Boolean, val scene: PostScene = PostScene.Normal,
         val topicScene: TopicScene = TopicScene.Normal,
