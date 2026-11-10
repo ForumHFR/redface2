@@ -1,6 +1,8 @@
 package fr.forumhfr.redface2.feature.editor
 
+import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
@@ -23,6 +25,8 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
@@ -31,6 +35,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorScaffoldChrome
 import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -47,9 +52,11 @@ class TopicFormChromeComposeTest {
     @get:Rule val compose = createComposeRule()
     private var fixture = TopicFormChromeFixture()
     private lateinit var chrome: EditorScaffoldChrome
+    private lateinit var back: OnBackPressedDispatcher
 
     @Composable
     private fun Content(compact: Boolean = false) {
+        back = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
         val a = fixture.adapter
         val focus = remember { FocusRequester() }
         val projected = a.chrome()
@@ -185,5 +192,36 @@ class TopicFormChromeComposeTest {
         compose.onNode(hasSetTextAction()).assertIsFocused()
         compose.runOnIdle { assertEquals(listOf(TopicFormIntent.ReloadRequested), fixture.calls) }
     }
-
+    @Test fun `ED45 explicit Masquer in the topic detail forwards acknowledgement without sending`() {
+        val attempt = EditorDraftStore.AttemptToken("alice", fixture.session.key, "attempt", 1)
+        fixture.transition(fixture.state.copy(submission = EditorSubmissionState.Uncertain(attempt),
+            submitError = EditorErrors.uncertain))
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Envoi incertain, Afficher les détails").performClick()
+        compose.runOnIdle { assertTrue(fixture.calls.isEmpty()) }
+        compose.onNodeWithText("Masquer").performClick()
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(listOf(TopicFormIntent.ErrorDismissed), fixture.calls)
+            assertNull(fixture.adapter.host.detail)
+            assertNull(fixture.events.visibleEvent)
+        }
+    }
+    @Test fun `ED45 ED85 system Back closes the topic uncertainty detail without acknowledging it`() {
+        fixture = TopicFormChromeFixture(TopicFormMode.EditFirstPost)
+        val attempt = EditorDraftStore.AttemptToken("alice", fixture.session.key, "attempt", 1)
+        val uncertain = EditorSubmissionState.Uncertain(attempt)
+        fixture.transition(fixture.state.copy(submission = uncertain, submitError = EditorErrors.uncertain))
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Envoi incertain, Afficher les détails").performClick()
+        compose.onNodeWithText("Masquer").assertExists()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNodeWithText("Masquer").assertDoesNotExist()
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            assertTrue(fixture.calls.isEmpty())
+            assertNull(fixture.adapter.host.detail)
+            assertEquals(uncertain, fixture.state.submission)
+        }
+    }
 }

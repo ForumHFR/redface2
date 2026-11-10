@@ -16,6 +16,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionAdapter
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionScenario
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionBodyMutation
 import fr.forumhfr.redface2.core.domain.editor.SubmissionErrorProbe
 import fr.forumhfr.redface2.core.domain.editor.SubmissionProbe
@@ -77,6 +78,7 @@ import fr.forumhfr.redface2.core.model.write.TopicPollForm
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorAction
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
 import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
 import fr.forumhfr.redface2.core.ui.editor.EventKey
@@ -1774,6 +1776,168 @@ class TopicFormViewModelTest {
         testScheduler.runCurrent()
         assertEquals(writes, draftStore.saveCount)
     }
+
+    @Test
+    fun `ED45 ED170 Masquer acknowledges a restored topic attempt before recreation`() = runTest {
+        for (mode in TopicFormMode.entries) {
+            draftStore = FakeEditorDraftStore()
+            val key = topicDraftKey(mode)
+            val attempt = restoredUncertainAttempt(mode)
+            val posts = postCount()
+            val vm = openTopic(mode)
+            assertEquals(EditorSubmissionState.Uncertain(attempt), vm.state.value.submission)
+            val adapter = chromeAdapter(vm)
+            val event = vm.editorEvents.state.visibleEvent!!.key
+            adapter.host.barActions.onEvent(event, EditorEventAction.Details)
+            adapter.host.dismissDetails(event)
+            syncBody()
+            assertNull(adapter.host.detail)
+            assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
+            assertNull(vm.state.value.submitError)
+            // The acknowledgement reserves PersistingAttempt: no « Envoi… » may outlive it.
+            assertNoSendingEvent(vm)
+            assertNull(vm.editorEvents.state.visibleEvent)
+            assertNull(draftStore.entries[key]?.attempt)
+            assertEquals("uncertain body", vm.bodyFieldState.text.toString())
+            assertEquals("uncertain title", vm.state.value.subject.text)
+            vm.viewModelScope.cancel()
+
+            val recreated = openTopic(mode)
+            assertEquals(EditorSubmissionState.Ready, recreated.state.value.submission)
+            assertNull(recreated.state.value.submitError)
+            assertTrue(recreated.editorEvents.state.events.isEmpty())
+            assertEquals("uncertain body", draftStore.saved[key]?.body)
+            assertEquals(posts, postCount())
+        }
+    }
+
+    @Test
+    fun `ED45 ED170 Masquer also acknowledges a freshly failed topic submission`() = runTest {
+        for (mode in TopicFormMode.entries) {
+            draftStore = FakeEditorDraftStore()
+            val posts = postCount()
+            val vm = failUncertainly(mode)
+            val adapter = chromeAdapter(vm)
+            val event = vm.editorEvents.state.visibleEvent!!.key
+            adapter.host.barActions.onEvent(event, EditorEventAction.Details)
+            adapter.host.dismissDetails(event)
+            syncBody()
+            assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
+            assertNull(vm.state.value.submitError)
+            assertNoSendingEvent(vm)
+            assertNull(vm.editorEvents.state.visibleEvent)
+            assertNull(draftStore.entries[topicDraftKey(mode)]?.attempt)
+            assertEquals("uncertain body", vm.bodyFieldState.text.toString())
+            assertEquals(posts + 1, postCount())
+        }
+    }
+
+    @Test
+    fun `ED85 ED170 Back or detail closing keeps topic uncertainty and recreation offers it again`() = runTest {
+        for (mode in TopicFormMode.entries) {
+            draftStore = FakeEditorDraftStore()
+            val key = topicDraftKey(mode)
+            val attempt = restoredUncertainAttempt(mode)
+            val posts = postCount()
+            val closings = listOf<(TopicFormChromeAdapter, EventKey) -> Unit>(
+                { adapter, _ -> adapter.back() }, { adapter, event -> adapter.host.closeDetails(event) })
+            closings.forEachIndexed { index, close ->
+                val vm = openTopic(mode)
+                val adapter = chromeAdapter(vm)
+                val event = vm.editorEvents.state.visibleEvent!!.key
+                adapter.host.barActions.onEvent(event, EditorEventAction.Details)
+                close(adapter, event)
+                syncBody()
+                assertNull("$mode closing $index", adapter.host.detail)
+                assertNull(vm.editorEvents.state.visibleEvent)
+                assertEquals(EditorSubmissionState.Uncertain(attempt), vm.state.value.submission)
+                assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
+                assertEquals(attempt, draftStore.entries[key]?.attempt?.token)
+                vm.viewModelScope.cancel()
+            }
+
+            val recreated = openTopic(mode)
+            assertEquals(EditorSubmissionState.Uncertain(attempt), recreated.state.value.submission)
+            assertEquals(EditorErrors.uncertain, recreated.state.value.submitError)
+            assertEquals(EditorEventContent.Problem(EditorErrors.uncertain),
+                recreated.editorEvents.state.visibleEvent?.content)
+            assertEquals(posts, postCount())
+        }
+    }
+
+    @Test
+    fun `ED170 Masquer preserves topic uncertainty on failed durable acknowledgement and recreation`() = runTest {
+        for (mode in TopicFormMode.entries) {
+            draftStore = FakeEditorDraftStore()
+            val key = topicDraftKey(mode)
+            val attempt = restoredUncertainAttempt(mode)
+            val posts = postCount()
+            val vm = openTopic(mode)
+            draftStore.finishFailure = java.io.IOException("disk unavailable")
+            val finishCalls = draftStore.finishCalls
+            val adapter = chromeAdapter(vm)
+            val event = vm.editorEvents.state.visibleEvent!!.key
+            adapter.host.barActions.onEvent(event, EditorEventAction.Details)
+            adapter.host.dismissDetails(event)
+            syncBody()
+            assertEquals(finishCalls + 1, draftStore.finishCalls)
+            assertEquals(EditorSubmissionState.Uncertain(attempt), vm.state.value.submission)
+            assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
+            // The kept uncertainty is signalled again in this session, bound to the same attempt, without « Envoi… ».
+            assertNoSendingEvent(vm)
+            val kept = vm.editorEvents.state.visibleEvent!!
+            assertEquals(EditorEventContent.Problem(EditorErrors.uncertain), kept.content)
+            assertNotEquals(event, kept.key)
+            assertEquals(attempt, vm.editorEvents.uncertainAttempt(kept.key))
+            assertEquals(attempt, draftStore.entries[key]?.attempt?.token)
+            assertEquals("uncertain body", vm.bodyFieldState.text.toString())
+            vm.viewModelScope.cancel()
+
+            draftStore.finishFailure = null
+            val recreated = openTopic(mode)
+            assertEquals(EditorSubmissionState.Uncertain(attempt), recreated.state.value.submission)
+            assertEquals(EditorEventContent.Problem(EditorErrors.uncertain),
+                recreated.editorEvents.state.visibleEvent?.content)
+            assertEquals(posts, postCount())
+        }
+    }
+
+    private fun openTopic(mode: TopicFormMode): TopicFormViewModel =
+        if (mode == TopicFormMode.New) newTopicViewModel(entrySubcat = SAMPLE_SUBCAT) else newViewModel()
+
+    private fun topicDraftKey(mode: TopicFormMode): String = if (mode == TopicFormMode.New) {
+        EditorDraftKey.newTopic(SAMPLE_CAT)
+    } else {
+        EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE)
+    }
+
+    private fun postCount() = topicFormRepository.submitCalls + topicFormRepository.newTopicSubmitCalls
+
+    /** ED-170: an ambiguous POST leaves an uncertain durable attempt under this mode's draft key. */
+    private fun failUncertainly(mode: TopicFormMode): TopicFormViewModel {
+        topicFormRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        topicFormRepository.newTopicSubmitResult = NewTopicSubmitResult.Failure(ReplyFailureReason.Unknown)
+        val vm = openTopic(mode)
+        vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("uncertain title")))
+        vm.editBody(TextFieldValue("uncertain body"))
+        vm.submit(TopicFormIntent.SubmitClicked())
+        dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(vm.state.value.submission is EditorSubmissionState.Uncertain)
+        return vm
+    }
+
+    /** The failed ViewModel dies; the next opening restores its attempt from the store. */
+    private fun restoredUncertainAttempt(mode: TopicFormMode): EditorDraftStore.AttemptToken {
+        failUncertainly(mode).viewModelScope.cancel()
+        return checkNotNull(draftStore.entries[topicDraftKey(mode)]?.attempt).token
+    }
+
+    private fun chromeAdapter(vm: TopicFormViewModel) = TopicFormChromeAdapter(
+        { vm.state.value }, vm.bodyFieldState, vm.editorEvents, vm::submit, {}, {}, vm.chromeMemory,
+    )
+
+    private fun assertNoSendingEvent(vm: TopicFormViewModel) =
+        assertTrue(vm.editorEvents.state.events.none { it.content is EditorEventContent.InProgress })
 
     @Test
     fun restoreReplacesUntouchedSeed() = runTest {

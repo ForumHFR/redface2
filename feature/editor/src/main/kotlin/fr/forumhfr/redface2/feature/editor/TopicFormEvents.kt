@@ -7,6 +7,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorEventCollector
 import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
 import fr.forumhfr.redface2.core.ui.editor.EditorEventProjection
 import fr.forumhfr.redface2.core.ui.editor.EditorHostEvents
+import fr.forumhfr.redface2.core.ui.editor.EventKey
 import fr.forumhfr.redface2.core.ui.editor.afterFormLoaded
 
 /**
@@ -31,6 +32,7 @@ internal class TopicFormEvents : EditorHostEvents {
     private var projection = EditorEventProjection(state.session)
 
     override fun dispatch(input: EditorEventInput) = collector.dispatch(input)
+    override fun uncertainAttempt(key: EventKey) = collector.uncertainAttempt(key)
     fun open(session: EditorSession) {
         if (session != state.session) projection = EditorEventProjection(session)
         collector.open(session)

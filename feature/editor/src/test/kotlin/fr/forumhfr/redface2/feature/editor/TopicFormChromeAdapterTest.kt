@@ -15,8 +15,10 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorSession
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
+import fr.forumhfr.redface2.core.domain.editor.SubmissionToken
 import fr.forumhfr.redface2.core.model.write.TopicFormSubcategoryChoice
 import fr.forumhfr.redface2.core.ui.editor.EditorBackAction
 import fr.forumhfr.redface2.core.ui.editor.EditorBackState
@@ -27,6 +29,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
 import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
+import fr.forumhfr.redface2.core.ui.editor.EventKey
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.editBbcode
@@ -71,6 +74,8 @@ internal class TopicFormChromeFixture(mode: TopicFormMode = TopicFormMode.New) {
         state = state.copy(submitError = error)
         events.observe(previous.copy(submitError = null), state)
     }
+    /** VM-like synchronous projection of one state transition, as TopicFormViewModel.updateState delivers it. */
+    fun transition(next: TopicFormState) { events.observe(state, next); state = next }
 }
 
 /** Render the production topic chrome with deterministic window metrics and real picker registration. */
@@ -337,6 +342,145 @@ class TopicFormChromeAdapterTest {
             }
             assertNull(f.adapter.host.detail)
             assertEquals(uncertain, f.state.submission)
+        }
+    }
+
+    @Test fun `ED45 Masquer acknowledges only the exact uncertain delivery once`() {
+        TopicFormMode.entries.forEach { mode ->
+            // Every uncertain error carries details (ED-112): Masquer is reached from the detail, never the bar.
+            val f = TopicFormChromeFixture(mode)
+            val attempt = EditorDraftStore.AttemptToken("alice", f.session.key, "attempt", 1)
+            f.transition(f.state.copy(submission = EditorSubmissionState.Uncertain(attempt),
+                submitError = EditorErrors.uncertain))
+            val key = f.events.visibleEvent!!.key
+            f.adapter.host.barActions.onEvent(key, EditorEventAction.Details)
+            f.adapter.host.dismissDetails(key)
+            assertEquals(listOf(TopicFormIntent.ErrorDismissed), f.calls)
+            assertNull(f.adapter.host.detail)
+            assertNull(f.events.visibleEvent)
+            f.adapter.host.dismissDetails(key)
+            assertEquals(listOf(TopicFormIntent.ErrorDismissed), f.calls)
+        }
+    }
+
+    @Test fun `ED45 an old uncertainty detail cannot acknowledge a replacement or close its detail`() {
+        val f = TopicFormChromeFixture()
+        val attempt = EditorDraftStore.AttemptToken("alice", f.session.key, "old", 1)
+        f.transition(f.state.copy(submission = EditorSubmissionState.Uncertain(attempt),
+            submitError = EditorErrors.uncertain))
+        val old = f.events.visibleEvent!!
+        f.adapter.host.barActions.onEvent(old.key, EditorEventAction.Details)
+        f.transition(f.state.copy(submission = EditorSubmissionState.PersistingAttempt(
+            SubmissionToken(3, f.session)), submitError = null))
+        f.transition(f.state.copy(submission = EditorSubmissionState.Uncertain(attempt.copy(id = "new")),
+            submitError = EditorErrors.uncertain))
+        val replacement = f.events.visibleEvent!!
+        assertNotEquals(old.key, replacement.key)
+        f.adapter.host.dismissDetails(old.key)
+        assertTrue(f.calls.isEmpty())
+        assertEquals(replacement, f.events.visibleEvent)
+        f.adapter.host.barActions.onEvent(replacement.key, EditorEventAction.Details)
+        f.adapter.host.dismissDetails(old.key)
+        assertEquals(replacement, f.adapter.host.detail)
+        assertTrue(f.calls.isEmpty())
+        f.adapter.host.dismissDetails(replacement.key)
+        assertEquals(listOf(TopicFormIntent.ErrorDismissed), f.calls)
+    }
+
+    @Test fun `ED170 cancellation can deliver uncertainty before its submission state`() {
+        val f = TopicFormChromeFixture(TopicFormMode.EditFirstPost)
+        val attempt = EditorDraftStore.AttemptToken("alice", f.session.key, "cancelled", 1)
+        f.transition(f.state.copy(submission = EditorSubmissionState.Sending(attempt),
+            submitError = EditorErrors.uncertain))
+        f.transition(f.state.copy(submission = EditorSubmissionState.Uncertain(attempt)))
+        val key = f.events.visibleEvent!!.key
+        f.adapter.host.barActions.onEvent(key, EditorEventAction.Details)
+        f.adapter.host.dismissDetails(key)
+        assertEquals(listOf(TopicFormIntent.ErrorDismissed), f.calls)
+    }
+
+    @Test fun `ED170 a retained delivery cannot borrow a different or accepted attempt`() {
+        val f = TopicFormChromeFixture()
+        val attempt = EditorDraftStore.AttemptToken("alice", f.session.key, "old", 1)
+        listOf(EditorSubmissionState.Uncertain(attempt.copy(id = "new")),
+            EditorSubmissionState.Uncertain(attempt, accepted = true)).forEachIndexed { index, newer ->
+            f.transition(f.state.copy(submission = EditorSubmissionState.Uncertain(attempt), submitError = null))
+            f.transition(f.state.copy(submitError = EditorErrors.uncertain))
+            val key = f.events.visibleEvent!!.key
+            f.adapter.host.barActions.onEvent(key, EditorEventAction.Details)
+            f.transition(f.state.copy(submission = newer))
+            f.adapter.host.dismissDetails(key)
+            assertTrue("attempt guard $index", f.calls.isEmpty())
+        }
+    }
+
+    @Test fun `ED170 a retained detail cannot acknowledge a new session`() {
+        val f = TopicFormChromeFixture()
+        val attempt = EditorDraftStore.AttemptToken("alice", f.session.key, "attempt", 1)
+        f.transition(f.state.copy(submission = EditorSubmissionState.Uncertain(attempt),
+            submitError = EditorErrors.uncertain))
+        val key = f.events.visibleEvent!!.key
+        f.adapter.host.barActions.onEvent(key, EditorEventAction.Details)
+        f.events.open(f.session.copy(id = "new-opening"))
+        f.adapter.host.dismissDetails(key)
+        assertTrue(f.calls.isEmpty())
+        assertNull(f.events.visibleEvent)
+    }
+
+    @Test fun `ED170 Back detail closing and reload never acknowledge a bound uncertain attempt`() {
+        TopicFormMode.entries.forEach { mode ->
+            val closings = mutableListOf<(TopicFormChromeFixture, EventKey) -> Unit>(
+                { f, _ -> f.adapter.back() }, { f, key -> f.adapter.host.closeDetails(key) })
+            if (mode == TopicFormMode.EditFirstPost) closings.add { f, key ->
+                f.state = f.state.copy(draftHydratedFromServer = false)
+                f.adapter.reload(key)
+            }
+            closings.forEachIndexed { index, close ->
+                val f = TopicFormChromeFixture(mode)
+                val attempt = EditorDraftStore.AttemptToken("alice", f.session.key, "attempt", 1)
+                val uncertain = EditorSubmissionState.Uncertain(attempt)
+                f.transition(f.state.copy(submission = uncertain, submitError = EditorErrors.uncertain))
+                val key = f.events.visibleEvent!!.key
+                assertEquals(attempt, f.events.uncertainAttempt(key)) // Masquer could acknowledge it.
+                f.adapter.host.barActions.onEvent(key, EditorEventAction.Details)
+                close(f, key)
+                assertNull("$mode closing $index", f.adapter.host.detail)
+                assertFalse("$mode closing $index", TopicFormIntent.ErrorDismissed in f.calls)
+                assertEquals(uncertain, f.state.submission)
+                f.adapter.host.dismissDetails(key) // A closed detail has no Masquer left.
+                assertFalse("$mode closing $index", TopicFormIntent.ErrorDismissed in f.calls)
+            }
+        }
+    }
+
+    @Test fun `ED170 the topic collector retires the unsent reservation and rebinds a kept uncertainty`() {
+        TopicFormMode.entries.forEach { mode ->
+            val f = TopicFormChromeFixture(mode)
+            val attempt = EditorDraftStore.AttemptToken("alice", f.session.key, "attempt", 1)
+            val uncertain = EditorSubmissionState.Uncertain(attempt)
+            f.transition(f.state.copy(submission = uncertain, submitError = EditorErrors.uncertain))
+            val first = f.events.visibleEvent!!.key
+            f.adapter.host.barActions.onEvent(first, EditorEventAction.Details)
+            f.adapter.host.dismissDetails(first)
+            // The ViewModel reserves without sending and keeps submitError; the failed write keeps the attempt.
+            f.transition(f.state.copy(submission = EditorSubmissionState.PersistingAttempt(
+                SubmissionToken(3, f.session))))
+            f.transition(f.state.copy(submission = uncertain))
+            assertTrue(f.events.state.events.none { it.content is EditorEventContent.InProgress })
+            val kept = f.events.visibleEvent!!
+            assertNotEquals(first, kept.key)
+            assertEquals(EditorEventContent.Problem(EditorErrors.uncertain), kept.content)
+            assertEquals(attempt, f.events.uncertainAttempt(kept.key))
+            // Once storage recovers, Masquer on the signalled-again warning acknowledges the same attempt.
+            f.adapter.host.barActions.onEvent(kept.key, EditorEventAction.Details)
+            f.adapter.host.dismissDetails(kept.key)
+            f.transition(f.state.copy(submission = EditorSubmissionState.PersistingAttempt(
+                SubmissionToken(4, f.session))))
+            f.transition(f.state.copy(submission = EditorSubmissionState.Ready))
+            f.transition(f.state.copy(submitError = null))
+            assertEquals(listOf(TopicFormIntent.ErrorDismissed, TopicFormIntent.ErrorDismissed), f.calls)
+            assertTrue(f.events.state.events.isEmpty())
+            assertNull(f.events.visibleEvent)
         }
     }
 

@@ -31,6 +31,7 @@ internal class TopicFormChromeAdapter(
     val state get() = TopicFormChromeState(source())
     // The completion port owns the header, including its focus target and return to the body.
     // It opens directly after acknowledgement, without consuming a second gesture on a hidden information.
+    // ED-45/170: only the host's explicit Masquer of the bound uncertain delivery reaches ErrorDismissed.
     val host = EditorHost(
         { state.host }, body, events,
         EditorHostActions(
@@ -40,6 +41,7 @@ internal class TopicFormChromeAdapter(
             { onIntent(TopicFormIntent.ToolbarActionClicked(it)) },
             { onIntent(TopicFormIntent.TogglePreview) }, { onIntent(TopicFormIntent.CloseRequested) },
             onComplete = ::completeHeader,
+            onAcknowledgeUncertain = { onIntent(TopicFormIntent.ErrorDismissed) },
         ),
         EditorHostSurfaces(TopicFormChromeSurface.Smileys, TopicFormChromeSurface.Options,
             TopicFormChromeSurface.Picker, imageUrl = TopicFormChromeSurface.Url,

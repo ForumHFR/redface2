@@ -67,7 +67,10 @@ private fun HeaderNote(text: String) {
     Text(text, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
-/** The GET remedy remains available, including beside an uncertain attempt with an unknown FP body. */
+/**
+ * The GET remedy remains available, including beside an uncertain attempt with an unknown FP body.
+ * ED-45/170: only Masquer may acknowledge the bound uncertain attempt; Back and overlay closing only close.
+ */
 @Composable
 internal fun TopicFormEventDetails(
     adapter: TopicFormChromeAdapter,
@@ -77,7 +80,8 @@ internal fun TopicFormEventDetails(
 ) {
     val source = adapter.state.source
     EditorEventDetails(adapter.host.detail, bodyState, adapter.host::closeDetails, adapter::reload,
-        { adapter.host.returnToBody(onReturnToBody) }, body = body) { event ->
+        { adapter.host.returnToBody(onReturnToBody) }, onDismiss = adapter.host::dismissDetails,
+        body = body) { event ->
         val error = (event.content as? EditorEventContent.Problem)?.error
         if (source.isAwaitingInitialBody && error != null && error.action != EditorErrorAction.Reload) {
             TextButton(onClick = { adapter.reload(event.key) }, enabled = !source.isLoadingForm) {
