@@ -174,10 +174,12 @@ class PrivateMessageComposeRestorationScreenTest {
         var owner by mutableStateOf(modelOwner.get())
         var model by mutableStateOf(editor(owner, initial = null))
         lateinit var back: androidx.activity.OnBackPressedDispatcher
+        lateinit var focus: FocusManager
         compose.setContent {
             key(owner) {
                 CompositionLocalProvider(LocalLifecycleOwner provides owner) {
                     back = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+                    focus = LocalFocusManager.current
                     RedfaceTheme(darkTheme = false, dynamicColor = false) {
                         PrivateMessageComposeScreen({}, {}, viewModel = model)
                     }
@@ -227,6 +229,18 @@ class PrivateMessageComposeRestorationScreenTest {
             assertFalse(model.chromeMemory.host.focus.autoFocusConsumed)
             owner = host().get()
         }
+        compose.onNodeWithText("Retour au message").assertDoesNotExist()
+        // H / ED-86 restores the real body focus, independently of the consumed automatic header.
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(selection, model.bodyFieldState.selection)
+            assertNull(model.chromeMemory.host.surface)
+            focus.clearFocus(force = true)
+            // Keep the checkpoint's reversed range after BTF2's explicit focus-loss collapse.
+            model.bodyFieldState.edit { this.selection = selection }
+        }
+        compose.onNode(hasSetTextAction()).assertIsNotFocused()
+        compose.runOnIdle { owner = host().get() }
         compose.onNodeWithText("Retour au message").assertDoesNotExist()
         compose.onNode(hasSetTextAction()).assertIsNotFocused()
         compose.runOnIdle { assertNull(model.chromeMemory.host.surface) }

@@ -18,7 +18,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.platform.InterceptPlatformTextInput
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.PlatformTextInputInterceptor
@@ -100,6 +102,7 @@ class PrivateMessageComposeChromeComposeTest {
     private val uncertain = EditorErrors.uncertain(EditorErrorSurface.MessageCompose)
     private val scroll = ScrollState(0)
     private lateinit var back: OnBackPressedDispatcher
+    private lateinit var focus: FocusManager
     private lateinit var view: View
     private var renderedChrome: EditorScaffoldChrome? = null
     private var hides = 0
@@ -128,6 +131,7 @@ class PrivateMessageComposeChromeComposeTest {
         modifier: Modifier = Modifier,
     ) {
         back = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+        focus = LocalFocusManager.current
         view = LocalView.current
         val scope = rememberCoroutineScope()
         val smileys = remember { SmileyPickerController(scope, searchWiki = { _, _ -> emptyList() }) }
@@ -182,6 +186,19 @@ class PrivateMessageComposeChromeComposeTest {
             assertFalse(f.adapter.consumeReturn())
             generation.value++
         }
+        compose.onNodeWithText("Retour au message").assertDoesNotExist()
+        // H restores the focused body after recreation, without replaying entry or starting the IME.
+        bodyField().assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(TextRange(6, 1), f.body.selection)
+            assertEquals(0, shows)
+            assertEquals(0, bodyInputStarts)
+            assertTrue(bodyInputs.isEmpty())
+            assertFalse(f.adapter.consumeReturn())
+            focus.clearFocus(force = true)
+        }
+        bodyField().assertIsNotFocused()
+        compose.runOnIdle { generation.value++ }
         compose.onNodeWithText("Retour au message").assertDoesNotExist()
         bodyField().assertIsNotFocused()
         compose.runOnIdle {

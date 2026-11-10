@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.feature.messages
 
+import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -13,7 +15,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertHeightIsEqualTo
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertWidthIsEqualTo
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -34,6 +38,8 @@ import fr.forumhfr.redface2.core.ui.editor.EditorRecipientState
 import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.testing.captureRoboImage
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -203,12 +209,16 @@ class EditorBaselineRoborazziTest {
     private fun captureComposeStates(orientation: String, scale: Float) {
         val scenario = mutableStateOf(false to ComposeCapture.Header)
         lateinit var focus: FocusManager
+        lateinit var bodyScroll: ScrollState
         compose.setContent {
             focus = LocalFocusManager.current
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, scale)) {
                 RedfaceTheme(darkTheme = scenario.value.first, dynamicColor = false) {
-                    key(scenario.value) { ComposeChrome(MULTILINE_DRAFT, scenario.value.second) }
+                    key(scenario.value) {
+                        bodyScroll = rememberScrollState()
+                        ComposeChrome(MULTILINE_DRAFT, scenario.value.second, bodyScroll)
+                    }
                 }
             }
         }
@@ -216,6 +226,17 @@ class EditorBaselineRoborazziTest {
             ComposeCapture.entries.forEach { state ->
                 compose.runOnIdle { scenario.value = dark to state }
                 compose.waitForIdle()
+                if (state == ComposeCapture.Options) {
+                    // Open through the real gesture after autofocus reveals the caret. Pre-opening
+                    // the sheet before mounting the body correctly blocks that autofocus (ED-86).
+                    compose.onNode(hasSetTextAction()).assertIsFocused()
+                    val before = compose.runOnIdle {
+                        assertTrue("The body must reveal its caret before opening Options", bodyScroll.value > 0)
+                        bodyScroll.value
+                    }
+                    compose.onNodeWithContentDescription("Options").performClick()
+                    compose.runOnIdle { assertEquals(before, bodyScroll.value) }
+                }
                 compose.runOnIdle { focus.clearFocus(force = true) }
                 compose.mainClock.advanceTimeBy(1_000L)
                 compose.mainClock.autoAdvance = false
@@ -229,14 +250,18 @@ class EditorBaselineRoborazziTest {
     }
 
     @Composable
-    private fun ComposeChrome(body: String, capture: ComposeCapture = ComposeCapture.Normal) {
+    private fun ComposeChrome(
+        body: String,
+        capture: ComposeCapture = ComposeCapture.Normal,
+        bodyScrollState: ScrollState = rememberScrollState(),
+    ) {
         val f = remember { PrivateMessageComposeChromeFixture().apply { stage(body, capture); openScene(capture) } }
         val scope = rememberCoroutineScope()
         val smileys = remember { SmileyPickerController(scope, searchWiki = { _, _ -> emptyList() }) }
         val height = LocalConfiguration.current.screenHeightDp.dp
         PrivateMessageComposeContent(f.state, f.body, InputTransformation {}, f.recipients, f.subject,
             f.actions, smileys, chromeEvents = f.events, chromeMemory = f.memory,
-            windowMetrics = EditorWindowMetrics(height, 0.dp, 0.dp))
+            windowMetrics = EditorWindowMetrics(height, 0.dp, 0.dp), bodyScrollState = bodyScrollState)
     }
 
     private fun PrivateMessageComposeChromeFixture.stage(body: String, capture: ComposeCapture) {
@@ -255,12 +280,11 @@ class EditorBaselineRoborazziTest {
         this.body.edit { replace(0, length, body) }
     }
 
-    /** Surfaces open through the production adapter; EmptyEntry is opened by the screen's own entry effect. */
+    /** Options opens by gesture after mounting; EmptyEntry uses the screen's own entry effect. */
     private fun PrivateMessageComposeChromeFixture.openScene(capture: ComposeCapture) {
         when (capture) {
             ComposeCapture.Header -> adapter.openHeader()
             ComposeCapture.Restore -> adapter.open(PrivateMessageComposeChromeSurface.Restore)
-            ComposeCapture.Options -> adapter.open(PrivateMessageComposeChromeSurface.Options)
             ComposeCapture.Event -> transition(state.copy(submitError = EditorErrors.incompleteRecipient))
             // The entry header was already closed: only the app bar summary names what is missing.
             ComposeCapture.EmptySummary -> memory.claimInitialEntry()
