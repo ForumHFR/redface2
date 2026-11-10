@@ -141,7 +141,7 @@ class EditorCompactControlGeometryTest {
         compose.onNodeWithTag("editor-bar-submit-shape", useUnmergedTree = true).assert(hasClickAction())
         assertControlBounds(submit, "editor-bar-submit-shape", visibleHeight)
         assertControlBounds(compose.onNodeWithContentDescription("Mise en forme"),
-            "editor-bar-format-shape", visibleHeight)
+            "editor-bar-format-shape", visibleHeight, nativeTarget = true)
         if (visibleHeight == 40f) assertCompactStatusBounds()
         show(EditorScaffoldChrome(bar = EditorBarState(arm = host.frozenArm)))
         compose.onNodeWithText("Confirmer").assertExists()
@@ -167,8 +167,14 @@ class EditorCompactControlGeometryTest {
         assertEquals(4f, (bar.bottom - badge.bottom).value, 0.5f)
     }
 
-    private fun assertControlBounds(target: SemanticsNodeInteraction, shapeTag: String, visibleHeight: Float) {
-        val touch = target.getUnclippedBoundsInRoot()
+    /**
+     * Send and the event keep a 48 dp semantics node around their shape. A [nativeTarget] icon's node is
+     * its state layer: it must coincide with the shape, and Compose's touch expansion is the target.
+     */
+    private fun assertControlBounds(
+        target: SemanticsNodeInteraction, shapeTag: String, visibleHeight: Float, nativeTarget: Boolean = false,
+    ) {
+        val touch = if (nativeTarget) target.targetBounds() else target.getUnclippedBoundsInRoot()
         val shape = bounds(shapeTag)
         val bar = bounds("editor-scaffold-action-bar")
         assertEquals(visibleHeight + 8f, bar.height.value, 0.5f)
@@ -178,6 +184,10 @@ class EditorCompactControlGeometryTest {
         assertEquals(4f, (shape.top - bar.top).value, 0.5f)
         assertEquals(4f, (bar.bottom - shape.bottom).value, 0.5f)
         assertEquals((touch.top + touch.height / 2).value, (shape.top + shape.height / 2).value, 0.5f)
+        if (nativeTarget) {
+            assertEquals(shape, target.layoutBounds())
+            assertEquals((touch.left + touch.width / 2).value, (shape.left + shape.width / 2).value, 0.5f)
+        }
     }
 
     @Test

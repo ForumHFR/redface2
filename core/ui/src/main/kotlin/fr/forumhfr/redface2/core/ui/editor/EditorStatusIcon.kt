@@ -13,7 +13,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TooltipAnchorPosition
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
-import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
@@ -81,10 +80,8 @@ fun EditorStatusIcon(
             }
         }, focusable = false, enableUserInput = visible,
     ) {
-        Box(
-            modifier = if (visible && compactHeight) Modifier.minimumInteractiveComponentSize() else Modifier,
-            contentAlignment = Alignment.Center,
-        ) {
+        // Masking reattaches this movable node: one stable chain keeps its 40 dp layer's bounds exact.
+        Box(Modifier.editorCompactTargetSlot(visible && compactHeight), contentAlignment = Alignment.Center) {
             // The stacked badge reaches the bottom edge; a round button clips its lower corners.
             IconButton(onClick = onClick, enabled = enabled && visible, shape = RectangleShape,
                 modifier = editorStatusButtonModifier(visible, compactHeight, badgeWidth),

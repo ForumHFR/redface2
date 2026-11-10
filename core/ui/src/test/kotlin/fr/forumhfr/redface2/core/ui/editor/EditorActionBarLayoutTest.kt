@@ -84,7 +84,7 @@ class EditorActionBarLayoutTest {
         host.secondStatus.value = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon retrouvé", {})
         host.bar.value = EditorBarState(EditorBarMode.Format); compose.setContent { host.Content() }
         val preview = compose.onNodeWithContentDescription("Afficher l’aperçu")
-        assertTrue(preview.getUnclippedBoundsInRoot().right <= bounds("editor-bar-scroll").left)
+        assertTrue(preview.targetBounds().right <= bounds("editor-bar-scroll").left)
         compose.runOnIdle { host.width.value = 360.dp }; assertTrue(bounds("editor-bar-scroll").width >= 48.dp)
         preview.revealEditorControl()
         compose.onNodeWithContentDescription("12 citations").revealEditorControl()
@@ -100,9 +100,10 @@ class EditorActionBarLayoutTest {
         val header = compose.onNodeWithContentDescription("Titre et sous-catégorie").assertIsDisplayed()
         val eventControl = compose.onNode(hasClickAction() and hasContentDescription("Titre manquant, Compléter"))
         val retainedEvent = eventControl.getUnclippedBoundsInRoot()
-        assertEquals(16f, header.getUnclippedBoundsInRoot().left.value, 0.5f)
+        // Compact icons expose a 40 dp layer; the 48 dp slot is their native touch target.
+        assertEquals(16f, header.targetBounds().left.value, 0.5f)
         assertEquals(64f, retainedEvent.left.value, 0.5f)
-        assertTrue(header.getUnclippedBoundsInRoot().right <= retainedEvent.left)
+        assertTrue(header.targetBounds().right <= retainedEvent.left)
         assertTrue(retainedEvent.width >= 185.dp)
         assertTrue(bounds("editor-bar-submit").left - retainedEvent.right >= 7.9.dp)
         compose.runOnIdle { host.width.value = headerBoundary - 1.dp }
@@ -174,10 +175,11 @@ class EditorActionBarLayoutTest {
 
     private fun assertFixedSlotsThroughEvents(labels: List<String>) {
         val resting = labels.associateWith { compose.onNodeWithContentDescription(it).getUnclippedBoundsInRoot() }
+        // Slots are 48 dp targets; a compact icon's own node is only its 40 dp state layer.
         val fixed = labels.mapNotNull { label ->
             val node = compose.onNodeWithContentDescription(label)
             if (hasAnyAncestor(hasScrollAction()).matches(node.fetchSemanticsNode())) null
-            else label to node.getUnclippedBoundsInRoot()
+            else label to node.targetBounds()
         }.toMap()
         assertTrue(fixed.isNotEmpty())
         val send = bounds("editor-bar-submit"); val body = bounds("body")
@@ -195,7 +197,7 @@ class EditorActionBarLayoutTest {
             assertEquals(expected.keys.toList(), retained)
             expected.forEach { (label, position) ->
                 val node = compose.onNodeWithContentDescription(label)
-                assertEquals(position, node.getUnclippedBoundsInRoot())
+                assertEquals(position, node.targetBounds())
                 assertEquals(retainedIds.getValue(label), node.fetchSemanticsNode().id)
             }
             val envelope = bounds("editor-bar-event")

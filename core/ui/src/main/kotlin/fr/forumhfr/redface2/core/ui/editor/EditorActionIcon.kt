@@ -11,7 +11,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TooltipAnchorPosition
 import androidx.compose.material3.TooltipBox
 import androidx.compose.material3.TooltipDefaults
-import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -27,7 +26,8 @@ import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 /**
  * Insertions have no selected state. Only the Format mode trigger supplies [expanded].
  * [containerModifier] styles a background independently of the 48 dp interactive target.
- * In [compactHeight], the button's state layer is 40 dp; its native touch target still expands to 48 dp.
+ * In [compactHeight], the button's state layer is 40 dp, centred in a 48 dp slot; its native touch target
+ * still expands to 48 dp.
  * The host dispatches NextGesture before [onClick]'s action and stops when gestureConsumed is true.
  */
 @Composable
@@ -46,10 +46,7 @@ fun EditorActionIcon(
         stringResource(if (it) R.string.editor_mode_expanded else R.string.editor_mode_collapsed)
     }
     EditorIconTooltip(label) {
-        Box(
-            modifier = if (compactHeight) Modifier.minimumInteractiveComponentSize() else Modifier,
-            contentAlignment = Alignment.Center,
-        ) {
+        Box(Modifier.editorCompactTargetSlot(compactHeight), contentAlignment = Alignment.Center) {
             Box(containerModifier)
             IconButton(
                 onClick = onClick,
@@ -64,6 +61,16 @@ fun EditorActionIcon(
             }
         }
     }
+}
+
+/**
+ * ED-05/W8-1: when [enabled], a 48 dp slot whose Box parent centres the 40 dp layer by child placement.
+ * The chain is the same either way: minimumInteractiveComponentSize() centres through an offset inside
+ * this node, which semantics reported 4 dp high after a hidden movable status was reattached visible.
+ */
+internal fun Modifier.editorCompactTargetSlot(enabled: Boolean): Modifier {
+    val slot = if (enabled) EditorChromeMetrics.minimumTargetSize else 0.dp
+    return sizeIn(minWidth = slot, minHeight = slot)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
