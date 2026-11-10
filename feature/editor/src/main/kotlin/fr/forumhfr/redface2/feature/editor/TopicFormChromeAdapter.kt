@@ -109,10 +109,11 @@ internal class TopicFormChromeAdapter(
         }
     }
     fun reload(key: EventKey) {
-        val error = (host.detail?.takeIf { it.key == key }?.content as? EditorEventContent.Problem)?.error
         val current = events.state.events.any { it.key == key }
+        val detail = host.detail?.takeIf { it.key == key && current }
+        val error = (detail?.content as? EditorEventContent.Problem)?.error
         val remedy = error?.action == EditorErrorAction.Reload || source().isAwaitingInitialBody
-        if (error == null || !current || !remedy || source().isLoadingForm) return
+        if (error == null || !remedy || source().isLoadingForm) return
         onIntent(TopicFormIntent.ReloadRequested)
         host.closeDetails(key)
     }
