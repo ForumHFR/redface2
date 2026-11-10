@@ -3,25 +3,41 @@ package fr.forumhfr.redface2.feature.messages
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
-import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.input.InputModeManager
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.InterceptPlatformTextInput
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.PlatformTextInputInterceptor
 import androidx.compose.ui.platform.SoftwareKeyboardController
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.isToggleable
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.text.TextRange
-import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.domain.editor.ArmToken
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
-import fr.forumhfr.redface2.core.ui.editor.EditorScaffold
+import fr.forumhfr.redface2.core.ui.editor.EditorBarMode
+import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorScaffoldChrome
-import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -40,10 +56,16 @@ import org.robolectric.annotation.GraphicsMode
 class PrivateMessageReplyChromeComposeTest {
     @get:Rule val compose = createComposeRule()
     private val f = PrivateMessageReplyChromeFixture()
-    private val focus = FocusRequester()
+    private lateinit var back: androidx.activity.OnBackPressedDispatcher
+    private lateinit var inputMode: InputModeManager
     private lateinit var chrome: EditorScaffoldChrome
     private var hides = 0
     private var shows = 0
+    private var inputActive = false
+    private val input = PlatformTextInputInterceptor { request, next ->
+        inputActive = true
+        try { next.startInputMethod(request) } finally { inputActive = false }
+    }
     private val keyboard = object : SoftwareKeyboardController {
         override fun show() { shows++ }
         override fun hide() { hides++ }
@@ -53,17 +75,13 @@ class PrivateMessageReplyChromeComposeTest {
         val adapter = f.adapter
         val projected = adapter.chrome()
         SideEffect { chrome = projected }
+        back = androidx.activity.compose.LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+        inputMode = LocalInputModeManager.current
         CompositionLocalProvider(LocalSoftwareKeyboardController provides keyboard) {
-            RedfaceTheme {
-                EditorScaffold(f.body, EditorWindowMetrics(740.dp, 0.dp, 0.dp), adapter.title(),
-                    adapter.state.context, projected, adapter.barActions, adapter.submitState, adapter.submitActions,
-                    adapter.imageActions, adapter::closeRequested, bodyFocusRequester = focus,
-                    surfaceFocus = adapter.focusMemory, onSystemBack = { adapter.back() },
-                    fieldArea = { body -> PrivateMessageReplyChromePreview(adapter, f.body, focus, body) },
-                    overlay = { restore, body ->
-                        body()
-                        PrivateMessageReplyChromeSheets(adapter, autoOpen, restore)
-                    })
+            InterceptPlatformTextInput(input) {
+                RedfaceTheme {
+                    PrivateMessageReplyTestContent(f.state, f.body, f.actions, f.events, f.memory, autoOpen)
+                }
             }
         }
     }
@@ -98,7 +116,7 @@ class PrivateMessageReplyChromeComposeTest {
         compose.onNodeWithText("Administration", substring = true).assertExists()
         compose.runOnIdle {
             assertEquals(1, f.calls.size)
-            f.adapter.back()
+            back.onBackPressed()
         }
         compose.runOnIdle { assertNull(f.adapter.surface) }
     }
@@ -109,13 +127,14 @@ class PrivateMessageReplyChromeComposeTest {
             f.adapter.focusMemory.imeBeforeSurface = false
             hides = 0
             shows = 0
-            f.adapter.back()
+            back.onBackPressed()
         }
         compose.onNode(hasSetTextAction()).assertIsFocused()
         compose.runOnIdle {
             assertEquals(TextRange(6, 1), f.body.selection)
             assertTrue(hides > 0)
             assertEquals(0, shows)
+            assertFalse(inputActive)
             assertFalse(f.adapter.consumeReturn())
             assertTrue(f.memory.recipientEntryHandled)
         }
@@ -133,4 +152,128 @@ class PrivateMessageReplyChromeComposeTest {
             assertEquals(listOf("signature:true", "smileyDisabled:true", "notification:true"), f.calls)
         }
     }
+    @Test fun `ED85 Back closes color format preview then requests saved exit`() {
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Mise en forme").performClick()
+        compose.onNodeWithContentDescription("Couleur").performScrollTo().performClick()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNodeWithContentDescription("Gras").assertExists()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNodeWithContentDescription("Options").assertExists()
+        compose.onNodeWithContentDescription("Afficher l’aperçu").performClick()
+        compose.onNode(hasSetTextAction()).assertDoesNotExist()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNode(hasSetTextAction()).assertExists()
+        compose.runOnIdle { back.onBackPressed() }
+        assertEquals(listOf("preview", "preview", "close"), f.calls)
+    }
+
+    @Test fun `ED85 Back skips the event masked mode without acknowledgement`() {
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Mise en forme").performClick()
+        compose.runOnIdle { f.transition(f.state.copy(submitError = EditorErrors.antiFlood)) }
+        compose.runOnIdle { back.onBackPressed() }
+        compose.runOnIdle {
+            assertEquals(listOf("close"), f.calls)
+            assertEquals(EditorBarMode.Format, f.adapter.scaffoldChrome().bar.mode)
+            assertTrue(f.events.visibleEvent != null)
+        }
+    }
+
+    @Test fun `ED85 host Back returns keyboard focus to the parent bar control`() {
+        compose.setContent { Content() }
+        compose.runOnIdle { assertTrue(inputMode.requestInputMode(InputMode.Keyboard)) }
+        compose.onNodeWithContentDescription("Mise en forme").requestFocus().performKeyInput { pressKey(Key.Enter) }
+        compose.onNodeWithContentDescription("Couleur").performScrollTo().requestFocus()
+            .performKeyInput { pressKey(Key.Enter) }
+        compose.onNode(hasContentDescription("Retour") and hasAnyAncestor(hasTestTag("editor-scaffold-action-bar")))
+            .assertIsFocused()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNodeWithContentDescription("Couleur").assertIsFocused()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNodeWithContentDescription("Mise en forme").assertIsFocused()
+        compose.runOnIdle { assertTrue(f.calls.isEmpty()) }
+    }
+
+    @Test fun `ED85 detail precedes disarm and disarm precedes a retained masked mode`() {
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Mise en forme").performClick()
+        compose.runOnIdle {
+            f.state = f.state.copy(submission = EditorSubmissionState.Armed(ArmToken(1, f.session, 0, 4_000L)))
+        }
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNodeWithContentDescription("Gras").assertExists()
+        compose.runOnIdle {
+            assertEquals(EditorBarMode.Format, f.adapter.scaffoldChrome().bar.mode)
+            f.transition(f.state.copy(submitError = EditorErrors.antiFlood))
+        }
+        compose.onNodeWithContentDescription("Anti-flood HFR, Afficher les détails").performClick()
+        compose.runOnIdle {
+            // Same OpenSurface behaviour as dev: opening details resets the retained bar mode.
+            assertEquals(EditorBarMode.Normal, f.adapter.scaffoldChrome().bar.mode)
+            f.state = f.state.copy(submission = EditorSubmissionState.Armed(ArmToken(2, f.session, 0, 4_000L)))
+            back.onBackPressed()
+        }
+        compose.runOnIdle {
+            assertNull(f.adapter.detail)
+            assertTrue(f.state.submission is EditorSubmissionState.Armed)
+            assertEquals(listOf("disarm"), f.calls)
+            back.onBackPressed()
+        }
+        compose.runOnIdle { assertEquals(listOf("disarm", "disarm"), f.calls) }
+    }
+
+    @Test fun `ED85 Back dismisses action and status tooltips before leaving`() {
+        f.state = f.state.copy(restorableDraft = "Brouillon")
+        compose.setContent { Content() }
+        for (label in listOf("Mise en forme", "Brouillon retrouvé, restaurer ou ignorer")) {
+            compose.onNodeWithContentDescription(label).performTouchInput { longClick() }
+            compose.onNodeWithText(label, useUnmergedTree = true).assertExists()
+            compose.runOnIdle { back.onBackPressed() }
+            compose.onNodeWithText(label, useUnmergedTree = true).assertDoesNotExist()
+            compose.runOnIdle { assertTrue(f.calls.isEmpty()) }
+        }
+    }
+
+    @Test fun `ED86 manager returns open IME and reversed selection exactly once`() {
+        f.state = f.state.copy(canManageRecipients = true, recipients = listOf("alice", "Administration"))
+        compose.setContent { Content(autoOpen = true) }
+        compose.runOnIdle {
+            f.adapter.focusMemory.imeBeforeSurface = true
+            shows = 0
+            hides = 0
+            back.onBackPressed()
+        }
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(TextRange(6, 1), f.body.selection)
+            assertTrue(inputActive)
+            assertEquals(0, hides)
+            assertFalse(f.adapter.consumeReturn())
+        }
+    }
+
+    @Test fun `ED86 process recreation closes the manager without repeating automatic entry`() {
+        val restoration = StateRestorationTester(compose)
+        restoration.setContent {
+            RedfaceTheme {
+                PrivateMessageReplyTestContent(f.state.copy(canManageRecipients = true,
+                    recipients = listOf("alice", "Administration")), autoOpen = true)
+            }
+        }
+        compose.onNodeWithText("Membres de la discussion").assertExists()
+        restoration.emulateSavedInstanceStateRestore()
+        compose.onNodeWithText("Membres de la discussion").assertDoesNotExist()
+        compose.onNode(hasSetTextAction()).assertExists()
+    }
+
+    @Test fun `ED130 form or inline quote failure stays full screen with the existing retry`() {
+        f.state = f.state.copy(formError = true, formAvailable = false)
+        compose.setContent { Content() }
+        compose.onNode(hasSetTextAction()).assertDoesNotExist()
+        compose.onNodeWithContentDescription("Options").assertDoesNotExist()
+        compose.onNodeWithText("Réessayer").performClick()
+        compose.runOnIdle { assertEquals(listOf("reload"), f.calls) }
+    }
+
 }

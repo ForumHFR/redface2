@@ -397,30 +397,6 @@ private fun MessageOptionToggle(
 }
 
 /**
- * #618 (Bug 1) — compact owner-only recipients summary shown in the reply composer in place of the
- * old inline editor. « Destinataires : N » + a « Gérer » action; the tap opens the dedicated
- * [RecipientManagerSheet] so the message body and the send bar stay reachable (the inline editor used
- * to crowd them out, especially for a 29+-member DT). Gated by `canManageRecipients` at the call site.
- */
-@Composable
-internal fun MessageRecipientsSummary(count: Int, onManage: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(
-            text = stringResource(R.string.messages_recipients_summary, count),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        TextButton(onClick = onManage) {
-            Text(text = stringResource(R.string.messages_recipients_manage))
-        }
-    }
-}
-
-/**
  * #618 (Bug 1) — bottom sheet hosting the DT/MultiMP member editor, moved out of the composer flow.
  * Wraps the existing [MessageRecipientsEditor] (chips + add field) in a height-capped, scrollable
  * column so a 29+-member DT scrolls inside the sheet instead of pushing the composer off-screen. The

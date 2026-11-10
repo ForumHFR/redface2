@@ -103,8 +103,6 @@
         <item quantity="one">%1$d destinataire, gérer</item>
         <item quantity="other">%1$d destinataires, gérer</item>
     </plurals>
-    <string name="messages_recipients_summary">Destinataires : %1$d</string>
-    <string name="messages_recipients_manage">Gérer</string>
 
     <!-- #1042 — tap avatar/pseudo d'un message privé : ouvre le profil (parité topic #208). -->
     <string name="messages_open_profile_action">Voir le profil</string>

@@ -25,7 +25,8 @@ import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
-import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextInputSelection
@@ -240,16 +241,16 @@ class PrivateMessageReplyInputTest {
         }
         assertEquals(node, field().assertIsFocused().fetchSemanticsNode().id)
         val context = RuntimeEnvironment.getApplication()
-        val error = context.getString(fr.forumhfr.redface2.core.ui.R.string.editor_error_invalid_hash)
-        val send = context.getString(R.string.messages_reply_submit)
-        compose.onNodeWithText(error).assertIsDisplayed()
-        compose.onNodeWithText(send).assertIsNotEnabled()
+        val error = context.getString(fr.forumhfr.redface2.core.ui.R.string.editor_summary_hash) +
+            ", Afficher les détails"
+        compose.onNodeWithContentDescription(error).assertIsDisplayed()
+        compose.onNodeWithTag("editor-bar-submit").assertIsNotEnabled()
 
         compose.runOnIdle { refresh.complete(replyForm(quote).copy(hashCheck = "refreshed-private-hash")) }
         compose.waitUntil { !vm.state.value.isLoadingForm }
         assertEquals(node, field().assertIsFocused().fetchSemanticsNode().id)
-        compose.onNodeWithText(error).assertIsDisplayed()
-        compose.onNodeWithText(send).assertIsEnabled()
+        compose.onNodeWithContentDescription(error).assertIsDisplayed()
+        compose.onNodeWithTag("editor-bar-submit").assertIsEnabled()
         compose.runOnIdle {
             assertTrue(vm.state.value.canSubmit)
             assertEquals(quote + "body", vm.bodyFieldState.text.toString())
@@ -386,21 +387,9 @@ class PrivateMessageReplyInputTest {
     @Composable
     private fun ReplyContent() {
         val state by vm.state.collectAsState()
-        PrivateMessageReplyContent(
-            state = state, autoOpenRecipientManager = false, onBack = vm::onCloseRequested,
-            bodyFieldState = vm.bodyFieldState, bodyInputTransformation = vm.bodyInputTransformation,
-            bodyScrollState = vm.bodyScrollState,
-            onToolbarAction = vm::onToolbarAction, onTogglePreview = vm::onTogglePreview,
-            onToggleSignature = vm::onToggleSignature, onToggleSmileyDisabled = vm::onToggleSmileyDisabled,
-            onToggleEmailNotification = vm::onToggleEmailNotification, onErrorDismissed = vm::onErrorDismissed,
-            onSubmit = vm::onSubmit, onSubmitConfirmed = vm::onSubmitConfirmed,
-            onSubmitConfirmationDismissed = vm::onSubmitConfirmationDismissed,
-            onRetryFormLoad = vm::retryFormLoad, onDraftRestore = vm::onDraftRestoreRequested,
-            onDraftDiscard = vm::onDraftDiscardRequested, onImagePickerEvent = vm::onImagePickerEvent,
-            onUploadErrorDismissed = vm::onUploadErrorDismissed, onAddRecipient = vm::onAddRecipient,
-            onRemoveRecipient = vm::onRemoveRecipient, smileyPicker = vm.smileyPicker,
-            onSmileySelected = vm::onSmileySelected,
-        )
+        PrivateMessageReplyTestContent(state, vm.bodyFieldState, remember(vm) { vm.chromeActions() },
+            vm.editorEvents, vm.chromeMemory, scroll = vm.bodyScrollState, smileys = vm.smileyPicker,
+            transformation = vm.bodyInputTransformation, bodyCaretRevealResetKey = { vm.bodyCaretRevealResetKey })
     }
 
     private fun replyForm(quote: String) = ReplyForm(

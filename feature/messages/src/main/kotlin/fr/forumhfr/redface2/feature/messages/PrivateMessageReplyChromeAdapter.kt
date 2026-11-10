@@ -27,7 +27,8 @@ internal class PrivateMessageReplyChromeAdapter(
     { PrivateMessageReplyChromeState(source()).host }, body, events, actions.host,
     // Reply has neither header nor quote panel, and never completes a recipient refusal as a new MP would.
     EditorHostSurfaces(PrivateMessageReplyChromeSurface.Smileys, PrivateMessageReplyChromeSurface.Options,
-        PrivateMessageReplyChromeSurface.Picker, canWrapSelection = true),
+        PrivateMessageReplyChromeSurface.Picker, canWrapSelection = true,
+        returnsToBody = { it != PrivateMessageReplyChromeSurface.Restore }),
     launchPicker, openSmileys, memory.host,
 ) {
     val state get() = PrivateMessageReplyChromeState(source())
@@ -75,6 +76,8 @@ internal class PrivateMessageReplyChromeAdapter(
         if (event !is ImagePickerEvent.Launched) closeSurface()
         actions.picker(event)
     }
+    fun pickerCancelled() { closeSurface() }
+    fun retryFormLoad() { actions.reloadForm() }
     fun restoreDraft() {
         if (state.restoreEnabled) { actions.restoreDraft(); closeSurface() }
     }

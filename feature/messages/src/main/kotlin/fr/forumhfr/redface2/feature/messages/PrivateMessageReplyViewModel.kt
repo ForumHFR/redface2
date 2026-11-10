@@ -115,6 +115,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     /** Body and IME state belong to this ViewModel, never to a Bundle saver. */
     val bodyFieldState: TextFieldState get() = draftSession.bodyFieldState
     val bodyScrollState: ScrollState get() = draftSession.bodyScrollState
+    internal val bodyCaretRevealResetKey: Int get() = draftSession.bodyCaretRevealResetKey
 
     private val _state = MutableStateFlow(PrivateMessageReplyUiState(isInitializing = true))
     val state: StateFlow<PrivateMessageReplyUiState> = _state.asStateFlow()

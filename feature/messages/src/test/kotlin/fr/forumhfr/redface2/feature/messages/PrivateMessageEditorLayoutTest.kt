@@ -15,8 +15,13 @@ import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
@@ -34,12 +39,7 @@ import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
-import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
-import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
-import io.mockk.every
-import io.mockk.mockk
 import java.util.concurrent.atomic.AtomicReference
-import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -49,7 +49,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** #447 — MP reply uses the same short-window budget and alert-first ordering as topic editors. */
+/** Reply uses the shared chrome budget; new-message checks retain the legacy body until C4. */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "fr-rFR-w360dp-h330dp-xxhdpi")
@@ -79,17 +79,9 @@ class PrivateMessageEditorLayoutTest {
         try {
             compose.setContent {
                 RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                    ReplyEditorBody(
-                        state = PrivateMessageReplyUiState(
-                            isLoadingForm = false, formAvailable = true, isPreviewVisible = true,
-                            preview = PostContent(listOf(PostBlock.Image(url, null))),
-                        ),
-                        bodyFieldState = remember { TextFieldState() },
-                        bodyInputTransformation = InputTransformation {},
-                        onToolbarAction = {}, onTogglePreview = {}, onErrorDismissed = {},
-                        onDraftRestore = {}, onDraftDiscard = {}, onImagePickerEvent = {},
-                        onUploadErrorDismissed = {}, onManageRecipients = {},
-                    )
+                    PrivateMessageReplyTestContent(PrivateMessageReplyUiState(
+                        isLoadingForm = false, formAvailable = true, isPreviewVisible = true,
+                        preview = PostContent(listOf(PostBlock.Image(url, null)))))
                 }
             }
             compose.waitUntil(timeoutMillis = 5_000) { policy.get() != null }
@@ -97,145 +89,84 @@ class PrivateMessageEditorLayoutTest {
         } finally { SingletonImageLoader.reset() }
     }
 
-    @Test
-    fun `reply body keeps 160 dp field and both draft actions on short viewport`() {
-        compose.setContent {
-            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                ReplyEditorBody(
-                    state = PrivateMessageReplyUiState(
-                        isLoadingForm = false,
-                        formAvailable = true,
-                        restorableDraft = "Brouillon à restaurer",
-                    ),
-                    bodyFieldState = remember { TextFieldState() },
-                    bodyInputTransformation = InputTransformation {},
-                    onToolbarAction = {},
-                    onTogglePreview = {},
-                    onErrorDismissed = {},
-                    onDraftRestore = {},
-                    onDraftDiscard = {},
-                    onImagePickerEvent = {},
-                    onUploadErrorDismissed = {},
-                    onManageRecipients = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-        }
+    @Test fun replyCompactGeometryStaysFixedWhileTyping() = checkReplyGeometry(48.dp)
 
-        compose.onNode(hasSetTextAction()).assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT - FIELD_LABEL_HEADROOM)
-        assertDraftActionsFullyVisible()
+    @Test
+    @Config(qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
+    fun replyNormalGeometryStaysFixedWhileTyping() = checkReplyGeometry(56.dp)
+
+    private fun checkReplyGeometry(barHeight: androidx.compose.ui.unit.Dp) {
+        setReplyContent { readyReply() }
+        val field = compose.onNodeWithTag("editor-scaffold-field").getUnclippedBoundsInRoot()
+        val send = compose.onNodeWithTag("editor-bar-submit").getUnclippedBoundsInRoot()
+        val bar = compose.onNodeWithTag("editor-scaffold-action-bar").getUnclippedBoundsInRoot()
+        assertEquals(barHeight, bar.height)
+        assertTrue(field.height >= EDITOR_DRAFT_MIN_HEIGHT)
+        assertTrue(field.bottom <= bar.top)
+        repeat(50) { compose.onNode(hasSetTextAction()).performTextInput("a") }
+        assertEquals(field, compose.onNodeWithTag("editor-scaffold-field").getUnclippedBoundsInRoot())
+        assertEquals(send, compose.onNodeWithTag("editor-bar-submit").getUnclippedBoundsInRoot())
+        assertEquals(bar, compose.onNodeWithTag("editor-scaffold-action-bar").getUnclippedBoundsInRoot())
     }
 
     @Test
     @Config(qualifiers = "fr-rFR-w360dp-h200dp-xxhdpi")
-    fun `reply keeps both draft actions fully visible below the 220 dp budget threshold`() {
-        compose.setContent {
-            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                ReplyEditorBody(
-                    state = PrivateMessageReplyUiState(
-                        isLoadingForm = false,
-                        formAvailable = true,
-                        restorableDraft = "Brouillon à restaurer",
-                    ),
-                    bodyFieldState = remember { TextFieldState() },
-                    bodyInputTransformation = InputTransformation {},
-                    onToolbarAction = {},
-                    onTogglePreview = {},
-                    onErrorDismissed = {},
-                    onDraftRestore = {},
-                    onDraftDiscard = {},
-                    onImagePickerEvent = {},
-                    onUploadErrorDismissed = {},
-                    onManageRecipients = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-        }
-
-        // ReplyEditorBody has 176 dp after its vertical padding on this 200 dp window.
+    fun replyRestorePanelKeepsBothDraftActionsReachableOnShortWindow() {
+        setReplyContent { readyReply().copy(restorableDraft = "Brouillon") }
+        openRestore()
+        compose.onNodeWithText("Restaurer").performScrollTo()
         assertDraftActionsFullyVisible()
     }
 
-    @Test
-    fun replyRestoreDisabledWhileSeedFormLoadsAndEnabledAfterFailure() {
+    @Test fun replyRestoreDisabledWhileSeedFormLoadsAndEnabledAfterFailure() {
         val state = mutableStateOf(PrivateMessageReplyUiState(restorableDraft = "Brouillon à restaurer"))
         setReplyContent { state.value }
-
+        openRestore()
         compose.onNodeWithText("Restaurer").assertIsNotEnabled()
         compose.onNodeWithText("Ignorer").assertIsEnabled()
         assertDraftActionsFullyVisible()
-
-        compose.runOnIdle {
-            state.value = state.value.copy(isLoadingForm = false, formError = true)
-        }
+        compose.runOnIdle { state.value = state.value.copy(isLoadingForm = false, formError = true) }
         compose.onNodeWithText("Restaurer").assertIsEnabled()
         compose.onNodeWithText("Ignorer").assertIsEnabled()
+        compose.onNodeWithText("Réessayer").assertIsEnabled()
         assertDraftActionsFullyVisible()
-
-        // Editor state: the offer moves into the editor, still a single banner (onNodeWithText fails on two).
-        compose.runOnIdle {
-            state.value = state.value.copy(isLoadingForm = false, formAvailable = true, formError = false)
-        }
+        compose.runOnIdle { state.value = state.value.copy(formAvailable = true, formError = false) }
+        // The same host memory keeps the restore panel across the full-screen form failure.
         compose.onNodeWithText("Restaurer").assertIsEnabled()
-
-        // Refetch over an available form: one banner, inactive until the seed is known again.
         compose.runOnIdle { state.value = state.value.copy(isLoadingForm = true) }
         compose.onNodeWithText("Restaurer").assertIsNotEnabled()
         compose.onNodeWithText("Ignorer").assertIsEnabled()
     }
 
-    @Test
-    fun replyRestoreDisabledDuringUpload() {
-        val state = mutableStateOf(PrivateMessageReplyUiState(
-            isLoadingForm = false,
-            formAvailable = true,
-            restorableDraft = "Brouillon à restaurer",
-            isUploading = true,
-        ))
+    @Test fun replyRestoreDisabledDuringUpload() {
+        val state = mutableStateOf(readyReply().copy(restorableDraft = "Brouillon", isUploading = true))
         setReplyContent { state.value }
-
+        openRestore()
         compose.onNodeWithText("Restaurer").assertIsNotEnabled()
         compose.onNodeWithText("Ignorer").assertIsEnabled()
-
         compose.runOnIdle { state.value = state.value.copy(isUploading = false) }
         compose.onNodeWithText("Restaurer").assertIsEnabled()
     }
 
-    @Test
-    fun replyRestoreDisabledForAcceptedUncertainSubmission() {
-        setReplyContent {
-            PrivateMessageReplyUiState(
-                isLoadingForm = false,
-                formAvailable = true,
-                restorableDraft = "Brouillon à restaurer",
-                isUploading = false,
-                submission = EditorSubmissionState.Uncertain(
-                    AttemptToken("tester", "key", "id", 1),
-                    accepted = true,
-                ),
-            )
-        }
-
+    @Test fun replyRestoreDisabledForAcceptedUncertainSubmission() {
+        val state = mutableStateOf(readyReply().copy(restorableDraft = "Brouillon"))
+        setReplyContent { state.value }
+        openRestore()
+        compose.runOnIdle { state.value = state.value.copy(submission = EditorSubmissionState.Uncertain(
+            AttemptToken("tester", "key", "id", 1), accepted = true)) }
         compose.onNodeWithText("Restaurer").assertIsNotEnabled()
     }
 
-    @Test
-    fun replyRestoreEnabledForUnacceptedUncertainSubmission() {
-        setReplyContent {
-            PrivateMessageReplyUiState(
-                isLoadingForm = false,
-                formAvailable = true,
-                restorableDraft = "Brouillon à restaurer",
-                isUploading = false,
-                submission = EditorSubmissionState.Uncertain(
-                    AttemptToken("tester", "key", "id", 1),
-                    accepted = false,
-                ),
-            )
-        }
-
+    @Test fun replyRestoreEnabledForUnacceptedUncertainSubmission() {
+        setReplyContent { readyReply().copy(restorableDraft = "Brouillon", submission =
+            EditorSubmissionState.Uncertain(AttemptToken("tester", "key", "id", 1), accepted = false)) }
+        openRestore()
         compose.onNodeWithText("Restaurer").assertIsEnabled()
     }
+
+    private fun readyReply() = PrivateMessageReplyUiState(isLoadingForm = false, formAvailable = true)
+    private fun openRestore() =
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
 
     @Test
     fun `new message keeps 160 dp body and both draft actions on short viewport`() {
@@ -293,36 +224,9 @@ class PrivateMessageEditorLayoutTest {
     }
 
     private fun setReplyContent(state: () -> PrivateMessageReplyUiState) {
-        val picker = mockk<SmileyPickerController>(relaxed = true)
-        every { picker.state } returns MutableStateFlow<SmileyPickerState>(SmileyPickerState.Hidden)
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                PrivateMessageReplyContent(
-                    state = state(),
-                    autoOpenRecipientManager = false,
-                    onBack = {},
-                    bodyFieldState = remember { TextFieldState() },
-                    bodyInputTransformation = InputTransformation {},
-                    onToolbarAction = {},
-                    onTogglePreview = {},
-                    onToggleSignature = {},
-                    onToggleSmileyDisabled = {},
-                    onToggleEmailNotification = {},
-                    onErrorDismissed = {},
-                    onSubmit = {},
-                    onSubmitConfirmed = {},
-                    onSubmitConfirmationDismissed = {},
-                    onRetryFormLoad = {},
-                    onDraftRestore = {},
-                    onDraftDiscard = {},
-                    onImagePickerEvent = {},
-                    onUploadErrorDismissed = {},
-                    onAddRecipient = {},
-                    onRemoveRecipient = {},
-                    smileyPicker = picker,
-                    onSmileySelected = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
+                PrivateMessageReplyTestContent(state())
             }
         }
     }

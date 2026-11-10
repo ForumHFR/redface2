@@ -5,7 +5,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorHostState
 import fr.forumhfr.redface2.core.ui.editor.EditorScaffoldChrome
 import fr.forumhfr.redface2.core.ui.post.PostMediaDiskCachePolicy
 
-/** R2 projection only; the reply keeps its existing chrome until R3. */
+/** Reply policy projected into the common chrome, without a header or quote panel. */
 internal data class PrivateMessageReplyChromeState(val source: PrivateMessageReplyUiState) {
     private val busy = source.isSubmitting || source.submission.blocksBodyMutation
     val sendActivatable = source.canSubmit

@@ -199,14 +199,19 @@ internal class PrivateMessageReplyChromeFixture {
     val calls = mutableListOf<String>()
     var launches = 0
     var confirmed: ArmToken? = null
+    val actions = PrivateMessageReplyChromeActions(
+        EditorHostActions({ calls += "send" }, { confirmed = it }, {
+            calls += "disarm"
+            state = state.copy(submission = EditorSubmissionState.Ready)
+        }, { calls += "format" }, {
+            calls += "preview"
+            state = state.copy(isPreviewVisible = !state.isPreviewVisible)
+        }, { calls += "close" }),
+        { calls += "signature:$it" }, { calls += "smileyDisabled:$it" }, { calls += "notification:$it" },
+        { calls += "smiley:$it" }, {}, { calls += "restore" }, { calls += "discard" },
+        { calls += "add:$it" }, { calls += "remove:$it" }, { calls += "reload" })
     val adapter = createAdapter()
-    fun createAdapter() = PrivateMessageReplyChromeAdapter({ state }, body, events,
-        PrivateMessageReplyChromeActions(
-            EditorHostActions({ calls += "send" }, { confirmed = it }, { calls += "disarm" },
-                { calls += "format" }, { calls += "preview" }, { calls += "close" }),
-            { calls += "signature:$it" }, { calls += "smileyDisabled:$it" }, { calls += "notification:$it" },
-            { calls += "smiley:$it" }, {}, { calls += "restore" }, { calls += "discard" },
-            { calls += "add:$it" }, { calls += "remove:$it" }, { calls += "reload" }),
+    fun createAdapter() = PrivateMessageReplyChromeAdapter({ state }, body, events, actions,
         { launches++ }, {}, memory)
     fun transition(next: PrivateMessageReplyUiState) { events.observe(state, next); state = next }
 }

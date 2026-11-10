@@ -3,6 +3,10 @@ package fr.forumhfr.redface2.feature.messages
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.text.TextRange
 import androidx.lifecycle.SavedStateHandle
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
@@ -34,6 +38,8 @@ internal class PrivateMessageReplyDraftSession(
 ) {
     val bodyFieldState = TextFieldState()
     val bodyScrollState = ScrollState(0)
+    var bodyCaretRevealResetKey by mutableIntStateOf(0)
+        private set
     private val restoration = EditorSessionRestoration(saved, EditorSessionSurface.MessageReply)
     val isRecreation: Boolean get() = restoration.isRecreation
     private var draftRestored = false
@@ -117,9 +123,12 @@ internal class PrivateMessageReplyDraftSession(
     }
 
     private fun replaceBody(body: String) {
-        bodyFieldState.edit {
-            replace(0, length, body)
-            selection = TextRange(length)
+        Snapshot.withMutableSnapshot {
+            bodyCaretRevealResetKey++
+            bodyFieldState.edit {
+                replace(0, length, body)
+                selection = TextRange(length)
+            }
         }
     }
 
@@ -139,9 +148,12 @@ internal class PrivateMessageReplyDraftSession(
         if (initial.isNotBlank() && (hydrate || insertOpeningQuote)) {
             bodyEditedBeforeHydration = bodyEditedBeforeHydration || existing.isNotEmpty()
             val separator = if (initial.endsWith('\n')) "\n" else "\n\n"
-            bodyFieldState.editBbcode { _, _, _ ->
-                val combined = if (existing.isBlank()) initial else initial + separator + existing
-                BbcodeFormatResult(combined, combined.length, combined.length)
+            Snapshot.withMutableSnapshot {
+                if (existing.isBlank()) bodyCaretRevealResetKey++
+                bodyFieldState.editBbcode { _, _, _ ->
+                    val combined = if (existing.isBlank()) initial else initial + separator + existing
+                    BbcodeFormatResult(combined, combined.length, combined.length)
+                }
             }
             resetUndoBaseline()
             previousBody = bodyFieldState.text.toString()

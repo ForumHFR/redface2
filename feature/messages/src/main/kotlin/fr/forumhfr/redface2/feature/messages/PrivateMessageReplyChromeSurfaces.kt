@@ -5,12 +5,45 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.res.stringResource
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.ui.editor.EditorEventDetails
+import fr.forumhfr.redface2.core.ui.editor.EditorHeaderPanel
 import fr.forumhfr.redface2.core.ui.editor.EditorOptions
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsLabels
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
 import fr.forumhfr.redface2.core.ui.editor.EditorPreview
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 
-/** Prepared for the R3 overlay; the source stays mounted while these sheets cover it. */
+/** Mounted around the live field, like the post: panels hide it without losing its viewport/undo. */
+@Composable
+@Suppress("LongParameterList") // Live field, picker and the scaffold's focus callback are separate ports.
+internal fun PrivateMessageReplyChromeSurfaces(
+    adapter: PrivateMessageReplyChromeAdapter,
+    bodyState: TextFieldState,
+    smileys: SmileyPickerController,
+    autoOpenRecipients: Boolean,
+    onReturnToBody: () -> Unit,
+    body: @Composable () -> Unit,
+) {
+    EditorEventDetails(adapter.detail, bodyState, adapter::closeDetails, adapter::reload,
+        { adapter.returnToBody(onReturnToBody) }, body = {
+            EditorHeaderPanel(adapter.surface == PrivateMessageReplyChromeSurface.Restore,
+                stringResource(R.string.messages_draft_restore_message), bodyState, adapter::closeSurface,
+                { adapter.returnToBody(onReturnToBody) }, body = body) {
+                MessageDraftRestoreBanner(adapter::restoreDraft, adapter::discardDraft,
+                    restoreEnabled = adapter.state.restoreEnabled)
+            }
+        })
+    PrivateMessageReplyChromeSheets(adapter, autoOpenRecipients, onReturnToBody)
+    if (adapter.surface == PrivateMessageReplyChromeSurface.Smileys && adapter.state.canInsert) {
+        val picker = smileys.state.collectAsStateWithLifecycle().value as? SmileyPickerState.Open
+        if (picker != null) SmileyPickerSheet(picker, { smileys.dismiss(); adapter.closeSurface() },
+            smileys::onQueryChanged, adapter::smiley)
+    }
+}
+
 @Composable
 internal fun PrivateMessageReplyChromeSheets(
     adapter: PrivateMessageReplyChromeAdapter,
