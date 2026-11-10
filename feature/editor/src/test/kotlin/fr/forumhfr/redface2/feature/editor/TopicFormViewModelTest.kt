@@ -1902,8 +1902,80 @@ class TopicFormViewModelTest {
         }
     }
 
-    private fun openTopic(mode: TopicFormMode): TopicFormViewModel =
-        if (mode == TopicFormMode.New) newTopicViewModel(entrySubcat = SAMPLE_SUBCAT) else newViewModel()
+    @Test
+    fun `ED45 ED170 local topic Masquer in Ready allows the next failed autosave to deliver information`() = runTest {
+        for (mode in TopicFormMode.entries) assertLocalMasquerReleasesAutosave(mode, rearm = false)
+    }
+
+    @Test
+    fun `ED45 ED170 local topic Masquer after rearming allows the next failed autosave to deliver information`() =
+        runTest { for (mode in TopicFormMode.entries) assertLocalMasquerReleasesAutosave(mode, rearm = true) }
+
+    /** I1: Masquer of « Brouillon non écrit » releases deferred draft information, as on dev, without storage. */
+    private fun assertLocalMasquerReleasesAutosave(mode: TopicFormMode, rearm: Boolean) {
+        draftStore = FakeEditorDraftStore()
+        val posts = postCount()
+        val vm = openTopic(mode, FakeUserPreferencesRepository(confirmBeforePosting = rearm))
+        draftStore.beginFailure = java.io.IOException("disk full")
+        vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("unsent title")))
+        vm.editBody(TextFieldValue("unsent body"))
+        vm.submit(TopicFormIntent.SubmitClicked())
+        if (rearm) {
+            dispatcher.scheduler.advanceTimeBy(401)
+            vm.submit(TopicFormIntent.SubmitConfirmed(vm.state.value.armToken))
+        }
+        syncBody()
+        assertEquals("$mode", EditorSubmissionState.Ready, vm.state.value.submission)
+        assertEquals(EditorErrors.draftWriteFailed, vm.state.value.submitError)
+        assertEquals(1, draftStore.beginCalls)
+        val intents = mutableListOf<TopicFormIntent>()
+        val adapter = chromeAdapter(vm, intents)
+        if (rearm) {
+            adapter.host.submitActions.onSubmit()
+            syncBody()
+            assertTrue(vm.state.value.submission is EditorSubmissionState.Armed)
+        }
+        val submission = vm.state.value.submission
+        val activity = listOf(draftStore.writes, draftStore.beginCalls, draftStore.finishCalls, draftStore.saveCount)
+        val key = vm.editorEvents.state.visibleEvent!!.key
+        assertEquals(EditorEventContent.Problem(EditorErrors.draftWriteFailed),
+            vm.editorEvents.state.visibleEvent?.content)
+        adapter.host.barActions.onEvent(key, EditorEventAction.Details)
+        adapter.host.dismissDetails(key)
+        syncBody()
+        assertEquals(List(if (rearm) 1 else 0) { TopicFormIntent.SubmitClicked() } +
+            TopicFormIntent.DraftWriteFailureDismissed, intents)
+        assertEquals(submission, vm.state.value.submission)
+        assertNull(vm.state.value.submitError)
+        assertNull(adapter.host.detail)
+        assertNull(vm.editorEvents.state.visibleEvent)
+        assertEquals(activity,
+            listOf(draftStore.writes, draftStore.beginCalls, draftStore.finishCalls, draftStore.saveCount))
+        assertNoSendingEvent(vm)
+
+        // On dev, the next autosave failure is delivered again once the attempt write failure was hidden.
+        draftStore.saveFailure = java.io.IOException("still full")
+        vm.editBody(TextFieldValue("continued composition"))
+        dispatcher.scheduler.advanceTimeBy(751)
+        syncBody()
+        assertEquals("$mode", EditorErrors.draftSaveFailed, vm.state.value.submitError)
+        assertEquals(EditorEventContent.Problem(EditorErrors.draftSaveFailed),
+            vm.editorEvents.state.visibleEvent?.content)
+        assertEquals("continued composition", vm.bodyFieldState.text.toString())
+        assertEquals(posts, postCount())
+        assertEquals(0, draftStore.finishCalls)
+        assertNoSendingEvent(vm)
+        vm.viewModelScope.cancel()
+    }
+
+    private fun openTopic(
+        mode: TopicFormMode,
+        preferences: UserPreferencesRepository = FakeUserPreferencesRepository(),
+    ): TopicFormViewModel = if (mode == TopicFormMode.New) {
+        newTopicViewModel(entrySubcat = SAMPLE_SUBCAT, userPreferencesRepository = preferences)
+    } else {
+        newViewModel(userPreferencesRepository = preferences)
+    }
 
     private fun topicDraftKey(mode: TopicFormMode): String = if (mode == TopicFormMode.New) {
         EditorDraftKey.newTopic(SAMPLE_CAT)
@@ -1932,9 +2004,11 @@ class TopicFormViewModelTest {
         return checkNotNull(draftStore.entries[topicDraftKey(mode)]?.attempt).token
     }
 
-    private fun chromeAdapter(vm: TopicFormViewModel) = TopicFormChromeAdapter(
-        { vm.state.value }, vm.bodyFieldState, vm.editorEvents, vm::submit, {}, {}, vm.chromeMemory,
-    )
+    private fun chromeAdapter(vm: TopicFormViewModel, intents: MutableList<TopicFormIntent> = mutableListOf()) =
+        TopicFormChromeAdapter({ vm.state.value }, vm.bodyFieldState, vm.editorEvents, { intent ->
+            intents += intent
+            vm.submit(intent)
+        }, {}, {}, vm.chromeMemory)
 
     private fun assertNoSendingEvent(vm: TopicFormViewModel) =
         assertTrue(vm.editorEvents.state.events.none { it.content is EditorEventContent.InProgress })

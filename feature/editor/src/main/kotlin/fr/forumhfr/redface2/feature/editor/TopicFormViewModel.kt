@@ -609,6 +609,7 @@ class TopicFormViewModel @AssistedInject constructor(
             is TopicFormIntent.SubmitConfirmed -> onSubmitConfirmed(intent)
             TopicFormIntent.SubmitConfirmationDismissed -> submission.disarm()
             TopicFormIntent.ErrorDismissed -> submission.acknowledge(::scheduleAutosave)
+            TopicFormIntent.DraftWriteFailureDismissed -> submission.acknowledgeLocal()
             TopicFormIntent.ReloadRequested -> reloadForm()
             is TopicFormIntent.SubcatSelected -> {
                 restoration.decide(EditorSessionField.Subcategory)

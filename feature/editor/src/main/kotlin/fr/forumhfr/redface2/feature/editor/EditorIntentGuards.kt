@@ -27,6 +27,6 @@ internal val TopicFormIntent.mutatesEditor: Boolean
         is TopicFormIntent.SubmitClicked, is TopicFormIntent.SubmitConfirmed,
         TopicFormIntent.SubmitConfirmationDismissed, TopicFormIntent.CloseRequested,
         TopicFormIntent.ErrorDismissed, TopicFormIntent.ReloadRequested, TopicFormIntent.UploadErrorDismissed,
-        TopicFormIntent.TogglePreview -> false
+        TopicFormIntent.DraftWriteFailureDismissed, TopicFormIntent.TogglePreview -> false
         else -> true
     }

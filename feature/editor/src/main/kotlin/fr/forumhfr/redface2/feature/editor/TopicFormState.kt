@@ -238,6 +238,10 @@ sealed interface TopicFormIntent {
     data object SubmitConfirmationDismissed : TopicFormIntent
 
     data object ErrorDismissed : TopicFormIntent
+
+    /** Explicit Masquer of a failed attempt write; releases deferred draft information without storage. */
+    data object DraftWriteFailureDismissed : TopicFormIntent
+
     data object ReloadRequested : TopicFormIntent
     data class SubcatSelected(val id: Int) : TopicFormIntent
     data class ToggleSignature(val enabled: Boolean) : TopicFormIntent

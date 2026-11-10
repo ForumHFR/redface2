@@ -484,6 +484,62 @@ class TopicFormChromeAdapterTest {
         }
     }
 
+    @Test fun `ED45 local attempt failure Masquer reaches only DraftWriteFailureDismissed once in Ready and Armed`() {
+        TopicFormMode.entries.forEach { mode ->
+            val f = TopicFormChromeFixture(mode)
+            val armed = EditorSubmissionState.Armed(ArmToken(1, f.session, 0, 4_000L))
+            listOf(EditorSubmissionState.Ready, armed).forEachIndexed { index, submission ->
+                f.transition(f.state.copy(submission = submission))
+                f.error(EditorErrors.draftWriteFailed)
+                val key = f.events.visibleEvent!!.key
+                f.adapter.host.barActions.onEvent(key, EditorEventAction.Details)
+                assertEquals(index, f.calls.size) // Opening the detail never acknowledges.
+                f.adapter.host.dismissDetails(key)
+                f.adapter.host.dismissDetails(key)
+                assertEquals("$mode $index", List(index + 1) { TopicFormIntent.DraftWriteFailureDismissed }, f.calls)
+                assertEquals(submission, f.state.submission)
+                assertNull(f.adapter.host.detail)
+                assertNull(f.events.visibleEvent)
+            }
+        }
+    }
+
+    @Test fun `ED85 Back detail closing and reload never acknowledge a local attempt write failure`() {
+        TopicFormMode.entries.forEach { mode ->
+            val closings = mutableListOf<(TopicFormChromeFixture, EventKey) -> Unit>(
+                { f, _ -> f.adapter.back() }, { f, key -> f.adapter.host.closeDetails(key) })
+            if (mode == TopicFormMode.EditFirstPost) closings.add { f, key ->
+                f.state = f.state.copy(draftHydratedFromServer = false)
+                f.adapter.reload(key)
+            }
+            closings.forEachIndexed { index, close ->
+                val f = TopicFormChromeFixture(mode)
+                f.error(EditorErrors.draftWriteFailed)
+                val key = f.events.visibleEvent!!.key
+                f.adapter.host.barActions.onEvent(key, EditorEventAction.Details)
+                close(f, key)
+                assertNull("$mode closing $index", f.adapter.host.detail)
+                f.adapter.host.dismissDetails(key) // A closed detail has no Masquer left.
+                assertFalse("$mode closing $index", TopicFormIntent.DraftWriteFailureDismissed in f.calls)
+                assertFalse("$mode closing $index", TopicFormIntent.ErrorDismissed in f.calls)
+            }
+        }
+    }
+
+    @Test fun `ED45 Masquer of a draft save or network failure never reaches the local acknowledgement`() {
+        // The deferred save information shares the « Brouillon non écrit » summary, not the attempt cause.
+        val f = TopicFormChromeFixture()
+        listOf(EditorErrors.draftSaveFailed, EditorErrors.network).forEach { error ->
+            f.error(error)
+            val key = f.events.visibleEvent!!.key
+            f.adapter.host.barActions.onEvent(key, EditorEventAction.Details)
+            f.adapter.host.dismissDetails(key)
+            assertNull(f.adapter.host.detail)
+            assertNull(f.events.visibleEvent)
+        }
+        assertTrue(f.calls.isEmpty())
+    }
+
     @Test fun `ED85 Back closes preview without consuming displayed information or the masked mode`() {
         val f = TopicFormChromeFixture()
         f.state = f.state.copy(isPreviewVisible = true)
