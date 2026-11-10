@@ -339,9 +339,9 @@ class TopicFormChromeAdapterTest {
                 assertEquals(listOf(TopicFormIntent.ReloadRequested), f.calls)
             } else {
                 f.adapter.back()
+                assertTrue(f.calls.isEmpty()) // No acknowledgement nor disarm reaches the ViewModel.
             }
             assertNull(f.adapter.host.detail)
-            assertEquals(uncertain, f.state.submission)
         }
     }
 
@@ -445,8 +445,8 @@ class TopicFormChromeAdapterTest {
                 f.adapter.host.barActions.onEvent(key, EditorEventAction.Details)
                 close(f, key)
                 assertNull("$mode closing $index", f.adapter.host.detail)
-                assertFalse("$mode closing $index", TopicFormIntent.ErrorDismissed in f.calls)
-                assertEquals(uncertain, f.state.submission)
+                // Only the first post reload reaches the ViewModel: neither ErrorDismissed nor a disarm.
+                assertTrue("$mode closing $index", f.calls.all { it == TopicFormIntent.ReloadRequested })
                 f.adapter.host.dismissDetails(key) // A closed detail has no Masquer left.
                 assertFalse("$mode closing $index", TopicFormIntent.ErrorDismissed in f.calls)
             }
@@ -497,7 +497,6 @@ class TopicFormChromeAdapterTest {
                 f.adapter.host.dismissDetails(key)
                 f.adapter.host.dismissDetails(key)
                 assertEquals("$mode $index", List(index + 1) { TopicFormIntent.DraftWriteFailureDismissed }, f.calls)
-                assertEquals(submission, f.state.submission)
                 assertNull(f.adapter.host.detail)
                 assertNull(f.events.visibleEvent)
             }
