@@ -70,6 +70,32 @@ class EditorSubmissionControllerTest {
     }
 
     @Test
+    fun `immediate send and retry reservations use Send`() = runTest {
+        ports.outcome = EditorSendOutcome.UNCERTAIN
+        repeat(2) {
+            val token = reserve()
+            assertEquals(EditorSubmissionState.PersistingAttempt(token, EditorSubmissionPurpose.Send), controller.state)
+            controller.execute(token, ports)
+            assertEquals(EditorSubmissionState.Uncertain(attempt), controller.state)
+        }
+        assertEquals(2, ports.events.count { it == "send" })
+    }
+
+    @Test
+    fun `confirmed send and retry reservations use Send`() = runTest {
+        ports.outcome = EditorSendOutcome.UNCERTAIN
+        repeat(2) {
+            val confirmation = arm()
+            nanos += 400_000_000
+            val token = (controller.confirm(confirmation) as SubmissionRequest.Accepted).token
+            assertEquals(EditorSubmissionState.PersistingAttempt(token, EditorSubmissionPurpose.Send), controller.state)
+            controller.execute(token, ports)
+            assertEquals(EditorSubmissionState.Uncertain(attempt), controller.state)
+        }
+        assertEquals(2, ports.events.count { it == "send" })
+    }
+
+    @Test
     fun `caller accessibility timeout is honored just before and at deadline`() {
         val arm = arm(9_000)
         nanos = 8_999_000_000
@@ -422,6 +448,33 @@ class EditorSubmissionControllerTest {
         ports.outcome = EditorSendOutcome.UNCERTAIN
         controller.execute(reserve(), ports)
         assertTrue(controller.acknowledgeUncertain(ports))
+        assertEquals(EditorSubmissionState.Ready, controller.state)
+        assertEquals(listOf("begin", "send", "UNCERTAIN", "CERTAIN_FAILURE"), ports.events)
+    }
+
+    @Test
+    fun `acknowledgement reserves Acknowledge while its write is suspended`() = runTest {
+        ports.outcome = EditorSendOutcome.UNCERTAIN
+        val send = reserve()
+        controller.execute(send, ports)
+        ports.finishGate = CompletableDeferred()
+        var acknowledged = false
+        val job = launch(start = CoroutineStart.UNDISPATCHED) {
+            acknowledged = controller.acknowledgeUncertain(ports)
+        }
+        val reservation = controller.state as EditorSubmissionState.PersistingAttempt
+        assertEquals(EditorSubmissionPurpose.Acknowledge, reservation.purpose)
+        assertEquals(session, reservation.submission.session)
+        assertTrue(reservation.submission.id > send.id)
+        assertTrue(controller.blocksBodyMutation)
+        assertTrue(controller.blocksClose)
+        assertFalse(controller.disarm())
+        assertNull(controller.beginUpload())
+        assertEquals(SubmissionRequest.Ignored, controller.requestSubmit(4_000, false))
+        assertFalse(acknowledged)
+        ports.finishGate?.complete(Unit)
+        job.join()
+        assertTrue(acknowledged)
         assertEquals(EditorSubmissionState.Ready, controller.state)
         assertEquals(listOf("begin", "send", "UNCERTAIN", "CERTAIN_FAILURE"), ports.events)
     }

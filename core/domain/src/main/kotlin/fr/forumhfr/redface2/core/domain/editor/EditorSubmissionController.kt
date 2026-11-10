@@ -56,7 +56,7 @@ class EditorSubmissionController(private val clock: DiagnosticsClock, initialSes
             !canSubmit || blocksBodyMutation -> SubmissionRequest.Ignored
             state is EditorSubmissionState.Armed -> SubmissionRequest.Ignored
             confirmationRequired != false -> arm(timeoutMillis)
-            else -> reserve()
+            else -> reserve(EditorSubmissionPurpose.Send)
         }
     }
 
@@ -65,7 +65,7 @@ class EditorSubmissionController(private val clock: DiagnosticsClock, initialSes
         val armed = state as? EditorSubmissionState.Armed
         val elapsed = clock.elapsedRealtimeNanos() - token.armedAtNanos
         return if (armed?.token == token && token.session == session && elapsed >= MIN_CONFIRM_NANOS) {
-            reserve()
+            reserve(EditorSubmissionPurpose.Send)
         } else {
             SubmissionRequest.Ignored
         }
@@ -139,7 +139,7 @@ class EditorSubmissionController(private val clock: DiagnosticsClock, initialSes
         uncertain: EditorSubmissionState.Uncertain,
         ports: EditorSubmissionPorts,
     ): Boolean {
-        val token = reserve().token
+        val token = reserve(EditorSubmissionPurpose.Acknowledge).token
         return try {
             val result = finishOutcome(attempt, AttemptOutcome.CERTAIN_FAILURE, ports)
             if (result !is StoreWriteResult.Written) ports.recordFailure(EditorSubmissionFailure.OUTCOME, result)
@@ -164,11 +164,11 @@ class EditorSubmissionController(private val clock: DiagnosticsClock, initialSes
         return SubmissionRequest.Armed(token)
     }
 
-    private fun reserve(): SubmissionRequest.Accepted {
+    private fun reserve(purpose: EditorSubmissionPurpose): SubmissionRequest.Accepted {
         val token = SubmissionToken(++sequence, session)
         activeSubmission = token
         retryAttempt = unresolvedAttempt
-        state = EditorSubmissionState.PersistingAttempt(token)
+        state = EditorSubmissionState.PersistingAttempt(token, purpose)
         return SubmissionRequest.Accepted(token)
     }
 

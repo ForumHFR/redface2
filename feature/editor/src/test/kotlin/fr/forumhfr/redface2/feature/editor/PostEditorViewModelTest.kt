@@ -83,14 +83,19 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorAction
 import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
+import fr.forumhfr.redface2.core.ui.editor.EditorEventCollector
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
 import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
+import fr.forumhfr.redface2.core.ui.editor.EditorEventProjection
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorText
 import fr.forumhfr.redface2.core.ui.editor.OperationRef
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.toEditorError
+import io.mockk.every
+import io.mockk.mockkConstructor
+import io.mockk.unmockkConstructor
 import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -1721,29 +1726,78 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `successful draft write preserves a newer form loading error`() = runTest {
-        val vm = newReplyViewModel()
-        settleBody()
-        draftStore.saveFailure = IOException("disk full")
-        vm.editBody(TextFieldValue("unsaved body"))
-        settleBody()
-        assertEquals(EditorErrors.draftSaveFailed, vm.state.value.submitError)
+    fun autosaveRecoveryObservesNullErrorBeforeDurableSuccess() = runTest {
+        withObservedProjections { projections ->
+            val vm = newReplyViewModel()
+            settleBody()
+            draftStore.saveFailure = IOException("disk full")
+            vm.editBody(TextFieldValue("unsaved body"))
+            settleBody()
+            assertEquals(EditorErrors.draftSaveFailed, vm.state.value.submitError)
+            val failed = projections.last { it.submitError == EditorErrors.draftSaveFailed }
+            projections.clear()
 
-        replyRepository.formException = IOException("offline")
-        vm.dispatch(PostEditorIntent.ReloadRequested)
-        settleBody()
-        assertTrue(vm.chromeEvents.state.events.any {
-            (it.content as? EditorEventContent.Problem)?.error == EditorErrors.draftSaveFailed
-        })
-        assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
-        draftStore.saveFailure = null
-        vm.editBody(TextFieldValue("saved body"))
-        settleBody()
-        assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
-        assertEquals(listOf(EditorErrors.formNetwork), vm.chromeEvents.state.events.mapNotNull {
-            (it.content as? EditorEventContent.Problem)?.error
-        })
-        assertEquals("saved body", draftStore.saved[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)]?.body)
+            draftStore.saveFailure = null
+            vm.editBody(TextFieldValue("saved body"))
+            settleBody()
+            val reset = projections.indexOfFirst {
+                it.submitError == null && it.durableWriteGeneration == failed.durableWriteGeneration
+            }
+            val durable = projections.indexOfFirst { it.durableWriteGeneration > failed.durableWriteGeneration }
+            assertTrue("The collector must observe clearError before durableWriteSucceeded", reset >= 0)
+            assertTrue("The successful write must follow the observed reset", durable > reset)
+            assertNull(projections[durable].submitError)
+            assertNull(vm.state.value.submitError)
+            assertTrue(vm.chromeEvents.state.events.isEmpty())
+            assertEquals("saved body", draftStore.saved[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)]?.body)
+        }
+    }
+
+    @Test
+    fun `successful draft write preserves a newer form loading error`() = runTest {
+        withObservedProjections { projections ->
+            val vm = newReplyViewModel()
+            settleBody()
+            draftStore.saveFailure = IOException("disk full")
+            vm.editBody(TextFieldValue("unsaved body"))
+            settleBody()
+            assertEquals(EditorErrors.draftSaveFailed, vm.state.value.submitError)
+
+            replyRepository.formException = IOException("offline")
+            vm.dispatch(PostEditorIntent.ReloadRequested)
+            settleBody()
+            assertTrue(vm.chromeEvents.state.events.any {
+                (it.content as? EditorEventContent.Problem)?.error == EditorErrors.draftSaveFailed
+            })
+            assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
+            val generation = projections.last().durableWriteGeneration
+            projections.clear()
+            draftStore.saveFailure = null
+            vm.editBody(TextFieldValue("saved body"))
+            settleBody()
+            assertTrue(projections.any { it.durableWriteGeneration > generation })
+            assertTrue(projections.all { it.submitError == EditorErrors.formNetwork })
+            assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
+            assertEquals(listOf(EditorErrors.formNetwork), vm.chromeEvents.state.events.mapNotNull {
+                (it.content as? EditorEventContent.Problem)?.error
+            })
+            assertEquals("saved body", draftStore.saved[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)]?.body)
+        }
+    }
+
+    private fun withObservedProjections(block: (MutableList<EditorEventProjection>) -> Unit) {
+        // StateFlow and the final event queue cannot reveal a reset that bypassed the collector.
+        mockkConstructor(EditorEventCollector::class)
+        try {
+            val projections = mutableListOf<EditorEventProjection>()
+            every { anyConstructed<EditorEventCollector>().observe(any(), any()) } answers {
+                projections += secondArg<EditorEventProjection>()
+                callOriginal()
+            }
+            block(projections)
+        } finally {
+            unmockkConstructor(EditorEventCollector::class)
+        }
     }
 
     @Test

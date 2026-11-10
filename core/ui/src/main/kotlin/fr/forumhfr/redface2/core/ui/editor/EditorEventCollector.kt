@@ -130,7 +130,8 @@ class EditorEventCollector(private val errors: EditorErrorMappers) : EditorHostE
     /**
      * ED-45/170: a failed acknowledgement signals the kept uncertainty again, even with an unchanged error.
      * Leaving PersistingAttempt without Sending also completes any actual send reservation (e.g. a failed
-     * retry preparation); acknowledgement itself never registers a sending operation.
+     * retry preparation). The projection excludes purpose Acknowledge even when the error is null, so
+     * acknowledgement itself never registers a sending operation or triggers ED-44 cleanup.
      */
     private fun settleUnsentReservation(previous: EditorEventProjection, current: EditorEventProjection) {
         val uncertain = (current.submission as? EditorSubmissionState.Uncertain)?.takeUnless { it.accepted }

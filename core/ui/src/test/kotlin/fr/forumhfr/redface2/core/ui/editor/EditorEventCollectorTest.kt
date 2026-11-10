@@ -2,8 +2,10 @@ package fr.forumhfr.redface2.core.ui.editor
 
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorSession
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionPurpose
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionToken
+import fr.forumhfr.redface2.core.ui.R
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -27,6 +29,9 @@ class EditorEventCollectorTest {
     }
     private fun visible() = requireNotNull(collector.state.visibleEvent)
     private fun acknowledge() = collector.dispatch(EditorEventInput.Acknowledge(visible().key))
+    private fun acknowledgeReservation(id: Long) = EditorSubmissionState.PersistingAttempt(
+        SubmissionToken(id, session), EditorSubmissionPurpose.Acknowledge,
+    )
 
     @Test fun `success and accepted uncertainty finish silently and reject late deliveries`() {
         listOf(EditorSubmissionState.Succeeded(attempt), EditorSubmissionState.Uncertain(attempt, accepted = true))
@@ -285,7 +290,7 @@ class EditorEventCollectorTest {
         assertEquals(attempt, collector.uncertainAttempt(first.key))
         acknowledge()
         // A failed acknowledgement reserves PersistingAttempt without sending, then keeps the same uncertainty.
-        observe(projection.copy(submission = EditorSubmissionState.PersistingAttempt(SubmissionToken(1, session))))
+        observe(projection.copy(submission = acknowledgeReservation(1)))
         assertNull(projection.submissionOperation)
         assertTrue(collector.state.events.isEmpty())
         observe(projection.copy(submission = uncertain))
@@ -298,7 +303,7 @@ class EditorEventCollectorTest {
         assertEquals(listOf(again), collector.state.events)
         // A successful acknowledgement returns to Ready without any delivery.
         acknowledge()
-        observe(projection.copy(submission = EditorSubmissionState.PersistingAttempt(SubmissionToken(2, session))))
+        observe(projection.copy(submission = acknowledgeReservation(2)))
         assertTrue(collector.state.events.isEmpty())
         observe(projection.copy(submission = EditorSubmissionState.Ready, submitError = null))
         assertNull(collector.state.visibleEvent)
@@ -315,7 +320,7 @@ class EditorEventCollectorTest {
         val finish = retained.single { it.content is EditorEventContent.Finished }
         assertEquals(EditorEventContent.Problem(EditorErrors.missingTitle), validation.content)
 
-        observe(projection.copy(submission = EditorSubmissionState.PersistingAttempt(SubmissionToken(1, session))))
+        observe(projection.copy(submission = acknowledgeReservation(1)))
         assertEquals(retained, collector.state.events)
         assertEquals(validation, visible())
         assertNull(projection.submissionOperation)
@@ -332,7 +337,7 @@ class EditorEventCollectorTest {
         acknowledge()
         val finish = visible()
         assertTrue(finish.content is EditorEventContent.Finished)
-        observe(projection.copy(submission = EditorSubmissionState.PersistingAttempt(SubmissionToken(1, session))))
+        observe(projection.copy(submission = acknowledgeReservation(1)))
         assertEquals(listOf(finish), collector.state.events)
         observe(projection.copy(submission = EditorSubmissionState.Ready, submitError = null))
         assertEquals(finish, visible())
@@ -345,7 +350,7 @@ class EditorEventCollectorTest {
         observe(projection.copy(submitError = EditorErrors.missingTitle))
         acknowledge()
         val retained = collector.state.events
-        observe(projection.copy(submission = EditorSubmissionState.PersistingAttempt(SubmissionToken(1, session))))
+        observe(projection.copy(submission = acknowledgeReservation(1)))
         assertEquals(retained, collector.state.events)
         observe(projection.copy(submission = EditorSubmissionState.Uncertain(attempt)))
         observe(projection.copy(submitError = EditorErrors.uncertain))
@@ -357,6 +362,77 @@ class EditorEventCollectorTest {
         assertTrue(collector.state.currentOperations.none { it.ref is OperationRef.Submission })
         observe(projection)
         assertEquals(retained + again, collector.state.events)
+    }
+
+    @Test fun `ED44 ED170 acknowledgement with null error preserves the queue through success`() {
+        queueUncertaintyWithUpload()
+        observe(projection.copy(submitError = EditorErrors.missingTitle))
+        acknowledge()
+        observe(projection.copy(submitError = null))
+        val retained = collector.state.events
+        val operations = collector.state.currentOperations
+        val validation = visible()
+        assertEquals(EditorEventContent.Problem(EditorErrors.missingTitle), validation.content)
+        val finish = retained.single { it.content is EditorEventContent.Finished }
+
+        observe(projection.copy(submission = acknowledgeReservation(1)))
+        assertNull(projection.submitError)
+        assertNull(projection.submissionOperation)
+        assertEquals(retained, collector.state.events)
+        assertEquals(operations, collector.state.currentOperations)
+        assertFalse(collector.state.events.any { it.content is EditorEventContent.InProgress })
+        observe(projection.copy(submission = EditorSubmissionState.Ready))
+        assertEquals(retained, collector.state.events)
+        assertEquals(validation, visible())
+        assertTrue(collector.state.currentOperations.none { it.ref is OperationRef.Submission })
+        acknowledge()
+        assertEquals(finish, visible())
+    }
+
+    @Test fun `ED44 ED170 acknowledgement with null error preserves the queue and redelivers on failure`() {
+        val first = queueUncertaintyWithUpload()
+        observe(projection.copy(submitError = EditorErrors.missingTitle))
+        acknowledge()
+        observe(projection.copy(submitError = null))
+        val retained = collector.state.events
+        val operations = collector.state.currentOperations
+
+        observe(projection.copy(submission = acknowledgeReservation(1)))
+        assertNull(projection.submitError)
+        assertNull(projection.submissionOperation)
+        assertEquals(retained, collector.state.events)
+        assertEquals(operations, collector.state.currentOperations)
+        assertFalse(collector.state.events.any { it.content is EditorEventContent.InProgress })
+        observe(projection.copy(submission = EditorSubmissionState.Uncertain(attempt)))
+        assertEquals(retained, collector.state.events)
+        observe(projection.copy(submitError = EditorErrors.uncertain))
+        val again = collector.state.events.last()
+        assertEquals(retained + again, collector.state.events)
+        assertNotEquals(first.key, again.key)
+        assertEquals(EditorEventContent.Problem(EditorErrors.uncertain), again.content)
+        assertEquals(attempt, collector.uncertainAttempt(again.key))
+        assertTrue(collector.state.currentOperations.none { it.ref is OperationRef.Submission })
+        observe(projection)
+        assertEquals(retained + again, collector.state.events)
+    }
+
+    @Test fun `ED44 Send with null error immediately delivers sending and cleans validation`() {
+        queueUncertaintyWithUpload()
+        observe(projection.copy(submitError = EditorErrors.missingTitle))
+        observe(projection.copy(submitError = null))
+        val finish = collector.state.events.single { it.content is EditorEventContent.Finished }
+        val token = SubmissionToken(1, session)
+        observe(projection.copy(submission = EditorSubmissionState.PersistingAttempt(
+            token, EditorSubmissionPurpose.Send,
+        )))
+        val sending = visible()
+        assertEquals(token, projection.submissionOperation)
+        assertEquals(OperationRef.Submission(token), sending.key.operation)
+        assertEquals(EditorEventContent.InProgress(EditorText(R.string.editor_event_sending)), sending.content)
+        assertEquals(listOf(finish, sending), collector.state.events)
+        observe(projection)
+        observe(projection.copy(submission = EditorSubmissionState.Sending(attempt)))
+        assertEquals(listOf(finish, sending), collector.state.events)
     }
 
     @Test fun `ED44 retry without confirmation starts after the reserved error reset`() {

@@ -292,7 +292,7 @@ class PostEditorViewModel @AssistedInject constructor(
             success = { value -> _effects.trySend(value) },
             durableWriteSucceeded = chromeEvents::durableWriteSucceeded,
             clearError = { error ->
-                _state.update { if (it.submitError == error) it.copy(submitError = null) else it }
+                updateChromeState { if (it.submitError == error) it.copy(submitError = null) else it }
             },
         ),
     )

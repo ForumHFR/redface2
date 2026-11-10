@@ -22,6 +22,54 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class EditorSubmissionBindingTest {
     @Test
+    fun `immediate send and retry publish Send reservations`() = runTest {
+        assertSendReservations(confirmation = false)
+    }
+
+    @Test
+    fun `confirmed send and retry publish Send reservations`() = runTest {
+        assertSendReservations(confirmation = true)
+    }
+
+    @Test
+    fun `acknowledgement publishes Acknowledge until the durable write completes`() = runTest {
+        val store = VersionedEditorDraftStore()
+        val states = mutableListOf<EditorSubmissionState>()
+        val failures = mutableListOf<String?>()
+        val binding = binding(store, states = states, failures = failures)
+        binding.restore("key")
+        binding.setPreference(false)
+        val permit = binding.request(4_000, true) as SubmissionRequest.Accepted
+        binding.launch(permit, Draft("sent body")) { EditorDelivery(outcome = EditorSendOutcome.UNCERTAIN) }
+        runCurrent()
+        val attempt = (binding.state as EditorSubmissionState.Uncertain).attempt
+        store.finishGate = CompletableDeferred()
+        var acknowledged = false
+        binding.acknowledge { acknowledged = true }
+        runCurrent()
+        val reservation = binding.state as EditorSubmissionState.PersistingAttempt
+        assertEquals(EditorSubmissionPurpose.Acknowledge, reservation.purpose)
+        assertEquals(reservation, states.last())
+        assertEquals(binding.session, reservation.submission.session)
+        assertTrue(reservation.submission.id > permit.token.id)
+        assertTrue(binding.blocksMutation)
+        assertTrue(binding.blocksClose)
+        assertFalse(binding.tryDisarm())
+        assertEquals(SubmissionRequest.Ignored, binding.request(4_000, true))
+        assertFalse(acknowledged)
+        assertEquals("uncertain", failures.last())
+        assertEquals(attempt, store.entries["key"]?.attempt?.token)
+        store.finishGate?.complete(Unit)
+        runCurrent()
+        assertTrue(acknowledged)
+        assertEquals(EditorSubmissionState.Ready, binding.state)
+        assertFalse(binding.blocksMutation)
+        assertNull(store.entries["key"]?.attempt)
+        assertEquals("sent body", store.saved["key"]?.body)
+        assertEquals(1, store.beginCalls)
+    }
+
+    @Test
     fun flushProviderCapturesAfterAnInflightAutosaveReturns() = runTest {
         val store = VersionedEditorDraftStore()
         val binding = binding(store)
@@ -551,6 +599,31 @@ class EditorSubmissionBindingTest {
         assertEquals(activity, store.storageActivity())
         assertEquals(entries, store.entries)
         assertEquals(displayed, failures)
+    }
+
+    private suspend fun TestScope.assertSendReservations(confirmation: Boolean) {
+        val store = VersionedEditorDraftStore()
+        val states = mutableListOf<EditorSubmissionState>()
+        val binding = binding(store, states = states)
+        binding.restore("key")
+        binding.setPreference(confirmation)
+        repeat(2) {
+            val request = binding.request(4_000, true)
+            val permit = if (confirmation) {
+                advanceTimeBy(400)
+                binding.confirm((request as SubmissionRequest.Armed).token) as SubmissionRequest.Accepted
+            } else {
+                request as SubmissionRequest.Accepted
+            }
+            val reservation = EditorSubmissionState.PersistingAttempt(permit.token, EditorSubmissionPurpose.Send)
+            assertEquals(reservation, binding.state)
+            assertEquals(reservation, states.last())
+            binding.launch(permit, Draft("body")) { EditorDelivery(outcome = EditorSendOutcome.UNCERTAIN) }
+            runCurrent()
+            assertTrue(binding.state is EditorSubmissionState.Uncertain)
+        }
+        assertEquals(2, store.beginCalls)
+        assertNotEquals(store.attemptedIds[0], store.attemptedIds[1])
     }
 
     private fun VersionedEditorDraftStore.storageActivity() = listOf(writes, beginCalls, finishCalls, saveCount)
