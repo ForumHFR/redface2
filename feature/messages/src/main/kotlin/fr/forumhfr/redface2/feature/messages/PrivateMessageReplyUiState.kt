@@ -23,6 +23,8 @@ data class PrivateMessageReplyUiState(
     val isLoadingForm: Boolean = true,
     /** True once a non-anonymous form has been parsed; gates submission. */
     val formAvailable: Boolean = false,
+    /** Private app-bar context from ReplyForm.sujet only; never saved in navigation or a Bundle. */
+    val conversationTitle: String = "",
     /** True when the form GET failed (network / session / parse / anonymous) → show retry. */
     val formError: Boolean = false,
     /** Text-only mirror; selection and undo history stay in the ViewModel. */

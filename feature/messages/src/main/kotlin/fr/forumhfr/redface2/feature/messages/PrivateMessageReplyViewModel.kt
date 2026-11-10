@@ -59,7 +59,6 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerFavoriteSources
 import fr.forumhfr.redface2.core.ui.editor.SmileyWikiKeywordsSource
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
-import fr.forumhfr.redface2.core.ui.editor.afterFormLoaded
 import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.editBbcode
 import fr.forumhfr.redface2.core.ui.editor.imageInsertBbcodeOrNull
@@ -121,11 +120,13 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     val state: StateFlow<PrivateMessageReplyUiState> = _state.asStateFlow()
 
     internal val editorEvents = PrivateMessageReplyEvents()
+    internal val chromeMemory = PrivateMessageReplyChromeMemory()
 
     /** Observe synchronously: StateFlow may conflate two identical local refusals. */
     private fun updateState(transform: (PrivateMessageReplyUiState) -> PrivateMessageReplyUiState) {
         val previous = _state.value
         _state.update(transform)
+        if (editorEvents.state.session != submission.session) chromeMemory.reset()
         editorEvents.open(submission.session)
         editorEvents.observe(previous, _state.value)
     }
@@ -286,7 +287,8 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                     draftSession.invalidate()
                     updateState {
                         it.copy(formAvailable = false, isUploading = false, uploadProgress = null,
-                            restorableDraft = null)
+                            restorableDraft = null, conversationTitle = "", canManageRecipients = false,
+                            recipients = emptyList(), recipientsDirty = false)
                     }
                 }
                 authObserved = true
@@ -442,8 +444,10 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         return hydrated.copy(
             isLoadingForm = false,
             formAvailable = true,
+            conversationTitle = form.sujet,
             formError = false,
-            submitError = submitError.afterFormLoaded(),
+            // InvalidForm here is a submission preparation failure, never a failed GET (ED-44).
+            // Keep its banner aligned with the send event until acknowledgement or the next send.
             signatureEnabled = if (hydrateOptions) {
                 form.options.signatureEnabled || form.hiddenFields["signature"] == "1"
             } else {

@@ -99,6 +99,10 @@
     </plurals>
 
     <!-- #618 — bouton compact « Destinataires : N — Gérer » au-dessus du corps du composer (créateur). -->
+    <plurals name="messages_reply_recipient_status">
+        <item quantity="one">%1$d destinataire, gérer</item>
+        <item quantity="other">%1$d destinataires, gérer</item>
+    </plurals>
     <string name="messages_recipients_summary">Destinataires : %1$d</string>
     <string name="messages_recipients_manage">Gérer</string>
 

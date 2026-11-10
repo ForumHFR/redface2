@@ -217,7 +217,7 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
-    fun `successful form retry clears preparation errors and preserves uncertain delivery`() = runTest {
+    fun `successful form retry keeps preparation and uncertain errors aligned with their events`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } returns form()
         val vm = PrivateMessageReplyViewModel(
@@ -232,9 +232,11 @@ class PrivateMessageReplyViewModelTest {
         vm.onSubmit()
         advanceUntilIdle()
         assertEquals(EditorErrors.invalidForm, vm.state.value.submitError)
+        val preparationEvent = vm.editorEvents.visibleEvent
         vm.retryFormLoad()
         advanceUntilIdle()
-        assertNull(vm.state.value.submitError)
+        assertEquals(EditorErrors.invalidForm, vm.state.value.submitError)
+        assertEquals(preparationEvent, vm.editorEvents.visibleEvent)
         coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
         vm.onSubmit()
@@ -244,6 +246,34 @@ class PrivateMessageReplyViewModelTest {
         vm.retryFormLoad()
         advanceUntilIdle()
         assertEquals(uncertain, vm.state.value.submitError)
+    }
+
+    @Test
+    fun `conversation title comes only from a successful loaded form and is cleared on owner change`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val gate = CompletableDeferred<ReplyForm>()
+        coEvery { repository.fetchReplyForm(any(), any()) } coAnswers { gate.await() }
+        val auth = MutableStateFlow<AuthState>(AuthState.Authenticated("alice"))
+        val authRepository = mockk<AuthRepository> { every { observeAuthState() } returns auth }
+        val vm = viewModel(repository = repository, authRepository = authRepository)
+        runCurrent()
+        assertEquals("", vm.state.value.conversationTitle)
+        gate.complete(ownerForm().copy(sujet = "Titre privé du formulaire"))
+        advanceUntilIdle()
+        assertEquals("Titre privé du formulaire", vm.state.value.conversationTitle)
+        vm.chromeMemory.finishRecipientEntry()
+        vm.chromeMemory.host.focus.imeBeforeSurface = true
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form().copy(sujet = "Titre actualisé")
+        vm.retryFormLoad()
+        advanceUntilIdle()
+        assertEquals("Titre actualisé", vm.state.value.conversationTitle)
+        auth.value = AuthState.Anonymous
+        advanceUntilIdle()
+        assertEquals("", vm.state.value.conversationTitle)
+        assertFalse(vm.state.value.canManageRecipients)
+        assertTrue(vm.state.value.recipients.isEmpty())
+        assertFalse(vm.chromeMemory.recipientEntryHandled)
+        assertFalse(vm.chromeMemory.host.focus.imeBeforeSurface)
     }
 
     @Test

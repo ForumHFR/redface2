@@ -349,7 +349,7 @@ class PrivateMessageReplyRestorationTest {
         fetchFailure = null
         editor.retryFormLoad()
         settle()
-        assertNull(editor.state.value.submitError)
+        assertEquals(EditorErrors.invalidForm, editor.state.value.submitError)
         assertTrue(editor.editorEvents.state.events.any { it.content == problem })
         coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Failure(ReplyFailureReason.AntiFlood)
