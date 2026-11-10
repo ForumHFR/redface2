@@ -149,11 +149,13 @@ class PostEditorTransientComposeTest {
         val field = compose.onNodeWithTag("editor-scaffold-field")
         val bounds = field.getUnclippedBoundsInRoot()
         val node = compose.onNode(hasSetTextAction()).fetchSemanticsNode().id
-        compose.onNodeWithText("Extrait du message de Alice").assertDoesNotExist()
+        // QuoteCard renders the author and excerpt together in one Text node.
+        compose.onNodeWithText("Extrait du message de Alice", substring = true).assertDoesNotExist()
         compose.onNodeWithText("Tout vider").assertDoesNotExist()
         compose.onNodeWithContentDescription("3 citations, ouvrir le panneau citations")
             .assertIsDisplayed().performClick()
-        compose.onNodeWithText("Extrait du message de Alice").assertExists()
+        compose.onNode(hasSetTextAction()).assertDoesNotExist()
+        compose.onNodeWithText("Extrait du message de Alice", substring = true).assertExists()
         compose.onNodeWithText("Tout vider").performClick()
         compose.onNodeWithText("Aucune citation").assertIsFocused()
         compose.onNodeWithText("Retour au message").performScrollTo().performClick()
@@ -185,13 +187,22 @@ class PostEditorTransientComposeTest {
         val selection = TextRange(3, 1)
         listOf(initiallyOpen, !initiallyOpen).forEachIndexed { index, open ->
             if (open) field.performClick()
-            field.performTextInputSelection(selection)
-            compose.runOnIdle { input.insets(open) }
+            // performTextInputSelection sends SetSelection(min, max), losing the range's orientation.
+            // Set the live focused range directly, as in the ED86 and MP restoration tests.
+            compose.runOnIdle {
+                host.body.edit { this.selection = selection }
+                input.insets(open)
+            }
+            field.assertIsFocused()
+            compose.runOnIdle {
+                assertEquals("Reversed range before opening the panel", selection, host.body.selection)
+            }
             compose.onNodeWithContentDescription("3 citations, ouvrir le panneau citations").performClick()
             field.assertDoesNotExist()
             compose.onNode(hasSetTextAction(), useUnmergedTree = true).requestFocus().assertIsNotFocused()
             val keyboardBefore = keyboard.calls.toList()
             val sessions = compose.runOnIdle {
+                assertEquals("Reversed range while the panel is open", selection, host.body.selection)
                 assertNull(input.connection)
                 input.insets(!open) // The return must use the opening snapshot, not these new insets.
                 input.sessions
