@@ -23,7 +23,6 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
-import androidx.compose.ui.test.performTextInputSelection
 import androidx.compose.ui.text.TextRange
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.LocalLifecycleOwner
@@ -203,8 +202,11 @@ class PrivateMessageComposeRestorationScreenTest {
         compose.runOnIdle { back.onBackPressed() }
         compose.onNodeWithText("Retour au message").assertDoesNotExist()
         compose.onNode(hasSetTextAction()).performClick().performTextInput("Bonjour")
-        compose.onNode(hasSetTextAction()).performTextInputSelection(selection)
-        compose.runOnIdle { assertEquals(selection, model.bodyFieldState.selection) }
+        // performTextInputSelection sends SetSelection(min, max) (ui-test TextActions): it can never pose (6, 1).
+        // Reverse the live focused range on the field state, as the R3 rotation and ED86 tests do.
+        compose.runOnIdle { model.bodyFieldState.edit { this.selection = selection } }
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle { assertEquals("Reversed range before opening", selection, model.bodyFieldState.selection) }
         // A later explicit opening is retained across rotation through the same VM surface memory. The
         // title block's description is "<header action> : <title>, <summary>" (EditorAppBarTitle).
         val headerAction = "Modifier les destinataires et le sujet : Nouveau MP, " +
