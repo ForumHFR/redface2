@@ -45,7 +45,7 @@ class EditorCompactControlGeometryTest {
     private val statusButton get() = compose.onNode(hasClickAction() and
         hasAnyAncestor(hasTestTag("editor-bar-FirstStatus")), useUnmergedTree = true)
 
-    // Unlike getUnclippedBoundsInRoot(), these bounds exclude native minimum-touch-target expansion.
+    // The node's own placed size; native minimum-touch-target expansion only shows in touchBoundsInRoot.
     private fun SemanticsNodeInteraction.layoutBounds(): DpRect {
         val node = fetchSemanticsNode()
         val position = node.positionInRoot
@@ -98,6 +98,13 @@ class EditorCompactControlGeometryTest {
         assertEquals(format.layoutBounds(), bounds("editor-bar-format-shape"))
         tapIconMargin(format, top)
         compose.runOnIdle { assertEquals(EditorBarMode.Normal, host.chrome.value.bar.mode) }
+        show(chrome.copy(bar = EditorBarState(EditorBarMode.Color)))
+        tapIconMargin(compose.onNode(hasClickAction() and hasContentDescription("Rouge")), top)
+        compose.runOnIdle { assertEquals(EditorBarMode.Format, host.chrome.value.bar.mode) }
+        show(chrome.copy(bar = EditorBarState(EditorBarMode.Image)))
+        host.calls.clear()
+        tapIconMargin(compose.onNode(hasClickAction() and hasContentDescription("Uploader une image")), top)
+        assertEquals(listOf("upload"), host.calls)
     }
 
     private fun assertIconLayerBounds(target: SemanticsNodeInteraction) {
@@ -208,7 +215,7 @@ class EditorCompactControlGeometryTest {
             assertEquals(listOf("event:Complete"), host.calls)
             compose.runOnIdle { host.panel.value = false }
             show(EditorScaffoldChrome(bar = EditorBarState(EditorBarMode.Format)))
-            tapMargin(compose.onNodeWithContentDescription("Mise en forme"), top)
+            tapBarMargin(compose.onNodeWithContentDescription("Mise en forme"), top)
             compose.runOnIdle { assertEquals(EditorBarMode.Normal, host.chrome.value.bar.mode) }
         }
     }
@@ -220,5 +227,18 @@ class EditorCompactControlGeometryTest {
     private fun tapMargin(target: SemanticsNodeInteraction, top: Boolean) {
         val inset = with(host.density) { 1.dp.toPx() }
         target.performTouchInput { click(Offset(center.x, if (top) inset else height - inset)) }
+    }
+
+    /** A native-target icon's node is its 40 dp layer: tap the bar 1 dp from its edge, outside that layer. */
+    private fun tapBarMargin(target: SemanticsNodeInteraction, top: Boolean) {
+        val shape = target.layoutBounds()
+        val bar = bounds("editor-scaffold-action-bar")
+        val point = with(host.density) {
+            val y = if (top) 1.dp else bar.height - 1.dp
+            Offset((shape.left + shape.width / 2 - bar.left).toPx(), y.toPx())
+        }
+        assertTrue("Tap must land outside the 40 dp layer", (bar.top + 1.dp) < shape.top)
+        compose.onNodeWithTag("editor-scaffold-action-bar", useUnmergedTree = true)
+            .performTouchInput { click(point) }
     }
 }

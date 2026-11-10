@@ -65,8 +65,9 @@ fun EditorActionIcon(
 
 /**
  * ED-05/W8-1: when [enabled], a 48 dp slot whose Box parent centres the 40 dp layer by child placement.
- * The chain is the same either way: minimumInteractiveComponentSize() centres through an offset inside
- * this node, which semantics reported 4 dp high after a hidden movable status was reattached visible.
+ * The chain is the same either way. Toggling minimumInteractiveComponentSize() instead, which centres
+ * through an offset inside its own node, once left a reattached movable status 4 dp high in semantics;
+ * the Compose cause is not established, and this stable chain avoids depending on it.
  */
 internal fun Modifier.editorCompactTargetSlot(enabled: Boolean): Modifier {
     val slot = if (enabled) EditorChromeMetrics.minimumTargetSize else 0.dp

@@ -6,8 +6,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
@@ -41,13 +41,14 @@ internal fun EditorColorRow(
         val click = { onAction(BbcodeAction.Color(hex)) }
         val outline = MaterialTheme.colorScheme.onSurface
         EditorIconTooltip(label) {
-            val target = if (compactHeight) Modifier.minimumInteractiveComponentSize() else Modifier
-            IconButton(onClick = click, enabled = enabled,
-                modifier = target.size(EditorChromeMetrics(compactHeight).controlVisibleHeight)
-                    .editorBarActivation(enabled, click).semantics { contentDescription = label }) {
-                Box(Modifier.size(24.dp).alpha(if (enabled) 1f else DISABLED_SWATCH_ALPHA).clip(CircleShape)
-                    .background(Color(android.graphics.Color.parseColor(hex)))
-                    .drawBehind { drawCircle(outline, style = Stroke(1.dp.toPx())) })
+            Box(Modifier.editorCompactTargetSlot(compactHeight), contentAlignment = Alignment.Center) {
+                IconButton(onClick = click, enabled = enabled,
+                    modifier = Modifier.size(EditorChromeMetrics(compactHeight).controlVisibleHeight)
+                        .editorBarActivation(enabled, click).semantics { contentDescription = label }) {
+                    Box(Modifier.size(24.dp).alpha(if (enabled) 1f else DISABLED_SWATCH_ALPHA).clip(CircleShape)
+                        .background(Color(android.graphics.Color.parseColor(hex)))
+                        .drawBehind { drawCircle(outline, style = Stroke(1.dp.toPx())) })
+                }
             }
         }
     }
