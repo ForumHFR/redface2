@@ -15,6 +15,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -152,6 +153,9 @@ class PrivateMessageComposeRestorationScreenTest {
             store.loadGate?.complete(Unit)
         }
         compose.onNode(hasSetTextAction()).assertIsDisplayed()
+        // Process death drops the VM-only focus memory: restored recipients autofocus the body once,
+        // as the post and the reply do, while selection and scroll stay restored (gate C4 m1).
+        compose.onNode(hasSetTextAction()).assertIsFocused()
         compose.runOnIdle {
             assertEquals("Sujet privé", restored.state.value.subject)
             assertEquals(recipients, restored.state.value.recipientState)
@@ -161,6 +165,8 @@ class PrivateMessageComposeRestorationScreenTest {
             assertTrue(restored.bodyScrollState.maxValue > 80)
             assertEquals(80, restored.bodyScrollState.value)
             assertNull(restored.chromeMemory.host.surface)
+            assertTrue(restored.chromeMemory.host.focus.autoFocusConsumed)
+            assertFalse(restored.chromeMemory.host.focus.imeBeforeSurface)
         }
     }
 
@@ -180,12 +186,30 @@ class PrivateMessageComposeRestorationScreenTest {
             }
         }
         compose.onNodeWithText("Retour au message").assertIsDisplayed()
+        compose.runOnIdle {
+            assertEquals(PrivateMessageComposeChromeSurface.Header, model.chromeMemory.host.surface)
+            owner = host().get() // Rotation while the automatic entry header itself is still open.
+        }
+        // The entry header survives as is: same VM surface, its recipients target refocused, no IME captured.
+        compose.onNodeWithText("Retour au message").assertIsDisplayed()
+        compose.onNode(hasSetTextAction() and hasText("Destinataires")).assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(PrivateMessageComposeChromeSurface.Header, model.chromeMemory.host.surface)
+            assertFalse(model.chromeMemory.host.focus.imeBeforeSurface)
+            assertFalse(model.chromeMemory.host.focus.autoFocusConsumed)
+        }
         val selection = TextRange(6, 1)
         // Capture a body edited before opening the header; replacing text behind it bypasses captureBody.
         compose.runOnIdle { back.onBackPressed() }
+        compose.onNodeWithText("Retour au message").assertDoesNotExist()
         compose.onNode(hasSetTextAction()).performClick().performTextInput("Bonjour")
         compose.onNode(hasSetTextAction()).performTextInputSelection(selection)
-        compose.onNodeWithContentDescription("Modifier les destinataires et le sujet").performClick()
+        compose.runOnIdle { assertEquals(selection, model.bodyFieldState.selection) }
+        // A later explicit opening is retained across rotation through the same VM surface memory. The
+        // title block's description is "<header action> : <title>, <summary>" (EditorAppBarTitle).
+        val headerAction = "Modifier les destinataires et le sujet : Nouveau MP, " +
+            "Ajouter des destinataires · Ajouter un sujet"
+        compose.onNodeWithContentDescription(headerAction).performClick()
         compose.onNodeWithText("Retour au message").assertIsDisplayed()
         compose.runOnIdle {
             assertEquals(selection, model.bodyFieldState.selection)

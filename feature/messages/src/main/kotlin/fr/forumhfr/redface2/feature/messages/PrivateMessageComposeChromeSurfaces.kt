@@ -87,8 +87,9 @@ private fun ComposeHeader(
     EditorHeaderPanel(header || restore, stringResource(if (restore) R.string.messages_compose_restore_title
         else R.string.messages_compose_header), bodyState, adapter::closeSurface,
         { adapter.returnToBody(onReturnToBody) }, initialFocusRequester = focus.takeIf { header }, body = body) {
+        // The panel has the full height: never ellipsize the offer at 1.3 (gate C4 m8).
         if (restore) MessageDraftRestoreBanner(adapter::restoreDraft, adapter::discardDraft,
-            restoreEnabled = adapter.state.restoreEnabled)
+            restoreEnabled = adapter.state.restoreEnabled, messageMaxLines = Int.MAX_VALUE)
         else {
             EditorRecipientField(adapter.state.source.recipientState, recipients, { subjectFocus.requestFocus() },
                 Modifier.focusRequester(recipientFocus), enabled = adapter.state.scaffold.controlsEnabled)

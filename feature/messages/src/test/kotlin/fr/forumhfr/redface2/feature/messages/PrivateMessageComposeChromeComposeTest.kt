@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.messages
 
 import android.text.InputType
+import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import androidx.activity.OnBackPressedDispatcher
@@ -18,6 +19,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.PlatformTextInputInterceptor
 import androidx.compose.ui.platform.SoftwareKeyboardController
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -44,6 +46,9 @@ import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
+import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import coil3.ColorImage
 import coil3.ImageLoader
 import coil3.SingletonImageLoader
@@ -91,6 +96,7 @@ class PrivateMessageComposeChromeComposeTest {
     private val f = PrivateMessageComposeChromeFixture()
     private val scroll = ScrollState(0)
     private lateinit var back: OnBackPressedDispatcher
+    private lateinit var view: View
     private var renderedChrome: EditorScaffoldChrome? = null
     private var hides = 0
     private var shows = 0
@@ -118,6 +124,7 @@ class PrivateMessageComposeChromeComposeTest {
         modifier: Modifier = Modifier,
     ) {
         back = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+        view = LocalView.current
         val scope = rememberCoroutineScope()
         val smileys = remember { SmileyPickerController(scope, searchWiki = { _, _ -> emptyList() }) }
         f.openSmileys = { smileys.open() }
@@ -137,6 +144,14 @@ class PrivateMessageComposeChromeComposeTest {
         hasSetTextAction() and hasAnyAncestor(hasTestTag("editor-scaffold-field")))
     private fun prefill() {
         f.state = f.state.copy(recipientState = EditorRecipientState(listOf("alice")), subject = "Sujet privé")
+    }
+    /** Real IME insets, as the platform reports them for the focused body; never the scaffold's flag. */
+    private fun showIme() {
+        compose.runOnIdle {
+            ViewCompat.dispatchApplyWindowInsets(view, WindowInsetsCompat.Builder()
+                .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, 200))
+                .setVisible(WindowInsetsCompat.Type.ime(), true).build())
+        }
     }
     @Test fun `ED113 empty entry opens chips and Next preserves buffer then returns selection and closed IME`() {
         val generation = mutableStateOf(0)
@@ -182,6 +197,8 @@ class PrivateMessageComposeChromeComposeTest {
             assertNull(f.adapter.surface)
             assertTrue(bodyInputs.isNotEmpty())
         }
+        // The completion gesture captures the IME the focused body actually shows (ED-86, real path).
+        showIme()
         listOf(EditorErrors.unknownRecipient to "Destinataires", EditorErrors.missingSubject to "Sujet")
             .forEach { (error, label) ->
                 compose.runOnIdle {
@@ -190,31 +207,77 @@ class PrivateMessageComposeChromeComposeTest {
                 val summary = error.summary.resolve(RuntimeEnvironment.getApplication())
                 compose.onNodeWithContentDescription("$summary, Compléter").performClick()
                 compose.onNode(hasSetTextAction() and hasText(label)).assertIsFocused()
-                compose.runOnIdle { f.adapter.focusMemory.imeBeforeSurface = true; hides = 0 }
+                compose.runOnIdle { assertTrue(f.adapter.focusMemory.imeBeforeSurface); hides = 0 }
                 compose.onNodeWithText("Retour au message").performClick()
-                compose.onNode(hasSetTextAction()).assertIsFocused()
-                compose.runOnIdle { assertEquals(0, hides); assertEquals(TextRange(6, 1), f.body.selection) }
+                bodyField().assertIsFocused()
+                compose.runOnIdle {
+                    assertEquals(0, hides)
+                    assertEquals(TextRange(6, 1), f.body.selection)
+                    assertTrue(bodyInputs.isNotEmpty())
+                }
             }
     }
-    @Test fun `ED40 restore discard and reload detail all render and reach their existing business ports`() {
+    @Test fun `ED86 title block captures the open body IME and returns it with the reversed selection once`() {
+        prefill()
+        val headerAction = "Modifier les destinataires et le sujet : Nouveau MP, 1 destinataire · Sujet privé"
+        compose.setContent { Content() }
+        bodyField().assertIsFocused()
+        compose.runOnIdle {
+            assertTrue("Body input must be active before opening the header", bodyInputs.isNotEmpty())
+            assertFalse(f.adapter.focusMemory.imeBeforeSurface)
+            f.body.edit { selection = TextRange(6, 1) }
+        }
+        showIme()
+        compose.onNodeWithContentDescription(headerAction).performClick()
+        compose.onNodeWithText("Retour au message").assertExists()
+        compose.runOnIdle {
+            assertTrue("Opening from the title must capture the visible IME", f.adapter.focusMemory.imeBeforeSurface)
+            assertEquals(PrivateMessageComposeChromeSurface.Header, f.adapter.surface)
+            shows = 0
+            hides = 0
+        }
+        compose.onNodeWithText("Retour au message").performClick()
+        bodyField().assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(TextRange(6, 1), f.body.selection)
+            assertTrue("Returning to the body must restart its input session", bodyInputs.isNotEmpty())
+            assertEquals(0, hides)
+            assertNull(f.adapter.surface)
+            assertFalse(f.adapter.consumeReturn())
+        }
+    }
+    @Test fun `ED40 restore discard and reload detail reach their ports and return body focus exactly once`() {
         prefill()
         f.state = f.state.copy(restorableDraft = "brouillon", restorableSubject = "titre",
             restorableRecipients = "bob")
         compose.setContent { Content() }
-        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
-        compose.onNodeWithText("Restaurer").performClick()
-        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
-        compose.onNodeWithText("Ignorer").performClick()
+        listOf("Restaurer", "Ignorer").forEachIndexed { index, label ->
+            compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
+            bodyField().assertDoesNotExist()
+            compose.onNodeWithText(label).performClick()
+            // The panel itself returns focus; Restore is not a returnsToBody surface, so no second return.
+            bodyField().assertIsFocused()
+            compose.runOnIdle {
+                assertEquals(listOf("restore", "discard").take(index + 1), f.calls)
+                assertNull(f.adapter.surface)
+                assertEquals(0, f.adapter.returnGeneration)
+                assertFalse(f.adapter.consumeReturn())
+            }
+        }
         compose.runOnIdle {
             f.transition(f.state.copy(submitError = EditorErrors.invalidForm))
         }
         val summary = EditorErrors.invalidForm.summary.resolve(RuntimeEnvironment.getApplication())
         compose.onNodeWithContentDescription("$summary, Afficher les détails").performClick()
+        bodyField().assertDoesNotExist()
         compose.onNodeWithText("Recharger").performClick()
+        bodyField().assertIsFocused()
         compose.runOnIdle {
             assertEquals(listOf("restore", "discard", "reload"), f.calls)
             assertNull(f.adapter.surface)
             assertNull(f.adapter.detail)
+            assertEquals(0, f.adapter.returnGeneration)
+            assertFalse(f.adapter.consumeReturn())
         }
     }
     @Test fun `ED71 options have only three toggles and header inputs freeze during sending`() {

@@ -45,7 +45,10 @@ import org.robolectric.annotation.GraphicsMode
  * Actual reply and new-MP content on the common scaffold.
  * Reply: portrait/landscape × font scale 1.0/1.3 × light/dark × empty/multiline, plus restore/event/preview/
  * owner states, an armed send, both statuses at rest and under an event, and the full-screen form failure.
- * Light names are historical; dark reply names end in `_dark`. The new-MP matrix bodies stay light only.
+ * Light names are historical; dark reply names end in `_dark`.
+ * New MP: `private_message_new_<scene>_<orientation>_fs<scale>_dark<theme>.png` for every [ComposeCapture],
+ * plus the historical empty-body `private_message_new_<orientation>_fs<scale>_empty.png`. Its multiline body
+ * is the light `Normal` scene; the matrix no longer records that byte-identical duplicate.
  * Deterministic local text only. PNG references are explicitly recorded by the maintainer.
  */
 @RunWith(RobolectricTestRunner::class)
@@ -103,10 +106,11 @@ class EditorBaselineRoborazziTest {
             }
         }
 
-        // The new-MP matrix bodies keep their light references only; its panels are in captureComposeStates.
+        // The new-MP matrix keeps its light empty body; a filled new MP is private_message_new_Normal_*_darkfalse
+        // in captureComposeStates, which also covers its dark theme.
         val surfaces = if (dark) listOf(EditorSurface.Reply) else EditorSurface.entries
         val cases = surfaces.flatMap { surface ->
-            listOf(false, true).map { Scenario(surface, it) }
+            listOf(false, true).filter { !it || surface == EditorSurface.Reply }.map { Scenario(surface, it) }
         } + ReplyChrome.entries.filter { it != ReplyChrome.Ready }.map {
             Scenario(EditorSurface.Reply, filled = true, chrome = it)
         }
@@ -214,7 +218,9 @@ class EditorBaselineRoborazziTest {
                 compose.runOnIdle { focus.clearFocus(force = true) }
                 compose.mainClock.advanceTimeBy(1_000L)
                 compose.mainClock.autoAdvance = false
-                compose.onRoot().captureRoboImage(filePath = "src/test/screenshots/" +
+                // The options sheet is a ModalBottomSheet: it renders in its own dialog window.
+                val target = if (state == ComposeCapture.Options) compose.onNode(isDialog()) else compose.onRoot()
+                target.captureRoboImage(filePath = "src/test/screenshots/" +
                     "private_message_new_${state}_${orientation}_fs${scale}_dark$dark.png")
                 compose.mainClock.autoAdvance = true
             }
@@ -223,19 +229,7 @@ class EditorBaselineRoborazziTest {
 
     @Composable
     private fun ComposeChrome(body: String, capture: ComposeCapture = ComposeCapture.Normal) {
-        val f = remember { PrivateMessageComposeChromeFixture().apply {
-            state = state.copy(recipients = "CorrespondantTest", subject = "Conversation de démonstration",
-                recipientState = EditorRecipientState(listOf("CorrespondantTest")),
-                bodyText = body, isPreviewVisible = capture == ComposeCapture.Preview,
-                preview = PostContent(listOf(PostBlock.Paragraph(listOf(PostInline.Text("Aperçu du message privé"))))),
-                restorableDraft = if (capture == ComposeCapture.Restore) "Brouillon privé" else null)
-            this.body.edit { replace(0, length, body) }
-            when (capture) {
-                ComposeCapture.Header -> adapter.openHeader()
-                ComposeCapture.Restore -> adapter.open(PrivateMessageComposeChromeSurface.Restore)
-                else -> Unit
-            }
-        } }
+        val f = remember { PrivateMessageComposeChromeFixture().apply { stage(body, capture); openScene(capture) } }
         val scope = rememberCoroutineScope()
         val smileys = remember { SmileyPickerController(scope, searchWiki = { _, _ -> emptyList() }) }
         val height = LocalConfiguration.current.screenHeightDp.dp
@@ -244,7 +238,44 @@ class EditorBaselineRoborazziTest {
             windowMetrics = EditorWindowMetrics(height, 0.dp, 0.dp))
     }
 
-    private enum class ComposeCapture { Normal, Header, Preview, Restore }
+    private fun PrivateMessageComposeChromeFixture.stage(body: String, capture: ComposeCapture) {
+        state = state.copy(recipients = if (capture.routed) "CorrespondantTest" else "",
+            subject = if (capture.routed) "Conversation de démonstration" else "",
+            recipientState = EditorRecipientState(if (capture.routed) listOf("CorrespondantTest") else emptyList(),
+                // ED-133 width proof: « Pseudo à valider » comes from an uncommitted pseudo.
+                buffer = if (capture == ComposeCapture.Event) "Pseudo" else ""),
+            bodyText = body, isPreviewVisible = capture == ComposeCapture.Preview,
+            preview = PostContent(listOf(PostBlock.Paragraph(listOf(PostInline.Text("Aperçu du message privé"))))),
+            restorableDraft = if (capture.restorable) "Brouillon privé" else null,
+            submission = if (capture == ComposeCapture.Armed) EditorSubmissionState.Armed(
+                ArmToken(1, session, Long.MAX_VALUE / 4, 60_000L)) // Far-future arm: frozen countdown.
+            else EditorSubmissionState.Ready,
+            formAvailable = capture != ComposeCapture.FormError, formError = capture == ComposeCapture.FormError)
+        this.body.edit { replace(0, length, body) }
+    }
+
+    /** Surfaces open through the production adapter; EmptyEntry is opened by the screen's own entry effect. */
+    private fun PrivateMessageComposeChromeFixture.openScene(capture: ComposeCapture) {
+        when (capture) {
+            ComposeCapture.Header -> adapter.openHeader()
+            ComposeCapture.Restore -> adapter.open(PrivateMessageComposeChromeSurface.Restore)
+            ComposeCapture.Options -> adapter.open(PrivateMessageComposeChromeSurface.Options)
+            ComposeCapture.Event -> transition(state.copy(submitError = EditorErrors.incompleteRecipient))
+            // The entry header was already closed: only the app bar summary names what is missing.
+            ComposeCapture.EmptySummary -> memory.claimInitialEntry()
+            else -> Unit
+        }
+    }
+
+    /**
+     * Armed and Event keep the statuses of their state (Event with ↺); States shows ↺ without a tap.
+     * EmptyEntry is the automatic header without chips; EmptySummary reads « Ajouter des destinataires ·
+     * Ajouter un sujet » once it is closed; FormError is the full-screen retry.
+     */
+    private enum class ComposeCapture(val routed: Boolean = true, val restorable: Boolean = false) {
+        Normal, Header, Preview, Restore(restorable = true), Armed, Event(restorable = true),
+        States(restorable = true), EmptyEntry(routed = false), EmptySummary(routed = false), Options, FormError,
+    }
 
     private enum class EditorSurface(val fileName: String) {
         Reply("private_message_reply"),

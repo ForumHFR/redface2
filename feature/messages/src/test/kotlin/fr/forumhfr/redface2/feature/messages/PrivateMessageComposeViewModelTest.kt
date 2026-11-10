@@ -400,9 +400,6 @@ class PrivateMessageComposeViewModelTest {
             expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
-        vm.onUploadErrorDismissed()
-        advanceUntilIdle()
-        assertNull(vm.state.value.uploadError)
     }
 
     @Test

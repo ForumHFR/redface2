@@ -103,7 +103,8 @@ internal fun MessageEditorHeader(title: String, onBack: () -> Unit) {
 /**
  * #405 — non-destructive draft-restore banner of the new-message editor (the reply uses ReplyDraftRestoreChoice).
  * « Restaurer » pre-fills the editor from the cached draft ; « Ignorer » deletes the cached row.
- * The draft is never silently applied nor lost.
+ * The draft is never silently applied nor lost. [messageMaxLines] stays 2 in the inline legacy banner;
+ * a full-height panel passes [Int.MAX_VALUE] so the message is never ellipsized at large font scales.
  */
 @Composable
 internal fun MessageDraftRestoreBanner(
@@ -111,6 +112,7 @@ internal fun MessageDraftRestoreBanner(
     onDiscard: () -> Unit,
     modifier: Modifier = Modifier,
     restoreEnabled: Boolean = true,
+    messageMaxLines: Int = 2,
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
@@ -127,7 +129,7 @@ internal fun MessageDraftRestoreBanner(
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurface,
                 modifier = Modifier.weight(1f),
-                maxLines = 2,
+                maxLines = messageMaxLines,
                 overflow = TextOverflow.Ellipsis,
             )
             TextButton(
