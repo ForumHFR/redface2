@@ -167,6 +167,7 @@ private fun ComposeChrome(
         onOpenHeader = host::openHeader, headerLabel = stringResource(R.string.messages_compose_header_open),
         bodyFocusRequester = focus, bodyScrollState = scroll, inputTransformation = transformation,
         autoFocus = autoFocus, surfaceFocus = host.focusMemory,
+        bodyFocusRestoreAllowed = host.surface == null && host.detail == null && !host.state.scaffold.previewVisible,
         bodyCaretRevealResetKey = bodyCaretRevealResetKey,
         onSystemBack = back,
         fieldArea = { field -> PrivateMessageComposeChromePreview(host, body, focus, field) },
