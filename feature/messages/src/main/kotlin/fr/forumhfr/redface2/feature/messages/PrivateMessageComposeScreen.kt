@@ -14,6 +14,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -124,7 +125,11 @@ internal fun PrivateMessageComposeContent(
     val window = windowMetrics ?: activity?.let { rememberEditorWindowMetrics(it).value }
     when {
         state.isInitializing || window == null -> ComposeFormStatus(host, modifier)
-        state.formError || state.isLoadingForm && !state.formAvailable -> ComposeFormStatus(host, modifier)
+        state.formError || state.isLoadingForm && !state.formAvailable -> {
+            // Only a failure drops the layers (gate C4 r1, minor 9); loading keeps them and the entry latch.
+            if (state.formError) LaunchedEffect(host) { host.closeLayersForFormFailure { smileyPicker.dismiss() } }
+            ComposeFormStatus(host, modifier)
+        }
         else -> CompositionLocalProvider(LocalEditorTooltipHost provides remember { EditorTooltipHost() }) {
             ComposeChrome(host, bodyFieldState, bodyInputTransformation, bodyScrollState, recipients, subject,
                 smileyPicker, window, modifier, bodyCaretRevealResetKey)
@@ -153,12 +158,15 @@ private fun ComposeChrome(
         }
     }
     val focus = remember { FocusRequester() }
+    // An empty entry belongs to the automatic header, without a body IME for the scaffold to restore.
+    val autoFocus = host.memory.autoFocusBody(host.state.source.recipientState)
+    // Freeze the policy only once this composition is applied, never from an abandoned one (gate C4 r1, minor 2).
+    SideEffect { host.memory.retainAutoFocus(autoFocus) }
     EditorScaffold(body, window, host.title(), host.context(), host.chrome(), host.barActions,
         host.submitState, host.submitActions, host.imageActions, host::closeRequested, modifier = modifier,
         onOpenHeader = host::openHeader, headerLabel = stringResource(R.string.messages_compose_header_open),
         bodyFocusRequester = focus, bodyScrollState = scroll, inputTransformation = transformation,
-        // An empty entry belongs to the automatic header, without a body IME for the scaffold to restore.
-        autoFocus = host.memory.autoFocusBody(host.state.source.recipientState), surfaceFocus = host.focusMemory,
+        autoFocus = autoFocus, surfaceFocus = host.focusMemory,
         bodyCaretRevealResetKey = bodyCaretRevealResetKey,
         onSystemBack = back,
         fieldArea = { field -> PrivateMessageComposeChromePreview(host, body, focus, field) },

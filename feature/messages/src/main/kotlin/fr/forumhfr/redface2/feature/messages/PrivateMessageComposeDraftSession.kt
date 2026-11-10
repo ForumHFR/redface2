@@ -166,10 +166,10 @@ internal class PrivateMessageComposeDraftSession(
         }
     }
 
-    fun changeRecipients(value: EditorRecipientState, legacyDisplay: String = display(value)) {
+    fun changeRecipients(value: EditorRecipientState) {
         decide(EditorSessionField.Recipients)
         updateState {
-            it.copy(recipientState = value, recipients = legacyDisplay,
+            it.copy(recipientState = value, recipients = display(value),
                 restorableRecipients = if (it.restorableDraft != null) value.encode() else it.restorableRecipients)
         }
         scheduleAutosave()

@@ -181,7 +181,7 @@ class PrivateMessageComposeRestorationTest {
         settle()
         type(editor, "too early")
         editor.onSubjectChanged("too early")
-        editor.onRecipientsChanged("too early")
+        editor.onRecipientStateChanged(EditorRecipientState(listOf("too early")))
         assertTrue(editor.state.value.isInitializing)
         assertEquals("", editor.bodyFieldState.text.toString())
         assertEquals("", editor.state.value.subject)
@@ -225,8 +225,8 @@ class PrivateMessageComposeRestorationTest {
         store.loadGate = CompletableDeferred()
         val editor = open(initial = "route-default")
         settle()
-        editor.onRecipientsChanged("typed")
-        editor.onRecipientsChanged("")
+        editor.onRecipientStateChanged(EditorRecipientState(listOf("typed")))
+        editor.onRecipientStateChanged(EditorRecipientState())
         editor.onSubjectChanged("typed")
         editor.onSubjectChanged("")
         type(editor, "typed")
@@ -249,7 +249,7 @@ class PrivateMessageComposeRestorationTest {
         assertEquals(EditorRecipientState(listOf("alice")), first.state.value.recipientState)
         first.onSubjectChanged("private subject")
         type(first, "saved body")
-        first.onRecipientsChanged("")
+        first.onRecipientStateChanged(EditorRecipientState())
         first.onStopped()
         mainImmediateTurn()
         val frozen = freeze(saved)
@@ -268,7 +268,7 @@ class PrivateMessageComposeRestorationTest {
         assertFalse(restored.state.value.canSubmit)
     }
 
-    @Test fun legacyCsvAdapterPreservesEmptySegmentsAcrossDeathAndPost() = runTest(dispatcher) {
+    @Test fun emptyCsvSegmentsSurviveDeathAndPost() = runTest(dispatcher) {
         every { preferences.observeConfirmBeforePosting() } returns flowOf(false)
         coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Failure(ReplyFailureReason.AntiFlood)
@@ -278,7 +278,7 @@ class PrivateMessageComposeRestorationTest {
             val first = open(saved)
             settle()
             first.onSubjectChanged("private subject")
-            first.onRecipientsChanged(csv)
+            first.onRecipientStateChanged(EditorRecipientState(csv.split(',')))
             type(first, "saved body")
             first.onStopped()
             mainImmediateTurn()
@@ -306,7 +306,7 @@ class PrivateMessageComposeRestorationTest {
         type(editor, "saved body")
         settle()
         for (csv in listOf(",", ", ,")) {
-            editor.onRecipientsChanged(csv)
+            editor.onRecipientStateChanged(EditorRecipientState(csv.split(',')))
             assertFalse(editor.state.value.canSubmit)
             editor.onSubmit()
             assertEquals(EditorErrors.missingRecipients, editor.state.value.submitError)

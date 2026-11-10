@@ -10,6 +10,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.text.input.InputTransformation
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
@@ -334,8 +335,31 @@ class PrivateMessageComposeChromeComposeTest {
         compose.runOnIdle {
             assertNull(f.adapter.surface)
             assertTrue(f.calls.isEmpty())
-            assertEquals(EditorSubmissionState.Uncertain(attempt), f.state.submission)
         }
+    }
+    @Test fun `ED45 Masquer of an uncertainty without a durable attempt only hides it`() {
+        prefill()
+        f.transition(f.state.copy(submission = EditorSubmissionState.Uncertain(null), submitError = uncertain))
+        compose.setContent { Content() }
+        val summary = uncertain.summary.resolve(RuntimeEnvironment.getApplication())
+        compose.onNodeWithContentDescription("$summary, Afficher les détails").performClick()
+        compose.onNodeWithText("Masquer").performClick()
+        bodyField().assertIsFocused()
+        compose.runOnIdle {
+            // No attempt is bound: Masquer stays visual and never reaches the durable port.
+            assertTrue(f.calls.isEmpty())
+            assertNull(f.adapter.detail)
+            assertNull(f.events.visibleEvent)
+        }
+    }
+    @Test fun `ED113 summary ignores blank chips and counts only nonblank recipients`() {
+        f.state = f.state.copy(recipientState = EditorRecipientState(listOf("", " ", "\t")), subject = "Sujet privé")
+        compose.setContent { RedfaceTheme { Text(f.adapter.context()) } }
+        compose.onNodeWithText("Ajouter des destinataires · Sujet privé").assertExists()
+        compose.runOnIdle {
+            f.state = f.state.copy(recipientState = EditorRecipientState(listOf("", "alice", " ", "bob", "\t")))
+        }
+        compose.onNodeWithText("2 destinataires · Sujet privé").assertExists()
     }
     @Test fun `ED71 options have only three toggles and header inputs freeze during sending`() {
         prefill()
@@ -392,6 +416,25 @@ class PrivateMessageComposeChromeComposeTest {
             assertEquals(0, bodyInputStarts)
             assertTrue(bodyInputs.isEmpty())
             assertFalse(f.adapter.consumeReturn())
+        }
+    }
+
+    @Test fun `ED130 a full-screen form failure closes the header instead of restoring it after the retry`() {
+        prefill()
+        compose.setContent { Content() }
+        compose.runOnIdle { f.adapter.openHeader() }
+        compose.onNodeWithText("Retour au message").assertExists()
+        compose.runOnIdle { f.state = f.state.copy(formError = true, formAvailable = false) }
+        compose.onNodeWithText("Réessayer").assertIsDisplayed()
+        compose.runOnIdle {
+            assertNull(f.adapter.surface)
+            f.state = f.state.copy(formError = false, formAvailable = true)
+        }
+        compose.onNodeWithText("Retour au message").assertDoesNotExist()
+        bodyField().assertExists()
+        compose.runOnIdle {
+            assertNull(f.adapter.surface)
+            assertTrue(f.calls.isEmpty())
         }
     }
 

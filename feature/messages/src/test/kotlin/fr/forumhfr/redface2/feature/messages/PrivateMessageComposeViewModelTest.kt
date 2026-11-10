@@ -45,6 +45,7 @@ import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorSurface
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorEvent
@@ -87,6 +88,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -198,7 +200,7 @@ class PrivateMessageComposeViewModelTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchComposeForm(any()) } returns composeForm()
         val vm = viewModel(repository)
-        vm.onRecipientsChanged("alice")
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("alice")))
         vm.onSubjectChanged("title")
         advanceUntilIdle()
         vm.editBody(TextFieldValue("body"))
@@ -277,7 +279,7 @@ class PrivateMessageComposeViewModelTest {
         coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Failure(ReplyFailureReason.EmptyMessage)
         val vm = viewModel(repository)
-        vm.onRecipientsChanged("alice")
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("alice")))
         vm.onSubjectChanged("title")
         vm.editBody(TextFieldValue("body"))
         vm.onSubmit()
@@ -288,7 +290,7 @@ class PrivateMessageComposeViewModelTest {
         listOf<() -> Unit>(
             { vm.editBody(TextFieldValue("changed")) },
             { vm.editBody(TextFieldValue("changed", TextRange(1, 3))) },
-            { vm.onRecipientsChanged("bob") },
+            { vm.onRecipientStateChanged(EditorRecipientState(listOf("bob"))) },
             { vm.onSubjectChanged("changed") },
             { vm.onToggleSignature(true) },
             { vm.onToolbarAction(BbcodeAction.Bold) },
@@ -633,7 +635,7 @@ class PrivateMessageComposeViewModelTest {
         val vm = viewModel(repository)
         assertFalse(vm.state.value.canSubmit)
 
-        vm.onRecipientsChanged("bozoleclown")
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("bozoleclown")))
         assertFalse(vm.state.value.canSubmit)
         vm.onSubjectChanged("Hello")
         assertFalse(vm.state.value.canSubmit)
@@ -685,7 +687,7 @@ class PrivateMessageComposeViewModelTest {
         } returns ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
 
         val vm = viewModel(repository)
-        vm.onRecipientsChanged(" bozoleclown, Lt Ripley ")
+        vm.onRecipientStateChanged(EditorRecipientState(" bozoleclown, Lt Ripley ".split(',')))
         vm.onSubjectChanged("  Sujet  ")
         vm.editBody(TextFieldValue("Bonjour."))
 
@@ -714,7 +716,7 @@ class PrivateMessageComposeViewModelTest {
             repository.submitNewMessage(any(), any(), any(), any(), any())
         } returns ReplySubmitResult.Failure(ReplyFailureReason.UnknownRecipient)
         val vm = viewModel(repository)
-        vm.onRecipientsChanged("missing-account")
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("missing-account")))
         vm.onSubjectChanged("Sujet")
         vm.editBody(TextFieldValue("Bonjour."))
         vm.effects.test {
@@ -736,7 +738,7 @@ class PrivateMessageComposeViewModelTest {
         } returns ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
 
         val vm = viewModel(repository)
-        vm.onRecipientsChanged("bozoleclown")
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("bozoleclown")))
         vm.onSubjectChanged("Sujet")
         vm.editBody(TextFieldValue("Bonjour."))
         vm.onSubmit()
@@ -760,7 +762,7 @@ class PrivateMessageComposeViewModelTest {
         } returns ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
 
         val vm = viewModel(repository)
-        vm.onRecipientsChanged("bozoleclown")
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("bozoleclown")))
         vm.onSubjectChanged("Sujet")
         vm.editBody(TextFieldValue("Bonjour."))
 
@@ -780,7 +782,7 @@ class PrivateMessageComposeViewModelTest {
         } returns ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
 
         val vm = viewModel(repository)
-        vm.onRecipientsChanged("bozoleclown")
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("bozoleclown")))
         vm.onSubjectChanged("Sujet")
         vm.editBody(TextFieldValue("Bonjour."))
         vm.onSubmit()
@@ -800,7 +802,7 @@ class PrivateMessageComposeViewModelTest {
         } returns ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
 
         val vm = viewModel(repository)
-        vm.onRecipientsChanged("quelqu'un d'autre")
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("quelqu'un d'autre")))
         vm.onSubjectChanged("Sujet")
         vm.editBody(TextFieldValue("Bonjour."))
         vm.onSubmit() // stale hash → silent refetch returns dest=bozoleclown again
@@ -831,7 +833,7 @@ class PrivateMessageComposeViewModelTest {
         coEvery { repository.fetchComposeForm(any()) } returns composeForm()
 
         val vm = viewModel(repository, confirmBeforePosting = true)
-        vm.onRecipientsChanged("bozoleclown")
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("bozoleclown")))
         vm.onSubjectChanged("Sujet")
         vm.editBody(TextFieldValue("Bonjour."))
         vm.onSubmit()
@@ -848,7 +850,7 @@ class PrivateMessageComposeViewModelTest {
         coEvery { repository.fetchComposeForm(any()) } returns composeForm()
         val vm = viewModel(repository)
 
-        vm.onRecipientsChanged("bozoleclown")
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("bozoleclown")))
         vm.onSubjectChanged("Salut")
         vm.editBody(TextFieldValue("Bonjour."))
         advanceTimeBy(800L)
@@ -1036,7 +1038,7 @@ class PrivateMessageComposeViewModelTest {
         )
         val viewModel = viewModel(repository)
 
-        viewModel.onRecipientsChanged("new recipient")
+        viewModel.onRecipientStateChanged(EditorRecipientState(listOf("new recipient")))
         viewModel.onSubjectChanged("new subject")
         advanceTimeBy(800L)
 
@@ -1069,7 +1071,7 @@ class PrivateMessageComposeViewModelTest {
         val viewModel = viewModel(repository)
         advanceUntilIdle()
 
-        viewModel.onRecipientsChanged("bob")
+        viewModel.onRecipientStateChanged(EditorRecipientState(listOf("bob")))
         viewModel.onSubjectChanged("fresh subject")
         viewModel.editBody(TextFieldValue("fresh body"))
         viewModel.onDraftRestoreRequested()
@@ -1124,7 +1126,7 @@ class PrivateMessageComposeViewModelTest {
         coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
         val vm = viewModel(repository)
-        vm.onRecipientsChanged("bozoleclown")
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("bozoleclown")))
         vm.onSubjectChanged("Sujet")
         vm.editBody(TextFieldValue("Bonjour."))
 
@@ -1147,7 +1149,7 @@ class PrivateMessageComposeViewModelTest {
 
         // Type, then close IMMEDIATELY — well inside the 750 ms debounce window. The flush must
         // persist the state at close time, not the snapshot the debounce captured at scheduling.
-        vm.onRecipientsChanged("bozoleclown")
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("bozoleclown")))
         vm.onSubjectChanged("Salut")
         vm.editBody(TextFieldValue("dernier mot"))
         vm.onCloseRequested()
@@ -1214,11 +1216,11 @@ class PrivateMessageComposeViewModelTest {
         advanceUntilIdle()
         val key = EditorDraftKey.mpCompose()
 
-        viewModel.onRecipientsChanged("alice")
+        viewModel.onRecipientStateChanged(EditorRecipientState(listOf("alice")))
         viewModel.onSubjectChanged("temporary subject")
         viewModel.editBody(TextFieldValue("temporary body"))
         advanceTimeBy(800L)
-        viewModel.onRecipientsChanged("")
+        viewModel.onRecipientStateChanged(EditorRecipientState())
         viewModel.onSubjectChanged("")
         viewModel.editBody(TextFieldValue(""))
         viewModel.onCloseRequested()
@@ -1238,7 +1240,7 @@ class PrivateMessageComposeViewModelTest {
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
         }
         val vm = viewModel(repository)
-        vm.onRecipientsChanged("bozoleclown")
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("bozoleclown")))
         vm.onSubjectChanged("Sujet")
         vm.editBody(TextFieldValue("en vol"))
 
@@ -1285,11 +1287,11 @@ class PrivateMessageComposeViewModelTest {
         coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
         val vm = viewModel(repository)
-        vm.onRecipientsChanged("alice")
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("alice")))
         vm.onSubjectChanged("original subject")
         vm.editBody(TextFieldValue("original body"))
         vm.onSubmit()
-        vm.onRecipientsChanged("bob")
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("bob")))
         vm.onSubjectChanged("late subject")
         vm.editBody(TextFieldValue("late body"))
         assertEquals("alice", vm.state.value.recipients)
@@ -1310,7 +1312,7 @@ class PrivateMessageComposeViewModelTest {
         coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
         val vm = viewModel(repository)
-        vm.onRecipientsChanged("alice")
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("alice")))
         vm.onSubjectChanged("title")
         vm.bodyFieldState.edit { append("live body") }
         assertEquals("", vm.state.value.bodyText)
@@ -1328,7 +1330,7 @@ class PrivateMessageComposeViewModelTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchComposeForm(any()) } returns composeForm()
         val vm = viewModel(repository)
-        vm.onRecipientsChanged("alice")
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("alice")))
         vm.onSubjectChanged("title")
         vm.editBody(TextFieldValue("body"))
         assertTrue(vm.state.value.canSubmit)
@@ -1349,7 +1351,7 @@ class PrivateMessageComposeViewModelTest {
         coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
         val vm = viewModel(repository)
-        vm.onRecipientsChanged(" alice, bob ")
+        vm.onRecipientStateChanged(EditorRecipientState(" alice, bob ".split(',')))
         vm.onSubjectChanged(" title ")
         vm.onToggleSignature(false)
         vm.onToggleSmileyDisabled(true)
@@ -1357,7 +1359,7 @@ class PrivateMessageComposeViewModelTest {
         vm.bodyFieldState.edit { append("frozen body") }
         assertEquals("", vm.state.value.bodyText)
         vm.onSubmit()
-        vm.onRecipientsChanged("mallory")
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("mallory")))
         vm.onSubjectChanged("changed")
         vm.editBody(TextFieldValue("late input"))
         vm.onToggleSignature(true)
@@ -1387,7 +1389,7 @@ class PrivateMessageComposeViewModelTest {
         coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
         val vm = viewModel(repository, confirmBeforePosting = true)
-        vm.onRecipientsChanged("alice")
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("alice")))
         vm.onSubjectChanged("title")
         vm.bodyFieldState.edit { append("live body") }
         vm.onSubmit()
@@ -1531,7 +1533,7 @@ class PrivateMessageComposeViewModelTest {
         val gate = CompletableDeferred<Unit>()
         draftStore.beginGate = gate
         val vm = viewModel(repository)
-        vm.onRecipientsChanged("alice")
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("alice")))
         vm.onSubjectChanged("subject")
         vm.editBody(TextFieldValue("body", TextRange(4)))
         vm.smileyPicker.open()
@@ -1575,7 +1577,7 @@ class PrivateMessageComposeViewModelTest {
         coEvery { repository.submitNewMessage(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
         val original = viewModel(repository)
-        original.onRecipientsChanged("alice")
+        original.onRecipientStateChanged(EditorRecipientState(listOf("alice")))
         original.onSubjectChanged("subject")
         original.editBody(TextFieldValue("uncertain body"))
         original.onSubmit()
@@ -1632,7 +1634,7 @@ class PrivateMessageComposeViewModelTest {
     fun `ED45 ED170 Masquer also acknowledges a freshly failed submission`() = runTest {
         val repository = uncertainRepository()
         val vm = viewModel(repository)
-        vm.onRecipientsChanged("alice")
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("alice")))
         vm.onSubjectChanged("Sujet")
         vm.editBody(TextFieldValue("sent body"))
         vm.onSubmit()
@@ -1710,6 +1712,79 @@ class PrivateMessageComposeViewModelTest {
     }
 
     @Test
+    fun `ED170 the redelivered uncertainty stays bound and acknowledges once storage recovers`() = runTest {
+        val repository = uncertainRepository()
+        val attempt = seedUncertainAttempt()
+        val vm = viewModel(repository)
+        settle()
+        draftStore.finishFailure = IOException("disk unavailable")
+        val adapter = vm.chromeAdapter()
+        val first = vm.editorEvents.state.visibleEvent!!.key
+        adapter.barActions.onEvent(first, EditorEventAction.Details)
+        adapter.dismissDetails(first)
+        settle()
+        val again = vm.editorEvents.state.visibleEvent!!.key
+        assertNotEquals(first, again)
+        draftStore.finishFailure = null
+        val finishCalls = draftStore.finishCalls
+        adapter.dismissDetails(first)
+        adapter.barActions.onEvent(again, EditorEventAction.Details)
+        adapter.dismissDetails(again)
+        settle()
+        assertEquals(finishCalls + 1, draftStore.finishCalls)
+        assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
+        assertNull(vm.state.value.submitError)
+        vm.assertNoSendingEvent()
+        assertNull(vm.editorEvents.state.visibleEvent)
+        assertNull(draftStore.entries[attempt.key]?.attempt)
+        coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `ED170 a subject refused during uncertainty keeps the uncertain delivery bound`() = runTest {
+        assertLocalRefusalKeepsUncertaintyBound(EditorErrors.missingSubject) { onSubjectChanged("") }
+    }
+
+    @Test
+    fun `ED170 an uncommitted pseudo refused during uncertainty keeps the uncertain delivery bound`() = runTest {
+        assertLocalRefusalKeepsUncertaintyBound(EditorErrors.incompleteRecipient) {
+            onRecipientStateChanged(EditorRecipientState(listOf("alice"), "bo"))
+        }
+    }
+
+    /** C3 r2: a local refusal replaces submitError, never the « Envoi incertain » delivery bound to its attempt. */
+    private suspend fun TestScope.assertLocalRefusalKeepsUncertaintyBound(
+        refusal: EditorError,
+        edit: PrivateMessageComposeViewModel.() -> Unit,
+    ) {
+        val repository = uncertainRepository()
+        val attempt = seedUncertainAttempt()
+        val vm = viewModel(repository)
+        settle()
+        val uncertainEvent = checkNotNull(vm.editorEvents.state.visibleEvent)
+        assertEquals(EditorEventContent.Problem(uncertainError), uncertainEvent.content)
+        vm.edit()
+        vm.onSubmit()
+        settle()
+        assertEquals(EditorSubmissionState.Uncertain(attempt), vm.state.value.submission)
+        assertEquals(refusal, vm.state.value.submitError)
+        assertTrue(vm.editorEvents.state.events.any { it.content == EditorEventContent.Problem(refusal) })
+        // The older uncertainty stays in front (FIFO) and bound to its durable attempt.
+        assertEquals(uncertainEvent, vm.editorEvents.state.visibleEvent)
+        assertEquals(attempt, vm.editorEvents.uncertainAttempt(uncertainEvent.key))
+        val finishCalls = draftStore.finishCalls
+        val adapter = vm.chromeAdapter()
+        adapter.barActions.onEvent(uncertainEvent.key, EditorEventAction.Details)
+        adapter.dismissDetails(uncertainEvent.key)
+        settle()
+        assertEquals(finishCalls + 1, draftStore.finishCalls)
+        assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
+        assertNull(draftStore.entries[attempt.key]?.attempt)
+        vm.assertNoSendingEvent()
+        coVerify(exactly = 0) { repository.submitNewMessage(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
     fun `ED45 ED170 local Masquer in Ready allows the next failed autosave to deliver information`() = runTest {
         assertLocalMasquerReleasesAutosave(rearm = false)
     }
@@ -1755,7 +1830,7 @@ class PrivateMessageComposeViewModelTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchComposeForm(any()) } returns composeForm()
         val vm = viewModel(repository, confirmBeforePosting = rearm)
-        vm.onRecipientsChanged("alice")
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("alice")))
         vm.onSubjectChanged("Sujet")
         vm.editBody(TextFieldValue("unsent body"))
         settle()
@@ -2039,7 +2114,7 @@ class PrivateMessageComposeViewModelTest {
             override val closeEffects get() = effects.count { it is PrivateMessageComposeEffect.CloseCommitted }
 
             override fun editBody(body: String) {
-                viewModel.onRecipientsChanged("alice")
+                viewModel.onRecipientStateChanged(EditorRecipientState(listOf("alice")))
                 viewModel.onSubjectChanged("Contract title")
                 viewModel.editBody(TextFieldValue(body, TextRange(body.length)), advanceMirror = false)
             }

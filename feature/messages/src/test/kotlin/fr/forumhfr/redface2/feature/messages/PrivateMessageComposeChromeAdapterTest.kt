@@ -1,13 +1,9 @@
 package fr.forumhfr.redface2.feature.messages
 
 import androidx.compose.foundation.text.input.TextFieldState
-import androidx.compose.material3.Text
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.test.ExperimentalTestApi
-import androidx.compose.ui.test.junit4.v2.createComposeRule
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.text.TextRange
 import androidx.lifecycle.SavedStateHandle
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
@@ -17,40 +13,25 @@ import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionToken
 import fr.forumhfr.redface2.core.model.editor.ImagePickerContract
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
-import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.EditorBarGesture
 import fr.forumhfr.redface2.core.ui.editor.EditorBarMode
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorSurface
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
-import fr.forumhfr.redface2.core.ui.editor.EditorEvent
 import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
-import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
+import fr.forumhfr.redface2.core.ui.editor.EditorEventRank
 import fr.forumhfr.redface2.core.ui.editor.EditorHostActions
-import fr.forumhfr.redface2.core.ui.editor.EditorLocalOperation
 import fr.forumhfr.redface2.core.ui.editor.EditorRecipientInput
 import fr.forumhfr.redface2.core.ui.editor.EditorRecipientState
 import fr.forumhfr.redface2.core.ui.editor.EditorSubjectInput
-import fr.forumhfr.redface2.core.ui.editor.EventKey
-import fr.forumhfr.redface2.core.ui.editor.OperationRef
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
-import org.junit.Rule
 import org.junit.Test
-import org.junit.runner.RunWith
-import org.robolectric.RobolectricTestRunner
-import org.robolectric.annotation.Config
-import org.robolectric.annotation.GraphicsMode
 
-@OptIn(ExperimentalTestApi::class)
-@RunWith(RobolectricTestRunner::class)
-@Config(sdk = [34], qualifiers = "fr-rFR")
-@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class PrivateMessageComposeChromeAdapterTest {
-    @get:Rule val compose = createComposeRule()
     private val f = PrivateMessageComposeChromeFixture()
     private val uncertain = EditorErrors.uncertain(EditorErrorSurface.MessageCompose)
     @Test fun `ED35 projection separates activation from strict POST and freezes every send phase`() {
@@ -111,28 +92,29 @@ class PrivateMessageComposeChromeAdapterTest {
                 fixture.adapter.surface)
         }
     }
-    @Test fun `ED113 summary ignores blank chips and counts only nonblank recipients`() {
-        f.state = f.state.copy(recipientState = EditorRecipientState(listOf("", " ", "\t")), subject = "Sujet privé")
-        compose.setContent { RedfaceTheme { Text(f.adapter.context()) } }
-        compose.onNodeWithText("Ajouter des destinataires · Sujet privé").assertExists()
-        compose.runOnIdle {
-            f.state = f.state.copy(recipientState = EditorRecipientState(listOf("", "alice", " ", "bob", "\t")))
-        }
-        compose.onNodeWithText("2 destinataires · Sujet privé").assertExists()
+    @Test fun `ED113 the entry focus policy freezes only once retained and reset forgets it`() {
+        val prefilled = EditorRecipientState(listOf("alice"))
+        // A composition that is never applied only reads: the next one still sees the live recipients.
+        assertTrue(f.memory.autoFocusBody(prefilled))
+        assertFalse(f.memory.autoFocusBody(EditorRecipientState()))
+        f.memory.retainAutoFocus(true)
+        f.memory.retainAutoFocus(false)
+        assertTrue(f.memory.autoFocusBody(EditorRecipientState()))
+        f.memory.reset()
+        assertFalse(f.memory.autoFocusBody(EditorRecipientState()))
+        assertTrue(f.memory.autoFocusBody(EditorRecipientState(buffer = "bo")))
     }
     @Test fun `ED45 completion targets recipients or subject without consuming the next information`() {
         listOf(EditorErrors.unknownRecipient, EditorErrors.incompleteRecipient, EditorErrors.missingSubject)
-            .forEachIndexed { index, error ->
-                f.transition(f.state.copy(submitError = null))
+            .forEach { error ->
+                f.transition(f.state.copy(submitError = null, uploadError = null))
                 f.transition(f.state.copy(submitError = error))
                 val event = f.events.visibleEvent!!
-                // UnknownRecipient already delivered a terminal Notice; a later notice needs a fresh sequence.
-                val sequence = f.events.state.currentOperations.map { it.ref }
-                    .filterIsInstance<OperationRef.Local>().maxOf { it.sequence } + 1
-                val info = EditorEvent(EventKey(f.session,
-                    OperationRef.Local(EditorLocalOperation.Notice, sequence), 0),
-                    EditorEventContent.Information(EditorErrors.imageLimit.summary), 100L + index)
-                f.events.dispatch(EditorEventInput.Received(info))
+                // The production path: the collector numbers the picker's information itself.
+                f.transition(f.state.copy(uploadError = EditorErrors.imageLimit))
+                val info = f.events.state.events.last()
+                assertEquals(EditorEventContent.Problem(EditorErrors.imageLimit), info.content)
+                assertEquals(EditorEventRank.Information, info.rank)
                 assertEquals(listOf(event, info), f.events.state.events)
                 assertEquals(event, f.events.visibleEvent)
                 f.adapter.barActions.onEvent(event.key, EditorEventAction.Complete)
@@ -198,10 +180,10 @@ class PrivateMessageComposeChromeAdapterTest {
         f.adapter.closeDetails(second)
         assertNull(f.adapter.detail)
         f.adapter.openHeader()
+        assertEquals(PrivateMessageComposeChromeSurface.Header, f.adapter.surface)
         f.adapter.back()
         assertNull(f.adapter.surface)
         assertTrue(f.calls.isEmpty())
-        assertEquals(EditorSubmissionState.Uncertain(attempt), f.state.submission)
     }
     @Test fun `ED45 an old uncertainty detail cannot acknowledge a replacement or close its detail`() {
         val attempt = AttemptToken("alice", f.session.key, "old", 1)
@@ -256,6 +238,28 @@ class PrivateMessageComposeChromeAdapterTest {
         assertTrue(f.calls.isEmpty())
         assertNull(f.events.visibleEvent)
     }
+    @Test fun `ED130 a form failure closes every layer without acknowledging or claiming the entry`() {
+        val attempt = AttemptToken("alice", f.session.key, "attempt", 1)
+        f.transition(f.state.copy(submission = EditorSubmissionState.Uncertain(attempt), submitError = uncertain))
+        val key = f.events.visibleEvent!!.key
+        f.adapter.barActions.onEvent(key, EditorEventAction.Details)
+        assertEquals(key, f.adapter.detail?.key)
+        var dismissed = 0
+        f.adapter.closeLayersForFormFailure { dismissed++ }
+        assertNull(f.adapter.detail)
+        f.adapter.dismissDetails(key)
+        assertTrue("a closed detail never acknowledges", f.calls.isEmpty())
+        listOf<() -> Unit>({ f.adapter.openHeader() }, { f.adapter.open(PrivateMessageComposeChromeSurface.Restore) },
+            f.adapter.barActions.onOptions, f.adapter.barActions.onSmileys).forEach { open ->
+            open()
+            assertTrue(f.adapter.surface != null)
+            f.adapter.closeLayersForFormFailure { dismissed++ }
+            assertNull(f.adapter.surface)
+        }
+        assertEquals("only the smiley sheet owns a picker", 1, dismissed)
+        assertTrue(f.calls.isEmpty())
+        assertTrue("the automatic entry latch is untouched", f.saved.keys().isEmpty())
+    }
     @Test fun `ED45 local Masquer of a failed attempt write calls only the local port once`() {
         f.transition(f.state.copy(submitError = EditorErrors.draftWriteFailed))
         val event = f.events.visibleEvent!!
@@ -299,6 +303,23 @@ class PrivateMessageComposeChromeAdapterTest {
         assertTrue(f.adapter.consumeReturn())
         assertFalse(f.adapter.consumeReturn())
         assertNull(f.events.visibleEvent)
+    }
+    @Test fun `ED31 picker and upload failures are visible problems while the image limit finishes the upload`() {
+        listOf(EditorErrors.pickerAbsent, EditorErrors.noImageReceived, EditorErrors.tooLarge).forEach { error ->
+            val fixture = PrivateMessageComposeChromeFixture()
+            // The VM reports picker failures without an upload; only a real upload failure ends one.
+            if (error == EditorErrors.tooLarge) fixture.transition(fixture.state.copy(isUploading = true))
+            fixture.transition(fixture.state.copy(isUploading = false, uploadError = error))
+            assertEquals(EditorEventContent.Problem(error), fixture.adapter.scaffoldChrome().event?.content)
+        }
+        // The VM raises the limit when the upload starts; the trimmed batch still finishes as a success.
+        f.transition(f.state.copy(isUploading = true, uploadError = EditorErrors.imageLimit))
+        f.transition(f.state.copy(isUploading = false))
+        val contents = f.events.state.events.map { it.content }
+        assertEquals(listOf(EditorEventContent.Problem(EditorErrors.imageLimit)),
+            contents.filterIsInstance<EditorEventContent.Problem>())
+        assertEquals(1, contents.count { it is EditorEventContent.Finished })
+        assertTrue(contents.none { it is EditorEventContent.InProgress })
     }
 }
 

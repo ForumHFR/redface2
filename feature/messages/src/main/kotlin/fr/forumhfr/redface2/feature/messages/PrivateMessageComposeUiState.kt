@@ -30,7 +30,7 @@ data class PrivateMessageComposeUiState(
     val formAvailable: Boolean = false,
     val formError: Boolean = false,
     val recipients: String = "",
-    /** Private representation; recipients adapts the legacy chrome until C4. */
+    /** Private representation (chips and D4 buffer); [recipients] only mirrors it as a display string. */
     val recipientState: EditorRecipientState = EditorRecipientState(
         recipients.takeIf(String::isNotBlank)?.split(',').orEmpty(),
     ),

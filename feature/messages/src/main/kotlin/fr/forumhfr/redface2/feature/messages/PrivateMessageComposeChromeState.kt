@@ -42,11 +42,12 @@ internal class PrivateMessageComposeChromeMemory(private val saved: SavedStateHa
     private var focusBodyOnEntry: Boolean? = null
     var field by mutableStateOf(PrivateMessageComposeHeaderField.Recipients)
         private set
-    // ED-113: retain the initial focus policy across recipient edits, panel closure and rotation.
-    fun autoFocusBody(recipients: EditorRecipientState): Boolean {
-        val focus = focusBodyOnEntry ?: (recipients.chips.any(String::isNotBlank) || recipients.buffer.isNotBlank())
-        focusBodyOnEntry = focus
-        return focus
+    /** ED-113: the entry focus policy; reading it in composition never freezes it ([retainAutoFocus] does). */
+    fun autoFocusBody(recipients: EditorRecipientState): Boolean =
+        focusBodyOnEntry ?: (recipients.chips.any(String::isNotBlank) || recipients.buffer.isNotBlank())
+    /** Called once a chrome composition is applied: retain the policy across recipient edits and rotation. */
+    fun retainAutoFocus(focus: Boolean) {
+        if (focusBodyOnEntry == null) focusBodyOnEntry = focus
     }
     fun claimInitialEntry(): Boolean {
         val initial = !entryHandled
@@ -61,6 +62,7 @@ internal class PrivateMessageComposeChromeMemory(private val saved: SavedStateHa
     fun reset() {
         host.reset()
         field = PrivateMessageComposeHeaderField.Recipients
+        focusBodyOnEntry = null
     }
     companion object {
         const val INITIAL_HEADER_HANDLED = "messageComposeEditor.initialHeaderHandled"

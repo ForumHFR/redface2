@@ -77,6 +77,12 @@ internal class PrivateMessageComposeChromeAdapter(
         if (state.scaffold.controlsEnabled) { actions.discard(); closeSurface() }
     }
     fun retryFormLoad() = actions.reload()
+    /** ED-130 replaces the whole editor: no header, ↺ panel, sheet or detail comes back after « Réessayer ». */
+    fun closeLayersForFormFailure(dismissSmileys: () -> Unit) {
+        if (surface == PrivateMessageComposeChromeSurface.Smileys) dismissSmileys()
+        detail?.let { closeDetails(it.key) }
+        closeSurface()
+    }
     fun reload(key: EventKey) {
         val current = events.state.events.any { it.key == key }
         val error = (detail?.takeIf { it.key == key && current }?.content as? EditorEventContent.Problem)?.error

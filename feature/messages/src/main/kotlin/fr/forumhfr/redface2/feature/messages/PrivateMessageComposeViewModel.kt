@@ -459,14 +459,6 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                     EditorRecipientState.decode(restorableRecipients) != recipientState
                 )
 
-    /** Legacy CSV chrome until C4: preserve empty segments instead of silently changing the submitted CSV. */
-    fun onRecipientsChanged(value: String) {
-        if (!acceptMutation()) return
-        draftSession.changeRecipients(
-            EditorRecipientState(value.takeIf(String::isNotBlank)?.split(',').orEmpty()), value,
-        )
-    }
-
     fun onRecipientStateChanged(value: EditorRecipientState) {
         if (!acceptMutation()) return
         draftSession.changeRecipients(value)
