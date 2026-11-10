@@ -2760,6 +2760,102 @@ class PrivateMessageReplyViewModelTest {
         coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any(), any()) }
     }
 
+    @Test
+    fun `ED45 ED170 local Masquer in Ready allows the next failed autosave to deliver information`() = runTest {
+        assertLocalMasquerReleasesAutosave(rearm = false)
+    }
+
+    @Test
+    fun `ED45 ED170 local Masquer after rearming allows the next failed autosave to deliver information`() = runTest {
+        assertLocalMasquerReleasesAutosave(rearm = true)
+    }
+
+    @Test
+    fun `ED85 Back closes a failed attempt write visually and keeps later draft information deferred`() = runTest {
+        val repository = uncertainReplyRepository()
+        val vm = viewModel(repository)
+        val adapter = failAttemptWrite(vm, confirm = false)
+        val key = vm.editorEvents.state.visibleEvent!!.key
+        adapter.barActions.onEvent(key, EditorEventAction.Details)
+        adapter.back()
+        settle()
+        assertNull(adapter.detail)
+        assertNull(vm.editorEvents.state.visibleEvent)
+        assertEquals(EditorErrors.draftWriteFailed, vm.state.value.submitError)
+
+        draftStore.saveFailure = IOException("still full")
+        vm.editBody(TextFieldValue("continued composition"))
+        settle()
+        // Back is visual only: without the explicit Masquer, the failed attempt keeps deferring draft information.
+        assertEquals(EditorErrors.draftWriteFailed, vm.state.value.submitError)
+        assertNull(vm.editorEvents.state.visibleEvent)
+        assertEquals("continued composition", vm.bodyFieldState.text.toString())
+        coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any(), any()) }
+    }
+
+    private fun TestScope.assertLocalMasquerReleasesAutosave(rearm: Boolean) {
+        val repository = uncertainReplyRepository()
+        val vm = viewModel(repository, confirmBeforePosting = rearm)
+        val adapter = failAttemptWrite(vm, confirm = rearm)
+        if (rearm) {
+            // A deliberate new arm is not an attempt: « Brouillon non écrit » stays displayed while Armed.
+            adapter.submitActions.onSubmit()
+            runCurrent()
+            assertTrue(vm.state.value.submission is EditorSubmissionState.Armed)
+        }
+        val submission = vm.state.value.submission
+        val activity = listOf(draftStore.writes, draftStore.beginCalls, draftStore.finishCalls, draftStore.saveCount)
+        val key = vm.editorEvents.state.visibleEvent!!.key
+        assertEquals(EditorEventContent.Problem(EditorErrors.draftWriteFailed),
+            vm.editorEvents.state.visibleEvent?.content)
+        adapter.barActions.onEvent(key, EditorEventAction.Details)
+        adapter.dismissDetails(key)
+        // Synchronous and storage-free; settling here would also expire the arm.
+        runCurrent()
+        assertEquals(submission, vm.state.value.submission)
+        assertNull(vm.state.value.submitError)
+        assertNull(adapter.detail)
+        assertNull(vm.editorEvents.state.visibleEvent)
+        assertEquals(activity,
+            listOf(draftStore.writes, draftStore.beginCalls, draftStore.finishCalls, draftStore.saveCount))
+        vm.assertNoSendingEvent()
+
+        draftStore.saveFailure = IOException("still full")
+        vm.editBody(TextFieldValue("continued composition"))
+        settle()
+        assertEquals(EditorErrors.draftSaveFailed, vm.state.value.submitError)
+        assertEquals(EditorEventContent.Problem(EditorErrors.draftSaveFailed),
+            vm.editorEvents.state.visibleEvent?.content)
+        assertEquals("continued composition", vm.bodyFieldState.text.toString())
+        assertEquals(0, draftStore.finishCalls)
+        vm.assertNoSendingEvent()
+        coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any(), any()) }
+    }
+
+    /** The composition is saved, then storage refuses the attempt write: « Brouillon non écrit », nothing sent. */
+    private fun TestScope.failAttemptWrite(
+        vm: PrivateMessageReplyViewModel,
+        confirm: Boolean,
+    ): PrivateMessageReplyChromeAdapter {
+        settle()
+        vm.editBody(TextFieldValue("unsent body"))
+        settle()
+        draftStore.beginFailure = IOException("disk full")
+        vm.onSubmit()
+        if (confirm) {
+            advanceTimeBy(400) // ED-166: a deliberate confirmation.
+            vm.onSubmitConfirmed(vm.state.value.armToken)
+        }
+        settle()
+        assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
+        assertEquals(EditorErrors.draftWriteFailed, vm.state.value.submitError)
+        assertEquals(EditorEventContent.Problem(EditorErrors.draftWriteFailed),
+            vm.editorEvents.state.visibleEvent?.content)
+        assertEquals(1, draftStore.beginCalls)
+        assertNull(draftStore.entries[EditorDraftKey.mpReply(request.threadId)]?.attempt)
+        return vm.chromeAdapter()
+    }
+
     private val uncertainReplyError = EditorErrors.uncertain(EditorErrorSurface.MessageReply)
 
     private fun uncertainReplyRepository(): PrivateMessageWriteRepository {

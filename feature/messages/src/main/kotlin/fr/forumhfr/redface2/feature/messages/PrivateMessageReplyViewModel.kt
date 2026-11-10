@@ -449,7 +449,8 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             formError = false,
             // InvalidForm here is a submission preparation failure, never a failed GET (ED-44).
             // A GET clears neither submitError nor its event. Masquer retires the event; only an explicit Masquer of
-            // the bound uncertainty also acknowledges its attempt durably, which then clears submitError (ED-170).
+            // the bound uncertainty also acknowledges its attempt durably, which then clears submitError (ED-170),
+            // and an explicit Masquer of a failed attempt write clears it locally, without storage.
             signatureEnabled = if (hydrateOptions) {
                 form.options.signatureEnabled || form.hiddenFields["signature"] == "1"
             } else {
@@ -572,6 +573,13 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
 
     /** ED-45/170: reached only by the host's explicit Masquer of the bound uncertain delivery, never by Back. */
     fun onErrorDismissed() = submission.acknowledge(draftSession::scheduleAutosave)
+
+    /**
+     * ED-45: reached only by the host's explicit Masquer of « Brouillon non écrit », never by Back. Releases the
+     * deferred draft-save information without storage; the binding guards a real Ready/Armed state and lets a
+     * displayed uncertainty win.
+     */
+    fun onDraftWriteFailureDismissed() = submission.acknowledgeLocal()
 
     /** ED-164/166: callbacks carry the identity displayed by the current composition. */
     fun onSubmitConfirmed(token: ArmToken?) {

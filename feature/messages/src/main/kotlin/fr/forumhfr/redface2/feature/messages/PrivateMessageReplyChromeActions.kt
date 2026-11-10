@@ -24,7 +24,9 @@ internal fun PrivateMessageReplyViewModel.chromeActions() = PrivateMessageReplyC
         onDisarm = ::onSubmitConfirmationDismissed, onFormat = ::onToolbarAction,
         onPreview = ::onTogglePreview, onClose = ::onCloseRequested,
         // ED-45/170: the host calls it only for the explicit Masquer of the bound uncertain delivery.
-        onAcknowledgeUncertain = ::onErrorDismissed),
+        onAcknowledgeUncertain = ::onErrorDismissed,
+        // ED-45: and this one only for the explicit Masquer of a failed attempt write (DraftWriteFailed).
+        onAcknowledgeLocal = ::onDraftWriteFailureDismissed),
     signature = ::onToggleSignature,
     smileyDisabled = ::onToggleSmileyDisabled,
     notification = ::onToggleEmailNotification,

@@ -289,6 +289,43 @@ class PrivateMessageReplyChromeAdapterTest {
             assertEquals(EditorSubmissionState.Uncertain(attempt), f.state.submission)
         }
     }
+    @Test fun `ED45 Masquer of a failed attempt write calls only the local port once in Ready and Armed`() {
+        val armed = EditorSubmissionState.Armed(ArmToken(1, f.session, 0, 4_000L))
+        listOf(EditorSubmissionState.Ready, armed).forEachIndexed { index, submission ->
+            f.transition(f.state.copy(submission = submission, submitError = null))
+            f.transition(f.state.copy(submitError = EditorErrors.draftWriteFailed))
+            val key = f.events.state.visibleEvent!!.key
+            f.adapter.barActions.onEvent(key, EditorEventAction.Details)
+            assertEquals("detail $index", key, f.adapter.detail?.key)
+            f.adapter.dismissDetails(key)
+            f.adapter.dismissDetails(key)
+            // Never the durable port: « Brouillon non écrit » has no attempt to acknowledge.
+            assertEquals(List(index + 1) { "acknowledgeLocal" }, f.calls)
+            assertNull(f.adapter.detail)
+            assertNull(f.events.state.visibleEvent)
+            assertEquals(submission, f.state.submission)
+        }
+    }
+    @Test fun `ED85 Back closing the detail and a form failure never acknowledge a failed attempt write`() {
+        listOf<(PrivateMessageReplyChromeFixture, EventKey) -> Unit>(
+            { fixture, _ -> fixture.adapter.back() },
+            { fixture, key -> fixture.adapter.closeDetails(key) },
+            { fixture, _ -> fixture.adapter.closeLayersForFormFailure {} },
+        ).forEachIndexed { index, close ->
+            val f = PrivateMessageReplyChromeFixture()
+            f.transition(f.state.copy(submitError = EditorErrors.draftWriteFailed))
+            val key = f.events.state.visibleEvent!!.key
+            f.adapter.barActions.onEvent(key, EditorEventAction.Details)
+            close(f, key)
+            assertNull("detail closed $index", f.adapter.detail)
+            assertNull("visual acknowledgement only $index", f.events.state.visibleEvent)
+            assertTrue("no acknowledgement $index", f.calls.isEmpty())
+            // A closed detail cannot acknowledge later, and leaving the editor is not an acknowledgement.
+            f.adapter.dismissDetails(key)
+            f.adapter.back()
+            assertEquals("leave only $index", listOf("close"), f.calls)
+        }
+    }
 }
 
 internal class PrivateMessageReplyChromeFixture {
@@ -308,7 +345,8 @@ internal class PrivateMessageReplyChromeFixture {
         }, { calls += "format" }, {
             calls += "preview"
             state = state.copy(isPreviewVisible = !state.isPreviewVisible)
-        }, { calls += "close" }, onAcknowledgeUncertain = { calls += "acknowledge" }),
+        }, { calls += "close" }, onAcknowledgeUncertain = { calls += "acknowledge" },
+            onAcknowledgeLocal = { calls += "acknowledgeLocal" }),
         { calls += "signature:$it" }, { calls += "smileyDisabled:$it" }, { calls += "notification:$it" },
         { calls += "smiley:$it" }, {}, { calls += "restore" }, { calls += "discard" },
         { calls += "add:$it" }, { calls += "remove:$it" }, { calls += "reload" })

@@ -392,6 +392,20 @@ class PrivateMessageReplyChromeComposeTest {
         }
     }
 
+    @Test fun `ED45 explicit Masquer of a failed attempt write forwards only the local acknowledgement`() {
+        f.transition(f.state.copy(submitError = EditorErrors.draftWriteFailed))
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Brouillon non écrit, Afficher les détails").performClick()
+        compose.runOnIdle { assertTrue(f.calls.isEmpty()) }
+        compose.onNodeWithText("Masquer").performClick()
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(listOf("acknowledgeLocal"), f.calls)
+            assertNull(f.adapter.detail)
+            assertNull(f.events.state.visibleEvent)
+        }
+    }
+
     @Test fun `ED85 ED170 system Back closes the uncertainty detail without acknowledgement`() {
         val attempt = AttemptToken("alice", f.session.key, "attempt", 1)
         f.transition(f.state.copy(submission = EditorSubmissionState.Uncertain(attempt), submitError = uncertain))
