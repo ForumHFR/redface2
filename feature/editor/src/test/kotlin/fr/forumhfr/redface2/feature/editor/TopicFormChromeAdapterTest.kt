@@ -372,4 +372,21 @@ class TopicFormChromeAdapterTest {
         assertEquals(listOf(TopicFormIntent.SubmitConfirmationDismissed), f.calls)
     }
 
+    @Test fun `image URL confirmation closes the dialog whether the insertion is accepted or refused`() {
+        // ImageUrlDialog leaves closing to its adapter (gate T3 r2 C2): both outcomes must close here.
+        val f = TopicFormChromeFixture()
+        f.adapter.host.open(TopicFormChromeSurface.Url)
+        assertEquals(TopicFormChromeSurface.Url, f.adapter.host.surface)
+        f.adapter.imageUrl("https://example.test/a.png")
+        assertEquals(listOf(TopicFormIntent.ImageUrlInserted("https://example.test/a.png")), f.calls)
+        assertNull(f.adapter.host.surface)
+
+        f.adapter.host.open(TopicFormChromeSurface.Url)
+        assertEquals(TopicFormChromeSurface.Url, f.adapter.host.surface)
+        f.state = f.state.copy(isUploading = true)
+        assertFalse(f.adapter.state.host.canInsert)
+        f.adapter.imageUrl("https://example.test/b.png")
+        assertEquals(listOf(TopicFormIntent.ImageUrlInserted("https://example.test/a.png")), f.calls)
+        assertNull(f.adapter.host.surface)
+    }
 }
