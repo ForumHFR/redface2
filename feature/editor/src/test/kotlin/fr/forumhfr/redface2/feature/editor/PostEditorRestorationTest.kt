@@ -302,7 +302,8 @@ class PostEditorRestorationTest {
         assertEquals("offered body", store.saved[key]?.body)
         assertEquals(pending(), store.saved[key]?.pendingInlineQuoteRequest)
         assertEquals(0, store.saveCount)
-        coVerify(exactly = 0) { replies.fetchReplyForm(any()) }
+        coVerify(exactly = 1) { replies.fetchReplyForm(match { !it.isQuote }) }
+        coVerify(exactly = 0) { replies.fetchReplyForm(match { it.isQuote }) }
     }
 
     @Test

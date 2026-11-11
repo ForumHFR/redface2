@@ -39,7 +39,10 @@ internal fun PostEditorChromeSurfaces(
         if (adapter.consumeReturn()) adapter.returnToBody(onReturnToBody)
     }
     val source = adapter.state.source
-    EditorEventDetails(adapter.detail, bodyState, adapter::closeDetails, adapter::reload,
+    // A pending notice is a keyed event detail, rendered by the existing offer panel below.
+    // Keep both wrappers mounted so opening it never recreates the body field (ED-03/41).
+    EditorEventDetails(adapter.detail.takeUnless { adapter.pendingQuoteDetailKey != null },
+        bodyState, adapter::closeDetails, adapter::reload,
         { adapter.returnToBody(onReturnToBody) },
         onIgnoreQuote = if (source.canIgnorePendingQuote && !source.hasDormantQuote) adapter::ignoreQuote else null,
         onDismiss = adapter::dismissDetails,
@@ -48,8 +51,8 @@ internal fun PostEditorChromeSurfaces(
         }) { event ->
         if (source.hasDormantQuote) QuoteDecisions(adapter, event.key)
         val error = (event.content as? EditorEventContent.Problem)?.error
-        // Keep the uncertainty detail intact while offering the missing edit form's GET (#1574).
-        if (source.isAwaitingInitialBody && error != null && error.action != EditorErrorAction.Reload) {
+        // Host recovery also covers a pending quote's CAS; it must not replay the insertion.
+        if (adapter.canReload(event.key) && error?.action != EditorErrorAction.Reload) {
             TextButton(onClick = { adapter.reload(event.key) }, enabled = !source.isLoadingForm) {
                 Text(stringResource(UiR.string.editor_action_reload))
             }
@@ -76,10 +79,14 @@ private fun PostEditorHeaderSurface(
     body: @Composable () -> Unit,
 ) {
     val pending = adapter.surface == PostEditorChromeSurface.PendingQuote
+    val offerDetail = adapter.pendingQuoteDetailKey
+    val close: () -> Unit = if (offerDetail == null) adapter::closeSurface else {
+        { adapter.closeDetails(offerDetail) }
+    }
     // Short title: the offer sentence appears once, in the panel body (gate R1b T3 r1, minor 3).
     val title = if (pending) R.string.editor_quote_pending else R.string.editor_draft_restore_title
-    EditorHeaderPanel(adapter.surface == PostEditorChromeSurface.Restore || pending,
-        stringResource(title), bodyState, adapter::closeSurface,
+    EditorHeaderPanel(adapter.surface == PostEditorChromeSurface.Restore || pending || offerDetail != null,
+        stringResource(title), bodyState, close,
         { adapter.returnToBody(onReturnToBody) },
         body = { PostEditorQuotePanel(adapter, bodyState, onReturnToBody, body) }) {
         if (!pending && source.restorableDraft != null && source.pendingQuotes.isNotEmpty()) {
@@ -117,8 +124,14 @@ private fun PostEditorSmileysSurface(adapter: PostEditorChromeAdapter, smileys: 
 @Composable
 private fun QuoteDecisions(adapter: PostEditorChromeAdapter, key: EventKey? = null) {
     val source = adapter.state.source
-    TextButton(onClick = { adapter.resumeQuote(key) }, enabled = source.hasDormantQuote && !source.isLoadingForm) {
-        Text(stringResource(R.string.editor_action_resume_quote))
+    if (source.hasDormantQuote) {
+        TextButton(onClick = { adapter.resumeQuote(key) }, enabled = !source.isLoadingForm) {
+            Text(stringResource(R.string.editor_action_resume_quote))
+        }
+    } else if (adapter.hasPendingQuoteRecovery) {
+        TextButton(onClick = adapter::reloadPendingQuote, enabled = !source.isLoadingForm) {
+            Text(stringResource(UiR.string.editor_action_reload))
+        }
     }
     TextButton(onClick = { adapter.ignoreQuote(key) }, enabled = source.canIgnorePendingQuote) {
         Text(stringResource(UiR.string.editor_action_ignore_quote))

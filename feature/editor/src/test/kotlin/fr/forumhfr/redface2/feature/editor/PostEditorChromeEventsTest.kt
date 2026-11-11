@@ -1,13 +1,19 @@
 package fr.forumhfr.redface2.feature.editor
 
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorSession
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionToken
+import fr.forumhfr.redface2.core.model.write.QuoteLocator
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorClass
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
 import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
+import fr.forumhfr.redface2.core.ui.editor.EditorEventRank
 import fr.forumhfr.redface2.core.ui.editor.EditorLocalOperation
+import fr.forumhfr.redface2.core.ui.editor.EditorText
 import fr.forumhfr.redface2.core.ui.editor.OperationRef
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -21,6 +27,64 @@ import org.junit.Test
 class PostEditorChromeEventsTest {
     private val host = PostEditorChromeFixture()
     private val attempt = EditorDraftStore.AttemptToken("alice", host.session.key, "attempt", 1)
+
+    @Test fun `1450 pending quote is one Information below a form error and survives metadata hydration`() {
+        host.transition(host.state.copy(restorableDraft = "D", pendingQuotes = listOf(
+            QuoteSelection(QuoteLocator(1, 101, null), "", "")), isLoadingForm = true))
+        val pending = host.events.visibleEvent!!
+        assertEquals(EditorText(R.string.editor_quote_pending), pending.summary)
+        assertEquals(EditorEventRank.Information, pending.rank)
+        assertEquals(EditorEventAction.Details, pending.action)
+        host.events.readFailed()
+        host.transition(host.state.copy(isLoadingForm = false, submitError = EditorErrors.formNetwork))
+        val error = host.events.visibleEvent!!
+        assertEquals(EditorEventRank.Error, error.rank)
+        assertEquals(EditorLocalOperation.FormLoad, (error.key.operation as OperationRef.Local).kind)
+        host.transition(host.state.copy(isLoadingForm = true))
+        host.transition(host.state.copy(isLoadingForm = false, submitError = null))
+        assertEquals(listOf(pending), host.events.state.events)
+        assertEquals(pending, host.events.visibleEvent)
+    }
+
+    @Test fun `1450 ordinary error overtaken by a decision retires after a successful quote form`() {
+        host.transition(host.state.copy(isLoadingForm = true))
+        host.events.readFailed()
+        host.transition(host.state.copy(isLoadingForm = false, submitError = EditorErrors.formNetwork))
+        host.transition(host.state.copy(isLoadingForm = true, isFetchingQuote = true))
+        host.transition(host.state.copy(isLoadingForm = false, submitError = null))
+        assertTrue(host.events.state.events.isEmpty())
+    }
+
+    @Test fun `1450 pending information follows ED44 without lifting Q or redelivering on observation`() {
+        host.transition(host.state.copy(restorableDraft = "D", pendingQuotes = listOf(
+            QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
+        assertTrue(host.events.dispatch(EditorEventInput.NextGesture(host.session)).gestureConsumed)
+        assertNull(host.events.visibleEvent)
+        host.transition(host.state.copy(bodyText = "typing"))
+        assertNull(host.events.visibleEvent)
+        assertTrue(host.state.pendingQuotes.isNotEmpty())
+        assertEquals("D", host.state.restorableDraft)
+    }
+
+    @Test fun `1450 pending notice retires by exact key when offer or request ends and on account change`() {
+        for (endOffer in listOf(true, false)) {
+            val fixture = PostEditorChromeFixture()
+            fixture.transition(fixture.state.copy(restorableDraft = "D", pendingQuotes = listOf(
+                QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
+            val pending = fixture.events.visibleEvent!!
+            // It can be hidden by another event when its underlying condition ends.
+            val error = fixture.error(EditorErrors.formNetwork)
+            fixture.transition(if (endOffer) fixture.state.copy(restorableDraft = null)
+                else fixture.state.copy(pendingQuotes = emptyList()))
+            assertTrue(fixture.events.state.events.none { it.key == pending.key })
+            assertEquals(error, fixture.events.visibleEvent)
+        }
+        host.transition(host.state.copy(restorableDraft = "D", pendingQuotes = listOf(
+            QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
+        host.events.open(EditorSession("changed", null, host.session.key))
+        host.events.observe(host.state, host.state)
+        assertTrue(host.events.state.events.isEmpty())
+    }
 
     @Test fun `ED88 silent success completes the operation and rejects late same-session deliveries`() {
         val successes = listOf(EditorSubmissionState.Succeeded(attempt),

@@ -11,6 +11,11 @@ import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.InputModeManager
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.LocalInputModeManager
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
@@ -85,6 +90,120 @@ class PostEditorChromeComposeTest {
                 bodyScrollState = scroll, overlay = { restore, body ->
                     PostEditorChromeSurfaces(host.adapter, host.body, smileys, restore, compactHeight = false, body)
                 })
+        }
+    }
+
+    @Test fun `1450 pending quote announces politely in the fixed bar and opens Restore on tap`() {
+        compose.setContent { Content() }
+        val field = compose.onNode(hasSetTextAction()).getUnclippedBoundsInRoot()
+        val fieldNode = compose.onNode(hasSetTextAction()).fetchSemanticsNode().id
+        val submit = compose.onNodeWithTag("editor-bar-submit").getUnclippedBoundsInRoot()
+        compose.runOnIdle {
+            host.transition(host.state.copy(restorableDraft = "saved D", pendingQuotes = listOf(
+                QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
+            assertNull(host.adapter.surface)
+        }
+        compose.onNodeWithContentDescription("Citation en attente, Afficher les détails", useUnmergedTree = true)
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))
+        // The outer submit tag measures geometry; only the inner M3 Button owns Disabled.
+        compose.onNodeWithTag("editor-bar-submit-shape").assertIsNotEnabled()
+        compose.runOnIdle {
+            assertFalse(host.state.canSubmit)
+            assertFalse(host.adapter.state.sendActivatable)
+        }
+        assertEquals(field, compose.onNode(hasSetTextAction()).getUnclippedBoundsInRoot())
+        assertEquals(submit, compose.onNodeWithTag("editor-bar-submit").getUnclippedBoundsInRoot())
+        compose.onNodeWithTag("editor-bar-event").performClick()
+        compose.onNodeWithText("Citation en attente").assertIsDisplayed()
+        compose.onNodeWithText("Restaurer").assertIsDisplayed()
+        compose.onNodeWithText("Ignorer").assertIsDisplayed()
+        compose.onNodeWithText("Recharger").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(host.events.visibleEvent?.key, host.adapter.pendingQuoteDetailKey)
+            assertTrue(host.calls.isEmpty())
+        }
+        compose.onNodeWithText("Retour au message").performClick()
+        compose.onNodeWithTag("editor-bar-submit-shape").assertIsNotEnabled()
+        assertEquals(fieldNode, compose.onNode(hasSetTextAction()).fetchSemanticsNode().id)
+        compose.runOnIdle {
+            assertNull(host.events.visibleEvent)
+            assertNull(host.adapter.detail)
+            assertEquals("saved D", host.state.restorableDraft)
+            assertTrue(host.state.pendingQuotes.isNotEmpty())
+        }
+    }
+
+    @Test fun `1450 pending event disappears without acknowledgement when its request is removed`() {
+        host.transition(host.state.copy(restorableDraft = "saved D", pendingQuotes = listOf(
+            QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Citation en attente, Afficher les détails").assertExists()
+        compose.runOnIdle { host.transition(host.state.copy(pendingQuotes = emptyList())) }
+        compose.onNodeWithContentDescription("Citation en attente, Afficher les détails").assertDoesNotExist()
+    }
+
+    @Test fun `1450 pending quote delivery offers Reload in save failure details`() {
+        host.transition(host.state.copy(pendingQuotes = listOf(
+            QuoteSelection(QuoteLocator(1, 101, null), "", "")), submitError = EditorErrors.draftSaveFailed))
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Brouillon non écrit, Afficher les détails").performClick()
+        compose.onNodeWithText("Recharger").assertIsDisplayed().performClick()
+        compose.runOnIdle {
+            assertEquals(listOf(PostEditorIntent.ReloadRequested), host.calls)
+            assertEquals("Bonjour", host.body.text.toString())
+            assertTrue(host.state.pendingQuotes.isNotEmpty())
+        }
+    }
+
+    @Test fun `1450 quote status keeps Reload reachable after autosave retires its save information`() {
+        host.transition(host.state.copy(pendingQuotes = listOf(
+            QuoteSelection(QuoteLocator(1, 101, null), "", "")), submitError = EditorErrors.draftSaveFailed))
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Brouillon non écrit, Afficher les détails").assertExists()
+        compose.runOnIdle {
+            host.transition(host.state.copy(submitError = null))
+            host.events.durableWriteSucceeded()
+        }
+        compose.onNodeWithContentDescription("Brouillon non écrit, Afficher les détails").assertDoesNotExist()
+        compose.onNodeWithTag("editor-bar-submit-shape").assertIsNotEnabled()
+        compose.onNodeWithContentDescription("1 citation, ouvrir le panneau citations").performClick()
+        compose.onNodeWithText("Recharger").assertIsDisplayed().performClick()
+        compose.runOnIdle {
+            assertEquals(listOf(PostEditorIntent.ReloadRequested), host.calls)
+            assertTrue(host.state.pendingQuotes.isNotEmpty())
+        }
+        compose.runOnIdle { host.transition(host.state.copy(pendingQuotes = emptyList())) }
+        compose.onNodeWithContentDescription("1 citation, ouvrir le panneau citations").assertDoesNotExist()
+    }
+
+    @Test fun `1450 invalidated binding removes quote recovery from status and open save details`() {
+        host.transition(host.state.copy(pendingQuotes = listOf(
+            QuoteSelection(QuoteLocator(1, 101, null), "", "")), submitError = EditorErrors.draftSaveFailed))
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Brouillon non écrit, Afficher les détails").performClick()
+        compose.onNodeWithText("Recharger").assertIsDisplayed()
+        compose.runOnIdle { host.transition(host.state.copy(blocksFormReload = true)) }
+        compose.onNodeWithText("Recharger").assertDoesNotExist()
+        compose.onNodeWithContentDescription("1 citation, ouvrir le panneau citations").assertDoesNotExist()
+        compose.runOnIdle {
+            host.adapter.reload(host.adapter.detail!!.key)
+            assertTrue(host.calls.isEmpty())
+            assertTrue(host.state.pendingQuotes.isNotEmpty())
+        }
+    }
+
+    @Test fun `1450 invalidated binding removes Reload from a retained pending quote panel`() {
+        host.transition(host.state.copy(pendingQuotes = listOf(QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("1 citation, ouvrir le panneau citations").performClick()
+        compose.onNodeWithText("Recharger").assertIsDisplayed()
+        compose.runOnIdle { host.transition(host.state.copy(blocksFormReload = true)) }
+        compose.onNodeWithText("Recharger").assertDoesNotExist()
+        compose.onNodeWithContentDescription("1 citation, ouvrir le panneau citations").assertDoesNotExist()
+        compose.runOnIdle {
+            host.adapter.reloadPendingQuote()
+            assertTrue(host.calls.isEmpty())
+            assertTrue(host.state.pendingQuotes.isNotEmpty())
         }
     }
 

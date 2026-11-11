@@ -4,6 +4,8 @@ import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.SubmissionToken
+import fr.forumhfr.redface2.core.model.write.QuoteLocator
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.EditorBackAction
 import fr.forumhfr.redface2.core.ui.editor.EditorBackState
@@ -26,6 +28,87 @@ import org.junit.Test
 
 class PostEditorChromeAdapterTest {
     private val host = PostEditorChromeFixture()
+
+    @Test fun `1450 pending event opens the existing restore panel without an automatic opening or intent`() {
+        host.transition(host.state.copy(restorableDraft = "D", pendingQuotes = listOf(
+            QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
+        val pending = host.events.visibleEvent!!
+        assertNull(host.adapter.surface)
+        assertFalse(host.adapter.state.sendActivatable)
+        host.adapter.barActions.onEvent(pending.key, EditorEventAction.Details)
+        assertEquals(pending.key, host.adapter.pendingQuoteDetailKey)
+        assertEquals(pending.key, host.adapter.detail?.key)
+        assertEquals(pending, host.events.visibleEvent) // ED-45 acknowledges on closing, not opening.
+        host.adapter.gesture(EditorBarGesture.ToggleFormat)
+        assertNull(host.events.visibleEvent)
+        assertEquals(pending.key, host.adapter.pendingQuoteDetailKey)
+        assertEquals(pending.key, host.adapter.detail?.key)
+        assertTrue(host.calls.isEmpty())
+        assertTrue(host.state.pendingQuotes.isNotEmpty())
+        host.transition(host.state.copy(restorableDraft = null))
+        assertNull(host.adapter.pendingQuoteDetailKey)
+        assertFalse(host.events.isPendingQuoteEvent(pending.key))
+        host.adapter.closeDetails(pending.key)
+        assertNull(host.adapter.detail)
+        assertNull(host.events.visibleEvent)
+        host.adapter.barActions.onEvent(pending.key, EditorEventAction.Details)
+        assertNull(host.adapter.surface)
+    }
+
+    @Test fun `1450 acknowledged pending offer detail does not survive an account session change`() {
+        host.transition(host.state.copy(restorableDraft = "D", pendingQuotes = listOf(
+            QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
+        val pending = host.events.visibleEvent!!
+        host.adapter.barActions.onEvent(pending.key, EditorEventAction.Details)
+        host.adapter.gesture(EditorBarGesture.ToggleFormat)
+        assertEquals(pending.key, host.adapter.pendingQuoteDetailKey)
+        host.events.open(host.session.copy(id = "changed", owner = null))
+        assertNull(host.adapter.pendingQuoteDetailKey)
+        assertFalse(host.events.isPendingQuoteEvent(pending.key))
+    }
+
+    @Test fun `1450 save failure Reload is limited to an unresolved quote without a draft offer or uncertainty`() {
+        val pending = listOf(QuoteSelection(QuoteLocator(1, 101, null), "", ""))
+        host.transition(host.state.copy(pendingQuotes = pending, submitError = EditorErrors.draftSaveFailed))
+        val failure = host.events.visibleEvent!!
+        host.adapter.barActions.onEvent(failure.key, EditorEventAction.Details)
+        assertTrue(host.adapter.canReload(failure.key))
+        host.state = host.state.copy(blocksFormReload = true)
+        assertFalse(host.adapter.canReload(failure.key))
+        host.adapter.reload(failure.key)
+        host.state = host.state.copy(blocksFormReload = false)
+        host.state = host.state.copy(restorableDraft = "D")
+        assertFalse(host.adapter.canReload(failure.key))
+        host.adapter.reload(failure.key)
+        host.state = host.state.copy(restorableDraft = null, submission = EditorSubmissionState.Uncertain(null))
+        assertFalse(host.adapter.canReload(failure.key))
+        host.adapter.reload(failure.key)
+        host.state = host.state.copy(submission = EditorSubmissionState.Ready, pendingQuotes = emptyList())
+        assertFalse(host.adapter.canReload(failure.key))
+        host.adapter.reload(failure.key)
+        assertTrue(host.calls.isEmpty())
+    }
+
+    @Test fun `1450 quote recovery rejects busy and stale panel callbacks`() {
+        host.state = host.state.copy(pendingQuotes = listOf(QuoteSelection(QuoteLocator(1, 101, null), "", "")))
+        host.adapter.open(PostEditorChromeSurface.PendingQuote)
+        host.state = host.state.copy(isLoadingForm = true)
+        host.adapter.reloadPendingQuote()
+        assertTrue(host.calls.isEmpty())
+        host.state = host.state.copy(isLoadingForm = false)
+        host.state = host.state.copy(blocksFormReload = true)
+        assertFalse(host.adapter.hasPendingQuoteRecovery)
+        host.adapter.reloadPendingQuote()
+        assertTrue(host.calls.isEmpty())
+        host.state = host.state.copy(blocksFormReload = false)
+        host.adapter.closeSurface()
+        host.adapter.reloadPendingQuote()
+        assertTrue(host.calls.isEmpty())
+        host.adapter.open(PostEditorChromeSurface.PendingQuote)
+        host.adapter.reloadPendingQuote()
+        host.adapter.reloadPendingQuote()
+        assertEquals(listOf(PostEditorIntent.ReloadRequested), host.calls)
+    }
 
     @Test fun `ED36 projects exactly the allowed shortcuts on this surface`() {
         val f = PostEditorChromeFixture()
