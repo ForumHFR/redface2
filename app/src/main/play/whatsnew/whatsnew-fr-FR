@@ -1,6 +1,3 @@
-Redface 2 v0.69.11 — dev.
-- Nouvel éditeur pour les posts, sujets et MP : barre d'action en bas, panneau d'en-tête, reprise après rotation.
-- Nouveau MP : destinataires en puces.
-- Citations en cartes dans un panneau dédié.
-- Aperçu à côté du texte, masqué pendant la frappe.
-- Réglage : raccourci dans la barre d'action.
+Redface 2 v0.69.12 — dev.
+- Éditeur : « Citer » avec un brouillon en attente charge de nouveau le titre, les favoris HFR et Envoyer.
+- La citation attend Restaurer ou Ignorer (« Citation en attente »), puis s'insère une seule fois.
