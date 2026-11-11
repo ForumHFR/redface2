@@ -276,4 +276,5 @@
     <string name="editor_action_reload">Recharger</string>
     <string name="editor_action_ignore_quote">Ignorer la citation</string>
     <string name="editor_error_quote_unreadable">La demande de citation enregistrée est illisible. Vous pouvez la recharger ou ignorer la citation. Le texte et la tentative d’envoi sont conservés.</string>
+    <string name="editor_summary_recipient_incomplete">Pseudo à valider</string>
 </resources>

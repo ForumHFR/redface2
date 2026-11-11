@@ -6,37 +6,26 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
-import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.union
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledTonalButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.InputChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -51,26 +40,13 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import fr.forumhfr.redface2.core.domain.editor.ArmToken
-import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitActions
-import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitButton
-import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitLabels
-import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitState
-import fr.forumhfr.redface2.core.ui.editor.EditorCause
-import fr.forumhfr.redface2.core.ui.editor.EditorError
-import fr.forumhfr.redface2.core.ui.editor.EditorErrorSurface
-import fr.forumhfr.redface2.core.ui.editor.EditorErrors
-import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummary
-import fr.forumhfr.redface2.core.ui.editor.bannerText
-import fr.forumhfr.redface2.core.ui.editor.hasSubmissionSummary
 
 /**
  * Building blocks shared by the two private-message editors — the conversation reply
  * (#301, [PrivateMessageReplyScreen]) and the new-conversation composer (#301 follow-up,
- * [PrivateMessageComposeScreen]). Extracted verbatim from the reply screen so the composer
- * does not fork the IME-pinned bar, the option toggles, or the load/error scaffolding.
+ * [PrivateMessageComposeScreen]): header, draft offer, recipient sheet and load/error scaffolding.
+ * The send bar and the options sheet come from the common editor chrome (`core/ui` editor).
  */
 
 @Composable
@@ -101,53 +77,55 @@ internal fun MessageEditorHeader(title: String, onBack: () -> Unit) {
 }
 
 /**
- * #405 — non-destructive draft-restore banner of the new-message editor (the reply uses ReplyDraftRestoreChoice).
- * « Restaurer » pre-fills the editor from the cached draft ; « Ignorer » deletes the cached row.
- * The draft is never silently applied nor lost.
+ * #405 — non-destructive draft offer shared by both editors: the ↺ panel of the reply and of the new message,
+ * and the reply's full-screen form failure. « Restaurer » pre-fills the editor from the cached draft ;
+ * « Ignorer » deletes the cached row. The draft is never silently applied nor lost. The sentence has no line
+ * cap nor ellipsis, so font scale 1.3 never truncates it (gates R1b R3 m2, C4 m8). It sits above the two 48 dp
+ * actions; at a [compactHeight] (EditorWindowMetrics.compactHeight) it takes the rest of their row instead, as
+ * the post and topic offer does, so a landscape ↺ panel above the keyboard still shows both actions (gate R1b
+ * minors r1 C1).
  */
 @Composable
-internal fun MessageDraftRestoreBanner(
+internal fun MessageDraftRestoreChoice(
     onRestore: () -> Unit,
     onDiscard: () -> Unit,
+    restoreEnabled: Boolean,
+    compactHeight: Boolean,
     modifier: Modifier = Modifier,
-    restoreEnabled: Boolean = true,
 ) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-        tonalElevation = 2.dp,
-    ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = stringResource(R.string.messages_draft_restore_message),
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.weight(1f),
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            TextButton(
-                onClick = onRestore,
-                enabled = restoreEnabled,
-                modifier = Modifier.heightIn(min = 48.dp),
-                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
-            ) {
-                Text(text = stringResource(R.string.messages_draft_restore))
-            }
-            TextButton(
-                onClick = onDiscard,
-                modifier = Modifier.heightIn(min = 48.dp),
-                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp),
-            ) {
-                Text(text = stringResource(R.string.messages_draft_discard))
+    val offer = stringResource(R.string.messages_draft_restore_message)
+    if (compactHeight) {
+        Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically) {
+            Text(offer, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            // The narrower padding leaves the sentence its room in a 760 dp landscape at font scale 1.3.
+            MessageDraftRestoreActions(onRestore, onDiscard, restoreEnabled, CompactDraftActionPadding)
+        }
+    } else {
+        Column(modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(offer, style = MaterialTheme.typography.bodyMedium)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MessageDraftRestoreActions(onRestore, onDiscard, restoreEnabled,
+                    ButtonDefaults.TextButtonContentPadding)
             }
         }
     }
 }
+
+/** Emits « Restaurer » then « Ignorer » into the caller's row. */
+@Composable
+private fun MessageDraftRestoreActions(
+    onRestore: () -> Unit, onDiscard: () -> Unit, restoreEnabled: Boolean, padding: PaddingValues,
+) {
+    TextButton(onRestore, Modifier.heightIn(min = 48.dp), enabled = restoreEnabled, contentPadding = padding) {
+        Text(stringResource(R.string.messages_draft_restore))
+    }
+    TextButton(onDiscard, Modifier.heightIn(min = 48.dp), contentPadding = padding) {
+        Text(stringResource(R.string.messages_draft_discard))
+    }
+}
+
+private val CompactDraftActionPadding = PaddingValues(horizontal = 6.dp, vertical = 8.dp)
 
 /**
  * #606 — DT/MultiMP member editor, shown only to the conversation OWNER (gated by
@@ -266,137 +244,6 @@ internal fun MessageFormErrorState(
 }
 
 /**
- * Send button pinned to the bottom, lifted above the IME so the user never dismisses the keyboard to
- * reach « Envoyer ». Mirrors the post editor's submit bar (the editor's `EditorSubmitBar` is module-
- * private, so the window-insets pattern is replicated here). Requires `windowSoftInputMode=adjustNothing`.
- * The armed-confirmation behaviour (#312 v2, countdown drain included) lives in the shared
- * [ArmedSubmitButton].
- */
-@Composable
-@Suppress("LongParameterList") // Mirrors the editor bar's state + actions.
-internal fun MessageSubmitBar(
-    canSubmit: Boolean,
-    isSubmitting: Boolean,
-    confirmArmed: Boolean,
-    onSubmit: (Long) -> Unit,
-    onConfirmSubmit: () -> Unit,
-    onDisarmConfirm: () -> Unit,
-    onOpenOptions: () -> Unit,
-    onOpenSmileys: () -> Unit,
-    armToken: ArmToken? = null,
-) {
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer, tonalElevation = 3.dp) {
-        Column(modifier = Modifier.fillMaxWidth()) {
-            HorizontalDivider()
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    // Single bottom inset = max(navBar, ime) via union(), so the two never stack into a
-                    // phantom gap. Keyboard closed → clears the gesture nav bar; open → rides on the IME.
-                    .windowInsetsPadding(
-                        WindowInsets.navigationBars
-                            .union(WindowInsets.ime)
-                            .only(WindowInsetsSides.Horizontal + WindowInsetsSides.Bottom),
-                    )
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                // Tonal container for the secondary trigger, filled for « Envoyer » — same M3
-                // emphasis pair as the post editor's bar. Hidden while the confirmation is
-                // armed so the armed label never wraps (same fix as the editor bar).
-                if (!confirmArmed) {
-                    FilledTonalButton(onClick = onOpenOptions) {
-                        Text(text = stringResource(R.string.messages_reply_actions_options))
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    // #387 — same Options/Smileys/Envoyer trio as the post editor's bar (#388).
-                    FilledTonalButton(onClick = onOpenSmileys) {
-                        Text(text = stringResource(R.string.messages_reply_actions_smileys))
-                    }
-                }
-                Spacer(modifier = Modifier.weight(1f))
-                if (isSubmitting) {
-                    CircularProgressIndicator(modifier = Modifier.size(20.dp))
-                    Spacer(modifier = Modifier.width(12.dp))
-                }
-                ArmedSubmitButton(
-                    state = ArmedSubmitState(armed = confirmArmed, enabled = canSubmit, armToken = armToken),
-                    labels = ArmedSubmitLabels(
-                        submit = stringResource(R.string.messages_reply_submit),
-                        confirm = stringResource(R.string.messages_reply_submit_confirm),
-                    ),
-                    actions = ArmedSubmitActions(
-                        onSubmit = { onSubmit(4_000L) },
-                        onSubmitWithTimeout = onSubmit,
-                        onConfirmSubmit = onConfirmSubmit,
-                        onDisarm = onDisarmConfirm,
-                    ),
-                )
-            }
-        }
-    }
-}
-
-@Composable
-@Suppress("LongParameterList") // 3 toggles + 3 callbacks + enabled — each call-site distinct.
-internal fun MessageEditorOptions(
-    signatureEnabled: Boolean,
-    smileyDisabled: Boolean,
-    emailNotificationEnabled: Boolean,
-    enabled: Boolean,
-    onSignatureChanged: (Boolean) -> Unit,
-    onSmileyDisabledChanged: (Boolean) -> Unit,
-    onEmailNotificationChanged: (Boolean) -> Unit,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = stringResource(R.string.messages_reply_options_title),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        MessageOptionToggle(
-            label = stringResource(R.string.messages_reply_option_signature),
-            checked = signatureEnabled,
-            enabled = enabled,
-            onCheckedChange = onSignatureChanged,
-        )
-        MessageOptionToggle(
-            label = stringResource(R.string.messages_reply_option_smiley_disabled),
-            checked = smileyDisabled,
-            enabled = enabled,
-            onCheckedChange = onSmileyDisabledChanged,
-        )
-        MessageOptionToggle(
-            label = stringResource(R.string.messages_reply_option_email_notification),
-            checked = emailNotificationEnabled,
-            enabled = enabled,
-            onCheckedChange = onEmailNotificationChanged,
-        )
-    }
-}
-
-@Composable
-private fun MessageOptionToggle(
-    label: String,
-    checked: Boolean,
-    enabled: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.padding(end = 16.dp),
-        )
-        Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
-    }
-}
-
-/**
  * #618 (Bug 1) — bottom sheet hosting the DT/MultiMP member editor, moved out of the composer flow.
  * Wraps the existing [MessageRecipientsEditor] (chips + add field) in a height-capped, scrollable
  * column so a 29+-member DT scrolls inside the sheet instead of pushing the composer off-screen. The
@@ -438,18 +285,3 @@ internal fun RecipientManagerSheet(
 
 /** #606 — HFR's system member of a group conversation ; removing it warrants a warning, not a block. */
 private const val ADMIN_PSEUDO = "Administration"
-
-/** ED-112: the catalogue owns both MP verification details. */
-@Composable
-internal fun MessageSubmissionError(error: EditorError, composing: Boolean) {
-    val displayed = if (error.cause == EditorCause.Uncertain) {
-        EditorErrors.uncertain(if (composing) EditorErrorSurface.MessageCompose else EditorErrorSurface.MessageReply)
-    } else {
-        error
-    }
-    if (displayed.hasSubmissionSummary) EditorSubmissionSummary(displayed)
-    Text(
-        text = displayed.bannerText(), style = MaterialTheme.typography.bodyMedium,
-        color = MaterialTheme.colorScheme.error,
-    )
-}

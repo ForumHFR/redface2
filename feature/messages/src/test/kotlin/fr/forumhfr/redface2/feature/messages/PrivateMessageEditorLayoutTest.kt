@@ -1,13 +1,17 @@
 package fr.forumhfr.redface2.feature.messages
 
 import android.content.Context
-import androidx.compose.foundation.layout.fillMaxSize
+import android.view.View
 import androidx.compose.foundation.text.input.InputTransformation
-import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
@@ -22,9 +26,14 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
+import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.test.core.app.ApplicationProvider
 import coil3.ColorImage
 import coil3.ImageLoader
@@ -40,8 +49,16 @@ import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
+import fr.forumhfr.redface2.core.ui.editor.EditorRecipientState
+import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
+import io.mockk.every
+import io.mockk.mockk
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -50,7 +67,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** Reply uses the shared chrome budget; new-message checks retain the legacy body until C4. */
+/** Both MP editors use the shared chrome budget; their ↺ panels render the same [MessageDraftRestoreChoice]. */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "fr-rFR-w360dp-h330dp-xxhdpi")
@@ -168,14 +185,19 @@ class PrivateMessageEditorLayoutTest {
     }
 
     private fun readyReply() = PrivateMessageReplyUiState(isLoadingForm = false, formAvailable = true)
+
+    private fun restorableReply() = readyReply().copy(restorableDraft = "Brouillon")
+
+    /** Same ↺ status and offer on both surfaces. */
     private fun openRestore() =
         compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
 
     @Test
     fun `new message keeps 160 dp body and both draft actions on short viewport`() {
-        setComposeContent()
-        compose.onNodeWithText("Votre réponse")
+        setComposeContent(openRestore = false)
+        compose.onNodeWithTag("editor-scaffold-field")
             .assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT - FIELD_LABEL_HEADROOM)
+        openComposeRestore()
         assertDraftActionsFullyVisible()
     }
 
@@ -226,6 +248,86 @@ class PrivateMessageEditorLayoutTest {
         compose.onNodeWithText("Restaurer").assertIsEnabled()
     }
 
+    @Test
+    @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
+    fun `reply restore offer and actions share one row above a landscape keyboard at font scale 1_0`() =
+        assertCompactRestoreRow(1.0f) { PrivateMessageReplyTestContent(restorableReply()) }
+
+    @Test
+    @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
+    fun `reply restore offer and actions share one row above a landscape keyboard at font scale 1_3`() =
+        assertCompactRestoreRow(1.3f) { PrivateMessageReplyTestContent(restorableReply()) }
+
+    @Test
+    @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
+    fun `new message restore offer and actions share one row above a landscape keyboard at font scale 1_3`() {
+        val f = PrivateMessageComposeChromeFixture()
+        f.state = f.state.copy(recipients = "alice", subject = "Sujet privé",
+            recipientState = EditorRecipientState(listOf("alice")), restorableDraft = "Brouillon à restaurer")
+        val picker = mockk<SmileyPickerController>(relaxed = true)
+        every { picker.state } returns MutableStateFlow<SmileyPickerState>(SmileyPickerState.Hidden)
+        assertCompactRestoreRow(1.3f) {
+            PrivateMessageComposeContent(f.state, f.body, InputTransformation {}, f.recipients, f.subject,
+                f.actions, picker, chromeEvents = f.events, chromeMemory = f.memory,
+                windowMetrics = EditorWindowMetrics(360.dp, 0.dp, 0.dp))
+        }
+    }
+
+    /**
+     * Gate R1b minors r1 C1, as the post and topic: a 760 × 360 dp landscape with a 190 dp keyboard leaves the ↺ panel
+     * about 100 dp of viewport. At this compact height the offer takes the rest of the actions' row: the whole sentence
+     * and both labels stay in view, each action inside the window above the keyboard. Stacked, both fall below.
+     */
+    private fun assertCompactRestoreRow(fontScale: Float, content: @Composable () -> Unit) {
+        lateinit var view: View
+        lateinit var density: Density
+        compose.setContent {
+            view = LocalView.current
+            density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale)) {
+                RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) { content() }
+            }
+        }
+        compose.runOnIdle {
+            val ime = with(density) { LANDSCAPE_KEYBOARD.roundToPx() }
+            ViewCompat.dispatchApplyWindowInsets(view, WindowInsetsCompat.Builder()
+                .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, ime))
+                .setVisible(WindowInsetsCompat.Type.ime(), true).build())
+        }
+        openRestore()
+        val offer = assertOfferLaidOutWhole(fontScale)
+        val offerBounds = offer.getUnclippedBoundsInRoot()
+        assertEquals("The offer must be entirely in view", offerBounds, offer.getBoundsInRoot())
+        val keyboardTop = compose.onRoot().getUnclippedBoundsInRoot().bottom - LANDSCAPE_KEYBOARD
+        var previousRight = offerBounds.right
+        for (label in listOf("Restaurer", "Ignorer")) {
+            val bounds = compose.onNodeWithText(label).assertHeightIsAtLeast(48.dp).getUnclippedBoundsInRoot()
+            assertTrue("$label must stay in the window above the keyboard", bounds.bottom <= keyboardTop)
+            val text = compose.onNodeWithText(label, useUnmergedTree = true)
+            assertEquals("$label must be entirely in view", text.getUnclippedBoundsInRoot(), text.getBoundsInRoot())
+            assertEquals("$label must share the offer's row", offerBounds.centerY, bounds.centerY, 1f)
+            assertTrue("$label must follow the offer and the previous action", bounds.left >= previousRight)
+            previousRight = bounds.right
+        }
+    }
+
+    /** The offer is laid out whole at [fontScale]: no line cap, no ellipsis, every character. */
+    private fun assertOfferLaidOutWhole(fontScale: Float): SemanticsNodeInteraction {
+        val offer = compose.onNodeWithText(RESTORE_OFFER, useUnmergedTree = true)
+        val layouts = mutableListOf<TextLayoutResult>()
+        val read = requireNotNull(offer.fetchSemanticsNode().config.getOrNull(SemanticsActions.GetTextLayoutResult)
+            ?.action)
+        assertTrue(read(layouts))
+        val layout = layouts.single()
+        val last = layout.lineCount - 1
+        assertEquals(fontScale, layout.layoutInput.density.fontScale, 0.001f)
+        assertFalse("The offer must not exceed a line cap", layout.multiParagraph.didExceedMaxLines)
+        assertFalse("The offer must not be ellipsized", layout.isLineEllipsized(last))
+        assertEquals("Every character must be laid out", RESTORE_OFFER.length,
+            layout.getLineEnd(last, visibleEnd = true))
+        return offer
+    }
+
     private fun setReplyContent(state: () -> PrivateMessageReplyUiState) {
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
@@ -237,32 +339,30 @@ class PrivateMessageEditorLayoutTest {
     private fun setComposeContent(
         isUploading: Boolean = false,
         submission: EditorSubmissionState = EditorSubmissionState.Ready,
+        openRestore: Boolean = true,
     ) {
+        val f = PrivateMessageComposeChromeFixture()
+        f.state = f.state.copy(recipients = "alice", subject = "Sujet privé",
+            recipientState = EditorRecipientState(listOf("alice")),
+            restorableDraft = "Brouillon à restaurer", isUploading = isUploading)
+        val picker = mockk<SmileyPickerController>(relaxed = true)
+        every { picker.state } returns MutableStateFlow<SmileyPickerState>(SmileyPickerState.Hidden)
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                ComposeEditorBody(
-                    state = PrivateMessageComposeUiState(
-                        isLoadingForm = false,
-                        formAvailable = true,
-                        restorableDraft = "Brouillon à restaurer",
-                        isUploading = isUploading,
-                        submission = submission,
-                    ),
-                    bodyFieldState = remember { TextFieldState() },
-                    bodyInputTransformation = InputTransformation {},
-                    onRecipientsChanged = {},
-                    onSubjectChanged = {},
-                    onToolbarAction = {},
-                    onTogglePreview = {},
-                    onErrorDismissed = {},
-                    onDraftRestore = {},
-                    onDraftDiscard = {},
-                    onImagePickerEvent = {},
-                    onUploadErrorDismissed = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
+                PrivateMessageComposeContent(f.state, f.body, InputTransformation {}, f.recipients, f.subject,
+                    f.actions, picker, chromeEvents = f.events, chromeMemory = f.memory,
+                    windowMetrics = EditorWindowMetrics(330.dp, 0.dp, 0.dp))
             }
         }
+        if (openRestore) openComposeRestore()
+        // An already open panel remains readable while submission disables its controls.
+        compose.runOnIdle { f.state = f.state.copy(submission = submission) }
+    }
+
+    /** At this compact height the offer shares the actions' row; scroll the panel to them, as the reply at 200 dp. */
+    private fun openComposeRestore() {
+        openRestore()
+        compose.onNodeWithText("Restaurer").performScrollTo()
     }
 
     private fun assertDraftActionsFullyVisible() {
@@ -295,3 +395,10 @@ class PrivateMessageEditorLayoutTest {
 
 /** The editable node sits under the 8 dp floating-label headroom reserved inside the 160 dp slot. */
 private val FIELD_LABEL_HEADROOM = 8.dp
+
+private const val RESTORE_OFFER = "Un brouillon non envoyé a été retrouvé."
+
+/** Same keyboard as the post and topic landscape restore checks (EditorScreenLayoutTest). */
+private val LANDSCAPE_KEYBOARD = 190.dp
+
+private val DpRect.centerY: Float get() = ((top + bottom) / 2).value

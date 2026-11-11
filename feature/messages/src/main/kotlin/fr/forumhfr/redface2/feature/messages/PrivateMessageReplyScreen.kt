@@ -185,7 +185,8 @@ private fun PrivateMessageReplyChrome(
         onSystemBack = back,
         fieldArea = { field -> PrivateMessageReplyChromePreview(host, body, focus, field) },
         overlay = { restore, content ->
-            PrivateMessageReplyChromeSurfaces(host, body, smileys, autoOpenRecipients, restore, content)
+            PrivateMessageReplyChromeSurfaces(host, body, smileys, autoOpenRecipients, restore, window.compactHeight,
+                content)
             // Last activity handler: the host resolves every ED-85 level, including bar focus return.
             BackHandler(onBack = back)
         })
@@ -209,8 +210,9 @@ private fun ReplyFormFailure(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHighest, tonalElevation = 2.dp,
             ) {
-                ReplyDraftRestoreChoice(host::restoreDraft, host::discardDraft, state.restoreEnabled,
-                    Modifier.padding(start = 8.dp, top = 8.dp, end = 8.dp))
+                // Full screen without a field or keyboard: the sentence keeps its stacked layout.
+                MessageDraftRestoreChoice(host::restoreDraft, host::discardDraft, state.restoreEnabled,
+                    compactHeight = false, Modifier.padding(start = 8.dp, top = 8.dp, end = 8.dp))
             }
             MessageFormErrorState(onRetry = host::retryFormLoad)
         }
