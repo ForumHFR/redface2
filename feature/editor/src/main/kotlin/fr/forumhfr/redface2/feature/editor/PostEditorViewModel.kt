@@ -324,8 +324,9 @@ class PostEditorViewModel @AssistedInject constructor(
     private var uploadJob: Job? = null
     private var draftRestored = false
     private var sharedDraftResumed = false
-    private var draftRestoreDiscarding = false
-    private var inlineQuoteDeferredByUpload = false
+    private var draftRestoreDeciding = false
+    private var restoredOfferAwaitingWrite: String? = null
+    private var inlineQuoteDeliveryRequested = false
     private var duplicateQuoteDelivery = false
     private var deliveredInlineQuoteRequest: PendingInlineQuoteRequest? = null
     private var quoteCardsDelivered = false
@@ -391,7 +392,8 @@ class PostEditorViewModel @AssistedInject constructor(
                     submission.accountChanged()
                     loadedForm = null
                     restoration.invalidate()
-                    inlineQuoteDeferredByUpload = false
+                    inlineQuoteDeliveryRequested = false
+                    restoredOfferAwaitingWrite = null
                     deliveredInlineQuoteRequest = null
                     updateChromeState { it.copy(isUploading = false, uploadProgress = null) }
                 }
@@ -468,7 +470,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 QuoteSelection(QuoteLocator(it.page, it.numreponse, it.ref), "", "", it.truncate)
             })
             _state.update { it.copy(isInitializing = false) }
-            if (!_state.value.hasDormantQuote) loadReplyFormWithInlineQuotes(_state.value.pendingQuotes)
+            servePendingInlineQuoteIfEligible(requestDelivery = true, loadFormUnderOffer = true)
         } else {
             savedStateHandle.remove<Int>(QUOTE_FAILURES_KEY)
             _state.update { it.copy(quoteFetchFailures = 0, isInitializing = false) }
@@ -499,7 +501,9 @@ class PostEditorViewModel @AssistedInject constructor(
         submission.disarm()
         val pending = _state.value.pendingQuotes
         when {
-            pending.isNotEmpty() -> loadReplyFormWithInlineQuotes(pending)
+            pending.isNotEmpty() -> servePendingInlineQuoteIfEligible(
+                requestDelivery = true, loadFormUnderOffer = true,
+            )
             _state.value.quotes.isNotEmpty() && _state.value.submitError?.cause == EditorCause.QuoteFetchFailed ->
                 loadReplyFormWithInlineQuotes(_state.value.quotes, insertInline = false)
             request.mode == PostEditorMode.Edit -> loadEditFormIfPossible()
@@ -538,7 +542,7 @@ class PostEditorViewModel @AssistedInject constructor(
     private fun resumeDormantQuote() {
         if (!_state.value.hasDormantQuote || _state.value.isLoadingForm || submission.blocksMutation) return
         submission.acknowledge {
-            resumePendingInlineQuotes()
+            servePendingInlineQuoteIfEligible(requestDelivery = true)
         }
     }
 
@@ -560,7 +564,7 @@ class PostEditorViewModel @AssistedInject constructor(
         if (insertInline) setPendingQuotes(quotes)
         // An offer is not the live body. Serialize quote GETs after its decision so accepting
         // cannot append a second copy of a quote that a GET already inserted into the field.
-        if (insertInline && (_state.value.restorableDraft != null || draftRestoreDiscarding)) return
+        if (insertInline && (_state.value.restorableDraft != null || draftRestoreDeciding)) return
         // #1553: retry a failed CAS without replaying an insertion the user may have edited.
         if (insertInline && submission.drafts.pendingInlineQuoteRequest == deliveredInlineQuoteRequest) {
             updateChromeState { it.copy(isLoadingForm = true) }
@@ -576,11 +580,13 @@ class PostEditorViewModel @AssistedInject constructor(
     /** Inline delivery only runs once this opening chose the inline rendering (cards ON never does). */
     private fun inlineQuoteLoadBlocked(insertInline: Boolean): Boolean {
         if (request.mode != PostEditorMode.Reply || _state.value.isLoadingForm || submission.blocksMutation) return true
-        return insertInline && (submission.drafts.pendingInlineQuoteRequest == null || _state.value.hasDormantQuote)
+        val storageBlocked = _state.value.unreadableQuoteRequest || _state.value.quoteStorageUnavailable
+        return insertInline &&
+            (submission.drafts.pendingInlineQuoteRequest == null || _state.value.hasDormantQuote || storageBlocked)
     }
 
     private fun finishInlineQuoteDelivery() {
-        inlineQuoteDeferredByUpload = false
+        inlineQuoteDeliveryRequested = false
         deliveredInlineQuoteRequest = null
         savedStateHandle.remove<Int>(QUOTE_FAILURES_KEY)
         updateChromeState {
@@ -602,7 +608,7 @@ class PostEditorViewModel @AssistedInject constructor(
         val quoteContext = context.copy(quotedNumreponse = quotes.first().numreponse, quoteRef = null)
         val opening = submission.session
         val favoriteStamp = smileyPicker.favoriteFormStamp()
-        updateChromeState { it.copy(isLoadingForm = true) }
+        updateChromeState { it.copy(isLoadingForm = true, isFetchingQuote = true) }
         viewModelScope.launch {
             val outcome = runCatching {
                 quoteMaterializer.fetchFormWithQuotes(
@@ -621,7 +627,7 @@ class PostEditorViewModel @AssistedInject constructor(
                     loadedForm = form
                     smileyPicker.refreshFavorites(favoriteStamp)
                     if (_state.value.isAwaitingInitialBody || !acceptMutation(blockDuringUpload = insertInline)) {
-                        inlineQuoteDeferredByUpload =
+                        inlineQuoteDeliveryRequested =
                             insertInline && _state.value.isUploading && !submission.blocksMutation
                         updateChromeState { it.copy(isLoadingForm = false) }
                         return@fold
@@ -1006,6 +1012,7 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     /** ED-89: replace the untouched seed, keep its typed suffix, or append after other live text. */
+    @Suppress("CyclomaticComplexMethod") // Ordered ED-89 cases plus the durable, retryable ED-132 handoff.
     private fun onDraftRestoreRequested() {
         val snapshot = _state.value
         if (!snapshot.canRestoreDraft || snapshot.isUploading) return
@@ -1019,38 +1026,74 @@ class PostEditorViewModel @AssistedInject constructor(
             suffix != null -> offeredBody + "\n\n" + suffix.trimStart()
             else -> liveBody.trimEnd() + "\n\n" + offeredBody
         }
-        replaceBody(body)
-        _state.update { it.copy(restorableDraft = null, draftHydratedFromForm = true) }
+        val awaitsQuote = snapshot.pendingQuotes.isNotEmpty()
+        draftRestoreDeciding = awaitsQuote
+        // A failed write reoffers the decision, but C already contains the restored D. Retrying
+        // persists the live field (including newer typing), without replaying the ED-89 merge.
+        if (restoredOfferAwaitingWrite != offeredBody) replaceBody(body)
+        if (awaitsQuote) restoredOfferAwaitingWrite = offeredBody
+        updateChromeState { it.copy(restorableDraft = null, draftHydratedFromForm = true) }
         viewModelScope.launch {
-            submission.flush(draftSnapshot())
-            resumePendingInlineQuotes()
+            try {
+                val result = submission.flush(draftSnapshot())
+                val durable = result is EditorDraftStore.StoreWriteResult.Written && !submission.drafts.invalidated
+                if (awaitsQuote && !durable) {
+                    if (!submission.drafts.invalidated) updateChromeState { it.copy(restorableDraft = offeredBody) }
+                    return@launch
+                }
+                restoredOfferAwaitingWrite = null
+            } finally {
+                draftRestoreDeciding = false
+            }
+            servePendingInlineQuoteIfEligible()
         }
     }
 
     /** Discard only the offered body; retain current typing and the session-owned request. */
     private fun onDraftDiscardRequested() {
         val body = _state.value.restorableDraft ?: return
-        draftRestoreDiscarding = true
-        _state.update { it.copy(restorableDraft = null) }
+        draftRestoreDeciding = true
+        updateChromeState { it.copy(restorableDraft = null) }
         viewModelScope.launch {
             try {
                 val result = submission.flush(EditorDraftStore.Draft(body = bodyFieldState.text.toString()))
-                if (result !is EditorDraftStore.StoreWriteResult.Written) {
-                    _state.update { it.copy(restorableDraft = body) }
+                if (result !is EditorDraftStore.StoreWriteResult.Written || submission.drafts.invalidated) {
+                    if (!submission.drafts.invalidated) updateChromeState { it.copy(restorableDraft = body) }
                     return@launch
                 }
                 markDraftRestoreOfferIgnored(body)
+                restoredOfferAwaitingWrite = null
             } finally {
-                draftRestoreDiscarding = false
+                draftRestoreDeciding = false
             }
             // Finish the discard before any insertion/autosave can repopulate the row.
-            resumePendingInlineQuotes()
+            servePendingInlineQuoteIfEligible()
         }
     }
 
-    private fun resumePendingInlineQuotes() {
-        val pending = _state.value.pendingQuotes
-        if (pending.isNotEmpty()) loadReplyFormWithInlineQuotes(pending)
+    /**
+     * One idempotent delivery entry point. A blocked opening/decision keeps its request until the
+     * ordinary GET, durable decision or upload ends. Consume it before starting work: failures need
+     * an explicit Reload, never an automatic retry on an unrelated completion.
+     */
+    @Suppress("ReturnCount") // Independent lifecycle guards retain one pending delivery, without retrying failures.
+    private fun servePendingInlineQuoteIfEligible(
+        requestDelivery: Boolean = false,
+        loadFormUnderOffer: Boolean = false,
+    ) {
+        if (requestDelivery) inlineQuoteDeliveryRequested = true
+        val snapshot = _state.value
+        if (!inlineQuoteDeliveryRequested || inlineQuoteLoadBlocked(insertInline = true)) return
+        if (draftRestoreDeciding) return
+        if (snapshot.restorableDraft != null) {
+            // ED-132 defers the quote GET, not ordinary form metadata. Never hydrate C from this GET.
+            if (loadFormUnderOffer) loadReplyFormIfPossible(preserveDraft = true)
+            return
+        }
+        // An explicit Reload may fetch during upload; insertion and CAS still wait for its end.
+        if (snapshot.isUploading && (!requestDelivery || deliveredInlineQuoteRequest != null)) return
+        inlineQuoteDeliveryRequested = false
+        loadReplyFormWithInlineQuotes(snapshot.pendingQuotes)
     }
 
     private fun markDraftRestoreOfferIgnored(body: String) {
@@ -1218,7 +1261,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 }
             }
             updateChromeState { it.copy(isUploading = false, uploadProgress = null) }
-            resumeDeferredInlineQuotes()
+            servePendingInlineQuoteIfEligible()
         }
     }
 
@@ -1234,14 +1277,7 @@ class PostEditorViewModel @AssistedInject constructor(
             UploadFailureDiagnostics.describe(error, mapped.toString()),
         )
         updateChromeState { it.copy(isUploading = false, uploadError = mapped, uploadProgress = null) }
-        resumeDeferredInlineQuotes()
-    }
-
-    /** Resume only a successful GET deferred by upload, without retrying unrelated quote failures. */
-    private fun resumeDeferredInlineQuotes() {
-        if (!inlineQuoteDeferredByUpload) return
-        inlineQuoteDeferredByUpload = false
-        resumePendingInlineQuotes()
+        servePendingInlineQuoteIfEligible()
     }
 
     private fun onToolbarActionClicked(action: BbcodeAction) {
@@ -1267,8 +1303,8 @@ class PostEditorViewModel @AssistedInject constructor(
         // the PLAIN reply form : citations live as cards in [PostEditorState.quotes] and their
         // [quotemsg] blocks are materialised fresh at submit (see [onSubmitClicked]), exactly
         // like the quick-reply sheet. This fetch only warms the hash and hydrates the per-post
-        // options. Cards OFF goes through [loadReplyFormWithInlineQuotes] instead (#805).
-        launchFormFetch {
+        // options. Inline requests also use this ordinary GET while their draft offer waits (#1450).
+        launchFormFetch(preserveDraft = preserveDraft) {
             val form = replyRepository.fetchReplyForm(context)
             if (preserveDraft) form.copy(initialContent = "") else form
         }
@@ -1283,10 +1319,10 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     /** Form hydration and metadata are separate from the single asynchronous preview pipeline. */
-    private fun launchFormFetch(fetch: suspend () -> ReplyForm) {
+    private fun launchFormFetch(preserveDraft: Boolean = false, fetch: suspend () -> ReplyForm) {
         val opening = submission.session
         val favoriteStamp = smileyPicker.favoriteFormStamp()
-        updateChromeState { it.copy(isLoadingForm = true) }
+        updateChromeState { it.copy(isLoadingForm = true, isFetchingQuote = false) }
         viewModelScope.launch {
             val outcome = runCatching { fetch() }
             if (submission.session != opening) return@launch
@@ -1294,23 +1330,28 @@ class PostEditorViewModel @AssistedInject constructor(
                 onSuccess = { form ->
                     loadedForm = form
                     smileyPicker.refreshFavorites(favoriteStamp)
-                    applyFormHydration(form)
+                    applyFormHydration(form, preserveDraft)
                 },
                 onFailure = { error -> handleFetchFailure(error) },
             )
+            // A draft decision can finish during either a successful or a failed ordinary GET.
+            servePendingInlineQuoteIfEligible()
         }
     }
 
-    private fun applyFormHydration(form: ReplyForm) {
+    private fun applyFormHydration(form: ReplyForm, preserveDraft: Boolean = false) {
         val snapshot = _state.value
-        val hydrate = !submission.blocksMutation && snapshot.shouldHydrateBody(form)
+        val hydrate = !preserveDraft && !submission.blocksMutation && snapshot.shouldHydrateBody(form)
         if (hydrate) {
             replaceBody(form.initialContent)
             previousBody = form.initialContent
             resetUndoBaseline()
         }
         val liveBody = bodyFieldState.text.toString()
-        updateChromeState { it.withFormHydration(form, hydrate, liveBody) }
+        updateChromeState {
+            val hydrated = it.withFormHydration(form, hydrate, liveBody)
+            if (preserveDraft) hydrated.copy(restorableDraft = it.restorableDraft) else hydrated
+        }
     }
 
     /** An empty edit textarea is a known server seed; a missing textarea is rejected by the parser. */
@@ -1369,7 +1410,7 @@ class PostEditorViewModel @AssistedInject constructor(
         val mapped = when (error) {
             is SessionExpiredException -> EditorErrors.sessionExpired
             else -> when {
-                quoteFetch || _state.value.pendingQuotes.isNotEmpty() ->
+                quoteFetch ->
                     EditorErrors.quoteFetchFailed(inline = _state.value.pendingQuotes.isNotEmpty())
                 error is IOException -> EditorErrors.formNetwork
                 else -> EditorErrors.invalidForm

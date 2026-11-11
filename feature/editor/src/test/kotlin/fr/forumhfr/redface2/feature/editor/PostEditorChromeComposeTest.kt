@@ -11,6 +11,11 @@ import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.InputModeManager
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.LocalInputModeManager
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
@@ -86,6 +91,49 @@ class PostEditorChromeComposeTest {
                     PostEditorChromeSurfaces(host.adapter, host.body, smileys, restore, compactHeight = false, body)
                 })
         }
+    }
+
+    @Test fun `1450 pending quote announces politely in the fixed bar and opens Restore on tap`() {
+        compose.setContent { Content() }
+        val field = compose.onNode(hasSetTextAction()).getUnclippedBoundsInRoot()
+        val fieldNode = compose.onNode(hasSetTextAction()).fetchSemanticsNode().id
+        val submit = compose.onNodeWithTag("editor-bar-submit").getUnclippedBoundsInRoot()
+        compose.runOnIdle {
+            host.transition(host.state.copy(restorableDraft = "saved D", pendingQuotes = listOf(
+                QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
+            assertNull(host.adapter.surface)
+        }
+        compose.onNodeWithContentDescription("Citation en attente, Afficher les détails", useUnmergedTree = true)
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))
+        compose.onNodeWithTag("editor-bar-submit").assertIsNotEnabled()
+        assertEquals(field, compose.onNode(hasSetTextAction()).getUnclippedBoundsInRoot())
+        assertEquals(submit, compose.onNodeWithTag("editor-bar-submit").getUnclippedBoundsInRoot())
+        compose.onNodeWithTag("editor-bar-event").performClick()
+        compose.onNodeWithText("Citation en attente").assertIsDisplayed()
+        compose.onNodeWithText("Restaurer").assertIsDisplayed()
+        compose.onNodeWithText("Ignorer").assertIsDisplayed()
+        compose.onNodeWithText("Recharger").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(host.events.visibleEvent?.key, host.adapter.pendingQuoteDetailKey)
+            assertTrue(host.calls.isEmpty())
+        }
+        compose.onNodeWithText("Retour au message").performClick()
+        assertEquals(fieldNode, compose.onNode(hasSetTextAction()).fetchSemanticsNode().id)
+        compose.runOnIdle {
+            assertNull(host.events.visibleEvent)
+            assertNull(host.adapter.detail)
+            assertEquals("saved D", host.state.restorableDraft)
+            assertTrue(host.state.pendingQuotes.isNotEmpty())
+        }
+    }
+
+    @Test fun `1450 pending event disappears without acknowledgement when its request is removed`() {
+        host.transition(host.state.copy(restorableDraft = "saved D", pendingQuotes = listOf(
+            QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Citation en attente, Afficher les détails").assertExists()
+        compose.runOnIdle { host.transition(host.state.copy(pendingQuotes = emptyList())) }
+        compose.onNodeWithContentDescription("Citation en attente, Afficher les détails").assertDoesNotExist()
     }
 
     @Test fun `ED22 ED44 ED80 selection survives tools and typing then only the second tap sends`() {

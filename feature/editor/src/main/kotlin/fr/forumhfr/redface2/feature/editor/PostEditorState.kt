@@ -52,6 +52,8 @@ data class PostEditorState(
     val validation: BbcodeValidation = BbcodeValidation.Idle,
     /** True while we GET `message.php` (reply / quote / edit form) to grab `hash_check`. */
     val isLoadingForm: Boolean = false,
+    /** Read identity is independent of a pending request: ordinary metadata may load under its offer. */
+    val isFetchingQuote: Boolean = false,
     /** Availability is evidence from the private loadedForm, never inferred from a finished GET. */
     val hasLoadedForm: Boolean = false,
     val hasAuthenticatedForm: Boolean = false,
@@ -169,6 +171,11 @@ data class PostEditorState(
             !submission.blocksBodyMutation &&
             !isLoadingForm && !quoteStorageUnavailable && pendingQuotes.isEmpty() &&
             !isUploading
+
+    /** ED-132: a readable inline request waits for this offer's explicit decision. */
+    val isQuoteAwaitingDraftDecision: Boolean
+        get() = mode == PostEditorMode.Reply && restorableDraft != null && pendingQuotes.isNotEmpty() &&
+            !hasDormantQuote && !unreadableQuoteRequest && !quoteStorageUnavailable
 
     val hasDormantQuote: Boolean
         get() = pendingQuotes.isNotEmpty() && submission is EditorSubmissionState.Uncertain

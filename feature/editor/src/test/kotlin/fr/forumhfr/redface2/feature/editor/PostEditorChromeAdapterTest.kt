@@ -4,6 +4,8 @@ import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.SubmissionToken
+import fr.forumhfr.redface2.core.model.write.QuoteLocator
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.EditorBackAction
 import fr.forumhfr.redface2.core.ui.editor.EditorBackState
@@ -26,6 +28,25 @@ import org.junit.Test
 
 class PostEditorChromeAdapterTest {
     private val host = PostEditorChromeFixture()
+
+    @Test fun `1450 pending event opens the existing restore panel without an automatic opening or intent`() {
+        host.transition(host.state.copy(restorableDraft = "D", pendingQuotes = listOf(
+            QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
+        val pending = host.events.visibleEvent!!
+        assertNull(host.adapter.surface)
+        assertFalse(host.adapter.state.sendActivatable)
+        host.adapter.barActions.onEvent(pending.key, EditorEventAction.Details)
+        assertEquals(pending.key, host.adapter.pendingQuoteDetailKey)
+        assertEquals(pending.key, host.adapter.detail?.key)
+        assertTrue(host.events.isPendingQuoteEvent(pending.key)) // ED-45 acknowledges on closing, not opening.
+        assertTrue(host.calls.isEmpty())
+        assertTrue(host.state.pendingQuotes.isNotEmpty())
+        host.adapter.closeDetails(pending.key)
+        assertNull(host.events.visibleEvent)
+        host.transition(host.state.copy(restorableDraft = null))
+        host.adapter.barActions.onEvent(pending.key, EditorEventAction.Details)
+        assertNull(host.adapter.surface)
+    }
 
     @Test fun `ED36 projects exactly the allowed shortcuts on this surface`() {
         val f = PostEditorChromeFixture()

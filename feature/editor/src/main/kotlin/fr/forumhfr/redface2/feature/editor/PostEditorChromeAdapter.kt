@@ -20,7 +20,7 @@ import fr.forumhfr.redface2.core.ui.editor.EventKey
 internal class PostEditorChromeAdapter(
     private val source: () -> PostEditorState,
     body: TextFieldState,
-    events: PostEditorChromeEvents,
+    private val events: PostEditorChromeEvents,
     private val onIntent: (PostEditorIntent) -> Unit,
     launchPicker: () -> Unit,
     openSmileys: () -> Unit,
@@ -60,6 +60,9 @@ internal class PostEditorChromeAdapter(
             { open(PostEditorChromeSurface.Restore) }, enabled = state.scaffold.controlsEnabled,
         ),
     )
+    /** Render this keyed detail with the existing offer panel; EditorHost retains ED-45 acknowledgement. */
+    val pendingQuoteDetailKey get() = detail?.key?.takeIf(events::isPendingQuoteEvent)
+
     private val quoteCount get() = source().quotes.size + source().pendingQuotes.size
     fun signature(enabled: Boolean) = option(PostEditorIntent.ToggleSignature(enabled))
     fun smileyDisabled(disabled: Boolean) = option(PostEditorIntent.ToggleSmileyDisabled(disabled))
@@ -87,14 +90,16 @@ internal class PostEditorChromeAdapter(
     fun restoreDraft() {
         // A non-blank restore can resolve an unknown edit body after the initial GET failed (#1574).
         if (source().canRestoreDraft && state.scaffold.controlsEnabled && !source().isUploading) {
+            val key = pendingQuoteDetailKey
             onIntent(PostEditorIntent.DraftRestoreRequested)
-            closeSurface()
+            if (key == null) closeSurface() else closeDetails(key)
         }
     }
     fun discardDraft() {
         if (state.scaffold.controlsEnabled) {
+            val key = pendingQuoteDetailKey
             onIntent(PostEditorIntent.DraftDiscardRequested)
-            closeSurface()
+            if (key == null) closeSurface() else closeDetails(key)
         }
     }
     fun resumeQuote(key: EventKey? = null) {
