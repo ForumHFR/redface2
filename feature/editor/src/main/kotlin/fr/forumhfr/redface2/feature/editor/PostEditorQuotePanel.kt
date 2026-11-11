@@ -100,7 +100,8 @@ internal fun PostEditorQuotePanel(
                 // Outlives every card and the button, including the final removal and clear-all.
                 Box(Modifier.size(1.dp).semantics {
                     liveRegion = LiveRegionMode.Polite
-                    contentDescription = announcement
+                    // Even an empty description makes this leaf screen-reader-focusable on Android.
+                    if (announcement.isNotEmpty()) contentDescription = announcement
                 })
             }
         }, body = body,

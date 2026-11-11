@@ -243,9 +243,10 @@ class PostEditorTransientComposeTest {
         }
     }
 
-    @Test fun `R2a the idle Android live region clears two seconds after the last message and works again`() {
+    @Test fun `R2a the idle Android live region is not focusable and still announces again after expiration`() {
         openQuotePanel()
         val id = compose.onNode(quotePanelLive, useUnmergedTree = true).fetchSemanticsNode().id
+        assertPanelAnnouncement(id, "")
         compose.mainClock.autoAdvance = false
         try {
             compose.onNodeWithContentDescription("Retirer la citation de Bob")
@@ -601,14 +602,24 @@ class PostEditorTransientComposeTest {
     private fun assertPanelAnnouncement(id: Int, text: String) {
         val node = compose.onNode(quotePanelLive, useUnmergedTree = true).fetchSemanticsNode()
         assertEquals(id, node.id)
-        assertEquals(listOf(text), node.config[SemanticsProperties.ContentDescription])
+        if (text.isEmpty()) {
+            assertFalse("An empty announcement must omit its description",
+                node.config.contains(SemanticsProperties.ContentDescription))
+        } else assertEquals(listOf(text), node.config[SemanticsProperties.ContentDescription])
         compose.runOnIdle {
             val info = requireNotNull(quotePanelView.accessibilityNodeProvider.createAccessibilityNodeInfo(id)) {
                 "Panel live region $id was pruned by Android"
             }
             assertTrue("Panel live region $id is invisible to Android", info.isVisibleToUser)
             assertEquals(View.ACCESSIBILITY_LIVE_REGION_POLITE, info.liveRegion)
-            assertEquals(text, info.contentDescription?.toString().orEmpty())
+            // LiveRegion is an important accessibility key, even without any speakable content.
+            assertTrue(info.isImportantForAccessibility)
+            assertNull(info.text)
+            if (text.isEmpty()) {
+                assertNull("An empty announcement must have no Android description", info.contentDescription)
+                assertFalse("An empty live region must not be a TalkBack stop", info.isScreenReaderFocusable)
+                assertFalse(info.isFocusable)
+            } else assertEquals(text, info.contentDescription?.toString())
         }
     }
 
