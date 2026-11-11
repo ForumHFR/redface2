@@ -38,6 +38,8 @@ import androidx.compose.ui.text.TextRange
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionController
 import fr.forumhfr.redface2.core.domain.editor.SubmissionRequest
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
+import fr.forumhfr.redface2.core.model.editor.EditorShortcutSurface
 import fr.forumhfr.redface2.core.ui.R
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -159,14 +161,35 @@ class EditorActionBarTest {
 
     @Test
     fun `ED38 shortcut is third only in normal mode and does not own a preference`() {
-        host.shortcut.value = EditorBarShortcut(R.drawable.ic_editor_bold, "Gras", { host.calls += "shortcut" })
-        compose.setContent { host.Content() }; click("Gras"); assertEquals(listOf("shortcut"), host.calls)
-        click("Mise en forme"); click("Gras"); assertEquals(listOf("shortcut", "bbcode"), host.calls)
+        host.shortcut.value = EditorBarShortcut(EditorShortcut.BOLD, EditorShortcutSurface.POST)
+        compose.setContent { host.Content() }; click("Gras"); assertEquals(listOf("bbcode"), host.calls)
+        click("Mise en forme"); click("Gras"); assertEquals(listOf("bbcode", "bbcode"), host.calls)
         compose.runOnIdle { host.bar.value = EditorBarState(arm = host.arm) }
         compose.onNodeWithContentDescription("Gras").assertDoesNotExist()
+        compose.runOnIdle { host.bar.value = EditorBarState(); host.event.value = host.finished() }
+        compose.onNodeWithContentDescription("Gras").assertDoesNotExist()
+        compose.runOnIdle { host.event.value = null }
         compose.runOnIdle { host.bar.value = EditorBarState(); host.uploading.value = true }
         compose.onNodeWithContentDescription("Gras").assertIsNotEnabled()
         compose.onNodeWithContentDescription("Mise en forme").assertIsNotEnabled()
+    }
+
+    @Test
+    fun `ED36 unavailable image shortcut is absent even when the host exposes wrapping`() {
+        host.imageUrl.value = false
+        host.shortcut.value = EditorBarShortcut(EditorShortcut.IMAGE_SELECTION, EditorShortcutSurface.POST)
+        compose.setContent { host.Content() }
+        compose.onNodeWithContentDescription("Baliser la sélection en [img]").assertDoesNotExist()
+        compose.runOnIdle {
+            host.shortcut.value = EditorBarShortcut(
+                EditorShortcut.IMAGE_SELECTION, EditorShortcutSurface.PRIVATE_MESSAGE_REPLY,
+            )
+        }
+        click("Baliser la sélection en [img]")
+        assertEquals("Un [img]texte[/img] choisi", host.body.text.toString())
+        assertEquals(EditorBarMode.Normal, host.bar.value.mode)
+        compose.runOnIdle { host.shortcut.value = EditorBarShortcut(EditorShortcut.NONE, EditorShortcutSurface.POST) }
+        compose.onNodeWithContentDescription("Baliser la sélection en [img]").assertDoesNotExist()
     }
 
     @Test

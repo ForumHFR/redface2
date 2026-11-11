@@ -96,6 +96,7 @@ open class EditorHost<S : Any>(
         return true
     }
     fun returnToBody(focus: () -> Unit) {
+        memory.focus.clearToolSelection()
         val target = if (body.text.toString() == memory.textBeforeSurface) memory.selection else body.selection
         focus()
         if (body.selection != target) body.edit { selection = target }

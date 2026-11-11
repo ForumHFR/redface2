@@ -242,6 +242,8 @@ class EditorPreviewComposeTest {
             val toggle = previewToggle()
             toggle.requestFocus().assertIsFocused()
             val (sessions, beforePreview) = compose.runOnIdle {
+                assertEquals(selection, host.surfaceFocus.toolFocus.captured?.selection)
+                assertEquals(ime > 0, host.surfaceFocus.toolFocus.captured?.imeVisible)
                 // BTF2 may collapse a range on genuine focus loss; set the preview-return range afterwards.
                 host.body.edit { this.selection = selection }
                 assertNull(host.inputConnection)
@@ -426,6 +428,7 @@ class EditorPreviewComposeTest {
         compose.runOnIdle {
             assertEquals(text, host.body.text.toString())
             assertEquals(selection, host.body.selection)
+            assertNull(host.surfaceFocus.toolFocus.captured)
             assertNull(host.inputConnection)
             assertEquals(sessions, host.inputSessions)
             assertEquals(commands, keyboard.calls)
@@ -445,6 +448,117 @@ class EditorPreviewComposeTest {
             assertFalse(host.body.undoState.canUndo)
             host.body.undoState.redo()
             assertEquals(text, host.body.text.toString())
+        }
+    }
+
+    @Test fun `covering preview consumes a refused surface return without IME or resize replay`() {
+        val selection = TextRange(12, 4)
+        openCoveringPreviewWithIme(selection)
+        val sessions = host.inputSessions
+        compose.onNodeWithContentDescription("Titre et sous-catégorie").revealEditorControl().performClick()
+        compose.runOnIdle { assertTrue(host.surfaceFocus.imeBeforeSurface) }
+        compose.onNodeWithText("Retour au message").performClick()
+        compose.onNodeWithTag("editor-preview-fallback").assertIsDisplayed()
+        compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
+        compose.runOnIdle {
+            assertEquals(selection, host.body.selection)
+            assertNull(host.inputConnection)
+            assertEquals(sessions, host.inputSessions)
+            assertTrue(keyboard.calls.isEmpty())
+            host.width.value = 760.dp
+        }
+        compose.onNodeWithTag("editor-preview-rendered").assertIsDisplayed()
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(600L)
+        compose.onNode(hasSetTextAction()).assertIsNotFocused()
+        compose.runOnIdle {
+            assertNull(host.inputConnection)
+            assertEquals(sessions, host.inputSessions)
+            assertTrue(keyboard.calls.isEmpty())
+            host.focus.requestFocus()
+        }
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            // Observe restoreImeOnFocus before closing the preview could suppress it again.
+            assertEquals(selection, host.body.selection)
+            assertNull(host.inputConnection)
+            assertEquals(sessions, host.inputSessions)
+            assertTrue(keyboard.calls.isEmpty())
+        }
+        previewToggle().revealEditorControl().performClick()
+        compose.onNodeWithTag("editor-preview-rendered").assertDoesNotExist()
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(selection, host.body.selection)
+            assertNull(host.surfaceFocus.toolFocus.captured)
+            host.width.value = 360.dp
+            host.metrics.value = EditorWindowMetrics(740.dp, 24.dp, 30.dp)
+        }
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(600L)
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(selection, host.body.selection)
+            assertNull(host.surfaceFocus.toolFocus.captured)
+            assertNull(host.inputConnection)
+            assertEquals(sessions, host.inputSessions)
+            assertTrue(keyboard.calls.isEmpty())
+        }
+    }
+
+    @Test fun `surface opened after covering defocus returns after expansion without stale IME show`() {
+        val selection = TextRange(12, 4)
+        openCoveringPreviewWithIme(selection)
+        val sessions = host.inputSessions
+        // Deliver the real IME closure after the covering preview ended the body's input session.
+        compose.runOnIdle { host.insets(ime = 0) }
+        compose.runOnIdle { assertFalse(imeVisible) }
+        compose.onNodeWithContentDescription("Titre et sous-catégorie").revealEditorControl().performClick()
+        compose.runOnIdle {
+            assertTrue(host.panel.value)
+            host.width.value = 760.dp
+        }
+        compose.onNodeWithText("Retour au message").performClick()
+        compose.onNodeWithTag("editor-preview-rendered").assertIsDisplayed()
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            assertFalse(host.surfaceFocus.imeBeforeSurface)
+            assertEquals(listOf("hide"), keyboard.calls)
+            assertEquals(selection, host.body.selection)
+            assertNull(host.surfaceFocus.toolFocus.captured)
+            assertNull(host.inputConnection)
+            assertEquals(sessions, host.inputSessions)
+        }
+    }
+
+    private fun openCoveringPreviewWithIme(selection: TextRange) {
+        mount()
+        compose.onNode(hasSetTextAction()).performClick()
+        compose.runOnIdle {
+            // The setup tap's own IME request is not under test: count commands from here on.
+            keyboard.calls.clear()
+            host.body.edit { this.selection = selection }
+            host.insets(ime = 180)
+        }
+        open()
+        compose.onNodeWithTag("editor-preview-rendered").assertIsDisplayed()
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        val sessions = compose.runOnIdle {
+            assertNotNull(host.inputConnection)
+            host.inputSessions
+        }
+        compose.runOnIdle {
+            host.width.value = 200.dp
+            host.metrics.value = EditorWindowMetrics(360.dp, 24.dp, 0.dp)
+        }
+        compose.onNodeWithTag("editor-preview-fallback").assertIsDisplayed()
+        compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
+        compose.runOnIdle {
+            assertTrue(imeVisible)
+            assertEquals(selection, host.body.selection)
+            assertNull(host.inputConnection)
+            assertEquals(sessions, host.inputSessions)
+            assertTrue(keyboard.calls.isEmpty())
         }
     }
 

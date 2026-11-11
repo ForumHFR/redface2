@@ -37,6 +37,27 @@ class TextFieldStateBbcodeIntegrationTest {
     private val state = TextFieldState()
 
     @Test
+    fun personalSmileyIsOneUndoTransactionWithEmptyAndReversedSelections() {
+        setFieldContent()
+        field().performTextInput("un nom")
+        listOf(TextRange(3), TextRange(6, 3)).forEach { selection ->
+            // performTextInputSelection sends (min, max), so it cannot pose a reversed range.
+            // Foundation 1.12.1 records both endpoints and undo restores them unchanged.
+            change { state.edit { this.selection = selection } }
+            assertValue("un nom", selection)
+            change { state.editBbcode { text, start, end ->
+                applyBbcodeAction(BbcodeAction.PersonalSmiley, text, start, end)
+            } }
+            if (selection.collapsed) assertValue("un [:]nom", TextRange(5))
+            else assertValue("un [:nom]", TextRange(9))
+            change { state.undoState.undo() }
+            assertValue("un nom", selection)
+        }
+        change { state.undoState.undo() }
+        assertValue("", TextRange.Zero)
+    }
+
+    @Test
     fun insertionPreservesSelectionAndUndoContract() {
         setFieldContent()
         field().performTextInput("hello ")

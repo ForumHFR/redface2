@@ -402,6 +402,7 @@ private class SelectionDetachNode(
         // Undo only BTF2's bare collapse: same text, caret at the recorded max. Like EditorHeaderPanel,
         // a selection-only programmatic edit adds no undo entry and bypasses the input transformation.
         if (live == recorded.copy(selection = TextRange(recorded.selection.max))) {
+            // Selection-only focus repair keeps the tool capture valid for the unchanged buffer.
             state.edit { selection = recorded.selection }
         }
     }

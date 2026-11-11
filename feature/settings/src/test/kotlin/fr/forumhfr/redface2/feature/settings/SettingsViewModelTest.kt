@@ -31,6 +31,7 @@ import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.EditorPreviewKey
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
@@ -3051,6 +3052,10 @@ class SettingsViewModelTest {
         var failOnImagePickerModeSet: Boolean = false
 
         override fun observeImagePickerMode(): Flow<ImagePickerMode> = imagePickerMode
+
+        override fun observeEditorShortcut(): Flow<EditorShortcut> = MutableStateFlow(EditorShortcut.NONE)
+
+        override suspend fun setEditorShortcut(shortcut: EditorShortcut) = Unit
 
         override suspend fun setImagePickerMode(mode: ImagePickerMode) {
             imagePickerModeSetCalls += 1

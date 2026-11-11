@@ -490,6 +490,10 @@ class TopicFormViewModel @AssistedInject constructor(
     private fun persistDraftNow() {
         if (!draftRestored || submission.blocksClose || submission.drafts.invalidated) return
         val draft = draftSnapshot() ?: return
+        // Consume the body decision before suppressing this revision's delayed mirror.
+        if (draft.body != previousBody) decideBody()
+        // This live revision is checkpointed now; its delayed mirror must not rearm autosave.
+        previousBody = draft.body
         val version = maxOf(submission.drafts.nextContentVersion, lastCheckpointVersion + 1)
         lastCheckpointVersion = version
         pendingCheckpoints++
@@ -684,6 +688,7 @@ class TopicFormViewModel @AssistedInject constructor(
 
     /** Explicit restore/hydration is one undoable edit, independent of the current selection. */
     private fun replaceBody(body: String) {
+        chromeMemory.host.focus.clearToolSelection()
         Snapshot.withMutableSnapshot {
             bodyCaretRevealResetKey++
             bodyFieldState.edit {
@@ -717,6 +722,7 @@ class TopicFormViewModel @AssistedInject constructor(
     private fun onSmileySelected(token: String) {
         if (_state.value.isAwaitingInitialBody) return
         decideBody()
+        chromeMemory.host.focus.clearToolSelection()
         bodyFieldState.editBbcode { text, start, end -> insertBbcodeToken(token, text, start, end) }
         // Close the picker on successful insertion (#824 restores the search on the next
         // open) — same contract as PostEditorViewModel.onSmileySelected.
@@ -734,7 +740,6 @@ class TopicFormViewModel @AssistedInject constructor(
         if (_state.value.isAwaitingInitialBody) return
         val token = imageInsertBbcodeOrNull(fullUrl = url, mode = imageInsertMode) ?: return
         insertImageBbcodeAtCaret(token, leadingNewline = false)
-        scheduleAutosave()
     }
 
     /**
@@ -747,12 +752,14 @@ class TopicFormViewModel @AssistedInject constructor(
     private fun insertImageBbcodeAtCaret(bbcode: String, leadingNewline: Boolean) {
         if (submission.blocksMutation || _state.value.isAwaitingInitialBody) return
         decideBody()
+        chromeMemory.host.focus.clearToolSelection()
         bodyFieldState.editBbcode { text, start, end ->
             val caret = start.coerceIn(0, text.length)
             val needsNewline = leadingNewline && caret > 0 && text[caret - 1] != '\n'
             val token = if (needsNewline) "\n$bbcode" else bbcode
             insertBbcodeToken(token, text, start, end, surroundWithSpaces = false)
         }
+        persistDraftNow()
     }
 
     /** #1573 — cancellation only records diagnostics; a successful empty callback retains #1128 feedback. */
@@ -827,9 +834,6 @@ class TopicFormViewModel @AssistedInject constructor(
                 if (submission.blocksMutation || activeUserId != userId) break
                 if (bbcode != null) {
                     insertImageBbcodeAtCaret(bbcode, leadingNewline = completed > 0)
-                    // Persist after EACH insert: a later image failing must not lose the images
-                    // already inserted into the draft (Codex review #490).
-                    scheduleAutosave()
                 }
                 completed += 1
                 if (multiple) {
@@ -877,8 +881,9 @@ class TopicFormViewModel @AssistedInject constructor(
     private fun onToolbarActionClicked(action: BbcodeAction) {
         if (_state.value.isAwaitingInitialBody) return
         decideBody()
+        chromeMemory.host.focus.clearToolSelection()
         bodyFieldState.editBbcode { text, start, end -> applyBbcodeAction(action, text, start, end) }
-        scheduleAutosave()
+        if (action == BbcodeAction.Image) persistDraftNow() else scheduleAutosave()
     }
 
     private fun onTogglePreview() {

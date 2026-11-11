@@ -32,9 +32,11 @@ internal class PrivateMessageComposeDraftSession(
     private val submission: EditorSubmissionBinding<PrivateMessageComposeEffect, EditorError>,
     private val scope: CoroutineScope,
     private val draftKey: String,
-    private val readState: () -> PrivateMessageComposeUiState,
-    private val updateState: ((PrivateMessageComposeUiState) -> PrivateMessageComposeUiState) -> Unit,
+    state: PrivateMessageDraftState<PrivateMessageComposeUiState>,
+    private val clearToolSelection: () -> Unit,
 ) {
+    private val readState = state.read
+    private val updateState = state.update
     val bodyFieldState = TextFieldState()
     val bodyScrollState = ScrollState(0)
     var bodyCaretRevealResetKey by mutableIntStateOf(0)
@@ -223,6 +225,7 @@ internal class PrivateMessageComposeDraftSession(
     }
 
     private fun replaceBody(body: String) {
+        clearToolSelection()
         Snapshot.withMutableSnapshot {
             bodyCaretRevealResetKey++
             bodyFieldState.edit {
@@ -251,9 +254,13 @@ internal class PrivateMessageComposeDraftSession(
     }
 
     /** Capture before suspension, including the final keystroke before the mirror/debounce runs. */
-    private fun persistDraftNow() {
+    fun persistDraftNow() {
         if (!draftRestored || submission.blocksClose || submission.drafts.invalidated) return
         val draft = draftSnapshot() ?: return
+        // Consume the body decision before suppressing this revision's delayed mirror.
+        if (draft.body != previousBody) decide(EditorSessionField.Body)
+        // This live revision is checkpointed now; its delayed mirror must not rearm autosave.
+        previousBody = draft.body
         val version = maxOf(submission.drafts.nextContentVersion, lastCheckpointVersion + 1)
         lastCheckpointVersion = version
         pendingCheckpoints++

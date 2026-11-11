@@ -68,6 +68,12 @@ sealed interface BbcodeAction {
         override val closeTag: String = "[/img]"
     }
 
+    /** ED-37: no spaces; unlike formats, a wrapped name leaves the caret after the token. */
+    data object PersonalSmiley : BbcodeAction {
+        override val openTag: String = "[:"
+        override val closeTag: String = "]"
+    }
+
     /**
      * HFR colour wrap : `[#RRGGBB]…[/#RRGGBB]`. The closing tag echoes the
      * same hex code (verified in `BbcodeContentParser.parseColor`). Hex must
@@ -95,11 +101,12 @@ sealed interface BbcodeAction {
  * - [selectionStart] and [selectionEnd] mark the new selection. The contract is
  *   convenient for callers wiring this up to Compose's `TextFieldValue`:
  *
- *   * if the original selection was non-empty, the new selection wraps the inserted
+ *   * for formats, if the original selection was non-empty, the new selection wraps the inserted
  *     content (i.e. spans the formatted text between the open and close tags);
  *   * if the original selection was empty, the new selection is collapsed and placed
  *     between the open and close tags so the caret sits where the user is about to
  *     type.
+ *   * [BbcodeAction.PersonalSmiley] instead collapses after the token when wrapping a name (ED-37).
  */
 data class BbcodeFormatResult(
     val text: String,
@@ -144,6 +151,11 @@ fun applyBbcodeAction(
 
     val newSelectionStart = before.length + open.length
     val newSelectionEnd = newSelectionStart + selected.length
+
+    if (action == BbcodeAction.PersonalSmiley) {
+        val caret = if (start == end) newSelectionStart else newSelectionEnd + close.length
+        return BbcodeFormatResult(newText, caret, caret)
+    }
 
     return BbcodeFormatResult(
         text = newText,

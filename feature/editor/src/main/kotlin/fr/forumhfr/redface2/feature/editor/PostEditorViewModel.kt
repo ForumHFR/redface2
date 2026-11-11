@@ -646,6 +646,7 @@ class PostEditorViewModel @AssistedInject constructor(
         val prefills = delivery.bbcode
         // ED-132: reconcile on the live field immediately before this single edit.
         // #881/#790: a quote alone ends with one newline; a prefix uses two.
+        chromeMemory.focus.clearToolSelection()
         if (prefills.isNotBlank()) bodyFieldState.editBbcode { text, _, _ ->
             val combined = if (text.isBlank()) prefills + "\n" else prefills + "\n\n" + text
             BbcodeFormatResult(combined, combined.length, combined.length)
@@ -807,6 +808,7 @@ class PostEditorViewModel @AssistedInject constructor(
         liveBody != cachedBody && (liveBody.isBlank() || liveBody == draftHydratedContent)
 
     private fun restoreViewport(length: Int) {
+        chromeMemory.focus.clearToolSelection()
         bodyFieldState.edit { selection = restoration.selection(length) }
     }
 
@@ -823,6 +825,8 @@ class PostEditorViewModel @AssistedInject constructor(
     private fun persistDraftNow() {
         if (!draftRestored || submission.blocksClose || submission.drafts.invalidated) return
         val draft = draftSnapshot() ?: return
+        // This live revision is checkpointed now; its delayed mirror must not rearm autosave.
+        previousBody = draft.body
         // Several stops/upload completions may queue behind the same in-flight CAS or autosave join.
         val version = maxOf(submission.drafts.nextContentVersion, lastCheckpointVersion + 1)
         lastCheckpointVersion = version
@@ -1050,6 +1054,7 @@ class PostEditorViewModel @AssistedInject constructor(
 
     /** Hydration/restore and its reveal baseline must be observed atomically, including equal bodies. */
     private fun replaceBody(body: String) {
+        chromeMemory.focus.clearToolSelection()
         Snapshot.withMutableSnapshot {
             bodyCaretRevealResetKey++
             bodyFieldState.edit {
@@ -1067,6 +1072,7 @@ class PostEditorViewModel @AssistedInject constructor(
     private fun onSmileySelected(token: String) {
         if (_state.value.isAwaitingInitialBody) return
         bodyEditedBeforeHydration = true
+        chromeMemory.focus.clearToolSelection()
         bodyFieldState.editBbcode { text, start, end -> insertBbcodeToken(token, text, start, end) }
         smileyPicker.dismiss(SmileyPickerCloseCause.INSERTION)
         scheduleAutosave()
@@ -1083,7 +1089,6 @@ class PostEditorViewModel @AssistedInject constructor(
         if (_state.value.isAwaitingInitialBody) return
         val bbcode = imageInsertBbcodeOrNull(fullUrl = url, mode = imageInsertMode) ?: return
         insertImageBbcodeAtCaret(bbcode, leadingNewline = false)
-        scheduleAutosave()
     }
 
     /**
@@ -1097,6 +1102,7 @@ class PostEditorViewModel @AssistedInject constructor(
         // Only validated upload callbacks reach this path during isUploading.
         if (_state.value.isAwaitingInitialBody || !acceptMutation()) return
         bodyEditedBeforeHydration = true
+        chromeMemory.focus.clearToolSelection()
         bodyFieldState.editBbcode { text, start, end ->
             val caret = start.coerceIn(0, text.length)
             val needsNewline = leadingNewline && caret > 0 && text[caret - 1] != '\n'
@@ -1105,6 +1111,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 text = text, selectionStart = start, selectionEnd = end, surroundWithSpaces = false,
             )
         }
+        persistDraftNow()
     }
 
     /**
@@ -1198,9 +1205,6 @@ class PostEditorViewModel @AssistedInject constructor(
                 if (bbcode != null) {
                     // Each image after the first lands on its own line (no more run-together uploads).
                     insertImageBbcodeAtCaret(bbcode, leadingNewline = completed > 0)
-                    // Persist after EACH insert, not once at the end: a later image failing must not
-                    // lose the images already inserted into the draft (Codex review #490).
-                    scheduleAutosave()
                 }
                 completed += 1
                 if (multiple) {
@@ -1237,8 +1241,9 @@ class PostEditorViewModel @AssistedInject constructor(
     private fun onToolbarActionClicked(action: BbcodeAction) {
         if (_state.value.isAwaitingInitialBody) return
         bodyEditedBeforeHydration = true
+        chromeMemory.focus.clearToolSelection()
         bodyFieldState.editBbcode { text, start, end -> applyBbcodeAction(action, text, start, end) }
-        scheduleAutosave()
+        if (action == BbcodeAction.Image) persistDraftNow() else scheduleAutosave()
     }
 
     private fun onTogglePreview() {

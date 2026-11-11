@@ -11,6 +11,8 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
+import fr.forumhfr.redface2.core.model.editor.EditorShortcutSurface
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Assert.assertEquals
@@ -64,7 +66,9 @@ class EditorActionBarRoborazziTest {
         host.bar.value = EditorBarState(sampleMode(sample), if (sample == 6 || sample == 16) host.frozenArm else null)
         host.enabled.value = sample != 17 && sample != 18
         host.imageUrl.value = sample != 5
-        host.shortcut.value = if (sample == 1) EditorBarShortcut(R.drawable.ic_editor_bold, "Gras", {}) else null
+        host.shortcut.value = if (sample == 1) {
+            EditorBarShortcut(EditorShortcut.BOLD, EditorShortcutSurface.POST)
+        } else null
         host.loading.value = sample == 7
         host.sending.value = sample == 8
         host.uploading.value = sample in 9..11

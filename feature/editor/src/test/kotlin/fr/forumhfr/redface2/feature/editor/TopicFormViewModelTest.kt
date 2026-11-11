@@ -61,6 +61,7 @@ import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyWikiKeywordsResult
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.EditorPreviewKey
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerContract
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
@@ -3438,6 +3439,68 @@ class TopicFormViewModelTest {
     }
 
     @Test
+    fun `ED37 URL upload and image wrapping cancel the typing debounce with one checkpoint`() = runTest {
+        val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        syncBody()
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        val saves = draftStore.saveCount
+        val writes = draftStore.writes
+        vm.editBody(TextFieldValue("nom", TextRange(3, 0)))
+        dispatcher.scheduler.advanceTimeBy(300)
+        syncBody()
+        assertEquals(saves, draftStore.saveCount)
+        assertEquals(writes, draftStore.writes)
+        vm.submit(TopicFormIntent.ToolbarActionClicked(BbcodeAction.Image))
+        syncBody()
+        assertEquals("[img]nom[/img]", draftStore.saved[key]?.body)
+        assertEquals(saves + 1, draftStore.saveCount)
+        assertEquals(writes + 1, draftStore.writes)
+        // The image checkpoint must cancel the typing debounce, including a delayed mirror.
+        dispatcher.scheduler.advanceTimeBy(1_000)
+        syncBody()
+        assertEquals(saves + 1, draftStore.saveCount)
+        assertEquals(writes + 1, draftStore.writes)
+        val now = dispatcher.scheduler.currentTime
+        vm.submit(TopicFormIntent.ImageUrlInserted("https://example.test/image.png"))
+        syncBody()
+        assertEquals(vm.bodyFieldState.text.toString(), draftStore.saved[key]?.body)
+        val beforeUpload = vm.bodyFieldState.text.toString()
+        vm.submit(TopicFormIntent.ImagesPicked(listOf("content://pick/1")))
+        syncBody()
+        assertTrue(vm.bodyFieldState.text.toString() != beforeUpload)
+        assertEquals(vm.bodyFieldState.text.toString(), draftStore.saved[key]?.body)
+        assertEquals(now, dispatcher.scheduler.currentTime)
+    }
+
+    @Test
+    fun `ED37 image actions and stop cannot checkpoint while sending`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        topicFormRepository.submitGate = gate
+        val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Title")))
+        vm.editBody(TextFieldValue("body", TextRange(4)))
+        vm.submit(TopicFormIntent.SubmitClicked())
+        syncBody()
+        assertTrue(vm.state.value.submission is EditorSubmissionState.Sending)
+        val saves = draftStore.saveCount
+        val writes = draftStore.writes
+        val entry = draftStore.entries[EditorDraftKey.newTopic(SAMPLE_CAT)]
+
+        vm.submit(TopicFormIntent.ToolbarActionClicked(BbcodeAction.Image))
+        vm.submit(TopicFormIntent.ImageUrlInserted("https://example.test/image.png"))
+        vm.submit(TopicFormIntent.Stopped)
+        dispatcher.scheduler.advanceTimeBy(1_000)
+        syncBody()
+
+        assertTrue(vm.state.value.submission is EditorSubmissionState.Sending)
+        assertEquals("body", vm.bodyFieldState.text.toString())
+        assertEquals(saves, draftStore.saveCount)
+        assertEquals(writes, draftStore.writes)
+        assertEquals(entry, draftStore.entries[EditorDraftKey.newTopic(SAMPLE_CAT)])
+        gate.complete(Unit)
+    }
+
+    @Test
     fun `picked images upload and insert one img per success, in pick order (#459)`() = runTest {
         val uploads = FakeUploadRepository()
         val reader = FakeImageUploadReader()
@@ -4101,6 +4164,10 @@ class TopicFormViewModelTest {
         private val imagePickerMode = MutableStateFlow(ImagePickerMode.DEFAULT)
 
         override fun observeImagePickerMode(): Flow<ImagePickerMode> = imagePickerMode
+
+        override fun observeEditorShortcut(): Flow<EditorShortcut> = MutableStateFlow(EditorShortcut.NONE)
+
+        override suspend fun setEditorShortcut(shortcut: EditorShortcut) = Unit
 
         override suspend fun setImagePickerMode(mode: ImagePickerMode) {
             imagePickerMode.value = mode

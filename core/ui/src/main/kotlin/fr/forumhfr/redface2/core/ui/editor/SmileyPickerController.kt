@@ -197,7 +197,16 @@ class SmileyPickerController(
      */
     private var lastDismissed: SmileyPickerState.Open? = null
 
-    fun open() {
+    /** Legacy hosts keep their focus behaviour until all four opt into ED-70 in R6 PR 2. */
+    fun open() = openWithIntent(null)
+
+    /**
+     * An already open sheet ignores [intent] and keeps its live search/opening intent.
+     * Today the modal sheet blocks the editor's opening controls, so users cannot reach this case.
+     */
+    fun open(intent: SmileyPickerOpenIntent) = openWithIntent(intent)
+
+    private fun openWithIntent(intent: SmileyPickerOpenIntent?) {
         val before = _state.value
         if (before is SmileyPickerState.Hidden) pickerDiagnostics.sheetOpened()
         if ((before as? SmileyPickerState.Open)?.detailSmiley != null) {
@@ -212,7 +221,12 @@ class SmileyPickerController(
                 // #824 — restore the last dismissed search (query + results) so reopening
                 // right after an insertion / accidental swipe-down never costs a retype.
                 val restored = withFavorites(lastDismissed ?: SmileyPickerState.Open())
-                restored.copy(initialTab = initialTab(restored))
+                restored.copy(
+                    initialTab = if (intent == SmileyPickerOpenIntent.SEARCH) {
+                        SmileyPickerTab.WIKI
+                    } else initialTab(restored),
+                    openingIntent = intent,
+                )
             }
         }
     }

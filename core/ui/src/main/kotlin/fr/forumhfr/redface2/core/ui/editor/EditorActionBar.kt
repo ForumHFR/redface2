@@ -3,7 +3,6 @@
 package fr.forumhfr.redface2.core.ui.editor
 
 import androidx.activity.compose.BackHandler
-import androidx.annotation.DrawableRes
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
@@ -38,6 +37,8 @@ import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
+import fr.forumhfr.redface2.core.model.editor.EditorShortcutSurface
 import fr.forumhfr.redface2.core.ui.R
 
 data class EditorActionBarActions(
@@ -48,13 +49,14 @@ data class EditorActionBarActions(
     val onOptions: () -> Unit,
     val onPreview: () -> Unit,
     val onEvent: (EventKey, EditorEventAction) -> Unit,
+    /** Supplied by R6 hosts; search stays unavailable until its intention can be dispatched. */
+    val onSmileySearch: (() -> Unit)? = null,
 )
 
-/** R6 supplies availability, dispatch and focus restoration; this slot stores no preference. */
+/** Typed choice only: insertion and surface callbacks always come from the common bar actions. */
 data class EditorBarShortcut(
-    @param:DrawableRes val iconRes: Int,
-    val label: String,
-    val onClick: () -> Unit,
+    val choice: EditorShortcut,
+    val surface: EditorShortcutSurface,
     val enabled: Boolean = true,
 )
 
@@ -323,8 +325,7 @@ private fun EditorBarTools(
             format()
             EditorBarIcon(R.drawable.ic_editor_smileys, stringResource(R.string.editor_smileys),
                 { external(actions.onSmileys) }, enabled = enabled, compactHeight = compactHeight)
-            shortcut?.let { EditorBarIcon(it.iconRes, it.label, it.onClick,
-                enabled = enabled && it.enabled, compactHeight = compactHeight) }
+            shortcut?.let { EditorShortcutControl(it, actions, images, enabled, compactHeight, insert, external) }
             EditorBarIcon(R.drawable.ic_editor_image, stringResource(R.string.editor_bar_image),
                 { focus.navigate(EditorBarFocusTarget.Image, EditorBarFocusTarget.Return) {
                     actions.onGesture(EditorBarGesture.OpenImage)

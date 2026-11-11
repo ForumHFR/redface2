@@ -41,6 +41,7 @@ import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.EditorPreviewDirection
 import fr.forumhfr.redface2.core.model.editor.EditorPreviewKey
 import fr.forumhfr.redface2.core.model.editor.EditorPreviewWidthClass
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
@@ -71,6 +72,39 @@ import org.junit.rules.TemporaryFolder
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class DataStoreUserPreferencesRepositoryTest {
+
+    @Test
+    fun `editor shortcut defaults to None for absent and unknown IDs`() = runTest(dispatcher) {
+        assertEquals(EditorShortcut.NONE, repository.observeEditorShortcut().first())
+        dataStore.edit { it[stringPreferencesKey("editor_shortcut")] = "future_action" }
+        assertEquals(EditorShortcut.NONE, repository.observeEditorShortcut().first())
+    }
+
+    @Test
+    fun `editor shortcut persists stable IDs and a new repository reads every choice`() = runTest(dispatcher) {
+        EditorShortcut.entries.forEach { choice ->
+            repository.setEditorShortcut(choice)
+            assertEquals(choice.id, dataStore.data.first()[stringPreferencesKey("editor_shortcut")])
+            assertEquals(choice, repositoryWith(dataStore).observeEditorShortcut().first())
+        }
+    }
+
+    @Test
+    fun `failed shortcut write propagates and preserves the previous choice`() = runTest(dispatcher) {
+        repository.setEditorShortcut(EditorShortcut.BOLD)
+        val gated = GatedCommitDataStore(dataStore)
+        val repo = repositoryWith(gated)
+        repo.observeEditorShortcut().test {
+            assertEquals(EditorShortcut.BOLD, awaitItem())
+            val write = async { runCatching { repo.setEditorShortcut(EditorShortcut.RED) } }
+            gated.commitStarted.await()
+            gated.finishCommit.completeExceptionally(IOException("disk full"))
+            assertTrue(write.await().exceptionOrNull() is IOException)
+            expectNoEvents()
+            assertEquals(EditorShortcut.BOLD, repo.observeEditorShortcut().first())
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
 
     @get:Rule val tempFolder = TemporaryFolder()
 

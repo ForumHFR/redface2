@@ -108,7 +108,10 @@ fun EditorPreview(
     LaunchedEffect(visible, bodyState) {
         if (!visible && focusMemory.wasOpen && focusMemory.returnFocus) {
             if (!sourceFocused && returnToSource != null) returnToSource() else {
-                requestEditorBodyFocus(bodyState, bodyFocusRequester)
+                val selection = bodyState.selection
+                bodyFocusRequester.requestFocus()
+                // If focus is refused, selection-only repair preserves any existing tool capture.
+                if (bodyState.selection != selection) bodyState.edit { this.selection = selection }
             }
         }
         focusMemory.wasOpen = visible

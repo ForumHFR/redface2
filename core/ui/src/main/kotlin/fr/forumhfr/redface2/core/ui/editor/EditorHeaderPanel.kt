@@ -144,6 +144,7 @@ internal fun EditorPanelOverlay(
         }
         // BTF2 collapses selection on focus loss. A panel must preserve both endpoints,
         // including a reversed range, without replacing text or adding an undo entry.
+        // Selection-only focus repair keeps the tool capture valid for the unchanged buffer.
         if (bodyState.selection != selectionBeforeFocusChange) bodyState.edit {
             selection = selectionBeforeFocusChange
         }

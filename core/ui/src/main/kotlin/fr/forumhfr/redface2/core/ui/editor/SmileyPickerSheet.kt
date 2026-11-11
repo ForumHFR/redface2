@@ -53,6 +53,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
@@ -116,7 +117,9 @@ fun SmileyPickerSheet(
     // All four hosts remove the sheet on Hidden: expiration survives tab changes, not a new opening.
     val favoriteOverlayExpired = rememberSmileyPickerOverlayExpired(state.favoriteFeedbackGeneration)
     val gridState = rememberSaveableStateHolder()
-    val wikiAutofocus = rememberSaveable { mutableStateOf(state.detailSmiley == null) }
+    val wikiAutofocus = rememberSaveable {
+        mutableStateOf(state.openingIntent != SmileyPickerOpenIntent.CONSULTATION && state.detailSmiley == null)
+    }
     val uiState = SmileyPickerUiState(wikiAutofocus, favoriteOverlayExpired)
     val gestures = remember { SmileySheetGestures() }
     val scope = rememberCoroutineScope()
@@ -166,6 +169,7 @@ fun SmileyPickerSheet(
             SmileySheetHandle(
                 onDismiss = { dismissAnimated(SmileyPickerCloseCause.SHEET_ACTION) },
                 modifier = Modifier.align(Alignment.CenterHorizontally),
+                takeInitialFocus = state.openingIntent == SmileyPickerOpenIntent.CONSULTATION,
             )
             SmileyDetailBackHandler(state)
             SmileyDetailFocusEffect(state.detailSmiley, wikiAutofocus)
@@ -217,9 +221,19 @@ fun SmileyPickerSheet(
 /** Same M3 handle and touch target, with an explicit cause for taps and accessibility dismissal. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SmileySheetHandle(onDismiss: () -> Unit, modifier: Modifier = Modifier) {
+private fun SmileySheetHandle(
+    onDismiss: () -> Unit, modifier: Modifier = Modifier, takeInitialFocus: Boolean = false,
+) {
+    val focus = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        if (takeInitialFocus) focus.requestFocus()
+    }
     Box(
-        modifier.minimumInteractiveComponentSize().clickable(
+        // The dialog's native initial focus otherwise lands on the Wiki field in touch mode,
+        // even when WikiTabContent does not request it. Keep an accessible, non-input target.
+        modifier.focusRequester(focus).focusProperties {
+            if (takeInitialFocus) canFocus = true
+        }.minimumInteractiveComponentSize().clickable(
             role = Role.Button,
             onClickLabel = stringResource(R.string.editor_smiley_picker_close),
             onClick = onDismiss,

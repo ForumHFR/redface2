@@ -155,12 +155,15 @@ internal enum class EditorBodyFocusAvailability { Pending, Ready, Blocked }
  * preview-blocked if still Blocked, otherwise deadline, without reclaiming focus on a later resize.
  */
 @Composable
+@Suppress("LongParameterList") // H binding: observation, eligibility, field, focus, preview readiness, tool capture.
 internal fun RestoreRecreatedEditorBodyFocus(
     observation: EditorBodyFocusObservation, allowed: Boolean, state: TextFieldState, focus: FocusRequester,
     availability: EditorBodyFocusAvailability = EditorBodyFocusAvailability.Ready,
+    clearToolSelection: () -> Unit,
 ) {
     val currentAllowed by rememberUpdatedState(allowed)
     val currentAvailability by rememberUpdatedState(availability)
+    val currentClearToolSelection by rememberUpdatedState(clearToolSelection)
     val restoreOnAttach = remember(observation) { allowed && observation.restore != null }
     SideEffect { observation.trace.availability(availability) }
     LaunchedEffect(observation) {
@@ -171,7 +174,9 @@ internal fun RestoreRecreatedEditorBodyFocus(
             try {
                 val completed = withTimeoutOrNull(BODY_FOCUS_RESTORATION_TIMEOUT_MS) {
                     if (attempt.awaitReady()) {
-                        outcome = if (requestEditorBodyFocus(state, focus)) "restored" else "focus-refused"
+                        outcome = if (requestEditorBodyFocus(state, focus, currentClearToolSelection)) {
+                            "restored"
+                        } else "focus-refused"
                     } else outcome = attempt.cancellationReason
                     true
                 }
@@ -254,7 +259,11 @@ internal fun Modifier.cancelEditorBodyFocusRestorationOnInteraction(
         }
 }
 
-internal fun requestEditorBodyFocus(state: TextFieldState, focus: FocusRequester): Boolean {
+internal fun requestEditorBodyFocus(
+    state: TextFieldState, focus: FocusRequester, clearToolSelection: () -> Unit,
+): Boolean {
+    // Focus may already be held or refused: onEnter alone cannot invalidate an older tool selection.
+    clearToolSelection()
     val selection = state.selection
     val focused = focus.requestFocus()
     // Both oriented endpoints, selection-only: no clearFocus, text replacement or undo entry.
