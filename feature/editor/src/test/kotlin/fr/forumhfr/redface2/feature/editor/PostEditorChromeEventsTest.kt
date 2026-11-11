@@ -32,7 +32,7 @@ class PostEditorChromeEventsTest {
         host.transition(host.state.copy(restorableDraft = "D", pendingQuotes = listOf(
             QuoteSelection(QuoteLocator(1, 101, null), "", "")), isLoadingForm = true))
         val pending = host.events.visibleEvent!!
-        assertEquals(EditorText(R.string.editor_quote_pending), pending.summary)
+        assertEquals(EditorText(R.string.editor_quote_pending_event), pending.summary)
         assertEquals(EditorEventRank.Information, pending.rank)
         assertEquals(EditorEventAction.Details, pending.action)
         assertEquals(5_000L, (pending.content as EditorEventContent.Information).timeoutMillis)

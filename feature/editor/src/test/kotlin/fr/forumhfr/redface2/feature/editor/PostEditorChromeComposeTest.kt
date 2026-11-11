@@ -113,7 +113,8 @@ class PostEditorChromeComposeTest {
                 QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
             assertNull(host.adapter.surface)
         }
-        compose.onNodeWithContentDescription("Citation en attente, Afficher les détails", useUnmergedTree = true)
+        compose.onNodeWithContentDescription("Brouillon retrouvé, citation en attente, Afficher les détails",
+            useUnmergedTree = true)
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))
         // The outer submit tag measures geometry; only the inner M3 Button owns Disabled.
         compose.onNodeWithTag("editor-bar-submit-shape").assertIsNotEnabled()
@@ -126,6 +127,7 @@ class PostEditorChromeComposeTest {
         compose.onNodeWithTag("editor-bar-event").performClick()
         compose.onNode(isDialog()).assertExists()
         compose.onNodeWithTag("editor-draft-offer-sheet").assertIsDisplayed()
+        compose.onNodeWithText("Brouillon retrouvé").assertIsDisplayed()
         compose.onNodeWithText("Citation en attente").assertIsDisplayed()
         compose.onNodeWithText("Restaurer").assertIsDisplayed()
         compose.onNodeWithText("Ignorer").assertIsDisplayed()
@@ -273,9 +275,10 @@ class PostEditorChromeComposeTest {
         host.transition(host.state.copy(restorableDraft = "saved D", pendingQuotes = listOf(
             QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
         compose.setContent { Content() }
-        compose.onNodeWithContentDescription("Citation en attente, Afficher les détails").assertExists()
+        compose.onNodeWithContentDescription("Brouillon retrouvé, citation en attente, Afficher les détails").assertExists()
         compose.runOnIdle { host.transition(host.state.copy(pendingQuotes = emptyList())) }
-        compose.onNodeWithContentDescription("Citation en attente, Afficher les détails").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Brouillon retrouvé, citation en attente, Afficher les détails")
+            .assertDoesNotExist()
     }
 
     @Test fun `1450 pending quote delivery offers Reload in save failure details`() {

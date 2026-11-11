@@ -111,6 +111,28 @@ class EditorHostTest {
         assertFalse(rotated.consumeReturn())
     }
 
+    @Test fun `ED35 offer first tap exception never arms or sends under its information`() {
+        val arm = ArmToken(1, session, 0, 4_000L)
+        listOf(false, true).forEachIndexed { index, confirm ->
+            val key = EventKey(session, OperationRef.Local(EditorLocalOperation.Notice, index + 1L), 0)
+            val host = host(draftOffer = true, isDraftOfferDetail = { it == key })
+            val submission = if (confirm) EditorSubmissionState.Armed(arm) else EditorSubmissionState.Ready
+            state = state.copy(submission = submission)
+            events.dispatch(EditorEventInput.Received(EditorEvent(key,
+                EditorEventContent.Information(EditorText(R.string.editor_draft_offer_title),
+                    EditorText(R.string.editor_action_details)), index + 1L)))
+            assertEquals(key, events.visibleEvent?.key)
+            assertTrue(host.submitState.enabled)
+            assertEquals(confirm, host.submitState.armed)
+            if (confirm) host.submitActions.onConfirmSubmit() else host.submitActions.onSubmit()
+            assertNull(events.visibleEvent)
+            assertTrue(events.state.events.isEmpty())
+            assertEquals(submission, state.submission)
+            assertFalse(host.draftOfferOpen)
+            assertTrue(calls.isEmpty())
+        }
+    }
+
     @Test fun `the first tap exception never opens a different tool under the offer information`() {
         val information = error(EditorErrors.noImageReceived)
         val host = host(draftOffer = true, isDraftOfferDetail = { it == information.key })

@@ -84,7 +84,7 @@ internal class PostEditorChromeEvents : EditorHostEvents {
             // The next gesture or the accessible five-second timeout acknowledges only this notice;
             // ED-132 also retires its exact key when the offer ends. Q still needs a draft decision.
             // The shared event control announces Information with a polite live region (ED-95).
-            pendingQuoteEvent = collector.information(EditorText(R.string.editor_quote_pending),
+            pendingQuoteEvent = collector.information(EditorText(R.string.editor_quote_pending_event),
                 EditorText(R.string.editor_quote_pending), timeoutMillis = 5_000)
         } else if (!waiting) {
             pendingQuoteEvent?.let { collector.dispatch(EditorEventInput.Acknowledge(it)) }

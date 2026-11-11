@@ -5128,7 +5128,7 @@ class PostEditorViewModelTest {
 
     private fun assertPendingQuoteNotice(vm: PostEditorViewModel, expected: Boolean) {
         assertEquals(expected, vm.chromeEvents.state.events.any {
-            it.summary == EditorText(R.string.editor_quote_pending)
+            it.summary == EditorText(R.string.editor_quote_pending_event)
         })
     }
 
