@@ -16,6 +16,10 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.69.12` — `internal` (dev) — 2026-11-11
+
+Correctif de l'éditeur de réponse ([#1450](https://github.com/ForumHFR/redface2/issues/1450), PR [#1606](https://github.com/ForumHFR/redface2/pull/1606)) : « Citer » alors qu'un brouillon attend une décision charge de nouveau le formulaire (titre du sujet, favoris HFR, Envoyer). La citation attend Restaurer ou Ignorer, signalée par « Citation en attente », puis s'insère une seule fois.
+
 ## `0.69.11` — `internal` (dev) — 2026-11-11
 
 Refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)) : le nouveau chrome arrive sur les quatre éditeurs. Lots R1a-1 ([#1513](https://github.com/ForumHFR/redface2/issues/1513)), R1a-2 ([#1450](https://github.com/ForumHFR/redface2/issues/1450)), R1b-1 ([#1451](https://github.com/ForumHFR/redface2/issues/1451)), R1b-2a ([#1514](https://github.com/ForumHFR/redface2/issues/1514)), R1b-2b ([#1515](https://github.com/ForumHFR/redface2/issues/1515)), R2a et R2b ([#1452](https://github.com/ForumHFR/redface2/issues/1452)), R6 ([#1516](https://github.com/ForumHFR/redface2/issues/1516)) ; PR [#1583](https://github.com/ForumHFR/redface2/pull/1583) à [#1603](https://github.com/ForumHFR/redface2/pull/1603).
