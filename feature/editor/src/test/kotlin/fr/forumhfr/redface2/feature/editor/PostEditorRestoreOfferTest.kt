@@ -88,7 +88,7 @@ class PostEditorRestoreOfferTest {
         assertEquals(SEED, editor.state.value.draftRestoreSeed)
         editor.submit(PostEditorIntent.DraftRestoreRequested)
         assertRestored(editor, OFFER)
-        assertTrue(saved.keys().isEmpty()) // The server body is never put in SavedStateHandle.
+        assertFalse(saved.keys().any { saved.get<Any?>(it) == SEED || saved.get<Any?>(it) == OFFER })
         advanceUntilIdle()
         assertEquals(OFFER, store.saved[editKey]?.body)
     }
@@ -242,6 +242,21 @@ class PostEditorRestoreOfferTest {
     }
 
     @Test
+    fun restorationAfterFormFailureDecidesTheBodyEvenIfClearedBeforeReload() = runTest(dispatcher) {
+        coEvery { editRepository.fetchEditPostForm(any()) } throws IOException("offline")
+        val editor = open()
+        runCurrent()
+        editor.submit(PostEditorIntent.DraftRestoreRequested)
+        assertRestored(editor, OFFER)
+        type(editor, "")
+        coEvery { editRepository.fetchEditPostForm(any()) } returns form(SEED)
+        editor.submit(PostEditorIntent.ReloadRequested)
+        runCurrent()
+        assertEquals("", editor.bodyFieldState.text.toString())
+        assertTrue(editor.state.value.draftHydratedFromForm)
+    }
+
+    @Test
     fun restoreDoesNotDuplicateAnIdenticalLiveDraft() = runTest(dispatcher) {
         val editor = open()
         runCurrent()
@@ -272,6 +287,7 @@ class PostEditorRestoreOfferTest {
             Triple(PostEditorMode.Edit, SEED, OFFER),
             Triple(PostEditorMode.Reply, "typed", "typed\n\n" + OFFER),
             Triple(PostEditorMode.Edit, SEED + " suffix", OFFER + "\n\nsuffix"),
+            Triple(PostEditorMode.Edit, SEED + " \t\n", OFFER),
             Triple(PostEditorMode.Edit, "edited seed", "edited seed\n\n" + OFFER),
             Triple(PostEditorMode.Edit, " \n", OFFER),
             Triple(PostEditorMode.Edit, OFFER, OFFER),
@@ -298,7 +314,7 @@ class PostEditorRestoreOfferTest {
                 // The flow conflates; history does not. One undo must land exactly on the pre-restore body.
                 editor.bodyFieldState.undoState.undo()
                 assertEquals(live, editor.bodyFieldState.text.toString())
-                assertEquals(TextRange(0, live.length), editor.bodyFieldState.selection)
+                assertEquals(TextRange(live.length, 0), editor.bodyFieldState.selection)
                 editor.bodyFieldState.undoState.redo()
                 assertRestored(editor, expected)
             }
@@ -314,7 +330,7 @@ class PostEditorRestoreOfferTest {
         // Deliberately leave the display mirror behind before restoration.
         editor.bodyFieldState.edit {
             replace(0, length, text)
-            selection = TextRange(0, text.length)
+            selection = TextRange(text.length, 0)
             with(editor.bodyInputTransformation) { transformInput() }
         }
     }

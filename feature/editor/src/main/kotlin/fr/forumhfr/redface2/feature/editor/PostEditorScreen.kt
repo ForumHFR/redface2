@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.feature.editor
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -35,12 +36,14 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -51,6 +54,9 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
@@ -99,6 +105,28 @@ fun PostEditorScreen(
     ),
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, viewModel) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_START -> viewModel.submit(PostEditorIntent.Started)
+                Lifecycle.Event.ON_STOP -> viewModel.submit(PostEditorIntent.Stopped)
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+    val bodyScroll = viewModel.bodyScrollState
+    val measuredViewport = bodyScroll.maxValue to bodyScroll.viewportSize
+    LaunchedEffect(viewModel, state.isInitializing, measuredViewport) {
+        if (state.isInitializing || measuredViewport.first == Int.MAX_VALUE) return@LaunchedEffect
+        // BTF2 publishes its range before placement/caret following finishes. Let that pass complete
+        // and observe a full frame with the same range/viewport, including the initial autofocus.
+        withFrameNanos { }
+        withFrameNanos { }
+        if (measuredViewport == (bodyScroll.maxValue to bodyScroll.viewportSize)) viewModel.restoreBodyScroll()
+    }
     val currentOnSubmitSucceeded by rememberUpdatedState(onSubmitSucceeded)
     LaunchedEffect(viewModel) {
         viewModel.effects.collect { effect ->
@@ -121,6 +149,7 @@ fun PostEditorScreen(
         state = state,
         bodyFieldState = viewModel.bodyFieldState,
         bodyInputTransformation = viewModel.bodyInputTransformation,
+        bodyScrollState = viewModel.bodyScrollState,
         onIntent = remember(viewModel) { { intent: PostEditorIntent -> viewModel.submit(intent) } },
         // #441 — the picker is driven by the shared controller (same wiring as the MP
         // composers, cf. PrivateMessageReplyScreen) ; only SmileySelected stays an intent.
@@ -138,11 +167,18 @@ internal fun PostEditorContent(
     onIntent: (PostEditorIntent) -> Unit,
     smileyPicker: SmileyPickerController,
     modifier: Modifier = Modifier,
+    bodyScrollState: ScrollState = rememberScrollState(),
 ) {
     var imageUrlDialogOpen by remember { mutableStateOf(false) }
     var optionsSheetOpen by remember { mutableStateOf(false) }
     val launchImagePicker = rememberEditorImagePicker(state.imagePickerMode) { event ->
         onIntent(PostEditorIntent.ImagePickerEventReceived(event))
+    }
+    if (state.isInitializing) {
+        Surface(modifier = modifier.fillMaxSize()) {
+            Box(contentAlignment = Alignment.Center) { CircularProgressIndicator() }
+        }
+        return
     }
     // Reply (#145), Quote (#146) and Edit (#147) submit through HFR's reply/edit form ; the other
     // (defensive) modes show a disabled note instead of a submit bar.
@@ -183,6 +219,7 @@ internal fun PostEditorContent(
                     BbcodeTextField(
                         state = bodyFieldState,
                         inputTransformation = bodyInputTransformation,
+                        scrollState = bodyScrollState,
                         label = stringResource(R.string.editor_field_label),
                         placeholder = stringResource(R.string.editor_field_placeholder),
                         modifier = Modifier.weight(1f),

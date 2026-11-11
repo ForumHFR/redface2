@@ -3659,7 +3659,7 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `current content identical to the cached draft is never offered`() = runTest {
+    fun `field refuses input until the initial owner read is complete`() = runTest {
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
         draftStore.preload(key, EditorDraftStore.Draft(body = "already visible"))
         draftStore.loadGate = CompletableDeferred()
@@ -3668,15 +3668,17 @@ class PostEditorViewModelTest {
         syncBody()
 
         viewModel.editBody(TextFieldValue("already visible"))
+        assertTrue(viewModel.state.value.isInitializing)
+        assertEquals("", viewModel.bodyFieldState.text.toString())
         draftStore.loadGate?.complete(Unit)
         settleBody()
 
-        assertEquals("already visible", viewModel.bodyFieldState.text.toString())
-        assertNull(viewModel.state.value.restorableDraft)
+        assertEquals("", viewModel.bodyFieldState.text.toString())
+        assertEquals("already visible", viewModel.state.value.restorableDraft)
     }
 
     @Test
-    fun `image insertion and autosave cannot turn the current draft into a restore offer`() = runTest {
+    fun `upload cannot start before the initial owner read`() = runTest {
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
         draftStore.preload(key, EditorDraftStore.Draft(body = "older draft"))
         draftStore.loadGate = CompletableDeferred()
@@ -3701,12 +3703,13 @@ class PostEditorViewModelTest {
         draftStore.loadGate?.complete(Unit)
         settleBody()
 
-        assertEquals(viewModel.bodyFieldState.text.toString(), draftStore.saved[key]?.body)
-        assertNull(viewModel.state.value.restorableDraft)
+        assertEquals("older draft", draftStore.saved[key]?.body)
+        assertEquals("older draft", viewModel.state.value.restorableDraft)
+        assertEquals(0, uploadRepository.uploadCalls)
     }
 
     @Test
-    fun `ViewModel recreation reoffers until decision and typing still autosaves`() = runTest {
+    fun `ViewModel recreation reoffers before decision then silently resumes a matching checkpoint`() = runTest {
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
         val savedStateHandle = SavedStateHandle()
         draftStore.preload(key, EditorDraftStore.Draft(body = "rescued text"))
@@ -3734,11 +3737,12 @@ class PostEditorViewModelTest {
 
         val afterRestore = newReplyViewModel(savedStateHandle = savedStateHandle)
         settleBody()
-        assertEquals("new live text\n\nrescued text", afterRestore.state.value.restorableDraft)
+        assertNull(afterRestore.state.value.restorableDraft)
+        assertEquals("new live text\n\nrescued text", afterRestore.bodyFieldState.text.toString())
     }
 
     @Test
-    fun `process recreation offers a newer autosaved draft after live state was lost`() = runTest {
+    fun `process recreation offers a draft whose version diverges from the checkpoint`() = runTest {
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
         val savedStateHandle = SavedStateHandle()
         draftStore.preload(key, EditorDraftStore.Draft(body = "first offered version"))
@@ -3753,6 +3757,7 @@ class PostEditorViewModelTest {
         assertEquals("newer autosaved version", draftStore.saved[key]?.body)
         assertEquals("first offered version", first.state.value.restorableDraft)
         first.viewModelScope.cancel()
+        draftStore.entries[key] = checkNotNull(draftStore.entries[key]).let { it.copy(version = it.version + 1) }
         val recreated = newReplyViewModel(savedStateHandle = savedStateHandle)
         settleBody()
 
@@ -3986,7 +3991,7 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun sharedDraftReadCompletingDuringUploadRestoresBodyAndPersistsImage() = runTest {
+    fun sharedDraftReadPrecedesUploadAndPersistsTheInsertedImage() = runTest {
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
         draftStore.preload(key, EditorDraftStore.Draft("shared body"))
         val loadGate = CompletableDeferred<Unit>()
@@ -3997,16 +4002,17 @@ class PostEditorViewModelTest {
         assertEquals("", vm.bodyFieldState.text.toString())
         assertEquals(0, replyRepository.formFetches)
         vm.dispatch(PostEditorIntent.ImagePicked("content://pick/1"))
-        assertTrue(vm.state.value.isUploading)
+        assertFalse(vm.state.value.isUploading)
 
         loadGate.complete(Unit)
         settleBody()
 
-        assertTrue(vm.state.value.isUploading)
         assertEquals("shared body", vm.bodyFieldState.text.toString())
         assertEquals("shared body", vm.state.value.bodyText)
         assertEquals("shared body", draftStore.saved[key]?.body)
         assertNull(vm.state.value.restorableDraft)
+        vm.dispatch(PostEditorIntent.ImagePicked("content://pick/1"))
+        assertTrue(vm.state.value.isUploading)
         uploadGate.complete(Unit)
         settleBody()
         val expected = "shared body[img]${uploadRepository.uploadResult.imageUrl}[/img]"
@@ -4032,6 +4038,7 @@ class PostEditorViewModelTest {
         )
         settleBody()
         assertEquals("texte de la sheet", first.bodyFieldState.text.toString())
+        first.dispatch(PostEditorIntent.Stopped)
         first.viewModelScope.cancel()
 
         val recreated = newReplyViewModel(

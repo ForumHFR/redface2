@@ -22,6 +22,28 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class EditorSubmissionBindingTest {
     @Test
+    fun flushProviderCapturesAfterAnInflightAutosaveReturns() = runTest {
+        val store = VersionedEditorDraftStore()
+        val binding = binding(store)
+        binding.restore("key")
+        var live = "autosaved body"
+        store.saveReturnGate = CompletableDeferred()
+        binding.autosave { Draft(live) }
+        advanceTimeBy(750)
+        runCurrent()
+        assertEquals("autosaved body", store.saved["key"]?.body)
+        val flushing = launch { binding.flush { Draft(live) } }
+        runCurrent()
+        assertFalse(flushing.isCompleted)
+        live = "quote delivered while flush joins"
+        store.saveReturnGate?.complete(Unit)
+        runCurrent()
+        assertTrue(flushing.isCompleted)
+        assertEquals(live, store.saved["key"]?.body)
+        assertEquals(2L, store.entries["key"]?.version)
+    }
+
+    @Test
     fun `duplicate permit emits once after the pending autosave changes the version`() = runTest {
         val store = VersionedEditorDraftStore()
         val binding = binding(store)

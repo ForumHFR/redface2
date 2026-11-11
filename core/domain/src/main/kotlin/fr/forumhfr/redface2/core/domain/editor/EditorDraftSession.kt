@@ -19,6 +19,11 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
     var owner: String? = null
         private set
     private var version = 0L
+    private var writingVersion: Long? = null
+    /** ED-81: includes a CAS committed on the store dispatcher whose result is still in flight. */
+    val nextContentVersion: Long get() = (writingVersion ?: version) + 1
+    /** Optional surface checkpoint; null result announces the revision before the first suspension. */
+    var checkpointObserver: ((Draft, Long, StoreWriteResult?) -> Unit)? = null
     private var published = false
     private var readable = false
     private var unresolved: AttemptToken? = null
@@ -66,7 +71,9 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
     suspend fun save(draft: Draft): StoreWriteResult = writes.withLock {
         // Once a storage call can commit, cancellation must not separate its result from adoption.
         withContext(NonCancellable) {
-            val result = if (canWrite()) writeComposition(ownedDraft(draft)) else StoreWriteResult.OwnerChanged
+            val result = if (canWrite()) checkpointWrite(ownedDraft(draft)) {
+                writeComposition(ownedDraft(draft))
+            } else StoreWriteResult.OwnerChanged
             adopt(result)
             result
         }
@@ -97,7 +104,9 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
             val result = if (pendingInlineQuoteRequest != request || (draft != null && unresolved != null)) {
                 StoreWriteResult.Conflict
             } else {
-                mutation { store.consumeInlineQuoteRequest(owner, checkNotNull(key), request, version, draft) }
+                checkpointWrite(draft) {
+                    mutation { store.consumeInlineQuoteRequest(owner, checkNotNull(key), request, version, draft) }
+                }
             }
             if (result is StoreWriteResult.Written) pendingInlineQuoteRequest = null
             adopt(result)
@@ -152,6 +161,19 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
     }
 
     private fun canWrite(): Boolean = readable && !invalidated && key != null
+
+    private suspend fun checkpointWrite(draft: Draft?, write: suspend () -> StoreWriteResult): StoreWriteResult {
+        val target = version + 1
+        writingVersion = target
+        if (draft != null) checkpointObserver?.invoke(draft, target, null)
+        return try {
+            write().also { result ->
+                if (draft != null) checkpointObserver?.invoke(draft, target, result)
+            }
+        } finally {
+            writingVersion = null
+        }
+    }
 
     private fun ownedDraft(draft: Draft): Draft = draft.copy(pendingInlineQuoteRequest = pendingInlineQuoteRequest)
 

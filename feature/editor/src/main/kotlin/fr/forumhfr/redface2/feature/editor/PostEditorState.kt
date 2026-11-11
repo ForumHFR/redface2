@@ -25,6 +25,8 @@ data class PostEditorState(
     val page: Int?,
     /** Sub-category id required by HFR's write contract. Null when unknown — reply disabled. */
     val subcat: Int?,
+    /** ED-81: no field composition until the owner-bound read and rendering choice are complete. */
+    val isInitializing: Boolean = false,
     /**
      * #604 lot 3 (mockup P3) — the armed quote CARDS, in citation order. Seeded from
      * [PostEditorRequest.initialQuotes], reorderable / removable / clearable from the UI
@@ -105,8 +107,8 @@ data class PostEditorState(
      * #405 — the body of a previously-cached draft for this editor's key, surfaced on init when a
      * non-empty draft was found. Non-null means « propose a restore » : the UI shows a banner with
      * « Restaurer » ([PostEditorIntent.DraftRestoreRequested]) and « Ignorer »
-     * ([PostEditorIntent.DraftDiscardRequested]). The draft is never silently applied so a fresh
-     * quote prefill is not clobbered ; it is also never silently lost — discarding deletes the row.
+     * ([PostEditorIntent.DraftDiscardRequested]). A matching interrupted session resumes silently;
+     * an unrelated revision remains an explicit offer.
      */
     val restorableDraft: String? = null,
     /**
@@ -156,7 +158,7 @@ data class PostEditorState(
             // requiring a non-blank body — its cards list is always empty.
             (bodyText.isNotBlank() || (mode == PostEditorMode.Reply && quotes.isNotEmpty())) &&
             !isAwaitingInitialBody &&
-            !isSubmitting &&
+            !isInitializing && !isSubmitting &&
             !submission.blocksBodyMutation &&
             !isLoadingForm && !quoteStorageUnavailable && pendingQuotes.isEmpty() &&
             !isUploading
@@ -165,7 +167,7 @@ data class PostEditorState(
         get() = pendingQuotes.isNotEmpty() && submission is EditorSubmissionState.Uncertain
 
     val canRestoreDraft: Boolean
-        get() = draftRestoreSeed != null && (mode != PostEditorMode.Edit || !isLoadingForm)
+        get() = !isInitializing && draftRestoreSeed != null && (mode != PostEditorMode.Edit || !isLoadingForm)
 
     @Suppress("ComplexCondition") // Explicit recovery, or an eligible readable request, plus busy-state guards.
     val canIgnorePendingQuote: Boolean

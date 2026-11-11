@@ -8,7 +8,7 @@ internal val PostEditorIntent.mutatesEditor: Boolean
         PostEditorIntent.ErrorDismissed, PostEditorIntent.ReloadRequested, PostEditorIntent.PendingQuoteIgnored,
         PostEditorIntent.PendingQuoteResumed, PostEditorIntent.LegacyQuoteNoticeDismissed,
         PostEditorIntent.UploadErrorDismissed,
-        PostEditorIntent.TogglePreview -> false
+        PostEditorIntent.TogglePreview, PostEditorIntent.Started, PostEditorIntent.Stopped -> false
         else -> true
     }
 
