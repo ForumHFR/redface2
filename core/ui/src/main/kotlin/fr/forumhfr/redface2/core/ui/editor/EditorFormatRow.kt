@@ -19,19 +19,9 @@ internal fun EditorFormatRow(
     colorModifier: Modifier = Modifier,
     compactHeight: Boolean = false,
 ) {
-    val formats = listOf(
-        Triple(BbcodeAction.Bold, R.drawable.ic_editor_bold, R.string.bbcode_action_bold),
-        Triple(BbcodeAction.Italic, R.drawable.ic_editor_italic, R.string.bbcode_action_italic),
-        Triple(BbcodeAction.Underline, R.drawable.ic_editor_underline, R.string.bbcode_action_underline),
-        Triple(BbcodeAction.Strike, R.drawable.ic_editor_strike, R.string.bbcode_action_strike),
-        Triple(BbcodeAction.Quote, R.drawable.ic_editor_quote, R.string.bbcode_action_quote),
-        Triple(BbcodeAction.Cpp, R.drawable.ic_editor_code, R.string.bbcode_action_cpp),
-        Triple(BbcodeAction.Fixed, R.drawable.ic_editor_fixed, R.string.bbcode_action_fixed),
-        Triple(BbcodeAction.Spoiler, R.drawable.ic_editor_spoiler, R.string.bbcode_action_spoiler),
-        Triple(BbcodeAction.Url, R.drawable.ic_editor_link, R.string.bbcode_action_url),
-    )
-    formats.forEach { (action, icon, label) ->
-        EditorBarIcon(icon, stringResource(label), { onAction(action) },
+    editorShortcutFormats.forEach { entry ->
+        EditorBarIcon(checkNotNull(entry.iconRes), stringResource(entry.labelRes),
+            { onAction(checkNotNull(entry.bbcode)) },
             enabled = enabled, compactHeight = compactHeight)
     }
     EditorBarIcon(R.drawable.ic_editor_color, stringResource(R.string.bbcode_action_color), onColor, colorModifier,

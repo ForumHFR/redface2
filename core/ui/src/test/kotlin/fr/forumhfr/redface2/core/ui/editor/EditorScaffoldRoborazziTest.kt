@@ -20,6 +20,8 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
+import fr.forumhfr.redface2.core.model.editor.EditorShortcutSurface
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Assert.assertEquals
@@ -139,7 +141,7 @@ class EditorScaffoldRoborazziTest {
             bar = EditorBarState(mode, if (sample == 5) host.frozenArm else null),
             firstStatus = host.statuses[0].takeUnless { sample == 0 },
             secondStatus = host.statuses[1].takeUnless { sample == 0 },
-            shortcut = if (sample == 1) EditorBarShortcut(R.drawable.ic_editor_bold, "Gras", {}) else null,
+            shortcut = if (sample == 1) EditorBarShortcut(EditorShortcut.BOLD, EditorShortcutSurface.POST) else null,
             loadingForm = sample == 6, uploading = sample in 8..10,
             uploadProgress = if (sample in 9..10) UploadProgress(1, 3) else null,
             bodyReadOnly = sample == 7,

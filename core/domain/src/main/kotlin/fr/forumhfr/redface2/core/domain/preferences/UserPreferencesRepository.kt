@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.FlagType
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.EditorPreviewKey
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import kotlinx.coroutines.flow.Flow
@@ -276,6 +277,12 @@ interface UserPreferencesRepository {
 
     /** Persists [observeImagePickerMode]. Default [ImagePickerMode.DEFAULT] until the first call. */
     suspend fun setImagePickerMode(mode: ImagePickerMode)
+
+    /** Device-wide ED-36 choice, independent of account. Missing/unknown ID means NONE. */
+    fun observeEditorShortcut(): Flow<EditorShortcut>
+
+    /** Await durable storage; failure is propagated and the previously persisted choice survives. */
+    suspend fun setEditorShortcut(shortcut: EditorShortcut)
 
     /**
      * Opt-in « DT » section on the Drapeaux screen: when `true`, a « DT » tab appears next

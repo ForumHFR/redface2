@@ -219,7 +219,8 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
 
     private val draftSession = PrivateMessageReplyDraftSession(
         saved = savedStateHandle, submission = submission, scope = viewModelScope, draftKey = draftKey,
-        readState = { _state.value }, updateState = ::updateState,
+        state = PrivateMessageDraftState(read = { _state.value }, update = ::updateState),
+        clearToolSelection = { chromeMemory.host.focus.clearToolSelection() },
     )
 
     /**
@@ -499,14 +500,16 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     fun onToolbarAction(action: BbcodeAction) {
         if (!acceptMutation(blockDuringUpload = true)) return
         val before = bodyFieldState.text.toString()
+        chromeMemory.host.focus.clearToolSelection()
         bodyFieldState.editBbcode { text, start, end -> applyBbcodeAction(action, text, start, end) }
         if (mutatesBody(before)) draftSession.decideBody()
-        draftSession.scheduleAutosave()
+        if (action == BbcodeAction.Image) draftSession.persistDraftNow() else draftSession.scheduleAutosave()
     }
 
     fun onSmileySelected(token: String) {
         if (!acceptMutation(blockDuringUpload = true)) return
         val before = bodyFieldState.text.toString()
+        chromeMemory.host.focus.clearToolSelection()
         bodyFieldState.editBbcode { text, start, end -> insertBbcodeToken(token, text, start, end) }
         if (mutatesBody(before)) draftSession.decideBody()
         smileyPicker.dismiss(SmileyPickerCloseCause.INSERTION)
@@ -741,9 +744,6 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                 )
                 if (bbcode != null) {
                     insertImageBbcodeAtCaret(bbcode, leadingNewline = completed > 0)
-                    // Persist after EACH insert: a later image failing must not lose the images
-                    // already inserted into the draft (Codex review #490).
-                    draftSession.scheduleAutosave()
                 }
                 completed += 1
                 if (multiple) {
@@ -762,6 +762,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
      */
     private fun insertImageBbcodeAtCaret(bbcode: String, leadingNewline: Boolean) {
         if (submission.blocksMutation) return
+        chromeMemory.host.focus.clearToolSelection()
         bodyFieldState.editBbcode { text, start, end ->
             val caret = start.coerceIn(0, text.length)
             val needsNewline = leadingNewline && caret > 0 && text[caret - 1] != '\n'
@@ -769,6 +770,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             insertBbcodeToken(token, text, start, end, surroundWithSpaces = false)
         }
         draftSession.decideBody()
+        draftSession.persistDraftNow()
     }
 
     private fun handleUploadFailure(error: Throwable) {

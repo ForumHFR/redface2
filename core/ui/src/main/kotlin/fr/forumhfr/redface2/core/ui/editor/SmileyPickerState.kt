@@ -52,6 +52,8 @@ sealed interface SmileyPickerState {
         val detailFeedbackEmissionAtEntry: Long = 0L,
         /** Same sink as the controller; UI records only sheet geometry and gesture causes. */
         val diagnostics: SmileyPickerDiagnostics? = null,
+        /** ED-70: null retains legacy autofocus until the four hosts opt in together (R6 PR 2). */
+        val openingIntent: SmileyPickerOpenIntent? = null,
     ) : SmileyPickerState {
         /** The detail can show an eligible action's pending state while mutations remain blocked. */
         fun favoriteAction(smiley: EditorSmiley, includePending: Boolean = false): SmileyFavoriteAction? = when {
@@ -74,6 +76,9 @@ sealed interface SmileyPickerState {
 enum class SmileyFavoriteAction { ADD, REMOVE }
 
 enum class SmileyPickerTab { FAVORITES, STANDARD, WIKI }
+
+/** Stable across the three-tab picker and the later S2 single-search field. */
+enum class SmileyPickerOpenIntent { CONSULTATION, SEARCH }
 
 sealed interface SmileyWikiKeywordsState {
     data object Hidden : SmileyWikiKeywordsState

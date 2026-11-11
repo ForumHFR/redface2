@@ -60,6 +60,8 @@ internal class EditorScaffoldFixture(private val retainSurfaceFocus: Boolean = t
     val surfaceFocus = EditorSurfaceFocusMemory()
     val scroll = ScrollState(0)
     val calls = mutableListOf<String>()
+    val surfaceSelections = mutableListOf<TextRange>()
+    var emulateExternalSurface = false
     var inputConnection: InputConnection? = null
         private set
     var inputSessions = 0
@@ -110,7 +112,13 @@ internal class EditorScaffoldFixture(private val retainSurfaceFocus: Boolean = t
     }
 
     private fun gesture(gesture: EditorBarGesture) {
+        if (gesture == EditorBarGesture.OpenSurface) surfaceSelections += body.selection
         chrome.value = chrome.value.copy(bar = reduceEditorBar(chrome.value.bar, gesture))
+    }
+
+    private fun external(name: String) {
+        calls += name
+        if (emulateExternalSurface) panel.value = true
     }
 
     @Composable
@@ -134,7 +142,7 @@ internal class EditorScaffoldFixture(private val retainSurfaceFocus: Boolean = t
             EditorScaffold(body, metrics.value, "Répondre", "Sujet de démonstration", chrome.value,
                 EditorActionBarActions(::gesture, { action ->
                     body.editBbcode { text, start, end -> applyBbcodeAction(action, text, start, end) }
-                }, {}, { calls += "smileys" }, { calls += "options" }, { previewAction() },
+                }, {}, { external("smileys") }, { calls += "options" }, { previewAction() },
                     { key, action ->
                         calls += "event:$action"
                         if (chrome.value.event?.key == key) when (action) {
@@ -145,13 +153,13 @@ internal class EditorScaffoldFixture(private val retainSurfaceFocus: Boolean = t
                             }
                             EditorEventAction.Dismiss -> chrome.value = chrome.value.copy(event = null)
                         }
-                    }),
+                    }, onSmileySearch = { external("search") }),
                 ArmedSubmitState(chrome.value.bar.arm != null,
                     !chrome.value.uploading && !chrome.value.loadingForm && !chrome.value.bodyReadOnly,
                     armToken = chrome.value.bar.arm),
                 ArmedSubmitActions({ calls += "send" }, { calls += "confirm" }, {
                     calls += "disarm"; chrome.value = chrome.value.copy(bar = chrome.value.bar.copy(arm = null))
-                }), EditorBarImageActions({ calls += "upload" }, { calls += "url" }),
+                }), EditorBarImageActions({ external("upload") }, { external("url") }),
                 { calls += "close" },
                 modifier = Modifier.size(width.value, metrics.value.windowHeight).testTag("scaffold-bench"),
                 onOpenHeader = { panel.value = true }, bodyFocusRequester = focus, bodyScrollState = scroll,

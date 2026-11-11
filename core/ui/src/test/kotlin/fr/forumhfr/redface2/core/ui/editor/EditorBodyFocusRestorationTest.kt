@@ -74,7 +74,7 @@ class EditorBodyFocusRestorationTest {
                     BbcodeTextField(body, "Message", Modifier.focusRequester(focus)
                         .observeEditorBodyFocus(observation), showKeyboardOnFocus = false)
                 }
-                RestoreRecreatedEditorBodyFocus(observation, true, body, focus)
+                RestoreRecreatedEditorBodyFocus(observation, true, body, focus) { }
                 // Pause without stop after attachment, before the restoration's first frame.
                 DisposableEffect(Unit) {
                     owner.registry.currentState = Lifecycle.State.STARTED
@@ -133,7 +133,7 @@ class EditorBodyFocusRestorationTest {
                     }
                     .observeEditorBodyFocus(observation), showKeyboardOnFocus = false)
             }
-            RestoreRecreatedEditorBodyFocus(observation, true, body, focus, availability)
+            RestoreRecreatedEditorBodyFocus(observation, true, body, focus, availability) { }
         }
         compose.mainClock.advanceTimeBy(320L)
         compose.onNode(hasSetTextAction()).assertIsNotFocused()
@@ -201,7 +201,7 @@ class EditorBodyFocusRestorationTest {
                         .observeEditorBodyFocus(observation), showKeyboardOnFocus = false)
                 }
             }
-            RestoreRecreatedEditorBodyFocus(observation, true, body, bodyFocus, availability)
+            RestoreRecreatedEditorBodyFocus(observation, true, body, bodyFocus, availability) { }
         }
         compose.onNode(hasSetTextAction()).assertIsNotFocused()
         compose.mainClock.advanceTimeBy(600L)
@@ -290,7 +290,7 @@ class EditorBodyFocusRestorationTest {
                         .observeEditorBodyFocus(observation), showKeyboardOnFocus = false)
                 }
             }
-            RestoreRecreatedEditorBodyFocus(observation, true, body, bodyFocus, availability)
+            RestoreRecreatedEditorBodyFocus(observation, true, body, bodyFocus, availability) { }
         }
         compose.mainClock.advanceTimeByFrame()
         compose.onNode(hasSetTextAction()).assertIsNotFocused()
@@ -362,7 +362,7 @@ class EditorBodyFocusRestorationTest {
                         .observeEditorBodyFocus(observation), showKeyboardOnFocus = false)
                 }
             }
-            RestoreRecreatedEditorBodyFocus(observation, true, body, bodyFocus, availability)
+            RestoreRecreatedEditorBodyFocus(observation, true, body, bodyFocus, availability) { }
         }
         compose.mainClock.advanceTimeByFrame()
         compose.runOnIdle {
@@ -424,7 +424,7 @@ class EditorBodyFocusRestorationTest {
                         .observeEditorBodyFocus(observation), showKeyboardOnFocus = false)
                 }
             }
-            RestoreRecreatedEditorBodyFocus(observation, allowed, body, bodyFocus, availability)
+            RestoreRecreatedEditorBodyFocus(observation, allowed, body, bodyFocus, availability) { }
         }
         compose.mainClock.advanceTimeByFrame()
         when (interaction) {

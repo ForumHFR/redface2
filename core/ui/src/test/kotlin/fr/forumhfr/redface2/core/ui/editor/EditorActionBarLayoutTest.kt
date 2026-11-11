@@ -30,6 +30,8 @@ import androidx.compose.ui.unit.height
 import androidx.compose.ui.unit.width
 import androidx.test.core.app.ApplicationProvider
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
+import fr.forumhfr.redface2.core.model.editor.EditorShortcutSurface
 import fr.forumhfr.redface2.core.ui.R
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -55,10 +57,10 @@ class EditorActionBarLayoutTest {
     @Test
     fun `ED21 ED30 ED38 two formats or three normal actions fit at 360 and 1_3 times L`() {
         host.scale.value = 1.3f
-        host.shortcut.value = EditorBarShortcut(R.drawable.ic_editor_bold, "Raccourci", {})
+        host.shortcut.value = EditorBarShortcut(EditorShortcut.BOLD, EditorShortcutSurface.POST)
         compose.setContent { host.Content() }
         val submit = bounds("editor-bar-submit"); val scroll = bounds("editor-bar-scroll")
-        listOf("Mise en forme", "Smileys", "Raccourci").forEach { label ->
+        listOf("Mise en forme", "Smileys", "Gras").forEach { label ->
             val target = compose.onNodeWithContentDescription(label).getUnclippedBoundsInRoot()
             assertTrue(target.left >= scroll.left && target.right <= scroll.right)
             assertTrue(target.width >= 48.dp && target.height >= 48.dp)

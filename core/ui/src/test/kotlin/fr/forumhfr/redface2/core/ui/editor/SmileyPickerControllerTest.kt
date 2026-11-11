@@ -27,6 +27,33 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class SmileyPickerControllerTest {
 
+    @Test
+    fun `search forces Wiki without a request and consultation restores results`() = runTest {
+        var calls = 0
+        val controller = SmileyPickerController(this, { _, _ -> calls++; listOf(smiley) })
+        controller.open(SmileyPickerOpenIntent.SEARCH)
+        var open = controller.state.value as SmileyPickerState.Open
+        assertEquals(SmileyPickerTab.WIKI, open.initialTab)
+        assertEquals(SmileyPickerOpenIntent.SEARCH, open.openingIntent)
+        advanceUntilIdle()
+        assertEquals(0, calls)
+        controller.onQueryChanged("jap")
+        advanceUntilIdle()
+        controller.dismiss()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
+        open = controller.state.value as SmileyPickerState.Open
+        assertEquals(SmileyPickerOpenIntent.CONSULTATION, open.openingIntent)
+        assertEquals("jap", open.query)
+        assertEquals(WikiSearchState.Results(listOf(smiley)), open.wiki)
+        controller.dismiss()
+        controller.open(SmileyPickerOpenIntent.SEARCH)
+        open = controller.state.value as SmileyPickerState.Open
+        assertEquals(SmileyPickerTab.WIKI, open.initialTab)
+        assertEquals(WikiSearchState.Results(listOf(smiley)), open.wiki)
+        advanceUntilIdle()
+        assertEquals(1, calls)
+    }
+
     private val smiley = EditorSmiley(
         token = "[:rofl]",
         imageUrl = "https://x/rofl.gif",

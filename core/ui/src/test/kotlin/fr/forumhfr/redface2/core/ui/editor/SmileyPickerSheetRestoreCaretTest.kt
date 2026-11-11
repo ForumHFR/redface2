@@ -4,7 +4,10 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.text.TextRange
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
@@ -40,7 +43,7 @@ class SmileyPickerSheetRestoreCaretTest {
     @get:Rule
     val composeTestRule = createComposeRule()
 
-    private fun reopenedController(query: String): SmileyPickerController {
+    private fun reopenedController(query: String, intent: SmileyPickerOpenIntent? = null): SmileyPickerController {
         val controller = SmileyPickerController(
             scope = CoroutineScope(StandardTestDispatcher()),
             searchWiki = { _, _ -> emptyList() },
@@ -48,8 +51,27 @@ class SmileyPickerSheetRestoreCaretTest {
         controller.open()
         controller.onQueryChanged(query)
         controller.dismiss()
-        controller.open()
+        if (intent == null) controller.open() else controller.open(intent)
         return controller
+    }
+
+    @Test
+    fun `explicit consultation keeps a restored Wiki query without taking search focus`() {
+        composeSheet(reopenedController("jap", SmileyPickerOpenIntent.CONSULTATION))
+        composeTestRule.onNode(hasSetTextAction()).assertIsNotFocused()
+        val node = composeTestRule.onNode(hasSetTextAction()).fetchSemanticsNode()
+        assertEquals("jap", node.config[SemanticsProperties.EditableText].text)
+        assertEquals(TextRange(3), node.config[SemanticsProperties.TextSelectionRange])
+        // Consultation changes only initial focus: the restored search remains directly editable.
+        composeTestRule.onNode(hasSetTextAction()).performClick().assertIsFocused().performTextInput("o")
+        assertEquals("japo", composeTestRule.onNode(hasSetTextAction()).fetchSemanticsNode()
+            .config[SemanticsProperties.EditableText].text)
+    }
+
+    @Test
+    fun `explicit search takes focus even with no restored query`() {
+        composeSheet(reopenedController("", SmileyPickerOpenIntent.SEARCH))
+        composeTestRule.onNode(hasSetTextAction()).assertIsFocused()
     }
 
     private fun composeSheet(controller: SmileyPickerController) {

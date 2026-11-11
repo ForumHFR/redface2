@@ -2571,6 +2571,74 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
+    fun `ED37 wrapping and upload cancel the typing debounce with one checkpoint`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val vm = viewModel(repository)
+        runCurrent()
+        val key = EditorDraftKey.mpReply(request.threadId)
+        val saves = draftStore.saveCount
+        val writes = draftStore.writes
+        vm.editBody(TextFieldValue("nom", TextRange(3, 0)))
+        mainDispatcher.scheduler.advanceTimeBy(300)
+        runCurrent()
+        assertEquals(saves, draftStore.saveCount)
+        assertEquals(writes, draftStore.writes)
+        vm.onToolbarAction(BbcodeAction.Image)
+        Snapshot.sendApplyNotifications()
+        runCurrent()
+        assertEquals("[img]nom[/img]", draftStore.saved[key]?.body)
+        assertEquals(saves + 1, draftStore.saveCount)
+        assertEquals(writes + 1, draftStore.writes)
+        // The image checkpoint must cancel the typing debounce, including a delayed mirror.
+        mainDispatcher.scheduler.advanceTimeBy(1_000)
+        runCurrent()
+        assertEquals(saves + 1, draftStore.saveCount)
+        assertEquals(writes + 1, draftStore.writes)
+        val now = mainDispatcher.scheduler.currentTime
+        val beforeUpload = vm.bodyFieldState.text.toString()
+        vm.onImagesPicked(listOf("content://pick/1"))
+        Snapshot.sendApplyNotifications()
+        runCurrent()
+        assertTrue(vm.bodyFieldState.text.toString() != beforeUpload)
+        assertEquals(vm.bodyFieldState.text.toString(), draftStore.saved[key]?.body)
+        assertEquals(now, mainDispatcher.scheduler.currentTime)
+    }
+
+    @Test
+    fun `ED37 image actions and stop cannot checkpoint while sending`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } coAnswers {
+            gate.await()
+            ReplySubmitResult.Failure(ReplyFailureReason.EmptyMessage)
+        }
+        val vm = viewModel(repository)
+        runCurrent()
+        vm.editBody(TextFieldValue("body", TextRange(4)))
+        vm.onSubmit()
+        runCurrent()
+        assertTrue(vm.state.value.submission is EditorSubmissionState.Sending)
+        val saves = draftStore.saveCount
+        val writes = draftStore.writes
+        val entry = draftStore.entries[EditorDraftKey.mpReply(request.threadId)]
+
+        vm.onToolbarAction(BbcodeAction.Image)
+        vm.onStopped()
+        mainDispatcher.scheduler.advanceTimeBy(1_000)
+        runCurrent()
+
+        assertTrue(vm.state.value.submission is EditorSubmissionState.Sending)
+        assertEquals("body", vm.bodyFieldState.text.toString())
+        assertEquals(saves, draftStore.saveCount)
+        assertEquals(writes, draftStore.writes)
+        assertEquals(entry, draftStore.entries[EditorDraftKey.mpReply(request.threadId)])
+        gate.complete(Unit)
+        runCurrent()
+    }
+
+    @Test
     fun uploadInsertionPreservesAcceptedImages() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } returns form()

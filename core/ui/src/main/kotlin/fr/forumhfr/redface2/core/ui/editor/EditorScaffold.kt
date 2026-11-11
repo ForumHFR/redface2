@@ -31,6 +31,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.TooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -63,6 +64,7 @@ import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.traversalIndex
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.R
 
@@ -86,13 +88,18 @@ data class EditorScaffoldChrome(
  * A host keeps one in its ViewModel; the default [Saver] only saves the entry/surface booleans (R1a-1).
  */
 class EditorSurfaceFocusMemory {
+    internal val toolFocus = EditorBodyToolFocus()
     var imeBeforeSurface: Boolean = false
     var autoFocusConsumed: Boolean = false
     internal val preview = EditorPreviewFocusMemory()
     internal var body by mutableStateOf(EditorBodyFocusMemory())
         private set
 
+    /** Invalidate before programmatic body/selection writes, including equal-text restorations. */
+    fun clearToolSelection() { toolFocus.clear() }
+
     fun reset() {
+        clearToolSelection()
         imeBeforeSurface = false
         autoFocusConsumed = false
         preview.reset()
@@ -132,6 +139,8 @@ val LocalEditorTooltipHost = staticCompositionLocalOf<EditorTooltipHost?> { null
  *
  * The host reduces [barActions] gestures, edits [bodyState] with the existing keep formatter, and
  * guards [onCloseRequested] (save/leave). Inline insertions restore [bodyFocusRequester] here.
+ * Tool focus entry captures selection and IME before BTF2's focus-loss collapse; insertion and surface
+ * dispatch restore that selection if the buffer still matches.
  * Surface gestures capture IME visibility before dispatch; captured returns enqueue a Surface return.
  * Its effect preserves selection and restores focus and that visibility after the input options update.
  * An initial panel preserves selection while waiting for closed-IME options.
@@ -193,6 +202,11 @@ fun EditorScaffold(
     val keyboard = LocalSoftwareKeyboardController.current
     val imeVisible = WindowInsets.isImeVisible
     val bodyFocus = rememberEditorBodyFocus(bodyState, surfaceFocus.body, imeVisible)
+    val toolFocus = surfaceFocus.toolFocus
+    DisposableEffect(bodyState, toolFocus) {
+        toolFocus.clear()
+        onDispose { toolFocus.clear() }
+    }
     val armed = submitState.armed || chrome.bar.arm != null
     // Entry autofocus stays consumed across recreation. Restoring a retained body's actual focus is
     // separate; its IME option is local to this attachment and initialized from the session snapshot.
@@ -212,11 +226,12 @@ fun EditorScaffold(
     val captureIme = {
         bodyFocus.cancelRestoration("surface")
         initialFocus = false
-        surfaceFocus.imeBeforeSurface = imeVisible
+        toolFocus.captureSurfaceIme(bodyState, surfaceFocus, imeVisible)
         restoreImeOnFocus = false
         if (armed) submitActions.onDisarm()
     }
     val returnToBody: (EditorBodyFocusReturn) -> Unit = { reason ->
+        toolFocus.clear()
         initialFocus = false
         restoreImeOnFocus = reason.showImeOnFocus(surfaceFocus.imeBeforeSurface)
         pendingBodyFocusReturn = reason
@@ -227,7 +242,8 @@ fun EditorScaffold(
     LaunchedEffect(pendingBodyFocusReturn) {
         val reason = pendingBodyFocusReturn
         if (reason != null) {
-            val focused = bodyFocusRestoreAllowed && requestEditorBodyFocus(bodyState, bodyFocusRequester)
+            val focused = bodyFocusRestoreAllowed && requestEditorBodyFocus(
+                bodyState, bodyFocusRequester, toolFocus::clear)
             restoreImeOnFocus = restoreImeOnFocus and focused
             // ED-61: preview returns never command the keyboard. A covering preview may also refuse
             // a surface return: consume it without commanding the keyboard or deferring another try.
@@ -235,7 +251,7 @@ fun EditorScaffold(
             pendingBodyFocusReturn = null
         }
     }
-    val actions = barActions.withScaffoldFocus(captureIme, bodyFocusRequester)
+    val actions = barActions.withScaffoldFocus(captureIme, bodyState, toolFocus, bodyFocusRequester)
     val previewAction = previewWithoutImeChange(chrome.event, barActions, armed, submitActions.onDisarm)
     val preview = { bodyFocus.cancelRestoration("preview"); previewAction() }
     val returnFromPreview: () -> Unit = {
@@ -283,8 +299,10 @@ fun EditorScaffold(
                                 fieldArea {
                                     RestoreRecreatedEditorBodyFocus(bodyFocus, bodyFocusRestoreAllowed, bodyState,
                                         bodyFocusRequester,
-                                        availability = LocalEditorPreviewBodyFocusAvailability.current)
-                                    Box(Modifier.guardEditorBodyFocus(bodyFocusRestoreAllowed)) {
+                                        availability = LocalEditorPreviewBodyFocusAvailability.current,
+                                        clearToolSelection = surfaceFocus::clearToolSelection)
+                                    Box(Modifier.guardEditorBodyFocus(
+                                        bodyFocusRestoreAllowed, bodyState, toolFocus, imeVisible)) {
                                         BbcodeTextField(bodyState, stringResource(R.string.editor_scaffold_message),
                                             modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)
                                                 .testTag("editor-scaffold-field").focusRequester(bodyFocusRequester)
@@ -344,8 +362,11 @@ private enum class EditorBodyFocusReturn {
 }
 
 /** A new window can attempt native focus entry independently of our restoration effect. */
-private fun Modifier.guardEditorBodyFocus(allowed: Boolean): Modifier = focusProperties {
-    onEnter = { if (!allowed) cancelFocusChange() }
+private fun Modifier.guardEditorBodyFocus(
+    allowed: Boolean, state: TextFieldState, tools: EditorBodyToolFocus, imeVisible: Boolean,
+): Modifier = focusProperties {
+    onEnter = { if (!allowed) cancelFocusChange() else tools.clear() }
+    onExit = { tools.capture(state, imeVisible) }
 }.focusGroup()
 
 /** ED-61: preview reduces tools/disarms without the IME capture used by other surfaces. */
@@ -359,8 +380,47 @@ private fun previewWithoutImeChange(
     }
 }
 
-/** Keep surface capture before host dispatch, including events which open their own surface. */
-private fun EditorActionBarActions.withScaffoldFocus(captureIme: () -> Unit, focus: FocusRequester) = copy(
+/** Capture before BTF2 collapses selection on focus loss, including Tab to an editor tool. */
+internal class EditorBodyToolFocus {
+    internal data class Capture(
+        val state: TextFieldState, val text: String, val selection: TextRange, val imeVisible: Boolean,
+    )
+    internal var captured: Capture? = null
+        private set
+
+    fun capture(state: TextFieldState, imeVisible: Boolean) {
+        captured = Capture(state, state.text.toString(), state.selection, imeVisible)
+    }
+
+    fun clear() { captured = null }
+
+    fun captureSurfaceIme(state: TextFieldState, surfaceFocus: EditorSurfaceFocusMemory, imeVisible: Boolean) {
+        surfaceFocus.imeBeforeSurface = restoreSelection(state) ?: imeVisible
+    }
+
+    /** Restore only the same buffer/selection or BTF2's bare collapse to the saved maximum. */
+    fun restoreSelection(state: TextFieldState): Boolean? {
+        val saved = captured ?: return null
+        return if (!saved.canRestoreSelection(state)) {
+            clear()
+            null
+        } else {
+            if (state.selection != saved.selection) state.edit { selection = saved.selection }
+            saved.imeVisible
+        }
+    }
+
+    private fun Capture.canRestoreSelection(state: TextFieldState): Boolean {
+        val selectionMatches = state.selection == selection || state.selection == TextRange(selection.max)
+        return state === this.state && state.text.toString() == text && selectionMatches
+    }
+}
+
+/** Keep surface capture before host dispatch, including typed shortcuts and events opening a surface. */
+private fun EditorActionBarActions.withScaffoldFocus(
+    captureIme: () -> Unit, body: TextFieldState, tools: EditorBodyToolFocus, focus: FocusRequester,
+) = copy(
+    onBbcode = { action -> tools.restoreSelection(body); onBbcode(action) },
     onGesture = { gesture ->
         if (gesture == EditorBarGesture.OpenSurface) captureIme()
         onGesture(gesture)
@@ -372,7 +432,7 @@ private fun EditorActionBarActions.withScaffoldFocus(captureIme: () -> Unit, foc
         }
         onEvent(key, action)
     },
-    onBodyFocus = { focus.requestFocus(); onBodyFocus() },
+    onBodyFocus = { requestEditorBodyFocus(body, focus, tools::clear); onBodyFocus() },
 )
 
 /** Native clicks own the default case; closed-return clicks must first enable a new input session. */

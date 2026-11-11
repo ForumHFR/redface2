@@ -162,6 +162,9 @@
     <string name="editor_smiley_local_favorite_limit">Limite de 256 favoris de l\'appareil atteinte</string>
     <string name="editor_smiley_local_favorite_error">Échec de l\'enregistrement des favoris de l\'appareil</string>
     <string name="editor_smiley_tab_wiki">Wiki</string>
+    <string name="editor_shortcut_none">Aucun</string>
+    <string name="editor_shortcut_search_smileys">Smileys Wiki</string>
+    <string name="editor_shortcut_personal_smiley">Smiley perso</string>
     <string name="editor_smiley_search_label">Rechercher un smiley perso</string>
     <string name="editor_smiley_search_hint">Tapez au moins 3 caractères pour interroger le wiki HFR.</string>
     <string name="editor_smiley_search_loading">Recherche…</string>

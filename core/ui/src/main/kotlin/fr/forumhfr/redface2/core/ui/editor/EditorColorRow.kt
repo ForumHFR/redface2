@@ -31,24 +31,23 @@ internal fun EditorColorRow(
 ) {
     EditorBarIcon(R.drawable.ic_arrow_back, stringResource(R.string.editor_return), onBack, backModifier,
         compactHeight = compactHeight)
-    val palette = listOf(
-        "#FF0000" to R.string.bbcode_color_red, "#0000FF" to R.string.bbcode_color_blue,
-        "#008000" to R.string.bbcode_color_green, "#FF6600" to R.string.bbcode_color_orange,
-        "#808080" to R.string.bbcode_color_grey,
-    )
-    palette.forEach { (hex, resource) ->
-        val label = stringResource(resource)
-        val click = { onAction(BbcodeAction.Color(hex)) }
-        val outline = MaterialTheme.colorScheme.onSurface
-        EditorIconTooltip(label) {
-            Box(Modifier.editorCompactTargetSlot(compactHeight), contentAlignment = Alignment.Center) {
-                IconButton(onClick = click, enabled = enabled,
-                    modifier = Modifier.size(EditorChromeMetrics(compactHeight).controlVisibleHeight)
-                        .editorBarActivation(enabled, click).semantics { contentDescription = label }) {
-                    Box(Modifier.size(24.dp).alpha(if (enabled) 1f else DISABLED_SWATCH_ALPHA).clip(CircleShape)
-                        .background(Color(android.graphics.Color.parseColor(hex)))
-                        .drawBehind { drawCircle(outline, style = Stroke(1.dp.toPx())) })
-                }
+    editorShortcutColors.forEach { entry ->
+        val action = entry.bbcode as BbcodeAction.Color
+        EditorColorIcon(action.colorHex, stringResource(entry.labelRes), { onAction(action) }, enabled, compactHeight)
+    }
+}
+
+@Composable
+internal fun EditorColorIcon(hex: String, label: String, click: () -> Unit, enabled: Boolean, compactHeight: Boolean) {
+    val outline = MaterialTheme.colorScheme.onSurface
+    EditorIconTooltip(label) {
+        Box(Modifier.editorCompactTargetSlot(compactHeight), contentAlignment = Alignment.Center) {
+            IconButton(onClick = click, enabled = enabled,
+                modifier = Modifier.size(EditorChromeMetrics(compactHeight).controlVisibleHeight)
+                    .editorBarActivation(enabled, click).semantics { contentDescription = label }) {
+                Box(Modifier.size(24.dp).alpha(if (enabled) 1f else DISABLED_SWATCH_ALPHA).clip(CircleShape)
+                    .background(Color(android.graphics.Color.parseColor(hex)))
+                    .drawBehind { drawCircle(outline, style = Stroke(1.dp.toPx())) })
             }
         }
     }

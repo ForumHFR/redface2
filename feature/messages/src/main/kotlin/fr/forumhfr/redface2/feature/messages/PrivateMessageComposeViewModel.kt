@@ -207,14 +207,17 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         ),
     )
 
-    private val draftSession = PrivateMessageComposeDraftSession(
+    private val draftSession: PrivateMessageComposeDraftSession = PrivateMessageComposeDraftSession(
         saved = savedStateHandle, submission = submission, scope = viewModelScope, draftKey = draftKey,
-        readState = { _state.value }, updateState = ::updateState,
+        state = PrivateMessageDraftState(read = { _state.value }, update = ::updateState),
+        clearToolSelection = { chromeMemory.host.focus.clearToolSelection() },
     )
     internal val bodyCaretRevealResetKey get() = draftSession.bodyCaretRevealResetKey
     // ED-63/C8: VM lifetime only; visibility remains in the existing preview pipeline.
     internal val previewLayout by lazy { EditorPreviewState(userPreferencesRepository, viewModelScope) }
-    internal val chromeMemory = PrivateMessageComposeChromeMemory(savedStateHandle, draftSession.isRecreation)
+    // Draft-session construction only registers callbacks; restore/hydrate run from init below.
+    internal val chromeMemory: PrivateMessageComposeChromeMemory =
+        PrivateMessageComposeChromeMemory(savedStateHandle, draftSession.isRecreation)
 
     /**
      * #459 — lowercased pseudo of the authenticated session, or null when anonymous. The upload
@@ -481,13 +484,15 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     fun onToolbarAction(action: BbcodeAction) {
         if (!acceptMutation(blockDuringUpload = true)) return
         draftSession.decide(EditorSessionField.Body)
+        chromeMemory.host.focus.clearToolSelection()
         bodyFieldState.editBbcode { text, start, end -> applyBbcodeAction(action, text, start, end) }
-        scheduleAutosave()
+        if (action == BbcodeAction.Image) draftSession.persistDraftNow() else scheduleAutosave()
     }
 
     fun onSmileySelected(token: String) {
         if (!acceptMutation(blockDuringUpload = true)) return
         draftSession.decide(EditorSessionField.Body)
+        chromeMemory.host.focus.clearToolSelection()
         bodyFieldState.editBbcode { text, start, end -> insertBbcodeToken(token, text, start, end) }
         smileyPicker.dismiss(SmileyPickerCloseCause.INSERTION)
         scheduleAutosave()
@@ -669,9 +674,6 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                 )
                 if (bbcode != null) {
                     insertImageBbcodeAtCaret(bbcode, leadingNewline = completed > 0)
-                    // Persist after EACH insert: a later image failing must not lose the images
-                    // already inserted into the draft (Codex review #490).
-                    scheduleAutosave()
                 }
                 completed += 1
                 if (multiple) {
@@ -692,6 +694,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         // Authorized upload callbacks may insert during their own upload, unlike user input.
         if (!acceptMutation()) return
         draftSession.decide(EditorSessionField.Body)
+        chromeMemory.host.focus.clearToolSelection()
         bodyFieldState.editBbcode { text, start, end ->
             val caret = start.coerceIn(0, text.length)
             val needsNewline = leadingNewline && caret > 0 && text[caret - 1] != '\n'
@@ -703,6 +706,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                 surroundWithSpaces = false,
             )
         }
+        draftSession.persistDraftNow()
     }
 
     private fun handleUploadFailure(error: Throwable) {

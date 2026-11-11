@@ -5,6 +5,19 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class BbcodeFormatterTest {
+    @Test
+    fun `personal smiley inserts no spaces and keeps an empty caret inside the token`() {
+        assertEquals(BbcodeFormatResult("a[:]b", 3, 3),
+            applyBbcodeAction(BbcodeAction.PersonalSmiley, "ab", 1, 1))
+    }
+
+    @Test
+    fun `personal smiley normalizes reversed and out of bounds selections then collapses after token`() {
+        assertEquals(BbcodeFormatResult("a[:nom]z", 7, 7),
+            applyBbcodeAction(BbcodeAction.PersonalSmiley, "anomz", 4, 1))
+        assertEquals(BbcodeFormatResult("[:nom]", 6, 6),
+            applyBbcodeAction(BbcodeAction.PersonalSmiley, "nom", 99, -1))
+    }
 
     @Test
     fun `non-empty selection is wrapped and the new selection still wraps the content`() {
