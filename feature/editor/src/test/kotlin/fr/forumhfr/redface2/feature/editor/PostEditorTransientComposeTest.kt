@@ -6,12 +6,15 @@ import android.view.inputmethod.InputConnection
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
@@ -70,6 +73,7 @@ import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.R as UiR
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
+import fr.forumhfr.redface2.core.ui.editor.EditorHeaderPanel
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -140,15 +144,13 @@ class PostEditorTransientComposeTest {
 
     @Test fun `ED50 removing the final card retains its announcement and gives focus to the empty panel`() {
         host.state = host.state.copy(quotes = host.state.quotes.take(1))
-        compose.setContent {
-            RedfaceTheme { PostEditorTestContent(host.state, host::dispatch, host.body, host.events, host.memory) }
-        }
-        compose.onNodeWithContentDescription("1 citation, ouvrir le panneau citations").performClick()
+        openQuotePanel()
+        val id = compose.onNode(quotePanelLive, useUnmergedTree = true).fetchSemanticsNode().id
         compose.onNodeWithText("Tout vider").assertDoesNotExist()
         compose.onNodeWithContentDescription("Retirer la citation de Alice").performScrollTo().performClick()
         compose.onNodeWithText("Aucune citation").assertIsFocused()
         compose.mainClock.advanceTimeBy(500L)
-        compose.onNodeWithContentDescription("Citation de Alice retirée. 0 citation restante").assertExists()
+        assertPanelAnnouncement(id, "Citation de Alice retirée. 0 citation restante")
     }
 
     @Test fun `R2a every panel live region with cards survives Android accessibility occlusion pruning`() {
@@ -181,6 +183,22 @@ class PostEditorTransientComposeTest {
         assertPanelAnnouncement(id, "Toutes les citations ont été retirées")
     }
 
+    @Test fun `R2a removing the fifteenth scrolled card keeps the Android live region visible and updated`() {
+        val template = host.state.quotes.first()
+        host.state = host.state.copy(quotes = (1..15).map { index ->
+            template.copy(locator = template.locator.copy(numreponse = 100 + index), author = "Auteur $index")
+        })
+        openQuotePanel()
+        val id = compose.onNode(quotePanelLive, useUnmergedTree = true).fetchSemanticsNode().id
+        val returnButton = compose.onNodeWithText("Retour au message")
+        val initialReturnTop = returnButton.getUnclippedBoundsInRoot().top
+        compose.onNodeWithContentDescription("Retirer la citation de Auteur 15").performScrollTo().performClick()
+        compose.mainClock.advanceTimeBy(500L)
+        // Prove that this scenario really scrolled the panel, rather than fitting all cards onscreen.
+        assertTrue(returnButton.getUnclippedBoundsInRoot().top < initialReturnTop)
+        assertPanelAnnouncement(id, "Citation de Auteur 15 retirée. 14 citations restantes")
+    }
+
     @Test fun `R2a two identical moves expose an empty interval and the same announcement twice to Android`() {
         host.state = host.state.copy(quotes = host.state.quotes.take(2).map { it.copy(author = "Alice") })
         openQuotePanel()
@@ -189,17 +207,76 @@ class PostEditorTransientComposeTest {
         compose.mainClock.autoAdvance = false
         try {
             move.performSemanticsAction(SemanticsActions.OnClick)
-            compose.mainClock.advanceTimeBy(256L)
+            compose.mainClock.advanceTimeBy(160L)
+            assertPanelAnnouncement(id, "")
+            compose.mainClock.advanceTimeBy(96L)
             assertPanelAnnouncement(id, "Citation de Alice déplacée en position 1")
             val first = host.state.quotes.first()
             // The other Alice now occupies position 2: same author, same result, different snapshot.
             // Queue it while the first message is still displayed, before its minimum dwell ends.
             move.performSemanticsAction(SemanticsActions.OnClick)
             compose.mainClock.advanceTimeBy(208L)
+            assertPanelAnnouncement(id, "Citation de Alice déplacée en position 1")
+            compose.mainClock.advanceTimeBy(192L)
+            assertPanelAnnouncement(id, "Citation de Alice déplacée en position 1")
+            compose.mainClock.advanceTimeBy(128L)
             assertPanelAnnouncement(id, "")
-            compose.mainClock.advanceTimeBy(256L)
+            compose.mainClock.advanceTimeBy(208L)
             assertPanelAnnouncement(id, "Citation de Alice déplacée en position 1")
             compose.runOnIdle { assertTrue(first != host.state.quotes.first()) }
+        } finally {
+            compose.mainClock.autoAdvance = true
+        }
+    }
+
+    @Test fun `R2a the idle Android live region clears two seconds after the last message and works again`() {
+        openQuotePanel()
+        val id = compose.onNode(quotePanelLive, useUnmergedTree = true).fetchSemanticsNode().id
+        compose.mainClock.autoAdvance = false
+        try {
+            compose.onNodeWithContentDescription("Retirer la citation de Bob")
+                .performSemanticsAction(SemanticsActions.OnClick)
+            compose.mainClock.advanceTimeBy(256L)
+            assertPanelAnnouncement(id, "Citation de Bob retirée. 2 citations restantes")
+            compose.mainClock.advanceTimeBy(1_856L)
+            assertPanelAnnouncement(id, "Citation de Bob retirée. 2 citations restantes")
+            compose.mainClock.advanceTimeBy(192L)
+            assertPanelAnnouncement(id, "")
+            compose.onNodeWithText("Tout vider").performSemanticsAction(SemanticsActions.OnClick)
+            compose.mainClock.advanceTimeBy(160L)
+            assertPanelAnnouncement(id, "")
+            compose.mainClock.advanceTimeBy(96L)
+            assertPanelAnnouncement(id, "Toutes les citations ont été retirées")
+        } finally {
+            compose.mainClock.autoAdvance = true
+        }
+    }
+
+    @Test fun `R2a closing the panel clears the displayed message and discards queued announcements`() {
+        openQuotePanel()
+        val oldId = compose.onNode(quotePanelLive, useUnmergedTree = true).fetchSemanticsNode().id
+        compose.mainClock.autoAdvance = false
+        try {
+            compose.onNodeWithContentDescription("Descendre la citation de Alice")
+                .performSemanticsAction(SemanticsActions.OnClick)
+            compose.mainClock.advanceTimeBy(256L)
+            assertPanelAnnouncement(oldId, "Citation de Alice déplacée en position 2")
+            compose.onNodeWithContentDescription("Descendre la citation de Bob")
+                .performSemanticsAction(SemanticsActions.OnClick)
+            compose.mainClock.advanceTimeByFrame() // Queue Bob while Alice is still displayed.
+            compose.onNodeWithText("Retour au message").performSemanticsAction(SemanticsActions.OnClick)
+            compose.mainClock.advanceTimeByFrame()
+            compose.onNode(quotePanelLive, useUnmergedTree = true).assertDoesNotExist()
+            compose.onNodeWithContentDescription("3 citations, ouvrir le panneau citations")
+                .performSemanticsAction(SemanticsActions.OnClick)
+            compose.mainClock.advanceTimeByFrame()
+            val id = compose.onNode(quotePanelLive, useUnmergedTree = true).fetchSemanticsNode().id
+            assertPanelAnnouncement(id, "")
+            compose.mainClock.advanceTimeBy(1_024L)
+            assertPanelAnnouncement(id, "")
+            compose.onNodeWithText("Tout vider").performSemanticsAction(SemanticsActions.OnClick)
+            compose.mainClock.advanceTimeBy(256L)
+            assertPanelAnnouncement(id, "Toutes les citations ont été retirées")
         } finally {
             compose.mainClock.autoAdvance = true
         }
@@ -246,14 +323,45 @@ class PostEditorTransientComposeTest {
         compose.runOnIdle { assertEquals("Bob", host.state.quotes.last().author) }
     }
 
+    @Test fun `R2a two up clicks before recomposition focus down and announce the actual final position`() {
+        val template = host.state.quotes.first()
+        host.state = host.state.copy(quotes = listOf("Alice", "Bob", "Chloé", "Diane").mapIndexed { index, author ->
+            template.copy(locator = template.locator.copy(numreponse = 101 + index), author = author)
+        })
+        openQuotePanel()
+        val id = compose.onNode(quotePanelLive, useUnmergedTree = true).fetchSemanticsNode().id
+        compose.runOnIdle { quoteInputMode.requestInputMode(InputMode.Keyboard) }
+        compose.runOnIdle { assertEquals(InputMode.Keyboard, quoteInputMode.inputMode) }
+        val up = compose.onNodeWithContentDescription("Monter la citation de Chloé")
+        up.performScrollTo().requestFocus().assertIsFocused()
+        compose.mainClock.autoAdvance = false
+        try {
+            // Invoke the SAME captured action twice in one UI turn: no idle/recomposition between clicks.
+            up.performSemanticsAction(SemanticsActions.OnClick) { click ->
+                assertTrue(click())
+                assertTrue(click())
+            }
+            compose.mainClock.advanceTimeBy(256L)
+            compose.runOnIdle {
+                assertEquals(listOf("Chloé", "Alice", "Bob", "Diane"), host.state.quotes.map { it.author })
+            }
+            up.assertIsNotEnabled()
+            compose.onNodeWithContentDescription("Descendre la citation de Chloé").assertIsEnabled().assertIsFocused()
+            assertPanelAnnouncement(id, "Citation de Chloé déplacée en position 1")
+        } finally {
+            compose.mainClock.autoAdvance = true
+        }
+    }
+
     private fun openQuotePanel() {
         compose.setContent {
             quotePanelView = LocalView.current
             quoteInputMode = LocalInputModeManager.current
             RedfaceTheme { PostEditorTestContent(host.state, host::dispatch, host.body, host.events, host.memory) }
         }
-        compose.onNodeWithContentDescription("${host.state.quotes.size} citations, ouvrir le panneau citations")
-            .performClick()
+        val count = host.state.quotes.size
+        val label = if (count == 1) "1 citation" else "$count citations"
+        compose.onNodeWithContentDescription("$label, ouvrir le panneau citations").performClick()
     }
 
     private fun assertPanelAnnouncement(id: Int, text: String) {
@@ -261,10 +369,68 @@ class PostEditorTransientComposeTest {
         assertEquals(id, node.id)
         assertEquals(listOf(text), node.config[SemanticsProperties.ContentDescription])
         compose.runOnIdle {
-            val info = requireNotNull(quotePanelView.accessibilityNodeProvider.createAccessibilityNodeInfo(id))
-            assertTrue(info.isVisibleToUser)
+            val info = requireNotNull(quotePanelView.accessibilityNodeProvider.createAccessibilityNodeInfo(id)) {
+                "Panel live region $id was pruned by Android"
+            }
+            assertTrue("Panel live region $id is invisible to Android", info.isVisibleToUser)
             assertEquals(View.ACCESSIBILITY_LIVE_REGION_POLITE, info.liveRegion)
             assertEquals(text, info.contentDescription?.toString().orEmpty())
+        }
+    }
+
+    @Test fun `R2a the pinned live region preserves panel geometry with zero one or three cards`() =
+        quotePanelHeaderGeometry()
+
+    @Test
+    @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
+    fun `R2a the pinned live region preserves compact panel geometry with zero one or three cards`() =
+        quotePanelHeaderGeometry()
+
+    private fun quotePanelHeaderGeometry() {
+        val baseline = mutableStateOf(true)
+        val fontScale = mutableStateOf(1f)
+        val originalQuotes = host.state.quotes
+        compose.setContent {
+            quotePanelView = LocalView.current
+            val density = LocalDensity.current
+            CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale.value)) {
+                RedfaceTheme {
+                    if (baseline.value) {
+                        // Previous layout: the button alone in headerActions, 1 dp before the scroll content.
+                        EditorHeaderPanel(true, "Citations", host.body, {}, {}, headerActions = {
+                            if (host.state.quotes.size >= 2) TextButton(onClick = {}) { Text("Tout vider") }
+                        }, body = {}) {
+                            Spacer(Modifier.size(1.dp))
+                            if (host.state.quotes.isEmpty()) Text("Aucune citation")
+                            PostEditorQuoteCards(host.state.quotes, true, {}, {}, {})
+                        }
+                    } else PostEditorQuotePanel(host.adapter, host.body, {}, {})
+                }
+            }
+        }
+        compose.runOnIdle { host.adapter.open(PostEditorChromeSurface.Quotes) }
+        listOf(1f, 1.3f).forEach { scale ->
+            listOf(0, 1, 3).forEach { count ->
+                compose.runOnIdle {
+                    baseline.value = true
+                    fontScale.value = scale
+                    host.state = host.state.copy(quotes = originalQuotes.take(count))
+                }
+                val labels = listOf("Citations", "Retour au message") +
+                    if (count == 0) listOf("Aucune citation") else listOf("❝ Alice — Extrait du message de Alice")
+                val bounds = labels.associateWith { compose.onNodeWithText(it).getUnclippedBoundsInRoot() }
+                val buttonBounds = if (count >= 2) compose.onNodeWithText("Tout vider").getUnclippedBoundsInRoot()
+                    else null
+                compose.runOnIdle { baseline.value = false }
+                bounds.forEach { (label, expected) ->
+                    assertEquals("$label at $count cards, fontScale=$scale", expected,
+                        compose.onNodeWithText(label).getUnclippedBoundsInRoot())
+                }
+                if (buttonBounds != null) assertEquals(buttonBounds,
+                    compose.onNodeWithText("Tout vider").getUnclippedBoundsInRoot())
+                val id = compose.onNode(quotePanelLive, useUnmergedTree = true).fetchSemanticsNode().id
+                assertPanelAnnouncement(id, "")
+            }
         }
     }
 

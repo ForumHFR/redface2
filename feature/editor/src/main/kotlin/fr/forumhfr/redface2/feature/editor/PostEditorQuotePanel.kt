@@ -4,7 +4,10 @@ import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -15,6 +18,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -32,6 +36,7 @@ import fr.forumhfr.redface2.core.ui.editor.QuoteCard
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardControls
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withTimeoutOrNull
 
 /** ED-50/53: keep mounted around the body; the scaffold callback restores the captured IME state. */
 @Composable
@@ -43,17 +48,28 @@ internal fun PostEditorQuotePanel(
 ) {
     val quotes = adapter.state.source.quotes
     val enabled = adapter.state.scaffold.controlsEnabled
-    var announcement by remember { mutableStateOf("") }
-    val announcements = remember { Channel<String>(Channel.UNLIMITED) }
+    val isOpen = adapter.surface == PostEditorChromeSurface.Quotes
+    // Closing drops both the displayed message and any queued actions, even on an immediate reopening.
+    var announcement by remember(isOpen) { mutableStateOf("") }
+    val announcements = remember(isOpen) { Channel<String>(Channel.UNLIMITED) }
     val onAnnounce: (String) -> Unit = { announcements.trySend(it) }
     LaunchedEffect(announcements) {
-        for (message in announcements) {
-            // A real empty interval lets Android observe even two identical consecutive messages.
-            // Queue them: a new action must not cancel a pending announcement.
-            announcement = ""
-            delay(QUOTE_ANNOUNCEMENT_INTERVAL_MILLIS)
-            announcement = message
-            delay(QUOTE_ANNOUNCEMENT_INTERVAL_MILLIS)
+        if (isOpen) {
+            var message = announcements.receive()
+            while (true) {
+                // Android must observe an empty interval even between identical messages.
+                announcement = ""
+                delay(QUOTE_ANNOUNCEMENT_EMPTY_MILLIS)
+                announcement = message
+                // TalkBack rereads asynchronously: do not let a queued action erase this message early.
+                delay(QUOTE_ANNOUNCEMENT_HOLD_MILLIS)
+                message = withTimeoutOrNull(QUOTE_ANNOUNCEMENT_IDLE_MILLIS - QUOTE_ANNOUNCEMENT_HOLD_MILLIS) {
+                    announcements.receive()
+                } ?: run {
+                    announcement = ""
+                    announcements.receive()
+                }
+            }
         }
     }
     val clearedLabel = stringResource(R.string.editor_quotes_cleared)
@@ -63,24 +79,33 @@ internal fun PostEditorQuotePanel(
         if (cleared && quotes.isEmpty()) { emptyFocus.requestFocus(); cleared = false }
     }
     EditorHeaderPanel(
-        adapter.surface == PostEditorChromeSurface.Quotes, stringResource(R.string.editor_quote_panel_title),
+        isOpen, stringResource(R.string.editor_quote_panel_title),
         bodyState, adapter::closeSurface, { adapter.returnToBody(onReturnToBody) },
         headerActions = {
-            if (quotes.size >= 2) TextButton(onClick = {
-                onAnnounce(clearedLabel)
-                cleared = true
-                adapter.clearQuotes()
-            }, enabled = enabled) {
-                // The visible label is also the single accessible name (label-in-name).
-                Text(stringResource(R.string.editor_quotes_clear_all))
+            // With a button, its size alone defines this slot. Without one, reserve zero width in
+            // the Row and place the 1 dp node inward, over the title's trailing edge, without clipping.
+            val headerModifier = if (quotes.size >= 2) Modifier else
+                Modifier.width(0.dp).wrapContentWidth(Alignment.End, unbounded = true)
+            Box(headerModifier) {
+                if (quotes.size >= 2) TextButton(onClick = {
+                    onAnnounce(clearedLabel)
+                    cleared = true
+                    adapter.clearQuotes()
+                }, enabled = enabled) {
+                    // The visible label is also the single accessible name (label-in-name).
+                    Text(stringResource(R.string.editor_quotes_clear_all))
+                }
+                // Pinned outside the scroll viewport; after the button so Android cannot occlude it.
+                // Outlives every card and the button, including the final removal and clear-all.
+                Box(Modifier.size(1.dp).semantics {
+                    liveRegion = LiveRegionMode.Polite
+                    contentDescription = announcement
+                })
             }
         }, body = body,
     ) {
-        // Outlives the last card, including a clear-all operation.
-        Box(Modifier.size(1.dp).semantics {
-            liveRegion = LiveRegionMode.Polite
-            contentDescription = announcement
-        })
+        // Preserve the former node's height AND its following 8 dp Column gap (Roborazzi geometry).
+        Spacer(Modifier.size(1.dp))
         if (quotes.isEmpty()) Text(stringResource(R.string.editor_quote_panel_empty),
             Modifier.focusRequester(emptyFocus).focusable())
         PostEditorQuoteCards(quotes, enabled, adapter::quoteIntent, { emptyFocus.requestFocus() }, onAnnounce)
@@ -113,16 +138,21 @@ internal fun PostEditorQuoteCards(
             key(quote) {
                 val moveUpFocus = remember { FocusRequester() }
                 val moveDownFocus = remember { FocusRequester() }
-                var pendingMoveFocus by remember { mutableStateOf<FocusRequester?>(null) }
+                var movedByUser by remember { mutableStateOf(false) }
                 // Wait for the reordered card's buttons to receive their new enabled state.
                 LaunchedEffect(index) {
-                    pendingMoveFocus?.requestFocus()
-                    pendingMoveFocus = null
+                    if (movedByUser) {
+                        when (index) {
+                            0 -> moveDownFocus.requestFocus()
+                            quotes.lastIndex -> moveUpFocus.requestFocus()
+                        }
+                        // Coalesced clicks announce the actual final position, never a stale index.
+                        onAnnounce(moved.format(quote.author, index + 1))
+                        movedByUser = false
+                    }
                 }
                 val move: (Int) -> Unit = { delta ->
-                    if (index + delta == 0) pendingMoveFocus = moveDownFocus
-                    if (index + delta == quotes.lastIndex) pendingMoveFocus = moveUpFocus
-                    onAnnounce(moved.format(quote.author, index + delta + 1))
+                    movedByUser = true
                     onIntent(PostEditorIntent.QuoteMoved(quote.numreponse, delta, quote))
                 }
                 QuoteCard(quote, QuoteCardControls(index > 0, index < quotes.lastIndex, enabled,
@@ -137,4 +167,7 @@ internal fun PostEditorQuoteCards(
 }
 
 // Longer than Compose's 100 ms recurring accessibility-event interval; no spoken suffix or node replacement.
-private const val QUOTE_ANNOUNCEMENT_INTERVAL_MILLIS = 200L
+private const val QUOTE_ANNOUNCEMENT_EMPTY_MILLIS = 200L
+private const val QUOTE_ANNOUNCEMENT_HOLD_MILLIS = 500L
+// Includes the minimum hold above: the last message disappears 2 s after it was displayed.
+private const val QUOTE_ANNOUNCEMENT_IDLE_MILLIS = 2_000L
