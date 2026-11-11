@@ -535,6 +535,8 @@ class EditorPreviewComposeTest {
         mount()
         compose.onNode(hasSetTextAction()).performClick()
         compose.runOnIdle {
+            // The setup tap's own IME request is not under test: count commands from here on.
+            keyboard.calls.clear()
             host.body.edit { this.selection = selection }
             host.insets(ime = 180)
         }
