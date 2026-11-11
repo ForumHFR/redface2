@@ -175,15 +175,25 @@ class PostEditorTransientComposeTest {
     @Test fun `R2a removal movement and clear all update the same Android panel live region`() {
         openQuotePanel()
         val id = compose.onNode(quotePanelLive, useUnmergedTree = true).fetchSemanticsNode().id
-        compose.onNodeWithContentDescription("Retirer la citation de Bob").performScrollTo().performClick()
-        compose.mainClock.advanceTimeBy(500L)
-        assertPanelAnnouncement(id, "Citation de Bob retirée. 2 citations restantes")
-        compose.onNodeWithContentDescription("Descendre la citation de Alice").performScrollTo().performClick()
-        compose.mainClock.advanceTimeBy(500L)
-        assertPanelAnnouncement(id, "Citation de Alice déplacée en position 2")
-        compose.onNodeWithText("Tout vider").performClick()
-        compose.mainClock.advanceTimeBy(500L)
-        assertPanelAnnouncement(id, "Toutes les citations ont été retirées")
+        compose.mainClock.autoAdvance = false
+        try {
+            compose.onNodeWithContentDescription("Retirer la citation de Bob")
+                .performSemanticsAction(SemanticsActions.OnClick)
+            advanceQuotePanelTimeBy(500L)
+            assertPanelAnnouncement(id, "Citation de Bob retirée. 2 citations restantes")
+            compose.onNodeWithContentDescription("Descendre la citation de Alice")
+                .performSemanticsAction(SemanticsActions.OnClick)
+            advanceQuotePanelTimeBy(500L)
+            assertPanelAnnouncement(id, "Citation de Alice déplacée en position 2")
+            compose.onNodeWithText("Tout vider").performSemanticsAction(SemanticsActions.OnClick)
+            advanceQuotePanelTimeBy(500L)
+            // Movement's minimum hold delays clear-all: this is its empty interval, not expiration.
+            assertPanelAnnouncement(id, "")
+            advanceQuotePanelTimeBy(320L)
+            assertPanelAnnouncement(id, "Toutes les citations ont été retirées")
+        } finally {
+            compose.mainClock.autoAdvance = true
+        }
     }
 
     @Test fun `R2a removing the fifteenth scrolled card keeps the Android live region visible and updated`() {
@@ -211,21 +221,21 @@ class PostEditorTransientComposeTest {
         compose.mainClock.autoAdvance = false
         try {
             move.performSemanticsAction(SemanticsActions.OnClick)
-            compose.mainClock.advanceTimeBy(160L)
+            advanceQuotePanelTimeBy(160L)
             assertPanelAnnouncement(id, "")
-            compose.mainClock.advanceTimeBy(160L)
+            advanceQuotePanelTimeBy(160L)
             assertPanelAnnouncement(id, "Citation de Alice déplacée en position 1")
             val first = host.state.quotes.first()
             // The other Alice now occupies position 2: same author, same result, different snapshot.
             // Queue it while the first message is still displayed, before its minimum dwell ends.
             move.performSemanticsAction(SemanticsActions.OnClick)
-            compose.mainClock.advanceTimeBy(208L)
+            advanceQuotePanelTimeBy(208L)
             assertPanelAnnouncement(id, "Citation de Alice déplacée en position 1")
-            compose.mainClock.advanceTimeBy(128L)
+            advanceQuotePanelTimeBy(128L)
             assertPanelAnnouncement(id, "Citation de Alice déplacée en position 1")
-            compose.mainClock.advanceTimeBy(160L)
+            advanceQuotePanelTimeBy(160L)
             assertPanelAnnouncement(id, "")
-            compose.mainClock.advanceTimeBy(208L)
+            advanceQuotePanelTimeBy(208L)
             assertPanelAnnouncement(id, "Citation de Alice déplacée en position 1")
             compose.runOnIdle { assertTrue(first != host.state.quotes.first()) }
         } finally {
@@ -240,16 +250,16 @@ class PostEditorTransientComposeTest {
         try {
             compose.onNodeWithContentDescription("Retirer la citation de Bob")
                 .performSemanticsAction(SemanticsActions.OnClick)
-            compose.mainClock.advanceTimeBy(320L)
+            advanceQuotePanelTimeBy(320L)
             assertPanelAnnouncement(id, "Citation de Bob retirée. 2 citations restantes")
-            compose.mainClock.advanceTimeBy(1_792L)
+            advanceQuotePanelTimeBy(1_792L)
             assertPanelAnnouncement(id, "Citation de Bob retirée. 2 citations restantes")
-            compose.mainClock.advanceTimeBy(320L)
+            advanceQuotePanelTimeBy(320L)
             assertPanelAnnouncement(id, "")
             compose.onNodeWithText("Tout vider").performSemanticsAction(SemanticsActions.OnClick)
-            compose.mainClock.advanceTimeBy(160L)
+            advanceQuotePanelTimeBy(160L)
             assertPanelAnnouncement(id, "")
-            compose.mainClock.advanceTimeBy(160L)
+            advanceQuotePanelTimeBy(160L)
             assertPanelAnnouncement(id, "Toutes les citations ont été retirées")
         } finally {
             compose.mainClock.autoAdvance = true
@@ -263,23 +273,23 @@ class PostEditorTransientComposeTest {
         try {
             compose.onNodeWithContentDescription("Descendre la citation de Alice")
                 .performSemanticsAction(SemanticsActions.OnClick)
-            compose.mainClock.advanceTimeBy(320L)
+            advanceQuotePanelTimeBy(320L)
             assertPanelAnnouncement(oldId, "Citation de Alice déplacée en position 2")
             compose.onNodeWithContentDescription("Descendre la citation de Bob")
                 .performSemanticsAction(SemanticsActions.OnClick)
-            compose.mainClock.advanceTimeByFrame() // Queue Bob while Alice is still displayed.
+            advanceQuotePanelFrame() // Queue Bob while Alice is still displayed.
             compose.onNodeWithText("Retour au message").performSemanticsAction(SemanticsActions.OnClick)
-            compose.mainClock.advanceTimeByFrame()
+            advanceQuotePanelFrame()
             compose.onNode(quotePanelLive, useUnmergedTree = true).assertDoesNotExist()
             compose.onNodeWithContentDescription("3 citations, ouvrir le panneau citations")
                 .performSemanticsAction(SemanticsActions.OnClick)
-            compose.mainClock.advanceTimeByFrame()
+            advanceQuotePanelFrame()
             val id = compose.onNode(quotePanelLive, useUnmergedTree = true).fetchSemanticsNode().id
             assertPanelAnnouncement(id, "")
-            compose.mainClock.advanceTimeBy(1_024L)
+            advanceQuotePanelTimeBy(1_024L)
             assertPanelAnnouncement(id, "")
             compose.onNodeWithText("Tout vider").performSemanticsAction(SemanticsActions.OnClick)
-            compose.mainClock.advanceTimeBy(320L)
+            advanceQuotePanelTimeBy(320L)
             assertPanelAnnouncement(id, "Toutes les citations ont été retirées")
         } finally {
             compose.mainClock.autoAdvance = true
@@ -338,10 +348,10 @@ class PostEditorTransientComposeTest {
                 assertTrue(host.calls.isEmpty())
                 host.state = host.state.copy(isInitializing = false)
             }
-            compose.mainClock.advanceTimeByFrame()
+            advanceQuotePanelFrame()
             compose.onNodeWithContentDescription("Retirer la citation de Alice")
                 .performSemanticsAction(SemanticsActions.OnClick)
-            compose.mainClock.advanceTimeBy(320L) // Before the pending move's one-second expiry.
+            advanceQuotePanelTimeBy(320L) // Before the pending move's one-second expiry.
             compose.runOnIdle {
                 assertEquals(listOf("Bob", "Chloé"), host.state.quotes.map { it.author })
                 assertEquals(listOf("Citation de Alice retirée. 2 citations restantes"), announcements)
@@ -369,11 +379,11 @@ class PostEditorTransientComposeTest {
                 assertTrue(requireNotNull(down.config[SemanticsActions.OnClick].action).invoke())
                 assertEquals(original, host.state.quotes)
             }
-            compose.mainClock.advanceTimeBy(1_200L)
+            advanceQuotePanelTimeBy(1_200L)
             compose.runOnIdle {
                 host.state = host.state.copy(quotes = listOf(original[1], original[0], original[2]))
             }
-            compose.mainClock.advanceTimeBy(320L)
+            advanceQuotePanelTimeBy(320L)
             compose.runOnIdle {
                 assertEquals(2, host.calls.count { it is PostEditorIntent.QuoteMoved })
                 assertTrue(announcements.isEmpty())
@@ -434,9 +444,10 @@ class PostEditorTransientComposeTest {
             // Invoke the SAME captured action twice in one UI turn: no idle/recomposition between clicks.
             up.performSemanticsAction(SemanticsActions.OnClick) { click ->
                 assertTrue(click())
+                assertEquals(listOf("Alice", "Chloé", "Bob", "Diane"), host.state.quotes.map { it.author })
                 assertTrue(click())
             }
-            compose.mainClock.advanceTimeBy(320L)
+            advanceQuotePanelTimeBy(320L)
             compose.runOnIdle {
                 assertEquals(listOf("Chloé", "Alice", "Bob", "Diane"), host.state.quotes.map { it.author })
             }
@@ -446,6 +457,20 @@ class PostEditorTransientComposeTest {
         } finally {
             compose.mainClock.autoAdvance = true
         }
+    }
+
+    private fun advanceQuotePanelTimeBy(milliseconds: Long) {
+        // Semantic clicks write global snapshots; drain Android's apply notifications before ticking
+        // the v2 dispatcher, or the recomposition and its effects may only be scheduled at the assertion.
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(milliseconds)
+        compose.waitForIdle()
+    }
+
+    private fun advanceQuotePanelFrame() {
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeByFrame()
+        compose.waitForIdle()
     }
 
     private fun quoteAccessibilityNodes(id: Int): List<AccessibilityNodeInfo> {
