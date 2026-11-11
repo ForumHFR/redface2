@@ -29,26 +29,33 @@ import org.junit.Test
 class PostEditorChromeAdapterTest {
     private val host = PostEditorChromeFixture()
 
-    @Test fun `1450 pending event opens the existing restore panel without an automatic opening or intent`() {
+    @Test fun `1450 pending event opens the offer sheet and retains its identity after acknowledgement`() {
         host.transition(host.state.copy(restorableDraft = "D", pendingQuotes = listOf(
             QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
         val pending = host.events.visibleEvent!!
         assertNull(host.adapter.surface)
+        assertFalse(host.adapter.draftOfferOpen)
         assertFalse(host.adapter.state.sendActivatable)
         host.adapter.barActions.onEvent(pending.key, EditorEventAction.Details)
-        assertEquals(pending.key, host.adapter.pendingQuoteDetailKey)
+        assertTrue(host.adapter.draftOfferOpen)
+        assertEquals(pending.key, host.adapter.draftOfferDetailKey)
         assertEquals(pending.key, host.adapter.detail?.key)
         assertEquals(pending, host.events.visibleEvent) // ED-45 acknowledges on closing, not opening.
         host.adapter.gesture(EditorBarGesture.ToggleFormat)
         assertNull(host.events.visibleEvent)
-        assertEquals(pending.key, host.adapter.pendingQuoteDetailKey)
+        assertEquals(pending.key, host.adapter.draftOfferDetailKey)
         assertEquals(pending.key, host.adapter.detail?.key)
         assertTrue(host.calls.isEmpty())
         assertTrue(host.state.pendingQuotes.isNotEmpty())
         host.transition(host.state.copy(restorableDraft = null))
-        assertNull(host.adapter.pendingQuoteDetailKey)
+        // Presentation stays captured until the sheet's unavailable-offer effect closes it.
+        assertEquals(pending.key, host.adapter.draftOfferDetailKey)
         assertFalse(host.events.isPendingQuoteEvent(pending.key))
-        host.adapter.closeDetails(pending.key)
+        host.adapter.closeDraftOffer()
+        assertFalse(host.adapter.draftOfferOpen)
+        assertTrue(host.adapter.consumeReturn())
+        host.adapter.closeDraftOffer()
+        assertFalse(host.adapter.consumeReturn())
         assertNull(host.adapter.detail)
         assertNull(host.events.visibleEvent)
         host.adapter.barActions.onEvent(pending.key, EditorEventAction.Details)
@@ -61,10 +68,36 @@ class PostEditorChromeAdapterTest {
         val pending = host.events.visibleEvent!!
         host.adapter.barActions.onEvent(pending.key, EditorEventAction.Details)
         host.adapter.gesture(EditorBarGesture.ToggleFormat)
-        assertEquals(pending.key, host.adapter.pendingQuoteDetailKey)
+        assertEquals(pending.key, host.adapter.draftOfferDetailKey)
+        // Match the ViewModel's session transition: reset retained chrome before opening the session.
+        host.memory.reset()
         host.events.open(host.session.copy(id = "changed", owner = null))
-        assertNull(host.adapter.pendingQuoteDetailKey)
+        assertNull(host.adapter.draftOfferDetailKey)
+        assertFalse(host.adapter.draftOfferOpen)
         assertFalse(host.events.isPendingQuoteEvent(pending.key))
+    }
+
+    @Test fun `1450 first restore tap under pending notice opens the sheet and Back only acknowledges it`() {
+        host.transition(host.state.copy(restorableDraft = "D", pendingQuotes = listOf(
+            QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
+        val pending = host.events.visibleEvent!!
+        host.adapter.open(PostEditorChromeSurface.Restore)
+        assertTrue(host.adapter.draftOfferOpen)
+        assertNull(host.adapter.draftOfferDetailKey)
+        assertNull(host.events.visibleEvent)
+        val layers = mutableListOf<EditorBackAction>()
+        host.adapter.back(onLayerBack = layers::add)
+        assertEquals(listOf(EditorBackAction.CloseSheet(EditorSheet.DraftOffer)), layers)
+        assertFalse(host.adapter.draftOfferOpen)
+        assertTrue(host.adapter.consumeReturn())
+        assertFalse(host.adapter.consumeReturn())
+        host.transition(host.state.copy(bodyText = "typing"))
+        assertNull(host.events.visibleEvent)
+        assertTrue(host.events.isPendingQuoteEvent(pending.key))
+        assertEquals("D", host.state.restorableDraft)
+        assertTrue(host.state.pendingQuotes.isNotEmpty())
+        assertFalse(host.adapter.state.sendActivatable)
+        assertTrue(host.calls.isEmpty())
     }
 
     @Test fun `1450 save failure Reload is limited to an unresolved quote without a draft offer or uncertainty`() {
@@ -200,13 +233,12 @@ class PostEditorChromeAdapterTest {
         assertTrue(host.events.state.events.isEmpty())
     }
 
-    @Test fun `ED53 Quotes Restore and PendingQuote panels do not schedule a deferred focus return`() {
+    @Test fun `ED53 quote panels retain panel focus ownership while Restore defers exactly one return`() {
         host.adapter.barActions.onOptions()
         host.adapter.closeSurface()
         assertTrue(host.adapter.consumeReturn())
         val generation = host.adapter.returnGeneration
-        listOf(PostEditorChromeSurface.Quotes, PostEditorChromeSurface.Restore,
-            PostEditorChromeSurface.PendingQuote).forEach { surface ->
+        listOf(PostEditorChromeSurface.Quotes, PostEditorChromeSurface.PendingQuote).forEach { surface ->
             host.adapter.open(surface)
             assertEquals(surface, host.adapter.surface)
             assertEquals(generation, host.adapter.returnGeneration)
@@ -215,6 +247,12 @@ class PostEditorChromeAdapterTest {
             assertEquals(generation, host.adapter.returnGeneration)
             assertFalse(host.adapter.consumeReturn())
         }
+        host.adapter.open(PostEditorChromeSurface.Restore)
+        host.adapter.closeDraftOffer()
+        assertEquals(generation + 1, host.adapter.returnGeneration)
+        assertTrue(host.adapter.consumeReturn())
+        host.adapter.closeDraftOffer()
+        assertFalse(host.adapter.consumeReturn())
     }
     @Test fun `ED35 real form evidence and strict post guard are independent`() {
         val source = host.state

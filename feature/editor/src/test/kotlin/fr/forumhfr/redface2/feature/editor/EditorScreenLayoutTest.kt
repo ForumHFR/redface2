@@ -28,6 +28,7 @@ import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithText
@@ -59,6 +60,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.shadows.ShadowDialog
 
 /** #447 — real editor layouts keep the draft and restore actions usable on an IME viewport. */
 @OptIn(ExperimentalTestApi::class)
@@ -177,11 +179,12 @@ class EditorScreenLayoutTest {
 
     @Test
     @Config(qualifiers = "fr-rFR-w360dp-h760dp-port-xxhdpi")
-    fun `post restore panel states its offer once and never ellipsizes it at font scale 1_3`() {
+    fun `post restore sheet states its offer once and never ellipsizes it at font scale 1_3`() {
         val host = PostEditorChromeFixture()
         host.state = host.state.copy(restorableDraft = "Brouillon conservé")
         setScaledContent { PostEditorTestContent(host.state, host::dispatch, host.body, host.events) }
         assertRestoreOfferStatedOnce()
+        compose.onNode(isDialog()).assertExists()
     }
 
     @Test
@@ -197,18 +200,18 @@ class EditorScreenLayoutTest {
 
     @Test
     @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
-    fun `post restore offer and actions share one row above a landscape keyboard at font scale 1_0`() {
+    fun `post restore sheet offer and actions are reachable above a landscape keyboard at font scale 1_0`() {
         val host = PostEditorChromeFixture()
         host.state = host.state.copy(restorableDraft = "Brouillon conservé")
-        assertCompactRestoreRow(1.0f) { PostEditorTestContent(host.state, host::dispatch, host.body, host.events) }
+        assertCompactRestoreSheet(1.0f) { PostEditorTestContent(host.state, host::dispatch, host.body, host.events) }
     }
 
     @Test
     @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
-    fun `post restore offer and actions share one row above a landscape keyboard at font scale 1_3`() {
+    fun `post restore sheet offer and actions are reachable above a landscape keyboard at font scale 1_3`() {
         val host = PostEditorChromeFixture()
         host.state = host.state.copy(restorableDraft = "Brouillon conservé")
-        assertCompactRestoreRow(1.3f) { PostEditorTestContent(host.state, host::dispatch, host.body, host.events) }
+        assertCompactRestoreSheet(1.3f) { PostEditorTestContent(host.state, host::dispatch, host.body, host.events) }
     }
 
     @Test
@@ -270,6 +273,38 @@ class EditorScreenLayoutTest {
             assertEquals("$label must share the offer's row", offerBounds.centerY, bounds.centerY, 1f)
             assertTrue("$label must follow the offer and the previous action", bounds.left >= previousRight)
             previousRight = bounds.right
+        }
+    }
+
+    /** The expanded offer sheet scrolls its whole sentence and both 48 dp actions above the IME. */
+    private fun assertCompactRestoreSheet(fontScale: Float, content: @Composable () -> Unit) {
+        lateinit var view: View
+        lateinit var density: Density
+        setScaledContent(fontScale) {
+            view = LocalView.current
+            density = LocalDensity.current
+            content()
+        }
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
+        compose.onNode(isDialog()).assertExists()
+        compose.runOnIdle {
+            val ime = with(density) { LANDSCAPE_KEYBOARD.roundToPx() }
+            val insets = WindowInsetsCompat.Builder()
+                .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, ime))
+                .setVisible(WindowInsetsCompat.Type.ime(), true).build()
+            ViewCompat.dispatchApplyWindowInsets(view, insets)
+            // A ModalBottomSheet owns a separate window: the activity's insets alone cannot test it.
+            ViewCompat.dispatchApplyWindowInsets(ShadowDialog.getLatestDialog().window!!.decorView, insets)
+        }
+        compose.onAllNodesWithText(RESTORE_OFFER, useUnmergedTree = true).assertCountEquals(1)
+        val offer = assertOfferLaidOutWhole(fontScale).performScrollTo().assertIsDisplayed()
+        assertEquals("The offer must be entirely in view", offer.getUnclippedBoundsInRoot(), offer.getBoundsInRoot())
+        val keyboardTop = compose.onNode(isDialog()).getUnclippedBoundsInRoot().bottom - LANDSCAPE_KEYBOARD
+        for (label in listOf("Restaurer", "Ignorer")) {
+            val action = compose.onNodeWithText(label).performScrollTo().assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+            assertTrue("$label must stay above the keyboard", action.getUnclippedBoundsInRoot().bottom <= keyboardTop)
+            val text = compose.onNodeWithText(label, useUnmergedTree = true)
+            assertEquals("$label must be entirely in view", text.getUnclippedBoundsInRoot(), text.getBoundsInRoot())
         }
     }
 

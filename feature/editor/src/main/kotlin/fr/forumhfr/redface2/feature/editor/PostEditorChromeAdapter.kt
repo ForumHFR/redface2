@@ -41,8 +41,8 @@ internal class PostEditorChromeAdapter(
     ),
     EditorHostSurfaces(PostEditorChromeSurface.Smileys, PostEditorChromeSurface.Options,
         PostEditorChromeSurface.Picker, imageUrl = PostEditorChromeSurface.Url, canWrapSelection = true,
-        returnsToBody = { it !in setOf(PostEditorChromeSurface.Restore, PostEditorChromeSurface.Quotes,
-            PostEditorChromeSurface.PendingQuote) }),
+        returnsToBody = { it !in setOf(PostEditorChromeSurface.Quotes, PostEditorChromeSurface.PendingQuote) },
+        draftOffer = PostEditorChromeSurface.Restore, isDraftOfferDetail = events::isPendingQuoteEvent),
     launchPicker, openSmileys, memory, openSmileySearch,
 ) {
     val state: PostEditorChromeState get() = PostEditorChromeState(source())
@@ -59,10 +59,9 @@ internal class PostEditorChromeAdapter(
         secondStatus = if (source().restorableDraft == null) null else EditorAppBarStatus(
             UiR.drawable.ic_editor_restore, stringResource(UiR.string.editor_status_restore),
             { open(PostEditorChromeSurface.Restore) }, enabled = state.scaffold.controlsEnabled,
+            opensOnInformation = events::isPendingQuoteEvent,
         ),
     )
-    /** Render this keyed detail with the existing offer panel; EditorHost retains ED-45 acknowledgement. */
-    val pendingQuoteDetailKey get() = detail?.key?.takeIf(events::isPendingQuoteEvent)
 
     // The save information may be acknowledged or retired by autosave while Q still needs its CAS.
     // Keep a recovery panel reachable from the quote status independently of that event's lifetime.
@@ -100,16 +99,14 @@ internal class PostEditorChromeAdapter(
     fun restoreDraft() {
         // A non-blank restore can resolve an unknown edit body after the initial GET failed (#1574).
         if (source().canRestoreDraft && state.scaffold.controlsEnabled && !source().isUploading) {
-            val key = pendingQuoteDetailKey
             onIntent(PostEditorIntent.DraftRestoreRequested)
-            if (key == null) closeSurface() else closeDetails(key)
+            closeDraftOffer()
         }
     }
     fun discardDraft() {
         if (state.scaffold.controlsEnabled) {
-            val key = pendingQuoteDetailKey
             onIntent(PostEditorIntent.DraftDiscardRequested)
-            if (key == null) closeSurface() else closeDetails(key)
+            closeDraftOffer()
         }
     }
     fun resumeQuote(key: EventKey? = null) {

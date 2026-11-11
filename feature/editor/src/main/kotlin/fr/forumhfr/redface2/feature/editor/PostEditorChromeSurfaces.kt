@@ -8,6 +8,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.ui.R as UiR
+import fr.forumhfr.redface2.core.ui.editor.EditorDraftOfferSheet
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorAction
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
 import fr.forumhfr.redface2.core.ui.editor.EditorEventDetails
@@ -22,7 +23,7 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 
 /**
  * Keep mounted inside EditorScaffold.overlay, including while the field is covered.
- * [compactHeight] is the host's EditorWindowMetrics.compactHeight, the scaffold's own signal.
+ * [compactHeight] retains the overlay call contract; the offer sheet handles compact height itself.
  */
 @Composable
 @Suppress("LongParameterList") // Overlay slots plus the host's compact-height signal.
@@ -31,7 +32,7 @@ internal fun PostEditorChromeSurfaces(
     bodyState: TextFieldState,
     smileys: SmileyPickerController,
     onReturnToBody: () -> Unit,
-    compactHeight: Boolean,
+    @Suppress("UNUSED_PARAMETER") compactHeight: Boolean,
     body: @Composable () -> Unit,
 ) {
     // Run after the overlay/dialog is removed, when the body can accept focus again. Exactly once.
@@ -39,15 +40,15 @@ internal fun PostEditorChromeSurfaces(
         if (adapter.consumeReturn()) adapter.returnToBody(onReturnToBody)
     }
     val source = adapter.state.source
-    // A pending notice is a keyed event detail, rendered by the existing offer panel below.
-    // Keep both wrappers mounted so opening it never recreates the body field (ED-03/41).
-    EditorEventDetails(adapter.detail.takeUnless { adapter.pendingQuoteDetailKey != null },
+    // ED-45: the pending notice's detail IS the offer. Keep its captured sheet identity even if
+    // the notice retires, and leave the body and ordinary event/pending-quote panels mounted.
+    EditorEventDetails(adapter.detail.takeUnless { adapter.draftOfferDetailKey != null },
         bodyState, adapter::closeDetails, adapter::reload,
         { adapter.returnToBody(onReturnToBody) },
         onIgnoreQuote = if (source.canIgnorePendingQuote && !source.hasDormantQuote) adapter::ignoreQuote else null,
         onDismiss = adapter::dismissDetails,
         body = {
-            PostEditorHeaderSurface(adapter, source, bodyState, onReturnToBody, compactHeight, body)
+            PostEditorHeaderSurface(adapter, bodyState, onReturnToBody, body)
         }) { event ->
         if (source.hasDormantQuote) QuoteDecisions(adapter, event.key)
         val error = (event.content as? EditorEventContent.Problem)?.error
@@ -58,6 +59,11 @@ internal fun PostEditorChromeSurfaces(
             }
         }
     }
+    EditorDraftOfferSheet(adapter.draftOfferOpen, source.restorableDraft != null, adapter::closeDraftOffer,
+        adapter::restoreDraft, adapter::discardDraft,
+        pendingQuote = if (source.pendingQuotes.isNotEmpty()) stringResource(R.string.editor_quote_pending) else null,
+        restoreEnabled = source.canRestoreDraft && !source.isUploading && adapter.state.scaffold.controlsEnabled,
+        discardEnabled = adapter.state.scaffold.controlsEnabled)
     when (adapter.surface) {
         PostEditorChromeSurface.Options -> PostEditorOptionsSurface(adapter, source)
         PostEditorChromeSurface.Url -> if (adapter.state.canInsert) {
@@ -69,33 +75,17 @@ internal fun PostEditorChromeSurfaces(
 }
 
 @Composable
-@Suppress("LongParameterList") // Same overlay slots and compact-height signal as PostEditorChromeSurfaces.
 private fun PostEditorHeaderSurface(
     adapter: PostEditorChromeAdapter,
-    source: PostEditorState,
     bodyState: TextFieldState,
     onReturnToBody: () -> Unit,
-    compactHeight: Boolean,
     body: @Composable () -> Unit,
 ) {
-    val pending = adapter.surface == PostEditorChromeSurface.PendingQuote
-    val offerDetail = adapter.pendingQuoteDetailKey
-    val close: () -> Unit = if (offerDetail == null) adapter::closeSurface else {
-        { adapter.closeDetails(offerDetail) }
-    }
-    // Short title: the offer sentence appears once, in the panel body (gate R1b T3 r1, minor 3).
-    val title = if (pending) R.string.editor_quote_pending else R.string.editor_draft_restore_title
-    EditorHeaderPanel(adapter.surface == PostEditorChromeSurface.Restore || pending || offerDetail != null,
-        stringResource(title), bodyState, close,
+    EditorHeaderPanel(adapter.surface == PostEditorChromeSurface.PendingQuote,
+        stringResource(R.string.editor_quote_pending), bodyState, adapter::closeSurface,
         { adapter.returnToBody(onReturnToBody) },
         body = { PostEditorQuotePanel(adapter, bodyState, onReturnToBody, body) }) {
-        if (!pending && source.restorableDraft != null && source.pendingQuotes.isNotEmpty()) {
-            Text(stringResource(R.string.editor_quote_pending))
-        }
-        if (pending) QuoteDecisions(adapter) else DraftRestoreChoice(
-            adapter::restoreDraft, adapter::discardDraft, compactHeight,
-            restoreEnabled = source.canRestoreDraft && !source.isUploading &&
-                adapter.state.scaffold.controlsEnabled)
+        QuoteDecisions(adapter)
     }
 }
 

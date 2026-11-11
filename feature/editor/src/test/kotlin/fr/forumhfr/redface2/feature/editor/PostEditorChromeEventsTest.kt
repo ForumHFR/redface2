@@ -35,6 +35,7 @@ class PostEditorChromeEventsTest {
         assertEquals(EditorText(R.string.editor_quote_pending), pending.summary)
         assertEquals(EditorEventRank.Information, pending.rank)
         assertEquals(EditorEventAction.Details, pending.action)
+        assertEquals(5_000L, (pending.content as EditorEventContent.Information).timeoutMillis)
         host.events.readFailed()
         host.transition(host.state.copy(isLoadingForm = false, submitError = EditorErrors.formNetwork))
         val error = host.events.visibleEvent!!
@@ -58,8 +59,10 @@ class PostEditorChromeEventsTest {
     @Test fun `1450 pending information follows ED44 without lifting Q or redelivering on observation`() {
         host.transition(host.state.copy(restorableDraft = "D", pendingQuotes = listOf(
             QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
+        val key = host.events.visibleEvent!!.key
         assertTrue(host.events.dispatch(EditorEventInput.NextGesture(host.session)).gestureConsumed)
         assertNull(host.events.visibleEvent)
+        assertTrue(host.events.isPendingQuoteEvent(key))
         host.transition(host.state.copy(bodyText = "typing"))
         assertNull(host.events.visibleEvent)
         assertTrue(host.state.pendingQuotes.isNotEmpty())

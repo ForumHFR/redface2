@@ -1,15 +1,18 @@
 package fr.forumhfr.redface2.feature.editor
 
+import androidx.activity.ComponentDialog
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.ScrollState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.InputModeManager
 import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.LocalAccessibilityManager
 import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -24,6 +27,7 @@ import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -33,8 +37,10 @@ import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextInputSelection
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
+import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
@@ -44,6 +50,7 @@ import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
 import fr.forumhfr.redface2.core.ui.editor.EditorScaffold
 import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
@@ -57,6 +64,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.shadows.ShadowDialog
 
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -69,6 +77,7 @@ class PostEditorChromeComposeTest {
     private val scroll = ScrollState(0)
     private lateinit var back: OnBackPressedDispatcher
     private lateinit var inputMode: InputModeManager
+    private var returns = 0
 
     @Composable private fun PostContent() {
         back = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
@@ -87,13 +96,14 @@ class PostEditorChromeComposeTest {
                 host.adapter.imageActions, host.adapter::closeRequested, bodyFocusRequester = focus,
                 bodyFocusRestoreAllowed = host.adapter.surface == null && host.adapter.detail == null &&
                     !host.state.isPreviewVisible,
-                bodyScrollState = scroll, overlay = { restore, body ->
-                    PostEditorChromeSurfaces(host.adapter, host.body, smileys, restore, compactHeight = false, body)
+                bodyScrollState = scroll, surfaceFocus = host.adapter.focusMemory, overlay = { restore, body ->
+                    PostEditorChromeSurfaces(host.adapter, host.body, smileys, { returns++; restore() },
+                        compactHeight = false, body)
                 })
         }
     }
 
-    @Test fun `1450 pending quote announces politely in the fixed bar and opens Restore on tap`() {
+    @Test fun `1450 pending quote announces politely in the fixed bar and its detail is the offer sheet`() {
         compose.setContent { Content() }
         val field = compose.onNode(hasSetTextAction()).getUnclippedBoundsInRoot()
         val fieldNode = compose.onNode(hasSetTextAction()).fetchSemanticsNode().id
@@ -114,15 +124,19 @@ class PostEditorChromeComposeTest {
         assertEquals(field, compose.onNode(hasSetTextAction()).getUnclippedBoundsInRoot())
         assertEquals(submit, compose.onNodeWithTag("editor-bar-submit").getUnclippedBoundsInRoot())
         compose.onNodeWithTag("editor-bar-event").performClick()
+        compose.onNode(isDialog()).assertExists()
+        compose.onNodeWithTag("editor-draft-offer-sheet").assertIsDisplayed()
         compose.onNodeWithText("Citation en attente").assertIsDisplayed()
         compose.onNodeWithText("Restaurer").assertIsDisplayed()
         compose.onNodeWithText("Ignorer").assertIsDisplayed()
         compose.onNodeWithText("Recharger").assertDoesNotExist()
         compose.runOnIdle {
-            assertEquals(host.events.visibleEvent?.key, host.adapter.pendingQuoteDetailKey)
+            assertEquals(host.events.visibleEvent?.key, host.adapter.draftOfferDetailKey)
             assertTrue(host.calls.isEmpty())
         }
-        compose.onNodeWithText("Retour au message").performClick()
+        compose.onNodeWithContentDescription("Fermer l’offre de brouillon").performClick()
+        compose.onNode(isDialog()).assertDoesNotExist()
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").assertExists()
         compose.onNodeWithTag("editor-bar-submit-shape").assertIsNotEnabled()
         assertEquals(fieldNode, compose.onNode(hasSetTextAction()).fetchSemanticsNode().id)
         compose.runOnIdle {
@@ -130,6 +144,128 @@ class PostEditorChromeComposeTest {
             assertNull(host.adapter.detail)
             assertEquals("saved D", host.state.restorableDraft)
             assertTrue(host.state.pendingQuotes.isNotEmpty())
+            assertTrue(host.calls.isEmpty())
+            assertEquals(1, returns)
+        }
+    }
+
+    @Test fun `1450 first restore tap under the pending event opens the same offer sheet`() {
+        pendingOffer()
+        compose.setContent { Content() }
+        compose.onNodeWithTag("editor-bar-event").assertExists()
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
+        compose.onNode(isDialog()).assertExists()
+        compose.onNodeWithTag("editor-draft-offer-sheet").assertIsDisplayed()
+        compose.onNodeWithText("Citation en attente").assertIsDisplayed()
+        compose.onNodeWithText("Restaurer").assertIsDisplayed()
+        compose.onNodeWithText("Ignorer").assertIsDisplayed()
+        compose.onNodeWithText("Recharger").assertDoesNotExist()
+        compose.runOnIdle {
+            assertTrue(host.adapter.draftOfferOpen)
+            assertNull(host.adapter.draftOfferDetailKey)
+            assertNull(host.events.visibleEvent)
+            assertTrue(host.calls.isEmpty())
+        }
+    }
+
+    @Test fun `1450 pending notice times out at five seconds without opening the offer or deciding`() {
+        compose.setContent {
+            CompositionLocalProvider(LocalAccessibilityManager provides null) { Content() }
+        }
+        compose.mainClock.autoAdvance = false
+        val key = compose.runOnIdle { pendingOffer(); host.events.visibleEvent!!.key }
+        compose.mainClock.advanceTimeByFrame() // Start the newly displayed event's timeout effect.
+        compose.waitForIdle()
+        advance(4_999L)
+        compose.runOnIdle { assertEquals(key, host.events.visibleEvent?.key) }
+        advance(1L)
+        compose.onNode(isDialog()).assertDoesNotExist()
+        compose.onNodeWithTag("editor-bar-event").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").assertExists()
+        compose.onNodeWithTag("editor-bar-submit-shape").assertIsNotEnabled()
+        compose.runOnIdle {
+            host.transition(host.state.copy(bodyText = "typing"))
+            assertNull(host.events.visibleEvent)
+            assertTrue(host.events.isPendingQuoteEvent(key))
+            assertFalse(host.adapter.draftOfferOpen)
+            assertEquals("saved D", host.state.restorableDraft)
+            assertTrue(host.state.pendingQuotes.isNotEmpty())
+            assertTrue(host.calls.isEmpty())
+            assertEquals(0, returns)
+        }
+    }
+
+    @Test fun `1450 either offer entry returns focus once after swipe Back Restore or Ignore`() {
+        compose.setContent { Content() }
+        var expectedReturns = 0
+        listOf(false, true).forEach { throughEvent ->
+            listOf("swipe", "back", "restore", "discard").forEach { closing ->
+                compose.runOnIdle {
+                    // End the previous request before delivering a fresh pending-quote event.
+                    host.transition(host.state.copy(restorableDraft = null, pendingQuotes = emptyList()))
+                    pendingOffer()
+                    focus.requestFocus()
+                    host.body.edit { selection = TextRange(6, 1) }
+                }
+                val field = compose.onNode(hasSetTextAction()).fetchSemanticsNode().id
+                val calls = host.calls.toList()
+                if (throughEvent) compose.onNodeWithTag("editor-bar-event").performClick()
+                else compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
+                compose.onNodeWithTag("editor-draft-offer-sheet").assertIsDisplayed()
+                when (closing) {
+                    "swipe" -> compose.onNodeWithTag("editor-draft-offer-sheet").performTouchInput { swipeDown() }
+                    "back" -> compose.runOnIdle { sheetBack() }
+                    "restore" -> compose.onNodeWithText("Restaurer").performScrollTo().performClick()
+                    "discard" -> compose.onNodeWithText("Ignorer").performScrollTo().performClick()
+                }
+                compose.onNode(isDialog()).assertDoesNotExist()
+                compose.onNode(hasSetTextAction()).assertIsFocused()
+                assertEquals(field, compose.onNode(hasSetTextAction()).fetchSemanticsNode().id)
+                compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").assertExists()
+                compose.onNodeWithTag("editor-bar-submit-shape").assertIsNotEnabled()
+                expectedReturns++
+                compose.runOnIdle {
+                    assertEquals(expectedReturns, returns)
+                    assertEquals(TextRange(6, 1), host.body.selection)
+                    assertEquals("Bonjour", host.body.text.toString())
+                    assertEquals("saved D", host.state.restorableDraft)
+                    assertTrue(host.state.pendingQuotes.isNotEmpty())
+                    assertNull(host.events.visibleEvent)
+                    assertNull(host.adapter.detail)
+                    val decision = when (closing) {
+                        "restore" -> listOf(PostEditorIntent.DraftRestoreRequested)
+                        "discard" -> listOf(PostEditorIntent.DraftDiscardRequested)
+                        else -> emptyList()
+                    }
+                    assertEquals(calls + decision, host.calls)
+                    host.adapter.closeDraftOffer() // A late dismissal cannot return focus twice.
+                }
+                compose.waitForIdle()
+                compose.runOnIdle { assertEquals(expectedReturns, returns) }
+            }
+        }
+    }
+
+    @Test fun `1450 losing the offer closes either sheet entry without exposing a retired event panel`() {
+        compose.setContent { Content() }
+        listOf(false, true).forEachIndexed { index, throughEvent ->
+            compose.runOnIdle { pendingOffer() }
+            if (throughEvent) compose.onNodeWithTag("editor-bar-event").performClick()
+            else compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
+            compose.onNodeWithTag("editor-draft-offer-sheet").assertIsDisplayed()
+            compose.runOnIdle {
+                host.adapter.detail?.key?.let { host.events.dispatch(EditorEventInput.Acknowledge(it)) }
+                host.transition(host.state.copy(restorableDraft = null))
+            }
+            compose.onNode(isDialog()).assertDoesNotExist()
+            compose.onNodeWithText("Retour au message").assertDoesNotExist()
+            compose.onNode(hasSetTextAction()).assertIsFocused()
+            compose.runOnIdle {
+                assertFalse(host.adapter.draftOfferOpen)
+                assertNull(host.adapter.detail)
+                assertEquals(index + 1, returns)
+                assertTrue(host.calls.isEmpty())
+            }
         }
     }
 
@@ -147,6 +283,7 @@ class PostEditorChromeComposeTest {
             QuoteSelection(QuoteLocator(1, 101, null), "", "")), submitError = EditorErrors.draftSaveFailed))
         compose.setContent { Content() }
         compose.onNodeWithContentDescription("Brouillon non écrit, Afficher les détails").performClick()
+        compose.onNode(isDialog()).assertDoesNotExist() // Save/quote recovery remains an event panel.
         compose.onNodeWithText("Recharger").assertIsDisplayed().performClick()
         compose.runOnIdle {
             assertEquals(listOf(PostEditorIntent.ReloadRequested), host.calls)
@@ -167,6 +304,8 @@ class PostEditorChromeComposeTest {
         compose.onNodeWithContentDescription("Brouillon non écrit, Afficher les détails").assertDoesNotExist()
         compose.onNodeWithTag("editor-bar-submit-shape").assertIsNotEnabled()
         compose.onNodeWithContentDescription("1 citation, ouvrir le panneau citations").performClick()
+        compose.onNode(isDialog()).assertDoesNotExist()
+        compose.onNodeWithText("Retour au message").assertIsDisplayed()
         compose.onNodeWithText("Recharger").assertIsDisplayed().performClick()
         compose.runOnIdle {
             assertEquals(listOf(PostEditorIntent.ReloadRequested), host.calls)
@@ -181,6 +320,7 @@ class PostEditorChromeComposeTest {
             QuoteSelection(QuoteLocator(1, 101, null), "", "")), submitError = EditorErrors.draftSaveFailed))
         compose.setContent { Content() }
         compose.onNodeWithContentDescription("Brouillon non écrit, Afficher les détails").performClick()
+        compose.onNode(isDialog()).assertDoesNotExist()
         compose.onNodeWithText("Recharger").assertIsDisplayed()
         compose.runOnIdle { host.transition(host.state.copy(blocksFormReload = true)) }
         compose.onNodeWithText("Recharger").assertDoesNotExist()
@@ -196,6 +336,8 @@ class PostEditorChromeComposeTest {
         host.transition(host.state.copy(pendingQuotes = listOf(QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
         compose.setContent { Content() }
         compose.onNodeWithContentDescription("1 citation, ouvrir le panneau citations").performClick()
+        compose.onNode(isDialog()).assertDoesNotExist()
+        compose.onNodeWithText("Retour au message").assertIsDisplayed()
         compose.onNodeWithText("Recharger").assertIsDisplayed()
         compose.runOnIdle { host.transition(host.state.copy(blocksFormReload = true)) }
         compose.onNodeWithText("Recharger").assertDoesNotExist()
@@ -353,27 +495,44 @@ class PostEditorChromeComposeTest {
         compose.runOnIdle { assertTrue(host.calls.isEmpty()) }
     }
 
-    @Test fun `ED85 post system Back disarms before the local restore panel handler can close it`() {
+    @Test fun `ED85 post system Back closes the draft offer sheet before disarming`() {
         host.state = host.state.copy(restorableDraft = "Brouillon retrouvé")
         compose.setContent { PostContent() }
         compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
-        compose.onNode(hasSetTextAction()).assertDoesNotExist()
+        compose.onNode(isDialog()).assertExists()
+        compose.onNodeWithTag("editor-draft-offer-sheet").assertIsDisplayed()
         compose.runOnIdle {
             host.state = host.state.copy(submission = EditorSubmissionState.Armed(
                 ArmToken(1, host.session, 0, 4_000L)))
         }
         compose.waitForIdle()
-        compose.runOnIdle { back.onBackPressed() }
-        compose.onNode(hasSetTextAction()).assertDoesNotExist()
+        compose.runOnIdle { sheetBack() }
+        compose.onNode(isDialog()).assertDoesNotExist()
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(ArmToken(1, host.session, 0, 4_000L), host.state.armToken)
+            assertTrue(host.calls.isEmpty())
+            back.onBackPressed()
+        }
+        compose.onNode(isDialog()).assertDoesNotExist()
         compose.runOnIdle {
             assertNull(host.state.armToken)
             assertEquals(listOf(PostEditorIntent.SubmitConfirmationDismissed), host.calls)
-            back.onBackPressed()
         }
-        compose.onNode(hasSetTextAction()).assertIsFocused()
-        compose.runOnIdle {
-            assertEquals(listOf(PostEditorIntent.SubmitConfirmationDismissed), host.calls)
-        }
+    }
+
+    private fun pendingOffer() {
+        host.transition(host.state.copy(restorableDraft = "saved D", pendingQuotes = listOf(
+            QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
+    }
+
+    private fun sheetBack() {
+        (ShadowDialog.getLatestDialog() as ComponentDialog).onBackPressedDispatcher.onBackPressed()
+    }
+
+    private fun advance(millis: Long) {
+        compose.mainClock.advanceTimeBy(millis, ignoreFrameDuration = true)
+        compose.waitForIdle()
     }
 
     /** The app bar also has a « Retour » control: scope lookups to the action bar. */
