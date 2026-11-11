@@ -16,7 +16,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class EditorHostTest {
-    private enum class Surface { Smileys, Options, Picker, Header, Recipients }
+    private enum class Surface { Smileys, Options, Picker, Header, Recipients, Restore }
     private val session = EditorSession("opening", "alice", "editor")
     private val memory = EditorHostMemory<Surface>()
     private val body = TextFieldState("Bonjour", TextRange(6, 1))
@@ -33,6 +33,8 @@ class EditorHostTest {
         onComplete: ((EditorCause) -> Unit)? = null,
         onAcknowledgeUncertain: (() -> Unit)? = { calls.add("acknowledge") },
         onAcknowledgeLocal: (() -> Unit)? = { calls.add("acknowledge local") },
+        draftOffer: Boolean = false,
+        isDraftOfferDetail: (EventKey) -> Boolean = { false },
     ) = EditorHost(
         { state }, body, events,
         EditorHostActions({ calls.add(it) }, { calls.add(it) }, {
@@ -42,7 +44,10 @@ class EditorHostTest {
             state = state.copy(scaffold = state.scaffold.copy(previewVisible = !state.scaffold.previewVisible))
         }, { calls.add("close") }, onComplete = onComplete, onAcknowledgeUncertain = onAcknowledgeUncertain,
             onAcknowledgeLocal = onAcknowledgeLocal),
-        EditorHostSurfaces(Surface.Smileys, Surface.Options, Surface.Picker, header = header),
+        EditorHostSurfaces(Surface.Smileys, Surface.Options, Surface.Picker, header = header,
+            // Simulate the old adapters' panel policy: the explicit offer field must take precedence.
+            returnsToBody = { it != header && it != Surface.Restore },
+            draftOffer = Surface.Restore.takeIf { draftOffer }, isDraftOfferDetail = isDraftOfferDetail),
         { calls.add("picker") }, { calls.add("smileys") }, memory,
     )
     private fun error(error: EditorError, sequence: Long = 1): EditorEvent {
@@ -50,6 +55,99 @@ class EditorHostTest {
             EditorEventContent.Problem(error), sequence)
         events.dispatch(EditorEventInput.Received(event))
         return event
+    }
+
+    @Test fun `offer status and event detail close at sheet rank before disarming`() {
+        val key = EventKey(session, OperationRef.Local(EditorLocalOperation.Notice, 1), 0)
+        val host = host(draftOffer = true, isDraftOfferDetail = { it == key })
+        val arm = ArmToken(1, session, 0, 4_000L)
+        listOf(false, true).forEach { throughEvent ->
+            if (throughEvent) {
+                events.dispatch(EditorEventInput.Received(EditorEvent(key,
+                    EditorEventContent.Information(EditorText(R.string.editor_action_details),
+                        EditorText(R.string.editor_action_details)), 1)))
+                host.barActions.onEvent(key, EditorEventAction.Details)
+                assertEquals(key, host.detail?.key)
+                assertNull(host.surface) // Preserve PR A's keyed detail, not surface = Restore.
+            } else host.open(Surface.Restore)
+            assertTrue(host.draftOfferOpen)
+            state = state.copy(submission = EditorSubmissionState.Armed(arm))
+            val layers = mutableListOf<EditorBackAction>()
+            host.back(onLayerBack = layers::add)
+            assertEquals(listOf(EditorBackAction.CloseSheet(EditorSheet.DraftOffer)), layers)
+            assertFalse(host.draftOfferOpen)
+            assertNull(host.detail)
+            assertNull(host.surface)
+            assertTrue(calls.isEmpty())
+            assertTrue(host.consumeReturn())
+            host.closeDraftOffer()
+            host.closeDetails(key)
+            assertFalse(host.consumeReturn())
+            assertEquals(EditorSubmissionState.Armed(arm), state.submission)
+            state = state.copy(submission = EditorSubmissionState.Ready)
+        }
+    }
+
+    @Test fun `offer detail remembers its sheet presentation after notice retirement and rotation`() {
+        val event = error(EditorErrors.noImageReceived)
+        var classified = true
+        val initial = host(draftOffer = true, isDraftOfferDetail = { classified && it == event.key })
+        initial.barActions.onEvent(event.key, EditorEventAction.Details)
+        events.dispatch(EditorEventInput.Acknowledge(event.key))
+        classified = false // The live offer/classifier can disappear before the closing composition.
+        val rotated = host(draftOffer = true)
+        assertTrue(rotated.draftOfferOpen)
+        assertEquals(event.key, rotated.draftOfferDetailKey)
+        rotated.closeDraftOffer()
+        assertNull(rotated.detail)
+        assertNull(events.state.detailKey)
+        assertTrue(rotated.consumeReturn())
+        assertFalse(initial.consumeReturn())
+        rotated.returnToBody { body.edit { selection = TextRange.Zero } }
+        assertEquals(TextRange(6, 1), body.selection)
+        assertTrue(calls.isEmpty())
+        memory.reset()
+        assertFalse(rotated.draftOfferOpen)
+        assertFalse(rotated.consumeReturn())
+    }
+
+    @Test fun `the first tap exception never opens a different tool under the offer information`() {
+        val information = error(EditorErrors.noImageReceived)
+        val host = host(draftOffer = true, isDraftOfferDetail = { it == information.key })
+        host.barActions.onOptions()
+        assertNull(host.surface)
+        assertNull(events.state.visibleEvent)
+        assertTrue(calls.isEmpty())
+    }
+
+    @Test fun `only the configured offer can open on the first gesture under its information`() {
+        val host = host(draftOffer = true,
+            isDraftOfferDetail = { (it.operation as? OperationRef.Local)?.sequence == 1L })
+        error(EditorErrors.noImageReceived)
+        host.open(Surface.Restore)
+        assertEquals(Surface.Restore, host.surface)
+        assertNull(events.state.visibleEvent)
+        host.closeDraftOffer()
+        error(EditorErrors.noImageReceived, 2)
+        host.open(Surface.Restore)
+        assertNull(host.surface)
+        assertNull(events.state.visibleEvent)
+        assertTrue(calls.isEmpty())
+    }
+
+    @Test fun `offer capability disabled keeps ED44 and ordinary detail focus ownership`() {
+        val host = host()
+        val information = error(EditorErrors.noImageReceived)
+        host.open(Surface.Restore)
+        assertNull(host.surface)
+        assertNull(events.state.visibleEvent)
+        val problem = error(EditorErrors.network, 2)
+        host.barActions.onEvent(problem.key, EditorEventAction.Details)
+        host.closeDetails(information.key)
+        assertEquals(problem, host.detail)
+        host.closeDetails(problem.key)
+        assertFalse(host.consumeReturn()) // EditorHeaderPanel remains the owner for ordinary details.
+        assertFalse(host.draftOfferOpen)
     }
 
     @Test fun `ED34 retained callbacks capture their arm and use current eligibility`() {

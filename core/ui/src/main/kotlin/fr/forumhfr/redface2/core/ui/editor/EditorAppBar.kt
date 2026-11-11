@@ -40,6 +40,8 @@ data class EditorAppBarStatus(
     val onClick: () -> Unit,
     val badgeCount: Int? = null,
     val enabled: Boolean = true,
+    /** Opt-in exception to ED-44 for this status and this exact information delivery. */
+    val opensOnInformation: (EventKey) -> Boolean = { false },
 )
 
 /**

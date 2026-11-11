@@ -252,6 +252,7 @@ fun EditorScaffold(
         }
     }
     val actions = barActions.withScaffoldFocus(captureIme, bodyState, toolFocus, bodyFocusRequester)
+    EditorInformationTimeout(chrome.event) { actions.onEvent(it, EditorEventAction.Dismiss) }
     val previewAction = previewWithoutImeChange(chrome.event, barActions, armed, submitActions.onDisarm)
     val preview = { bodyFocus.cancelRestoration("preview"); previewAction() }
     val returnFromPreview: () -> Unit = {
@@ -260,14 +261,14 @@ fun EditorScaffold(
         // An explicit body tap/accessibility click can enable a session afterwards, as for panels.
         returnToBody(EditorBodyFocusReturn.Preview)
     }
-    val open: (() -> Unit) -> Unit = { action ->
-        if (!consumeEditorBarInformation(chrome.event, actions.onEvent)) {
+    fun open(action: () -> Unit, opensOnInformation: (EventKey) -> Boolean = { false }) {
+        if (!consumeEditorBarInformation(chrome.event, actions.onEvent, opensOnInformation)) {
             actions.onGesture(EditorBarGesture.OpenSurface)
             action()
         }
     }
     val status: (EditorAppBarStatus?) -> EditorAppBarStatus? = { value ->
-        value?.copy(onClick = { open(value.onClick) })
+        value?.copy(onClick = { open(value.onClick, value.opensOnInformation) })
     }
     val header = onOpenHeader?.let { action -> { open(action) } }
     // ED-85: overlay details win, then disarm, then visible tool levels, panel, preview and guarded exit.

@@ -17,6 +17,8 @@ class EditorHostMemory<S : Any> {
         internal set
     var detail by mutableStateOf<EditorEvent?>(null)
         internal set
+    // Capture presentation on opening: the event may be acknowledged or its offer disappear later.
+    internal var detailSheet by mutableStateOf<EditorSheet?>(null)
     var bar by mutableStateOf(EditorBarState())
         internal set
     internal var selection = TextRange.Zero
@@ -28,6 +30,7 @@ class EditorHostMemory<S : Any> {
     fun reset() {
         surface = null
         detail = null
+        detailSheet = null
         bar = EditorBarState()
         selection = TextRange.Zero
         textBeforeSurface = ""
