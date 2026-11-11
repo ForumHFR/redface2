@@ -101,7 +101,7 @@ internal fun MessageEditorHeader(title: String, onBack: () -> Unit) {
 }
 
 /**
- * #405 — non-destructive draft-restore banner shared by the two private-message editors.
+ * #405 — non-destructive draft-restore banner of the new-message editor (the reply uses ReplyDraftRestoreChoice).
  * « Restaurer » pre-fills the editor from the cached draft ; « Ignorer » deletes the cached row.
  * The draft is never silently applied nor lost.
  */
@@ -393,30 +393,6 @@ private fun MessageOptionToggle(
             modifier = Modifier.padding(end = 16.dp),
         )
         Switch(checked = checked, enabled = enabled, onCheckedChange = onCheckedChange)
-    }
-}
-
-/**
- * #618 (Bug 1) — compact owner-only recipients summary shown in the reply composer in place of the
- * old inline editor. « Destinataires : N » + a « Gérer » action; the tap opens the dedicated
- * [RecipientManagerSheet] so the message body and the send bar stay reachable (the inline editor used
- * to crowd them out, especially for a 29+-member DT). Gated by `canManageRecipients` at the call site.
- */
-@Composable
-internal fun MessageRecipientsSummary(count: Int, onManage: () -> Unit) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-    ) {
-        Text(
-            text = stringResource(R.string.messages_recipients_summary, count),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        TextButton(onClick = onManage) {
-            Text(text = stringResource(R.string.messages_recipients_manage))
-        }
     }
 }
 

@@ -68,6 +68,8 @@
     <string name="messages_draft_restore_message">Un brouillon non envoyé a été retrouvé.</string>
     <string name="messages_draft_restore">Restaurer</string>
     <string name="messages_draft_discard">Ignorer</string>
+    <!-- R1b — titre court du panneau ↺ de la réponse : la phrase ci-dessus reste dans son corps. -->
+    <string name="messages_draft_restore_title">Brouillon retrouvé</string>
 
     <!-- #606 — gestion des membres d'une discussion de groupe (réservé au créateur). -->
     <string name="messages_members_title">Membres de la discussion</string>
@@ -98,9 +100,11 @@
         <item quantity="other">%1$d participants</item>
     </plurals>
 
-    <!-- #618 — bouton compact « Destinataires : N — Gérer » au-dessus du corps du composer (créateur). -->
-    <string name="messages_recipients_summary">Destinataires : %1$d</string>
-    <string name="messages_recipients_manage">Gérer</string>
+    <!-- ED-111 — statut des destinataires dans le chrome de réponse (créateur uniquement). -->
+    <plurals name="messages_reply_recipient_status">
+        <item quantity="one">%1$d destinataire, gérer</item>
+        <item quantity="other">%1$d destinataires, gérer</item>
+    </plurals>
 
     <!-- #1042 — tap avatar/pseudo d'un message privé : ouvre le profil (parité topic #208). -->
     <string name="messages_open_profile_action">Voir le profil</string>

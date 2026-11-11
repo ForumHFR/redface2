@@ -25,6 +25,8 @@ dependencies {
     implementation(libs.androidx.hilt.navigation.compose)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    // R1b R3 (#1514) — LocalActivity feeds rememberEditorWindowMetrics, as in :feature:editor.
+    implementation(libs.androidx.activity.compose)
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit4)
