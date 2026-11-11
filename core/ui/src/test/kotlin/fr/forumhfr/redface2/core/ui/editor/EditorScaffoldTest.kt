@@ -81,7 +81,7 @@ class EditorScaffoldTest {
         compose.onNode(hasSetTextAction()).performKeyInput {
             keyDown(Key.ShiftLeft); pressKey(Key.Tab); keyUp(Key.ShiftLeft)
         }
-        compose.onNodeWithContentDescription("Afficher l’aperçu").assertIsFocused()
+        compose.onNodeWithContentDescription("Aperçu").assertIsFocused()
         compose.runOnIdle { assertEquals(before, host.body.text.toString()); assertTrue(host.calls.isEmpty()) }
     }
 
@@ -226,7 +226,7 @@ class EditorScaffoldTest {
     fun `ED44 portrait preview statuses and header consume information before opening a surface`() {
         host.chrome.value = EditorScaffoldChrome(firstStatus = host.statuses[0], secondStatus = host.statuses[1])
         compose.setContent { host.Content() }
-        listOf("Afficher l’aperçu" to "preview", "12 citations" to "quotes", "Brouillon retrouvé" to "restore",
+        listOf("Aperçu" to "preview", "12 citations" to "quotes", "Brouillon retrouvé" to "restore",
             "header" to null).forEach { (label, call) ->
             compose.runOnIdle {
                 host.calls.clear()

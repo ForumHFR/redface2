@@ -10,7 +10,7 @@ import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.ui.editor.EditorPreview
 import fr.forumhfr.redface2.core.ui.post.PostMediaDiskCachePolicy
 
-/** Public-post cache policy and existing semantics; the shared preview owns focus and source retention. */
+/** Public-post cache policy; the shared preview owns the split, fallback and mounted source. */
 @Composable
 internal fun PostEditorPreview(
     visible: Boolean,

@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.floatPreferencesKey
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.preferencesOf
@@ -37,6 +38,9 @@ import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.ThemeMode
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.EditorPreviewDirection
+import fr.forumhfr.redface2.core.model.editor.EditorPreviewKey
+import fr.forumhfr.redface2.core.model.editor.EditorPreviewWidthClass
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.FlagType
@@ -139,6 +143,36 @@ class DataStoreUserPreferencesRepositoryTest {
             ioDispatcher = dispatcher,
             externalScope = externalScope,
         )
+    }
+
+    @Test
+    fun `preview dimensions are independent for all six direction and window width keys`() = runTest {
+        assertTrue(repository.observeEditorPreviewPositions().first().isEmpty())
+        val keys = EditorPreviewDirection.entries.flatMap { direction ->
+            EditorPreviewWidthClass.entries.map { EditorPreviewKey(direction, it) }
+        }
+        assertEquals(6, keys.map { it.storageKey }.toSet().size)
+        val positions = keys.mapIndexed { index, key -> key to 180f + index }.toMap()
+        positions.forEach { (key, value) -> repository.setEditorPreviewPosition(key, value) }
+        assertEquals(positions, repository.observeEditorPreviewPositions().first())
+        positions.forEach { (key, value) ->
+            assertEquals(value, dataStore.data.first()[floatPreferencesKey(key.storageKey)])
+        }
+        assertEquals("editor_preview_source_dp_vertical_compact", keys.first().storageKey)
+        assertEquals("editor_preview_source_dp_horizontal_expanded", keys.last().storageKey)
+    }
+
+    @Test
+    fun `corrupt preview dimensions are absent rather than breaking layout restoration`() = runTest {
+        val keys = EditorPreviewWidthClass.entries.map {
+            EditorPreviewKey(EditorPreviewDirection.Vertical, it)
+        }
+        dataStore.edit { prefs ->
+            keys.zip(listOf(Float.NaN, -1f, Float.POSITIVE_INFINITY)).forEach { (key, value) ->
+                prefs[floatPreferencesKey(key.storageKey)] = value
+            }
+        }
+        assertTrue(repository.observeEditorPreviewPositions().first().isEmpty())
     }
 
     /**

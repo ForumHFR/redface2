@@ -60,6 +60,7 @@ import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyWikiKeywordsResult
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.EditorPreviewKey
 import fr.forumhfr.redface2.core.model.editor.ImagePickerContract
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
@@ -4040,6 +4041,11 @@ class TopicFormViewModelTest {
         confirmBeforePosting: Boolean = false,
         editorImageInsert: EditorImageInsert = EditorImageInsert.FULL,
     ) : UserPreferencesRepository {
+        override fun observeEditorPreviewPositions(): Flow<Map<EditorPreviewKey, Float>> =
+            MutableStateFlow(emptyMap())
+
+        override suspend fun setEditorPreviewPosition(key: EditorPreviewKey, sourceDp: Float) = Unit
+
         private val confirmBeforePosting = MutableStateFlow(confirmBeforePosting)
         private val editorImageInsert = MutableStateFlow(editorImageInsert)
 

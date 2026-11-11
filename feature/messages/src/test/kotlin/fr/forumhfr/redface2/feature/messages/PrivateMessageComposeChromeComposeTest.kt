@@ -65,6 +65,9 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.PostInline
+import fr.forumhfr.redface2.core.model.SmileyKind
+import fr.forumhfr.redface2.core.model.persoSmileyUrl
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.EditorBarMode
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorSurface
@@ -382,7 +385,8 @@ class PrivateMessageComposeChromeComposeTest {
         prefill()
         compose.setContent { Content() }
         compose.onNodeWithContentDescription("Options").performClick()
-        compose.onAllNodes(isToggleable()).assertCountEquals(3)
+        compose.onAllNodes(isToggleable() and hasAnyAncestor(hasTestTag("editor-options-sheet")))
+            .assertCountEquals(3)
         compose.runOnIdle { f.adapter.closeSurface(); f.adapter.openHeader() }
         compose.runOnIdle { f.state = f.state.copy(isSubmitting = true) }
         compose.onNodeWithText("Destinataires").assertIsNotEnabled()
@@ -543,21 +547,29 @@ class PrivateMessageComposeChromeComposeTest {
     @OptIn(DelicateCoilApi::class)
     @Test fun `ED60 preview image requests disable disk reads and writes`() {
         val url = "https://example.com/private-preview.png"
+        val smiley = requireNotNull(persoSmileyUrl("[:test private compose]"))
+        val seen = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
         val observed = CopyOnWriteArrayList<CachePolicy>()
         val recorder = object : Interceptor {
             override suspend fun intercept(chain: Interceptor.Chain): ImageResult {
-                if (chain.request.data == url) observed += chain.request.diskCachePolicy
+                val data = chain.request.data
+                if (data == url || data == smiley) {
+                    observed += chain.request.diskCachePolicy
+                    seen += data.toString()
+                }
                 return chain.proceed()
             }
         }
-        val engine = FakeImageLoaderEngine.Builder().intercept(url, ColorImage(width = 320, height = 240)).build()
+        val engine = FakeImageLoaderEngine.Builder().intercept(url, ColorImage(width = 320, height = 240))
+            .intercept(smiley, ColorImage(width = 20, height = 20)).build()
         SingletonImageLoader.setUnsafe(ImageLoader.Builder(RuntimeEnvironment.getApplication())
             .components { add(recorder); add(engine) }.build())
         try {
             prefill()
-            f.state = f.state.copy(isPreviewVisible = true, preview = PostContent(listOf(PostBlock.Image(url, null))))
+            f.state = f.state.copy(isPreviewVisible = true, preview = PostContent(listOf(PostBlock.Image(url, null),
+                PostBlock.Paragraph(listOf(PostInline.Smiley(SmileyKind.Perso("test private compose"), smiley))))))
             compose.setContent { Content() }
-            compose.waitUntil(timeoutMillis = 5_000) { observed.isNotEmpty() }
+            compose.waitUntil(timeoutMillis = 5_000) { seen.size == 2 }
             assertTrue(observed.all { it == CachePolicy.DISABLED })
         } finally { SingletonImageLoader.reset() }
     }

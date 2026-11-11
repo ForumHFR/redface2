@@ -28,12 +28,15 @@ import coil3.request.ImageResult
 import coil3.test.FakeImageLoaderEngine
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.PostInline
+import fr.forumhfr.redface2.core.model.SmileyKind
+import fr.forumhfr.redface2.core.model.persoSmileyUrl
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.R as UiR
 import fr.forumhfr.redface2.core.ui.editor.EditorBarGesture
 import fr.forumhfr.redface2.core.ui.editor.EditorBarMode
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
-import java.util.concurrent.atomic.AtomicReference
+import java.util.concurrent.ConcurrentHashMap
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -181,20 +184,24 @@ class PrivateMessageReplyChromeSurfacesTest {
     @Test fun `private preview passes disabled disk reads and writes to the real Coil request`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val url = "https://images.example.org/private-reply.png"
-        val policy = AtomicReference<CachePolicy?>()
+        val smiley = requireNotNull(persoSmileyUrl("[:test private reply]"))
+        val policy = ConcurrentHashMap<String, CachePolicy>()
         val recorder = object : Interceptor {
             override suspend fun intercept(chain: Interceptor.Chain): ImageResult {
-                if (chain.request.data == url) policy.set(chain.request.diskCachePolicy)
+                val data = chain.request.data
+                if (data == url || data == smiley) policy[data.toString()] = chain.request.diskCachePolicy
                 return chain.proceed()
             }
         }
-        val engine = FakeImageLoaderEngine.Builder().intercept(url, ColorImage(0, width = 80, height = 60)).build()
+        val engine = FakeImageLoaderEngine.Builder().intercept(url, ColorImage(0, width = 80, height = 60))
+            .intercept(smiley, ColorImage(0, width = 20, height = 20)).build()
         SingletonImageLoader.setUnsafe(ImageLoader.Builder(context).components { add(recorder); add(engine) }.build())
         try {
-            f.state = f.state.copy(isPreviewVisible = true, preview = PostContent(listOf(PostBlock.Image(url, null))))
+            f.state = f.state.copy(isPreviewVisible = true, preview = PostContent(listOf(PostBlock.Image(url, null),
+                PostBlock.Paragraph(listOf(PostInline.Smiley(SmileyKind.Perso("test private reply"), smiley))))))
             content()
-            compose.waitUntil(timeoutMillis = 5_000) { policy.get() != null }
-            assertEquals(CachePolicy.DISABLED, policy.get())
+            compose.waitUntil(timeoutMillis = 5_000) { policy.size == 2 }
+            assertEquals(setOf(CachePolicy.DISABLED), policy.values.toSet())
         } finally {
             SingletonImageLoader.reset()
         }

@@ -7,14 +7,17 @@ import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.InputModeManager
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalInputModeManager
@@ -26,16 +29,27 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performSemanticsAction
+import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.height
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -51,6 +65,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
@@ -59,6 +74,9 @@ import fr.forumhfr.redface2.core.domain.write.EditPostRepository
 import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.PostBlock
+import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
@@ -108,6 +126,9 @@ class PostEditorRestorationScreenTest {
     private val store = VersionedEditorDraftStore()
     private val replies = mockk<ReplyRepository>()
     private val edits = mockk<EditPostRepository>(relaxed = true)
+    private val previewParser = mockk<BbcodePreviewParser> {
+        every { parsePreview(any()) } returns PostContent(emptyList())
+    }
     private val hosts = mutableListOf<ActivityController<ComponentActivity>>()
     private val editors = mutableListOf<PostEditorViewModel>()
     private val request = PostEditorRequest(PostEditorMode.Reply, 23, 35421, null, 1, 0)
@@ -274,6 +295,201 @@ class PostEditorRestorationScreenTest {
         }
     }
 
+    @Test
+    fun sharedPreviewBodyAcceptsFreshTouchFocusAndEdits() {
+        prepareRotationHost()
+        ActivityScenario.launch(PostEditorRotationHostActivity::class.java).use { scenario ->
+            openSharedPreview()
+            scenario.onActivity { it.focusManager.clearFocus(force = true) }
+            compose.onNode(hasSetTextAction()).assertIsNotFocused()
+                .performTouchInput { click() }.assertIsFocused().performTextInput("Éditable")
+            scenario.onActivity { assertEquals("Éditable", it.model.bodyFieldState.text.toString()) }
+            compose.onNodeWithTag("editor-preview-rendered").assertIsDisplayed()
+        }
+    }
+
+    @Test fun sharedPreviewRecreationRestoresFocusAndReversedSelectionWithClosedKeyboard() =
+        checkSharedPreviewRecreation(imeOpen = false)
+
+    @Test fun sharedPreviewRecreationRestoresFocusAndReversedSelectionWithOpenKeyboard() =
+        checkSharedPreviewRecreation(imeOpen = true)
+
+    private fun checkSharedPreviewRecreation(imeOpen: Boolean) {
+        var sessions = 0
+        prepareRotationHost { sessions++ }
+        ActivityScenario.launch(PostEditorRotationHostActivity::class.java).use { scenario ->
+            openSharedPreview()
+            // Keep the focus acquired before opening: even the broken guard lets it remain here.
+            compose.onNode(hasSetTextAction()).assertIsFocused()
+            lateinit var original: PostEditorRotationHostActivity
+            scenario.onActivity { original = it }
+            val model = original.model
+            val body = "Bonjour le forum"
+            val selection = TextRange(6, 1)
+            compose.runOnIdle {
+                model.bodyFieldState.edit { replace(0, length, body); this.selection = selection }
+                original.setImeVisible(imeOpen)
+            }
+            val before = compose.runOnIdle { assertTrue(sessions > 0); sessions }
+            repeat(2) { recreation ->
+                scenario.recreate()
+                // No tap or RequestFocus after recreate: the new, initially unmeasured preview
+                // must resolve its bounds before the one-shot restoration (H).
+                compose.onNodeWithTag("editor-preview-rendered").assertIsDisplayed()
+                compose.onNode(hasSetTextAction()).assertIsFocused()
+                scenario.onActivity {
+                    assertNotSame(original, it)
+                    assertTrue(original.isChangingConfigurations)
+                    assertSame(model, it.model)
+                    assertEquals(InputMode.Touch, it.inputMode.inputMode)
+                    original = it
+                }
+                compose.runOnIdle {
+                    assertTrue(model.state.value.isPreviewVisible)
+                    assertEquals(body, model.bodyFieldState.text.toString())
+                    assertEquals(selection, model.bodyFieldState.selection)
+                    assertEquals(before + if (imeOpen) recreation + 1 else 0, sessions)
+                }
+                scenario.onActivity { it.setImeVisible(imeOpen) }
+                compose.waitForIdle()
+            }
+        }
+    }
+
+    @Test
+    fun coveringPreviewRejectsFreshAndRestoredBodyFocusWhileTabReachesItsSpoiler() {
+        var height by mutableStateOf(640.dp)
+        var sessions = 0
+        every { previewParser.parsePreview(any()) } returns PostContent(listOf(
+            PostBlock.Spoiler("Secret", PostContent(listOf(
+                PostBlock.Paragraph(listOf(PostInline.Text("Contenu révélé"))),
+            ))),
+        ))
+        prepareRotationHost(editorModifier = { Modifier.height(height) }) { sessions++ }
+        ActivityScenario.launch(PostEditorRotationHostActivity::class.java).use { scenario ->
+            openSharedPreview()
+            scenario.onActivity { it.focusManager.clearFocus(force = true) }
+            // Establish actual focus in the shared source before it becomes covered. This also
+            // makes this regression test fail with the old host guard, before testing the refusal.
+            compose.onNode(hasSetTextAction()).assertIsNotFocused()
+                .performTouchInput { click() }.assertIsFocused()
+            lateinit var original: PostEditorRotationHostActivity
+            scenario.onActivity { original = it; it.setImeVisible(false) }
+            val model = original.model
+            val selection = TextRange(6, 1)
+            compose.runOnIdle {
+                model.bodyFieldState.edit { replace(0, length, "Bonjour le forum"); this.selection = selection }
+                height = 360.dp
+            }
+            compose.onNodeWithTag("editor-preview-fallback").assertIsDisplayed()
+            // ED-62/85: the covered body releases focus immediately; ED-86 must not restore it.
+            compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
+            compose.runOnIdle { assertEquals(selection, model.bodyFieldState.selection) }
+            val before = compose.runOnIdle { sessions }
+            scenario.recreate()
+            compose.onNodeWithTag("editor-preview-fallback").assertIsDisplayed()
+            compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
+            compose.onAllNodes(isFocused(), useUnmergedTree = true).assertCountEquals(0)
+            // A covering preview stays unfocusable throughout H's bounded wait, then expires.
+            compose.mainClock.advanceTimeBy(600L)
+            compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
+            scenario.onActivity {
+                assertNotSame(original, it)
+                assertTrue(original.isChangingConfigurations)
+                assertSame(model, it.model)
+                assertTrue(it.inputMode.requestInputMode(InputMode.Keyboard))
+            }
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val toggle = compose.onNodeWithContentDescription(context.getString(UiR.string.editor_preview_label))
+                .assertIsOn()
+            toggle.requestFocus().assertIsFocused()
+            compose.onNode(hasSetTextAction(), useUnmergedTree = true)
+                .performSemanticsAction(SemanticsActions.RequestFocus) { assertFalse(it()) }.assertIsNotFocused()
+            toggle.assertIsFocused().performKeyInput { pressKey(Key.Tab) }
+            val spoiler = compose.onNodeWithText("Secret")
+            spoiler.assertIsFocused().performKeyInput { pressKey(Key.Spacebar) }
+            compose.onNodeWithText("Contenu révélé").assertIsDisplayed()
+            compose.runOnIdle { height = 640.dp }
+            // More space with the preview still open must not replay the refused restoration.
+            compose.onNodeWithTag("editor-preview-rendered").assertIsDisplayed()
+            spoiler.assertIsFocused()
+            compose.onNode(hasSetTextAction()).assertIsNotFocused()
+            compose.runOnIdle {
+                assertTrue(model.state.value.isPreviewVisible)
+                assertEquals(selection, model.bodyFieldState.selection)
+                assertEquals(before, sessions)
+            }
+        }
+    }
+
+    @Test fun zeroHeightPreviewConsumesRestorationBeforeSpaceReturnsWithClosedKeyboard() =
+        checkZeroHeightPreviewRecreation(imeOpen = false)
+
+    @Test fun zeroHeightPreviewConsumesRestorationBeforeSpaceReturnsWithOpenKeyboard() =
+        checkZeroHeightPreviewRecreation(imeOpen = true)
+
+    private fun checkZeroHeightPreviewRecreation(imeOpen: Boolean) {
+        var height by mutableStateOf(640.dp)
+        var sessions = 0
+        prepareRotationHost(editorModifier = { Modifier.height(height) }) { sessions++ }
+        ActivityScenario.launch(PostEditorRotationHostActivity::class.java).use { scenario ->
+            openSharedPreview()
+            lateinit var original: PostEditorRotationHostActivity
+            scenario.onActivity { original = it; it.setImeVisible(imeOpen) }
+            val model = original.model
+            val body = "Bonjour le forum"
+            val selection = TextRange(6, 1)
+            compose.runOnIdle {
+                model.bodyFieldState.edit { replace(0, length, body); this.selection = selection }
+                height = 80.dp // The chrome absorbs the whole field area, even without an IME.
+            }
+            assertEquals(0f, compose.onNodeWithTag("editor-scaffold-field", useUnmergedTree = true)
+                .getUnclippedBoundsInRoot().height.value, 0.5f)
+            // A zero-height source is covered too: no retained focus or keystrokes before recreation.
+            compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
+            compose.runOnIdle { assertEquals(selection, model.bodyFieldState.selection) }
+            val before = compose.runOnIdle { sessions }
+
+            scenario.recreate()
+            compose.onNodeWithTag("editor-preview-fallback").assertExists()
+            assertEquals(0f, compose.onNodeWithTag("editor-scaffold-field", useUnmergedTree = true)
+                .getUnclippedBoundsInRoot().height.value, 0.5f)
+            compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
+            // Consume H at its deadline before space returns, without a cancelling key or pointer.
+            compose.mainClock.advanceTimeBy(600L)
+            compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
+            scenario.onActivity {
+                assertNotSame(original, it)
+                assertTrue(original.isChangingConfigurations)
+                assertSame(model, it.model)
+                assertEquals(InputMode.Touch, it.inputMode.inputMode)
+                assertTrue(it.inputMode.requestInputMode(InputMode.Keyboard))
+            }
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val toggle = compose.onNodeWithContentDescription(context.getString(UiR.string.editor_preview_label))
+                .assertIsOn()
+            toggle.requestFocus().assertIsFocused()
+            compose.runOnIdle { height = 640.dp }
+            // An unbounded readiness wait would now complete and steal this focus.
+            compose.onNodeWithTag("editor-preview-rendered").assertIsDisplayed()
+            toggle.assertIsFocused()
+            compose.onNode(hasSetTextAction()).assertIsNotFocused()
+            compose.runOnIdle {
+                assertTrue(model.state.value.isPreviewVisible)
+                assertEquals(body, model.bodyFieldState.text.toString())
+                assertEquals(selection, model.bodyFieldState.selection)
+                assertEquals(before, sessions)
+            }
+        }
+    }
+
+    private fun openSharedPreview() {
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        compose.onNodeWithContentDescription(context.getString(UiR.string.editor_preview_label)).performClick()
+        compose.onNodeWithTag("editor-preview-rendered").assertIsDisplayed()
+    }
+
     @Test fun rotationKeepsPostRestorePanelOverTheBody() = checkCoveredPost(PostEditorChromeSurface.Restore)
     @Test fun rotationKeepsPostOptionsOverTheBody() = checkCoveredPost(PostEditorChromeSurface.Options)
     @Test fun rotationKeepsPostPreviewOverTheBody() = checkCoveredPost(null)
@@ -328,7 +544,10 @@ class PostEditorRestorationScreenTest {
     private fun checkCoveredPost(surface: PostEditorChromeSurface?) {
         store.preload(EditorDraftKey.reply(23, 35421), EditorDraftStore.Draft(body = "Brouillon"))
         var sessions = 0
-        prepareRotationHost { sessions++ }
+        // A preview only covers the body when ED-62 cannot fit both panes.
+        prepareRotationHost(editorModifier = {
+            if (surface == null) Modifier.height(360.dp) else Modifier
+        }) { sessions++ }
         ActivityScenario.launch(PostEditorRotationHostActivity::class.java).use { scenario ->
             compose.onNode(hasSetTextAction()).assertIsFocused()
             lateinit var model: PostEditorViewModel
@@ -336,7 +555,7 @@ class PostEditorRestorationScreenTest {
             val action = when (surface) {
                 PostEditorChromeSurface.Restore -> "Brouillon retrouvé, restaurer ou ignorer"
                 PostEditorChromeSurface.Options -> "Options"
-                else -> ApplicationProvider.getApplicationContext<Context>().getString(UiR.string.editor_preview_show)
+                else -> ApplicationProvider.getApplicationContext<Context>().getString(UiR.string.editor_preview_label)
             }
             compose.onNodeWithContentDescription(action).performClick()
             compose.waitForIdle()
@@ -345,6 +564,10 @@ class PostEditorRestorationScreenTest {
             scenario.recreate()
             compose.waitForIdle()
             compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
+            if (surface == null) {
+                compose.mainClock.advanceTimeBy(600L)
+                compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
+            }
             assertPostCover(surface)
             compose.runOnIdle {
                 assertEquals(surface, model.chromeMemory.surface)
@@ -358,11 +581,15 @@ class PostEditorRestorationScreenTest {
         when (surface) {
             PostEditorChromeSurface.Restore -> compose.onNodeWithText("Retour au message").assertIsDisplayed()
             PostEditorChromeSurface.Options -> compose.onNodeWithText("Options du message").assertIsDisplayed()
-            else -> compose.onNodeWithTag("post-editor-preview").assertIsDisplayed()
+            else -> compose.onNodeWithTag("editor-preview-fallback").assertIsDisplayed()
         }
     }
 
-    private fun prepareRotationHost(route: PostEditorRequest = request, onInput: () -> Unit = {}) {
+    private fun prepareRotationHost(
+        route: PostEditorRequest = request,
+        editorModifier: () -> Modifier = { Modifier },
+        onInput: () -> Unit = {},
+    ) {
         InstrumentationRegistry.getInstrumentation().setInTouchMode(true)
         val context = ApplicationProvider.getApplicationContext<Context>()
         shadowOf(context.packageManager)
@@ -377,9 +604,10 @@ class PostEditorRestorationScreenTest {
             activity.setContent {
                 activity.view = LocalView.current
                 activity.inputMode = LocalInputModeManager.current
+                activity.focusManager = LocalFocusManager.current
                 InterceptPlatformTextInput(input) {
                     RedfaceTheme(darkTheme = false, dynamicColor = false) {
-                        PostEditorScreen(route, { _, _, _, _ -> }, viewModel = model)
+                        PostEditorScreen(route, { _, _, _, _ -> }, modifier = editorModifier(), viewModel = model)
                     }
                 }
             }
@@ -567,13 +795,14 @@ class PostEditorRestorationScreenTest {
     ): PostEditorViewModel = ViewModelProvider(owner, viewModelFactory {
         initializer {
             PostEditorViewModel(
-                request = request, previewParser = mockk(relaxed = true), defaultDispatcher = dispatcher,
+                request = request, previewParser = previewParser, defaultDispatcher = dispatcher,
                 replyRepository = replies, editPostRepository = edits,
                 smileyRepository = mockk(relaxed = true), draftStore = store, diagnostics = DiagnosticsLog(),
                 userPreferencesRepository = mockk<UserPreferencesRepository> {
                     every { observeConfirmBeforePosting() } returns flowOf(true)
                     every { observeEditorImageInsert() } returns flowOf(EditorImageInsert.FULL)
                     every { observeImagePickerMode() } returns flowOf(ImagePickerMode.DEFAULT)
+                    every { observeEditorPreviewPositions() } returns flowOf(emptyMap())
                 },
                 uploadRepository = mockk(relaxed = true), imageUploadReader = mockk(relaxed = true),
                 authRepository = mockk<AuthRepository> {
@@ -594,6 +823,7 @@ internal class PostEditorRotationHostActivity : ComponentActivity() {
     lateinit var model: PostEditorViewModel
     lateinit var view: android.view.View
     lateinit var inputMode: InputModeManager
+    lateinit var focusManager: FocusManager
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)

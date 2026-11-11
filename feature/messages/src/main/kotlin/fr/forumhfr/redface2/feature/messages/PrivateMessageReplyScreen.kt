@@ -36,6 +36,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.ui.editor.LocalEditorPreviewState
 import fr.forumhfr.redface2.core.ui.editor.EditorBackAction
 import fr.forumhfr.redface2.core.ui.editor.EditorBackState
 import fr.forumhfr.redface2.core.ui.editor.EditorScaffold
@@ -98,12 +99,15 @@ fun PrivateMessageReplyScreen(
             }
         }
     }
-    PrivateMessageReplyContent(
-        state, request.openRecipientManager, viewModel.bodyFieldState, viewModel.bodyInputTransformation,
-        remember(viewModel) { viewModel.chromeActions() }, viewModel.smileyPicker, modifier, viewModel.bodyScrollState,
-        viewModel.editorEvents, viewModel.chromeMemory,
-        bodyCaretRevealResetKey = remember(viewModel) { { viewModel.bodyCaretRevealResetKey } },
-    )
+    CompositionLocalProvider(LocalEditorPreviewState provides viewModel.previewLayout) {
+        PrivateMessageReplyContent(
+            state, request.openRecipientManager, viewModel.bodyFieldState, viewModel.bodyInputTransformation,
+            remember(viewModel) { viewModel.chromeActions() }, viewModel.smileyPicker, modifier,
+            viewModel.bodyScrollState,
+            viewModel.editorEvents, viewModel.chromeMemory,
+            bodyCaretRevealResetKey = remember(viewModel) { { viewModel.bodyCaretRevealResetKey } },
+        )
+    }
 }
 
 @Composable
@@ -180,7 +184,7 @@ private fun PrivateMessageReplyChrome(
         // The route's manager entry owns initial focus, including while its owner form is loading.
         // Keep this independent of the one-shot latch, which changes as soon as the manager opens.
         inputTransformation = transformation, autoFocus = autoFocusBody, surfaceFocus = host.focusMemory,
-        bodyFocusRestoreAllowed = host.surface == null && host.detail == null && !host.state.scaffold.previewVisible,
+        bodyFocusRestoreAllowed = host.surface == null && host.detail == null,
         bodyCaretRevealResetKey = bodyCaretRevealResetKey,
         onSystemBack = back,
         fieldArea = { field -> PrivateMessageReplyChromePreview(host, body, focus, field) },

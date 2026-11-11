@@ -61,6 +61,7 @@ import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
+import fr.forumhfr.redface2.core.ui.editor.EditorPreviewState
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.BbcodeFormatResult
 import fr.forumhfr.redface2.core.ui.editor.EditorCause
@@ -177,6 +178,8 @@ class PostEditorViewModel @AssistedInject constructor(
     )
     val state: StateFlow<PostEditorState> = _state.asStateFlow()
     internal val chromeEvents = PostEditorChromeEvents()
+    // ED-63/C8: VM lifetime only; visibility remains in the existing preview pipeline.
+    internal val previewLayout by lazy { EditorPreviewState(userPreferencesRepository, viewModelScope) }
     internal val chromeMemory = EditorHostMemory<PostEditorChromeSurface>()
 
     /** Capture operation transitions synchronously; observing StateFlow would lose short operations. */

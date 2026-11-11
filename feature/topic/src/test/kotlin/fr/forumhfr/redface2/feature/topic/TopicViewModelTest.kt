@@ -47,6 +47,7 @@ import fr.forumhfr.redface2.core.model.search.SearchRequest
 import fr.forumhfr.redface2.core.model.search.SearchResultPage
 import fr.forumhfr.redface2.core.domain.upload.UploadProviderId
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.EditorPreviewKey
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.domain.write.ModerationRepository
@@ -9073,6 +9074,11 @@ internal class FakeUserPreferencesRepository(
     // quick-reply sheet is experimental opt-in).
     private val writingSurfacePreset: WritingSurfacePreset = WritingSurfacePreset.FULL_EDITOR,
 ) : UserPreferencesRepository {
+    override fun observeEditorPreviewPositions(): Flow<Map<EditorPreviewKey, Float>> =
+        MutableStateFlow(emptyMap())
+
+    override suspend fun setEditorPreviewPosition(key: EditorPreviewKey, sourceDp: Float) = Unit
+
     override fun observeProxyConfig(): Flow<ProxyConfig> = MutableStateFlow(ProxyConfig())
 
     override suspend fun saveProxyConfig(config: ProxyConfig) = Unit

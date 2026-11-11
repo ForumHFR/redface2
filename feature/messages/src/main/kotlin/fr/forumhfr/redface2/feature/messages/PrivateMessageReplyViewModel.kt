@@ -49,6 +49,7 @@ import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
+import fr.forumhfr.redface2.core.ui.editor.EditorPreviewState
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorSurface
@@ -121,6 +122,8 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     val state: StateFlow<PrivateMessageReplyUiState> = _state.asStateFlow()
 
     internal val editorEvents = PrivateMessageReplyEvents()
+    // ED-63/C8: VM lifetime only; visibility remains in the existing preview pipeline.
+    internal val previewLayout by lazy { EditorPreviewState(userPreferencesRepository, viewModelScope) }
     internal val chromeMemory = PrivateMessageReplyChromeMemory()
 
     /** Observe synchronously: StateFlow may conflate two identical local refusals. */

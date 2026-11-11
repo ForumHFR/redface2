@@ -55,6 +55,7 @@ import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.model.write.TopicForm
+import fr.forumhfr.redface2.core.ui.editor.EditorPreviewState
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
@@ -181,6 +182,8 @@ class TopicFormViewModel @AssistedInject constructor(
     val state: StateFlow<TopicFormState> = _state.asStateFlow()
 
     internal val editorEvents = TopicFormEvents()
+    // ED-63/C8: VM lifetime only; visibility remains in the existing preview pipeline.
+    internal val previewLayout by lazy { EditorPreviewState(userPreferencesRepository, viewModelScope) }
     internal val chromeMemory = TopicFormChromeMemory()
 
     /** Deliver transitions before StateFlow can conflate repeated failures or synchronous operations. */

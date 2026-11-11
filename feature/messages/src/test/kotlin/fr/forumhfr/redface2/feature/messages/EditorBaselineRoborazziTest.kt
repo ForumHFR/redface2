@@ -22,6 +22,8 @@ import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Density
@@ -125,6 +127,7 @@ class EditorBaselineRoborazziTest {
             compose.runOnIdle { scenario.value = current }
             compose.waitForIdle()
             current.chrome.tap?.let { compose.onNodeWithContentDescription(it).performClick() }
+            if (current.chrome == ReplyChrome.Preview) assertSharedPreview()
             compose.runOnIdle { focusManager.clearFocus(force = true) }
             compose.mainClock.advanceTimeBy(1_000L)
             compose.waitForIdle()
@@ -138,6 +141,12 @@ class EditorBaselineRoborazziTest {
                 "${current.surface.fileName}_${orientation}_fs${fontScale}_${current.state}${theme(dark)}.png")
             compose.mainClock.autoAdvance = true
         }
+    }
+
+    private fun assertSharedPreview() {
+        compose.onNodeWithTag("editor-preview-rendered").assertIsDisplayed()
+        compose.onNodeWithTag("editor-preview-divider-target").assertIsDisplayed()
+        compose.onNode(hasSetTextAction()).assertIsDisplayed()
     }
 
     private fun theme(dark: Boolean) = if (dark) "_dark" else ""
@@ -237,6 +246,7 @@ class EditorBaselineRoborazziTest {
                     compose.onNodeWithContentDescription("Options").performClick()
                     compose.runOnIdle { assertEquals(before, bodyScroll.value) }
                 }
+                if (state == ComposeCapture.Preview) assertSharedPreview()
                 compose.runOnIdle { focus.clearFocus(force = true) }
                 compose.mainClock.advanceTimeBy(1_000L)
                 compose.mainClock.autoAdvance = false

@@ -5,6 +5,7 @@ import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyKind
+import fr.forumhfr.redface2.core.model.persoSmileyUrl
 
 /**
  * Best-effort BBCode → [PostContent] parser for the Phase 2B editor preview.
@@ -463,9 +464,8 @@ class BbcodeContentParser {
      *    (`:)`, `:D`, `:o`, `:/`) are deliberately NOT scanned — in free text they are ambiguous
      *    (URLs, code, prose) and a wrong hit is worse in a preview than a missing sprite.
      *  - **perso `[:name]`** — unambiguous bracket syntax (names may carry spaces/accents/`:N`
-     *    variants). Emitted with `imageUrl = null` : the sprite URL is NOT derivable from the name
-     *    (shard directories), so the renderer keeps showing the typed token — no regression, and a
-     *    resolution channel (picker-fed registry) can land separately.
+     *    variants). ED-66 uses the same pure URL derivation as local favorites. Failed images
+     *    fall back to the typed token in the renderer; parsing never performs a network lookup.
      */
     private fun splitSmileyRuns(text: String): List<PostInline> {
         val out = mutableListOf<PostInline>()
@@ -476,7 +476,7 @@ class BbcodeContentParser {
             val smiley = when {
                 candidate.startsWith("[:") -> PostInline.Smiley(
                     kind = SmileyKind.Perso(candidate.removeSurrounding("[:", "]")),
-                    imageUrl = null,
+                    imageUrl = persoSmileyUrl(candidate),
                 )
                 else -> BuiltinSmileyUrls[candidate]?.let { url ->
                     PostInline.Smiley(kind = SmileyKind.Builtin(candidate), imageUrl = url)

@@ -152,7 +152,7 @@ class EditorScreenLayoutTest {
         lateinit var previewLabel: String
         compose.setContent {
             back = androidx.activity.compose.LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
-            previewLabel = stringResource(UiR.string.editor_preview_show)
+            previewLabel = stringResource(UiR.string.editor_preview_label)
             RedfaceTheme(darkTheme = false, dynamicColor = false) {
                 PostEditorTestContent(host.state, host::dispatch, host.body, host.events)
             }
@@ -166,7 +166,8 @@ class EditorScreenLayoutTest {
         compose.onNodeWithContentDescription("Options").assertExists()
         compose.onNodeWithContentDescription(previewLabel).assertIsDisplayed().performClick()
         compose.onNodeWithTag("post-editor-preview").assertExists()
-        compose.onNode(hasSetTextAction()).assertDoesNotExist()
+        compose.onNodeWithTag("editor-preview-divider-target").assertExists()
+        compose.onNode(hasSetTextAction()).assertExists()
         compose.runOnIdle { back.onBackPressed() }
         compose.onNode(hasSetTextAction()).assertExists()
         compose.runOnIdle { back.onBackPressed() }

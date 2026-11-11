@@ -42,6 +42,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
+import fr.forumhfr.redface2.core.ui.editor.LocalEditorPreviewState
 import fr.forumhfr.redface2.core.ui.editor.EditorBackAction
 import fr.forumhfr.redface2.core.ui.editor.EditorBackState
 import fr.forumhfr.redface2.core.ui.editor.EditorPreview
@@ -58,7 +59,7 @@ import fr.forumhfr.redface2.core.ui.post.PostMediaDiskCachePolicy
  * Topic-level form screen. Live for [TopicFormMode.EditFirstPost] (Phase 2D
  * #148) and [TopicFormMode.New] (Phase 2E #149).
  *
- * The shared chrome keeps the body mounted beneath preview, header and event panels.
+ * The shared chrome keeps the body alongside preview and mounted beneath header and event panels.
  * The ViewModel owns the session, picker and transient host memory across rotation.
  */
 @Composable
@@ -132,18 +133,20 @@ fun TopicFormScreen(
         }
     }
 
-    TopicFormContent(
-        state = state,
-        bodyFieldState = viewModel.bodyFieldState,
-        bodyInputTransformation = viewModel.bodyInputTransformation,
-        bodyScrollState = viewModel.bodyScrollState,
-        onIntent = remember(viewModel) { { intent: TopicFormIntent -> viewModel.submit(intent) } },
-        smileyPicker = viewModel.smileyPicker,
-        modifier = modifier,
-        chromeEvents = viewModel.editorEvents,
-        chromeMemory = viewModel.chromeMemory,
-        bodyCaretRevealResetKey = remember(viewModel) { { viewModel.bodyCaretRevealResetKey } },
-    )
+    CompositionLocalProvider(LocalEditorPreviewState provides viewModel.previewLayout) {
+        TopicFormContent(
+            state = state,
+            bodyFieldState = viewModel.bodyFieldState,
+            bodyInputTransformation = viewModel.bodyInputTransformation,
+            bodyScrollState = viewModel.bodyScrollState,
+            onIntent = remember(viewModel) { { intent: TopicFormIntent -> viewModel.submit(intent) } },
+            smileyPicker = viewModel.smileyPicker,
+            modifier = modifier,
+            chromeEvents = viewModel.editorEvents,
+            chromeMemory = viewModel.chromeMemory,
+            bodyCaretRevealResetKey = remember(viewModel) { { viewModel.bodyCaretRevealResetKey } },
+        )
+    }
 }
 
 @Composable
@@ -214,7 +217,7 @@ private fun TopicFormChrome(
         onOpenHeader = adapter::openHeader, headerLabel = adapter.headerLabel(), bodyFocusRequester = focus,
         bodyScrollState = scroll, inputTransformation = transformation, autoFocus = true,
         surfaceFocus = host.focusMemory,
-        bodyFocusRestoreAllowed = host.surface == null && host.detail == null && !state.isPreviewVisible,
+        bodyFocusRestoreAllowed = host.surface == null && host.detail == null,
         bodyCaretRevealResetKey = bodyCaretRevealResetKey, onSystemBack = back,
         fieldArea = { draft ->
             EditorPreview(state.isPreviewVisible, state.preview, body, focus, PostMediaDiskCachePolicy.ENABLED,

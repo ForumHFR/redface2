@@ -6,9 +6,11 @@ import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputConnection
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.size
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -41,6 +43,8 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsNotFocused
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
@@ -75,6 +79,8 @@ import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.R as UiR
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import fr.forumhfr.redface2.core.ui.editor.EditorHeaderPanel
+import fr.forumhfr.redface2.core.ui.editor.EditorScaffold
+import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -770,8 +776,144 @@ class PostEditorTransientComposeTest {
         }
     }
 
-    @Test fun `ED140 preview keeps the focused source instance selection and IME commands`() = preview(false)
-    @Test fun `ED140 preview returns from a focused keyboard control without IME commands`() = preview(true)
+    @Test fun `ED60 shared preview keeps the focused source instance selection and IME commands`() = preview(false)
+    @Test fun `ED60 shared preview returns from a focused keyboard control without IME commands`() = preview(true)
+
+    @Test fun `ED61 scaffold preview return restores selection without keyboard commands`() {
+        val input = TransientInput()
+        val keyboard = TransientKeyboard()
+        mountScaffold(input, keyboard)
+        val field = compose.onNode(hasSetTextAction())
+        val node = field.fetchSemanticsNode().id
+        val selection = TextRange(6, 1)
+        listOf(false, true).forEach { open ->
+            field.performClick()
+            compose.runOnIdle {
+                input.insets(open)
+                quoteInputMode.requestInputMode(InputMode.Keyboard)
+            }
+            val toggle = compose.onNodeWithContentDescription("Aperçu")
+            toggle.requestFocus().assertIsFocused().performKeyInput { pressKey(Key.Enter) }
+            compose.onNodeWithTag("editor-preview-rendered").assertIsDisplayed()
+            val (sessions, commands) = compose.runOnIdle {
+                host.body.edit { this.selection = selection }
+                assertNull(input.connection)
+                input.sessions to keyboard.calls.toList()
+            }
+            toggle.assertIsFocused().performKeyInput { pressKey(Key.Enter) }
+            field.assertIsFocused()
+            assertEquals(node, field.fetchSemanticsNode().id)
+            compose.onNodeWithTag("editor-preview-rendered").assertDoesNotExist()
+            compose.runOnIdle {
+                assertEquals(selection, host.body.selection)
+                assertNull(input.connection)
+                assertEquals(sessions, input.sessions)
+                assertEquals(commands, keyboard.calls)
+            }
+        }
+    }
+
+    @Test fun `ED53 quote panel with shared preview restores an open keyboard`() =
+        quotePanelWithPreview(covering = false, open = true)
+
+    @Test fun `ED53 quote panel with shared preview restores a closed keyboard`() =
+        quotePanelWithPreview(covering = false, open = false)
+
+    @Test fun `ED61 quote panel with covering preview refuses focus and an open keyboard return`() =
+        quotePanelWithPreview(covering = true, open = true)
+
+    @Test fun `ED61 quote panel with covering preview refuses focus and a closed keyboard return`() =
+        quotePanelWithPreview(covering = true, open = false)
+
+    private fun mountScaffold(input: TransientInput, keyboard: TransientKeyboard, covering: () -> Boolean = { false }) {
+        compose.setContent {
+            quoteInputMode = LocalInputModeManager.current
+            input.Content { CompositionLocalProvider(LocalSoftwareKeyboardController provides keyboard) {
+                RedfaceTheme {
+                    // Keep normal-height chrome: shrinking only the content forces a covering preview.
+                    Box(Modifier.height(if (covering()) 360.dp else 760.dp)) {
+                        PostEditorTestContent(host.state, host::dispatch, host.body, host.events, host.memory)
+                    }
+                }
+            } }
+        }
+    }
+
+    private fun quotePanelWithPreview(covering: Boolean, open: Boolean) {
+        val input = TransientInput()
+        val keyboard = TransientKeyboard()
+        val covered = mutableStateOf(false)
+        mountScaffold(input, keyboard) { covered.value }
+        val field = compose.onNode(hasSetTextAction())
+        val node = field.fetchSemanticsNode().id
+        val selection = TextRange(6, 1)
+        field.performClick()
+        compose.runOnIdle {
+            input.insets(open)
+            host.body.edit { this.selection = selection }
+        }
+        compose.onNodeWithContentDescription("Aperçu").performClick()
+        compose.onNodeWithTag("editor-preview-rendered").assertIsDisplayed()
+        compose.onNodeWithContentDescription("3 citations, ouvrir le panneau citations").performClick()
+        field.assertDoesNotExist()
+        val (sessions, commands) = compose.runOnIdle {
+            assertEquals(open, host.memory.focus.imeBeforeSurface)
+            assertEquals(selection, host.body.selection)
+            assertNull(input.connection)
+            // Reflow behind the panel; return must use the captured IME state, not the new insets.
+            covered.value = covering
+            input.insets(!open)
+            input.sessions to keyboard.calls.toList()
+        }
+        compose.onNodeWithText("Retour au message").performScrollTo().performClick()
+        if (covering) {
+            compose.onNodeWithTag("editor-preview-fallback").assertIsDisplayed()
+            compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
+        } else {
+            compose.onNodeWithTag("editor-preview-rendered").assertIsDisplayed()
+            field.assertIsFocused()
+        }
+        val expectedCommands = if (covering) commands else commands + if (open) listOf("show") else listOf("hide")
+        compose.runOnIdle {
+            assertTrue(host.state.isPreviewVisible)
+            assertEquals(selection, host.body.selection)
+            assertEquals(expectedCommands, keyboard.calls)
+            assertEquals(!covering && open, input.connection != null)
+            assertEquals(sessions + if (!covering && open) 1 else 0, input.sessions)
+        }
+        if (covering) {
+            compose.runOnIdle { covered.value = false }
+            compose.onNodeWithTag("editor-preview-rendered").assertIsDisplayed()
+            field.assertIsNotFocused() // The refused surface return is consumed, never replayed on resize.
+            compose.runOnIdle {
+                assertEquals(selection, host.body.selection)
+                assertNull(input.connection)
+                assertEquals(sessions, input.sessions)
+                assertEquals(commands, keyboard.calls)
+            }
+            // Keyboard focus after the refused return must not start a session from the stale surface IME state.
+            // The status chip is not a focus target; Tab into the body shares this focus path (showKeyboardOnFocus).
+            compose.runOnIdle { quoteInputMode.requestInputMode(InputMode.Keyboard) }
+            field.requestFocus().assertIsFocused()
+            compose.runOnIdle {
+                assertNull(input.connection)
+                assertEquals(sessions, input.sessions)
+                assertEquals(commands, keyboard.calls)
+            }
+            // A later explicit preview close has its own neutral return, even after a captured open IME.
+            compose.onNodeWithContentDescription("Aperçu").requestFocus().assertIsFocused()
+            compose.runOnIdle { host.body.edit { this.selection = selection } }
+            compose.onNodeWithContentDescription("Aperçu").performKeyInput { pressKey(Key.Enter) }
+            field.assertIsFocused()
+            compose.runOnIdle {
+                assertEquals(selection, host.body.selection)
+                assertNull(input.connection)
+                assertEquals(sessions, input.sessions)
+                assertEquals(commands, keyboard.calls)
+            }
+        }
+        assertEquals(node, compose.onNode(hasSetTextAction(), useUnmergedTree = covering).fetchSemanticsNode().id)
+    }
 
     @Test fun `ED140 Tab reaches and toggles a real preview spoiler while the body stays unfocused`() {
         host.state = host.state.copy(quotes = emptyList(), preview = PostContent(listOf(
@@ -784,25 +926,43 @@ class PostEditorTransientComposeTest {
         compose.setContent {
             RedfaceTheme {
                 inputMode = LocalInputModeManager.current
-                // feature/editor overrides core/ui's typographic apostrophe in the merged resources.
-                previewLabel = stringResource(UiR.string.editor_preview_show)
-                PostEditorTestContent(host.state, host::dispatch, host.body, host.events)
+                previewLabel = stringResource(UiR.string.editor_preview_label)
+                // Keep normal-height chrome, but constrain its content: the vertical split cannot
+                // fit both panes' floors. Assert the covering fallback after its real measurement.
+                Box(Modifier.size(360.dp, 360.dp)) {
+                    EditorScaffold(host.body, EditorWindowMetrics(760.dp, 0.dp, 0.dp),
+                        "Répondre", "Sujet de démonstration", host.adapter.chrome(), host.adapter.barActions,
+                        host.adapter.submitState, host.adapter.submitActions, host.adapter.imageActions,
+                        host.adapter::closeRequested, bodyFocusRequester = focus,
+                        // Exercise PR 4's guard contract explicitly. R2b screens delegate covering
+                        // to EditorPreview; their now-open scaffold guard cannot catch a scope regression.
+                        bodyFocusRestoreAllowed = !host.state.isPreviewVisible,
+                        fieldArea = { body ->
+                            PostEditorPreview(host.state.isPreviewVisible, host.state.preview, host.body, focus, body)
+                        })
+                }
             }
         }
         compose.runOnIdle { inputMode.requestInputMode(InputMode.Keyboard) }
         compose.runOnIdle { assertEquals(InputMode.Keyboard, inputMode.inputMode) }
         val toggle = compose.onNode(hasContentDescription(previewLabel) and
             hasAnyAncestor(hasTestTag("editor-scaffold-app-bar")))
-        toggle.assertIsDisplayed()
-        toggle.requestFocus().assertIsFocused().performKeyInput { pressKey(Key.Spacebar) }
+        toggle.assertIsDisplayed().assertIsOff().requestFocus().assertIsFocused()
+            .performKeyInput { pressKey(Key.Spacebar) }
         compose.runOnIdle { assertTrue(host.state.isPreviewVisible) }
+        toggle.assertIsFocused().assertIsOn()
         compose.onNodeWithTag("post-editor-preview").assertIsDisplayed()
+        compose.onNodeWithTag("editor-preview-fallback").assertIsDisplayed()
+        compose.onNodeWithTag("editor-preview-divider-target").assertDoesNotExist()
         compose.onNodeWithText("Contenu révélé").assertDoesNotExist()
+        compose.onNode(hasSetTextAction(), useUnmergedTree = true)
+            .performSemanticsAction(SemanticsActions.RequestFocus) { assertFalse(it()) }.assertIsNotFocused()
         // With no quote/restore statuses, this is the last app-bar focus target. Tab enters fieldArea
         // to reach the preview's only clickable: guarding the whole slot would cancel that entry.
         toggle.assertIsFocused().performKeyInput { pressKey(Key.Tab) }
         compose.onNodeWithText("Secret").assertIsFocused().performKeyInput { pressKey(Key.Spacebar) }
-        compose.onNodeWithText("Contenu révélé").assertExists()
+        compose.onNodeWithText("Contenu révélé").assertIsDisplayed()
+        compose.onNodeWithText("Secret").assertIsFocused()
         compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
     }
 
@@ -844,7 +1004,8 @@ class PostEditorTransientComposeTest {
             compose.onNodeWithText("Aperçu").assertIsFocused().performKeyInput { pressKey(Key.Spacebar) }
         } else compose.runOnIdle { host.adapter.barActions.onPreview() }
         val selection = host.body.selection
-        compose.onNode(hasSetTextAction()).assertDoesNotExist()
+        compose.onNode(hasSetTextAction()).assertExists()
+        compose.onNodeWithTag("editor-preview-divider-target").assertExists()
         compose.onNodeWithText("La prévisualisation s'affiche ici dès que vous saisissez du texte.").assertExists()
         compose.onNodeWithTag("post-editor-preview").performTouchInput { click(center) }
         if (fromControl) compose.onNodeWithText("Aperçu").assertIsFocused()

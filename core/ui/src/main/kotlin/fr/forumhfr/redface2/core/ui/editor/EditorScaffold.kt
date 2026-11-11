@@ -30,6 +30,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.TooltipState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -55,6 +56,7 @@ import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.SoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.isTraversalGroup
@@ -86,18 +88,20 @@ data class EditorScaffoldChrome(
 class EditorSurfaceFocusMemory {
     var imeBeforeSurface: Boolean = false
     var autoFocusConsumed: Boolean = false
+    internal val preview = EditorPreviewFocusMemory()
     internal var body by mutableStateOf(EditorBodyFocusMemory())
         private set
 
     fun reset() {
         imeBeforeSurface = false
         autoFocusConsumed = false
+        preview.reset()
         body.reset()
         body = EditorBodyFocusMemory()
     }
 
     companion object {
-        /** Entry/surface booleans only; the body focus/IME snapshot never survives process death. */
+        /** Entry/surface booleans only; body focus/IME and preview returns never survive process death. */
         val Saver: Saver<EditorSurfaceFocusMemory, Any> = listSaver(
             save = { listOf(it.imeBeforeSurface, it.autoFocusConsumed) },
             restore = { saved ->
@@ -128,8 +132,9 @@ val LocalEditorTooltipHost = staticCompositionLocalOf<EditorTooltipHost?> { null
  *
  * The host reduces [barActions] gestures, edits [bodyState] with the existing keep formatter, and
  * guards [onCloseRequested] (save/leave). Inline insertions restore [bodyFocusRequester] here.
- * Surface gestures capture IME visibility before dispatch; captured returns restore focus synchronously
- * and restore that visibility. An initial panel preserves selection while waiting for closed-IME options.
+ * Surface gestures capture IME visibility before dispatch; captured returns enqueue a Surface return.
+ * Its effect preserves selection and restores focus and that visibility after the input options update.
+ * An initial panel preserves selection while waiting for closed-IME options.
  * Other focus requests open the IME by default; a return or recreation
  * with a previously closed IME suppresses automatic opening until a completed body tap, accessibility
  * click or surface capture. Suppression is local to this composition and is not saved.
@@ -137,11 +142,13 @@ val LocalEditorTooltipHost = staticCompositionLocalOf<EditorTooltipHost?> { null
  * [surfaceFocus] owns the consumed autofocus and the captured IME state across recreation: pass host-retained
  * memory; without one the default saves its two booleans, so it stays consumed even after process death.
  * [bodyFocusRestoreAllowed] is supplied explicitly by every host: false while any panel, sheet,
- * external surface or preview covers the body. Only the editable body passed to [fieldArea] is guarded:
+ * external surface covers the body. EditorPreview owns the covering fallback's focus guard; a shared
+ * preview keeps the source editable. Only the editable body passed to [fieldArea] is guarded:
  * it refuses fresh focus entry, including from the new window; other [fieldArea] controls remain reachable.
  * A retained body's focus is restored once after detach,
- * with its actual pre-pause IME visibility; a blocked restoration is discarded, leaving panel returns
- * to their existing callbacks. This rotation snapshot is never saved by [EditorSurfaceFocusMemory.Saver].
+ * with its actual pre-pause IME visibility; a blocked restoration waits for Ready until the 500 ms
+ * deadline, then is discarded, leaving panel returns to their existing callbacks. This rotation
+ * snapshot is never saved by [EditorSurfaceFocusMemory.Saver].
  * [overlay] must invoke its body exactly once, unconditionally, at a stable composition site. Wrap it
  * with EditorHeaderPanel / EditorEventDetails, passing [bodyState] and its onReturnToBody callback; their opaque
  * overlay hides and blocks the body without losing its viewport or undo history. Sheets/tooltips are
@@ -201,31 +208,42 @@ fun EditorScaffold(
     var restoreImeOnFocus by remember(bodyState) {
         mutableStateOf(bodyFocus.showImeOnRestore)
     }
-    RestoreRecreatedEditorBodyFocus(bodyFocus, bodyFocusRestoreAllowed, bodyState, bodyFocusRequester)
-    var pendingBodyFocus by remember(bodyState) { mutableStateOf(false) }
+    var pendingBodyFocusReturn by remember(bodyState) { mutableStateOf<EditorBodyFocusReturn?>(null) }
     val captureIme = {
+        bodyFocus.cancelRestoration("surface")
         initialFocus = false
         surfaceFocus.imeBeforeSurface = imeVisible
         restoreImeOnFocus = false
         if (armed) submitActions.onDisarm()
     }
-    val onReturnToBody: () -> Unit = {
+    val returnToBody: (EditorBodyFocusReturn) -> Unit = { reason ->
         initialFocus = false
-        restoreImeOnFocus = surfaceFocus.imeBeforeSurface
-        pendingBodyFocus = true
+        restoreImeOnFocus = reason.showImeOnFocus(surfaceFocus.imeBeforeSurface)
+        pendingBodyFocusReturn = reason
     }
+    val onReturnToBody: () -> Unit = { returnToBody(EditorBodyFocusReturn.Surface) }
     // Wait until the input options and host guard have recomposed after closing the surface.
     // Use H's selection-preserving path; an already focused field still needs explicit IME restore.
-    LaunchedEffect(pendingBodyFocus) {
-        if (pendingBodyFocus) {
-            if (bodyFocusRestoreAllowed) {
-                requestEditorBodyFocus(bodyState, bodyFocusRequester)
-                if (restoreImeOnFocus) keyboard?.show() else keyboard?.hide()
-            }
-            pendingBodyFocus = false // A covered body must not receive a deferred return later.
+    LaunchedEffect(pendingBodyFocusReturn) {
+        val reason = pendingBodyFocusReturn
+        if (reason != null) {
+            val focused = bodyFocusRestoreAllowed && requestEditorBodyFocus(bodyState, bodyFocusRequester)
+            restoreImeOnFocus = restoreImeOnFocus and focused
+            // ED-61: preview returns never command the keyboard. A covering preview may also refuse
+            // a surface return: consume it without commanding the keyboard or deferring another try.
+            if (focused) reason.restoreIme(keyboard, restoreImeOnFocus)
+            pendingBodyFocusReturn = null
         }
     }
     val actions = barActions.withScaffoldFocus(captureIme, bodyFocusRequester)
+    val previewAction = previewWithoutImeChange(chrome.event, barActions, armed, submitActions.onDisarm)
+    val preview = { bodyFocus.cancelRestoration("preview"); previewAction() }
+    val returnFromPreview: () -> Unit = {
+        // ED-61: a preview control already ended the body's session when it took focus. Returning
+        // must not start another one, even with visible IME insets: that would request IME.show().
+        // An explicit body tap/accessibility click can enable a session afterwards, as for panels.
+        returnToBody(EditorBodyFocusReturn.Preview)
+    }
     val open: (() -> Unit) -> Unit = { action ->
         if (!consumeEditorBarInformation(chrome.event, actions.onEvent)) {
             actions.onGesture(EditorBarGesture.OpenSurface)
@@ -239,60 +257,88 @@ fun EditorScaffold(
     // ED-85: overlay details win, then disarm, then visible tool levels, panel, preview and guarded exit.
     // OpenSurface disarms before a panel opens; a displayed event masks retained modes without a Back level.
     // Composed before the bar's sublevel handlers and the overlay's panel handlers; [onSystemBack] replaces it.
-    EditorSystemBack(onSystemBack, armed, { submitActions.onDisarm() }, onCloseRequested)
-    Surface(modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
-        Box(Modifier.fillMaxSize().windowInsetsPadding(editorHorizontalInsets())
-            .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))) {
-            overlay(onReturnToBody) {
-                Column(Modifier.fillMaxSize().semantics { paneTitle = title; isTraversalGroup = true }
-                    .testTag("editor-scaffold-column")) {
-                    EditorAppBar(title, context, onCloseRequested, { open(barActions.onPreview) },
-                        modifier = Modifier.semantics { isTraversalGroup = true; traversalIndex = 0f }
-                            .testTag("editor-scaffold-app-bar"),
-                        firstStatus = status(chrome.firstStatus), secondStatus = status(chrome.secondStatus),
-                        onOpenHeader = header, headerActionLabel = headerLabel, compactHeight = metrics.compactHeight,
-                        previewEnabled = chrome.controlsEnabled, headerEnabled = chrome.controlsEnabled)
-                    Spacer(Modifier.height(metrics.columnSpacing / 2))
-                    Box(Modifier.weight(1f).fillMaxWidth()) {
-                        fieldArea {
-                            Box(Modifier.guardEditorBodyFocus(bodyFocusRestoreAllowed)) {
-                                BbcodeTextField(bodyState, stringResource(R.string.editor_scaffold_message),
-                                    modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)
-                                        .testTag("editor-scaffold-field").focusRequester(bodyFocusRequester)
-                                        .observeEditorBodyFocus(bodyFocus)
-                                        .semantics { isTraversalGroup = true; traversalIndex = 1f }
-                                        .tabMovesFocus(focusManager)
-                                        .onEditorBodyTap(bodyState) { restoreImeOnFocus = true },
-                                    inputTransformation = inputTransformation,
-                                    readOnly = chrome.uploading || chrome.bodyReadOnly,
-                                    placeholder = stringResource(R.string.editor_scaffold_placeholder),
-                                    revealCaretOnChange = true,
-                                    scrollState = bodyScrollState, showLabel = metrics.showFieldLabel,
-                                    autoFocus = initialFocus, showKeyboardOnFocus = initialFocus || restoreImeOnFocus,
-                                    caretRevealResetKey = bodyCaretRevealResetKey,
-                                    onSemanticsClick = editorBodyClick(restoreImeOnFocus, bodyFocusRequester) {
-                                        restoreImeOnFocus = true
-                                    })
+    EditorSystemBack(onSystemBack, armed, { submitActions.onDisarm() }, onCloseRequested,
+        { bodyFocus.cancelRestoration("back") })
+    CompositionLocalProvider(LocalEditorPreviewFocusMemory provides surfaceFocus.preview) {
+        Surface(modifier.fillMaxSize().cancelEditorBodyFocusRestorationOnInteraction(bodyFocus),
+            color = MaterialTheme.colorScheme.surface) {
+            Box(Modifier.fillMaxSize().windowInsetsPadding(editorHorizontalInsets())
+                .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top))) {
+                overlay(onReturnToBody) {
+                    Column(Modifier.fillMaxSize().semantics { paneTitle = title; isTraversalGroup = true }
+                        .testTag("editor-scaffold-column")) {
+                        EditorAppBar(title, context, onCloseRequested, preview,
+                            modifier = Modifier.semantics { isTraversalGroup = true; traversalIndex = 0f }
+                                .testTag("editor-scaffold-app-bar"),
+                            firstStatus = status(chrome.firstStatus), secondStatus = status(chrome.secondStatus),
+                            onOpenHeader = header, headerActionLabel = headerLabel,
+                            compactHeight = metrics.compactHeight,
+                            previewEnabled = chrome.controlsEnabled, headerEnabled = chrome.controlsEnabled,
+                            previewVisible = chrome.previewVisible)
+                        Spacer(Modifier.height(metrics.columnSpacing / 2))
+                        Box(Modifier.weight(1f).fillMaxWidth()) {
+                            CompositionLocalProvider(
+                                LocalEditorPreviewCompactHeight provides windowMetrics.compactHeight,
+                                LocalEditorPreviewReturnFocus provides returnFromPreview) {
+                                fieldArea {
+                                    RestoreRecreatedEditorBodyFocus(bodyFocus, bodyFocusRestoreAllowed, bodyState,
+                                        bodyFocusRequester,
+                                        availability = LocalEditorPreviewBodyFocusAvailability.current)
+                                    Box(Modifier.guardEditorBodyFocus(bodyFocusRestoreAllowed)) {
+                                        BbcodeTextField(bodyState, stringResource(R.string.editor_scaffold_message),
+                                            modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp)
+                                                .testTag("editor-scaffold-field").focusRequester(bodyFocusRequester)
+                                                .observeEditorBodyFocus(bodyFocus)
+                                                .semantics { isTraversalGroup = true; traversalIndex = 1f }
+                                                .tabMovesFocus(focusManager)
+                                                .onEditorBodyTap(bodyState) { restoreImeOnFocus = true },
+                                            inputTransformation = inputTransformation,
+                                            readOnly = chrome.uploading || chrome.bodyReadOnly,
+                                            placeholder = stringResource(R.string.editor_scaffold_placeholder),
+                                            revealCaretOnChange = true,
+                                            scrollState = bodyScrollState, showLabel = metrics.showFieldLabel,
+                                            autoFocus = initialFocus,
+                                            showKeyboardOnFocus = initialFocus || restoreImeOnFocus,
+                                            caretRevealResetKey = bodyCaretRevealResetKey,
+                                            onMinimumHeightMeasured = LocalEditorPreviewFieldMinimum.current,
+                                            onSemanticsClick = editorBodyClick(restoreImeOnFocus, bodyFocusRequester) {
+                                                restoreImeOnFocus = true
+                                            })
+                                    }
+                                }
                             }
                         }
-                    }
-                    Spacer(Modifier.height(metrics.columnSpacing / 2))
-                    Box(Modifier.windowInsetsPadding(editorBottomInsets()).semantics {
-                        isTraversalGroup = true; traversalIndex = 2f
-                    }) {
-                        EditorActionBar(chrome.bar, actions, submitState, submitActions, imageActions,
-                            modifier = Modifier.testTag("editor-scaffold-action-bar"),
-                            event = chrome.event, compactHeight = metrics.compactHeight,
-                            firstStatus = chrome.firstStatus.takeIf { metrics.compactHeight },
-                            secondStatus = chrome.secondStatus.takeIf { metrics.compactHeight },
-                            onOpenHeader = if (metrics.compactHeight) onOpenHeader else null,
-                            headerLabel = headerLabel, previewVisible = chrome.previewVisible,
-                            shortcut = chrome.shortcut, controlsEnabled = chrome.controlsEnabled,
-                            uploading = chrome.uploading, uploadProgress = chrome.uploadProgress,
-                            loadingForm = chrome.loadingForm, insertionsEnabled = !chrome.bodyReadOnly)
+                        Spacer(Modifier.height(metrics.columnSpacing / 2))
+                        Box(Modifier.windowInsetsPadding(editorBottomInsets()).semantics {
+                            isTraversalGroup = true; traversalIndex = 2f
+                        }) {
+                            EditorActionBar(chrome.bar, actions, submitState, submitActions, imageActions,
+                                modifier = Modifier.testTag("editor-scaffold-action-bar"),
+                                event = chrome.event, compactHeight = metrics.compactHeight,
+                                firstStatus = chrome.firstStatus.takeIf { metrics.compactHeight },
+                                secondStatus = chrome.secondStatus.takeIf { metrics.compactHeight },
+                                onOpenHeader = if (metrics.compactHeight) onOpenHeader else null,
+                                headerLabel = headerLabel, previewVisible = chrome.previewVisible,
+                                shortcut = chrome.shortcut, controlsEnabled = chrome.controlsEnabled,
+                                uploading = chrome.uploading, uploadProgress = chrome.uploadProgress,
+                                loadingForm = chrome.loadingForm, insertionsEnabled = !chrome.bodyReadOnly,
+                                onPreviewWithoutImeChange = preview)
+                        }
                     }
                 }
             }
+        }
+    }
+}
+
+private enum class EditorBodyFocusReturn {
+    Surface, Preview;
+
+    fun showImeOnFocus(imeBeforeSurface: Boolean): Boolean = this == Surface && imeBeforeSurface
+
+    fun restoreIme(keyboard: SoftwareKeyboardController?, visible: Boolean) {
+        if (this == Surface) {
+            if (visible) keyboard?.show() else keyboard?.hide()
         }
     }
 }
@@ -301,6 +347,17 @@ fun EditorScaffold(
 private fun Modifier.guardEditorBodyFocus(allowed: Boolean): Modifier = focusProperties {
     onEnter = { if (!allowed) cancelFocusChange() }
 }.focusGroup()
+
+/** ED-61: preview reduces tools/disarms without the IME capture used by other surfaces. */
+private fun previewWithoutImeChange(
+    event: EditorEvent?, actions: EditorActionBarActions, armed: Boolean, onDisarm: () -> Unit,
+): () -> Unit = {
+    if (!consumeEditorBarInformation(event, actions.onEvent)) {
+        if (armed) onDisarm()
+        actions.onGesture(EditorBarGesture.OpenSurface)
+        actions.onPreview()
+    }
+}
 
 /** Keep surface capture before host dispatch, including events which open their own surface. */
 private fun EditorActionBarActions.withScaffoldFocus(captureIme: () -> Unit, focus: FocusRequester) = copy(
@@ -340,8 +397,11 @@ private fun Modifier.onEditorBodyTap(state: TextFieldState, onTap: () -> Unit): 
 
 /** System back for the whole editor; composed before the bar's and overlay's own handlers (ED-85). */
 @Composable
-private fun EditorSystemBack(onSystemBack: (() -> Unit)?, armed: Boolean, onDisarm: () -> Unit, onClose: () -> Unit) {
+private fun EditorSystemBack(
+    onSystemBack: (() -> Unit)?, armed: Boolean, onDisarm: () -> Unit, onClose: () -> Unit, onInteraction: () -> Unit,
+) {
     BackHandler {
+        onInteraction()
         when {
             onSystemBack != null -> onSystemBack()
             armed -> onDisarm()
