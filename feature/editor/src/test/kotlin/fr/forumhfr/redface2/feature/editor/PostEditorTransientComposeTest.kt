@@ -278,6 +278,14 @@ class PostEditorTransientComposeTest {
             compose.onNodeWithContentDescription("Descendre la citation de Bob")
                 .performSemanticsAction(SemanticsActions.OnClick)
             advanceQuotePanelFrame() // Queue Bob while Alice is still displayed.
+            assertPanelAnnouncement(oldId, "Citation de Alice déplacée en position 2")
+            advanceQuotePanelTimeBy(768L)
+            assertPanelAnnouncement(oldId, "Citation de Bob déplacée en position 2")
+            // Prove Bob was emitted, then queue the already-observed Alice action behind it.
+            compose.onNodeWithContentDescription("Descendre la citation de Alice")
+                .performSemanticsAction(SemanticsActions.OnClick)
+            advanceQuotePanelFrame()
+            assertPanelAnnouncement(oldId, "Citation de Bob déplacée en position 2")
             compose.onNodeWithText("Retour au message").performSemanticsAction(SemanticsActions.OnClick)
             advanceQuotePanelFrame()
             compose.onNode(quotePanelLive, useUnmergedTree = true).assertDoesNotExist()
@@ -313,6 +321,8 @@ class PostEditorTransientComposeTest {
                 assertTrue("The named group must be Android's clickable focus target",
                     button.isClickable && button.isScreenReaderFocusable)
                 assertEquals("Only the button takes accessibility focus", 1, nodes.count { it.isScreenReaderFocusable })
+                assertEquals("The group must expose the button role exactly once", 1,
+                    nodes.count { it.className == "android.widget.Button" })
                 assertTrue(nodes.drop(1).none { it.isClickable })
                 // Compose puts a merging parent's description on a virtual child to avoid clobbering
                 // descendants. Android/TalkBack computes the button's name from that whole group.
@@ -390,6 +400,66 @@ class PostEditorTransientComposeTest {
             }
             compose.onNodeWithText("Garder le focus").assertIsFocused()
             compose.onNodeWithContentDescription("Descendre la citation de Bob").assertIsNotFocused()
+        } finally {
+            compose.mainClock.autoAdvance = true
+        }
+    }
+
+    @Test fun `R2a a neighbour move replaces a filtered request before expiry without focusing Bob at the top`() {
+        val announcements = mutableListOf<String>()
+        setQuoteCardsWithLiveAdapter(announcements)
+        compose.onNodeWithText("Garder le focus").requestFocus().assertIsFocused()
+        compose.mainClock.autoAdvance = false
+        try {
+            compose.onNodeWithContentDescription("Monter la citation de Bob")
+                .performSemanticsAction(SemanticsActions.OnClick) { click ->
+                    host.state = host.state.copy(isInitializing = true)
+                    assertFalse(host.adapter.state.scaffold.controlsEnabled)
+                    assertTrue(click())
+                    assertTrue(host.calls.isEmpty())
+                    host.state = host.state.copy(isInitializing = false)
+                }
+            advanceQuotePanelFrame()
+            compose.onNodeWithContentDescription("Descendre la citation de Alice")
+                .performSemanticsAction(SemanticsActions.OnClick)
+            advanceQuotePanelTimeBy(320L) // The filtered Bob request has not expired yet.
+            compose.runOnIdle {
+                assertEquals(listOf("Bob", "Alice", "Chloé"), host.state.quotes.map { it.author })
+                assertEquals(listOf("Citation de Alice déplacée en position 2"), announcements)
+                assertEquals(1, host.calls.count { it is PostEditorIntent.QuoteMoved })
+            }
+            compose.onNodeWithText("Garder le focus").assertIsFocused()
+            compose.onNodeWithContentDescription("Descendre la citation de Bob").assertIsNotFocused()
+        } finally {
+            compose.mainClock.autoAdvance = true
+        }
+    }
+
+    @Test fun `R2a a neighbour move replaces coalesced requests before expiry without focusing Bob at the bottom`() {
+        val announcements = mutableListOf<String>()
+        setQuoteCardsWithLiveAdapter(announcements)
+        val up = compose.onNodeWithContentDescription("Monter la citation de Bob").fetchSemanticsNode()
+        val down = compose.onNodeWithContentDescription("Descendre la citation de Bob").fetchSemanticsNode()
+        compose.onNodeWithText("Garder le focus").requestFocus().assertIsFocused()
+        val original = host.state.quotes
+        compose.mainClock.autoAdvance = false
+        try {
+            compose.runOnIdle {
+                assertTrue(requireNotNull(up.config[SemanticsActions.OnClick].action).invoke())
+                assertTrue(requireNotNull(down.config[SemanticsActions.OnClick].action).invoke())
+                assertEquals(original, host.state.quotes)
+            }
+            advanceQuotePanelFrame()
+            compose.onNodeWithContentDescription("Monter la citation de Chloé")
+                .performSemanticsAction(SemanticsActions.OnClick)
+            advanceQuotePanelTimeBy(320L) // The coalesced Bob request has not expired yet.
+            compose.runOnIdle {
+                assertEquals(listOf("Alice", "Chloé", "Bob"), host.state.quotes.map { it.author })
+                assertEquals(listOf("Citation de Chloé déplacée en position 2"), announcements)
+                assertEquals(3, host.calls.count { it is PostEditorIntent.QuoteMoved })
+            }
+            compose.onNodeWithText("Garder le focus").assertIsFocused()
+            compose.onNodeWithContentDescription("Monter la citation de Bob").assertIsNotFocused()
         } finally {
             compose.mainClock.autoAdvance = true
         }

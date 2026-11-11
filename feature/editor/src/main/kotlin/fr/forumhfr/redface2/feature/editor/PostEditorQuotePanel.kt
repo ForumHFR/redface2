@@ -122,8 +122,19 @@ internal fun PostEditorQuoteCards(
     onAnnounce: (String) -> Unit,
 ) {
     var pendingIndex by remember { mutableStateOf<Int?>(null) }
+    var pendingMove by remember { mutableStateOf<Pair<QuoteSelection, List<QuoteSelection>>?>(null) }
+    LaunchedEffect(pendingMove) {
+        if (pendingMove != null) {
+            delay(QUOTE_MOVE_REQUEST_MILLIS)
+            pendingMove = null
+        }
+    }
     val focus = remember(quotes.size) { List(quotes.size) { FocusRequester() } }
+    // Every card captures the same request before the first list change consumes it.
+    val moveRequest = pendingMove
     LaunchedEffect(quotes) {
+        // A removal or replacement also consumes the request, without stealing its focus.
+        pendingMove = null
         pendingIndex?.let { index ->
             if (quotes.isEmpty()) onEmpty() else focus[index.coerceAtMost(quotes.lastIndex)].requestFocus()
             pendingIndex = null
@@ -138,16 +149,10 @@ internal fun PostEditorQuoteCards(
             key(quote) {
                 val moveUpFocus = remember { FocusRequester() }
                 val moveDownFocus = remember { FocusRequester() }
-                var pendingMove by remember { mutableStateOf<List<QuoteSelection>?>(null) }
-                LaunchedEffect(pendingMove) {
-                    if (pendingMove != null) {
-                        delay(QUOTE_MOVE_REQUEST_MILLIS)
-                        pendingMove = null
-                    }
-                }
                 // Wait for the reordered card's buttons to receive their new enabled state.
                 LaunchedEffect(quotes) {
-                    if (isQuoteReorder(pendingMove, quotes, quote)) {
+                    if (moveRequest != null && moveRequest.first == quote &&
+                        isQuoteReorder(moveRequest.second, quotes, quote)) {
                         when (index) {
                             0 -> moveDownFocus.requestFocus()
                             quotes.lastIndex -> moveUpFocus.requestFocus()
@@ -155,11 +160,9 @@ internal fun PostEditorQuoteCards(
                         // Coalesced clicks announce the actual final position, never a stale index.
                         onAnnounce(moved.format(quote.author, index + 1))
                     }
-                    // A removal or replacement also consumes the request, without stealing its focus.
-                    pendingMove = null
                 }
                 val move: (Int) -> Unit = { delta ->
-                    pendingMove = quotes
+                    pendingMove = quote to quotes
                     onIntent(PostEditorIntent.QuoteMoved(quote.numreponse, delta, quote))
                 }
                 QuoteCard(quote, QuoteCardControls(index > 0, index < quotes.lastIndex, enabled,
