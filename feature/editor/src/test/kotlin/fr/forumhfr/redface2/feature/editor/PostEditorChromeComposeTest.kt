@@ -345,7 +345,8 @@ class PostEditorChromeComposeTest {
         host.transition(host.state.copy(restorableDraft = "saved D", pendingQuotes = listOf(
             QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
         compose.setContent { Content() }
-        compose.onNodeWithContentDescription("Brouillon retrouvé, citation en attente, Afficher les détails").assertExists()
+        compose.onNodeWithContentDescription("Brouillon retrouvé, citation en attente, Afficher les détails")
+            .assertExists()
         compose.runOnIdle { host.transition(host.state.copy(pendingQuotes = emptyList())) }
         compose.onNodeWithContentDescription("Brouillon retrouvé, citation en attente, Afficher les détails")
             .assertDoesNotExist()

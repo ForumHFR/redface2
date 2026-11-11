@@ -215,9 +215,8 @@ private fun ReplyFormFailure(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHighest, tonalElevation = 2.dp,
             ) {
-                // Full screen without a field or keyboard: the sentence keeps its stacked layout.
                 MessageDraftRestoreChoice(host::restoreDraft, host::discardDraft, state.restoreEnabled,
-                    compactHeight = false, Modifier.padding(start = 8.dp, top = 8.dp, end = 8.dp))
+                    Modifier.padding(start = 8.dp, top = 8.dp, end = 8.dp))
             }
             MessageFormErrorState(onRetry = host::retryFormLoad)
         }

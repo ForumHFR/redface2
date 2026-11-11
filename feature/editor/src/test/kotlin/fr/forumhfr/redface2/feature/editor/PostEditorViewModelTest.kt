@@ -4709,7 +4709,7 @@ class PostEditorViewModelTest {
         settleBody()
         assertPendingQuoteNotice(vm, expected = true)
         val adapter = PostEditorChromeAdapter({ vm.state.value }, vm.bodyFieldState, vm.chromeEvents,
-            vm::dispatch, {}, {}, vm.chromeMemory)
+            { vm.dispatch(it) }, {}, {}, vm.chromeMemory)
         if (throughEvent) {
             val event = vm.chromeEvents.visibleEvent!!
             adapter.barActions.onEvent(event.key, EditorEventAction.Details)

@@ -10,6 +10,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.ui.R as UiR
 import fr.forumhfr.redface2.core.ui.editor.EditorDraftOfferSheet
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorAction
+import fr.forumhfr.redface2.core.ui.editor.EditorEvent
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
 import fr.forumhfr.redface2.core.ui.editor.EditorEventDetails
 import fr.forumhfr.redface2.core.ui.editor.EditorHeaderPanel
@@ -44,21 +45,8 @@ internal fun PostEditorChromeSurfaces(
         onDismiss = adapter::dismissDetails,
         body = {
             PostEditorHeaderSurface(adapter, bodyState, onReturnToBody, body)
-        }) { event ->
-        if (source.hasDormantQuote) QuoteDecisions(adapter, event.key)
-        val error = (event.content as? EditorEventContent.Problem)?.error
-        // Host recovery also covers a pending quote's CAS; it must not replay the insertion.
-        if (adapter.canReload(event.key) && error?.action != EditorErrorAction.Reload) {
-            TextButton(onClick = { adapter.reload(event.key) }, enabled = !source.isLoadingForm) {
-                Text(stringResource(UiR.string.editor_action_reload))
-            }
-        }
-    }
-    EditorDraftOfferSheet(adapter.draftOfferOpen, source.restorableDraft != null, adapter::closeDraftOffer,
-        adapter::restoreDraft, adapter::discardDraft,
-        pendingQuote = if (source.pendingQuotes.isNotEmpty()) stringResource(R.string.editor_quote_pending) else null,
-        restoreEnabled = source.canRestoreDraft && !source.isUploading && adapter.state.scaffold.controlsEnabled,
-        discardEnabled = adapter.state.scaffold.controlsEnabled)
+        }) { event -> PostEditorEventRemedies(adapter, event) }
+    PostEditorDraftOffer(adapter)
     when (adapter.surface) {
         PostEditorChromeSurface.Options -> PostEditorOptionsSurface(adapter, source)
         PostEditorChromeSurface.Url -> if (adapter.state.canInsert) {
@@ -67,6 +55,29 @@ internal fun PostEditorChromeSurfaces(
         PostEditorChromeSurface.Smileys -> if (adapter.state.canInsert) PostEditorSmileysSurface(adapter, smileys)
         else -> Unit
     }
+}
+
+@Composable
+private fun PostEditorEventRemedies(adapter: PostEditorChromeAdapter, event: EditorEvent) {
+    val source = adapter.state.source
+    if (source.hasDormantQuote) QuoteDecisions(adapter, event.key)
+    val error = (event.content as? EditorEventContent.Problem)?.error
+    // Host recovery also covers a pending quote's CAS; it must not replay the insertion.
+    if (adapter.canReload(event.key) && error?.action != EditorErrorAction.Reload) {
+        TextButton(onClick = { adapter.reload(event.key) }, enabled = !source.isLoadingForm) {
+            Text(stringResource(UiR.string.editor_action_reload))
+        }
+    }
+}
+
+@Composable
+private fun PostEditorDraftOffer(adapter: PostEditorChromeAdapter) {
+    val source = adapter.state.source
+    EditorDraftOfferSheet(adapter.draftOfferOpen, source.restorableDraft != null, adapter::closeDraftOffer,
+        adapter::restoreDraft, adapter::discardDraft,
+        pendingQuote = if (source.pendingQuotes.isNotEmpty()) stringResource(R.string.editor_quote_pending) else null,
+        restoreEnabled = source.canRestoreDraft && !source.isUploading && adapter.state.scaffold.controlsEnabled,
+        discardEnabled = adapter.state.scaffold.controlsEnabled)
 }
 
 @Composable

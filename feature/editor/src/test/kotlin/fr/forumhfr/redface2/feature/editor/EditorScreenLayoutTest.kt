@@ -35,14 +35,12 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
-import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
@@ -189,13 +187,14 @@ class EditorScreenLayoutTest {
 
     @Test
     @Config(qualifiers = "fr-rFR-w360dp-h760dp-port-xxhdpi")
-    fun `topic restore panel states its offer once and never ellipsizes it at font scale 1_3`() {
+    fun `topic restore sheet states its offer once and never ellipsizes it at font scale 1_3`() {
         val fixture = TopicFormChromeFixture()
         fixture.state = fixture.state.copy(restorableDraft = "Brouillon conservé")
         setScaledContent {
             TopicFormTestContent(fixture.state, fixture::dispatch, fixture.body, fixture.events, fixture.memory)
         }
         assertRestoreOfferStatedOnce()
+        compose.onNode(isDialog()).assertExists()
     }
 
     @Test
@@ -216,10 +215,10 @@ class EditorScreenLayoutTest {
 
     @Test
     @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
-    fun `topic restore offer and actions share one row above a landscape keyboard at font scale 1_3`() {
+    fun `topic restore sheet offer and actions are reachable above a landscape keyboard at font scale 1_3`() {
         val fixture = TopicFormChromeFixture()
         fixture.state = fixture.state.copy(restorableDraft = "Brouillon conservé")
-        assertCompactRestoreRow(1.3f) {
+        assertCompactRestoreSheet(1.3f) {
             TopicFormTestContent(fixture.state, fixture::dispatch, fixture.body, fixture.events, fixture.memory)
         }
     }
@@ -238,42 +237,6 @@ class EditorScreenLayoutTest {
         compose.onAllNodesWithText(RESTORE_OFFER, useUnmergedTree = true).assertCountEquals(1)
         assertOfferLaidOutWhole(1.3f)
         for (label in listOf("Restaurer", "Ignorer")) compose.onNodeWithText(label).assertHeightIsAtLeast(48.dp)
-    }
-
-    /**
-     * Gate R1b minors r1 C1: the Roborazzi landscape scene (760 × 360 dp, 190 dp keyboard) leaves the ↺ panel about
-     * 100 dp of viewport. At this compact height the offer takes the rest of the actions' row: the whole sentence and
-     * both labels stay in view, each action inside the window above the keyboard. Stacked, both actions fall below.
-     */
-    private fun assertCompactRestoreRow(fontScale: Float, content: @Composable () -> Unit) {
-        lateinit var view: View
-        lateinit var density: Density
-        setScaledContent(fontScale) {
-            view = LocalView.current
-            density = LocalDensity.current
-            content()
-        }
-        compose.runOnIdle {
-            val ime = with(density) { LANDSCAPE_KEYBOARD.roundToPx() }
-            ViewCompat.dispatchApplyWindowInsets(view, WindowInsetsCompat.Builder()
-                .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, ime))
-                .setVisible(WindowInsetsCompat.Type.ime(), true).build())
-        }
-        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
-        val offer = assertOfferLaidOutWhole(fontScale)
-        val offerBounds = offer.getUnclippedBoundsInRoot()
-        assertEquals("The offer must be entirely in view", offerBounds, offer.getBoundsInRoot())
-        val keyboardTop = compose.onRoot().getUnclippedBoundsInRoot().bottom - LANDSCAPE_KEYBOARD
-        var previousRight = offerBounds.right
-        for (label in listOf("Restaurer", "Ignorer")) {
-            val bounds = compose.onNodeWithText(label).assertHeightIsAtLeast(48.dp).getUnclippedBoundsInRoot()
-            assertTrue("$label must stay in the window above the keyboard", bounds.bottom <= keyboardTop)
-            val text = compose.onNodeWithText(label, useUnmergedTree = true)
-            assertEquals("$label must be entirely in view", text.getUnclippedBoundsInRoot(), text.getBoundsInRoot())
-            assertEquals("$label must share the offer's row", offerBounds.centerY, bounds.centerY, 1f)
-            assertTrue("$label must follow the offer and the previous action", bounds.left >= previousRight)
-            previousRight = bounds.right
-        }
     }
 
     /** The expanded offer sheet scrolls its whole sentence and both 48 dp actions above the IME. */
@@ -301,7 +264,8 @@ class EditorScreenLayoutTest {
         assertEquals("The offer must be entirely in view", offer.getUnclippedBoundsInRoot(), offer.getBoundsInRoot())
         val keyboardTop = compose.onNode(isDialog()).getUnclippedBoundsInRoot().bottom - LANDSCAPE_KEYBOARD
         for (label in listOf("Restaurer", "Ignorer")) {
-            val action = compose.onNodeWithText(label).performScrollTo().assertIsDisplayed().assertHeightIsAtLeast(48.dp)
+            val action = compose.onNodeWithText(label).performScrollTo().assertIsDisplayed()
+                .assertHeightIsAtLeast(48.dp)
             assertTrue("$label must stay above the keyboard", action.getUnclippedBoundsInRoot().bottom <= keyboardTop)
             val text = compose.onNodeWithText(label, useUnmergedTree = true)
             assertEquals("$label must be entirely in view", text.getUnclippedBoundsInRoot(), text.getBoundsInRoot())
@@ -386,5 +350,3 @@ private const val RESTORE_OFFER = "Un brouillon non envoyé a été retrouvé po
 
 /** Same keyboard as EditorBaselineRoborazziTest's landscape post scenes. */
 private val LANDSCAPE_KEYBOARD = 190.dp
-
-private val DpRect.centerY: Float get() = ((top + bottom) / 2).value

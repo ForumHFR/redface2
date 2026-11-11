@@ -75,7 +75,57 @@ class PrivateMessageDraftOfferSheetTest {
 
     @Test fun `1450 reply offer returns focus once for every dismissal and decision`() = checkOffer(isReply = true)
 
-    @Test fun `1450 new message offer returns focus once for every dismissal and decision`() = checkOffer(isReply = false)
+    @Test fun `1450 new message offer returns focus once for every dismissal and decision`() =
+        checkOffer(isReply = false)
+
+    @Test fun `1450 losing the reply offer closes its open sheet without a decision and returns focus once`() =
+        checkOfferLoss(isReply = true)
+
+    @Test fun `1450 losing the new message offer closes its open sheet without a decision and returns focus once`() =
+        checkOfferLoss(isReply = false)
+
+    private fun checkOfferLoss(isReply: Boolean) {
+        reply.state = reply.state.copy(restorableDraft = "Brouillon privé")
+        message.state = message.state.copy(restorableDraft = "Brouillon privé", restorableSubject = "titre",
+            restorableRecipients = "bob", recipientState = EditorRecipientState(listOf("alice")), subject = "Sujet")
+        val host = host(isReply)
+        val body = if (isReply) reply.body else message.body
+        val calls = if (isReply) reply.calls else message.calls
+        compose.setContent { Content(isReply) }
+        compose.runOnIdle {
+            focus.requestFocus()
+            body.edit { selection = TextRange(6, 1) }
+        }
+        val field = compose.onNode(hasSetTextAction()).fetchSemanticsNode().id
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
+        compose.onNode(isDialog()).assertExists()
+        compose.onNodeWithTag("editor-draft-offer-sheet").assertIsDisplayed()
+        compose.runOnIdle {
+            assertTrue(host.draftOfferOpen)
+            reply.state = reply.state.copy(restorableDraft = null)
+            message.state = message.state.copy(restorableDraft = null, restorableSubject = null,
+                restorableRecipients = null)
+        }
+        compose.onNode(isDialog()).assertDoesNotExist()
+        compose.onNodeWithText("Retour au message").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").assertDoesNotExist()
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        assertEquals(field, compose.onNode(hasSetTextAction()).fetchSemanticsNode().id)
+        compose.runOnIdle {
+            assertEquals(1, returns)
+            assertEquals(1, host.returnGeneration)
+            assertFalse(host.consumeReturn())
+            assertFalse(host.draftOfferOpen)
+            assertNull(host.surface)
+            assertNull(host.detail)
+            assertEquals("Bonjour", body.text.toString())
+            assertEquals(TextRange(6, 1), body.selection)
+            assertTrue(calls.isEmpty())
+            assertTrue(if (isReply) reply.events.state.events.isEmpty() else message.events.state.events.isEmpty())
+        }
+        compose.waitForIdle()
+        compose.runOnIdle { assertEquals(1, returns) }
+    }
 
     private fun host(isReply: Boolean): EditorHost<*> = if (isReply) reply.adapter else message.adapter
 
@@ -127,7 +177,8 @@ class PrivateMessageDraftOfferSheetTest {
                 assertEquals(TextRange(6, 1), body.selection)
                 val decisions = listOf(closing).filter { it == "restore" || it == "discard" }
                 assertEquals(previousCalls + decisions, calls)
-                assertEquals("Brouillon privé", if (isReply) reply.state.restorableDraft else message.state.restorableDraft)
+                val restorable = if (isReply) reply.state.restorableDraft else message.state.restorableDraft
+                assertEquals("Brouillon privé", restorable)
                 assertTrue(if (isReply) reply.events.state.events.isEmpty() else message.events.state.events.isEmpty())
                 host.closeDraftOffer() // A late dismissal cannot schedule a second focus return.
             }

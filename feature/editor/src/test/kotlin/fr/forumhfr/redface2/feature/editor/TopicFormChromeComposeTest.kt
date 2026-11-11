@@ -9,6 +9,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -17,6 +18,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -162,7 +164,7 @@ class TopicFormChromeComposeTest {
             restorableSubject = if (mode == TopicFormMode.New) "Saved title" else null,
             restorableDraft = if (mode == TopicFormMode.EditFirstPost) "Saved body" else null)
         compose.setContent { Content() }
-        listOf("restore", "discard", "swipe", "back", "close").forEachIndexed { index, closing ->
+        listOf("restore", "discard", "swipe", "back", "outside", "close").forEachIndexed { index, closing ->
             val field = compose.onNode(hasSetTextAction()).fetchSemanticsNode().id
             val calls = fixture.calls.toList()
             compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
@@ -183,6 +185,7 @@ class TopicFormChromeComposeTest {
                 "back" -> compose.runOnIdle {
                     (ShadowDialog.getLatestDialog() as ComponentDialog).onBackPressedDispatcher.onBackPressed()
                 }
+                "outside" -> tapScrim()
                 "close" -> compose.onNodeWithContentDescription("Fermer l’offre de brouillon").performClick()
             }
             compose.onNode(isDialog()).assertDoesNotExist()
@@ -206,6 +209,62 @@ class TopicFormChromeComposeTest {
             compose.waitForIdle()
             compose.runOnIdle { assertEquals(index + 1, returns) }
         }
+    }
+
+    @Test fun `1450 losing the topic offer closes its open sheet without an intent and returns focus once`() =
+        checkDraftOfferLoss(TopicFormMode.New)
+
+    @Test fun `1450 losing the first post offer closes its open sheet without an intent and returns focus once`() =
+        checkDraftOfferLoss(TopicFormMode.EditFirstPost)
+
+    private fun checkDraftOfferLoss(mode: TopicFormMode) {
+        fixture = TopicFormChromeFixture(mode)
+        fixture.state = fixture.state.copy(restorableSubject = "Saved title", restorableDraft = "Saved body")
+        compose.setContent { Content() }
+        val field = compose.onNode(hasSetTextAction()).fetchSemanticsNode().id
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
+        compose.onNode(isDialog()).assertExists()
+        compose.onNodeWithTag("editor-draft-offer-sheet").assertIsDisplayed()
+        // Either half keeps the offer available; only losing both closes the sheet.
+        compose.runOnIdle { fixture.state = fixture.state.copy(restorableDraft = null) }
+        compose.onNodeWithTag("editor-draft-offer-sheet").assertIsDisplayed()
+        compose.runOnIdle {
+            assertTrue(fixture.adapter.host.draftOfferOpen)
+            assertEquals(0, returns)
+            fixture.state = fixture.state.copy(restorableSubject = null)
+        }
+        compose.onNode(isDialog()).assertDoesNotExist()
+        compose.onNodeWithText("Retour au message").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").assertDoesNotExist()
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        assertEquals(field, compose.onNode(hasSetTextAction()).fetchSemanticsNode().id)
+        compose.runOnIdle {
+            assertFalse(fixture.adapter.host.draftOfferOpen)
+            assertNull(fixture.adapter.host.surface)
+            assertNull(fixture.adapter.host.detail)
+            assertEquals(1, returns)
+            assertEquals(1, fixture.adapter.host.returnGeneration)
+            assertFalse(fixture.adapter.host.consumeReturn())
+            assertTrue(fixture.calls.isEmpty())
+            assertTrue(fixture.events.state.events.isEmpty())
+            assertEquals(TextRange(6, 1), fixture.body.selection)
+            assertEquals("Bonjour", fixture.body.text.toString())
+        }
+        compose.waitForIdle()
+        compose.runOnIdle { assertEquals(1, returns) }
+    }
+
+    /** Tap the scrim the sheet leaves exposed above it, in the dialog's own coordinates. */
+    private fun tapScrim() {
+        val dialog = compose.onNode(isDialog())
+        val dialogNode = dialog.fetchSemanticsNode()
+        val dialogBounds = dialogNode.boundsInRoot
+        val sheetBounds = compose.onNodeWithTag("editor-draft-offer-sheet").fetchSemanticsNode().boundsInRoot
+        val exposedHeight = sheetBounds.top - dialogBounds.top
+        assertTrue("The sheet must expose a scrim above it", exposedHeight > 0f)
+        val tap = Offset(dialogBounds.center.x, dialogBounds.top + exposedHeight / 2f)
+        assertFalse(sheetBounds.contains(tap))
+        dialog.performTouchInput { click(tap - dialogNode.positionInRoot) }
     }
 
     @Test fun `missing route shows a writable header without the unsupported first post notice`() {
