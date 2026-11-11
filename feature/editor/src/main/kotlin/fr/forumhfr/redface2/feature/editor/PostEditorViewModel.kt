@@ -51,6 +51,7 @@ import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
@@ -364,6 +365,11 @@ class PostEditorViewModel @AssistedInject constructor(
         viewModelScope.launch {
             userPreferencesRepository.observeEditorImageInsert().collect { mode ->
                 imageInsertMode = mode
+            }
+        }
+        viewModelScope.launch {
+            userPreferencesRepository.observeEditorShortcut().collect { shortcut ->
+                _state.update { it.copy(editorShortcut = shortcut) }
             }
         }
         viewModelScope.launch {

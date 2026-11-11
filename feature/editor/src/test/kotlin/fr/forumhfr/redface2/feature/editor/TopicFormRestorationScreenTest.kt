@@ -48,6 +48,7 @@ import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.TopicForm
@@ -282,6 +283,7 @@ class TopicFormRestorationScreenTest {
                         every { observeEditorImageInsert() } returns flowOf(EditorImageInsert.FULL)
                         every { observeImagePickerMode() } returns flowOf(ImagePickerMode.DEFAULT)
                         every { observeEditorPreviewPositions() } returns flowOf(emptyMap())
+                        every { observeEditorShortcut() } returns flowOf(EditorShortcut.NONE)
                     }, store, DiagnosticsLog(), mockk<AuthRepository> {
                         every { observeAuthState() } returns flowOf(AuthState.Authenticated("tester"))
                     }, mockk(relaxed = true), mockk(relaxed = true), FakeHfrFavoriteSmileyRepository(),

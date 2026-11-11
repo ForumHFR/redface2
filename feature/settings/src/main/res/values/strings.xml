@@ -587,4 +587,9 @@
     <string name="report_error_recipient">HFR a refusé le destinataire du projet. Votre signalement n’a pas été envoyé ; votre saisie est conservée.</string>
     <string name="report_error_empty">HFR a refusé un champ vide. Vérifiez le motif et la description.</string>
     <string name="report_error_refused">HFR a refusé l’envoi. Votre saisie est conservée.</string>
+    <string name="settings_editor_shortcut_title">Raccourci de la barre d’édition</string>
+    <string name="settings_editor_shortcut_post_topic">Post et sujet</string>
+    <string name="settings_editor_shortcut_messages">Éditeurs MP</string>
+    <string name="settings_editor_shortcut_none">Aucun raccourci dans la barre</string>
+    <string name="settings_editor_shortcut_persist_failed">Impossible d’enregistrer le raccourci. Le choix précédent est conservé.</string>
 </resources>

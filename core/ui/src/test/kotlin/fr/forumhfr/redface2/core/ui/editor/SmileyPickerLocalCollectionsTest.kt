@@ -41,7 +41,7 @@ class SmileyPickerLocalCollectionsTest {
             favoriteSources = SmileyPickerFavoriteSources(localCollections = locals),
         )
         runCurrent()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         assertEquals(SmileyPickerTab.STANDARD, controller.openState().initialTab)
         val snapshots = listOf(
             SmileyLocalCollectionSnapshot("alice", favorites = listOf(LocalFavoriteSmiley(builtin.token, addedAt = 1))),
@@ -53,18 +53,18 @@ class SmileyPickerLocalCollectionsTest {
             // Late data does not retake selection during this opening.
             if (index == 0) assertEquals(SmileyPickerTab.STANDARD, controller.openState().initialTab)
             controller.dismiss()
-            controller.open()
+            controller.open(SmileyPickerOpenIntent.CONSULTATION)
             assertEquals(SmileyPickerTab.FAVORITES, controller.openState().initialTab)
         }
         controller.onQueryChanged("fictif")
         controller.dismiss()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         assertEquals(SmileyPickerTab.WIKI, controller.openState().initialTab)
         val hfr = SmileyPickerController(
             backgroundScope, { _, _ -> emptyList() },
             favoriteSources = SmileyPickerFavoriteSources(favoriteSmileys = { listOf(perso) }),
         )
-        hfr.open()
+        hfr.open(SmileyPickerOpenIntent.CONSULTATION)
         assertEquals(SmileyPickerTab.FAVORITES, hfr.openState().initialTab)
     }
 
@@ -79,7 +79,7 @@ class SmileyPickerLocalCollectionsTest {
             favoriteSources = SmileyPickerFavoriteSources(localCollections = locals),
         )
         runCurrent()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         assertEquals(SmileyPickerTab.FAVORITES, controller.openState().initialTab)
         assertEquals(emptyList<EditorSmiley>(), controller.openState().localFavoriteSmileys)
         assertEquals(setOf("unresolvable"), controller.openState().localFavoriteTokens)
@@ -100,7 +100,7 @@ class SmileyPickerLocalCollectionsTest {
             ),
         )
         runCurrent()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         val open = controller.openState()
         assertEquals("https://example.invalid/saved.gif", open.localFavoriteSmileys.single().imageUrl)
         assertEquals(listOf(perso.token, builtin.token), open.mostUsedSmileys.map { it.token })
@@ -133,7 +133,7 @@ class SmileyPickerLocalCollectionsTest {
             favoriteSources = SmileyPickerFavoriteSources(localCollections = locals),
         )
         runCurrent()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.openState().onLocalFavoriteChange?.invoke(builtin)
         locals.snapshot.value = SmileyLocalCollectionSnapshot(
             "bob", favorites = listOf(LocalFavoriteSmiley(perso.token, perso.imageUrl, 1)),
@@ -169,7 +169,7 @@ class SmileyPickerLocalCollectionsTest {
             favoriteSources = SmileyPickerFavoriteSources(localCollections = locals),
         )
         runCurrent()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         assertEquals(EditorSmileySource.WIKI, controller.openState().localFavoriteSmileys.single().source)
         controller.onQueryChanged("fictif")
         advanceTimeBy(SmileyPickerController.SEARCH_DEBOUNCE_MS)
@@ -192,7 +192,7 @@ class SmileyPickerLocalCollectionsTest {
             ),
         )
         runCurrent()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onFavoriteClicked(perso)
         val generation = controller.openState().favoriteFeedbackGeneration
         assertNotNull(controller.openState().localFavoriteAction(builtin))
@@ -219,7 +219,7 @@ class SmileyPickerLocalCollectionsTest {
                 ),
             )
             runCurrent()
-            controller.open()
+            controller.open(SmileyPickerOpenIntent.CONSULTATION)
             controller.onFavoriteClicked(perso)
             runCurrent()
             assertEquals(listOf(perso.token), controller.openState().favoriteSmileys.map { it.token })
@@ -257,7 +257,7 @@ class SmileyPickerLocalCollectionsTest {
                 ),
             )
             runCurrent()
-            controller.open()
+            controller.open(SmileyPickerOpenIntent.CONSULTATION)
             controller.openState().onLocalFavoriteChange?.invoke(builtin)
             runCurrent()
             controller.onFavoriteClicked(perso)
@@ -291,7 +291,7 @@ class SmileyPickerLocalCollectionsTest {
                     ),
                 )
                 runCurrent()
-                controller.open()
+                controller.open(SmileyPickerOpenIntent.CONSULTATION)
                 controller.onFavoriteClicked(perso)
                 runCurrent()
                 locals.snapshot.value = SmileyLocalCollectionSnapshot("bob")
@@ -331,7 +331,7 @@ class SmileyPickerLocalCollectionsTest {
                     ),
                 )
                 runCurrent()
-                controller.open()
+                controller.open(SmileyPickerOpenIntent.CONSULTATION)
                 controller.openState().onLocalFavoriteChange?.invoke(builtin)
                 runCurrent()
                 locals.snapshot.value = SmileyLocalCollectionSnapshot("bob")
@@ -361,7 +361,7 @@ class SmileyPickerLocalCollectionsTest {
             favoriteSources = SmileyPickerFavoriteSources(localCollections = locals),
         )
         runCurrent()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         val outcomes = listOf(
             LocalFavoriteSmileyMutationResult.LimitReached to SmileyFavoriteFeedback.LocalLimitReached,
             LocalFavoriteSmileyMutationResult.Failure(LocalFavoriteSmileyFailure.STORAGE_FAILURE) to
@@ -378,7 +378,7 @@ class SmileyPickerLocalCollectionsTest {
         runCurrent()
         assertEquals(SmileyFavoriteFeedback.LocalStorageFailure, controller.openState().favoriteFeedback)
         controller.dismiss()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         assertNull(controller.openState().favoriteFeedback)
     }
 
@@ -400,7 +400,7 @@ class SmileyPickerLocalCollectionsTest {
             ),
         )
         runCurrent()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.openState().onLocalFavoriteChange?.invoke(builtin)
         runCurrent()
         assertEquals(SmileyFavoriteAction.ADD, controller.openState().favoriteAction(perso))
@@ -422,14 +422,14 @@ class SmileyPickerLocalCollectionsTest {
             favoriteSources = SmileyPickerFavoriteSources(localCollections = locals),
         )
         runCurrent()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         val success = CompletableDeferred<LocalFavoriteSmileyMutationResult>()
         locals.addResult = { success.await() }
         controller.openState().onLocalFavoriteChange?.invoke(builtin)
         controller.dismiss()
         success.complete(LocalFavoriteSmileyMutationResult.Added)
         runCurrent()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         assertNull(controller.openState().favoriteFeedback)
         val failure = CompletableDeferred<LocalFavoriteSmileyMutationResult>()
         locals.removeResult = { failure.await() }
@@ -437,10 +437,10 @@ class SmileyPickerLocalCollectionsTest {
         controller.dismiss()
         failure.complete(LocalFavoriteSmileyMutationResult.Failure(LocalFavoriteSmileyFailure.STORAGE_FAILURE))
         runCurrent()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         assertEquals(SmileyFavoriteFeedback.LocalStorageFailure, controller.openState().favoriteFeedback)
         controller.dismiss()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         assertNull(controller.openState().favoriteFeedback)
     }
 

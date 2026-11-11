@@ -231,11 +231,20 @@ internal fun SettingsRoot(
             ) {
                 // #494 PR3 — résultats À PLAT : chaque résultat porte son origine (catégorie) en fil
                 // d'Ariane, et garde son contrôle éditable inline. Plus de regroupement par en-tête de
-                // section : l'origine vit sur chaque ligne (utile quand des résultats de catégories
-                // différentes se suivent).
-                val results = filtered.flatMap { section -> section.items.map { section.title to it } }
-                items(results, key = { "res:${it.second.id}" }) { (origin, item) ->
-                    SettingsSearchResult(origin = origin, render = renderers[item.id])
+                // section : l'origine vit sur chaque ligne. Les radios de raccourci restent dans un
+                // même groupe nommé, y compris quand la recherche exclut « Aucun ».
+                filtered.forEach { section ->
+                    val shortcuts = section.items.filter { it.isEditorShortcut }
+                    if (shortcuts.isNotEmpty()) {
+                        item(key = "res:editor_shortcuts") {
+                            SettingsSearchResult(origin = section.title) {
+                                EditorShortcutGroup { shortcuts.forEach { renderers[it.id]?.invoke() } }
+                            }
+                        }
+                    }
+                    items(section.items.filterNot { it.isEditorShortcut }, key = { "res:${it.id}" }) { item ->
+                        SettingsSearchResult(origin = section.title, render = renderers[item.id])
+                    }
                 }
             }
         }
@@ -759,7 +768,7 @@ internal fun buildSettingsCatalogue(
     SettingsCatalogueSection(
         id = "editing",
         title = stringResource(R.string.settings_section_editing),
-        items = listOf(
+        items = editorShortcutRows(state, onIntent) + listOf(
             toggleRow(
                 id = "confirm_before_posting",
                 title = stringResource(R.string.settings_confirm_before_posting_title),

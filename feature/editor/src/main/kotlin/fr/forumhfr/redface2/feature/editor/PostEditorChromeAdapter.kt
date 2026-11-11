@@ -25,6 +25,7 @@ internal class PostEditorChromeAdapter(
     launchPicker: () -> Unit,
     openSmileys: () -> Unit,
     memory: EditorHostMemory<PostEditorChromeSurface> = EditorHostMemory(),
+    openSmileySearch: (() -> Unit)? = null,
 ) : EditorHost<PostEditorChromeSurface>(
     { PostEditorChromeState(source()).host }, body, events,
     EditorHostActions(
@@ -41,7 +42,7 @@ internal class PostEditorChromeAdapter(
         PostEditorChromeSurface.Picker, imageUrl = PostEditorChromeSurface.Url, canWrapSelection = true,
         returnsToBody = { it !in setOf(PostEditorChromeSurface.Restore, PostEditorChromeSurface.Quotes,
             PostEditorChromeSurface.PendingQuote) }),
-    launchPicker, openSmileys, memory,
+    launchPicker, openSmileys, memory, openSmileySearch,
 ) {
     val state: PostEditorChromeState get() = PostEditorChromeState(source())
 

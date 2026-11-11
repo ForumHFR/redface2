@@ -3,11 +3,13 @@ package fr.forumhfr.redface2.feature.editor
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import fr.forumhfr.redface2.core.ui.editor.EditorBarShortcut
 import fr.forumhfr.redface2.core.ui.editor.EditorCause
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorHostMemory
 import fr.forumhfr.redface2.core.ui.editor.EditorHostState
 import fr.forumhfr.redface2.core.ui.editor.EditorScaffoldChrome
+import fr.forumhfr.redface2.core.model.editor.EditorShortcutSurface
 
 /** ED-35: activation exposes incomplete headers; canSubmit remains the strict POST guard. */
 internal data class TopicFormChromeState(val source: TopicFormState) {
@@ -17,6 +19,8 @@ internal data class TopicFormChromeState(val source: TopicFormState) {
     val postAllowed = source.canSubmit && !unsupportedFirstPost
     val categoryId = source.cat // Routing context, never inferred from an edited title or sub-category.
     val scaffold = EditorScaffoldChrome(
+        shortcut = source.editorShortcut.takeIf { it.isAvailableOn(EditorShortcutSurface.TOPIC) }
+            ?.let { EditorBarShortcut(it, EditorShortcutSurface.TOPIC) },
         previewVisible = source.isPreviewVisible,
         controlsEnabled = !source.isInitializing && !busy,
         bodyReadOnly = source.isInitializing || source.isAwaitingInitialBody || busy,

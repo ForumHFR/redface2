@@ -31,11 +31,13 @@ import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerOpenIntent
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -90,6 +92,7 @@ class PostEditorRestorationTest {
         every { preferences.observeConfirmBeforePosting() } returns flowOf(true)
         every { preferences.observeEditorImageInsert() } returns flowOf(EditorImageInsert.FULL)
         every { preferences.observeImagePickerMode() } returns flowOf(ImagePickerMode.DEFAULT)
+        every { preferences.observeEditorShortcut() } returns flowOf(EditorShortcut.NONE)
         coEvery { replies.fetchReplyForm(any()) } returns form("")
         coEvery { edits.fetchEditPostForm(any()) } returns form("server body")
     }
@@ -132,7 +135,7 @@ class PostEditorRestorationTest {
         first.bodyScrollState.scrollTo(80)
         assertEquals("", first.state.value.bodyText) // Deliberately leave the mirror behind.
         first.submit(PostEditorIntent.TogglePreview)
-        first.smileyPicker.open()
+        first.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         first.submit(PostEditorIntent.SubmitClicked())
         val arm = first.state.value.armToken
         assertNotNull(arm)

@@ -30,9 +30,9 @@ internal fun EditorImageRow(
     EditorBarIcon(R.drawable.ic_image_upload, stringResource(R.string.editor_bar_upload),
         { onExternal(actions.onUpload) }, enabled = enabled, compactHeight = compactHeight)
     actions.onInsertUrl?.let { insert ->
-        EditorBarIcon(R.drawable.ic_editor_link, stringResource(R.string.editor_bar_image_url),
+        EditorBarIcon(R.drawable.ic_editor_image_url, stringResource(R.string.editor_bar_image_url),
             { onExternal(insert) }, enabled = enabled, compactHeight = compactHeight)
     }
-    if (actions.canWrapSelection) EditorBarIcon(R.drawable.ic_editor_image,
+    if (actions.canWrapSelection) EditorBarIcon(R.drawable.ic_editor_image_selection,
         stringResource(R.string.editor_bar_image_selection), onWrap, enabled = enabled, compactHeight = compactHeight)
 }

@@ -11,6 +11,8 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSession
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionToken
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
+import fr.forumhfr.redface2.core.model.editor.EditorShortcutSurface
 import fr.forumhfr.redface2.core.model.editor.ImagePickerContract
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.ui.editor.EditorBarGesture
@@ -34,6 +36,17 @@ import org.junit.Test
 class PrivateMessageComposeChromeAdapterTest {
     private val f = PrivateMessageComposeChromeFixture()
     private val uncertain = EditorErrors.uncertain(EditorErrorSurface.MessageCompose)
+    @Test fun `ED36 projects exactly the allowed shortcuts on this surface`() {
+        val f = PrivateMessageComposeChromeFixture()
+        val surface = EditorShortcutSurface.PRIVATE_MESSAGE_COMPOSE
+        EditorShortcut.entries.forEach { choice ->
+            f.state = f.state.copy(editorShortcut = choice)
+            val shortcut = f.adapter.state.scaffold.shortcut
+            assertEquals(choice.takeIf { it.isAvailableOn(surface) }, shortcut?.choice)
+            if (shortcut != null) assertEquals(surface, shortcut.surface)
+        }
+    }
+
     @Test fun `ED35 projection separates activation from strict POST and freezes every send phase`() {
         assertTrue(f.adapter.state.host.sendActivatable)
         assertFalse(f.adapter.state.host.postAllowed)

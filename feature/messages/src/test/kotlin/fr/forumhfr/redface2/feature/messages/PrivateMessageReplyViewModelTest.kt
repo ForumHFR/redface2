@@ -36,6 +36,7 @@ import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerContract
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
@@ -52,6 +53,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorErrorSurface
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerOpenIntent
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import io.mockk.coEvery
@@ -93,6 +95,7 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class PrivateMessageReplyViewModelTest {
 
+    private val shortcutPreference = MutableStateFlow(EditorShortcut.NONE)
     private val mainDispatcher = UnconfinedTestDispatcher()
     private var submissionClock = DiagnosticsClock { mainDispatcher.scheduler.currentTime * 1_000_000L }
 
@@ -140,6 +143,7 @@ class PrivateMessageReplyViewModelTest {
             // #459 — the composer now mirrors the image-insert preference on init.
             every { observeEditorImageInsert() } returns MutableStateFlow(EditorImageInsert.REDUCED)
             every { observeImagePickerMode() } returns MutableStateFlow(ImagePickerMode.DEFAULT)
+            every { observeEditorShortcut() } returns shortcutPreference
         }
 
     private fun form(
@@ -218,6 +222,21 @@ class PrivateMessageReplyViewModelTest {
         }
         Snapshot.sendApplyNotifications()
         if (advanceMirror) mainDispatcher.scheduler.runCurrent()
+    }
+
+    @Test
+    fun `editor shortcut observes persisted choice and live changes without a draft mutation`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        shortcutPreference.value = EditorShortcut.BLUE
+        val vm = viewModel(repository)
+        assertEquals(EditorShortcut.BLUE, vm.state.value.editorShortcut)
+        val body = vm.bodyFieldState.text.toString()
+        shortcutPreference.value = EditorShortcut.PERSONAL_SMILEY
+        assertEquals(EditorShortcut.PERSONAL_SMILEY, vm.state.value.editorShortcut)
+        shortcutPreference.value = EditorShortcut.NONE
+        assertEquals(EditorShortcut.NONE, vm.state.value.editorShortcut)
+        assertEquals(body, vm.bodyFieldState.text.toString())
     }
 
     @Test
@@ -732,7 +751,7 @@ class PrivateMessageReplyViewModelTest {
             smileyRepository(), favoriteRepository, localCollections,
         ).also(::trackViewModel)
         testScheduler.advanceUntilIdle()
-        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         viewModel.smileyPicker.onFavoriteClicked(wiki)
         testScheduler.advanceUntilIdle()
         assertEquals(listOf(wiki.token), favoriteRepository.added)
@@ -767,7 +786,7 @@ class PrivateMessageReplyViewModelTest {
         advanceUntilIdle()
 
         assertFalse(viewModel.state.value.isLoadingForm)
-        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         val open = viewModel.smileyPicker.state.value as SmileyPickerState.Open
         assertTrue(open.favoriteSmileys.isEmpty())
         assertNull(open.onFavoriteChange)
@@ -789,7 +808,7 @@ class PrivateMessageReplyViewModelTest {
             submissionClock,
             smileyRepository(), favoriteRepository, localCollections,
         ).also(::trackViewModel)
-        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         val open = viewModel.smileyPicker.state.value as SmileyPickerState.Open
         assertEquals(listOf(favorite), open.favoriteSmileys)
         viewModel.editBody(TextFieldValue("hello", TextRange(5)))
@@ -797,7 +816,7 @@ class PrivateMessageReplyViewModelTest {
         assertEquals("hello [:fictif espace:3] ", viewModel.bodyFieldState.text.toString())
         assertEquals(SmileyPickerState.Hidden, viewModel.smileyPicker.state.value)
 
-        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         val replacement = favorite.copy(token = "[:fictif_b]", imageUrl = "https://example.invalid/fictif_b.gif")
         coEvery { repository.fetchReplyForm(any(), any()) } returns form().copy(favoriteSmileys = listOf(replacement))
         viewModel.retryFormLoad()
@@ -826,7 +845,7 @@ class PrivateMessageReplyViewModelTest {
             smileys, favoriteRepository, localCollections,
         ).also(::trackViewModel)
 
-        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         viewModel.smileyPicker.onQueryChanged("jap")
         advanceUntilIdle()
 
@@ -2201,7 +2220,7 @@ class PrivateMessageReplyViewModelTest {
         assertEquals("seed", vm.state.value.draftHydratedContent)
         vm.editBody(TextFieldValue("rejected"))
         vm.onToolbarAction(BbcodeAction.Bold)
-        vm.smileyPicker.open()
+        vm.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         vm.onSmileySelected(":jap:")
         vm.onDraftRestoreRequested()
         assertEquals("seed", vm.bodyFieldState.text.toString())
@@ -2558,7 +2577,7 @@ class PrivateMessageReplyViewModelTest {
         draftStore.beginGate = gate
         val vm = viewModel(repository)
         vm.editBody(TextFieldValue("body", TextRange(4)))
-        vm.smileyPicker.open()
+        vm.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         vm.onSubmit()
         vm.onSmileySelected(":jap:")
         assertEquals("body", vm.bodyFieldState.text.toString())

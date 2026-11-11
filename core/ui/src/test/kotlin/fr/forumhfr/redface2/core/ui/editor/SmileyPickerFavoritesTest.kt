@@ -103,7 +103,7 @@ class SmileyPickerFavoritesTest {
         scope = CoroutineScope(StandardTestDispatcher()),
         searchWiki = { _, _ -> error("Standard must not search the wiki") },
         favoriteSources = SmileyPickerFavoriteSources(favoriteSmileys = { items }),
-    ).also { it.open() }
+    ).also { it.open(SmileyPickerOpenIntent.CONSULTATION) }
 
     private fun description(smiley: EditorSmiley) =
         context.getString(R.string.editor_smiley_insert_description, smiley.token)

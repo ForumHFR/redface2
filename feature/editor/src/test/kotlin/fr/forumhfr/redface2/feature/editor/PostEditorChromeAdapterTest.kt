@@ -15,6 +15,8 @@ import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
 import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
 import fr.forumhfr.redface2.core.ui.editor.EditorSheet
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
+import fr.forumhfr.redface2.core.model.editor.EditorShortcutSurface
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -24,6 +26,17 @@ import org.junit.Test
 
 class PostEditorChromeAdapterTest {
     private val host = PostEditorChromeFixture()
+
+    @Test fun `ED36 projects exactly the allowed shortcuts on this surface`() {
+        val f = PostEditorChromeFixture()
+        val surface = EditorShortcutSurface.POST
+        EditorShortcut.entries.forEach { choice ->
+            f.state = f.state.copy(editorShortcut = choice)
+            val shortcut = f.adapter.state.scaffold.shortcut
+            assertEquals(choice.takeIf { it.isAvailableOn(surface) }, shortcut?.choice)
+            if (shortcut != null) assertEquals(surface, shortcut.surface)
+        }
+    }
 
     @Test fun `unknown edit body rejects retained insertion callbacks but keeps options and restore`() {
         val actions = host.adapter.barActions

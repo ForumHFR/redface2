@@ -51,6 +51,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorTooltipHost
 import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
 import fr.forumhfr.redface2.core.ui.editor.LocalEditorTooltipHost
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerOpenIntent
 import fr.forumhfr.redface2.core.ui.editor.rememberEditorImagePicker
 import fr.forumhfr.redface2.core.ui.editor.rememberEditorWindowMetrics
 import fr.forumhfr.redface2.core.ui.post.PostMediaDiskCachePolicy
@@ -173,7 +174,8 @@ internal fun TopicFormContent(
     val currentLaunch = rememberUpdatedState(launchPicker)
     val host = remember(bodyFieldState, chromeEvents, chromeMemory, smileyPicker) {
         TopicFormChromeAdapter({ source.value }, bodyFieldState, chromeEvents, { dispatch.value(it) },
-            { currentLaunch.value() }, smileyPicker::open, chromeMemory)
+            { currentLaunch.value() }, { smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION) }, chromeMemory,
+            openSmileySearch = { smileyPicker.open(SmileyPickerOpenIntent.SEARCH) })
     }
     adapter[0] = host
     val activity = LocalActivity.current

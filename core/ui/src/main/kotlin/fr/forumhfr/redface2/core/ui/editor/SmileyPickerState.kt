@@ -52,8 +52,10 @@ sealed interface SmileyPickerState {
         val detailFeedbackEmissionAtEntry: Long = 0L,
         /** Same sink as the controller; UI records only sheet geometry and gesture causes. */
         val diagnostics: SmileyPickerDiagnostics? = null,
-        /** ED-70: null retains legacy autofocus until the four hosts opt in together (R6 PR 2). */
+        /** ED-70: supplied by the controller; standalone render fixtures can omit entry focus policy. */
         val openingIntent: SmileyPickerOpenIntent? = null,
+        /** Last dismissed query, cleared on the first text edit of this opening. */
+        val restoredQuery: String? = null,
     ) : SmileyPickerState {
         /** The detail can show an eligible action's pending state while mutations remain blocked. */
         fun favoriteAction(smiley: EditorSmiley, includePending: Boolean = false): SmileyFavoriteAction? = when {

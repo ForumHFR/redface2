@@ -82,6 +82,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
 import fr.forumhfr.redface2.core.ui.editor.EventKey
 import fr.forumhfr.redface2.core.ui.editor.OperationRef
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerOpenIntent
 import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -138,7 +139,7 @@ class PrivateMessageComposeChromeComposeTest {
         view = LocalView.current
         val scope = rememberCoroutineScope()
         val smileys = remember { SmileyPickerController(scope, searchWiki = { _, _ -> emptyList() }) }
-        f.openSmileys = { smileys.open() }
+        f.openSmileys = { smileys.open(SmileyPickerOpenIntent.CONSULTATION) }
         // The production chrome of this state, as the screen passes it to EditorScaffold.
         renderedChrome = f.adapter.chrome()
         CompositionLocalProvider(LocalSoftwareKeyboardController provides keyboard) {

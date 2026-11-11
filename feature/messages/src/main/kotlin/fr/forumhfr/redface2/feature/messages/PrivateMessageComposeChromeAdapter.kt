@@ -24,6 +24,7 @@ internal class PrivateMessageComposeChromeAdapter(
     launchPicker: () -> Unit,
     openSmileys: () -> Unit,
     val memory: PrivateMessageComposeChromeMemory,
+    openSmileySearch: (() -> Unit)? = null,
 ) : EditorHost<PrivateMessageComposeChromeSurface>(
     { PrivateMessageComposeChromeState(source()).host }, body, events.completingHeader(memory::complete),
     actions.host,
@@ -32,7 +33,7 @@ internal class PrivateMessageComposeChromeAdapter(
         canWrapSelection = true, returnsToBody = {
             it !in setOf(PrivateMessageComposeChromeSurface.Header, PrivateMessageComposeChromeSurface.Restore)
         }),
-    launchPicker, openSmileys, memory.host,
+    launchPicker, openSmileys, memory.host, openSmileySearch,
 ) {
     val state get() = PrivateMessageComposeChromeState(source())
     val waitingForInformation get() = events.visibleEvent?.rank == EditorEventRank.Information

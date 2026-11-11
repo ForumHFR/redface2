@@ -39,18 +39,27 @@ internal fun EditorColorRow(
 
 @Composable
 internal fun EditorColorIcon(hex: String, label: String, click: () -> Unit, enabled: Boolean, compactHeight: Boolean) {
-    val outline = MaterialTheme.colorScheme.onSurface
     EditorIconTooltip(label) {
         Box(Modifier.editorCompactTargetSlot(compactHeight), contentAlignment = Alignment.Center) {
             IconButton(onClick = click, enabled = enabled,
                 modifier = Modifier.size(EditorChromeMetrics(compactHeight).controlVisibleHeight)
                     .editorBarActivation(enabled, click).semantics { contentDescription = label }) {
-                Box(Modifier.size(24.dp).alpha(if (enabled) 1f else DISABLED_SWATCH_ALPHA).clip(CircleShape)
-                    .background(Color(android.graphics.Color.parseColor(hex)))
-                    .drawBehind { drawCircle(outline, style = Stroke(1.dp.toPx())) })
+                EditorColorSwatch(hex, Modifier.alpha(if (enabled) 1f else DISABLED_SWATCH_ALPHA))
             }
         }
     }
+}
+
+/** The same drawn 24 dp swatch in the bar, the color row and the settings catalogue (ED-36). */
+@Composable
+fun EditorColorSwatch(hex: String, modifier: Modifier = Modifier) {
+    val outline = MaterialTheme.colorScheme.onSurface
+    Box(modifier.size(24.dp).clip(CircleShape)
+        .background(Color(android.graphics.Color.parseColor(hex)))
+        .drawBehind {
+            val stroke = 1.dp.toPx()
+            drawCircle(outline, radius = size.minDimension / 2 - stroke / 2, style = Stroke(stroke))
+        })
 }
 
 private const val DISABLED_SWATCH_ALPHA = 0.38f

@@ -23,6 +23,7 @@ import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
@@ -30,6 +31,7 @@ import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorSurface
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerOpenIntent
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -83,6 +85,7 @@ class PrivateMessageReplyRestorationTest {
         every { preferences.observeConfirmBeforePosting() } returns flowOf(true)
         every { preferences.observeEditorImageInsert() } returns flowOf(EditorImageInsert.FULL)
         every { preferences.observeImagePickerMode() } returns flowOf(ImagePickerMode.DEFAULT)
+        every { preferences.observeEditorShortcut() } returns flowOf(EditorShortcut.NONE)
         coEvery { repository.fetchReplyForm(any(), any()) } coAnswers {
             fetchFailure?.let { throw it }
             formGate?.await() ?: served
@@ -105,7 +108,7 @@ class PrivateMessageReplyRestorationTest {
         type(first, body, TextRange(19, 3))
         first.bodyScrollState.scrollTo(80)
         first.onTogglePreview()
-        first.smileyPicker.open()
+        first.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         first.onSubmit()
         val arm = first.state.value.armToken
         assertNotNull(arm)

@@ -18,6 +18,7 @@ import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import io.mockk.coEvery
@@ -68,6 +69,7 @@ class PostEditorRestoreOfferTest {
         every { preferences.observeConfirmBeforePosting() } returns flowOf(false)
         every { preferences.observeEditorImageInsert() } returns flowOf(EditorImageInsert.REDUCED)
         every { preferences.observeImagePickerMode() } returns flowOf(ImagePickerMode.DEFAULT)
+        every { preferences.observeEditorShortcut() } returns flowOf(EditorShortcut.NONE)
         every { auth.observeAuthState() } returns flowOf(AuthState.Anonymous)
         coEvery { editRepository.fetchEditPostForm(any()) } returns form(SEED)
         coEvery { replyRepository.fetchReplyForm(any()) } returns form("")

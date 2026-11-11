@@ -42,6 +42,7 @@ import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.EditorSmileySource
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
@@ -355,6 +356,7 @@ class PrivateMessageComposeRestorationScreenTest {
                         every { observeEditorImageInsert() } returns flowOf(EditorImageInsert.FULL)
                         every { observeImagePickerMode() } returns flowOf(ImagePickerMode.DEFAULT)
                         every { observeEditorPreviewPositions() } returns flowOf(emptyMap())
+                        every { observeEditorShortcut() } returns flowOf(EditorShortcut.NONE)
                     }, store, mockk<AuthRepository> { every { observeAuthState() } returns auth },
                     mockk(relaxed = true), mockk(relaxed = true), DiagnosticsLog(),
                     DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L },

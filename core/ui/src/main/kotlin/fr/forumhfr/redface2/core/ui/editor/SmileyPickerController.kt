@@ -197,16 +197,11 @@ class SmileyPickerController(
      */
     private var lastDismissed: SmileyPickerState.Open? = null
 
-    /** Legacy hosts keep their focus behaviour until all four opt into ED-70 in R6 PR 2. */
-    fun open() = openWithIntent(null)
-
     /**
      * An already open sheet ignores [intent] and keeps its live search/opening intent.
      * Today the modal sheet blocks the editor's opening controls, so users cannot reach this case.
      */
-    fun open(intent: SmileyPickerOpenIntent) = openWithIntent(intent)
-
-    private fun openWithIntent(intent: SmileyPickerOpenIntent?) {
+    fun open(intent: SmileyPickerOpenIntent) {
         val before = _state.value
         if (before is SmileyPickerState.Hidden) pickerDiagnostics.sheetOpened()
         if ((before as? SmileyPickerState.Open)?.detailSmiley != null) {
@@ -226,6 +221,7 @@ class SmileyPickerController(
                         SmileyPickerTab.WIKI
                     } else initialTab(restored),
                     openingIntent = intent,
+                    restoredQuery = restored.query.takeIf { it.isNotEmpty() },
                 )
             }
         }
@@ -513,7 +509,9 @@ class SmileyPickerController(
         if (_state.value !is SmileyPickerState.Open) return
         _state.update { current ->
             val open = current as? SmileyPickerState.Open ?: return@update current
-            open.copy(query = query)
+            // Previous results stay visible during the debounce; only the resume hint is
+            // tied to the untouched restored query (gate Fable r1, I-B).
+            open.copy(query = query, restoredQuery = open.restoredQuery.takeIf { query == open.query })
         }
         // Cancel in-flight searches so an older response can't overwrite a newer query.
         searchJob?.cancel()

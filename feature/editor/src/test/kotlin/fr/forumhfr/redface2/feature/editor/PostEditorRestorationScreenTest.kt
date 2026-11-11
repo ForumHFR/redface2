@@ -78,6 +78,7 @@ import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
@@ -803,6 +804,7 @@ class PostEditorRestorationScreenTest {
                     every { observeEditorImageInsert() } returns flowOf(EditorImageInsert.FULL)
                     every { observeImagePickerMode() } returns flowOf(ImagePickerMode.DEFAULT)
                     every { observeEditorPreviewPositions() } returns flowOf(emptyMap())
+                    every { observeEditorShortcut() } returns flowOf(EditorShortcut.NONE)
                 },
                 uploadRepository = mockk(relaxed = true), imageUploadReader = mockk(relaxed = true),
                 authRepository = mockk<AuthRepository> {

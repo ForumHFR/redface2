@@ -4,17 +4,21 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.SavedStateHandle
+import fr.forumhfr.redface2.core.ui.editor.EditorBarShortcut
 import fr.forumhfr.redface2.core.ui.editor.EditorCause
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorHostMemory
 import fr.forumhfr.redface2.core.ui.editor.EditorHostState
 import fr.forumhfr.redface2.core.ui.editor.EditorRecipientState
 import fr.forumhfr.redface2.core.ui.editor.EditorScaffoldChrome
+import fr.forumhfr.redface2.core.model.editor.EditorShortcutSurface
 
 /** Live projection of the new-conversation form onto the shared chrome. */
 internal data class PrivateMessageComposeChromeState(val source: PrivateMessageComposeUiState) {
     private val busy = source.isSubmitting || source.submission.blocksBodyMutation
     val scaffold = EditorScaffoldChrome(
+        shortcut = source.editorShortcut.takeIf { it.isAvailableOn(EditorShortcutSurface.PRIVATE_MESSAGE_COMPOSE) }
+            ?.let { EditorBarShortcut(it, EditorShortcutSurface.PRIVATE_MESSAGE_COMPOSE) },
         previewVisible = source.isPreviewVisible, controlsEnabled = !source.isInitializing && !busy,
         bodyReadOnly = source.isInitializing || busy, uploading = source.isUploading,
         uploadProgress = source.uploadProgress, loadingForm = source.isLoadingForm,

@@ -1,7 +1,9 @@
 package fr.forumhfr.redface2.feature.editor
 
+import fr.forumhfr.redface2.core.ui.editor.EditorBarShortcut
 import fr.forumhfr.redface2.core.ui.editor.EditorHostState
 import fr.forumhfr.redface2.core.ui.editor.EditorScaffoldChrome
+import fr.forumhfr.redface2.core.model.editor.EditorShortcutSurface
 
 /** ED-35: the button may expose a missing context, but only the VM can authorize a POST. */
 internal data class PostEditorChromeState(val source: PostEditorState) {
@@ -12,6 +14,8 @@ internal data class PostEditorChromeState(val source: PostEditorState) {
         (source.bodyText.isNotBlank() || source.mode == PostEditorMode.Reply && source.quotes.isNotEmpty())
     val postAllowed: Boolean = source.canSubmit && source.hasLoadedForm && source.hasAuthenticatedForm
     val scaffold: EditorScaffoldChrome = EditorScaffoldChrome(
+        shortcut = source.editorShortcut.takeIf { it.isAvailableOn(EditorShortcutSurface.POST) }
+            ?.let { EditorBarShortcut(it, EditorShortcutSurface.POST) },
         previewVisible = source.isPreviewVisible,
         controlsEnabled = !source.isInitializing && !source.submission.blocksBodyMutation,
         bodyReadOnly = source.isInitializing || source.isAwaitingInitialBody || source.submission.blocksBodyMutation,

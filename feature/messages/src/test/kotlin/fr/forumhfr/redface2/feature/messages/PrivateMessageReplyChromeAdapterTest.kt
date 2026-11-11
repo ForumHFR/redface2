@@ -19,6 +19,8 @@ import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
 import fr.forumhfr.redface2.core.ui.editor.EditorHostActions
 import fr.forumhfr.redface2.core.ui.editor.EventKey
 import fr.forumhfr.redface2.core.ui.post.PostMediaDiskCachePolicy
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
+import fr.forumhfr.redface2.core.model.editor.EditorShortcutSurface
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
@@ -30,6 +32,17 @@ import org.junit.Test
 class PrivateMessageReplyChromeAdapterTest {
     private val f = PrivateMessageReplyChromeFixture()
     private val uncertain = EditorErrors.uncertain(EditorErrorSurface.MessageReply)
+
+    @Test fun `ED36 projects exactly the allowed shortcuts on this surface`() {
+        val f = PrivateMessageReplyChromeFixture()
+        val surface = EditorShortcutSurface.PRIVATE_MESSAGE_REPLY
+        EditorShortcut.entries.forEach { choice ->
+            f.state = f.state.copy(editorShortcut = choice)
+            val shortcut = f.adapter.state.scaffold.shortcut
+            assertEquals(choice.takeIf { it.isAvailableOn(surface) }, shortcut?.choice)
+            if (shortcut != null) assertEquals(surface, shortcut.surface)
+        }
+    }
 
     @Test fun `ED35 projection requires loaded form nonblank body and neither send nor upload`() {
         val ready = f.state

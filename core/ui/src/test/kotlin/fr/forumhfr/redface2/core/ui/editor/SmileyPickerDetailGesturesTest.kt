@@ -19,6 +19,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertCountEquals
@@ -109,7 +110,7 @@ class SmileyPickerDetailGesturesTest {
     @Test
     fun `builtin without any favorite callback opens detail and inserts the exact token`() {
         val controller = SmileyPickerController(CoroutineScope(dispatcher), { _, _ -> emptyList() })
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         mount(controller)
         openDetail(builtin)
         text(R.string.editor_smiley_detail_title).assertIsDisplayed().assert(
@@ -129,7 +130,7 @@ class SmileyPickerDetailGesturesTest {
     @Test
     fun `TalkBack detail action is available on a builtin without favorite actions`() {
         val controller = SmileyPickerController(CoroutineScope(dispatcher), { _, _ -> emptyList() })
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         mount(controller)
         val action = compose.onNodeWithContentDescription(description(builtin)).fetchSemanticsNode()
             .config[SemanticsActions.CustomActions].single()
@@ -204,7 +205,7 @@ class SmileyPickerDetailGesturesTest {
             assertEquals(SmileyPickerState.Hidden, controller.state.value)
             assertFalse(dialog.isShowing)
             assertTrue(diagnostics.entries.value.any { it.message == "sheet_close cause=unknown" })
-            controller.open()
+            controller.open(SmileyPickerOpenIntent.CONSULTATION)
         }
         text(R.string.editor_smiley_tab_standard).assertIsSelected()
         text(R.string.editor_smiley_detail_title).assertDoesNotExist()
@@ -277,16 +278,33 @@ class SmileyPickerDetailGesturesTest {
     }
 
     @Test
+    fun `consultation does not reclaim tab or search focus on return from detail`() {
+        val controller = controller()
+        controller.onQueryChanged("fictif")
+        dispatcher.scheduler.advanceUntilIdle()
+        controller.dismiss()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
+        mount(controller)
+        compose.onNodeWithTag("smiley_selected_tab").assertIsFocused()
+        compose.onNode(hasSetTextAction()).assertIsNotFocused()
+        openDetail(wiki.first())
+        back()
+        compose.onNodeWithTag("smiley_selected_tab").assertIsNotFocused()
+        compose.onNode(hasSetTextAction()).assertIsNotFocused()
+    }
+
+    @Test
     fun `arrow restores Wiki query scroll and tab without requesting search focus again`() {
         val controller = controller()
         controller.onQueryChanged("fictif")
         dispatcher.scheduler.advanceUntilIdle()
         controller.dismiss()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.SEARCH)
         mount(controller)
         compose.onNode(hasScrollToIndexAction()).performScrollToIndex(50)
         val cell = compose.onNodeWithContentDescription(description(wiki[50]))
         val bounds = cell.fetchSemanticsNode().boundsInRoot
+        compose.onNode(hasSetTextAction()).assertIsFocused()
         cell.performTouchInput { longClick() }
         text(R.string.editor_smiley_tab_wiki).assertDoesNotExist()
         // Keyboard hiding is checked below with a provider inside the dialog's own Compose owner.
@@ -349,7 +367,7 @@ class SmileyPickerDetailGesturesTest {
         controller.onQueryChanged("fictif")
         dispatcher.scheduler.advanceUntilIdle()
         controller.dismiss()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         mount(controller)
         val target = wiki.first()
         openDetail(target)
@@ -417,7 +435,7 @@ class SmileyPickerDetailGesturesTest {
         compose.runOnIdle { controller.dismiss() }
         text(R.string.editor_smiley_detail_title).assertDoesNotExist()
         text(R.string.editor_smiley_tab_standard).assertDoesNotExist()
-        compose.runOnIdle { controller.open() }
+        compose.runOnIdle { controller.open(SmileyPickerOpenIntent.CONSULTATION) }
         text(R.string.editor_smiley_tab_standard).assertIsSelected()
         text(R.string.editor_smiley_detail_title).assertDoesNotExist()
     }
@@ -444,7 +462,7 @@ class SmileyPickerDetailGesturesTest {
             }),
         )
         dispatcher.scheduler.runCurrent()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         mount(controller)
         val target = compose.onAllNodesWithContentDescription(description(smiley))[0]
         // Inject on the SAME surviving node before/after the lazy cell disappears, and keep
@@ -528,7 +546,7 @@ class SmileyPickerDetailGesturesTest {
             ),
         )
         dispatcher.scheduler.runCurrent()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         mount(controller)
         repeat(4) { index ->
             val cells = compose.onAllNodesWithContentDescription(description(target))
@@ -672,7 +690,7 @@ class SmileyPickerDetailGesturesTest {
                 { _, _ -> HfrFavoriteSmileyMutationResult.Success(emptyList()) },
             ),
         ),
-    ).also { dispatcher.scheduler.runCurrent(); it.open() }
+    ).also { dispatcher.scheduler.runCurrent(); it.open(SmileyPickerOpenIntent.CONSULTATION) }
 
     private fun mount(controller: SmileyPickerController) {
         compose.setContent {

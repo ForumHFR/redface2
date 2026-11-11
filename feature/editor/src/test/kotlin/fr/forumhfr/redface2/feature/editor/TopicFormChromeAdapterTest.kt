@@ -21,6 +21,8 @@ import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionPurpose
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionToken
 import fr.forumhfr.redface2.core.model.write.TopicFormSubcategoryChoice
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
+import fr.forumhfr.redface2.core.model.editor.EditorShortcutSurface
 import fr.forumhfr.redface2.core.ui.editor.EditorBackAction
 import fr.forumhfr.redface2.core.ui.editor.EditorBackState
 import fr.forumhfr.redface2.core.ui.editor.EditorBarGesture
@@ -107,6 +109,17 @@ internal fun TopicFormTestContent(
 }
 
 class TopicFormChromeAdapterTest {
+    @Test fun `ED36 projects exactly the allowed shortcuts on this surface`() {
+        val f = TopicFormChromeFixture()
+        val surface = EditorShortcutSurface.TOPIC
+        EditorShortcut.entries.forEach { choice ->
+            f.state = f.state.copy(editorShortcut = choice)
+            val shortcut = f.adapter.state.scaffold.shortcut
+            assertEquals(choice.takeIf { it.isAvailableOn(surface) }, shortcut?.choice)
+            if (shortcut != null) assertEquals(surface, shortcut.surface)
+        }
+    }
+
     @Test fun `ED35 activation and POST authorization differ in creation and first post editing`() {
         TopicFormMode.entries.forEach { mode ->
             val f = TopicFormChromeFixture(mode)

@@ -24,13 +24,14 @@ internal class PrivateMessageReplyChromeAdapter(
     launchPicker: () -> Unit,
     openSmileys: () -> Unit,
     private val memory: PrivateMessageReplyChromeMemory = PrivateMessageReplyChromeMemory(),
+    openSmileySearch: (() -> Unit)? = null,
 ) : EditorHost<PrivateMessageReplyChromeSurface>(
     { PrivateMessageReplyChromeState(source()).host }, body, events, actions.host,
     // Reply has neither header nor quote panel, and never completes a recipient refusal as a new MP would.
     EditorHostSurfaces(PrivateMessageReplyChromeSurface.Smileys, PrivateMessageReplyChromeSurface.Options,
         PrivateMessageReplyChromeSurface.Picker, canWrapSelection = true,
         returnsToBody = { it != PrivateMessageReplyChromeSurface.Restore }),
-    launchPicker, openSmileys, memory.host,
+    launchPicker, openSmileys, memory.host, openSmileySearch,
 ) {
     val state get() = PrivateMessageReplyChromeState(source())
     @Composable fun title() = stringResource(R.string.messages_reply_title)
