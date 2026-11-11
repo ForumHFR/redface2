@@ -4,8 +4,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
-import androidx.activity.OnBackPressedDispatcher
-import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
+import androidx.activity.ComponentDialog
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.height
 import androidx.compose.runtime.CompositionLocalProvider
@@ -21,8 +20,10 @@ import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.InterceptPlatformTextInput
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalInputModeManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.PlatformTextInputInterceptor
+import androidx.compose.ui.platform.SoftwareKeyboardController
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertCountEquals
@@ -34,6 +35,7 @@ import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.isFocused
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -88,6 +90,7 @@ import fr.forumhfr.redface2.core.ui.R as UiR
 import io.mockk.coEvery
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -115,6 +118,7 @@ import org.robolectric.Shadows.shadowOf
 import org.robolectric.android.controller.ActivityController
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.shadows.ShadowDialog
 
 /** ED-81: exercise the screen observer, Android state registry and measured BTF2 viewport together. */
 @RunWith(RobolectricTestRunner::class)
@@ -196,10 +200,11 @@ class PostEditorRestorationScreenTest {
     }
 
     @Test
-    fun closedKeyboardStaysClosedAfterPanelRecreationWithSameViewModel() {
+    fun closedKeyboardStaysClosedAfterOfferSheetRecreationAndBackReturnsFocusOnce() {
         store.preload(EditorDraftKey.reply(23, 35421), EditorDraftStore.Draft(body = "Brouillon"))
         var owner by mutableStateOf(host().get())
         val model = editor(owner)
+        val keyboard = mockk<SoftwareKeyboardController>(relaxed = true)
         var sessions = 0
         var inputActive = false
         val input = PlatformTextInputInterceptor { request, next ->
@@ -207,12 +212,11 @@ class PostEditorRestorationScreenTest {
             inputActive = true
             try { next.startInputMethod(request) } finally { inputActive = false }
         }
-        lateinit var back: OnBackPressedDispatcher
         lateinit var view: android.view.View
         compose.setContent {
             key(owner) {
-                CompositionLocalProvider(LocalLifecycleOwner provides owner) {
-                    back = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+                CompositionLocalProvider(LocalLifecycleOwner provides owner,
+                    LocalSoftwareKeyboardController provides keyboard) {
                     view = LocalView.current
                     InterceptPlatformTextInput(input) {
                         RedfaceTheme(darkTheme = false, dynamicColor = false) {
@@ -231,16 +235,40 @@ class PostEditorRestorationScreenTest {
                 .setVisible(WindowInsetsCompat.Type.ime(), false).build())
         }
         compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
-        compose.onNode(hasSetTextAction()).assertDoesNotExist()
+        assertPostCover(PostEditorChromeSurface.Restore)
+        compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
         val before = compose.runOnIdle {
+            assertEquals(PostEditorChromeSurface.Restore, model.chromeMemory.surface)
+            assertEquals(0, model.chromeMemory.returnGeneration)
             assertFalse(model.chromeMemory.focus.imeBeforeSurface)
             assertFalse(inputActive)
             sessions.also { owner = host().get() }
         }
-        compose.onNode(hasSetTextAction()).assertDoesNotExist()
-        compose.runOnIdle { back.onBackPressed() }
+        assertPostCover(PostEditorChromeSurface.Restore)
+        compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
+        compose.runOnIdle {
+            assertEquals(PostEditorChromeSurface.Restore, model.chromeMemory.surface)
+            assertEquals(0, model.chromeMemory.returnGeneration)
+            assertFalse(model.chromeMemory.focus.imeBeforeSurface)
+            assertEquals(before, sessions)
+            assertFalse(inputActive)
+            sheetBack()
+        }
+        compose.onNode(isDialog()).assertDoesNotExist()
+        compose.onNodeWithTag("editor-draft-offer-sheet").assertDoesNotExist()
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            assertNull(model.chromeMemory.surface)
+            assertEquals(1, model.chromeMemory.returnGeneration)
+            assertEquals(before, sessions)
+            assertFalse(inputActive)
+        }
+        // A later frame must not repeat the deferred return or reopen the keyboard.
+        compose.mainClock.advanceTimeBy(600L)
         compose.onNode(hasSetTextAction()).assertIsFocused()
         compose.runOnIdle { assertEquals(before, sessions); assertFalse(inputActive) }
+        verify(exactly = 1) { keyboard.hide() }
+        verify(exactly = 0) { keyboard.show() }
     }
 
     @Test fun ownerRecreationKeepsFocusedReversedBodySelection() = checkFocusedBodyRecreation(imeOpen = false)
@@ -491,7 +519,7 @@ class PostEditorRestorationScreenTest {
         compose.onNodeWithTag("editor-preview-rendered").assertIsDisplayed()
     }
 
-    @Test fun rotationKeepsPostRestorePanelOverTheBody() = checkCoveredPost(PostEditorChromeSurface.Restore)
+    @Test fun rotationKeepsPostRestoreSheetOverTheBody() = checkCoveredPost(PostEditorChromeSurface.Restore)
     @Test fun rotationKeepsPostOptionsOverTheBody() = checkCoveredPost(PostEditorChromeSurface.Options)
     @Test fun rotationKeepsPostPreviewOverTheBody() = checkCoveredPost(null)
 
@@ -552,7 +580,7 @@ class PostEditorRestorationScreenTest {
         ActivityScenario.launch(PostEditorRotationHostActivity::class.java).use { scenario ->
             compose.onNode(hasSetTextAction()).assertIsFocused()
             lateinit var model: PostEditorViewModel
-            scenario.onActivity { model = it.model }
+            scenario.onActivity { model = it.model; it.setImeVisible(false) }
             val action = when (surface) {
                 PostEditorChromeSurface.Restore -> "Brouillon retrouvé, restaurer ou ignorer"
                 PostEditorChromeSurface.Options -> "Options"
@@ -564,6 +592,7 @@ class PostEditorRestorationScreenTest {
             val before = compose.runOnIdle { sessions }
             scenario.recreate()
             compose.waitForIdle()
+            scenario.onActivity { assertSame(model, it.model) }
             compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
             if (surface == null) {
                 compose.mainClock.advanceTimeBy(600L)
@@ -575,15 +604,40 @@ class PostEditorRestorationScreenTest {
                 assertEquals(surface == null, model.state.value.isPreviewVisible)
                 assertEquals(before, sessions)
             }
+            if (surface == PostEditorChromeSurface.Restore) {
+                compose.runOnIdle {
+                    assertFalse(model.chromeMemory.focus.imeBeforeSurface)
+                    assertEquals(0, model.chromeMemory.returnGeneration)
+                    sheetBack()
+                }
+                compose.onNode(isDialog()).assertDoesNotExist()
+                compose.onNodeWithTag("editor-draft-offer-sheet").assertDoesNotExist()
+                compose.onNode(hasSetTextAction()).assertIsFocused()
+                compose.mainClock.advanceTimeBy(600L)
+                compose.runOnIdle {
+                    assertNull(model.chromeMemory.surface)
+                    assertEquals(1, model.chromeMemory.returnGeneration)
+                    assertEquals(before, sessions)
+                }
+            }
         }
     }
 
     private fun assertPostCover(surface: PostEditorChromeSurface?) {
         when (surface) {
-            PostEditorChromeSurface.Restore -> compose.onNodeWithText("Retour au message").assertIsDisplayed()
+            PostEditorChromeSurface.Restore -> {
+                compose.onNode(isDialog()).assertExists()
+                compose.onNodeWithTag("editor-draft-offer-sheet").assertIsDisplayed()
+                compose.onNodeWithText("Brouillon retrouvé").assertIsDisplayed()
+                compose.onNodeWithText("Retour au message").assertDoesNotExist()
+            }
             PostEditorChromeSurface.Options -> compose.onNodeWithText("Options du message").assertIsDisplayed()
             else -> compose.onNodeWithTag("editor-preview-fallback").assertIsDisplayed()
         }
+    }
+
+    private fun sheetBack() {
+        (ShadowDialog.getLatestDialog() as ComponentDialog).onBackPressedDispatcher.onBackPressed()
     }
 
     private fun prepareRotationHost(

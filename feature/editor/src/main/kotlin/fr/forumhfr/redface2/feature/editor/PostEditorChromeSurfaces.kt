@@ -21,18 +21,13 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 
-/**
- * Keep mounted inside EditorScaffold.overlay, including while the field is covered.
- * [compactHeight] retains the overlay call contract; the offer sheet handles compact height itself.
- */
+/** Keep mounted inside EditorScaffold.overlay, including while the field is covered. */
 @Composable
-@Suppress("LongParameterList") // Overlay slots plus the host's compact-height signal.
 internal fun PostEditorChromeSurfaces(
     adapter: PostEditorChromeAdapter,
     bodyState: TextFieldState,
     smileys: SmileyPickerController,
     onReturnToBody: () -> Unit,
-    @Suppress("UNUSED_PARAMETER") compactHeight: Boolean,
     body: @Composable () -> Unit,
 ) {
     // Run after the overlay/dialog is removed, when the body can accept focus again. Exactly once.

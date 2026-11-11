@@ -36,7 +36,9 @@ import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyForm
+import fr.forumhfr.redface2.core.ui.editor.EditorBarGesture
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerOpenIntent
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import io.mockk.coEvery
@@ -576,6 +578,37 @@ class PostEditorRestorationTest {
         assertEquals(TextRange.Zero, restored.bodyFieldState.selection)
         assertTrue(restored.state.value.draftHydratedFromForm)
         assertFalse(restored.bodyFieldState.undoState.canUndo)
+    }
+
+    @Test
+    fun acknowledgedPendingOfferDetailClosesThroughTheRealAccountSessionChange() = runTest(dispatcher) {
+        store.preload(key, Draft("offered body", pendingInlineQuoteRequest = pending()))
+        val editor = open()
+        runCurrent()
+        val events = editor.chromeEvents
+        val opening = events.state.session
+        val notice = events.visibleEvent!!
+        assertTrue(events.isPendingQuoteEvent(notice.key))
+        val adapter = PostEditorChromeAdapter({ editor.state.value }, editor.bodyFieldState, events,
+            editor::submit, {}, {}, editor.chromeMemory)
+        adapter.barActions.onEvent(notice.key, EditorEventAction.Details)
+        adapter.gesture(EditorBarGesture.ToggleFormat)
+        assertNull(events.visibleEvent)
+        assertEquals(notice.key, adapter.draftOfferDetailKey)
+        assertTrue(adapter.draftOfferOpen)
+
+        store.activeOwner = null
+        account.value = AuthState.Anonymous
+        runCurrent()
+
+        assertFalse(opening == events.state.session)
+        assertNull(events.state.session.owner)
+        assertNull(adapter.draftOfferDetailKey)
+        assertNull(adapter.detail)
+        assertNull(adapter.surface)
+        assertFalse(adapter.draftOfferOpen)
+        assertFalse(events.isPendingQuoteEvent(notice.key))
+        assertTrue(events.state.events.isEmpty())
     }
 
     @Test

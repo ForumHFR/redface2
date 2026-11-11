@@ -58,10 +58,15 @@ internal class PostEditorChromeAdapter(
         ),
         secondStatus = if (source().restorableDraft == null) null else EditorAppBarStatus(
             UiR.drawable.ic_editor_restore, stringResource(UiR.string.editor_status_restore),
-            { open(PostEditorChromeSurface.Restore) }, enabled = state.scaffold.controlsEnabled,
+            ::openDraftOffer, enabled = state.scaffold.controlsEnabled,
             opensOnInformation = events::isPendingQuoteEvent,
         ),
     )
+
+    fun openDraftOffer() = open(PostEditorChromeSurface.Restore) {
+        // Opening through ↺ acknowledges the pending notice even when an error masks it.
+        events.acknowledgePendingQuote()
+    }
 
     // The save information may be acknowledged or retired by autosave while Q still needs its CAS.
     // Keep a recovery panel reachable from the quote status independently of that event's lifetime.

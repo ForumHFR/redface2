@@ -9,6 +9,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.InputModeManager
 import androidx.compose.ui.input.key.Key
@@ -22,6 +23,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
@@ -97,8 +99,7 @@ class PostEditorChromeComposeTest {
                 bodyFocusRestoreAllowed = host.adapter.surface == null && host.adapter.detail == null &&
                     !host.state.isPreviewVisible,
                 bodyScrollState = scroll, surfaceFocus = host.adapter.focusMemory, overlay = { restore, body ->
-                    PostEditorChromeSurfaces(host.adapter, host.body, smileys, { returns++; restore() },
-                        compactHeight = false, body)
+                    PostEditorChromeSurfaces(host.adapter, host.body, smileys, { returns++; restore() }, body)
                 })
         }
     }
@@ -170,7 +171,7 @@ class PostEditorChromeComposeTest {
         }
     }
 
-    @Test fun `1450 pending notice times out at five seconds without opening the offer or deciding`() {
+    @Test fun `1450 pending notice times out at five seconds then restore opens the same offer`() {
         compose.setContent {
             CompositionLocalProvider(LocalAccessibilityManager provides null) { Content() }
         }
@@ -195,13 +196,81 @@ class PostEditorChromeComposeTest {
             assertTrue(host.calls.isEmpty())
             assertEquals(0, returns)
         }
+        compose.mainClock.autoAdvance = true
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
+        compose.onNode(isDialog()).assertExists()
+        compose.onNodeWithTag("editor-draft-offer-sheet").assertIsDisplayed()
+        compose.onNodeWithText("Brouillon retrouvé").assertIsDisplayed()
+        compose.onNodeWithText("Citation en attente").assertIsDisplayed()
+        compose.onNodeWithText("Restaurer").assertIsDisplayed()
+        compose.onNodeWithText("Ignorer").assertIsDisplayed()
+        compose.runOnIdle {
+            assertEquals(PostEditorChromeSurface.Restore, host.adapter.surface)
+            assertNull(host.adapter.draftOfferDetailKey)
+            assertTrue(host.calls.isEmpty())
+        }
+        compose.runOnIdle { sheetBack() }
+        compose.onNode(isDialog()).assertDoesNotExist()
+        compose.onNodeWithTag("editor-bar-event").assertDoesNotExist()
+        compose.onNodeWithTag("editor-bar-submit-shape").assertIsNotEnabled()
+        compose.runOnIdle {
+            assertNull(host.events.visibleEvent)
+            assertEquals("saved D", host.state.restorableDraft)
+            assertTrue(host.state.pendingQuotes.isNotEmpty())
+            assertTrue(host.calls.isEmpty())
+            assertEquals(1, returns)
+        }
     }
 
-    @Test fun `1450 either offer entry returns focus once after swipe Back Restore or Ignore`() {
+    @Test fun `1450 restore acknowledges a pending notice masked by a form error without deciding`() {
+        compose.setContent { Content() }
+        val pending = compose.runOnIdle {
+            host.transition(host.state.copy(restorableDraft = "saved D", pendingQuotes = listOf(
+                QuoteSelection(QuoteLocator(1, 101, null), "", "")), isLoadingForm = true))
+            host.events.visibleEvent!!.key
+        }
+        compose.onNodeWithTag("editor-bar-event").assertExists()
+        val error = compose.runOnIdle {
+            host.events.readFailed()
+            host.transition(host.state.copy(isLoadingForm = false, submitError = EditorErrors.formNetwork))
+            host.events.visibleEvent!!
+        }
+        compose.onNodeWithContentDescription("Hors connexion, Afficher les détails").assertExists()
+        compose.runOnIdle { assertTrue(host.events.state.events.any { it.key == pending }) }
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
+        compose.onNode(isDialog()).assertExists()
+        compose.onNodeWithTag("editor-draft-offer-sheet").assertIsDisplayed()
+        compose.onNodeWithText("Citation en attente").assertIsDisplayed()
+        compose.runOnIdle {
+            assertEquals(PostEditorChromeSurface.Restore, host.adapter.surface)
+            assertEquals(error, host.events.visibleEvent)
+            assertTrue(host.events.state.events.none { it.key == pending })
+            sheetBack()
+        }
+        compose.onNode(isDialog()).assertDoesNotExist()
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.onNodeWithContentDescription("Hors connexion, Afficher les détails").assertExists()
+        compose.runOnIdle { host.transition(host.state.copy(isLoadingForm = true)) }
+        compose.runOnIdle { host.transition(host.state.copy(isLoadingForm = false, submitError = null)) }
+        compose.onNodeWithTag("editor-bar-event").assertDoesNotExist()
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").assertExists()
+        compose.onNodeWithTag("editor-bar-submit-shape").assertIsNotEnabled()
+        compose.runOnIdle {
+            assertNull(host.events.visibleEvent)
+            assertTrue(host.events.state.events.isEmpty())
+            assertEquals("saved D", host.state.restorableDraft)
+            assertTrue(host.state.pendingQuotes.isNotEmpty())
+            assertEquals("Bonjour", host.body.text.toString())
+            assertTrue(host.calls.isEmpty())
+            assertEquals(1, returns)
+        }
+    }
+
+    @Test fun `1450 either offer entry returns focus once after swipe scrim Back Restore or Ignore`() {
         compose.setContent { Content() }
         var expectedReturns = 0
         listOf(false, true).forEach { throughEvent ->
-            listOf("swipe", "back", "restore", "discard").forEach { closing ->
+            listOf("swipe", "outside", "back", "restore", "discard").forEach { closing ->
                 compose.runOnIdle {
                     // End the previous request before delivering a fresh pending-quote event.
                     host.transition(host.state.copy(restorableDraft = null, pendingQuotes = emptyList()))
@@ -216,6 +285,7 @@ class PostEditorChromeComposeTest {
                 compose.onNodeWithTag("editor-draft-offer-sheet").assertIsDisplayed()
                 when (closing) {
                     "swipe" -> compose.onNodeWithTag("editor-draft-offer-sheet").performTouchInput { swipeDown() }
+                    "outside" -> tapScrim()
                     "back" -> compose.runOnIdle { sheetBack() }
                     "restore" -> compose.onNodeWithText("Restaurer").performScrollTo().performClick()
                     "discard" -> compose.onNodeWithText("Ignorer").performScrollTo().performClick()
@@ -531,6 +601,18 @@ class PostEditorChromeComposeTest {
 
     private fun sheetBack() {
         (ShadowDialog.getLatestDialog() as ComponentDialog).onBackPressedDispatcher.onBackPressed()
+    }
+
+    private fun tapScrim() {
+        val dialog = compose.onNode(isDialog())
+        val dialogNode = dialog.fetchSemanticsNode()
+        val dialogBounds = dialogNode.boundsInRoot
+        val sheetBounds = compose.onNodeWithTag("editor-draft-offer-sheet").fetchSemanticsNode().boundsInRoot
+        val exposedHeight = sheetBounds.top - dialogBounds.top
+        assertTrue("The sheet must expose a scrim above it", exposedHeight > 0f)
+        val tap = Offset(dialogBounds.center.x, dialogBounds.top + exposedHeight / 2f)
+        assertFalse(sheetBounds.contains(tap))
+        dialog.performTouchInput { click(tap - dialogNode.positionInRoot) }
     }
 
     private fun advance(millis: Long) {

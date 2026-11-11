@@ -62,26 +62,11 @@ class PostEditorChromeAdapterTest {
         assertNull(host.adapter.surface)
     }
 
-    @Test fun `1450 acknowledged pending offer detail does not survive an account session change`() {
-        host.transition(host.state.copy(restorableDraft = "D", pendingQuotes = listOf(
-            QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
-        val pending = host.events.visibleEvent!!
-        host.adapter.barActions.onEvent(pending.key, EditorEventAction.Details)
-        host.adapter.gesture(EditorBarGesture.ToggleFormat)
-        assertEquals(pending.key, host.adapter.draftOfferDetailKey)
-        // Match the ViewModel's session transition: reset retained chrome before opening the session.
-        host.memory.reset()
-        host.events.open(host.session.copy(id = "changed", owner = null))
-        assertNull(host.adapter.draftOfferDetailKey)
-        assertFalse(host.adapter.draftOfferOpen)
-        assertFalse(host.events.isPendingQuoteEvent(pending.key))
-    }
-
     @Test fun `1450 first restore tap under pending notice opens the sheet and Back only acknowledges it`() {
         host.transition(host.state.copy(restorableDraft = "D", pendingQuotes = listOf(
             QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
         val pending = host.events.visibleEvent!!
-        host.adapter.open(PostEditorChromeSurface.Restore)
+        host.adapter.openDraftOffer()
         assertTrue(host.adapter.draftOfferOpen)
         assertNull(host.adapter.draftOfferDetailKey)
         assertNull(host.events.visibleEvent)
