@@ -91,8 +91,10 @@ class EditorInformationTimeoutTest {
         compose.mainClock.autoAdvance = false
         val key = notice(5_000L)
         advance(2_500L)
+        // The tester must recompose both removal and restoration to cancel/restart the effect.
+        compose.mainClock.autoAdvance = true
         restoration.emulateSavedInstanceStateRestore()
-        compose.mainClock.advanceTimeByFrame()
+        compose.mainClock.autoAdvance = false
         compose.waitForIdle()
         advance(4_999L) // Also crosses the old composition's deadline.
         compose.runOnIdle {
@@ -194,14 +196,22 @@ class EditorInformationTimeoutTest {
     }
 
     private fun content(manager: AccessibilityManager? = null) {
-        compose.setContent {
-            CompositionLocalProvider(LocalAccessibilityManager provides manager) { fixture.Content() }
-        }
+        val owner = TimeoutLifecycleOwner()
+        compose.runOnIdle { owner.registry.currentState = Lifecycle.State.RESUMED }
         compose.mainClock.autoAdvance = false
+        compose.setContent {
+            CompositionLocalProvider(LocalAccessibilityManager provides manager, LocalLifecycleOwner provides owner) {
+                fixture.Content()
+            }
+        }
+        compose.waitForIdle()
     }
 
     private fun notice(timeoutMillis: Long?): EventKey {
         val key = compose.runOnIdle { fixture.notice(timeoutMillis) }
+        // Publish the snapshot and wake the recomposer before producing the delivery's first frame.
+        // With autoAdvance off, waiting only after that frame would start the timer one frame late.
+        compose.waitForIdle()
         compose.mainClock.advanceTimeByFrame() // Start the effect for the newly displayed delivery.
         compose.waitForIdle()
         return key

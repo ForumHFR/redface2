@@ -101,10 +101,7 @@ fun EditorActionBar(
     val mode = if (armed) EditorBarMode.Normal else state.visibleMode(event)
     val metrics = EditorChromeMetrics(compactHeight)
     val height = metrics.actionBarHeight
-    val normalScroll = rememberScrollState()
-    val formatScroll = rememberScrollState()
-    val colorScroll = rememberScrollState()
-    val imageScroll = rememberScrollState()
+    val scroll = rememberEditorBarScroll(mode)
     val statuses = listOf(firstStatus, secondStatus)
     val statusWidths = editorBarStatusWidths(statuses)
     val focus = rememberEditorBarFocus(mode, masked = armed || event != null)
@@ -125,12 +122,6 @@ fun EditorActionBar(
     BackHandler(!armed && (backAction == EditorBackAction.CloseSublevel ||
         backAction == EditorBackAction.CloseFormat), onBack = back)
     val enabled = controlsEnabled && insertionsEnabled && !uploading
-    val scroll = when (mode) {
-        EditorBarMode.Normal -> normalScroll
-        EditorBarMode.Format -> formatScroll
-        EditorBarMode.Color -> colorScroll
-        EditorBarMode.Image -> imageScroll
-    }
     val slot: @Composable (EditorFixedSlot, Boolean) -> Unit = { fixed, visible ->
         EditorBarFixedSlot(fixed, statuses, headerLabel, onOpenHeader,
             {
@@ -173,6 +164,21 @@ fun EditorActionBar(
                 })
             EditorBarProgress(uploading, loadingForm, uploadProgress, Modifier.align(Alignment.TopStart))
         }
+    }
+}
+
+@Composable
+private fun rememberEditorBarScroll(mode: EditorBarMode): ScrollState {
+    // Keep every mode's scroll state mounted while another mode is visible.
+    val normal = rememberScrollState()
+    val format = rememberScrollState()
+    val color = rememberScrollState()
+    val image = rememberScrollState()
+    return when (mode) {
+        EditorBarMode.Normal -> normal
+        EditorBarMode.Format -> format
+        EditorBarMode.Color -> color
+        EditorBarMode.Image -> image
     }
 }
 

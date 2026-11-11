@@ -12,6 +12,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -78,7 +79,7 @@ class EditorDraftOfferSheetTest {
                     "discard" -> compose.onNodeWithText("Ignorer").performScrollTo().performClick()
                 }
                 compose.onNode(isDialog()).assertDoesNotExist()
-                compose.onNodeWithTag("editor-scaffold-field").assertIsFocused()
+                compose.onNode(hasSetTextAction()).assertIsFocused()
                 expectedReturns++
                 compose.runOnIdle {
                     assertEquals("$throughEvent / $closing", expectedReturns, fixture.returns)
@@ -107,7 +108,7 @@ class EditorDraftOfferSheetTest {
                 fixture.available = false
             }
             compose.onNode(isDialog()).assertDoesNotExist()
-            compose.onNodeWithTag("editor-scaffold-field").assertIsFocused()
+            compose.onNode(hasSetTextAction()).assertIsFocused()
             compose.runOnIdle {
                 assertFalse(fixture.host.draftOfferOpen)
                 assertNull(fixture.host.detail)
@@ -188,7 +189,7 @@ class EditorDraftOfferSheetTest {
     private fun open(throughEvent: Boolean) {
         if (throughEvent) {
             compose.runOnIdle { fixture.notice() }
-            compose.onNodeWithContentDescription("Brouillon retrouvé, Détails").performClick()
+            compose.onNodeWithContentDescription("Brouillon retrouvé, Afficher les détails").performClick()
         } else status().performClick()
         compose.onNode(isDialog()).assertExists()
     }

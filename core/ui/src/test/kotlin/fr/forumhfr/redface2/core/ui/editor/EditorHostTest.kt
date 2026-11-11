@@ -17,6 +17,8 @@ import org.junit.Test
 
 class EditorHostTest {
     private enum class Surface { Smileys, Options, Picker, Header, Recipients, Restore }
+    private data class DraftOfferConfig(val isDetail: (EventKey) -> Boolean = { false })
+
     private val session = EditorSession("opening", "alice", "editor")
     private val memory = EditorHostMemory<Surface>()
     private val body = TextFieldState("Bonjour", TextRange(6, 1))
@@ -33,8 +35,7 @@ class EditorHostTest {
         onComplete: ((EditorCause) -> Unit)? = null,
         onAcknowledgeUncertain: (() -> Unit)? = { calls.add("acknowledge") },
         onAcknowledgeLocal: (() -> Unit)? = { calls.add("acknowledge local") },
-        draftOffer: Boolean = false,
-        isDraftOfferDetail: (EventKey) -> Boolean = { false },
+        draftOffer: DraftOfferConfig? = null,
     ) = EditorHost(
         { state }, body, events,
         EditorHostActions({ calls.add(it) }, { calls.add(it) }, {
@@ -47,7 +48,8 @@ class EditorHostTest {
         EditorHostSurfaces(Surface.Smileys, Surface.Options, Surface.Picker, header = header,
             // Simulate the old adapters' panel policy: the explicit offer field must take precedence.
             returnsToBody = { it != header && it != Surface.Restore },
-            draftOffer = Surface.Restore.takeIf { draftOffer }, isDraftOfferDetail = isDraftOfferDetail),
+            draftOffer = Surface.Restore.takeIf { draftOffer != null },
+            isDraftOfferDetail = draftOffer?.isDetail ?: { false }),
         { calls.add("picker") }, { calls.add("smileys") }, memory,
     )
     private fun error(error: EditorError, sequence: Long = 1): EditorEvent {
@@ -59,7 +61,7 @@ class EditorHostTest {
 
     @Test fun `offer status and event detail close at sheet rank before disarming`() {
         val key = EventKey(session, OperationRef.Local(EditorLocalOperation.Notice, 1), 0)
-        val host = host(draftOffer = true, isDraftOfferDetail = { it == key })
+        val host = host(draftOffer = DraftOfferConfig { it == key })
         val arm = ArmToken(1, session, 0, 4_000L)
         listOf(false, true).forEach { throughEvent ->
             if (throughEvent) {
@@ -91,11 +93,11 @@ class EditorHostTest {
     @Test fun `offer detail remembers its sheet presentation after notice retirement and rotation`() {
         val event = error(EditorErrors.noImageReceived)
         var classified = true
-        val initial = host(draftOffer = true, isDraftOfferDetail = { classified && it == event.key })
+        val initial = host(draftOffer = DraftOfferConfig { classified && it == event.key })
         initial.barActions.onEvent(event.key, EditorEventAction.Details)
         events.dispatch(EditorEventInput.Acknowledge(event.key))
         classified = false // The live offer/classifier can disappear before the closing composition.
-        val rotated = host(draftOffer = true)
+        val rotated = host(draftOffer = DraftOfferConfig())
         assertTrue(rotated.draftOfferOpen)
         assertEquals(event.key, rotated.draftOfferDetailKey)
         rotated.closeDraftOffer()
@@ -115,7 +117,7 @@ class EditorHostTest {
         val arm = ArmToken(1, session, 0, 4_000L)
         listOf(false, true).forEachIndexed { index, confirm ->
             val key = EventKey(session, OperationRef.Local(EditorLocalOperation.Notice, index + 1L), 0)
-            val host = host(draftOffer = true, isDraftOfferDetail = { it == key })
+            val host = host(draftOffer = DraftOfferConfig { it == key })
             val submission = if (confirm) EditorSubmissionState.Armed(arm) else EditorSubmissionState.Ready
             state = state.copy(submission = submission)
             events.dispatch(EditorEventInput.Received(EditorEvent(key,
@@ -135,7 +137,7 @@ class EditorHostTest {
 
     @Test fun `the first tap exception never opens a different tool under the offer information`() {
         val information = error(EditorErrors.noImageReceived)
-        val host = host(draftOffer = true, isDraftOfferDetail = { it == information.key })
+        val host = host(draftOffer = DraftOfferConfig { it == information.key })
         host.barActions.onOptions()
         assertNull(host.surface)
         assertNull(events.state.visibleEvent)
@@ -143,8 +145,9 @@ class EditorHostTest {
     }
 
     @Test fun `only the configured offer can open on the first gesture under its information`() {
-        val host = host(draftOffer = true,
-            isDraftOfferDetail = { (it.operation as? OperationRef.Local)?.sequence == 1L })
+        val host = host(draftOffer = DraftOfferConfig {
+            (it.operation as? OperationRef.Local)?.sequence == 1L
+        })
         error(EditorErrors.noImageReceived)
         host.open(Surface.Restore)
         assertEquals(Surface.Restore, host.surface)
