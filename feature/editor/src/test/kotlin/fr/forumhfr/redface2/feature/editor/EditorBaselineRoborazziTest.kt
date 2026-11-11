@@ -21,6 +21,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Density
@@ -54,6 +55,7 @@ import org.robolectric.annotation.GraphicsMode
  * Reply represents the shared reply/edit post chrome; transient states use the production adapter.
  * Post: portrait/compact × light/dark × scale 1/1.3 × normal/format/arm/event/restore/cards/panel/preview.
  * Topic: both modes, header, poll, restore, preview, event, arm and app bar states (poll + restore, no tap);
+ * the post and topic Restore scenes open the ↺ offer sheet by its tap and capture its dialog window;
  * refused/missing FP context; historical names kept, each byte-identical capture recorded under one name only.
  *
  * Output: `feature/editor/build/outputs/roborazzi/<surface>_<orientation>_fs<scale>_<state>.png`.
@@ -140,7 +142,8 @@ class EditorBaselineRoborazziTest {
                     else -> Unit
                 }
                 if (scene == PostScene.Preview) assertSharedPreview()
-                record("post_${scene.name}_${orientation}_fs${fontScale}_dark$isDark", orientation, focusManager)
+                record("post_${scene.name}_${orientation}_fs${fontScale}_dark$isDark", orientation, focusManager,
+                    sheet = scene == PostScene.Restore)
             }
         }
     }
@@ -188,14 +191,15 @@ class EditorBaselineRoborazziTest {
                 }
                 if (scene == TopicScene.Preview) assertSharedPreview()
                 val name = "${surface.fileName}_${scene.name}_${orientation}_fs${fontScale}_dark$isDark"
-                record(name, orientation, focus)
+                record(name, orientation, focus, sheet = scene == TopicScene.Restore)
             }
         }
     }
 
     /**
      * Gate r1 (R1b T3) found 40 byte-identical topic captures; each image now keeps one unchanged name.
-     * Header, Poll and Restore panels match across modes. Landscape hides the app bar: there the first post
+     * Header and Poll panels match across modes; the Restore sheet is the same composable in both modes and is
+     * recorded on the new topic only. Landscape hides the app bar: there the first post
      * Normal and EmptyTitle match the new topic Normal (only creation auto-opens the header on an empty title)
      * and Preview matches across modes. The light new topic Normal is the historical
      * `new_topic_<orientation>_fs<scale>_multiline`. Event and Armed only change the action bar, as on the
@@ -217,15 +221,17 @@ class EditorBaselineRoborazziTest {
         compose.onNode(hasSetTextAction()).assertIsDisplayed()
     }
 
-    private fun record(name: String, orientation: String, focus: FocusManager) {
+    /** The ↺ offer is a ModalBottomSheet: it renders in its own dialog window, absent from [onRoot]. */
+    private fun record(name: String, orientation: String, focus: FocusManager, sheet: Boolean = false) {
         compose.waitForIdle()
         compose.runOnIdle { focus.clearFocus(force = true) }
         compose.mainClock.advanceTimeBy(1_000L)
         compose.waitForIdle()
         compose.mainClock.autoAdvance = false
-        compose.onRoot().assertWidthIsEqualTo(if (orientation == "portrait") 360.dp else 760.dp)
+        val target = if (sheet) compose.onNode(isDialog()) else compose.onRoot()
+            .assertWidthIsEqualTo(if (orientation == "portrait") 360.dp else 760.dp)
             .assertHeightIsEqualTo(if (orientation == "portrait") 760.dp else 360.dp)
-            .captureRoboImage(filePath = "src/test/screenshots/$name.png")
+        target.captureRoboImage(filePath = "src/test/screenshots/$name.png")
         compose.mainClock.autoAdvance = true
     }
 

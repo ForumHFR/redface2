@@ -51,7 +51,7 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * Actual reply and new-MP content on the common scaffold; the legacy submit bar and options were removed at
- * the R3/C4 junction, and both ↺ panels render [MessageDraftRestoreChoice].
+ * the R3/C4 junction. Both ↺ offers open the shared draft offer sheet, captured through its dialog window.
  * Reply: portrait/landscape × font scale 1.0/1.3 × light/dark × empty/multiline, plus restore/event/preview/
  * owner states, an armed send, both statuses at rest and under an event, and the full-screen form failure.
  * Light names are historical; dark reply names end in `_dark`.
@@ -186,7 +186,7 @@ class EditorBaselineRoborazziTest {
     /** [scene] names the PNG; [tap] is the content description opened before capture; sheets capture their dialog. */
     private enum class ReplyChrome(val scene: String?, val tap: String? = null, val sheet: Boolean = false) {
         Ready(null),
-        Restore("restore", tap = "Brouillon retrouvé, restaurer ou ignorer"),
+        Restore("restore", tap = "Brouillon retrouvé, restaurer ou ignorer", sheet = true),
         Owner("owner"),
         Manager("manager", tap = "2 destinataires, gérer", sheet = true),
         Options("options", tap = "Options", sheet = true),
@@ -250,8 +250,8 @@ class EditorBaselineRoborazziTest {
                 compose.runOnIdle { focus.clearFocus(force = true) }
                 compose.mainClock.advanceTimeBy(1_000L)
                 compose.mainClock.autoAdvance = false
-                // The options sheet is a ModalBottomSheet: it renders in its own dialog window.
-                val target = if (state == ComposeCapture.Options) compose.onNode(isDialog()) else compose.onRoot()
+                // The options and draft offer sheets are ModalBottomSheets: each renders in its own dialog window.
+                val target = if (state.sheet) compose.onNode(isDialog()) else compose.onRoot()
                 target.captureRoboImage(filePath = "src/test/screenshots/" +
                     "private_message_new_${state}_${orientation}_fs${scale}_dark$dark.png")
                 compose.mainClock.autoAdvance = true
@@ -310,6 +310,9 @@ class EditorBaselineRoborazziTest {
     private enum class ComposeCapture(val routed: Boolean = true, val restorable: Boolean = false) {
         Normal, Header, Preview, Restore(restorable = true), Armed, Event(restorable = true),
         States(restorable = true), EmptyEntry(routed = false), EmptySummary(routed = false), Options, FormError,
+        ;
+
+        val sheet get() = this == Restore || this == Options
     }
 
     private enum class EditorSurface(val fileName: String) {
