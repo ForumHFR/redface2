@@ -97,6 +97,7 @@ fun EditorPreview(
     val keyboard = LocalSoftwareKeyboardController.current
     val inputMode = LocalInputModeManager.current
     val returnToSource = LocalEditorPreviewReturnFocus.current
+    val clearToolSelection = LocalEditorPreviewClearToolSelection.current
     val focusMemory = LocalEditorPreviewFocusMemory.current ?: remember(bodyState) { EditorPreviewFocusMemory() }
     val focusManager = LocalFocusManager.current
     val previewScroll = rememberScrollState()
@@ -110,7 +111,7 @@ fun EditorPreview(
             if (!sourceFocused && returnToSource != null) returnToSource() else {
                 val selection = bodyState.selection
                 bodyFocusRequester.requestFocus()
-                // Selection-only focus repair keeps the tool capture valid for the unchanged buffer.
+                // If focus is refused, selection-only repair preserves any existing tool capture.
                 if (bodyState.selection != selection) bodyState.edit { this.selection = selection }
             }
         }
@@ -155,6 +156,8 @@ fun EditorPreview(
                 val selection = bodyState.selection
                 focusManager.clearFocus(force = true)
                 if (bodyState.selection != selection) bodyState.edit { this.selection = selection }
+                // This programmatic focus loss is not a handoff to a tool; discard its IME snapshot.
+                clearToolSelection()
             }
         }
         // A window/IME/font change cancels a gesture instead of releasing it against obsolete bounds.

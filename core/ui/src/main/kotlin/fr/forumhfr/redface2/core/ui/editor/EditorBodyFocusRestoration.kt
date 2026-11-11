@@ -155,6 +155,7 @@ internal enum class EditorBodyFocusAvailability { Pending, Ready, Blocked }
  * preview-blocked if still Blocked, otherwise deadline, without reclaiming focus on a later resize.
  */
 @Composable
+@Suppress("LongParameterList") // H binding: observation, eligibility, field, focus, preview readiness, tool capture.
 internal fun RestoreRecreatedEditorBodyFocus(
     observation: EditorBodyFocusObservation, allowed: Boolean, state: TextFieldState, focus: FocusRequester,
     availability: EditorBodyFocusAvailability = EditorBodyFocusAvailability.Ready,
