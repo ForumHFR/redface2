@@ -1,24 +1,39 @@
 package fr.forumhfr.redface2.feature.editor
 
+import androidx.activity.OnBackPressedDispatcher
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.ScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.input.InputModeManager
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextInputSelection
+import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.domain.editor.ArmToken
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
@@ -29,6 +44,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -46,6 +62,16 @@ class PostEditorChromeComposeTest {
     private val host = PostEditorChromeFixture()
     private val focus = FocusRequester()
     private val scroll = ScrollState(0)
+    private lateinit var back: OnBackPressedDispatcher
+    private lateinit var inputMode: InputModeManager
+
+    @Composable private fun PostContent() {
+        back = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
+        inputMode = LocalInputModeManager.current
+        RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+            PostEditorTestContent(host.state, host::dispatch, host.body, host.events)
+        }
+    }
 
     @Composable private fun Content() {
         val scope = rememberCoroutineScope()
@@ -54,6 +80,8 @@ class PostEditorChromeComposeTest {
             EditorScaffold(host.body, EditorWindowMetrics(740.dp, 24.dp, 30.dp), "Répondre", "Sujet",
                 host.adapter.chrome(), host.adapter.barActions, host.adapter.submitState, host.adapter.submitActions,
                 host.adapter.imageActions, host.adapter::closeRequested, bodyFocusRequester = focus,
+                bodyFocusRestoreAllowed = host.adapter.surface == null && host.adapter.detail == null &&
+                    !host.state.isPreviewVisible,
                 bodyScrollState = scroll, overlay = { restore, body ->
                     PostEditorChromeSurfaces(host.adapter, host.body, smileys, restore, body)
                 })
@@ -122,6 +150,22 @@ class PostEditorChromeComposeTest {
         }
     }
 
+    @Test fun `ED45 explicit Masquer in the post detail forwards acknowledgement without sending`() {
+        val attempt = EditorDraftStore.AttemptToken("alice", host.session.key, "attempt", 1)
+        host.transition(host.state.copy(submission = EditorSubmissionState.Uncertain(attempt),
+            submitError = EditorErrors.uncertain))
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Envoi incertain, Afficher les détails").performClick()
+        compose.runOnIdle { assertTrue(host.calls.isEmpty()) }
+        compose.onNodeWithText("Masquer").performClick()
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(listOf(PostEditorIntent.ErrorDismissed), host.calls)
+            assertNull(host.adapter.detail)
+            assertNull(host.events.state.visibleEvent)
+        }
+    }
+
     @Test fun `ED13 ED14 read-only programmatic upload insertion reveals final caret without stealing selection`() {
         host.state = host.state.copy(isUploading = true)
         compose.setContent { Content() }
@@ -138,5 +182,94 @@ class PostEditorChromeComposeTest {
             assertFalse(host.adapter.submitState.enabled)
             assertTrue(host.calls.isEmpty())
         }
+    }
+
+    @Test fun `ED85 post system Back disarms retained Format before closing it`() {
+        compose.setContent { PostContent() }
+        compose.onNodeWithContentDescription("Mise en forme").performClick()
+        compose.onNodeWithContentDescription("Gras").assertExists()
+        compose.runOnIdle {
+            host.state = host.state.copy(submission = EditorSubmissionState.Armed(
+                ArmToken(1, host.session, 0, 4_000L)))
+        }
+        compose.onNodeWithContentDescription("Gras").assertDoesNotExist()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNodeWithContentDescription("Gras").assertExists()
+        compose.runOnIdle {
+            assertNull(host.state.armToken)
+            assertEquals(listOf(PostEditorIntent.SubmitConfirmationDismissed), host.calls)
+            back.onBackPressed()
+        }
+        compose.onNodeWithContentDescription("Gras").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(listOf(PostEditorIntent.SubmitConfirmationDismissed), host.calls)
+        }
+    }
+
+    @Test fun `ED85 post system Back from a keyboard sublevel or Format restores its bar trigger`() {
+        compose.setContent { PostContent() }
+        // The return value reflects the view's focus request, not the mode switch: assert the mode itself.
+        compose.runOnIdle { inputMode.requestInputMode(InputMode.Keyboard) }
+        compose.runOnIdle { assertEquals(InputMode.Keyboard, inputMode.inputMode) }
+        openWithKeyboard("Mise en forme")
+        openWithKeyboard("Couleur")
+        barControl("Retour").assertIsFocused()
+        // ED-85 closes the focused control's tooltip first. The next Back is resolved and reduced by the
+        // host's handler, which wins over the bar's; focus must still return to the trigger.
+        backClosesFocusTooltip("Retour")
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNodeWithContentDescription("Gras").assertExists()
+        barControl("Couleur").assertIsFocused()
+        barControl("Mise en forme").requestFocus().assertIsFocused()
+        backClosesFocusTooltip("Mise en forme")
+        compose.onNodeWithContentDescription("Gras").assertExists()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNodeWithContentDescription("Gras").assertDoesNotExist()
+        barControl("Mise en forme").assertIsFocused()
+        openWithKeyboard("Image")
+        barControl("Retour").assertIsFocused()
+        backClosesFocusTooltip("Retour")
+        compose.runOnIdle { back.onBackPressed() }
+        barControl("Image").assertIsFocused()
+        compose.runOnIdle { assertTrue(host.calls.isEmpty()) }
+    }
+
+    @Test fun `ED85 post system Back disarms before the local restore panel handler can close it`() {
+        host.state = host.state.copy(restorableDraft = "Brouillon retrouvé")
+        compose.setContent { PostContent() }
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
+        compose.onNode(hasSetTextAction()).assertDoesNotExist()
+        compose.runOnIdle {
+            host.state = host.state.copy(submission = EditorSubmissionState.Armed(
+                ArmToken(1, host.session, 0, 4_000L)))
+        }
+        compose.waitForIdle()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNode(hasSetTextAction()).assertDoesNotExist()
+        compose.runOnIdle {
+            assertNull(host.state.armToken)
+            assertEquals(listOf(PostEditorIntent.SubmitConfirmationDismissed), host.calls)
+            back.onBackPressed()
+        }
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(listOf(PostEditorIntent.SubmitConfirmationDismissed), host.calls)
+        }
+    }
+
+    /** The app bar also has a « Retour » control: scope lookups to the action bar. */
+    private fun barControl(label: String) = compose.onNode(hasContentDescription(label) and
+        hasAnyAncestor(hasTestTag("editor-scaffold-action-bar")))
+
+    private fun openWithKeyboard(label: String) {
+        barControl(label).requestFocus().assertIsFocused().performKeyInput { pressKey(Key.Enter) }
+    }
+
+    /** material3 shows a keyboard-focused anchor's tooltip: ED-85 closes it first, keeping level and focus. */
+    private fun backClosesFocusTooltip(label: String) {
+        compose.onNodeWithText(label, useUnmergedTree = true).assertIsDisplayed()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.onNodeWithText(label, useUnmergedTree = true).assertDoesNotExist()
+        barControl(label).assertIsFocused()
     }
 }

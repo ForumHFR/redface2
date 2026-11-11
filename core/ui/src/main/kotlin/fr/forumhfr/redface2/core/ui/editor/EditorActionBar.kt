@@ -66,6 +66,9 @@ data class EditorBarShortcut(
  * [firstStatus]/[secondStatus] are independent permanent slots (see [EditorAppBar]): null means absent,
  * never compacted into the other slot. ED-30 events mask the lowest-priority fixed slots until the
  * full ED-133 envelope fits; retained slots keep their resting positions and return on acknowledgement.
+ * [insertionsEnabled] locks the tools independently of Options and the permanent slots.
+ * A host resolving ED-85 Back itself may reduce a sublevel or Format directly: keyboard focus then
+ * returns to the parent trigger exactly as with this bar's own Back handler.
  */
 @Composable
 @Suppress("LongParameterList") // Stateless rendering inputs, matching the app bar's host boundary.
@@ -88,6 +91,7 @@ fun EditorActionBar(
     uploading: Boolean = false,
     uploadProgress: UploadProgress? = null,
     loadingForm: Boolean = false,
+    insertionsEnabled: Boolean = true,
 ) {
     val buttonState = editorBarSubmitState(state, submitState, uploading, loadingForm)
     val armed = buttonState.armed
@@ -100,21 +104,23 @@ fun EditorActionBar(
     val imageScroll = rememberScrollState()
     val statuses = listOf(firstStatus, secondStatus)
     val statusWidths = editorBarStatusWidths(statuses)
+    val focus = rememberEditorBarFocus(mode, masked = armed || event != null)
+    // Bar gestures settle focus themselves; a Back reduced by the host is restored on the transition.
+    val own = actions.copy(onGesture = focus.ownGestures(actions.onGesture))
     val external: (() -> Unit) -> Unit = { action ->
         if (!consumeEditorBarInformation(event, actions.onEvent)) {
-            actions.onGesture(EditorBarGesture.OpenSurface)
+            own.onGesture(EditorBarGesture.OpenSurface)
             action()
         }
     }
     val insert: (BbcodeAction) -> Unit = { action -> actions.onBbcode(action); actions.onBodyFocus() }
-    val focus = rememberEditorBarFocus(mode)
     val back = {
-        focus.navigateBack(mode) { actions.onGesture(EditorBarGesture.Back) }
+        focus.navigateBack(mode) { own.onGesture(EditorBarGesture.Back) }
     }
     val backAction = resolveEditorBack(EditorBackState(bar = state, event = event))
     BackHandler(!armed && (backAction == EditorBackAction.CloseSublevel ||
         backAction == EditorBackAction.CloseFormat), onBack = back)
-    val enabled = controlsEnabled && !uploading
+    val enabled = controlsEnabled && insertionsEnabled && !uploading
     val scroll = when (mode) {
         EditorBarMode.Normal -> normalScroll
         EditorBarMode.Format -> formatScroll
@@ -129,7 +135,7 @@ fun EditorActionBar(
         val expanded = mode == EditorBarMode.Format
         val toggle = {
             focus.navigate(EditorBarFocusTarget.Format, EditorBarFocusTarget.Format) {
-                actions.onGesture(EditorBarGesture.ToggleFormat)
+                own.onGesture(EditorBarGesture.ToggleFormat)
             }
         }
         EditorBarIcon(R.drawable.ic_editor_format, stringResource(R.string.editor_format), toggle,
@@ -151,7 +157,7 @@ fun EditorActionBar(
                 content = { allocation ->
                     EditorBarRow(event, armed, mode, allocation, height, compactHeight,
                         actions.onEvent, scroll, slot, format) {
-                        EditorBarTools(mode, actions, imageActions, shortcut, enabled, controlsEnabled,
+                        EditorBarTools(mode, own, imageActions, shortcut, enabled, controlsEnabled,
                             focus, format, external, insert, back, compactHeight)
                     }
                 })

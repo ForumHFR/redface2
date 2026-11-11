@@ -66,6 +66,7 @@ class EditorEventDetailsTest {
     private val reloads = mutableListOf<EventKey>()
     private val ignored = mutableListOf<EventKey>()
     private val closed = mutableListOf<EventKey>()
+    private val dismissed = mutableListOf<EventKey>()
     private val hostClose: (EventKey) -> Unit = { closed += it; dispatch(EditorEventInput.CloseDetails(it)) }
     private lateinit var dispatcher: OnBackPressedDispatcher
     private lateinit var inputMode: InputModeManager
@@ -103,6 +104,7 @@ class EditorEventDetailsTest {
         compose.onNodeWithTag("body").assertIsFocused()
         compose.runOnIdle {
             assertEquals(listOf(event.key), closed)
+            assertEquals(listOf(event.key), dismissed)
             assertTrue(model.value.events.isEmpty())
             assertNull(model.value.detailKey)
         }
@@ -171,6 +173,7 @@ class EditorEventDetailsTest {
             assertEquals(selection.max, bodyState.selection.max)
             assertEquals(textBefore, bodyState.text.toString())
             assertEquals(listOf(event.key), closed)
+            assertTrue(dismissed.isEmpty())
             assertTrue(quotePending)
             assertEquals(0, leaves)
             dispatcher.onBackPressed()
@@ -344,6 +347,7 @@ class EditorEventDetailsTest {
             bodyState = bodyState,
             onReturnToBody = { bodyFocus.requestFocus() },
             onClose = hostClose,
+            onDismiss = { key -> dismissed += key; hostClose(key) },
             onReload = { reloads += it },
             onIgnoreQuote = if (ignoreAvailable) {
                 { key -> ignored += key; quotePending = false }

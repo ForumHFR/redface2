@@ -79,8 +79,8 @@ class EditorScaffoldImeTest {
         compose.onNodeWithText("Retour au message").performClick()
         val sessions = compose.runOnIdle { assertNull(host.inputConnection); host.inputSessions }
         restoration.emulateSavedInstanceStateRestore()
-        // Autofocus after recreation is deliberately unspecified: R1a-2 PR 4's
-        // EditorSurfaceFocusMemory will own that policy at rebase. Only explicit focus is tested here.
+        // R2: the saved default memory restores the consumed autofocus, so recreation does not refocus the
+        // body. Only an explicit focus request starts a new session here.
         compose.runOnIdle { host.focus.requestFocus() }
         field().assertIsFocused()
         compose.runOnIdle { assertNotNull(host.inputConnection); assertTrue(host.inputSessions > sessions) }

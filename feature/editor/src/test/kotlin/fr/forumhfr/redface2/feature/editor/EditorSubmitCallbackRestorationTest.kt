@@ -47,7 +47,10 @@ class EditorSubmitCallbackRestorationTest {
         every { model.effects } returns effects.receiveAsFlow()
         every { model.bodyFieldState } returns TextFieldState()
         every { model.bodyScrollState } returns ScrollState(0)
+        every { model.bodyCaretRevealResetKey } returns 0
         every { model.bodyInputTransformation } returns InputTransformation {}
+        every { model.chromeEvents } returns PostEditorChromeEvents()
+        every { model.chromeMemory } returns PostEditorChromeMemory()
         val received = mutableListOf<PostEditorEffect.SubmitSucceeded>()
         restoration.setContent {
             val owner = rememberSubmitAccount(account.value)

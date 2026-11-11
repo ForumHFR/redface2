@@ -1,17 +1,15 @@
 <resources>
-    <string name="editor_post_reply_title">Répondre au sujet</string>
-    <string name="editor_post_edit_title">Modifier votre message</string>
+    <string name="editor_post_reply_title">Répondre</string>
+    <string name="editor_post_edit_title">Modifier</string>
     <string name="editor_topic_new_title">Nouveau sujet</string>
     <string name="editor_topic_edit_first_post_title">Modifier le premier message</string>
     <string name="editor_field_label">Contenu BBCode</string>
     <!-- #436 (#604 lot 3) : cartes de citation dans l'éditeur plein écran. -->
     <string name="editor_quotes_clear_all">Tout vider</string>
     <string name="editor_quotes_clear_all_a11y">Retirer toutes les citations</string>
-    <string name="editor_field_placeholder">Saisissez votre message…</string>
     <string name="editor_preview_show">Afficher l\'aperçu</string>
     <string name="editor_preview_hide">Masquer l\'aperçu</string>
     <string name="editor_submit">Envoyer</string>
-    <string name="editor_submit_disabled">L\'envoi HFR arrive avec les autres modes — éditeur local seulement pour l\'instant.</string>
     <string name="editor_error_dismiss">Masquer</string>
     <string name="editor_options_title">Options du message</string>
     <string name="editor_option_signature">Activer votre signature</string>

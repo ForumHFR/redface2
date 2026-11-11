@@ -44,6 +44,19 @@ class EditorBarStateTest {
     }
 
     @Test
+    fun `ED85 - retained Back callbacks cannot close a masked mode before disarming`() {
+        val session = EditorSession("session", "alice", "topic:23:42")
+        val arm = ArmToken(1, session, 0, 5_000)
+        listOf(EditorBarMode.Format, EditorBarMode.Color, EditorBarMode.Image).forEach { mode ->
+            val armed = EditorBarState(mode, arm)
+            assertEquals(armed, reduceEditorBar(armed, EditorBarGesture.Back))
+            val disarmed = armed.withSubmission(EditorSubmissionState.Ready)
+            val expected = if (mode == EditorBarMode.Color) EditorBarMode.Format else EditorBarMode.Normal
+            assertEquals(expected, reduceEditorBar(disarmed, EditorBarGesture.Back).mode)
+        }
+    }
+
+    @Test
     fun `ED24 - color returns to format on choice and on Back`() {
         val format = EditorBarState(EditorBarMode.Format)
         val color = reduceEditorBar(format, EditorBarGesture.OpenColor)

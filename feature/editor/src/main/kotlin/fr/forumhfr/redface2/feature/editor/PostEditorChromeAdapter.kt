@@ -3,13 +3,12 @@ package fr.forumhfr.redface2.feature.editor
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.TextRange
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
+import fr.forumhfr.redface2.core.ui.R as UiR
 import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitActions
 import fr.forumhfr.redface2.core.ui.editor.ArmedSubmitState
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
@@ -19,9 +18,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorBackAction
 import fr.forumhfr.redface2.core.ui.editor.EditorBackState
 import fr.forumhfr.redface2.core.ui.editor.EditorBarGesture
 import fr.forumhfr.redface2.core.ui.editor.EditorBarImageActions
-import fr.forumhfr.redface2.core.ui.editor.EditorBarState
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorAction
-import fr.forumhfr.redface2.core.ui.editor.EditorEvent
 import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
 import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
@@ -29,9 +26,8 @@ import fr.forumhfr.redface2.core.ui.editor.EditorSheet
 import fr.forumhfr.redface2.core.ui.editor.EventKey
 import fr.forumhfr.redface2.core.ui.editor.reduceEditorBar
 import fr.forumhfr.redface2.core.ui.editor.resolveEditorBack
-import fr.forumhfr.redface2.core.ui.R as UiR
 
-/** Detached host; retain across recompositions. Scaffold owns IME capture/restore, root owns the picker launcher. */
+/** Post host; retain across recompositions. Scaffold owns IME capture/restore, root owns the picker launcher. */
 @Suppress("LongParameterList") // Independent host ports, without a ViewModel dependency in Compose tests.
 internal class PostEditorChromeAdapter(
     private val source: () -> PostEditorState,
@@ -40,16 +36,23 @@ internal class PostEditorChromeAdapter(
     private val onIntent: (PostEditorIntent) -> Unit,
     private val launchPicker: () -> Unit,
     private val openSmileys: () -> Unit,
+    private val memory: PostEditorChromeMemory = PostEditorChromeMemory(),
 ) {
-    var surface by mutableStateOf<PostEditorChromeSurface?>(null)
+    var surface by memory::surface
         private set
-    var detail by mutableStateOf<EditorEvent?>(null)
+    var detail by memory::detail
         private set
-    private var bar by mutableStateOf(EditorBarState())
-    private var selection = TextRange.Zero
-    private var textBeforeSurface = ""
-    var returnGeneration by mutableIntStateOf(0)
+    private var bar by memory::bar
+    private var selection by memory::selection
+    private var textBeforeSurface by memory::textBeforeSurface
+    var returnGeneration by memory::returnGeneration
         private set
+    fun consumeReturn(): Boolean {
+        if (memory.returnedGeneration == returnGeneration) return false
+        memory.returnedGeneration = returnGeneration
+        return true
+    }
+    val focusMemory get() = memory.focus
     val state: PostEditorChromeState get() = PostEditorChromeState(source())
 
     @Composable
@@ -95,14 +98,13 @@ internal class PostEditorChromeAdapter(
     }
 
     private fun format(action: BbcodeAction) {
-        if (!consumeInformation() && canInsert) onIntent(PostEditorIntent.ToolbarActionClicked(action))
+        if (!consumeInformation() && state.canInsert) onIntent(PostEditorIntent.ToolbarActionClicked(action))
     }
-    private val canInsert get() = state.scaffold.controlsEnabled && !source().isUploading
     private fun open(name: PostEditorChromeSurface, action: () -> Unit = {}) {
         if (consumeInformation() || !state.scaffold.controlsEnabled) return
         val insertion = name in setOf(PostEditorChromeSurface.Smileys, PostEditorChromeSurface.Picker,
             PostEditorChromeSurface.Url)
-        if (insertion && !canInsert) return
+        if (insertion && !state.canInsert) return
         captureBody()
         surface = name
         action()
@@ -137,7 +139,7 @@ internal class PostEditorChromeAdapter(
     fun smiley(token: String) = insert(PostEditorIntent.SmileySelected(token))
     fun imageUrl(url: String) = insert(PostEditorIntent.ImageUrlInserted(url))
     private fun insert(intent: PostEditorIntent) {
-        if (canInsert) onIntent(intent)
+        if (state.canInsert) onIntent(intent)
         closeSurface()
     }
 
@@ -147,7 +149,8 @@ internal class PostEditorChromeAdapter(
     }
     fun pickerCancelled() = closeSurface()
     fun restoreDraft() {
-        if (source().canRestoreDraft && canInsert) {
+        // A non-blank restore can resolve an unknown edit body after the initial GET failed (#1574).
+        if (source().canRestoreDraft && state.scaffold.controlsEnabled && !source().isUploading) {
             onIntent(PostEditorIntent.DraftRestoreRequested)
             closeSurface()
         }
@@ -169,9 +172,23 @@ internal class PostEditorChromeAdapter(
         // The bar uses Dismiss for ED-44, even when this information exposes ED-45 details.
         if (action == EditorEventAction.Dismiss && consumeInformation() || event.action != action) return
         events.dispatch(EditorEventInput.Activate(key))
+        if (action == EditorEventAction.Dismiss) acknowledgeUncertainty(key)
         if (action == EditorEventAction.Details) { captureBody(); detail = event }
     }
 
+    /** Explicit Masquer only; Back and overlay closing keep the durable attempt. */
+    fun dismissDetails(key: EventKey) {
+        if (detail?.key != key) return
+        val current = currentDetail(key) != null
+        closeDetails(key)
+        if (current) acknowledgeUncertainty(key)
+    }
+    private fun acknowledgeUncertainty(key: EventKey) {
+        val attempt = events.uncertainAttempt(key) ?: return
+        if (source().submission == EditorSubmissionState.Uncertain(attempt)) {
+            onIntent(PostEditorIntent.ErrorDismissed)
+        }
+    }
     fun closeDetails(key: EventKey) {
         if (detail?.key != key) return
         events.dispatch(EditorEventInput.CloseDetails(key))
@@ -197,7 +214,8 @@ internal class PostEditorChromeAdapter(
     private fun currentDetail(key: EventKey) = detail?.takeIf { it.key == key && it in events.state.events }
     fun reload(key: EventKey) {
         val error = (currentDetail(key)?.content as? EditorEventContent.Problem)?.error ?: return
-        if (error.action != EditorErrorAction.Reload || source().isLoadingForm) return
+        val reload = error.action == EditorErrorAction.Reload || source().isAwaitingInitialBody
+        if (!reload || source().isLoadingForm) return
         onIntent(PostEditorIntent.ReloadRequested)
         closeDetails(key)
     }
@@ -215,7 +233,9 @@ internal class PostEditorChromeAdapter(
             // 22:12: a mode masked by the displayed event is skipped, never closed nor acknowledged.
             event = events.visibleEvent))
         when (action) {
-            is EditorBackAction.CloseSublevel, EditorBackAction.CloseFormat -> gesture(EditorBarGesture.Back)
+            is EditorBackAction.CloseSublevel, EditorBackAction.CloseFormat -> {
+                bar = reduceEditorBar(bar.withSubmission(source().submission), EditorBarGesture.Back)
+            }
             is EditorBackAction.Disarm -> onIntent(PostEditorIntent.SubmitConfirmationDismissed)
             is EditorBackAction.CloseEventDetails -> closeDetails(action.key)
             is EditorBackAction.ClosePanel, is EditorBackAction.CloseSheet -> { closeSurface(); onLayerBack(action) }

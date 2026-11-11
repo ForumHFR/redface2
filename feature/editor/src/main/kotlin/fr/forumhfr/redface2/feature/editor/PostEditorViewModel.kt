@@ -4,7 +4,11 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.text.TextRange
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
@@ -143,6 +147,9 @@ class PostEditorViewModel @AssistedInject constructor(
     /** The live body, selection and IME state stay in memory, outside the Bundle. */
     val bodyFieldState = TextFieldState()
     val bodyScrollState = ScrollState(0)
+    /** ED-14: hydration/restoration resets reveal without taking ownership of ED-81 scroll restoration. */
+    var bodyCaretRevealResetKey by mutableIntStateOf(0)
+        private set
     private val restoration = PostEditorRestoration(savedStateHandle)
     private var previousBody = bodyFieldState.text.toString()
     private var bodyEditedBeforeHydration = false
@@ -164,11 +171,13 @@ class PostEditorViewModel @AssistedInject constructor(
     )
     val state: StateFlow<PostEditorState> = _state.asStateFlow()
     internal val chromeEvents = PostEditorChromeEvents()
+    internal val chromeMemory = PostEditorChromeMemory()
 
     /** Capture operation transitions synchronously; observing StateFlow would lose short operations. */
     private fun updateChromeState(transform: (PostEditorState) -> PostEditorState) {
         val previous = _state.value
         _state.update(transform)
+        if (chromeEvents.state.session != submission.session) chromeMemory.reset()
         chromeEvents.open(submission.session)
         chromeEvents.observe(previous, _state.value)
     }
@@ -184,7 +193,8 @@ class PostEditorViewModel @AssistedInject constructor(
     private var loadedForm: ReplyForm? = null
         set(value) {
             field = value
-            _state.update { it.copy(hasLoadedForm = value != null, hasAuthenticatedForm = value?.isAnonymous == false) }
+            _state.update { it.copy(hasLoadedForm = value != null,
+                hasAuthenticatedForm = value?.isAnonymous == false, topicTitle = value?.sujet.orEmpty()) }
             if (value == null) smileyPicker.refreshFavorites(null)
         }
 
@@ -1017,11 +1027,14 @@ class PostEditorViewModel @AssistedInject constructor(
             EditorDraftStore.Draft(body = body).restoreOfferFingerprint()
     }
 
-    /** Explicit hydration/restore is one undoable mutation, independent of selection. */
+    /** Hydration/restore and its reveal baseline must be observed atomically, including equal bodies. */
     private fun replaceBody(body: String) {
-        bodyFieldState.edit {
-            replace(0, length, body)
-            selection = TextRange(length)
+        Snapshot.withMutableSnapshot {
+            bodyCaretRevealResetKey++
+            bodyFieldState.edit {
+                replace(0, length, body)
+                selection = TextRange(length)
+            }
         }
     }
 

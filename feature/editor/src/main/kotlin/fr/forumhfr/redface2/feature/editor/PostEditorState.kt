@@ -54,6 +54,8 @@ data class PostEditorState(
     /** Availability is evidence from the private loadedForm, never inferred from a finished GET. */
     val hasLoadedForm: Boolean = false,
     val hasAuthenticatedForm: Boolean = false,
+    /** ED-10/Q4 provisional source: loaded form only, empty when HFR omits its subject. */
+    val topicTitle: String = "",
     /** True while we POST `bddpost.php` (reply / quote) or `bdd.php` (edit). Guards against double submit. */
     val isSubmitting: Boolean = false,
     /** ED-161/169: terminal success and in-flight reservation are state, never a replayed effect. */
