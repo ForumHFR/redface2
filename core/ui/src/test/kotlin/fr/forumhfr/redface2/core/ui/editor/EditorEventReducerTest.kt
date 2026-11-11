@@ -328,7 +328,7 @@ class EditorEventReducerTest {
             EditorEventInput.OperationCompleted(session, upload),
             EditorEventInput.OperationCompleted(nextSession, upload), // A foreign token cannot finish local work.
             EditorEventInput.OperationCompleted(nextSession, submission),
-            EditorEventInput.FormLoaded(session, form),
+            formLoaded(form),
             EditorEventInput.DurableWriteSucceeded(session, upload),
             EditorEventInput.NextGesture(session),
             EditorEventInput.Activate(error.key),
@@ -360,7 +360,7 @@ class EditorEventReducerTest {
         val foreign = listOf(
             EditorEventInput.Received(lateFailure),
             EditorEventInput.OperationCompleted(session, quote),
-            EditorEventInput.FormLoaded(session, quote),
+            formLoaded(quote),
         )
         // A local ref has no embedded session: each callback must check the containing input/key.
         foreign.forEach { assertEquals(EditorEventTransition(state), reduceEditorEvents(state, it)) }
@@ -370,7 +370,7 @@ class EditorEventReducerTest {
         assertTrue(received.currentOperations.single().finished)
         listOf(
             EditorEventInput.OperationCompleted(nextSession, quote),
-            EditorEventInput.FormLoaded(nextSession, quote),
+            formLoaded(quote, session = nextSession),
         ).forEach { input ->
             val completed = reduceEditorEvents(state, input)
             assertEquals(listOf(EditorEventOperation(quote, 1, finished = true)), completed.state.currentOperations)
@@ -535,12 +535,12 @@ class EditorEventReducerTest {
         val retry = form.copy(sequence = 2)
         val loading = before.observe(retry)
         assertTrue(loading.events.contains(own))
-        assertEquals(loading, loading.step(EditorEventInput.FormLoaded(session, form)))
-        val loaded = loading.step(EditorEventInput.FormLoaded(session, retry))
+        assertEquals(loading, loading.step(formLoaded(form)))
+        val loaded = loading.step(formLoaded(retry))
         assertEquals(others, loaded.events)
         assertEquals(loaded, loaded.step(EditorEventInput.Received(problem(form, EditorErrors.invalidForm, 99))))
         val quoteRetry = quote.copy(sequence = 2)
-        val quoted = loaded.observe(quoteRetry).step(EditorEventInput.FormLoaded(session, quoteRetry))
+        val quoted = loaded.observe(quoteRetry).step(formLoaded(quoteRetry))
         assertEquals(others.drop(1), quoted.events)
         val lateFailure = EditorEventInput.Received(problem(quoteRetry, EditorErrors.quoteFetchFailed, 99))
         assertEquals(quoted, quoted.step(lateFailure))
@@ -553,7 +553,7 @@ class EditorEventReducerTest {
             val running = event(upload, EditorEventContent.InProgress(text), 2)
             val information = event(notice, EditorEventContent.Information(text), 3)
             val state = containing(loading, running, information)
-            val loaded = reduceEditorEvents(state, EditorEventInput.FormLoaded(session, ref))
+            val loaded = reduceEditorEvents(state, formLoaded(ref))
             assertEquals(listOf(running, information), loaded.state.events)
             assertEquals(running, loaded.state.visibleEvent)
             assertTrue(loaded.state.currentOperations.first().finished)
@@ -575,13 +575,32 @@ class EditorEventReducerTest {
         val others = listOf(independentQuote, validationError, uncertain)
         val retry = form.copy(sequence = 2)
         val loading = containing(formFailure, quoteFailure, *others.toTypedArray()).observe(retry)
-        val unresolved = loading.step(EditorEventInput.FormLoaded(session, retry))
+        val unresolved = loading.step(formLoaded(retry))
         assertEquals(listOf(quoteFailure) + others, unresolved.events)
-        val resolved = loading.step(EditorEventInput.FormLoaded(session, retry, quotesResolved = true))
+        val resolved = loading.step(formLoaded(retry, quotesResolved = true))
         assertEquals(others, resolved.events)
         assertTrue(resolved.currentOperations.first { it.ref == retry }.finished)
         val late = EditorEventInput.Received(problem(retry, EditorErrors.quoteFetchFailed, 6))
         assertEquals(resolved, resolved.step(late))
+    }
+
+    @Test
+    fun `surface read resolution cannot purge another read kind send errors or ambiguous results`() {
+        val own = problem(form.copy(sequence = 0), EditorErrors.sessionExpired, 1)
+        val readUncertainty = problem(form, EditorErrors.uncertain, 2)
+        val sendUncertainty = submission.copy(token = SubmissionToken(2, session))
+        val survivors = listOf(
+            readUncertainty,
+            problem(quote, EditorErrors.sessionExpired, 3),
+            problem(submission, EditorErrors.sessionExpired, 4),
+            problem(sendUncertainty, EditorErrors.uncertain, 5),
+            problem(validation, EditorErrors.missingTitle, 6),
+        )
+        val retry = form.copy(sequence = 2)
+        val loading = containing(own, *survivors.toTypedArray()).observe(retry)
+        val loaded = loading.step(EditorEventInput.FormLoaded(session, retry, resolvesError = { _, _ -> true }))
+        assertEquals(survivors, loaded.events)
+        assertTrue(loaded.currentOperations.single { it.ref == retry }.finished)
     }
 
     @Test
@@ -812,7 +831,7 @@ class EditorEventReducerTest {
         val direct = reduceEditorEvents(containing(error), EditorEventInput.Acknowledge(error.key))
         assertEquals(EditorEventTransition(closed.state), direct)
         val retry = quote.copy(sequence = 2)
-        val retried = closed.state.observe(retry).step(EditorEventInput.FormLoaded(session, retry))
+        val retried = closed.state.observe(retry).step(formLoaded(retry))
         assertTrue(retried.currentOperations.single().finished)
         assertEquals(retry, retried.currentOperations.single().ref)
     }
@@ -838,6 +857,15 @@ class EditorEventReducerTest {
 
     private fun problem(ref: OperationRef, error: EditorError, order: Long) =
         event(ref, EditorEventContent.Problem(error), order)
+
+    private fun formLoaded(
+        ref: OperationRef.Local,
+        quotesResolved: Boolean = false,
+        session: EditorSession = this.session,
+    ) = EditorEventInput.FormLoaded(
+        session, ref, resolvesError = { error, resolved -> error.afterFormLoaded(resolved) == null },
+        quotesResolved = quotesResolved,
+    )
 
     private fun containing(vararg events: EditorEvent): EditorEventState = events.fold(EditorEventState(session)) {
         state, event -> state.observe(event.key.operation).step(EditorEventInput.Received(event))

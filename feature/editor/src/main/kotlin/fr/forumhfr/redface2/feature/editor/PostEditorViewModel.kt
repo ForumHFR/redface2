@@ -66,6 +66,12 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeFormatResult
 import fr.forumhfr.redface2.core.ui.editor.EditorCause
 import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.EditorHostMemory
+import fr.forumhfr.redface2.core.ui.editor.EditorSessionCheckpoint
+import fr.forumhfr.redface2.core.ui.editor.EditorSessionField
+import fr.forumhfr.redface2.core.ui.editor.EditorSessionRestoration
+import fr.forumhfr.redface2.core.ui.editor.EditorSessionRestore
+import fr.forumhfr.redface2.core.ui.editor.EditorSessionSurface
 import fr.forumhfr.redface2.core.ui.editor.MAX_IMAGES_PER_UPLOAD
 import fr.forumhfr.redface2.core.ui.editor.SmileyFavoriteMutations
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
@@ -150,7 +156,7 @@ class PostEditorViewModel @AssistedInject constructor(
     /** ED-14: hydration/restoration resets reveal without taking ownership of ED-81 scroll restoration. */
     var bodyCaretRevealResetKey by mutableIntStateOf(0)
         private set
-    private val restoration = PostEditorRestoration(savedStateHandle)
+    private val restoration = EditorSessionRestoration(savedStateHandle, EditorSessionSurface.Post)
     private var previousBody = bodyFieldState.text.toString()
     private var bodyEditedBeforeHydration = false
 
@@ -171,7 +177,7 @@ class PostEditorViewModel @AssistedInject constructor(
     )
     val state: StateFlow<PostEditorState> = _state.asStateFlow()
     internal val chromeEvents = PostEditorChromeEvents()
-    internal val chromeMemory = PostEditorChromeMemory()
+    internal val chromeMemory = EditorHostMemory<PostEditorChromeSurface>()
 
     /** Capture operation transitions synchronously; observing StateFlow would lose short operations. */
     private fun updateChromeState(transform: (PostEditorState) -> PostEditorState) {
@@ -286,7 +292,7 @@ class PostEditorViewModel @AssistedInject constructor(
             success = { value -> _effects.trySend(value) },
             durableWriteSucceeded = chromeEvents::durableWriteSucceeded,
             clearError = { error ->
-                _state.update { if (it.submitError == error) it.copy(submitError = null) else it }
+                updateChromeState { if (it.submitError == error) it.copy(submitError = null) else it }
             },
         ),
     )
@@ -706,16 +712,18 @@ class PostEditorViewModel @AssistedInject constructor(
             _state.update { it.copy(quoteFetchFailures = 0) }
         }
         restoration.bind(owner, draftKey)
-        if (entry != null && !submission.blocksMutation) {
-            if (entry.attempt != null) {
+        val restore = restoration.resolve(entry, owner, draftKey, allowResume = !reconcile)
+        if (entry != null && !submission.blocksMutation && restore != EditorSessionRestore.None) {
+            if (restore == EditorSessionRestore.Uncertain) {
                 restoreAttempt(entry.draft)
                 if (restoration.matches(entry, owner, draftKey)) restoreViewport(entry.draft.body.length)
-            } else if (!reconcile && restoration.matches(entry, owner, draftKey)) {
+            } else if (restore == EditorSessionRestore.Resume) {
                 replaceBody(entry.draft.body)
                 previousBody = entry.draft.body
                 restoreViewport(entry.draft.body.length)
                 resetUndoBaseline()
                 _state.update { it.copy(draftHydratedFromForm = true, restorableDraft = null) }
+                restoration.decide(EditorSessionField.Body)
             } else {
                 restoreOrdinaryDraft(entry.draft, reconcile)
             }
@@ -788,6 +796,8 @@ class PostEditorViewModel @AssistedInject constructor(
                 restorableDraft = null, submitError = EditorErrors.uncertain,
             )
         }
+        // S2: a blank uncertain edit stays unknown until a successful form GET (#1574).
+        if (_state.value.draftHydratedFromForm) restoration.decide(EditorSessionField.Body)
     }
 
     private fun PostEditorState.canOfferDraftRestore(cachedBody: String, liveBody: String): Boolean =
@@ -815,7 +825,7 @@ class PostEditorViewModel @AssistedInject constructor(
         lastCheckpointVersion = version
         pendingCheckpoints++
         stoppedBody = draft.body
-        restoration.capture(draft, version, bodyFieldState.selection, checkpointScroll())
+        captureSessionCheckpoint(draft, version)
         viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
             try {
                 val result = submission.flush(::draftSnapshot)
@@ -841,13 +851,18 @@ class PostEditorViewModel @AssistedInject constructor(
     private fun checkpointScroll(): Int = restoration.scrollToRestore ?: bodyScrollState.value
 
     private fun captureCheckpoint(draft: EditorDraftStore.Draft, version: Long) {
-        // #1574: storage writes (including discard) cannot certify an unknown edit body.
-        if (_state.value.isAwaitingInitialBody) return
         // A queued write may start after a later ON_STOP has already reserved its revision.
         if (version < lastCheckpointVersion) return
         if (bodyFieldState.text.toString() == draft.body) {
-            restoration.capture(draft, version, bodyFieldState.selection, checkpointScroll())
+            captureSessionCheckpoint(draft, version)
         }
+    }
+
+    private fun captureSessionCheckpoint(draft: EditorDraftStore.Draft, version: Long) {
+        restoration.capture(
+            EditorSessionCheckpoint(draft, version, bodyFieldState.selection, checkpointScroll()),
+            bodyKnown = !_state.value.isAwaitingInitialBody,
+        )
     }
 
     private fun draftSnapshot(): EditorDraftStore.Draft? {
@@ -856,7 +871,9 @@ class PostEditorViewModel @AssistedInject constructor(
         // #405: C is durable in the main row; the undecided D stays only in restorableDraft.
         val undecidedBlank = liveBody.isBlank() && snapshot.restorableDraft != null
         // #1574: only a known body can resume ED-81, including an intentional user clearing.
-        return if (snapshot.isAwaitingInitialBody || undecidedBlank) null else EditorDraftStore.Draft(body = liveBody)
+        return if (restoration.canCheckpoint(!snapshot.isAwaitingInitialBody, undecidedBlank)) {
+            EditorDraftStore.Draft(body = liveBody)
+        } else null
     }
 
     /** #604 lot 4a — one-shot latch : a committed close is never re-emitted (gate #803). */
@@ -924,6 +941,7 @@ class PostEditorViewModel @AssistedInject constructor(
                     }
                 }
             }
+            PostEditorIntent.DraftWriteFailureDismissed -> submission.acknowledgeLocal()
             PostEditorIntent.ReloadRequested -> reloadForm()
             PostEditorIntent.PendingQuoteIgnored -> ignorePendingQuote()
             PostEditorIntent.PendingQuoteResumed -> resumeDormantQuote()
@@ -1283,7 +1301,7 @@ class PostEditorViewModel @AssistedInject constructor(
 
     /** An empty edit textarea is a known server seed; a missing textarea is rejected by the parser. */
     private fun PostEditorState.shouldHydrateBody(form: ReplyForm): Boolean =
-        !draftHydratedFromForm && bodyFieldState.text.isBlank() &&
+        !draftHydratedFromForm && restoration.canHydrate(EditorSessionField.Body, bodyFieldState.text.isBlank()) &&
             (mode == PostEditorMode.Edit || form.initialContent.isNotBlank())
 
     /** Pure metadata reduction; refetches preserve the live field and the user's option choices. */
@@ -1378,6 +1396,7 @@ class PostEditorViewModel @AssistedInject constructor(
         val form = loadedForm
         if (!snapshot.canSubmit || form == null || closeRequested) return
         if (form.isAnonymous) {
+            updateChromeState { it.copy(submitError = null) }
             updateChromeState { it.copy(submitError = ReplyFailureReason.LoginRequired.toEditorError()) }
         } else {
             val permit = submission.request(intent.timeoutMillis, snapshot.canSubmit && !closeRequested)

@@ -157,7 +157,11 @@ internal class EditorScaffoldFixture {
                                 calls += "detail-close"
                                 if (chrome.value.event?.key == key) chrome.value = chrome.value.copy(event = null)
                                 detail.value = null
-                            }, { calls += "reload" }, onReturnToBody, Modifier.fillMaxSize(), body = {
+                            }, { calls += "reload" }, onReturnToBody, Modifier.fillMaxSize(), onDismiss = { key ->
+                                calls += "detail-close"
+                                if (chrome.value.event?.key == key) chrome.value = chrome.value.copy(event = null)
+                                detail.value = null
+                            }, body = {
                                 DisposableEffect(Unit) { onDispose { disposals++ } }
                                 bodyContent()
                             })

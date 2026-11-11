@@ -83,12 +83,19 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorAction
 import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
+import fr.forumhfr.redface2.core.ui.editor.EditorEventCollector
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
+import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
+import fr.forumhfr.redface2.core.ui.editor.EditorEventProjection
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorText
+import fr.forumhfr.redface2.core.ui.editor.OperationRef
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.toEditorError
+import io.mockk.every
+import io.mockk.mockkConstructor
+import io.mockk.unmockkConstructor
 import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -114,6 +121,7 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -1412,12 +1420,17 @@ class PostEditorViewModelTest {
         val adapter = vm.chromeAdapter()
         val key = vm.chromeEvents.state.visibleEvent!!.key
         adapter.barActions.onEvent(key, EditorEventAction.Details)
+        val acknowledgement = CompletableDeferred<Unit>()
+        draftStore.finishGate = acknowledgement
         adapter.dismissDetails(key)
+        assertTrue(vm.state.value.submission is EditorSubmissionState.PersistingAttempt)
+        vm.assertNoSendingEvent(expectedSubmissions = 0)
+        acknowledgement.complete(Unit)
         settleBody()
         assertNull(adapter.detail)
         assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
-        // The acknowledgement reserves PersistingAttempt: no « Envoi… » may outlive it (Fable PR 4 r3 B1).
-        vm.assertNoSendingEvent()
+        // Acknowledgement must never register a send, including while storage is suspended.
+        vm.assertNoSendingEvent(expectedSubmissions = 0)
         assertNull(vm.chromeEvents.state.visibleEvent)
         assertNull(draftStore.entries[attempt.key]?.attempt)
         assertEquals("uncertain body", vm.bodyFieldState.text.toString())
@@ -1444,14 +1457,155 @@ class PostEditorViewModelTest {
         val adapter = vm.chromeAdapter()
         val key = vm.chromeEvents.state.visibleEvent!!.key
         adapter.barActions.onEvent(key, EditorEventAction.Details)
+        val acknowledgement = CompletableDeferred<Unit>()
+        draftStore.finishGate = acknowledgement
         adapter.dismissDetails(key)
+        assertTrue(vm.state.value.submission is EditorSubmissionState.PersistingAttempt)
+        vm.assertNoSendingEvent(expectedSubmissions = 1)
+        acknowledgement.complete(Unit)
         settleBody()
         assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
-        vm.assertNoSendingEvent()
+        vm.assertNoSendingEvent(expectedSubmissions = 1)
         assertNull(vm.chromeEvents.state.visibleEvent)
         assertNull(draftStore.entries[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)]?.attempt)
         assertEquals("sent body", vm.bodyFieldState.text.toString())
         assertEquals(1, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `ED45 ED170 local Masquer in Ready allows the next failed autosave to deliver information`() = runTest {
+        assertLocalMasquerReleasesAutosave(rearm = false)
+    }
+
+    @Test
+    fun `ED45 ED170 local Masquer after rearming allows the next failed autosave to deliver information`() = runTest {
+        assertLocalMasquerReleasesAutosave(rearm = true)
+    }
+
+    @Test
+    fun `ED132 local Masquer bypasses the dormant quote projection veto and uses the real binding state`() = runTest {
+        val vm = newReplyViewModel()
+        settleBody()
+        draftStore.beginFailure = IOException("disk full")
+        vm.editBody(TextFieldValue("unsent body"))
+        vm.dispatch(PostEditorIntent.SubmitClicked())
+        assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
+        assertEquals(EditorErrors.draftWriteFailed, vm.state.value.submitError)
+
+        // Deliberately lag the UI projection: only the real binding may guard local acknowledgement.
+        // A consistent dormant projection implies Uncertain, which the domain must refuse independently.
+        @Suppress("UNCHECKED_CAST")
+        val projected = PostEditorViewModel::class.java.getDeclaredField("_state").run {
+            isAccessible = true
+            get(vm) as MutableStateFlow<PostEditorState>
+        }
+        val pending = listOf(card(101))
+        projected.value = projected.value.copy(
+            pendingQuotes = pending, submission = EditorSubmissionState.Uncertain(null),
+        )
+        assertTrue(vm.state.value.hasDormantQuote)
+        val writes = draftStore.writes
+        val intents = mutableListOf<PostEditorIntent>()
+        val adapter = vm.chromeAdapter(intents)
+        val key = vm.chromeEvents.state.visibleEvent!!.key
+        adapter.barActions.onEvent(key, EditorEventAction.Details)
+        adapter.dismissDetails(key)
+        syncBody()
+        assertEquals(listOf(PostEditorIntent.DraftWriteFailureDismissed), intents)
+        assertNull(vm.state.value.submitError)
+        assertTrue(vm.state.value.hasDormantQuote)
+        assertEquals(pending, vm.state.value.pendingQuotes)
+        assertEquals(writes, draftStore.writes)
+        assertEquals(0, draftStore.finishCalls)
+        assertEquals(0, replyRepository.submitCalls)
+        assertEquals("unsent body", vm.bodyFieldState.text.toString())
+        vm.assertNoSendingEvent()
+    }
+
+    @Test
+    fun `ED132 local Masquer keeps a real dormant quote and its uncertain attempt unresolved`() = runTest {
+        val attempt = seedUncertainAttempt()
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        settleBody()
+        assertTrue(vm.state.value.hasDormantQuote)
+        val entry = draftStore.entries[attempt.key]
+        val writes = draftStore.writes
+        val finishCalls = draftStore.finishCalls
+        // An unrelated local delivery cannot use Masquer to acknowledge the durable uncertainty.
+        vm.chromeEvents.pickerProblem(EditorErrors.draftWriteFailed)
+        val local = vm.chromeEvents.state.events.single {
+            it.content == EditorEventContent.Problem(EditorErrors.draftWriteFailed)
+        }
+        val uncertain = vm.chromeEvents.state.visibleEvent!!
+        vm.chromeEvents.dispatch(EditorEventInput.Acknowledge(uncertain.key))
+        val intents = mutableListOf<PostEditorIntent>()
+        val adapter = vm.chromeAdapter(intents)
+        adapter.barActions.onEvent(local.key, EditorEventAction.Details)
+        adapter.dismissDetails(local.key)
+        syncBody()
+        assertEquals(listOf(PostEditorIntent.DraftWriteFailureDismissed), intents)
+        assertEquals(EditorSubmissionState.Uncertain(attempt), vm.state.value.submission)
+        assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
+        assertTrue(vm.state.value.hasDormantQuote)
+        assertEquals(entry, draftStore.entries[attempt.key])
+        assertEquals(writes, draftStore.writes)
+        assertEquals(finishCalls, draftStore.finishCalls)
+        assertEquals(0, replyRepository.submitCalls)
+        vm.assertNoSendingEvent()
+    }
+
+    private fun TestScope.assertLocalMasquerReleasesAutosave(rearm: Boolean) {
+        val vm = newReplyViewModel(
+            userPreferencesRepository = FakeUserPreferencesRepository(confirmBeforePosting = rearm),
+        )
+        settleBody()
+        draftStore.beginFailure = IOException("disk full")
+        vm.editBody(TextFieldValue("unsent body"))
+        vm.dispatch(PostEditorIntent.SubmitClicked())
+        if (rearm) {
+            testScheduler.advanceTimeBy(401)
+            vm.dispatch(PostEditorIntent.SubmitConfirmed(vm.state.value.armToken))
+        }
+        assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
+        assertEquals(EditorErrors.draftWriteFailed, vm.state.value.submitError)
+        assertEquals(1, draftStore.beginCalls)
+        val intents = mutableListOf<PostEditorIntent>()
+        val adapter = vm.chromeAdapter(intents)
+        if (rearm) {
+            adapter.submitActions.onSubmit()
+            syncBody()
+            assertTrue(vm.state.value.submission is EditorSubmissionState.Armed)
+        }
+        val submission = vm.state.value.submission
+        val activity = listOf(draftStore.writes, draftStore.beginCalls, draftStore.finishCalls, draftStore.saveCount)
+        val key = vm.chromeEvents.state.visibleEvent!!.key
+        assertEquals(EditorEventContent.Problem(EditorErrors.draftWriteFailed),
+            vm.chromeEvents.state.visibleEvent?.content)
+        adapter.barActions.onEvent(key, EditorEventAction.Details)
+        adapter.dismissDetails(key)
+        syncBody()
+        assertEquals(List(if (rearm) 1 else 0) { PostEditorIntent.SubmitClicked() } +
+            PostEditorIntent.DraftWriteFailureDismissed, intents)
+        assertEquals(submission, vm.state.value.submission)
+        assertNull(vm.state.value.submitError)
+        assertNull(adapter.detail)
+        assertNull(vm.chromeEvents.state.visibleEvent)
+        assertEquals(activity,
+            listOf(draftStore.writes, draftStore.beginCalls, draftStore.finishCalls, draftStore.saveCount))
+        vm.assertNoSendingEvent()
+
+        draftStore.saveFailure = IOException("still full")
+        vm.editBody(TextFieldValue("continued composition"))
+        testScheduler.advanceTimeBy(751)
+        syncBody()
+        assertEquals(EditorErrors.draftSaveFailed, vm.state.value.submitError)
+        assertEquals(EditorEventContent.Problem(EditorErrors.draftSaveFailed),
+            vm.chromeEvents.state.visibleEvent?.content)
+        assertEquals("continued composition", vm.bodyFieldState.text.toString())
+        assertEquals(0, replyRepository.submitCalls)
+        assertEquals(0, draftStore.finishCalls)
+        vm.assertNoSendingEvent()
     }
 
     @Test
@@ -1489,13 +1643,18 @@ class PostEditorViewModelTest {
         val adapter = vm.chromeAdapter()
         val key = vm.chromeEvents.state.visibleEvent!!.key
         adapter.barActions.onEvent(key, EditorEventAction.Details)
+        val acknowledgement = CompletableDeferred<Unit>()
+        draftStore.finishGate = acknowledgement
         adapter.dismissDetails(key)
+        assertTrue(vm.state.value.submission is EditorSubmissionState.PersistingAttempt)
+        vm.assertNoSendingEvent(expectedSubmissions = 0)
+        acknowledgement.complete(Unit)
         settleBody()
         assertEquals(finishCalls + 1, draftStore.finishCalls)
         assertEquals(EditorSubmissionState.Uncertain(attempt), vm.state.value.submission)
         assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
-        // The kept uncertainty is signalled again in this session, without a dangling « Envoi… » (r3 I2).
-        vm.assertNoSendingEvent()
+        // The kept uncertainty is signalled again without ever registering a send for acknowledgement.
+        vm.assertNoSendingEvent(expectedSubmissions = 0)
         assertEquals(EditorEventContent.Problem(EditorErrors.uncertain), vm.chromeEvents.state.visibleEvent?.content)
         assertEquals(attempt, draftStore.entries[attempt.key]?.attempt?.token)
         assertEquals("uncertain body", vm.bodyFieldState.text.toString())
@@ -1559,33 +1718,86 @@ class PostEditorViewModelTest {
             { state.value }, bodyFieldState, chromeEvents, { intents += it; dispatch(it) }, {}, {}, chromeMemory,
         )
 
-    private fun PostEditorViewModel.assertNoSendingEvent() =
+    private fun PostEditorViewModel.assertNoSendingEvent(expectedSubmissions: Int? = null) {
         assertTrue(chromeEvents.state.events.none { it.content is EditorEventContent.InProgress })
+        expectedSubmissions?.let { expected ->
+            assertEquals(expected, chromeEvents.state.currentOperations.count { it.ref is OperationRef.Submission })
+        }
+    }
+
+    @Test
+    fun autosaveRecoveryObservesNullErrorBeforeDurableSuccess() = runTest {
+        withObservedProjections { projections ->
+            val vm = newReplyViewModel()
+            settleBody()
+            draftStore.saveFailure = IOException("disk full")
+            vm.editBody(TextFieldValue("unsaved body"))
+            settleBody()
+            assertEquals(EditorErrors.draftSaveFailed, vm.state.value.submitError)
+            val failed = projections.last { it.submitError == EditorErrors.draftSaveFailed }
+            projections.clear()
+
+            draftStore.saveFailure = null
+            vm.editBody(TextFieldValue("saved body"))
+            settleBody()
+            val reset = projections.indexOfFirst {
+                it.submitError == null && it.durableWriteGeneration == failed.durableWriteGeneration
+            }
+            val durable = projections.indexOfFirst { it.durableWriteGeneration > failed.durableWriteGeneration }
+            assertTrue("The collector must observe clearError before durableWriteSucceeded", reset >= 0)
+            assertTrue("The successful write must follow the observed reset", durable > reset)
+            assertNull(projections[durable].submitError)
+            assertNull(vm.state.value.submitError)
+            assertTrue(vm.chromeEvents.state.events.isEmpty())
+            assertEquals("saved body", draftStore.saved[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)]?.body)
+        }
+    }
 
     @Test
     fun `successful draft write preserves a newer form loading error`() = runTest {
-        val vm = newReplyViewModel()
-        settleBody()
-        draftStore.saveFailure = IOException("disk full")
-        vm.editBody(TextFieldValue("unsaved body"))
-        settleBody()
-        assertEquals(EditorErrors.draftSaveFailed, vm.state.value.submitError)
+        withObservedProjections { projections ->
+            val vm = newReplyViewModel()
+            settleBody()
+            draftStore.saveFailure = IOException("disk full")
+            vm.editBody(TextFieldValue("unsaved body"))
+            settleBody()
+            assertEquals(EditorErrors.draftSaveFailed, vm.state.value.submitError)
 
-        replyRepository.formException = IOException("offline")
-        vm.dispatch(PostEditorIntent.ReloadRequested)
-        settleBody()
-        assertTrue(vm.chromeEvents.state.events.any {
-            (it.content as? EditorEventContent.Problem)?.error == EditorErrors.draftSaveFailed
-        })
-        assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
-        draftStore.saveFailure = null
-        vm.editBody(TextFieldValue("saved body"))
-        settleBody()
-        assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
-        assertEquals(listOf(EditorErrors.formNetwork), vm.chromeEvents.state.events.mapNotNull {
-            (it.content as? EditorEventContent.Problem)?.error
-        })
-        assertEquals("saved body", draftStore.saved[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)]?.body)
+            replyRepository.formException = IOException("offline")
+            vm.dispatch(PostEditorIntent.ReloadRequested)
+            settleBody()
+            assertTrue(vm.chromeEvents.state.events.any {
+                (it.content as? EditorEventContent.Problem)?.error == EditorErrors.draftSaveFailed
+            })
+            assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
+            val generation = projections.last().durableWriteGeneration
+            projections.clear()
+            draftStore.saveFailure = null
+            vm.editBody(TextFieldValue("saved body"))
+            settleBody()
+            assertTrue(projections.any { it.durableWriteGeneration > generation })
+            assertTrue(projections.all { it.submitError == EditorErrors.formNetwork })
+            assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
+            assertEquals(listOf(EditorErrors.formNetwork), vm.chromeEvents.state.events.mapNotNull {
+                (it.content as? EditorEventContent.Problem)?.error
+            })
+            assertEquals("saved body", draftStore.saved[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)]?.body)
+        }
+    }
+
+    private fun withObservedProjections(block: (MutableList<EditorEventProjection>) -> Unit) {
+        // StateFlow and the final event queue cannot reveal a reset that bypassed the collector.
+        mockkConstructor(EditorEventCollector::class)
+        try {
+            val projections = mutableListOf<EditorEventProjection>()
+            every { anyConstructed<EditorEventCollector>().observe(any(), any()) } answers {
+                projections += secondArg<EditorEventProjection>()
+                callOriginal()
+            }
+            block(projections)
+        } finally {
+            unmockkConstructor(EditorEventCollector::class)
+        }
     }
 
     @Test
@@ -1893,6 +2105,32 @@ class PostEditorViewModelTest {
             )
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `anonymous submit refusals deliver distinct events after acknowledgement`() = runTest {
+        replyRepository.formResult = Result.success(anonymousForm())
+        val vm = newReplyViewModel()
+        vm.editBody(TextFieldValue("Hello!"))
+        val initial = requireNotNull(vm.chromeEvents.state.visibleEvent)
+        vm.chromeEvents.dispatch(EditorEventInput.Acknowledge(initial.key))
+        assertNull(vm.chromeEvents.state.visibleEvent)
+
+        val keys = List(2) {
+            vm.dispatch(PostEditorIntent.SubmitClicked())
+            val event = requireNotNull(vm.chromeEvents.state.visibleEvent)
+            assertEquals(EditorEventContent.Problem(EditorErrors.loginRequired), event.content)
+            assertEquals(listOf(event), vm.chromeEvents.state.events)
+            vm.chromeEvents.dispatch(EditorEventInput.Activate(event.key))
+            assertEquals(event.key, vm.chromeEvents.state.detailKey)
+            vm.chromeEvents.dispatch(EditorEventInput.CloseDetails(event.key))
+            assertNull(vm.chromeEvents.state.visibleEvent)
+            assertEquals(EditorErrors.loginRequired, vm.state.value.submitError)
+            event.key
+        }
+        assertNotEquals(keys.first(), keys.last())
+        assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
+        assertEquals(0, replyRepository.submitCalls)
     }
 
     @Test

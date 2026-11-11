@@ -40,6 +40,9 @@ dependencies {
     implementation(libs.androidx.exifinterface)
     // #959 — Lifecycle.currentStateAsState() gates GIF animation on RESUMED (§3 GIF).
     implementation(libs.androidx.lifecycle.runtime.compose)
+    // ED-81: shared session metadata is owned by each surface's SavedStateHandle.
+    // No lifecycle-viewmodel-savedstate alias in the catalogue yet; keep the existing transitive dependency.
+    implementation(libs.androidx.lifecycle.viewmodel.compose)
     // Coil 3 split the network fetcher out of coil-compose. Without this dependency, AsyncImage
     // resolves http(s) models to a no-op and every smiley / inline / block image stays on its
     // placeholder. The dependency must reach :app's runtime classpath, so it lives here next to
@@ -47,6 +50,7 @@ dependencies {
     implementation(libs.coil.network.okhttp)
 
     testImplementation(libs.junit4)
+    testImplementation(testFixtures(project(":core:domain")))
     // #956 (passe images, Lot 1A) — the segmentation policy tests parse the REAL bench fixture
     // (charte : fixtures from live HFR, they dictate exhaustiveness). Test-only dependency on the
     // parser's MAIN classes ; the fixture HTML itself lives in THIS module's test resources.

@@ -6,22 +6,17 @@ import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
-import androidx.compose.material3.Switch
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -45,6 +40,7 @@ import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.ui.editor.EditorBackAction
 import fr.forumhfr.redface2.core.ui.editor.EditorBackState
 import fr.forumhfr.redface2.core.ui.editor.EditorChromeMetrics
+import fr.forumhfr.redface2.core.ui.editor.EditorHostMemory
 import fr.forumhfr.redface2.core.ui.editor.EditorScaffold
 import fr.forumhfr.redface2.core.ui.editor.EditorTooltipHost
 import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
@@ -137,7 +133,7 @@ internal fun PostEditorContent(
     modifier: Modifier = Modifier,
     bodyScrollState: ScrollState = rememberScrollState(),
     chromeEvents: PostEditorChromeEvents = remember { PostEditorChromeEvents() },
-    chromeMemory: PostEditorChromeMemory = remember { PostEditorChromeMemory() },
+    chromeMemory: EditorHostMemory<PostEditorChromeSurface> = remember { EditorHostMemory() },
     windowMetrics: EditorWindowMetrics? = null,
     bodyCaretRevealResetKey: () -> Int = { 0 },
 ) {
@@ -230,78 +226,6 @@ private fun PostEditorChrome(
                 // Reducing a sublevel or Format here still returns keyboard focus to its bar trigger.
                 BackHandler(onBack = back)
             })
-    }
-}
-
-@Composable
-@Suppress("LongParameterList") // HFR options + callbacks + enabled — each is user-editable.
-internal fun PostEditorOptions(
-    signatureEnabled: Boolean,
-    smileyDisabled: Boolean,
-    emailNotificationEnabled: Boolean,
-    msgIcon: Int,
-    enabled: Boolean,
-    onSignatureChanged: (Boolean) -> Unit,
-    onSmileyDisabledChanged: (Boolean) -> Unit,
-    onEmailNotificationChanged: (Boolean) -> Unit,
-    onMsgIconSelected: (Int) -> Unit,
-    expandedTone: Boolean = false,
-) {
-    Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
-        Text(
-            text = stringResource(R.string.editor_options_title),
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        OptionToggle(
-            label = stringResource(R.string.editor_option_signature),
-            checked = signatureEnabled,
-            enabled = enabled,
-            onCheckedChange = onSignatureChanged,
-        )
-        OptionToggle(
-            label = stringResource(R.string.editor_option_smiley_disabled),
-            checked = smileyDisabled,
-            enabled = enabled,
-            onCheckedChange = onSmileyDisabledChanged,
-        )
-        OptionToggle(
-            label = stringResource(R.string.editor_option_email_notification),
-            checked = emailNotificationEnabled,
-            enabled = enabled,
-            onCheckedChange = onEmailNotificationChanged,
-        )
-        MessageIconPicker(
-            selectedIcon = msgIcon,
-            enabled = enabled,
-            onIconSelected = onMsgIconSelected,
-            alwaysExpanded = expandedTone,
-        )
-    }
-}
-
-@Composable
-private fun OptionToggle(
-    label: String,
-    checked: Boolean,
-    enabled: Boolean,
-    onCheckedChange: (Boolean) -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            modifier = Modifier.padding(end = 16.dp),
-        )
-        Switch(
-            checked = checked,
-            enabled = enabled,
-            onCheckedChange = onCheckedChange,
-        )
     }
 }
 

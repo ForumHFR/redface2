@@ -92,6 +92,7 @@ class EditorPanelsKeyboardTest {
                     if (details.value) EditorEventDetails(
                         event = event.takeIf { open.value }, bodyState = bodyState,
                         onClose = { open.value = false }, onReload = {}, onReturnToBody = restore,
+                        onDismiss = { open.value = false },
                         modifier = Modifier.fillMaxSize(), body = body,
                     ) else EditorHeaderPanel(
                         isOpen = open.value, title = "En-tête", bodyState = bodyState,

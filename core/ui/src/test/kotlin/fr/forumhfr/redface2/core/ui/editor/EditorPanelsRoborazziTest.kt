@@ -120,6 +120,7 @@ class EditorPanelsRoborazziTest {
                     event = event.takeIf { open.value }, bodyState = bodyState,
                     onReturnToBody = { bodyFocus.requestFocus() },
                     onClose = { open.value = false }, onReload = {}, onIgnoreQuote = {},
+                    onDismiss = { open.value = false },
                     modifier = modifier, body = { Body() },
                 ) else EditorHeaderPanel(
                     isOpen = open.value, title = "Titre et sous-catégorie",

@@ -23,6 +23,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorEvent
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
 import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
+import fr.forumhfr.redface2.core.ui.editor.EditorHostMemory
 import fr.forumhfr.redface2.core.ui.editor.EditorLocalOperation
 import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
 import fr.forumhfr.redface2.core.ui.editor.EventKey
@@ -35,7 +36,7 @@ import fr.forumhfr.redface2.core.ui.editor.insertBbcodeToken
 internal class PostEditorChromeFixture {
     val session = EditorSession("opening", "alice", "reply:23:42")
     val events = PostEditorChromeEvents().apply { open(session) }
-    val memory = PostEditorChromeMemory()
+    val memory = EditorHostMemory<PostEditorChromeSurface>()
     var state by mutableStateOf(PostEditorState(PostEditorMode.Reply, 23, 42, null, 1, 0,
         bodyText = "Bonjour", hasLoadedForm = true, hasAuthenticatedForm = true))
     val body = TextFieldState("Bonjour", TextRange(6, 1))
