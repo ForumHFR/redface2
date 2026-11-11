@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Text
 import androidx.compose.material3.TooltipAnchorPosition
@@ -74,6 +75,30 @@ fun EditorActionIcon(
 internal fun Modifier.editorCompactTargetSlot(enabled: Boolean): Modifier {
     val slot = if (enabled) EditorChromeMetrics.minimumTargetSize else 0.dp
     return sizeIn(minWidth = slot, minHeight = slot)
+}
+
+/** The same checked Eye in both bars, including the compact-height action bar. */
+@Composable
+internal fun EditorPreviewToggleButton(
+    visible: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    compactHeight: Boolean = false,
+) {
+    val label = stringResource(R.string.editor_preview_label)
+    val tooltip = stringResource(if (visible) R.string.editor_preview_hide else R.string.editor_preview_show)
+    EditorIconTooltip(tooltip) {
+        // Same geometry as EditorActionIcon: a 40 dp layer centred in a 48 dp slot in compact height.
+        Box(Modifier.editorCompactTargetSlot(compactHeight), contentAlignment = Alignment.Center) {
+            IconToggleButton(checked = visible, onCheckedChange = { onClick() },
+                modifier = modifier.size(if (compactHeight) EditorChromeMetrics(true).controlVisibleHeight else 48.dp)
+                    .editorPreviewVisibilitySemantics(visible).semantics { contentDescription = label },
+                enabled = enabled) {
+                RedfaceVectorIcon(R.drawable.ic_editor_preview)
+            }
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)

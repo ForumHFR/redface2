@@ -19,8 +19,9 @@ import fr.forumhfr.redface2.core.ui.R
  * a durable submission or abandonment of a quote. [onDismiss] handles the explicit Masquer remedy separately;
  * the host owns local or durable acknowledgement. CompleteHeader is handled by EditorHeaderPanel.
  * Supply the Message field's [bodyState] so focus transfers preserve its selection. As with
- * [EditorHeaderPanel], the host captures IME visibility before opening, prevents automatic keyboard
- * reopening if it was closed, and restores focus synchronously and that IME state in [onReturnToBody].
+ * [EditorHeaderPanel], the host captures IME visibility before opening. [onReturnToBody] enqueues a
+ * Surface return in [EditorScaffold]; its effect preserves selection and restores focus and the captured
+ * IME state after the input options update, provided the body accepts focus.
  *
  * [onReload] relaunches the host's existing GET only. Supply [onIgnoreQuote] only after two failures
  * of the SAME pending quote request; it is a distinct remedy, never a replacement for Reload.

@@ -19,6 +19,8 @@ import androidx.compose.ui.test.assertWidthIsEqualTo
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Density
@@ -90,7 +92,7 @@ class EditorBaselineRoborazziTest {
         compose.setContent {
             view = LocalView.current
             focusManager = LocalFocusManager.current
-            previewLabel = stringResource(UiR.string.editor_preview_show)
+            previewLabel = stringResource(UiR.string.editor_preview_label)
             pixelsPerDp = LocalDensity.current.density
             val density = LocalDensity.current
             CompositionLocalProvider(
@@ -137,6 +139,7 @@ class EditorBaselineRoborazziTest {
                         .assertIsDisplayed().performClick()
                     else -> Unit
                 }
+                if (scene == PostScene.Preview) assertSharedPreview()
                 record("post_${scene.name}_${orientation}_fs${fontScale}_dark$isDark", orientation, focusManager)
             }
         }
@@ -183,6 +186,7 @@ class EditorBaselineRoborazziTest {
                     TopicScene.Preview -> compose.onNodeWithContentDescription(previewLabel).performClick()
                     else -> Unit // Normal, EmptyTitle, Event, Armed and States are recorded without a tap.
                 }
+                if (scene == TopicScene.Preview) assertSharedPreview()
                 val name = "${surface.fileName}_${scene.name}_${orientation}_fs${fontScale}_dark$isDark"
                 record(name, orientation, focus)
             }
@@ -205,6 +209,12 @@ class EditorBaselineRoborazziTest {
             TopicScene.Header, TopicScene.Restore, TopicScene.Event, TopicScene.Armed -> newTopic
             TopicScene.Poll, TopicScene.States, TopicScene.Unsupported, TopicScene.MissingRoute -> !newTopic
         }
+    }
+
+    private fun assertSharedPreview() {
+        compose.onNodeWithTag("editor-preview-rendered").assertIsDisplayed()
+        compose.onNodeWithTag("editor-preview-divider-target").assertIsDisplayed()
+        compose.onNode(hasSetTextAction()).assertIsDisplayed()
     }
 
     private fun record(name: String, orientation: String, focus: FocusManager) {

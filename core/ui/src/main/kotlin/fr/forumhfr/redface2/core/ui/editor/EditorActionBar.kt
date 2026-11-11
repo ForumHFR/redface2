@@ -92,6 +92,7 @@ fun EditorActionBar(
     uploadProgress: UploadProgress? = null,
     loadingForm: Boolean = false,
     insertionsEnabled: Boolean = true,
+    onPreviewWithoutImeChange: (() -> Unit)? = null,
 ) {
     val buttonState = editorBarSubmitState(state, submitState, uploading, loadingForm)
     val armed = buttonState.armed
@@ -128,7 +129,12 @@ fun EditorActionBar(
         EditorBarMode.Image -> imageScroll
     }
     val slot: @Composable (EditorFixedSlot, Boolean) -> Unit = { fixed, visible ->
-        EditorBarFixedSlot(fixed, statuses, headerLabel, onOpenHeader, actions.onPreview,
+        EditorBarFixedSlot(fixed, statuses, headerLabel, onOpenHeader,
+            {
+                if (onPreviewWithoutImeChange != null) {
+                    focus.ownGestures { onPreviewWithoutImeChange() }(EditorBarGesture.OpenSurface)
+                } else external(actions.onPreview)
+            },
             previewVisible, controlsEnabled, visible, compactHeight, external)
     }
     val format: @Composable () -> Unit = {
@@ -241,9 +247,8 @@ private fun EditorBarFixedSlot(
     when (fixed) {
         EditorFixedSlot.Header -> EditorBarIcon(R.drawable.ic_editor_header, headerLabel,
             { onHeader?.let { external(it) } }, enabled = enabled, compactHeight = compactHeight)
-        EditorFixedSlot.Preview -> EditorBarIcon(R.drawable.ic_editor_preview,
-            stringResource(if (previewVisible) R.string.editor_preview_hide else R.string.editor_preview_show),
-            { external(onPreview) }, enabled = enabled, compactHeight = compactHeight)
+        EditorFixedSlot.Preview -> EditorPreviewToggleButton(previewVisible, onPreview,
+            Modifier.editorBarActivation(enabled, onPreview), enabled = enabled, compactHeight = compactHeight)
         else -> {
             val status = statuses[if (fixed == EditorFixedSlot.FirstStatus) 0 else 1]
             EditorStatusIcon(status?.iconRes ?: R.drawable.ic_editor_restore, status?.label.orEmpty(),

@@ -2,6 +2,7 @@
     <string name="editor_format">Mise en forme</string>
     <string name="editor_smileys">Smileys</string>
     <string name="editor_options">Options</string>
+    <string name="editor_preview_label">Aperçu</string>
     <string name="editor_preview_show">Afficher l’aperçu</string>
     <string name="editor_preview_hide">Masquer l’aperçu</string>
     <string name="editor_header_topic">Titre et sous-catégorie</string>

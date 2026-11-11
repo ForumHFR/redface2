@@ -50,6 +50,8 @@ import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.height
+import androidx.compose.ui.unit.width
 import androidx.core.app.ActivityOptionsCompat
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
@@ -85,17 +87,17 @@ class TopicFormScreenLayoutTest {
     @Composable private fun Content() {
         back = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
         inputMode = LocalInputModeManager.current
-        previewLabel = stringResource(UiR.string.editor_preview_show)
+        previewLabel = stringResource(UiR.string.editor_preview_label)
         RedfaceTheme(darkTheme = false, dynamicColor = false) {
             TopicFormTestContent(fixture.state, fixture::dispatch, fixture.body, fixture.events, fixture.memory)
         }
     }
 
-    @Test fun normalGeometryAndPanelsKeepTheLiveBody() = checkGeometry()
+    @Test fun normalGeometryAndPanelsKeepTheLiveBody() = checkGeometry(horizontalPreview = false)
     @Test @Config(qualifiers = "fr-rFR-w360dp-h330dp-xxhdpi")
-    fun compactGeometryAndPanelsKeepTheLiveBody() = checkGeometry()
+    fun compactGeometryAndPanelsKeepTheLiveBody() = checkGeometry(horizontalPreview = true)
 
-    private fun checkGeometry() {
+    private fun checkGeometry(horizontalPreview: Boolean) {
         compose.setContent { Content() }
         val field = compose.onNode(hasSetTextAction())
         field.assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT - 8.dp)
@@ -112,7 +114,22 @@ class TopicFormScreenLayoutTest {
         field.assertIsFocused()
         compose.onNodeWithContentDescription(previewLabel).assertIsDisplayed().performClick()
         compose.onNodeWithTag("topic-form-preview").assertExists()
-        field.assertDoesNotExist()
+        // ED-60/62: both windows have room for a split; the live source stays alongside the preview.
+        field.assertIsDisplayed()
+        assertEquals(id, field.fetchSemanticsNode().id)
+        compose.onNodeWithTag("editor-preview-divider-target").assertIsDisplayed()
+        val source = compose.onNodeWithTag("editor-scaffold-field").getUnclippedBoundsInRoot()
+        val preview = compose.onNodeWithTag("editor-preview-rendered").getUnclippedBoundsInRoot()
+        if (horizontalPreview) {
+            assertEquals(bounds.height, source.height)
+            assertTrue(source.width < bounds.width)
+            assertTrue(preview.left > source.right)
+        } else {
+            assertEquals(bounds.width, source.width)
+            assertTrue(source.height < bounds.height)
+            assertTrue(preview.top > source.bottom)
+        }
+        assertEquals(send, compose.onNodeWithTag("editor-bar-submit").getUnclippedBoundsInRoot())
         compose.runOnIdle { back.onBackPressed() }
         assertEquals(id, field.fetchSemanticsNode().id)
         assertEquals(bounds, compose.onNodeWithTag("editor-scaffold-field").getUnclippedBoundsInRoot())

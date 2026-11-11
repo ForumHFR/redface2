@@ -78,7 +78,7 @@ internal class EditorActionBarFixture {
     ))
 
     @Composable
-    fun Content(showBody: Boolean = true) {
+    fun Content(showBody: Boolean = true, previewVisible: Boolean = false) {
         inputMode = LocalInputModeManager.current
         val density = LocalDensity.current
         val focusManager = LocalFocusManager.current
@@ -113,7 +113,7 @@ internal class EditorActionBarFixture {
                                 if (imageUrl.value) ({ calls += "url" }) else null, !imageUrl.value),
                             Modifier.testTag("bar"), event.value, compact.value, firstStatus.value, secondStatus.value,
                             onOpenHeader = if (header.value) ({ calls += "header" }) else null,
-                            shortcut = shortcut.value, controlsEnabled = enabled.value,
+                            previewVisible = previewVisible, shortcut = shortcut.value, controlsEnabled = enabled.value,
                             uploading = uploading.value, uploadProgress = progress.value,
                             loadingForm = loading.value)
                     }

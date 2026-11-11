@@ -12,6 +12,7 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 
 /**
@@ -35,7 +36,8 @@ fun EditorOptionsSheet(
         skipPartiallyExpanded = false,
         confirmValueChange = { true },
     )
-    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
+    ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState,
+        modifier = Modifier.testTag("editor-options-sheet")) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()

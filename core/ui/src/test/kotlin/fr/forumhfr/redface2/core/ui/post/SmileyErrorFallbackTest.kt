@@ -2,7 +2,12 @@ package fr.forumhfr.redface2.core.ui.post
 
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
 import androidx.test.core.app.ApplicationProvider
@@ -14,7 +19,10 @@ import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyKind
+import fr.forumhfr.redface2.core.parser.BbcodeContentParser
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.editor.BbcodePreview
+import org.junit.After
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -52,6 +60,36 @@ class SmileyErrorFallbackTest {
             // deadUrl intentionally NOT intercepted → Coil error result.
             .build()
         SingletonImageLoader.setUnsafe(ImageLoader.Builder(context).components { add(engine) }.build())
+    }
+
+    @OptIn(coil3.annotation.DelicateCoilApi::class)
+    @After
+    fun resetImageLoader() { SingletonImageLoader.reset() }
+
+    @Test
+    fun `ED66 derived perso in preview falls back to the full typed token on image failure`() {
+        val token = "[:deleted-long-ago:1]"
+        val content = BbcodeContentParser().parse(token)
+        val ledger = MediaAttemptLedger()
+        val cache = DefaultIntrinsicMediaSizeCache()
+        composeTestRule.setContent {
+            RedfaceTheme(darkTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(LocalMediaAttemptLedger provides ledger,
+                    LocalIntrinsicMediaSizeCache provides cache) {
+                    BbcodePreview(content, mediaDiskCachePolicy = PostMediaDiskCachePolicy.DISABLED)
+                }
+            }
+        }
+        // The paragraph exposes the token as alternative text even before the image fails. Assert
+        // the displayed inline Text child, not that parent (or an arbitrary first text match).
+        val fallback = hasText(token) and hasAnyAncestor(SemanticsMatcher.keyIsDefined(PostRendererBodyColorKey))
+        composeTestRule.waitUntil(timeoutMillis = 5_000) {
+            val now = System.currentTimeMillis()
+            val failed = ledger.isFailedFresh(deadUrl, MediaAttemptKind.PROBE, now) ||
+                ledger.isFailedFresh(deadUrl, MediaAttemptKind.PAINTER, now)
+            failed && composeTestRule.onAllNodes(fallback, useUnmergedTree = true).fetchSemanticsNodes().size == 1
+        }
+        composeTestRule.onNode(fallback, useUnmergedTree = true).assertIsDisplayed()
     }
 
     @Test

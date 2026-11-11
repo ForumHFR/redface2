@@ -68,6 +68,7 @@ import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyUsageEntry
 import fr.forumhfr.redface2.core.model.SmileyWikiKeywordsResult
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.EditorPreviewKey
 import fr.forumhfr.redface2.core.model.editor.ImagePickerContract
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
@@ -2079,6 +2080,23 @@ class PostEditorViewModelTest {
         val viewModel = newReplyViewModel()
         viewModel.editBody(TextFieldValue("hello", TextRange(5)))
         assertEquals(0, previewParser.callCount)
+    }
+
+    @Test
+    fun `C8 new ViewModel after process death starts with preview closed`() = runTest {
+        val saved = SavedStateHandle()
+        val original = newReplyViewModel(savedStateHandle = saved)
+        original.editBody(TextFieldValue("Message"))
+        original.dispatch(PostEditorIntent.TogglePreview)
+        assertTrue(original.state.value.isPreviewVisible)
+        original.viewModelScope.cancel()
+        // A new VM gets the same saved values, but no surviving composition or preview visibility.
+        val restored = newReplyViewModel(savedStateHandle = SavedStateHandle(
+            saved.keys().associateWith { saved.get<Any?>(it) },
+        ))
+        assertFalse(restored.state.value.isPreviewVisible)
+        assertEquals(PostContent(emptyList()), restored.state.value.preview)
+        assertTrue(restored.previewLayout !== original.previewLayout)
     }
 
     @Test
@@ -5445,6 +5463,11 @@ class PostEditorViewModelTest {
         // #805 — false mirrors the production default (inline BBCode); the card tests opt in.
         quoteCardsEnabled: Boolean = false,
     ) : UserPreferencesRepository {
+        override fun observeEditorPreviewPositions(): Flow<Map<EditorPreviewKey, Float>> =
+            MutableStateFlow(emptyMap())
+
+        override suspend fun setEditorPreviewPosition(key: EditorPreviewKey, sourceDp: Float) = Unit
+
         private val confirmBeforePosting = MutableStateFlow(confirmBeforePosting)
         val quoteCardsEnabled = MutableStateFlow(quoteCardsEnabled)
 

@@ -39,6 +39,8 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
+import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -48,6 +50,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.pressKey
 import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.text.TextLayoutResult
@@ -63,6 +66,7 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.platform.app.InstrumentationRegistry
+import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -103,6 +107,49 @@ class EditorScaffoldBodyFocusRecreationTest {
     @Test fun closedImeAndMiddleCaret() = checkFocusedBody(open = false, selection = MIDDLE_CARET)
     @Test fun openImeAndReversedSelection() = checkFocusedBody(open = true, selection = REVERSED_SELECTION)
     @Test fun closedImeAndReversedSelection() = checkFocusedBody(open = false, selection = REVERSED_SELECTION)
+
+    @Test fun retainedClosedImeBodyStartsANewInputSessionOnTapAfterRotation() {
+        ActivityScenario.launch(BodyFocusHostActivity::class.java).use { scenario ->
+            compose.onNode(hasSetTextAction()).assertIsFocused()
+            lateinit var original: BodyFocusHostActivity
+            scenario.onActivity { original = it; it.hideIme() }
+            compose.waitForIdle()
+            val model = original.model
+            val sessions = compose.runOnIdle { model.sessions }
+            scenario.recreate()
+            scenario.onActivity {
+                assertNotSame(original, it)
+                assertSame(model, it.model)
+            }
+            compose.onNode(hasSetTextAction()).assertIsFocused()
+            compose.runOnIdle {
+                assertEquals(sessions, model.sessions)
+                assertFalse(model.inputActive)
+                assertEquals(EditorBodyFocusSnapshot(true, false), model.focus.body.snapshot)
+            }
+            // A requestFocus on this already focused field would not reopen its suppressed session.
+            // Exercise the real pointer path (not the accessibility OnClick semantics action).
+            compose.onNode(hasSetTextAction()).performTouchInput { click(center) }
+            compose.onNode(hasSetTextAction()).assertIsFocused()
+            compose.runOnIdle {
+                // BTF2 starts fromTap=true despite showKeyboardOnFocus=false, then restarts when
+                // onEditorBodyTap enables that option. Both starts follow the user's tap; the
+                // unchanged count BEFORE it proves that H never opened the closed keyboard.
+                assertEquals(sessions + 2, model.sessions)
+                assertTrue(model.inputActive)
+            }
+            // With the option enabled, another tap reuses the live session instead of restarting it.
+            compose.onNode(hasSetTextAction()).performTouchInput {
+                // Keep this a separate tap: a double tap selects text and opens native selection UI.
+                advanceEventTime(viewConfiguration.doubleTapTimeoutMillis + 1)
+                click(center)
+            }
+            compose.runOnIdle {
+                assertEquals(sessions + 2, model.sessions)
+                assertTrue(model.inputActive)
+            }
+        }
+    }
 
     private fun checkFocusedBody(open: Boolean, selection: TextRange) {
         ActivityScenario.launch(BodyFocusHostActivity::class.java).use { scenario ->
@@ -187,8 +234,13 @@ class EditorScaffoldBodyFocusRecreationTest {
                 it.inputMode.requestInputMode(InputMode.Keyboard)
                 it.model.cover = BodyFocusCover.Preview
             }
-            val toggle = compose.onNodeWithContentDescription("Afficher l’aperçu")
-            val preview = compose.onNodeWithTag("cover-focus")
+            compose.runOnIdle { assertEquals(InputMode.Keyboard, activity.inputMode.inputMode) }
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val toggle = compose.onNodeWithContentDescription(context.getString(R.string.editor_preview_label))
+                .assertIsOn()
+            val preview = compose.onNodeWithTag("cover-focus").assertIsDisplayed()
+            // The explicit Preview cover closes the scaffold's body guard. Each traversal below
+            // starts outside fieldArea: guarding the entire slot would also block this sibling.
             toggle.requestFocus().assertIsFocused()
             compose.runOnIdle { assertTrue(activity.focusManager.moveFocus(FocusDirection.Next)) }
             preview.assertIsFocused()

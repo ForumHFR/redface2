@@ -14,6 +14,8 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.unit.Density
 import fr.forumhfr.redface2.core.model.PostBlock
@@ -29,7 +31,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** R2a uses the integrated post screen; the transitional preview remains covered until R2b. */
+/** Integrated post screen for quote panels; shared preview rendered separately with the real source field. */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "fr-rFR-w360dp-h760dp-port-xxhdpi")
@@ -68,6 +70,7 @@ class PostEditorTransientRoborazziTest {
             listOf(false, true).forEach { preview ->
                 compose.runOnIdle { scenario.value = dark to preview }
                 compose.waitForIdle()
+                if (preview) compose.onNodeWithTag("editor-preview-divider-target").assertIsDisplayed()
                 val direction = if (compact) "compact" else "portrait"
                 val suffix = "${direction}_fs${fontScale}_dark$dark"
                 if (preview) capture("post_preview_$suffix") else {

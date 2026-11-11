@@ -281,6 +281,7 @@ class TopicFormRestorationScreenTest {
                         every { observeConfirmBeforePosting() } returns flowOf(true)
                         every { observeEditorImageInsert() } returns flowOf(EditorImageInsert.FULL)
                         every { observeImagePickerMode() } returns flowOf(ImagePickerMode.DEFAULT)
+                        every { observeEditorPreviewPositions() } returns flowOf(emptyMap())
                     }, store, DiagnosticsLog(), mockk<AuthRepository> {
                         every { observeAuthState() } returns flowOf(AuthState.Authenticated("tester"))
                     }, mockk(relaxed = true), mockk(relaxed = true), FakeHfrFavoriteSmileyRepository(),

@@ -27,10 +27,14 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.isRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
@@ -45,6 +49,7 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.style.LineHeightStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
@@ -71,6 +76,72 @@ import android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction as A
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class EditorAppBarTest {
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun `preview eye keeps its label and exposes checked state including when hidden during typing`() {
+        val previewVisible = mutableStateOf(false)
+        val focusMemory = EditorPreviewFocusMemory()
+        compose.setContent {
+            CompositionLocalProvider(LocalEditorPreviewFocusMemory provides focusMemory) {
+                RedfaceTheme {
+                    EditorAppBar("Répondre", "Contexte", {}, { previewVisible.value = !previewVisible.value },
+                        previewVisible = previewVisible.value)
+                }
+            }
+        }
+        val toggle = compose.onNodeWithContentDescription("Aperçu")
+        toggle.assertIsDisplayed().assertIsOff()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Checkbox))
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
+            .performClick()
+        toggle.assertIsDisplayed().assertIsOn()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Checkbox))
+        compose.runOnIdle { focusMemory.hiddenByIme = true }
+        toggle.assertIsOn()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription,
+                "Aperçu ouvert, masqué pendant la frappe"))
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))
+        toggle.performClick()
+        toggle.assertIsDisplayed().assertIsOff()
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
+    }
+
+    @Test
+    fun `app bar and compact action bar eyes expose the same label role and states`() {
+        val previewVisible = mutableStateOf(false)
+        val focusMemory = EditorPreviewFocusMemory()
+        val host = EditorActionBarFixture().apply { compact.value = true; width.value = 760.dp }
+        compose.setContent {
+            CompositionLocalProvider(LocalEditorPreviewFocusMemory provides focusMemory) {
+                RedfaceTheme {
+                    Column {
+                        EditorAppBar("Répondre", "Contexte", {}, { previewVisible.value = !previewVisible.value },
+                            Modifier.testTag("preview-app-bar"), previewVisible = previewVisible.value)
+                        host.Content(showBody = false, previewVisible = previewVisible.value)
+                    }
+                }
+            }
+        }
+        val eyes = listOf("preview-app-bar", "bar").map { tag ->
+            compose.onNode(hasContentDescription("Aperçu") and hasAnyAncestor(hasTestTag(tag)))
+        }
+        listOf(false to false, true to false, true to true, false to true).forEach { (visible, hidden) ->
+            compose.runOnIdle { previewVisible.value = visible; focusMemory.hiddenByIme = hidden }
+            eyes.forEach { eye ->
+                eye.assertIsDisplayed().assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Checkbox))
+                if (visible) eye.assertIsOn() else eye.assertIsOff()
+                if (visible && hidden) eye.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription,
+                    "Aperçu ouvert, masqué pendant la frappe"))
+                else eye.assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
+                val bounds = eye.targetBounds()
+                assertEquals(48f, bounds.width.value, 0.5f)
+                assertEquals(48f, bounds.height.value, 0.5f)
+            }
+            val compactBounds = eyes.last().getUnclippedBoundsInRoot()
+            assertEquals(40f, compactBounds.width.value, 0.5f)
+            assertEquals(40f, compactBounds.height.value, 0.5f)
+        }
+    }
 
     @Test
     fun `ED10 context is shown only when both rendered lines fit at both scales`() {
@@ -153,9 +224,10 @@ class EditorAppBarTest {
             compose.runOnIdle { inset.value = side }
             val bar = compose.onNodeWithTag("bar").getUnclippedBoundsInRoot()
             assertEquals(360f - 2 * side.value, bar.width.value, 0.5f)
-            val targets = listOf("Retour", "Afficher l’aperçu", "Citations", "Brouillon").map { label ->
+            val targets = listOf("Retour", "Aperçu", "Citations", "Brouillon").map { label ->
+                val role = if (label == "Aperçu") Role.Checkbox else Role.Button
                 compose.onNode(hasContentDescription(label) and
-                    SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
+                    SemanticsMatcher.expectValue(SemanticsProperties.Role, role))
                     .getUnclippedBoundsInRoot().also {
                         assertTrue(it.width >= 48.dp)
                         assertEquals(48f, it.height.value, 0.5f)
@@ -328,32 +400,7 @@ class EditorAppBarTest {
                 compose.runOnIdle {
                     available.value = width; scale.value = fontScale; hasCategory.value = width != 200.dp
                 }
-                val barNode = compose.onNodeWithTag("bar")
-                val bar = barNode.getUnclippedBoundsInRoot()
-                assertEquals(width.value, bar.width.value, 0.5f)
-                assertEquals(48f, bar.height.value, 0.5f)
-                val headerNode = compose.onNodeWithTag(EDITOR_APP_BAR_TITLE)
-                val header = headerNode.getUnclippedBoundsInRoot()
-                assertTrue(header.width >= 48.dp)
-                assertEquals(48f, header.height.value, 0.5f)
-                val actionLabel = if (width == 200.dp) "Modifier le titre" else "Modifier le titre et la sous-catégorie"
-                headerNode.assert(hasContentDescription("$actionLabel : Nouveau sujet, Titre et catégorie"))
-                    .performClick()
-                val back = compose.onNodeWithContentDescription("Retour").getUnclippedBoundsInRoot()
-                assertTrue(back.width >= 48.dp && back.left >= bar.left && back.right <= header.left)
-                val pxPerDp = barNode.fetchSemanticsNode().boundsInRoot.width / bar.width.value
-                listOf("Afficher l’aperçu", "Citations", "Brouillon").forEach { label ->
-                    val target = compose.onNode(hasContentDescription(label) and
-                        SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
-                    target.performScrollTo().assertIsDisplayed().performClick()
-                    val bounds = target.getUnclippedBoundsInRoot()
-                    assertTrue(bounds.width >= 48.dp && bounds.height >= 48.dp)
-                    assertTrue(bounds.left >= header.right && bounds.right <= bar.right)
-                    val clipped = target.fetchSemanticsNode().boundsInRoot
-                    assertEquals("Whole target must be reachable", bounds.width.value * pxPerDp, clipped.width, 0.5f)
-                    assertEquals(bounds.height.value * pxPerDp, clipped.height, 0.5f)
-                    assertEquals(header, headerNode.getUnclippedBoundsInRoot())
-                }
+                assertNarrowWidthActionsFit(width)
             }
         }
         assertEquals(6, headers)
@@ -378,7 +425,7 @@ class EditorAppBarTest {
         val barNode = compose.onNodeWithTag("bar")
         val bar = barNode.getUnclippedBoundsInRoot()
         val header = compose.onNodeWithTag(EDITOR_APP_BAR_TITLE).getUnclippedBoundsInRoot()
-        val preview = compose.onNodeWithContentDescription("Afficher l’aperçu").assertIsDisplayed()
+        val preview = compose.onNodeWithContentDescription("Aperçu").assertIsDisplayed()
         val bounds = preview.getUnclippedBoundsInRoot()
         assertEquals(48f, bounds.width.value, 0.5f)
         assertEquals(48f, bounds.height.value, 0.5f)
@@ -491,7 +538,7 @@ class EditorAppBarTest {
                 it.config[SemanticsActions.OnClick].label == null
             }).performClick()
         compose.onNodeWithContentDescription("Retour").performClick()
-        compose.onNodeWithContentDescription("Afficher l’aperçu").performClick()
+        compose.onNodeWithContentDescription("Aperçu").performClick()
         assertEquals(1, headers)
         assertEquals(1, closes)
         assertEquals(1, previews)
@@ -520,6 +567,36 @@ class EditorAppBarTest {
         compose.runOnIdle { compact.value = true }
         compose.onNodeWithTag(EDITOR_APP_BAR_TITLE).assertDoesNotExist()
         compose.onAllNodes(hasClickAction()).assertCountEquals(0)
+    }
+
+    private fun assertNarrowWidthActionsFit(width: Dp) {
+        val barNode = compose.onNodeWithTag("bar")
+        val bar = barNode.getUnclippedBoundsInRoot()
+        assertEquals(width.value, bar.width.value, 0.5f)
+        assertEquals(48f, bar.height.value, 0.5f)
+        val headerNode = compose.onNodeWithTag(EDITOR_APP_BAR_TITLE)
+        val header = headerNode.getUnclippedBoundsInRoot()
+        assertTrue(header.width >= 48.dp)
+        assertEquals(48f, header.height.value, 0.5f)
+        val actionLabel = if (width == 200.dp) "Modifier le titre" else "Modifier le titre et la sous-catégorie"
+        headerNode.assert(hasContentDescription("$actionLabel : Nouveau sujet, Titre et catégorie"))
+            .performClick()
+        val back = compose.onNodeWithContentDescription("Retour").getUnclippedBoundsInRoot()
+        assertTrue(back.width >= 48.dp && back.left >= bar.left && back.right <= header.left)
+        val pxPerDp = barNode.fetchSemanticsNode().boundsInRoot.width / bar.width.value
+        listOf("Aperçu", "Citations", "Brouillon").forEach { label ->
+            val role = if (label == "Aperçu") Role.Checkbox else Role.Button
+            val target = compose.onNode(hasContentDescription(label) and
+                SemanticsMatcher.expectValue(SemanticsProperties.Role, role))
+            target.performScrollTo().assertIsDisplayed().performClick()
+            val bounds = target.getUnclippedBoundsInRoot()
+            assertTrue(bounds.width >= 48.dp && bounds.height >= 48.dp)
+            assertTrue(bounds.left >= header.right && bounds.right <= bar.right)
+            val clipped = target.fetchSemanticsNode().boundsInRoot
+            assertEquals("Whole target must be reachable", bounds.width.value * pxPerDp, clipped.width, 0.5f)
+            assertEquals(bounds.height.value * pxPerDp, clipped.height, 0.5f)
+            assertEquals(header, headerNode.getUnclippedBoundsInRoot())
+        }
     }
 
     private fun textLayout(tag: String): TextLayoutResult {

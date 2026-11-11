@@ -100,6 +100,8 @@ class EditorBodyFocusMemoryTest {
             autoFocusConsumed = true
             imeBeforeSurface = true
             body.snapshot = EditorBodyFocusSnapshot(true, true)
+            preview.wasOpen = true
+            preview.returnFocus = true
         }
         val scope = object : SaverScope {
             override fun canBeSaved(value: Any) = true
@@ -109,12 +111,16 @@ class EditorBodyFocusMemoryTest {
         assertTrue(restored.autoFocusConsumed)
         assertTrue(restored.imeBeforeSurface)
         assertEquals(EditorBodyFocusSnapshot(), restored.body.snapshot)
+        assertFalse(restored.preview.wasOpen)
+        assertFalse(restored.preview.returnFocus)
         val obsolete = EditorBodyFocusObservation(memory.body, imeVisible = true)
         memory.reset()
         obsolete.focusChanged(true)
         obsolete.restored()
         assertFalse(memory.autoFocusConsumed)
         assertFalse(memory.imeBeforeSurface)
+        assertFalse(memory.preview.wasOpen)
+        assertFalse(memory.preview.returnFocus)
         assertNull(EditorBodyFocusObservation(memory.body, imeVisible = false).restore)
     }
 }

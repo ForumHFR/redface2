@@ -9,6 +9,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasSetTextAction
@@ -42,7 +43,8 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class EditorScaffoldImeTest {
     @get:Rule val compose = createComposeRule()
-    private val host = EditorScaffoldFixture()
+    // ED-53/86: saved-state restoration must discard the rotation-only body focus/IME snapshot.
+    private val host = EditorScaffoldFixture(retainSurfaceFocus = false)
     private fun field() = compose.onNode(hasSetTextAction())
 
     @Test
@@ -79,8 +81,10 @@ class EditorScaffoldImeTest {
         compose.onNodeWithText("Retour au message").performClick()
         val sessions = compose.runOnIdle { assertNull(host.inputConnection); host.inputSessions }
         restoration.emulateSavedInstanceStateRestore()
-        // R2: the saved default memory restores the consumed autofocus, so recreation does not refocus the
-        // body. Only an explicit focus request starts a new session here.
+        // The Saver keeps consumed autofocus, but neither body focus nor its closed-IME snapshot.
+        // Unlike a retained-VM rotation, this restoration must not automatically refocus the body.
+        field().assertIsNotFocused()
+        compose.runOnIdle { assertNull(host.inputConnection); assertEquals(sessions, host.inputSessions) }
         compose.runOnIdle { host.focus.requestFocus() }
         field().assertIsFocused()
         compose.runOnIdle { assertNotNull(host.inputConnection); assertTrue(host.inputSessions > sessions) }

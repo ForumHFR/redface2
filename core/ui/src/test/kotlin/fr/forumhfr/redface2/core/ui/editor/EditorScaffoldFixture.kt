@@ -15,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.input.InputModeManager
@@ -37,8 +38,8 @@ import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
 
-/** Component bench only: no screen, ViewModel, upload launcher or network submission. */
-internal class EditorScaffoldFixture {
+/** Component bench only. Retain host focus for rotation; use the Saver path for saved-state tests. */
+internal class EditorScaffoldFixture(private val retainSurfaceFocus: Boolean = true) {
     val chrome = mutableStateOf(EditorScaffoldChrome())
     val metrics = mutableStateOf(EditorWindowMetrics(740.dp, 24.dp, 30.dp))
     val width = mutableStateOf(360.dp)
@@ -47,11 +48,16 @@ internal class EditorScaffoldFixture {
     val fontPreset = mutableStateOf(FontScalePreference.L)
     val autoFocus = mutableStateOf(false)
     var inputTransformation: InputTransformation? = null
+    var fieldArea: @Composable (field: @Composable () -> Unit) -> Unit = { it() }
+    var headerContent: @Composable () -> Unit = { Text("Ajoutez un titre au sujet.") }
+    var previewAction: () -> Unit = { calls += "preview" }
+    var systemBack: (() -> Unit)? = null
     val panel = mutableStateOf(false)
     val headerLabel = mutableStateOf("Titre et sous-catégorie")
     val detail = mutableStateOf<EditorEvent?>(null)
     val body = TextFieldState((1..40).joinToString("\n") { "Ligne $it du message" }, TextRange(8, 12))
     val focus = FocusRequester()
+    val surfaceFocus = EditorSurfaceFocusMemory()
     val scroll = ScrollState(0)
     val calls = mutableListOf<String>()
     var inputConnection: InputConnection? = null
@@ -113,19 +119,22 @@ internal class EditorScaffoldFixture {
         density = LocalDensity.current
         back = LocalOnBackPressedDispatcherOwner.current!!.onBackPressedDispatcher
         inputMode = LocalInputModeManager.current
+        val focusMemory = if (retainSurfaceFocus) surfaceFocus else {
+            rememberSaveable(body, saver = EditorSurfaceFocusMemory.Saver) { EditorSurfaceFocusMemory() }
+        }
         CompositionLocalProvider(LocalDensity provides Density(density.density, scale.value)) {
-            InterceptPlatformTextInput(textInput) { Bench() }
+            InterceptPlatformTextInput(textInput) { Bench(focusMemory) }
         }
     }
 
     @Composable
-    private fun Bench() {
+    private fun Bench(focusMemory: EditorSurfaceFocusMemory) {
         RedfaceTheme(darkTheme = dark.value, dynamicColor = false,
             reading = ReadingDisplaySettings(fontScale = fontPreset.value)) {
             EditorScaffold(body, metrics.value, "Répondre", "Sujet de démonstration", chrome.value,
                 EditorActionBarActions(::gesture, { action ->
                     body.editBbcode { text, start, end -> applyBbcodeAction(action, text, start, end) }
-                }, {}, { calls += "smileys" }, { calls += "options" }, { calls += "preview" },
+                }, {}, { calls += "smileys" }, { calls += "options" }, { previewAction() },
                     { key, action ->
                         calls += "event:$action"
                         if (chrome.value.event?.key == key) when (action) {
@@ -147,9 +156,13 @@ internal class EditorScaffoldFixture {
                 modifier = Modifier.size(width.value, metrics.value.windowHeight).testTag("scaffold-bench"),
                 onOpenHeader = { panel.value = true }, bodyFocusRequester = focus, bodyScrollState = scroll,
                 headerLabel = headerLabel.value,
-                bodyFocusRestoreAllowed = !panel.value && detail.value == null && !chrome.value.previewVisible,
+                // Like production hosts: EditorPreview alone decides whether its source is covered.
+                bodyFocusRestoreAllowed = !panel.value && detail.value == null,
+                surfaceFocus = focusMemory,
                 autoFocus = autoFocus.value,
+                onSystemBack = systemBack,
                 inputTransformation = inputTransformation,
+                fieldArea = fieldArea,
                 overlay = { onReturnToBody, bodyContent ->
                     EditorHeaderPanel(panel.value, "Titre et sous-catégorie", body, { panel.value = false },
                         onReturnToBody, Modifier.fillMaxSize(), body = {
@@ -165,7 +178,7 @@ internal class EditorScaffoldFixture {
                                 DisposableEffect(Unit) { onDispose { disposals++ } }
                                 bodyContent()
                             })
-                        }) { Text("Ajoutez un titre au sujet.") }
+                        }) { headerContent() }
                 })
         }
     }

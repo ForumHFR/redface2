@@ -39,6 +39,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.node.ModifierNodeElement
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -188,18 +189,21 @@ fun BbcodeTextField(
     onSemanticsClick: (() -> Boolean)? = null,
     caretRevealResetKey: () -> Int = { 0 },
     revealCaretOnChange: Boolean = false,
+    onMinimumHeightMeasured: ((minimumHeightPx: Int, fieldHeightPx: Int) -> Unit)? =
+        LocalEditorPreviewFieldMinimum.current,
     onTextLayout: (Density.(getResult: () -> TextLayoutResult?) -> Unit)? = null,
 ) {
     val fieldInteractions = remember { MutableInteractionSource() }
     val focusRequester = remember { FocusRequester() }
-    var layout by remember(state) { mutableStateOf<TextLayoutResult?>(null) }
+    val measurements = rememberBbcodeFieldMeasurements(state, onMinimumHeightMeasured)
     var focused by remember(state) { mutableStateOf(false) }
     val currentReadOnly by rememberUpdatedState(readOnly)
     val currentResetKey by rememberUpdatedState(caretRevealResetKey)
     LaunchedEffect(state, scrollState, revealCaretOnChange) {
         if (revealCaretOnChange) {
             // Keep the measured baseline across edits. BTF2 owns focused, editable scrolling.
-            revealEditorCaret({ layout }, state, scrollState, { currentResetKey() }, { !focused || currentReadOnly })
+            revealEditorCaret({ measurements.textLayout }, state, scrollState,
+                { currentResetKey() }, { !focused || currentReadOnly })
         }
     }
     LaunchedEffect(Unit) {
@@ -224,7 +228,9 @@ fun BbcodeTextField(
     val fieldContext = remember(context) { createBbcodeTextFieldContext(context) }
     // C8: the Box records the range before BTF2's detach-time collapse, the field restores it after.
     val selectionCheckpoint = remember { SelectionDetachCheckpoint() }
-    Box(modifier = modifier.fillMaxWidth().then(SelectionDetachElement(state, selectionCheckpoint, restore = false))) {
+    Box(modifier = modifier.fillMaxWidth()
+        .onSizeChanged { measurements.fieldHeight = it.height }
+        .then(SelectionDetachElement(state, selectionCheckpoint, restore = false))) {
         CompositionLocalProvider(LocalContext provides fieldContext) {
             BasicTextField(
                 state = state,
@@ -253,7 +259,7 @@ fun BbcodeTextField(
                 ),
                 lineLimits = lineLimits,
                 onTextLayout = { getResult ->
-                    if (revealCaretOnChange) layout = getResult()
+                    measurements.textLayout = getResult()
                     onTextLayout?.invoke(this, getResult)
                 },
                 interactionSource = fieldInteractions,
@@ -268,7 +274,7 @@ fun BbcodeTextField(
                     placeholder = placeholder?.let { hint -> { Text(hint) } },
                     contentPadding = if (showLabel) OutlinedTextFieldDefaults.contentPaddingWithoutLabel()
                         else OutlinedTextFieldDefaults.contentPaddingWithoutLabel(top = 8.dp, bottom = 8.dp),
-                ), onViewportMeasured),
+                ), onViewportMeasured, measurements),
                 scrollState = scrollState,
             )
         }
@@ -402,16 +408,21 @@ private class SelectionDetachNode(
 }
 
 /** Measurement only: unlike ScrollState.viewportSize, this port is available before placement. */
-private fun measuredEditorDecorator(delegate: TextFieldDecorator, onMeasured: ((Int) -> Unit)?): TextFieldDecorator =
-    if (onMeasured == null) delegate else TextFieldDecorator { inner ->
-        delegate.Decoration {
-            Layout(content = inner) { measurables, constraints ->
-                val viewport = measurables.single().measure(constraints)
-                onMeasured(viewport.height)
-                layout(viewport.width, viewport.height) { viewport.placeRelative(0, 0) }
-            }
+private fun measuredEditorDecorator(
+    delegate: TextFieldDecorator,
+    onMeasured: ((Int) -> Unit)?,
+    measurements: BbcodeFieldMeasurements,
+): TextFieldDecorator = TextFieldDecorator { inner ->
+    delegate.Decoration {
+        Layout(content = inner) { measurables, constraints ->
+            // The capacity excludes decoration even when a short text does not fill it.
+            measurements.textCapacity = constraints.maxHeight
+            val viewport = measurables.single().measure(constraints)
+            onMeasured?.invoke(viewport.height)
+            layout(viewport.width, viewport.height) { viewport.placeRelative(0, 0) }
         }
     }
+}
 
 private data class BbcodeCaretSnapshot(
     val value: BbcodeTextSnapshot,

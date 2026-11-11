@@ -15,6 +15,7 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.EditorHostMemory
+import fr.forumhfr.redface2.core.ui.editor.EditorPreviewState
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import io.mockk.every
 import io.mockk.mockk
@@ -50,6 +51,7 @@ class EditorSubmitCallbackRestorationTest {
         every { model.bodyScrollState } returns ScrollState(0)
         every { model.bodyCaretRevealResetKey } returns 0
         every { model.bodyInputTransformation } returns InputTransformation {}
+        every { model.previewLayout } returns EditorPreviewState()
         every { model.chromeEvents } returns PostEditorChromeEvents()
         every { model.chromeMemory } returns EditorHostMemory<PostEditorChromeSurface>()
         val received = mutableListOf<PostEditorEffect.SubmitSucceeded>()
@@ -97,6 +99,7 @@ class EditorSubmitCallbackRestorationTest {
         every { model.bodyScrollState } returns ScrollState(0)
         every { model.bodyCaretRevealResetKey } returns 0
         every { model.bodyInputTransformation } returns InputTransformation {}
+        every { model.previewLayout } returns EditorPreviewState()
         every { model.editorEvents } returns TopicFormEvents()
         every { model.chromeMemory } returns TopicFormChromeMemory()
         val received = mutableListOf<TopicFormEffect.SubmitSucceeded>()

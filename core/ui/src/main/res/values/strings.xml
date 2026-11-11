@@ -277,4 +277,10 @@
     <string name="editor_action_ignore_quote">Ignorer la citation</string>
     <string name="editor_error_quote_unreadable">La demande de citation enregistrée est illisible. Vous pouvez la recharger ou ignorer la citation. Le texte et la tentative d’envoi sont conservés.</string>
     <string name="editor_summary_recipient_incomplete">Pseudo à valider</string>
+    <string name="editor_preview_divider">Séparateur entre le source et l’aperçu</string>
+    <string name="editor_preview_grow">Agrandir l’aperçu</string>
+    <string name="editor_preview_shrink">Réduire l’aperçu</string>
+    <string name="editor_preview_close_keyboard">Fermer le clavier</string>
+    <string name="editor_preview_release_keyboard">Relâcher pour fermer le clavier</string>
+    <string name="editor_preview_hidden_while_typing">Aperçu ouvert, masqué pendant la frappe</string>
 </resources>

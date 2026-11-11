@@ -83,7 +83,7 @@ class EditorActionBarLayoutTest {
         host.firstStatus.value = EditorAppBarStatus(R.drawable.ic_editor_quote, "12 citations", {}, 12)
         host.secondStatus.value = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon retrouvé", {})
         host.bar.value = EditorBarState(EditorBarMode.Format); compose.setContent { host.Content() }
-        val preview = compose.onNodeWithContentDescription("Afficher l’aperçu")
+        val preview = compose.onNodeWithContentDescription("Aperçu")
         assertTrue(preview.targetBounds().right <= bounds("editor-bar-scroll").left)
         compose.runOnIdle { host.width.value = 360.dp }; assertTrue(bounds("editor-bar-scroll").width >= 48.dp)
         preview.revealEditorControl()
@@ -125,7 +125,7 @@ class EditorActionBarLayoutTest {
             { host.calls += "draft" })
         compose.setContent { host.Content() }
         listOf(760.dp, headerBoundary() - 1.dp).forEach { width ->
-            listOf("Titre et sous-catégorie" to "header", "Afficher l’aperçu" to "preview",
+            listOf("Titre et sous-catégorie" to "header", "Aperçu" to "preview",
                 "Citations" to "quotes", "Brouillon" to "draft").forEach { (label, call) ->
                 listOf(EditorEventContent.Information(EditorText(R.string.editor_event_already_quoted)),
                     EditorEventContent.Problem(EditorErrors.noImageReceived)).forEach { content ->
@@ -160,7 +160,7 @@ class EditorActionBarLayoutTest {
         host.firstStatus.value = EditorAppBarStatus(R.drawable.ic_editor_quote, "12 citations", {}, 12)
         host.secondStatus.value = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon retrouvé", {})
         compose.setContent { host.Content() }
-        val labels = listOf("Titre et sous-catégorie", "Afficher l’aperçu", "12 citations", "Brouillon retrouvé")
+        val labels = listOf("Titre et sous-catégorie", "Aperçu", "12 citations", "Brouillon retrouvé")
         listOf(1f, 1.3f).forEach { scale ->
             listOf(360.dp, 420.dp, 468.dp, 516.dp, 564.dp, 760.dp).forEach { width ->
                 EditorBarMode.entries.forEach { mode ->
@@ -311,7 +311,7 @@ class EditorActionBarLayoutTest {
     private fun assertEventEnvelopes(compact: Boolean, events: List<EditorEvent>) {
         compose.runOnIdle { host.compact.value = compact; host.event.value = events.first() }
         val event = bounds("editor-bar-event"); val send = bounds("editor-bar-submit")
-        listOf("Titre et sous-catégorie", "Afficher l’aperçu", "12 citations", "Brouillon retrouvé").forEach {
+        listOf("Titre et sous-catégorie", "Aperçu", "12 citations", "Brouillon retrouvé").forEach {
             compose.onNodeWithContentDescription(it).assertDoesNotExist()
         }
         assertEquals(12f, event.left.value, 0.5f)

@@ -105,6 +105,19 @@ class EditorActionBarTest {
     }
 
     @Test
+    @Config(qualifiers = "fr-rFR-w760dp-h360dp-xxhdpi")
+    fun `ED32 compact preview eye dispatches once per Enter and Space key`() {
+        host.compact.value = true; host.width.value = androidx.compose.ui.unit.Dp(760f)
+        compose.setContent { host.Content() }
+        compose.runOnIdle { assertTrue(host.inputMode.requestInputMode(InputMode.Keyboard)) }
+        val preview = compose.onNodeWithContentDescription("Aperçu").revealEditorControl()
+        preview.requestFocus().assertIsFocused().performKeyInput { pressKey(Key.Enter) }
+        assertEquals(listOf("preview"), host.calls)
+        preview.assertIsFocused().performKeyInput { pressKey(Key.Spacebar) }
+        assertEquals(listOf("preview", "preview"), host.calls)
+    }
+
+    @Test
     fun `ED24 ED85 color and image return one level and color inserts without opening a surface`() {
         compose.setContent { host.Content() }; click("Mise en forme"); click("Couleur"); click("Retour")
         assertEquals(EditorBarMode.Format, host.bar.value.mode); click("Couleur")
@@ -134,7 +147,8 @@ class EditorActionBarTest {
     fun `ED23 opening a surface closes format and arm masking restores the stored mode`() {
         host.compact.value = true; host.width.value = androidx.compose.ui.unit.Dp(760f)
         compose.setContent { host.Content() }
-        click("Mise en forme"); click("Afficher l’aperçu"); assertEquals(EditorBarMode.Normal, host.bar.value.mode)
+        click("Mise en forme"); compose.onNodeWithContentDescription("Aperçu").revealEditorControl().performClick()
+        assertEquals(EditorBarMode.Normal, host.bar.value.mode)
         compose.runOnIdle { host.bar.value = EditorBarState(EditorBarMode.Format, host.arm) }
         compose.onNodeWithContentDescription("Gras").assertDoesNotExist()
         compose.onNodeWithContentDescription("Mise en forme").assertDoesNotExist()

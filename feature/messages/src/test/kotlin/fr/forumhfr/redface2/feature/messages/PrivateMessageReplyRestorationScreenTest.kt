@@ -287,6 +287,7 @@ class PrivateMessageReplyRestorationScreenTest {
                         every { observeConfirmBeforePosting() } returns flowOf(true)
                         every { observeEditorImageInsert() } returns flowOf(EditorImageInsert.FULL)
                         every { observeImagePickerMode() } returns flowOf(ImagePickerMode.DEFAULT)
+                        every { observeEditorPreviewPositions() } returns flowOf(emptyMap())
                     }, store, mockk<AuthRepository> { every { observeAuthState() } returns auth },
                     mockk(relaxed = true), mockk(relaxed = true), DiagnosticsLog(),
                     DiagnosticsClock { dispatcher.scheduler.currentTime * 1_000_000L },

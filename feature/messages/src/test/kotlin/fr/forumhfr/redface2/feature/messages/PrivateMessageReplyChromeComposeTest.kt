@@ -32,6 +32,7 @@ import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performScrollTo
@@ -181,7 +182,8 @@ class PrivateMessageReplyChromeComposeTest {
         compose.setContent { Content() }
         compose.onNodeWithContentDescription("Options").performClick()
         compose.onNodeWithText("Activer la signature").assertExists()
-        compose.onAllNodes(isToggleable()).assertCountEquals(3)
+        compose.onAllNodes(isToggleable() and hasAnyAncestor(hasTestTag("editor-options-sheet")))
+            .assertCountEquals(3)
         compose.runOnIdle {
             assertEquals(PrivateMessageReplyChromeSurface.Options, f.adapter.surface)
             f.adapter.signature(true)
@@ -198,8 +200,9 @@ class PrivateMessageReplyChromeComposeTest {
         compose.onNodeWithContentDescription("Gras").assertExists()
         compose.runOnIdle { back.onBackPressed() }
         compose.onNodeWithContentDescription("Options").assertExists()
-        compose.onNodeWithContentDescription("Afficher l’aperçu").performClick()
-        compose.onNode(hasSetTextAction()).assertDoesNotExist()
+        compose.onNodeWithContentDescription("Aperçu").performClick()
+        compose.onNode(hasSetTextAction()).assertExists()
+        compose.onNodeWithTag("editor-preview-rendered").assertIsDisplayed()
         compose.runOnIdle { back.onBackPressed() }
         compose.onNode(hasSetTextAction()).assertExists()
         compose.runOnIdle { back.onBackPressed() }

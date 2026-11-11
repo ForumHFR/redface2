@@ -65,6 +65,7 @@ fun EditorAppBar(
     closeEnabled: Boolean = true,
     previewEnabled: Boolean = true,
     headerEnabled: Boolean = true,
+    previewVisible: Boolean = false,
 ) {
     require(onOpenHeader == null || !headerActionLabel.isNullOrBlank())
     if (compactHeight) return
@@ -81,8 +82,7 @@ fun EditorAppBar(
                 EditorAppBarTitle(title, context, onOpenHeader, headerActionLabel, headerEnabled, Modifier.weight(1f))
                 Row(Modifier.widthIn(max = rowWidth - 104.dp).horizontalScroll(rememberScrollState())
                     .testTag(EDITOR_APP_BAR_ACTIONS), verticalAlignment = Alignment.CenterVertically) {
-                    EditorActionIcon(R.drawable.ic_editor_preview, stringResource(R.string.editor_preview_show),
-                        onPreview, enabled = previewEnabled)
+                    EditorPreviewToggleButton(previewVisible, onPreview, enabled = previewEnabled)
                     EditorAppBarStatusSlot(firstStatus)
                     EditorAppBarStatusSlot(secondStatus)
                 }

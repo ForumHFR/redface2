@@ -28,6 +28,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
+import fr.forumhfr.redface2.core.ui.editor.LocalEditorPreviewState
 import fr.forumhfr.redface2.core.ui.editor.EditorBackAction
 import fr.forumhfr.redface2.core.ui.editor.EditorBackState
 import fr.forumhfr.redface2.core.ui.editor.EditorHostMemory
@@ -95,20 +96,22 @@ fun PostEditorScreen(
             }
         }
     }
-    PostEditorContent(
-        state = state,
-        bodyFieldState = viewModel.bodyFieldState,
-        bodyInputTransformation = viewModel.bodyInputTransformation,
-        bodyScrollState = viewModel.bodyScrollState,
-        onIntent = remember(viewModel) { { intent: PostEditorIntent -> viewModel.submit(intent) } },
-        // #441 — the picker is driven by the shared controller (same wiring as the MP
-        // composers, cf. PrivateMessageReplyScreen) ; only SmileySelected stays an intent.
-        smileyPicker = viewModel.smileyPicker,
-        modifier = modifier,
-        chromeEvents = viewModel.chromeEvents,
-        chromeMemory = viewModel.chromeMemory,
-        bodyCaretRevealResetKey = remember(viewModel) { { viewModel.bodyCaretRevealResetKey } },
-    )
+    CompositionLocalProvider(LocalEditorPreviewState provides viewModel.previewLayout) {
+        PostEditorContent(
+            state = state,
+            bodyFieldState = viewModel.bodyFieldState,
+            bodyInputTransformation = viewModel.bodyInputTransformation,
+            bodyScrollState = viewModel.bodyScrollState,
+            onIntent = remember(viewModel) { { intent: PostEditorIntent -> viewModel.submit(intent) } },
+            // #441 — the picker is driven by the shared controller (same wiring as the MP
+            // composers, cf. PrivateMessageReplyScreen) ; only SmileySelected stays an intent.
+            smileyPicker = viewModel.smileyPicker,
+            modifier = modifier,
+            chromeEvents = viewModel.chromeEvents,
+            chromeMemory = viewModel.chromeMemory,
+            bodyCaretRevealResetKey = remember(viewModel) { { viewModel.bodyCaretRevealResetKey } },
+        )
+    }
 }
 
 @Composable
@@ -178,7 +181,7 @@ private fun PostEditorChrome(
         host.chrome(), host.barActions, host.submitState, host.submitActions,
         host.imageActions, host::closeRequested, bodyFocusRequester = focus, bodyScrollState = scroll,
         modifier = modifier, inputTransformation = transformation, autoFocus = true, surfaceFocus = host.focusMemory,
-        bodyFocusRestoreAllowed = host.surface == null && host.detail == null && !state.isPreviewVisible,
+        bodyFocusRestoreAllowed = host.surface == null && host.detail == null,
         bodyCaretRevealResetKey = bodyCaretRevealResetKey,
         onSystemBack = back,
         fieldArea = { draft ->

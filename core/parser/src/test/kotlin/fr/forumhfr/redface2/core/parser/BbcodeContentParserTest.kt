@@ -460,13 +460,14 @@ class BbcodeContentParserTest {
     }
 
     @Test
-    fun `perso smiley keeps its token as a null-url sprite (renderer shows the text)`() {
+    fun `perso smiley uses shared pure URL derivation without a registry or network`() {
         val ast = parser.parse("gg [:pierre tramo:3] !")
         val paragraph = ast.blocks.single() as PostBlock.Paragraph
         assertEquals(
             listOf(
                 PostInline.Text("gg "),
-                PostInline.Smiley(kind = SmileyKind.Perso("pierre tramo:3"), imageUrl = null),
+                PostInline.Smiley(kind = SmileyKind.Perso("pierre tramo:3"),
+                    imageUrl = "https://forum-images.hardware.fr/images/perso/3/pierre tramo.gif"),
                 PostInline.Text(" !"),
             ),
             paragraph.inlines,
