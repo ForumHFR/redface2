@@ -4719,6 +4719,79 @@ class PostEditorViewModelTest {
         assertFailedQuoteDeliveryRecovery(afterAutosave = true)
     }
 
+    @Test
+    fun `1450 account change after failed quote CAS disables recovery and preserves Q for its original owner`() = runTest {
+        var deliveryCalls = 0
+        draftStore = object : VersionedEditorDraftStore() {
+            override suspend fun consumeInlineQuoteRequest(
+                owner: String?, key: String, request: PendingInlineQuoteRequest,
+                expectedVersion: Long, draft: EditorDraftStore.Draft?,
+            ): EditorDraftStore.StoreWriteResult {
+                deliveryCalls++
+                return super.consumeInlineQuoteRequest(owner, key, request, expectedVersion, draft)
+            }
+        }
+        val auth = FakeAuthRepository(AuthState.Authenticated(checkNotNull(draftStore.activeOwner)))
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val quote = "[quotemsg=101]requested quote[/quotemsg]"
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.success(authenticatedForm(quote)))
+        val vm = newPendingQuoteOfferViewModel(authRepository = auth)
+        settleBody()
+        val pending = checkNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        val calls = mutableListOf<PostEditorIntent>()
+        val adapter = PostEditorChromeAdapter({ vm.state.value }, vm.bodyFieldState, vm.chromeEvents,
+            { calls += it; vm.dispatch(it) }, {}, {})
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
+        vm.dispatch(PostEditorIntent.DraftRestoreRequested)
+        syncBody()
+        draftStore.saveFailure = IOException("delivery CAS failed")
+        get.complete(Unit)
+        settleBody()
+        assertEquals(1, deliveryCalls)
+        assertEquals(EditorErrors.draftSaveFailed, vm.state.value.submitError)
+        assertTrue(adapter.hasPendingQuoteRecovery)
+        val failure = vm.chromeEvents.visibleEvent!!
+        adapter.barActions.onEvent(failure.key, EditorEventAction.Details)
+        assertTrue(adapter.canReload(failure.key))
+        // ED-44 may consume the first gesture under the save information.
+        adapter.open(PostEditorChromeSurface.PendingQuote)
+        adapter.open(PostEditorChromeSurface.PendingQuote)
+        assertEquals(PostEditorChromeSurface.PendingQuote, adapter.surface)
+        val originalEntries = draftStore.entries
+        val original = checkNotNull(originalEntries[key])
+        assertEquals(pending, original.draft.pendingInlineQuoteRequest)
+        val body = vm.bodyValue()
+        val writes = draftStore.writes
+        val loads = draftStore.loadCalls
+
+        draftStore.saveFailure = null
+        draftStore.activeOwner = "bob"
+        auth.states.value = AuthState.Authenticated("bob")
+        syncBody()
+        assertNull(vm.chromeEvents.state.session.owner)
+        assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
+        assertTrue(adapter.state.scaffold.controlsEnabled)
+        assertFalse(vm.state.value.isLoadingForm)
+        assertTrue(vm.state.value.blocksFormReload)
+        assertFalse(adapter.hasPendingQuoteRecovery)
+        assertFalse(adapter.canReload(failure.key))
+        adapter.reload(failure.key)
+        adapter.reloadPendingQuote()
+        vm.dispatch(PostEditorIntent.ReloadRequested)
+        settleBody()
+        assertTrue(calls.isEmpty())
+        assertEquals(body, vm.bodyValue())
+        assertTrue(vm.state.value.pendingQuotes.isNotEmpty())
+        assertEquals(original, originalEntries[key])
+        assertNull(draftStore.entries[key])
+        assertEquals(writes, draftStore.writes)
+        assertEquals(loads, draftStore.loadCalls)
+        assertEquals(1, deliveryCalls)
+        assertEquals(listOf(null, 101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
     private fun assertFailedQuoteDeliveryRecovery(afterAutosave: Boolean) {
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
         val quote = "[quotemsg=101]requested quote[/quotemsg]"
@@ -4746,6 +4819,7 @@ class PostEditorViewModelTest {
         assertPendingQuoteNotice(vm, expected = false)
         assertFalse(vm.state.value.canSubmit)
         assertFalse(adapter.state.sendActivatable)
+        assertFalse(vm.state.value.blocksFormReload)
         assertTrue(adapter.hasPendingQuoteRecovery)
         val failure = vm.chromeEvents.visibleEvent!!
 

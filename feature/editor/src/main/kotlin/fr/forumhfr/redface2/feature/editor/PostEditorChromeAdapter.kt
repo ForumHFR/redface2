@@ -66,8 +66,12 @@ internal class PostEditorChromeAdapter(
 
     // The save information may be acknowledged or retired by autosave while Q still needs its CAS.
     // Keep a recovery panel reachable from the quote status independently of that event's lifetime.
-    val hasPendingQuoteRecovery get() = source().pendingQuotes.isNotEmpty() &&
-        source().restorableDraft == null && !source().hasDormantQuote
+    val hasPendingQuoteRecovery: Boolean
+        get() {
+            val current = source()
+            if (current.blocksFormReload) return false
+            return current.pendingQuotes.isNotEmpty() && current.restorableDraft == null && !current.hasDormantQuote
+        }
     private val showPendingQuote get() = source().hasDormantQuote || hasPendingQuoteRecovery
     private val quoteCount get() = source().quotes.size + source().pendingQuotes.size
     fun signature(enabled: Boolean) = option(PostEditorIntent.ToggleSignature(enabled))
@@ -128,7 +132,8 @@ internal class PostEditorChromeAdapter(
     fun canReload(key: EventKey): Boolean {
         val error = (currentDetail(key)?.content as? EditorEventContent.Problem)?.error ?: return false
         val quoteRecovery = hasPendingQuoteRecovery && error.cause == EditorCause.DraftSaveFailed
-        return error.action == EditorErrorAction.Reload || source().isAwaitingInitialBody || quoteRecovery
+        val reloadable = error.action == EditorErrorAction.Reload || source().isAwaitingInitialBody || quoteRecovery
+        return !source().blocksFormReload && reloadable
     }
     fun reload(key: EventKey) {
         if (!canReload(key) || source().isLoadingForm) return

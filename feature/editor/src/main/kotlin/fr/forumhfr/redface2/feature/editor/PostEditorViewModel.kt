@@ -186,7 +186,7 @@ class PostEditorViewModel @AssistedInject constructor(
     /** Capture operation transitions synchronously; observing StateFlow would lose short operations. */
     private fun updateChromeState(transform: (PostEditorState) -> PostEditorState) {
         val previous = _state.value
-        _state.update(transform)
+        _state.update { transform(it).copy(blocksFormReload = submission.blocksMutation) }
         if (chromeEvents.state.session != submission.session) chromeMemory.reset()
         chromeEvents.open(submission.session)
         chromeEvents.observe(previous, _state.value)
@@ -483,7 +483,7 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     private fun reloadForm() {
-        if (!draftRestored || submission.blocksMutation || _state.value.isLoadingForm) return
+        if (!draftRestored || _state.value.blocksFormReload || _state.value.isLoadingForm) return
         if (_state.value.quoteStorageUnavailable) {
             updateChromeState { it.copy(isLoadingForm = true) }
             viewModelScope.launch {

@@ -52,6 +52,8 @@ data class PostEditorState(
     val validation: BbcodeValidation = BbcodeValidation.Idle,
     /** True while we GET `message.php` (reply / quote / edit form) to grab `hash_check`. */
     val isLoadingForm: Boolean = false,
+    /** Binding mutation guard shared by reload and its chrome affordances, including owner invalidation. */
+    val blocksFormReload: Boolean = false,
     /** Read identity is independent of a pending request: ordinary metadata may load under its offer. */
     val isFetchingQuote: Boolean = false,
     /** Availability is evidence from the private loadedForm, never inferred from a finished GET. */

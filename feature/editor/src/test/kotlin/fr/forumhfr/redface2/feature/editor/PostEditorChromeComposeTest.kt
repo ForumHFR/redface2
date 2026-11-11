@@ -176,6 +176,37 @@ class PostEditorChromeComposeTest {
         compose.onNodeWithContentDescription("1 citation, ouvrir le panneau citations").assertDoesNotExist()
     }
 
+    @Test fun `1450 invalidated binding removes quote recovery from status and open save details`() {
+        host.transition(host.state.copy(pendingQuotes = listOf(
+            QuoteSelection(QuoteLocator(1, 101, null), "", "")), submitError = EditorErrors.draftSaveFailed))
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Brouillon non écrit, Afficher les détails").performClick()
+        compose.onNodeWithText("Recharger").assertIsDisplayed()
+        compose.runOnIdle { host.transition(host.state.copy(blocksFormReload = true)) }
+        compose.onNodeWithText("Recharger").assertDoesNotExist()
+        compose.onNodeWithContentDescription("1 citation, ouvrir le panneau citations").assertDoesNotExist()
+        compose.runOnIdle {
+            host.adapter.reload(host.adapter.detail!!.key)
+            assertTrue(host.calls.isEmpty())
+            assertTrue(host.state.pendingQuotes.isNotEmpty())
+        }
+    }
+
+    @Test fun `1450 invalidated binding removes Reload from a retained pending quote panel`() {
+        host.transition(host.state.copy(pendingQuotes = listOf(QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("1 citation, ouvrir le panneau citations").performClick()
+        compose.onNodeWithText("Recharger").assertIsDisplayed()
+        compose.runOnIdle { host.transition(host.state.copy(blocksFormReload = true)) }
+        compose.onNodeWithText("Recharger").assertDoesNotExist()
+        compose.onNodeWithContentDescription("1 citation, ouvrir le panneau citations").assertDoesNotExist()
+        compose.runOnIdle {
+            host.adapter.reloadPendingQuote()
+            assertTrue(host.calls.isEmpty())
+            assertTrue(host.state.pendingQuotes.isNotEmpty())
+        }
+    }
+
     @Test fun `ED22 ED44 ED80 selection survives tools and typing then only the second tap sends`() {
         compose.setContent { Content() }
         compose.runOnIdle { focus.requestFocus() }
