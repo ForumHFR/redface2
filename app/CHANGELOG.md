@@ -16,6 +16,19 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.69.11` — `internal` (dev) — 2026-11-11
+
+Refonte de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417)) : le nouveau chrome arrive sur les quatre éditeurs. Lots R1a-1 ([#1513](https://github.com/ForumHFR/redface2/issues/1513)), R1a-2 ([#1450](https://github.com/ForumHFR/redface2/issues/1450)), R1b-1 ([#1451](https://github.com/ForumHFR/redface2/issues/1451)), R1b-2a ([#1514](https://github.com/ForumHFR/redface2/issues/1514)), R1b-2b ([#1515](https://github.com/ForumHFR/redface2/issues/1515)), R2a et R2b ([#1452](https://github.com/ForumHFR/redface2/issues/1452)), R6 ([#1516](https://github.com/ForumHFR/redface2/issues/1516)) ; PR [#1583](https://github.com/ForumHFR/redface2/pull/1583) à [#1603](https://github.com/ForumHFR/redface2/pull/1603).
+
+- **Nouveau chrome** : la réponse et la modification d'un post, la création et la modification d'un sujet, la réponse MP et le nouveau MP passent par le même éditeur. App bar (« Répondre », « Modifier », catégorie du sujet, « Nouveau message »), barre d'action en bas avec les rangées Format, Couleur et Image, panneau d'en-tête (titre et sous-catégorie du sujet, destinataires et sujet du MP). L'ancien chrome est supprimé.
+- **Reprise** : après une rotation ou la fermeture de l'app par le système, l'éditeur reprend le texte, la sélection, le défilement et l'en-tête. Le texte d'un MP ne passe jamais par l'état sauvegardé du système.
+- **Nouveau MP** : destinataires en puces, validées par la virgule, collage d'une liste accepté ; sujet limité à 70 caractères avec compteur ; « Compléter » sur un destinataire inconnu.
+- **Citations** : en mode cartes, les cartes quittent la tête du champ pour le panneau des citations (icône ❝ N de l'app bar), qui annonce ses changements à TalkBack.
+- **Aperçu** : il s'ouvre à côté du texte, dessous en portrait et à droite en paysage, avec un séparateur redimensionnable. Le clavier reste prioritaire : pendant la frappe, l'aperçu est masqué, puis revient à la fermeture du clavier.
+- **Raccourci de la barre d'action** : nouveau réglage dans « Édition et publication », « Aucun » par défaut, pour placer une action dans la barre (lien, image, smiley perso…). « Smiley perso » insère `[:]` ou enrobe la sélection.
+- **Publication** : la CD refuse un APK ou un AAB auquel manquent des modules Hilt ([#1582](https://github.com/ForumHFR/redface2/pull/1582)).
+- Suivi connu : focus TalkBack après le retrait ou le déplacement d'une carte de citation ([#1599](https://github.com/ForumHFR/redface2/issues/1599)).
+
 ## `0.69.10` — `internal` (dev) — 2026-11-09
 
 Correctif de la 0.69.9 : le build publié `app-v376` démarrait en crash. Il lui manquait les modules Hilt de `feature:topic`, perdus par une régression de KSP 2.3.13 lors de la génération de code ([google/ksp#3286](https://github.com/google/ksp/issues/3286)). Le code de l'app n'est pas en cause.
