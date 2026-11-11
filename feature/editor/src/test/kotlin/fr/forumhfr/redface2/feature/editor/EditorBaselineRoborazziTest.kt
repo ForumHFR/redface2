@@ -117,7 +117,7 @@ class EditorBaselineRoborazziTest {
         }
         captureTopics(orientation, fontScale, scenario, dark, focusManager, previewLabel)
         listOf(false, true).forEach { isDark ->
-            PostScene.entries.filter { orientation != "portrait" || it != PostScene.Panel }.forEach { scene ->
+            PostScene.entries.forEach { scene ->
                 compose.runOnIdle {
                     dark.value = isDark
                     scenario.value = Scenario(Surface.Post, filled = true, scene = scene)

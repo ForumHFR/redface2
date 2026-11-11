@@ -84,6 +84,7 @@ internal fun PostEditorTestContent(
     onIntent: (PostEditorIntent) -> Unit = {},
     body: TextFieldState = remember { TextFieldState(state.bodyText) },
     events: PostEditorChromeEvents = remember { PostEditorChromeEvents() },
+    memory: EditorHostMemory<PostEditorChromeSurface> = remember { EditorHostMemory() },
 ) {
     val scope = rememberCoroutineScope()
     val smileys = remember { SmileyPickerController(scope, searchWiki = { _, _ -> emptyList() }) }
@@ -94,7 +95,7 @@ internal fun PostEditorTestContent(
     val fallbackOwner = remember { PostEditorTestActivityResultOwner() }
     val registryOwner = LocalActivityResultRegistryOwner.current ?: fallbackOwner
     CompositionLocalProvider(LocalActivityResultRegistryOwner provides registryOwner) {
-        PostEditorContent(state, body, null, onIntent, smileys, chromeEvents = events,
+        PostEditorContent(state, body, null, onIntent, smileys, chromeEvents = events, chromeMemory = memory,
             windowMetrics = EditorWindowMetrics(height.dp, 0.dp, 0.dp))
     }
 }

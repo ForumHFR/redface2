@@ -124,6 +124,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -480,7 +481,8 @@ class PostEditorViewModelTest {
         assertEquals(listOf(portion, first, card(202)), vm.state.value.quotes)
         vm.dispatch(PostEditorIntent.QuoteRemoved(101, portion))
         assertEquals(listOf(first, card(202)), vm.state.value.quotes)
-        assertEquals(1, vm.chromeEvents.state.events.count { it.content is EditorEventContent.Information })
+        assertEquals(listOf(EditorEventContent.Information(EditorText(R.string.editor_quote_already_delivered))),
+            vm.chromeEvents.state.events.map { it.content }.filterIsInstance<EditorEventContent.Information>())
         assertEquals(0, replyRepository.submitCalls)
     }
 
@@ -5070,6 +5072,22 @@ class PostEditorViewModelTest {
             listOf(101, 303, 202),
             viewModel.state.value.quotes.map { it.numreponse },
         )
+    }
+
+    @Test
+    fun `R2a repeated exact snapshot moves preserve the card and use its current position`() = runTest {
+        val quotes = listOf(card(101), card(202), card(303), card(404))
+        val quote = quotes[2]
+        val viewModel = newReplyViewModel(initialQuotes = quotes)
+        val move = PostEditorIntent.QuoteMoved(quote.numreponse, delta = -1, quote = quote)
+
+        viewModel.dispatch(move)
+        assertEquals(listOf(quotes[0], quote, quotes[1], quotes[3]), viewModel.state.value.quotes)
+        assertSame("The Compose key remains the exact selected snapshot", quote, viewModel.state.value.quotes[1])
+
+        viewModel.dispatch(move)
+        assertEquals(listOf(quote, quotes[0], quotes[1], quotes[3]), viewModel.state.value.quotes)
+        assertSame(quote, viewModel.state.value.quotes.first())
     }
 
     @Test

@@ -4,6 +4,7 @@ import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteScope
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Test
 
@@ -22,7 +23,8 @@ class MultiQuoteBasketTest {
             .toggled(topicScope, selection(303, "carol"))
             .toggled(topicScope, selection(202, "bob"))
 
-        assertEquals(listOf(101, 303, 202), basket?.numreponses)
+        assertEquals(listOf(selection(101, "alice"), selection(303, "carol"), selection(202, "bob")),
+            basket?.selections)
         assertEquals(listOf("alice", "carol", "bob"), basket?.selections?.map { it.author })
     }
 
@@ -34,7 +36,7 @@ class MultiQuoteBasketTest {
             // The caller rebuilt a DIFFERENT snapshot and locator for the same post.
             .toggled(topicScope, selection(101, "alice-edited", page = 4, ref = null))
 
-        assertEquals(listOf(202), basket?.numreponses)
+        assertEquals(listOf(selection(202, "bob")), basket?.selections)
     }
 
     @Test
@@ -53,7 +55,7 @@ class MultiQuoteBasketTest {
             .toggled(QuoteScope.Topic(CAT, POST + 1), selection(555, "dave"))
 
         assertEquals(QuoteScope.Topic(CAT, POST + 1), basket?.scope)
-        assertEquals(listOf(555), basket?.numreponses)
+        assertEquals(listOf(selection(555, "dave")), basket?.selections)
     }
 
     @Test
@@ -70,7 +72,7 @@ class MultiQuoteBasketTest {
 
         val pruned = basket.withoutSelections(privateScope, setOf(101, 303))
 
-        assertEquals(listOf(202), pruned?.numreponses)
+        assertEquals(listOf(selection(202, "bob", page = 4, ref = 3)), pruned?.selections)
         assertEquals(basket, basket.withoutSelections(topicScope, setOf(101)))
     }
 
@@ -79,6 +81,23 @@ class MultiQuoteBasketTest {
         val basket = MultiQuoteBasket(topicScope, listOf(selection(101, "alice")))
 
         assertNull(basket.withoutSelections(topicScope, setOf(101)))
+    }
+
+    @Test
+    fun `1105 basket never exposes ids stripped of their scope and snapshots`() {
+        assertFalse(MultiQuoteBasket::class.java.methods.any { it.name == "getNumreponses" })
+    }
+
+    @Test
+    fun `same numeric id in another category replaces the scoped snapshot`() {
+        val otherScope = QuoteScope.Topic(CAT + 1, POST)
+        val quote = selection(101, "other author", page = 7)
+        val basket = (null as MultiQuoteBasket?)
+            .toggled(topicScope, selection(101, "alice"))
+            .toggled(otherScope, quote)
+
+        assertEquals(otherScope, basket?.scope)
+        assertEquals(listOf(quote), basket?.selections)
     }
 
     @Test

@@ -61,6 +61,8 @@ import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
+import fr.forumhfr.redface2.core.model.write.QuoteLocator
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.R as UiR
@@ -276,6 +278,53 @@ class PostEditorRestorationScreenTest {
     @Test fun rotationKeepsPostOptionsOverTheBody() = checkCoveredPost(PostEditorChromeSurface.Options)
     @Test fun rotationKeepsPostPreviewOverTheBody() = checkCoveredPost(null)
 
+    @Test fun quotePanelRecreationAndReturnKeepOpenKeyboard() = checkQuotePanelRecreation(imeOpen = true)
+    @Test fun quotePanelRecreationAndReturnKeepClosedKeyboard() = checkQuotePanelRecreation(imeOpen = false)
+
+    private fun checkQuotePanelRecreation(imeOpen: Boolean) {
+        var sessions = 0
+        val route = request.copy(initialQuotes = listOf(
+            QuoteSelection(QuoteLocator(1, 101, null), "Alice", "Extrait cité"),
+        ))
+        prepareRotationHost(route) { sessions++ }
+        ActivityScenario.launch(PostEditorRotationHostActivity::class.java).use { scenario ->
+            compose.onNode(hasSetTextAction()).assertIsFocused()
+            lateinit var model: PostEditorViewModel
+            val selection = TextRange(6, 1)
+            scenario.onActivity {
+                model = it.model
+                model.bodyFieldState.edit { replace(0, length, "Bonjour"); this.selection = selection }
+                it.setImeVisible(imeOpen)
+            }
+            compose.onNodeWithContentDescription("1 citation, ouvrir le panneau citations").performClick()
+            val before = compose.runOnIdle { sessions }
+            scenario.recreate()
+            compose.onNodeWithText("Retour au message").assertIsDisplayed()
+            compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
+            compose.runOnIdle {
+                assertEquals(PostEditorChromeSurface.Quotes, model.chromeMemory.surface)
+                assertEquals(selection, model.bodyFieldState.selection)
+                assertEquals(before, sessions)
+            }
+            compose.onNodeWithText("Retour au message").performClick()
+            compose.onNode(hasSetTextAction()).assertIsFocused()
+            compose.runOnIdle {
+                assertEquals(selection, model.bodyFieldState.selection)
+                assertEquals(before + if (imeOpen) 1 else 0, sessions)
+            }
+            // H still restores the focused body after returning from the quote surface.
+            scenario.onActivity { it.setImeVisible(imeOpen) }
+            compose.waitForIdle()
+            scenario.recreate()
+            compose.onNode(hasSetTextAction()).assertIsFocused()
+            compose.runOnIdle {
+                assertEquals(selection, model.bodyFieldState.selection)
+                assertEquals(before + if (imeOpen) 2 else 0, sessions)
+                assertEquals("Bonjour", model.bodyFieldState.text.toString())
+            }
+        }
+    }
+
     private fun checkCoveredPost(surface: PostEditorChromeSurface?) {
         store.preload(EditorDraftKey.reply(23, 35421), EditorDraftStore.Draft(body = "Brouillon"))
         var sessions = 0
@@ -313,7 +362,7 @@ class PostEditorRestorationScreenTest {
         }
     }
 
-    private fun prepareRotationHost(onInput: () -> Unit = {}) {
+    private fun prepareRotationHost(route: PostEditorRequest = request, onInput: () -> Unit = {}) {
         InstrumentationRegistry.getInstrumentation().setInTouchMode(true)
         val context = ApplicationProvider.getApplicationContext<Context>()
         shadowOf(context.packageManager)
@@ -323,14 +372,14 @@ class PostEditorRestorationScreenTest {
             next.startInputMethod(request)
         }
         PostEditorRotationHostActivity.render = { activity ->
-            val model = editor(activity)
+            val model = editor(activity, route)
             activity.model = model
             activity.setContent {
                 activity.view = LocalView.current
                 activity.inputMode = LocalInputModeManager.current
                 InterceptPlatformTextInput(input) {
                     RedfaceTheme(darkTheme = false, dynamicColor = false) {
-                        PostEditorScreen(request, { _, _, _, _ -> }, viewModel = model)
+                        PostEditorScreen(route, { _, _, _, _ -> }, viewModel = model)
                     }
                 }
             }

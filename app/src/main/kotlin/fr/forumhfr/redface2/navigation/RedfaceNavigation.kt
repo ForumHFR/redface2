@@ -2118,8 +2118,6 @@ internal data class MultiQuoteBasket(
     val scope: QuoteScope,
     val selections: List<QuoteSelection>,
 ) {
-    val numreponses: List<Int> get() = selections.map { it.numreponse }
-
     fun matches(scope: QuoteScope): Boolean = this.scope == scope
 }
 
