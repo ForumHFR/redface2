@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.parser.write
 
+import fr.forumhfr.redface2.core.model.write.MissingFirstPostSubcategoryException
 import org.jsoup.Jsoup
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -327,17 +328,12 @@ class TopicFormParserTest {
     }
 
     @Test
-    fun `parseEditFirstPost still fails fast when no subcat select is present (strict mode)`() {
-        // The cat-without-subcat tolerance is create-only. Edit FP stays strict :
-        // a missing `<select name=subcat>` must still fail-fast so we never silently
-        // re-categorise an existing topic on submit.
-        val html = """<html><body><form action="/bdd.php">
-            <input name="hash_check" value="HASH" />
-            <input name="sujet" value="x" />
-            <textarea name="content_form">x</textarea>
-        </form></body></html>"""
-        val result = parser.parseEditFirstPost(html)
+    fun `parseEditFirstPost exposes the missing selector refusal from a real edit response`() {
+        // This real regular-post edit response has hash_check and content_form, but no subcat selector.
+        // No FP capture without subcategories exists: keep the strict refusal, without inventing HTML.
+        val result = parser.parseEditFirstPost(readFixture("write_edit_form_test_post.html"))
         assertTrue("Edit FP must fail-fast on a missing subcat select", result.isFailure)
+        assertTrue(result.exceptionOrNull() is MissingFirstPostSubcategoryException)
     }
 
     @Test

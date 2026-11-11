@@ -384,6 +384,6 @@ internal fun TransientPanelHost(host: PostEditorChromeFixture, focus: FocusReque
         bodyFocusRestoreAllowed = host.adapter.surface == null && host.adapter.detail == null &&
             !host.state.isPreviewVisible,
         overlay = { restore, body ->
-            PostEditorChromeSurfaces(host.adapter, host.body, smileys, restore, body)
+            PostEditorChromeSurfaces(host.adapter, host.body, smileys, restore, compact, body)
         })
 }

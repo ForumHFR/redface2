@@ -44,9 +44,17 @@ data class TopicFormState(
      * which posts with `subcat=0`). Drives the [canSubmit] branch for the New
      * mode : a sub-category-less cat is submittable with `subcat=0` and no
      * explicit pick, while a cat WITH sub-categories still requires
-     * `selectedSubcat > 0`. Defaults to `true` so the historical contract holds.
+     * `selectedSubcat > 0`.
+     * Defaults to `true` so the historical contract holds.
      */
     val hasSubcategorySelect: Boolean = true,
+    /**
+     * ED-100: the strict first-post parser refused a missing selector. Only the chrome
+     * uses this refusal; [hasSubcategorySelect] keeps mirroring the last loaded form.
+     * Like that mirror, it is not saved in the ED-81 checkpoint and is rebuilt by GET.
+     * A successful form load clears it; other fetch failures keep the refusal.
+     */
+    val firstPostSubcategoryRefused: Boolean = false,
     val pollPresent: Boolean = false,
     val pollEditable: Boolean = false,
     val signatureEnabled: Boolean = false,
@@ -54,6 +62,11 @@ data class TopicFormState(
     val emailNotificationEnabled: Boolean = false,
     /** Selected HFR `MsgIcon` radio value. The topic form exposes the current 1..16 choices. */
     val msgIcon: Int = DEFAULT_MSG_ICON,
+    val isInitializing: Boolean = false,
+    /** Lock the title only while a recreated session waits for its authoritative draft read. */
+    val isRestoringSession: Boolean = false,
+    /** Successful GET in this instance; restored content alone never proves a usable form. */
+    val hasLoadedForm: Boolean = false,
     val isLoadingForm: Boolean = false,
     val isSubmitting: Boolean = false,
     /** ED-161/169: terminal success and in-flight reservation are state, never a replayed effect. */
@@ -118,6 +131,27 @@ data class TopicFormState(
     val isAwaitingInitialBody: Boolean
         get() = mode == TopicFormMode.EditFirstPost && !draftHydratedFromServer
 
+    /** ED-35: incomplete headers and anonymous forms remain activatable for a local refusal. */
+    val sendActivatable: Boolean
+        get() {
+            val formReady = hasLoadedForm && !isLoadingForm && !isInitializing
+            val bodyReady = !isAwaitingInitialBody && bodyText.isNotBlank()
+            val idle = !isSubmitting && !submission.blocksBodyMutation && !isUploading
+            val supported = mode == TopicFormMode.New || !firstPostSubcategoryRefused
+            val available = formReady && bodyReady && idle
+            return available && supported && hasSubmitContext
+        }
+
+    /** Same route requirements as the context builders; no enabled send can silently lack its route. */
+    private val hasSubmitContext: Boolean
+        get() = when (mode) {
+            TopicFormMode.New -> (cat ?: 0) > 0
+            TopicFormMode.EditFirstPost -> {
+                val topicKnown = cat != null && (subcat ?: 0) > 0 && (topicId ?: 0) > 0
+                topicKnown && (numreponse ?: 0) > 0 && page == 1
+            }
+        }
+
     /**
      * Submit is allowed when the mode-specific routing context is complete,
      * the user has typed a non-blank subject AND content, the form was
@@ -143,9 +177,10 @@ data class TopicFormState(
     val armToken: ArmToken? get() = (submission as? EditorSubmissionState.Armed)?.token
 
     val canSubmit: Boolean
-        get() = when (mode) {
+        get() = hasLoadedForm && !isInitializing && when (mode) {
             TopicFormMode.EditFirstPost ->
-                cat != null &&
+                hasSubcategorySelect &&
+                    cat != null &&
                     (subcat != null && subcat > 0) &&
                     topicId != null &&
                     numreponse != null &&
@@ -187,6 +222,8 @@ data class TopicFormState(
  * intents the post-level editor does not need.
  */
 sealed interface TopicFormIntent {
+    data object Started : TopicFormIntent
+    data object Stopped : TopicFormIntent
     data class SubjectChanged(val value: TextFieldValue) : TopicFormIntent
     data class ToolbarActionClicked(val action: BbcodeAction) : TopicFormIntent
     data object TogglePreview : TopicFormIntent
@@ -201,6 +238,10 @@ sealed interface TopicFormIntent {
     data object SubmitConfirmationDismissed : TopicFormIntent
 
     data object ErrorDismissed : TopicFormIntent
+
+    /** Explicit Masquer of a failed attempt write; releases deferred draft information without storage. */
+    data object DraftWriteFailureDismissed : TopicFormIntent
+
     data object ReloadRequested : TopicFormIntent
     data class SubcatSelected(val id: Int) : TopicFormIntent
     data class ToggleSignature(val enabled: Boolean) : TopicFormIntent

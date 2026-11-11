@@ -1,17 +1,21 @@
 package fr.forumhfr.redface2.feature.editor
 
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.text.input.InputTransformation
+import android.view.View
 import androidx.compose.foundation.text.input.TextFieldState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.input.InputModeManager
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalInputModeManager
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
 import androidx.compose.ui.test.assertIsDisplayed
@@ -26,6 +30,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -34,15 +39,19 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
-import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptToken
-import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
+import androidx.core.graphics.Insets
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.R as UiR
 import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -166,6 +175,121 @@ class EditorScreenLayoutTest {
     }
 
     @Test
+    @Config(qualifiers = "fr-rFR-w360dp-h760dp-port-xxhdpi")
+    fun `post restore panel states its offer once and never ellipsizes it at font scale 1_3`() {
+        val host = PostEditorChromeFixture()
+        host.state = host.state.copy(restorableDraft = "Brouillon conservé")
+        setScaledContent { PostEditorTestContent(host.state, host::dispatch, host.body, host.events) }
+        assertRestoreOfferStatedOnce()
+    }
+
+    @Test
+    @Config(qualifiers = "fr-rFR-w360dp-h760dp-port-xxhdpi")
+    fun `topic restore panel states its offer once and never ellipsizes it at font scale 1_3`() {
+        val fixture = TopicFormChromeFixture()
+        fixture.state = fixture.state.copy(restorableDraft = "Brouillon conservé")
+        setScaledContent {
+            TopicFormTestContent(fixture.state, fixture::dispatch, fixture.body, fixture.events, fixture.memory)
+        }
+        assertRestoreOfferStatedOnce()
+    }
+
+    @Test
+    @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
+    fun `post restore offer and actions share one row above a landscape keyboard at font scale 1_0`() {
+        val host = PostEditorChromeFixture()
+        host.state = host.state.copy(restorableDraft = "Brouillon conservé")
+        assertCompactRestoreRow(1.0f) { PostEditorTestContent(host.state, host::dispatch, host.body, host.events) }
+    }
+
+    @Test
+    @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
+    fun `post restore offer and actions share one row above a landscape keyboard at font scale 1_3`() {
+        val host = PostEditorChromeFixture()
+        host.state = host.state.copy(restorableDraft = "Brouillon conservé")
+        assertCompactRestoreRow(1.3f) { PostEditorTestContent(host.state, host::dispatch, host.body, host.events) }
+    }
+
+    @Test
+    @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
+    fun `topic restore offer and actions share one row above a landscape keyboard at font scale 1_3`() {
+        val fixture = TopicFormChromeFixture()
+        fixture.state = fixture.state.copy(restorableDraft = "Brouillon conservé")
+        assertCompactRestoreRow(1.3f) {
+            TopicFormTestContent(fixture.state, fixture::dispatch, fixture.body, fixture.events, fixture.memory)
+        }
+    }
+
+    private fun setScaledContent(fontScale: Float = 1.3f, content: @Composable () -> Unit) = compose.setContent {
+        val density = LocalDensity.current
+        CompositionLocalProvider(LocalDensity provides Density(density = density.density, fontScale = fontScale)) {
+            RedfaceTheme(darkTheme = false, dynamicColor = false) { content() }
+        }
+    }
+
+    /** Gate R1b T3 r1 m3: a short panel title, then the offer once, uncapped above both 48 dp actions. */
+    private fun assertRestoreOfferStatedOnce() {
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
+        compose.onNodeWithText("Brouillon retrouvé").assertIsDisplayed()
+        compose.onAllNodesWithText(RESTORE_OFFER, useUnmergedTree = true).assertCountEquals(1)
+        assertOfferLaidOutWhole(1.3f)
+        for (label in listOf("Restaurer", "Ignorer")) compose.onNodeWithText(label).assertHeightIsAtLeast(48.dp)
+    }
+
+    /**
+     * Gate R1b minors r1 C1: the Roborazzi landscape scene (760 × 360 dp, 190 dp keyboard) leaves the ↺ panel about
+     * 100 dp of viewport. At this compact height the offer takes the rest of the actions' row: the whole sentence and
+     * both labels stay in view, each action inside the window above the keyboard. Stacked, both actions fall below.
+     */
+    private fun assertCompactRestoreRow(fontScale: Float, content: @Composable () -> Unit) {
+        lateinit var view: View
+        lateinit var density: Density
+        setScaledContent(fontScale) {
+            view = LocalView.current
+            density = LocalDensity.current
+            content()
+        }
+        compose.runOnIdle {
+            val ime = with(density) { LANDSCAPE_KEYBOARD.roundToPx() }
+            ViewCompat.dispatchApplyWindowInsets(view, WindowInsetsCompat.Builder()
+                .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, ime))
+                .setVisible(WindowInsetsCompat.Type.ime(), true).build())
+        }
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
+        val offer = assertOfferLaidOutWhole(fontScale)
+        val offerBounds = offer.getUnclippedBoundsInRoot()
+        assertEquals("The offer must be entirely in view", offerBounds, offer.getBoundsInRoot())
+        val keyboardTop = compose.onRoot().getUnclippedBoundsInRoot().bottom - LANDSCAPE_KEYBOARD
+        var previousRight = offerBounds.right
+        for (label in listOf("Restaurer", "Ignorer")) {
+            val bounds = compose.onNodeWithText(label).assertHeightIsAtLeast(48.dp).getUnclippedBoundsInRoot()
+            assertTrue("$label must stay in the window above the keyboard", bounds.bottom <= keyboardTop)
+            val text = compose.onNodeWithText(label, useUnmergedTree = true)
+            assertEquals("$label must be entirely in view", text.getUnclippedBoundsInRoot(), text.getBoundsInRoot())
+            assertEquals("$label must share the offer's row", offerBounds.centerY, bounds.centerY, 1f)
+            assertTrue("$label must follow the offer and the previous action", bounds.left >= previousRight)
+            previousRight = bounds.right
+        }
+    }
+
+    /** The offer is laid out whole at [fontScale]: no line cap, no ellipsis, every character. */
+    private fun assertOfferLaidOutWhole(fontScale: Float): SemanticsNodeInteraction {
+        val offer = compose.onNodeWithText(RESTORE_OFFER, useUnmergedTree = true)
+        val layouts = mutableListOf<TextLayoutResult>()
+        val read = requireNotNull(offer.fetchSemanticsNode().config.getOrNull(SemanticsActions.GetTextLayoutResult)
+            ?.action)
+        assertTrue(read(layouts))
+        val layout = layouts.single()
+        val last = layout.lineCount - 1
+        assertEquals(fontScale, layout.layoutInput.density.fontScale, 0.001f)
+        assertFalse("The offer must not exceed a line cap", layout.multiParagraph.didExceedMaxLines)
+        assertFalse("The offer must not be ellipsized", layout.isLineEllipsized(last))
+        assertEquals("Every character must be laid out", RESTORE_OFFER.length,
+            layout.getLineEnd(last, visibleEnd = true))
+        return offer
+    }
+
+    @Test
     @Config(sdk = [29, 34], qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
     fun `post ED85 back dismisses action and status tooltips without requesting close`() {
         val host = PostEditorChromeFixture()
@@ -185,126 +309,6 @@ class EditorScreenLayoutTest {
             compose.onNodeWithText(label, useUnmergedTree = true).assertDoesNotExist()
             assertEquals(field, compose.onNode(hasSetTextAction()).fetchSemanticsNode().id)
             compose.runOnIdle { assertTrue(host.calls.isEmpty()) }
-        }
-    }
-
-    @Test
-    fun `topic form keeps 160 dp field and both draft actions on short viewport`() {
-        compose.setContent {
-            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                TopicFormContent(
-                    state = topicState(restorableDraft = "Brouillon à restaurer"),
-                    bodyFieldState = remember { TextFieldState() },
-                    bodyInputTransformation = InputTransformation {},
-                    onIntent = {},
-                    onOpenSmileys = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-        }
-
-        // The subject is the first editable node; the weighted BBCode field is the second.
-        compose.onAllNodes(hasSetTextAction())[1]
-            .assertHeightIsAtLeast(EDITOR_DRAFT_MIN_HEIGHT - FIELD_LABEL_HEADROOM)
-        assertDraftActionsFullyVisible()
-    }
-
-    @Test
-    fun `topic restore is disabled while the seed form loads and during an upload`() {
-        val state = mutableStateOf(topicState(restorableDraft = "Brouillon à restaurer").copy(isLoadingForm = true))
-        compose.setContent {
-            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                TopicFormContent(
-                    state = state.value,
-                    bodyFieldState = remember { TextFieldState() },
-                    bodyInputTransformation = InputTransformation {},
-                    onIntent = {},
-                    onOpenSmileys = {},
-                    modifier = Modifier.fillMaxSize(),
-                )
-            }
-        }
-
-        compose.onNodeWithText("Restaurer").assertIsNotEnabled()
-        compose.onNodeWithText("Ignorer").assertIsEnabled()
-        compose.runOnIdle { state.value = state.value.copy(isLoadingForm = false) }
-        compose.onNodeWithText("Restaurer").assertIsEnabled()
-        compose.runOnIdle { state.value = state.value.copy(isUploading = true) }
-        compose.onNodeWithText("Restaurer").assertIsNotEnabled()
-        compose.onNodeWithText("Ignorer").assertIsEnabled()
-        compose.runOnIdle {
-            state.value = state.value.copy(
-                isUploading = false,
-                submission = EditorSubmissionState.Uncertain(AttemptToken("tester", "key", "id", 1), accepted = true),
-            )
-        }
-        compose.onNodeWithText("Restaurer").assertIsNotEnabled()
-    }
-
-    @Test
-    @Config(qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
-    fun topicFormLocksBodyAndInsertionControlsWhileSeedUnknown() {
-        val state = mutableStateOf(topicState().copy(mode = TopicFormMode.EditFirstPost, isLoadingForm = true))
-        val body = TextFieldState("seed")
-        val intents = mutableListOf<TopicFormIntent>()
-        var smileyOpens = 0
-        compose.setContent {
-            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                TopicFormContent(
-                    state = state.value,
-                    bodyFieldState = body,
-                    bodyInputTransformation = InputTransformation {},
-                    onIntent = { intents += it },
-                    onOpenSmileys = { smileyOpens += 1 },
-                )
-            }
-        }
-        assertTopicBodyAndInsertionsLocked()
-        compose.onNodeWithText("Options").assertIsEnabled()
-
-        // Failure ends the spinner, but does not make the missing first post editable.
-        compose.runOnIdle {
-            state.value = state.value.copy(isLoadingForm = false, submitError = EditorErrors.formNetwork)
-        }
-        assertTopicBodyAndInsertionsLocked()
-        compose.onNodeWithText("Recharger").assertIsEnabled().performClick()
-        compose.runOnIdle { assertEquals(listOf(TopicFormIntent.ReloadRequested), intents) }
-
-        // Once known, the body and insertions remain available even during a later refetch.
-        compose.runOnIdle {
-            state.value = state.value.copy(
-                draftHydratedFromServer = true, isLoadingForm = true, submitError = null,
-            )
-        }
-        compose.onAllNodes(hasSetTextAction()).assertCountEquals(2)
-        compose.onAllNodes(hasSetTextAction())[1].performTextInput(" typed")
-        for (label in listOf("Gras", "Citation", "Image", "Uploader", "Smileys")) {
-            compose.onNodeWithText(label).assertIsEnabled()
-        }
-        compose.onNodeWithText("Smileys").performClick()
-        compose.runOnIdle {
-            assertEquals("seed typed", body.text.toString())
-            assertEquals(1, smileyOpens)
-        }
-    }
-
-    @Test
-    @Config(qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
-    fun topicFormNewKeepsBodyAndInsertionControlsWhileLoading() {
-        compose.setContent {
-            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
-                TopicFormContent(
-                    state = topicState().copy(isLoadingForm = true),
-                    bodyFieldState = remember { TextFieldState() },
-                    bodyInputTransformation = InputTransformation {},
-                    onIntent = {},
-                    onOpenSmileys = {},
-                )
-            }
-        }
-        compose.onAllNodes(hasSetTextAction()).assertCountEquals(2)
-        for (label in listOf("Gras", "Citation", "Image", "Uploader", "Smileys")) {
-            compose.onNodeWithText(label).assertIsEnabled()
         }
     }
 
@@ -337,52 +341,14 @@ class EditorScreenLayoutTest {
             .performScrollTo().performClick()
     }
 
-    private fun assertTopicBodyAndInsertionsLocked() {
-        // Only the subject retains SetText; the read-only body must not expose this action.
-        compose.onAllNodes(hasSetTextAction()).assertCountEquals(1)
-        for (label in listOf("Gras", "Citation", "Image", "Uploader", "Smileys")) {
-            compose.onNodeWithText(label).assertDoesNotExist()
-        }
-    }
-
-    private fun assertDraftActionsFullyVisible() {
-        val restoreBounds = assertFullyVisibleAction("Restaurer")
-        val discardBounds = assertFullyVisibleAction("Ignorer")
-        assertTrue(
-            "Draft actions must be separated by at least 8 dp",
-            discardBounds.left - restoreBounds.right >= 8.dp,
-        )
-    }
-
-    private fun assertFullyVisibleAction(label: String): DpRect {
-        val action = compose.onNodeWithText(label)
-            .assertHeightIsAtLeast(48.dp)
-        val clippedBounds = action.getBoundsInRoot()
-        val unclippedBounds = action.getUnclippedBoundsInRoot()
-        assertEquals("Action $label is clipped", unclippedBounds, clippedBounds)
-
-        val windowBounds = compose.onRoot().getUnclippedBoundsInRoot()
-        assertTrue(
-            "Action $label must stay entirely inside the window",
-            unclippedBounds.left >= windowBounds.left &&
-                unclippedBounds.top >= windowBounds.top &&
-                unclippedBounds.right <= windowBounds.right &&
-                unclippedBounds.bottom <= windowBounds.bottom,
-        )
-        return unclippedBounds
-    }
-
-    private fun topicState(restorableDraft: String? = null) = TopicFormState(
-        mode = TopicFormMode.New,
-        cat = 23,
-        subcat = null,
-        topicId = null,
-        page = null,
-        numreponse = null,
-        hasSubcategorySelect = false,
-        restorableDraft = restorableDraft,
-    )
 }
 
-/** The editable node sits under the 8 dp floating-label headroom reserved inside the 160 dp slot. */
+/** The editable node sits under the floating-label headroom inside the 160 dp slot. */
 private val FIELD_LABEL_HEADROOM = 8.dp
+
+private const val RESTORE_OFFER = "Un brouillon non envoyé a été retrouvé pour ce message."
+
+/** Same keyboard as EditorBaselineRoborazziTest's landscape post scenes. */
+private val LANDSCAPE_KEYBOARD = 190.dp
+
+private val DpRect.centerY: Float get() = ((top + bottom) / 2).value

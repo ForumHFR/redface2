@@ -1,15 +1,12 @@
 package fr.forumhfr.redface2.feature.editor
 
 import android.view.View
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
@@ -54,7 +51,8 @@ import org.robolectric.annotation.GraphicsMode
  * Uses the real content and routing fixtures from [EditorScreenLayoutTest], without a ViewModel.
  * Reply represents the shared reply/edit post chrome; transient states use the production adapter.
  * Post: portrait/compact × light/dark × scale 1/1.3 × normal/format/arm/event/restore/cards/panel/preview.
- * TopicForm keeps its light theme, closed IME, empty/multiline body and historical output names.
+ * Topic: both modes, header, poll, restore, preview, event, arm and app bar states (poll + restore, no tap);
+ * refused/missing FP context; historical names kept, each byte-identical capture recorded under one name only.
  *
  * Output: `feature/editor/build/outputs/roborazzi/<surface>_<orientation>_fs<scale>_<state>.png`.
  * This harness deliberately uses no M3 1.5 API so it can also be applied before the pin.
@@ -99,12 +97,13 @@ class EditorBaselineRoborazziTest {
                 LocalDensity provides Density(density = density.density, fontScale = fontScale),
             ) {
                 RedfaceTheme(darkTheme = dark.value, amoledTheme = false, dynamicColor = false,
-                    reading = if (scenario.value.surface == Surface.Post)
-                        ReadingDisplaySettings(fontScale = FontScalePreference.L) else ReadingDisplaySettings()) {
+                    reading = ReadingDisplaySettings(fontScale = FontScalePreference.L)) {
                     val current = scenario.value
                     // Recreate field/scroll/picker state for every capture, never inherit a caret
-                    // position or a controls offset from the preceding surface or draft.
-                    key(current) {
+                    // position or a controls offset from the preceding surface or draft. The theme is
+                    // part of the key: topic scenes capture one scenario in light then dark, and the
+                    // panel opened by the light pass would otherwise stay open over the dark pass.
+                    key(current, dark.value) {
                         EditorChrome(current)
                     }
                 }
@@ -116,6 +115,7 @@ class EditorBaselineRoborazziTest {
             record("new_topic_${orientation}_fs${fontScale}_${if (filled) "multiline" else "empty"}",
                 orientation, focusManager)
         }
+        captureTopics(orientation, fontScale, scenario, dark, focusManager, previewLabel)
         listOf(false, true).forEach { isDark ->
             PostScene.entries.filter { orientation != "portrait" || it != PostScene.Panel }.forEach { scene ->
                 compose.runOnIdle {
@@ -139,6 +139,71 @@ class EditorBaselineRoborazziTest {
                 }
                 record("post_${scene.name}_${orientation}_fs${fontScale}_dark$isDark", orientation, focusManager)
             }
+        }
+    }
+
+    @Suppress("LongParameterList") // Capture environment and independently varied topic scenarios.
+    private fun captureTopics(
+        orientation: String,
+        fontScale: Float,
+        scenario: androidx.compose.runtime.MutableState<Scenario>,
+        dark: androidx.compose.runtime.MutableState<Boolean>,
+        focus: FocusManager,
+        previewLabel: String,
+    ) {
+        for (surface in listOf(Surface.NewTopic, Surface.FirstPost)) {
+            captureTopicSurface(surface, orientation, fontScale, scenario, dark, focus, previewLabel)
+        }
+    }
+
+    @Suppress("LongParameterList") // One surface plus the same capture environment as captureTopics.
+    private fun captureTopicSurface(
+        surface: Surface,
+        orientation: String,
+        fontScale: Float,
+        scenario: androidx.compose.runtime.MutableState<Scenario>,
+        dark: androidx.compose.runtime.MutableState<Boolean>,
+        focus: FocusManager,
+        previewLabel: String,
+    ) {
+        for (scene in TopicScene.entries) {
+            for (isDark in listOf(false, true).filter { scene.recorded(surface, orientation, it) }) {
+                compose.runOnIdle {
+                    dark.value = isDark
+                    scenario.value = Scenario(surface, filled = true, topicScene = scene)
+                }
+                compose.waitForIdle()
+                when (scene) {
+                    TopicScene.Header, TopicScene.Unsupported, TopicScene.MissingRoute ->
+                        compose.onNodeWithContentDescription("Modifier le titre", substring = true).performClick()
+                    TopicScene.Poll -> compose.onNodeWithContentDescription("Sondage présent, consulter")
+                        .performClick()
+                    TopicScene.Restore -> compose.onNodeWithContentDescription(
+                        "Brouillon retrouvé, restaurer ou ignorer").performClick()
+                    TopicScene.Preview -> compose.onNodeWithContentDescription(previewLabel).performClick()
+                    else -> Unit // Normal, EmptyTitle, Event, Armed and States are recorded without a tap.
+                }
+                val name = "${surface.fileName}_${scene.name}_${orientation}_fs${fontScale}_dark$isDark"
+                record(name, orientation, focus)
+            }
+        }
+    }
+
+    /**
+     * Gate r1 (R1b T3) found 40 byte-identical topic captures; each image now keeps one unchanged name.
+     * Header, Poll and Restore panels match across modes. Landscape hides the app bar: there the first post
+     * Normal and EmptyTitle match the new topic Normal (only creation auto-opens the header on an empty title)
+     * and Preview matches across modes. The light new topic Normal is the historical
+     * `new_topic_<orientation>_fs<scale>_multiline`. Event and Armed only change the action bar, as on the
+     * post's single surface; an existing poll (Poll, States) only occurs when editing a first post.
+     */
+    private fun TopicScene.recorded(surface: Surface, orientation: String, isDark: Boolean): Boolean {
+        val newTopic = surface == Surface.NewTopic
+        return when (this) {
+            TopicScene.Normal -> if (newTopic) isDark else orientation == "portrait"
+            TopicScene.EmptyTitle, TopicScene.Preview -> newTopic || orientation == "portrait"
+            TopicScene.Header, TopicScene.Restore, TopicScene.Event, TopicScene.Armed -> newTopic
+            TopicScene.Poll, TopicScene.States, TopicScene.Unsupported, TopicScene.MissingRoute -> !newTopic
         }
     }
 
@@ -173,35 +238,51 @@ class EditorBaselineRoborazziTest {
                 val body = remember { TextFieldState(draft.text, draft.selection) }
                 PostEditorTestContent(host.state, host::dispatch, body, host.events)
             }
-            Surface.NewTopic -> TopicFormContent(
-                state = TopicFormState(
-                    mode = TopicFormMode.New,
-                    cat = 23,
-                    subcat = null,
-                    topicId = null,
-                    page = null,
-                    numreponse = null,
-                    hasSubcategorySelect = false,
-                    subject = TextFieldValue("Sujet de démonstration"),
-                    bodyText = draft.text,
-                ),
-                bodyFieldState = remember(scenario) {
-                    TextFieldState(initialText = draft.text, initialSelection = draft.selection)
-                },
-                bodyInputTransformation = InputTransformation {},
-                onIntent = {},
-                onOpenSmileys = {},
-                modifier = Modifier.fillMaxSize(),
-            )
+            Surface.NewTopic, Surface.FirstPost -> {
+                val host = remember { TopicFormChromeFixture(if (scenario.surface == Surface.NewTopic)
+                    TopicFormMode.New else TopicFormMode.EditFirstPost) }
+                remember(scenario) { stageTopic(host, scenario.topicScene, draft.text) }
+                val body = remember { TextFieldState(draft.text, draft.selection) }
+                TopicFormTestContent(host.state, host::dispatch, body, host.events, host.memory)
+            }
         }
     }
 
+    /**
+     * Stages one topic scene and returns the host (RememberReturnType). The content renders the host's event
+     * store without projecting state, so the Event scene delivers its error through that store, like the VM.
+     */
+    private fun stageTopic(host: TopicFormChromeFixture, scene: TopicScene, draft: String): TopicFormChromeFixture {
+        host.state = host.state.copy(
+            subject = TextFieldValue(if (scene == TopicScene.EmptyTitle) "" else "Sujet de démonstration"),
+            bodyText = draft,
+            preview = PostContent(listOf(PostBlock.Paragraph(listOf(PostInline.Text("Aperçu du sujet."))))),
+            restorableDraft = "Brouillon conservé".takeIf { scene in setOf(TopicScene.Restore, TopicScene.States) },
+            pollPresent = scene in setOf(TopicScene.Poll, TopicScene.States),
+            firstPostSubcategoryRefused = scene == TopicScene.Unsupported,
+            subcat = if (scene == TopicScene.MissingRoute) null else 1,
+            hasSubcategorySelect = scene != TopicScene.MissingRoute,
+            submission = if (scene == TopicScene.Armed) EditorSubmissionState.Armed(
+                ArmToken(1, host.session, Long.MAX_VALUE / 4, 60_000L)) // Far-future arm: frozen countdown.
+            else EditorSubmissionState.Ready,
+        )
+        if (scene == TopicScene.Event) host.error(EditorErrors.formNetwork)
+        return host
+    }
+
     private enum class PostScene { Normal, Format, Armed, Event, Restore, Cards, Panel, Preview }
-    private data class Scenario(val surface: Surface, val filled: Boolean, val scene: PostScene = PostScene.Normal)
+    private enum class TopicScene {
+        Normal, EmptyTitle, Header, Poll, Restore, Preview, Unsupported, MissingRoute, Event, Armed, States,
+    }
+    private data class Scenario(
+        val surface: Surface, val filled: Boolean, val scene: PostScene = PostScene.Normal,
+        val topicScene: TopicScene = TopicScene.Normal,
+    )
 
     private enum class Surface(val fileName: String) {
         Post("post_reply"),
         NewTopic("new_topic"),
+        FirstPost("edit_first_post"),
     }
 
     private companion object {

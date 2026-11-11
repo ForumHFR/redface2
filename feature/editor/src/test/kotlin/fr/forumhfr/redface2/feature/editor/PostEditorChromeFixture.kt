@@ -100,7 +100,7 @@ internal fun PostEditorTestContent(
 }
 
 /** Register the real picker contracts even when a test replaces the activity-backed context. */
-private class PostEditorTestActivityResultOwner : ActivityResultRegistryOwner {
+internal class PostEditorTestActivityResultOwner : ActivityResultRegistryOwner {
     override val activityResultRegistry = object : ActivityResultRegistry() {
         override fun <I, O> onLaunch(
             requestCode: Int,

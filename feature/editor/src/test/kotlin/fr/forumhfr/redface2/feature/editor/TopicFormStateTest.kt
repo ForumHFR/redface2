@@ -31,6 +31,7 @@ class TopicFormStateTest {
             topicId = null,
             page = null,
             numreponse = null,
+            hasLoadedForm = true,
             subject = TextFieldValue("Titre"),
             bodyText = "Corps",
             hasSubcategorySelect = hasSubcategorySelect,
@@ -45,12 +46,35 @@ class TopicFormStateTest {
             topicId = 35395,
             page = 1,
             numreponse = 1,
+            hasLoadedForm = true,
             subject = TextFieldValue("Titre"),
             bodyText = "Corps",
             selectedSubcat = 401,
             draftHydratedFromServer = true,
             isUploading = isUploading,
         )
+
+    @Test
+    fun contentAloneNeverProvesThatTheFormLoaded() {
+        val states = listOf(newState(false, null), editFirstPostState())
+        states.forEach { state ->
+            assertTrue(state.canSubmit)
+            assertFalse(state.copy(hasLoadedForm = false).canSubmit)
+            assertFalse(state.copy(isInitializing = true).canSubmit)
+        }
+    }
+
+    @Test
+    fun `ED35 missing first post route context disables activation as well as POST`() {
+        val ready = editFirstPostState()
+        assertTrue(ready.sendActivatable)
+        listOf(ready.copy(cat = null), ready.copy(subcat = null), ready.copy(topicId = null),
+            ready.copy(numreponse = null), ready.copy(page = null)).forEach { incomplete ->
+            assertFalse(incomplete.sendActivatable)
+            assertFalse(incomplete.canSubmit)
+        }
+        assertFalse(newState(false, null).copy(cat = null).sendActivatable)
+    }
 
     @Test
     fun `New with a cat WITHOUT sub-category allows submit even with a null selectedSubcat`() {

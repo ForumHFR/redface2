@@ -23,9 +23,10 @@ internal val PostEditorIntent.mutatesBody: Boolean
 
 internal val TopicFormIntent.mutatesEditor: Boolean
     get() = when (this) {
+        TopicFormIntent.Started, TopicFormIntent.Stopped -> false
         is TopicFormIntent.SubmitClicked, is TopicFormIntent.SubmitConfirmed,
         TopicFormIntent.SubmitConfirmationDismissed, TopicFormIntent.CloseRequested,
         TopicFormIntent.ErrorDismissed, TopicFormIntent.ReloadRequested, TopicFormIntent.UploadErrorDismissed,
-        TopicFormIntent.TogglePreview -> false
+        TopicFormIntent.DraftWriteFailureDismissed, TopicFormIntent.TogglePreview -> false
         else -> true
     }

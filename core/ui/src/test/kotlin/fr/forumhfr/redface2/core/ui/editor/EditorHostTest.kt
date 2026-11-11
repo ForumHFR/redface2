@@ -37,8 +37,11 @@ class EditorHostTest {
         { state }, body, events,
         EditorHostActions({ calls.add(it) }, { calls.add(it) }, {
             calls.add("disarm"); state = state.copy(submission = EditorSubmissionState.Ready)
-        }, { calls.add(it) }, { calls.add("preview") }, { calls.add("close") }, onComplete = onComplete,
-            onAcknowledgeUncertain = onAcknowledgeUncertain, onAcknowledgeLocal = onAcknowledgeLocal),
+        }, { calls.add(it) }, {
+            calls.add("preview")
+            state = state.copy(scaffold = state.scaffold.copy(previewVisible = !state.scaffold.previewVisible))
+        }, { calls.add("close") }, onComplete = onComplete, onAcknowledgeUncertain = onAcknowledgeUncertain,
+            onAcknowledgeLocal = onAcknowledgeLocal),
         EditorHostSurfaces(Surface.Smileys, Surface.Options, Surface.Picker, header = header),
         { calls.add("picker") }, { calls.add("smileys") }, memory,
     )
@@ -234,6 +237,24 @@ class EditorHostTest {
         assertEquals(listOf("disarm"), calls)
         host.back()
         assertEquals(listOf("disarm", "close"), calls)
+    }
+
+    @Test fun `ED85 Back closes preview without consuming displayed information or its masked mode`() {
+        val host = host()
+        state = state.copy(scaffold = state.scaffold.copy(previewVisible = true))
+        memory.bar = EditorBarState(EditorBarMode.Format)
+        val information = error(EditorErrors.noImageReceived)
+
+        host.back()
+
+        assertEquals(listOf("preview"), calls)
+        assertFalse(state.scaffold.previewVisible)
+        assertEquals(EditorBarMode.Format, memory.bar.mode)
+        assertEquals(information, events.state.visibleEvent)
+        host.back()
+        assertEquals(listOf("preview", "close"), calls)
+        assertEquals(information, events.state.visibleEvent)
+        assertEquals(EditorBarMode.Format, memory.bar.mode)
     }
 
     @Test fun `ED85 event without detail skips the masked mode and native layers win`() {

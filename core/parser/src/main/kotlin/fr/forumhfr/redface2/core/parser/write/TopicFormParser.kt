@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.parser.write
 
+import fr.forumhfr.redface2.core.model.write.MissingFirstPostSubcategoryException
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.TopicForm
 import fr.forumhfr.redface2.core.model.write.TopicFormSubcategoryChoice
@@ -111,12 +112,7 @@ class TopicFormParser {
         // mode ; the latter still fail-fasts.
         val hasSubcategorySelect = form.selectFirst("select[name=subcat]") != null
         if (!hasSubcategorySelect && requireSelectedSubcat) {
-            return Result.failure(
-                IllegalStateException(
-                    "topic form has no <select name=subcat> — refusing to edit a first post " +
-                        "without an explicit sub-category to avoid silent re-categorisation on submit",
-                ),
-            )
+            return Result.failure(MissingFirstPostSubcategoryException())
         }
         val subcatOutcome = parseSubcategories(form, requireSelectedSubcat)
             ?: if (hasSubcategorySelect) {

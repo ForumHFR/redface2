@@ -16,6 +16,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionAdapter
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionScenario
+import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionBodyMutation
 import fr.forumhfr.redface2.core.domain.editor.SubmissionErrorProbe
 import fr.forumhfr.redface2.core.domain.editor.SubmissionProbe
@@ -64,6 +65,7 @@ import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.editor.WritingSurfacePreset
 import fr.forumhfr.redface2.core.model.write.EditFirstPostContext
+import fr.forumhfr.redface2.core.model.write.MissingFirstPostSubcategoryException
 import fr.forumhfr.redface2.core.model.write.NewTopicContext
 import fr.forumhfr.redface2.core.model.write.NewTopicSubmitResult
 import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
@@ -76,6 +78,10 @@ import fr.forumhfr.redface2.core.model.write.TopicPollForm
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorAction
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
+import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
+import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
+import fr.forumhfr.redface2.core.ui.editor.EventKey
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.toEditorError
@@ -102,6 +108,7 @@ import java.util.concurrent.TimeUnit
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -137,6 +144,129 @@ class TopicFormViewModelTest {
     }
 
     @Test
+    fun `ED35 incomplete title and subcategory refuse twice without arm or POST in both modes`() = runTest {
+        for (creating in listOf(false, true)) {
+            val preferences = FakeUserPreferencesRepository(confirmBeforePosting = true)
+            val vm = if (creating) newTopicViewModel(null, userPreferencesRepository = preferences)
+                else newViewModel(userPreferencesRepository = preferences)
+            syncBody()
+            vm.editBody(TextFieldValue("Body"))
+            vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue()))
+            repeat(2) {
+                vm.submit(TopicFormIntent.SubmitClicked())
+                assertEquals(EditorErrors.missingTitle, vm.state.value.submitError)
+                assertFalse(vm.state.value.showSubmitConfirmation)
+                assertNull(vm.state.value.armToken)
+                val event = vm.editorEvents.visibleEvent!!
+                vm.editorEvents.dispatch(EditorEventInput.Activate(event.key))
+                assertNull(vm.editorEvents.visibleEvent)
+            }
+            vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Titre")))
+            // A loaded form may still carry the placeholder; exercise the live VM guard, not its projection.
+            vm.submit(TopicFormIntent.SubcatSelected(0))
+            repeat(2) {
+                vm.submit(TopicFormIntent.SubmitClicked())
+                assertEquals(EditorErrors.missingSubcategory, vm.state.value.submitError)
+                assertNull(vm.state.value.armToken)
+                val event = vm.editorEvents.visibleEvent!!
+                vm.editorEvents.dispatch(EditorEventInput.Activate(event.key))
+            }
+            assertEquals(0, topicFormRepository.submitCalls + topicFormRepository.newTopicSubmitCalls)
+            assertEquals(0, draftStore.beginCalls)
+            vm.submit(TopicFormIntent.SubmitConfirmed(null))
+            assertEquals(0, topicFormRepository.submitCalls + topicFormRepository.newTopicSubmitCalls)
+            vm.viewModelScope.cancel()
+        }
+    }
+
+    @Test
+    fun `ED100 parser refusal reaches first post chrome and a supported reload clears it`() = runTest {
+        // Same typed failure as the real no-select response in TopicFormParserTest and repository test.
+        topicFormRepository.formFailure = MissingFirstPostSubcategoryException()
+        val vm = newViewModel()
+        val refused = vm.state.value
+        assertFalse(refused.hasLoadedForm)
+        assertTrue(refused.firstPostSubcategoryRefused)
+        assertTrue(refused.hasSubcategorySelect)
+        assertTrue(TopicFormChromeState(refused).unsupportedFirstPost)
+        assertFalse(TopicFormChromeState(refused).showSubcategory)
+        assertFalse(refused.sendActivatable)
+        assertEquals(EditorErrors.invalidForm, refused.submitError)
+        vm.submit(TopicFormIntent.SubmitClicked())
+        vm.submit(TopicFormIntent.SubmitConfirmed(null))
+        assertNull(vm.state.value.armToken)
+        assertEquals(0, draftStore.beginCalls)
+        assertEquals(0, topicFormRepository.submitCalls)
+
+        topicFormRepository.formFailure = java.io.IOException("offline")
+        vm.submit(TopicFormIntent.ReloadRequested)
+        assertTrue(vm.state.value.firstPostSubcategoryRefused)
+        assertTrue(vm.state.value.hasSubcategorySelect)
+        assertTrue(TopicFormChromeState(vm.state.value).unsupportedFirstPost)
+        topicFormRepository.formFailure = null
+        vm.submit(TopicFormIntent.ReloadRequested)
+        syncBody()
+        assertTrue(vm.state.value.hasSubcategorySelect)
+        assertFalse(vm.state.value.firstPostSubcategoryRefused)
+        assertFalse(TopicFormChromeState(vm.state.value).unsupportedFirstPost)
+        assertTrue(TopicFormChromeState(vm.state.value).showSubcategory)
+        assertTrue(vm.state.value.canSubmit)
+    }
+
+    @Test
+    fun `anonymous complete forms deliver two send refusals without arming or durable attempt`() = runTest {
+        for (creating in listOf(false, true)) {
+            topicFormRepository.formResult = topicFormRepository.formResult.copy(isAnonymous = true)
+            topicFormRepository.newTopicFormResult = topicFormRepository.newTopicFormResult.copy(isAnonymous = true)
+            val preferences = FakeUserPreferencesRepository(confirmBeforePosting = true)
+            val vm = if (creating) newTopicViewModel(SAMPLE_SUBCAT, userPreferencesRepository = preferences)
+                else newViewModel(userPreferencesRepository = preferences)
+            vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Titre")))
+            vm.editBody(TextFieldValue("Body"))
+            vm.editorEvents.dispatch(EditorEventInput.Acknowledge(vm.editorEvents.visibleEvent!!.key))
+            val keys = mutableListOf<EventKey>()
+            repeat(2) {
+                assertTrue(vm.state.value.sendActivatable)
+                vm.submit(TopicFormIntent.SubmitClicked())
+                assertEquals(EditorErrors.loginRequired, vm.state.value.submitError)
+                val event = vm.editorEvents.visibleEvent!!
+                assertEquals(EditorErrors.loginRequired, (event.content as EditorEventContent.Problem).error)
+                keys += event.key
+                assertNull(vm.state.value.armToken)
+                assertFalse(vm.state.value.showSubmitConfirmation)
+                vm.editorEvents.dispatch(EditorEventInput.Acknowledge(keys.last()))
+                assertNull(vm.editorEvents.visibleEvent)
+            }
+            assertNotEquals(keys.first(), keys.last())
+            vm.submit(TopicFormIntent.SubmitConfirmed(null))
+            assertEquals(0, draftStore.beginCalls)
+            assertEquals(0, topicFormRepository.submitCalls + topicFormRepository.newTopicSubmitCalls)
+            vm.viewModelScope.cancel()
+        }
+    }
+
+    @Test
+    fun `unchanged anonymous reload retains its refusal without redelivery even after acknowledgement`() = runTest {
+        for (creating in listOf(false, true)) {
+            topicFormRepository.formResult = topicFormRepository.formResult.copy(isAnonymous = true)
+            topicFormRepository.newTopicFormResult = topicFormRepository.newTopicFormResult.copy(isAnonymous = true)
+            val vm = if (creating) newTopicViewModel(SAMPLE_SUBCAT) else newViewModel()
+            val original = vm.editorEvents.visibleEvent!!
+            vm.submit(TopicFormIntent.ReloadRequested)
+            assertEquals(original, vm.editorEvents.visibleEvent)
+            vm.editorEvents.dispatch(EditorEventInput.Acknowledge(original.key))
+            vm.submit(TopicFormIntent.ReloadRequested)
+            assertNull(vm.editorEvents.visibleEvent)
+            assertEquals(EditorErrors.loginRequired, vm.state.value.submitError)
+            assertNull(vm.state.value.armToken)
+            assertEquals(0, draftStore.beginCalls)
+            vm.viewModelScope.cancel()
+        }
+        assertEquals(3, topicFormRepository.formFetches)
+        assertEquals(3, topicFormRepository.newTopicFormFetches)
+    }
+
+    @Test
     fun `successful reload resolves form network errors in new topic and first post modes`() = runTest {
         for (creating in listOf(false, true)) {
             topicFormRepository.formFailure = java.io.IOException("offline")
@@ -148,6 +278,27 @@ class TopicFormViewModelTest {
             vm.submit(TopicFormIntent.ReloadRequested)
             syncBody()
             testScheduler.advanceUntilIdle()
+            assertNull(vm.state.value.submitError)
+            vm.viewModelScope.cancel()
+        }
+    }
+
+    @Test
+    fun `cancelled form fetch clears loading without an error in new topic and first post modes`() = runTest {
+        for (creating in listOf(false, true)) {
+            topicFormRepository.formFailure = kotlinx.coroutines.CancellationException("GET cancelled")
+            val vm = if (creating) newTopicViewModel(entrySubcat = SAMPLE_SUBCAT) else newViewModel()
+            syncBody()
+            testScheduler.advanceUntilIdle()
+            assertFalse(vm.state.value.isLoadingForm)
+            assertFalse(vm.state.value.hasLoadedForm)
+            assertNull(vm.state.value.submitError)
+            assertNull(vm.editorEvents.visibleEvent) // A cancellation is not a read failure.
+            topicFormRepository.formFailure = null
+            vm.submit(TopicFormIntent.ReloadRequested)
+            syncBody()
+            testScheduler.advanceUntilIdle()
+            assertTrue(vm.state.value.hasLoadedForm)
             assertNull(vm.state.value.submitError)
             vm.viewModelScope.cancel()
         }
@@ -1627,6 +1778,289 @@ class TopicFormViewModelTest {
     }
 
     @Test
+    fun `ED45 ED170 Masquer acknowledges a restored topic attempt before recreation`() = runTest {
+        for (mode in TopicFormMode.entries) {
+            draftStore = FakeEditorDraftStore()
+            val key = topicDraftKey(mode)
+            val attempt = restoredUncertainAttempt(mode)
+            val posts = postCount()
+            val vm = openTopic(mode)
+            assertEquals(EditorSubmissionState.Uncertain(attempt), vm.state.value.submission)
+            val adapter = chromeAdapter(vm)
+            val event = vm.editorEvents.state.visibleEvent!!.key
+            adapter.host.barActions.onEvent(event, EditorEventAction.Details)
+            adapter.host.dismissDetails(event)
+            syncBody()
+            assertNull(adapter.host.detail)
+            assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
+            assertNull(vm.state.value.submitError)
+            // The acknowledgement reserves PersistingAttempt: no « Envoi… » may outlive it.
+            assertNoSendingEvent(vm)
+            assertNull(vm.editorEvents.state.visibleEvent)
+            assertNull(draftStore.entries[key]?.attempt)
+            assertEquals("uncertain body", vm.bodyFieldState.text.toString())
+            assertEquals("uncertain title", vm.state.value.subject.text)
+            vm.viewModelScope.cancel()
+
+            val recreated = openTopic(mode)
+            assertEquals(EditorSubmissionState.Ready, recreated.state.value.submission)
+            assertNull(recreated.state.value.submitError)
+            assertTrue(recreated.editorEvents.state.events.isEmpty())
+            assertEquals("uncertain body", draftStore.saved[key]?.body)
+            assertEquals(posts, postCount())
+        }
+    }
+
+    @Test
+    fun `ED45 ED170 Masquer also acknowledges a freshly failed topic submission`() = runTest {
+        for (mode in TopicFormMode.entries) {
+            draftStore = FakeEditorDraftStore()
+            val posts = postCount()
+            val vm = failUncertainly(mode)
+            val adapter = chromeAdapter(vm)
+            val event = vm.editorEvents.state.visibleEvent!!.key
+            adapter.host.barActions.onEvent(event, EditorEventAction.Details)
+            adapter.host.dismissDetails(event)
+            syncBody()
+            assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
+            assertNull(vm.state.value.submitError)
+            assertNoSendingEvent(vm)
+            assertNull(vm.editorEvents.state.visibleEvent)
+            assertNull(draftStore.entries[topicDraftKey(mode)]?.attempt)
+            assertEquals("uncertain body", vm.bodyFieldState.text.toString())
+            assertEquals(posts + 1, postCount())
+        }
+    }
+
+    @Test
+    fun `ED85 ED170 Back or detail closing keeps topic uncertainty and recreation offers it again`() = runTest {
+        for (mode in TopicFormMode.entries) {
+            draftStore = FakeEditorDraftStore()
+            val key = topicDraftKey(mode)
+            val attempt = restoredUncertainAttempt(mode)
+            val posts = postCount()
+            val closings = listOf<(TopicFormChromeAdapter, EventKey) -> Unit>(
+                { adapter, _ -> adapter.back() }, { adapter, event -> adapter.host.closeDetails(event) })
+            closings.forEachIndexed { index, close ->
+                val vm = openTopic(mode)
+                val adapter = chromeAdapter(vm)
+                val event = vm.editorEvents.state.visibleEvent!!.key
+                adapter.host.barActions.onEvent(event, EditorEventAction.Details)
+                close(adapter, event)
+                syncBody()
+                assertNull("$mode closing $index", adapter.host.detail)
+                assertNull(vm.editorEvents.state.visibleEvent)
+                assertEquals(EditorSubmissionState.Uncertain(attempt), vm.state.value.submission)
+                assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
+                assertEquals(attempt, draftStore.entries[key]?.attempt?.token)
+                vm.viewModelScope.cancel()
+            }
+
+            val recreated = openTopic(mode)
+            assertEquals(EditorSubmissionState.Uncertain(attempt), recreated.state.value.submission)
+            assertEquals(EditorErrors.uncertain, recreated.state.value.submitError)
+            assertEquals(EditorEventContent.Problem(EditorErrors.uncertain),
+                recreated.editorEvents.state.visibleEvent?.content)
+            assertEquals(posts, postCount())
+        }
+    }
+
+    @Test
+    fun `ED170 Masquer preserves topic uncertainty on failed durable acknowledgement and recreation`() = runTest {
+        for (mode in TopicFormMode.entries) {
+            draftStore = FakeEditorDraftStore()
+            val key = topicDraftKey(mode)
+            val attempt = restoredUncertainAttempt(mode)
+            val posts = postCount()
+            val vm = openTopic(mode)
+            draftStore.finishFailure = java.io.IOException("disk unavailable")
+            val finishCalls = draftStore.finishCalls
+            val adapter = chromeAdapter(vm)
+            val event = vm.editorEvents.state.visibleEvent!!.key
+            adapter.host.barActions.onEvent(event, EditorEventAction.Details)
+            adapter.host.dismissDetails(event)
+            syncBody()
+            assertEquals(finishCalls + 1, draftStore.finishCalls)
+            assertEquals(EditorSubmissionState.Uncertain(attempt), vm.state.value.submission)
+            assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
+            // The kept uncertainty is signalled again in this session, bound to the same attempt, without « Envoi… ».
+            assertNoSendingEvent(vm)
+            val kept = vm.editorEvents.state.visibleEvent!!
+            assertEquals(EditorEventContent.Problem(EditorErrors.uncertain), kept.content)
+            assertNotEquals(event, kept.key)
+            assertEquals(attempt, vm.editorEvents.uncertainAttempt(kept.key))
+            assertEquals(attempt, draftStore.entries[key]?.attempt?.token)
+            assertEquals("uncertain body", vm.bodyFieldState.text.toString())
+            vm.viewModelScope.cancel()
+
+            draftStore.finishFailure = null
+            val recreated = openTopic(mode)
+            assertEquals(EditorSubmissionState.Uncertain(attempt), recreated.state.value.submission)
+            assertEquals(EditorEventContent.Problem(EditorErrors.uncertain),
+                recreated.editorEvents.state.visibleEvent?.content)
+            assertEquals(posts, postCount())
+        }
+    }
+
+    @Test
+    fun `ED35 ED170 a missing title refusal keeps the restored uncertainty bound until its Masquer`() = runTest {
+        for (mode in TopicFormMode.entries) {
+            draftStore = FakeEditorDraftStore()
+            val key = topicDraftKey(mode)
+            val attempt = restoredUncertainAttempt(mode)
+            val posts = postCount()
+            val vm = openTopic(mode)
+            val intents = mutableListOf<TopicFormIntent>()
+            val adapter = chromeAdapter(vm, intents)
+            val uncertain = vm.editorEvents.state.visibleEvent!!.key
+            assertEquals("$mode", attempt, vm.editorEvents.uncertainAttempt(uncertain))
+            vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue()))
+            adapter.host.submitActions.onSubmit()
+            syncBody()
+            // The local refusal is delivered behind the earlier warning, without arm, reservation or POST.
+            assertEquals("$mode", listOf(TopicFormIntent.SubmitClicked()), intents)
+            assertEquals(EditorErrors.missingTitle, vm.state.value.submitError)
+            assertTrue(vm.editorEvents.state.events.any {
+                it.content == EditorEventContent.Problem(EditorErrors.missingTitle)
+            })
+            assertNull(vm.state.value.armToken)
+            assertEquals(EditorSubmissionState.Uncertain(attempt), vm.state.value.submission)
+            assertEquals(uncertain, vm.editorEvents.state.visibleEvent?.key)
+            assertEquals(attempt, vm.editorEvents.uncertainAttempt(uncertain))
+            assertEquals(attempt, draftStore.entries[key]?.attempt?.token)
+            assertEquals(posts, postCount())
+
+            // Masquer of the still bound warning acknowledges the same attempt durably.
+            adapter.host.barActions.onEvent(uncertain, EditorEventAction.Details)
+            adapter.host.dismissDetails(uncertain)
+            syncBody()
+            assertEquals(listOf(TopicFormIntent.SubmitClicked(), TopicFormIntent.ErrorDismissed), intents)
+            assertNull(adapter.host.detail)
+            assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
+            assertNull(draftStore.entries[key]?.attempt)
+            assertTrue(vm.editorEvents.state.events.none { it.key == uncertain })
+            // The acknowledgement reserves without launching: no ED-44 cleanup, the refusal is now in front
+            // (gate R1b minors r1 m4, m-c).
+            assertEquals("$mode", EditorEventContent.Problem(EditorErrors.missingTitle),
+                vm.editorEvents.state.visibleEvent?.content)
+            assertNoSendingEvent(vm)
+            assertEquals(posts, postCount())
+            vm.viewModelScope.cancel()
+        }
+    }
+
+    @Test
+    fun `ED45 ED170 local topic Masquer in Ready allows the next failed autosave to deliver information`() = runTest {
+        for (mode in TopicFormMode.entries) assertLocalMasquerReleasesAutosave(mode, rearm = false)
+    }
+
+    @Test
+    fun `ED45 ED170 local topic Masquer after rearming allows the next failed autosave to deliver information`() =
+        runTest { for (mode in TopicFormMode.entries) assertLocalMasquerReleasesAutosave(mode, rearm = true) }
+
+    /** I1: Masquer of « Brouillon non écrit » releases deferred draft information, as on dev, without storage. */
+    private fun assertLocalMasquerReleasesAutosave(mode: TopicFormMode, rearm: Boolean) {
+        draftStore = FakeEditorDraftStore()
+        val posts = postCount()
+        val vm = openTopic(mode, FakeUserPreferencesRepository(confirmBeforePosting = rearm))
+        draftStore.beginFailure = java.io.IOException("disk full")
+        vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("unsent title")))
+        vm.editBody(TextFieldValue("unsent body"))
+        vm.submit(TopicFormIntent.SubmitClicked())
+        if (rearm) {
+            dispatcher.scheduler.advanceTimeBy(401)
+            vm.submit(TopicFormIntent.SubmitConfirmed(vm.state.value.armToken))
+        }
+        syncBody()
+        assertEquals("$mode", EditorSubmissionState.Ready, vm.state.value.submission)
+        assertEquals(EditorErrors.draftWriteFailed, vm.state.value.submitError)
+        assertEquals(1, draftStore.beginCalls)
+        val intents = mutableListOf<TopicFormIntent>()
+        val adapter = chromeAdapter(vm, intents)
+        if (rearm) {
+            adapter.host.submitActions.onSubmit()
+            syncBody()
+            assertTrue(vm.state.value.submission is EditorSubmissionState.Armed)
+        }
+        val submission = vm.state.value.submission
+        val activity = listOf(draftStore.writes, draftStore.beginCalls, draftStore.finishCalls, draftStore.saveCount)
+        val key = vm.editorEvents.state.visibleEvent!!.key
+        assertEquals(EditorEventContent.Problem(EditorErrors.draftWriteFailed),
+            vm.editorEvents.state.visibleEvent?.content)
+        adapter.host.barActions.onEvent(key, EditorEventAction.Details)
+        adapter.host.dismissDetails(key)
+        syncBody()
+        assertEquals(List(if (rearm) 1 else 0) { TopicFormIntent.SubmitClicked() } +
+            TopicFormIntent.DraftWriteFailureDismissed, intents)
+        assertEquals(submission, vm.state.value.submission)
+        assertNull(vm.state.value.submitError)
+        assertNull(adapter.host.detail)
+        assertNull(vm.editorEvents.state.visibleEvent)
+        assertEquals(activity,
+            listOf(draftStore.writes, draftStore.beginCalls, draftStore.finishCalls, draftStore.saveCount))
+        assertNoSendingEvent(vm)
+
+        // On dev, the next autosave failure is delivered again once the attempt write failure was hidden.
+        draftStore.saveFailure = java.io.IOException("still full")
+        vm.editBody(TextFieldValue("continued composition"))
+        dispatcher.scheduler.advanceTimeBy(751)
+        syncBody()
+        assertEquals("$mode", EditorErrors.draftSaveFailed, vm.state.value.submitError)
+        assertEquals(EditorEventContent.Problem(EditorErrors.draftSaveFailed),
+            vm.editorEvents.state.visibleEvent?.content)
+        assertEquals("continued composition", vm.bodyFieldState.text.toString())
+        assertEquals(posts, postCount())
+        assertEquals(0, draftStore.finishCalls)
+        assertNoSendingEvent(vm)
+        vm.viewModelScope.cancel()
+    }
+
+    private fun openTopic(
+        mode: TopicFormMode,
+        preferences: UserPreferencesRepository = FakeUserPreferencesRepository(),
+    ): TopicFormViewModel = if (mode == TopicFormMode.New) {
+        newTopicViewModel(entrySubcat = SAMPLE_SUBCAT, userPreferencesRepository = preferences)
+    } else {
+        newViewModel(userPreferencesRepository = preferences)
+    }
+
+    private fun topicDraftKey(mode: TopicFormMode): String = if (mode == TopicFormMode.New) {
+        EditorDraftKey.newTopic(SAMPLE_CAT)
+    } else {
+        EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE)
+    }
+
+    private fun postCount() = topicFormRepository.submitCalls + topicFormRepository.newTopicSubmitCalls
+
+    /** ED-170: an ambiguous POST leaves an uncertain durable attempt under this mode's draft key. */
+    private fun failUncertainly(mode: TopicFormMode): TopicFormViewModel {
+        topicFormRepository.submitResult = ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        topicFormRepository.newTopicSubmitResult = NewTopicSubmitResult.Failure(ReplyFailureReason.Unknown)
+        val vm = openTopic(mode)
+        vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("uncertain title")))
+        vm.editBody(TextFieldValue("uncertain body"))
+        vm.submit(TopicFormIntent.SubmitClicked())
+        dispatcher.scheduler.advanceUntilIdle()
+        assertTrue(vm.state.value.submission is EditorSubmissionState.Uncertain)
+        return vm
+    }
+
+    /** The failed ViewModel dies; the next opening restores its attempt from the store. */
+    private fun restoredUncertainAttempt(mode: TopicFormMode): EditorDraftStore.AttemptToken {
+        failUncertainly(mode).viewModelScope.cancel()
+        return checkNotNull(draftStore.entries[topicDraftKey(mode)]?.attempt).token
+    }
+
+    private fun chromeAdapter(vm: TopicFormViewModel, intents: MutableList<TopicFormIntent> = mutableListOf()) =
+        TopicFormChromeAdapter({ vm.state.value }, vm.bodyFieldState, vm.editorEvents, { intent ->
+            intents += intent
+            vm.submit(intent)
+        }, {}, {}, vm.chromeMemory)
+
+    private fun assertNoSendingEvent(vm: TopicFormViewModel) =
+        assertTrue(vm.editorEvents.state.events.none { it.content is EditorEventContent.InProgress })
+
+    @Test
     fun restoreReplacesUntouchedSeed() = runTest {
         val vm = editWithRestoreOffer()
         assertRestoreAndSingleUndo(vm, TextFieldValue("seed", TextRange(1, 3)), "draft")
@@ -2489,8 +2923,9 @@ class TopicFormViewModelTest {
         )
         syncBody()
         testScheduler.advanceUntilIdle()
-        assertEquals("new live body\n\nrescued body", afterRestore.state.value.restorableDraft)
-        assertEquals("new live title", afterRestore.state.value.restorableSubject)
+        assertNull(afterRestore.state.value.restorableDraft)
+        assertEquals("new live body\n\nrescued body", afterRestore.bodyFieldState.text.toString())
+        assertEquals("new live title", afterRestore.state.value.subject.text)
     }
 
     @Test

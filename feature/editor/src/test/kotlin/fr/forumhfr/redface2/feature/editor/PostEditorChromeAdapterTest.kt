@@ -77,6 +77,25 @@ class PostEditorChromeAdapterTest {
         assertEquals(1, host.calls.size)
     }
 
+    @Test fun `image URL confirmation closes the dialog whether the insertion is accepted or refused`() {
+        // ImageUrlDialog leaves closing to its adapter (gate T3 r2 C2): both outcomes must close here.
+        host.adapter.open(PostEditorChromeSurface.Url)
+        assertEquals(PostEditorChromeSurface.Url, host.adapter.surface)
+        host.adapter.imageUrl("https://example.test/a.png")
+        assertEquals(listOf(PostEditorIntent.ImageUrlInserted("https://example.test/a.png")), host.calls)
+        assertNull(host.adapter.surface)
+        assertTrue(host.adapter.consumeReturn())
+
+        host.adapter.open(PostEditorChromeSurface.Url)
+        assertEquals(PostEditorChromeSurface.Url, host.adapter.surface)
+        host.state = host.state.copy(isUploading = true)
+        assertFalse(host.adapter.state.canInsert)
+        host.adapter.imageUrl("https://example.test/b.png")
+        assertEquals(listOf(PostEditorIntent.ImageUrlInserted("https://example.test/a.png")), host.calls)
+        assertNull(host.adapter.surface)
+        assertTrue(host.adapter.consumeReturn())
+    }
+
     @Test fun `ED31 picker cancellation only returns focus without a delivery or intent`() {
         host.adapter.imageActions.onUpload()
         host.adapter.pickerCancelled()
