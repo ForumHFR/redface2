@@ -74,8 +74,8 @@ internal class PostEditorChromeEvents : EditorHostEvents {
         }
     }
 
-    fun isPendingQuoteEvent(key: EventKey): Boolean = key == pendingQuoteEvent &&
-        state.events.any { it.key == key }
+    // ED-44 can acknowledge the notice while its open offer still awaits a decision.
+    fun isPendingQuoteEvent(key: EventKey): Boolean = key == pendingQuoteEvent
 
     private fun observePendingQuote(current: PostEditorState) {
         val waiting = current.isQuoteAwaitingDraftDecision && state.session.owner != null

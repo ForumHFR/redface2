@@ -38,14 +38,33 @@ class PostEditorChromeAdapterTest {
         host.adapter.barActions.onEvent(pending.key, EditorEventAction.Details)
         assertEquals(pending.key, host.adapter.pendingQuoteDetailKey)
         assertEquals(pending.key, host.adapter.detail?.key)
-        assertTrue(host.events.isPendingQuoteEvent(pending.key)) // ED-45 acknowledges on closing, not opening.
+        assertEquals(pending, host.events.visibleEvent) // ED-45 acknowledges on closing, not opening.
+        host.adapter.gesture(EditorBarGesture.ToggleFormat)
+        assertNull(host.events.visibleEvent)
+        assertEquals(pending.key, host.adapter.pendingQuoteDetailKey)
+        assertEquals(pending.key, host.adapter.detail?.key)
         assertTrue(host.calls.isEmpty())
         assertTrue(host.state.pendingQuotes.isNotEmpty())
-        host.adapter.closeDetails(pending.key)
-        assertNull(host.events.visibleEvent)
         host.transition(host.state.copy(restorableDraft = null))
+        assertNull(host.adapter.pendingQuoteDetailKey)
+        assertFalse(host.events.isPendingQuoteEvent(pending.key))
+        host.adapter.closeDetails(pending.key)
+        assertNull(host.adapter.detail)
+        assertNull(host.events.visibleEvent)
         host.adapter.barActions.onEvent(pending.key, EditorEventAction.Details)
         assertNull(host.adapter.surface)
+    }
+
+    @Test fun `1450 acknowledged pending offer detail does not survive an account session change`() {
+        host.transition(host.state.copy(restorableDraft = "D", pendingQuotes = listOf(
+            QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
+        val pending = host.events.visibleEvent!!
+        host.adapter.barActions.onEvent(pending.key, EditorEventAction.Details)
+        host.adapter.gesture(EditorBarGesture.ToggleFormat)
+        assertEquals(pending.key, host.adapter.pendingQuoteDetailKey)
+        host.events.open(host.session.copy(id = "changed", owner = null))
+        assertNull(host.adapter.pendingQuoteDetailKey)
+        assertFalse(host.events.isPendingQuoteEvent(pending.key))
     }
 
     @Test fun `1450 save failure Reload is limited to an unresolved quote without a draft offer or uncertainty`() {

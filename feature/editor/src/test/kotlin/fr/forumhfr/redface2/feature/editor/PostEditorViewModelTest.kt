@@ -4740,7 +4740,7 @@ class PostEditorViewModelTest {
         val pending = checkNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
         val calls = mutableListOf<PostEditorIntent>()
         val adapter = PostEditorChromeAdapter({ vm.state.value }, vm.bodyFieldState, vm.chromeEvents,
-            { calls += it; vm.dispatch(it) }, {}, {})
+            { calls += it; vm.dispatch(it) }, {}, {}, vm.chromeMemory)
         val get = CompletableDeferred<Unit>()
         replyRepository.formGate = get
         vm.dispatch(PostEditorIntent.DraftRestoreRequested)
@@ -4775,7 +4775,11 @@ class PostEditorViewModelTest {
         assertFalse(vm.state.value.isLoadingForm)
         assertTrue(vm.state.value.blocksFormReload)
         assertFalse(adapter.hasPendingQuoteRecovery)
-        assertFalse(adapter.canReload(failure.key))
+        assertNull(adapter.detail)
+        assertNull(adapter.surface)
+        // Reopen after the session reset so recovery is rejected by eligibility, not a stale panel.
+        adapter.open(PostEditorChromeSurface.PendingQuote)
+        assertEquals(PostEditorChromeSurface.PendingQuote, adapter.surface)
         adapter.reload(failure.key)
         adapter.reloadPendingQuote()
         vm.dispatch(PostEditorIntent.ReloadRequested)
