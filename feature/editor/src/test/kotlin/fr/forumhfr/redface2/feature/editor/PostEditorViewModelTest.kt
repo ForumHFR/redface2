@@ -4720,7 +4720,7 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `1450 account change after failed quote CAS disables recovery and preserves Q for its original owner`() = runTest {
+    fun `1450 account change after failed quote CAS disables recovery and keeps Q for its original owner`() = runTest {
         var deliveryCalls = 0
         draftStore = object : VersionedEditorDraftStore() {
             override suspend fun consumeInlineQuoteRequest(
