@@ -138,21 +138,28 @@ internal fun PostEditorQuoteCards(
             key(quote) {
                 val moveUpFocus = remember { FocusRequester() }
                 val moveDownFocus = remember { FocusRequester() }
-                var movedByUser by remember { mutableStateOf(false) }
+                var pendingMove by remember { mutableStateOf<List<QuoteSelection>?>(null) }
+                LaunchedEffect(pendingMove) {
+                    if (pendingMove != null) {
+                        delay(QUOTE_MOVE_REQUEST_MILLIS)
+                        pendingMove = null
+                    }
+                }
                 // Wait for the reordered card's buttons to receive their new enabled state.
-                LaunchedEffect(index) {
-                    if (movedByUser) {
+                LaunchedEffect(quotes) {
+                    if (isQuoteReorder(pendingMove, quotes, quote)) {
                         when (index) {
                             0 -> moveDownFocus.requestFocus()
                             quotes.lastIndex -> moveUpFocus.requestFocus()
                         }
                         // Coalesced clicks announce the actual final position, never a stale index.
                         onAnnounce(moved.format(quote.author, index + 1))
-                        movedByUser = false
                     }
+                    // A removal or replacement also consumes the request, without stealing its focus.
+                    pendingMove = null
                 }
                 val move: (Int) -> Unit = { delta ->
-                    movedByUser = true
+                    pendingMove = quotes
                     onIntent(PostEditorIntent.QuoteMoved(quote.numreponse, delta, quote))
                 }
                 QuoteCard(quote, QuoteCardControls(index > 0, index < quotes.lastIndex, enabled,
@@ -166,6 +173,12 @@ internal fun PostEditorQuoteCards(
     }
 }
 
+private fun isQuoteReorder(before: List<QuoteSelection>?, after: List<QuoteSelection>, quote: QuoteSelection): Boolean =
+    before != null && before.size == after.size && before.toSet() == after.toSet() &&
+        before.indexOf(quote) != after.indexOf(quote)
+
+// Filtered/no-op intents and opposite clicks coalesced before recomposition must not outlive the gesture.
+private const val QUOTE_MOVE_REQUEST_MILLIS = 1_000L
 // Longer than Compose's 100 ms recurring accessibility-event interval; no spoken suffix or node replacement.
 private const val QUOTE_ANNOUNCEMENT_EMPTY_MILLIS = 200L
 private const val QUOTE_ANNOUNCEMENT_HOLD_MILLIS = 500L
