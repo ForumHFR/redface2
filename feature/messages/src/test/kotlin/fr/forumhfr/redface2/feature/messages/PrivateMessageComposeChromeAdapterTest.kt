@@ -36,6 +36,28 @@ import org.junit.Test
 class PrivateMessageComposeChromeAdapterTest {
     private val f = PrivateMessageComposeChromeFixture()
     private val uncertain = EditorErrors.uncertain(EditorErrorSurface.MessageCompose)
+
+    @Test fun `1450 Back closes the draft sheet before disarming and leaves the header return to its panel`() {
+        f.state = f.state.copy(restorableDraft = "Brouillon privé")
+        f.adapter.openHeader()
+        f.adapter.closeSurface()
+        assertFalse(f.adapter.consumeReturn())
+        f.adapter.open(PrivateMessageComposeChromeSurface.Restore)
+        assertTrue(f.adapter.draftOfferOpen)
+        val arm = ArmToken(1, f.session, 0, 4_000L)
+        f.state = f.state.copy(submission = EditorSubmissionState.Armed(arm))
+        f.adapter.back()
+        assertFalse(f.adapter.draftOfferOpen)
+        assertNull(f.adapter.surface)
+        assertEquals(EditorSubmissionState.Armed(arm), f.state.submission)
+        assertTrue(f.calls.isEmpty())
+        assertTrue(f.adapter.consumeReturn())
+        f.adapter.closeDraftOffer()
+        assertFalse(f.adapter.consumeReturn())
+        f.adapter.back()
+        assertEquals(listOf("disarm"), f.calls)
+    }
+
     @Test fun `ED36 projects exactly the allowed shortcuts on this surface`() {
         val f = PrivateMessageComposeChromeFixture()
         val surface = EditorShortcutSurface.PRIVATE_MESSAGE_COMPOSE

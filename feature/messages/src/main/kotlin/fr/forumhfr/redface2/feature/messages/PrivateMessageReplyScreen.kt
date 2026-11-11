@@ -191,8 +191,7 @@ private fun PrivateMessageReplyChrome(
         onSystemBack = back,
         fieldArea = { field -> PrivateMessageReplyChromePreview(host, body, focus, field) },
         overlay = { restore, content ->
-            PrivateMessageReplyChromeSurfaces(host, body, smileys, autoOpenRecipients, restore, window.compactHeight,
-                content)
+            PrivateMessageReplyChromeSurfaces(host, body, smileys, autoOpenRecipients, restore, content)
             // Last activity handler: the host resolves every ED-85 level, including bar focus return.
             BackHandler(onBack = back)
         })

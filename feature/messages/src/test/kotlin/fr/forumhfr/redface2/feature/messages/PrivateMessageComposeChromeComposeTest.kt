@@ -37,6 +37,7 @@ import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -255,6 +256,8 @@ class PrivateMessageComposeChromeComposeTest {
         showIme()
         compose.onNodeWithContentDescription(headerAction).performClick()
         compose.onNodeWithText("Retour au message").assertExists()
+        compose.onNode(isDialog()).assertDoesNotExist()
+        compose.onNode(hasSetTextAction() and hasText("Destinataires")).assertIsFocused()
         compose.runOnIdle {
             assertTrue("Opening from the title must capture the visible IME", f.adapter.focusMemory.imeBeforeSurface)
             assertEquals(PrivateMessageComposeChromeSurface.Header, f.adapter.surface)
@@ -278,14 +281,14 @@ class PrivateMessageComposeChromeComposeTest {
         compose.setContent { Content() }
         listOf("Restaurer", "Ignorer").forEachIndexed { index, label ->
             compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
-            bodyField().assertDoesNotExist()
-            compose.onNodeWithText(label).performClick()
-            // The panel itself returns focus; Restore is not a returnsToBody surface, so no second return.
+            compose.onNode(isDialog()).assertExists()
+            compose.onNodeWithText(label).performScrollTo().performClick()
+            compose.onNode(isDialog()).assertDoesNotExist()
             bodyField().assertIsFocused()
             compose.runOnIdle {
                 assertEquals(listOf("restore", "discard").take(index + 1), f.calls)
                 assertNull(f.adapter.surface)
-                assertEquals(0, f.adapter.returnGeneration)
+                assertEquals(index + 1, f.adapter.returnGeneration)
                 assertFalse(f.adapter.consumeReturn())
             }
         }
@@ -301,9 +304,53 @@ class PrivateMessageComposeChromeComposeTest {
             assertEquals(listOf("restore", "discard", "reload"), f.calls)
             assertNull(f.adapter.surface)
             assertNull(f.adapter.detail)
-            assertEquals(0, f.adapter.returnGeneration)
+            assertEquals(2, f.adapter.returnGeneration)
             assertFalse(f.adapter.consumeReturn())
         }
+    }
+    @Test fun `1450 initial header stays a panel before Restore opens its separate sheet`() {
+        f.state = f.state.copy(restorableDraft = "brouillon", restorableSubject = "titre",
+            restorableRecipients = "bob")
+        compose.setContent { Content() }
+        val recipients = compose.onNode(hasSetTextAction() and hasText("Destinataires"))
+        recipients.assertIsFocused()
+        compose.onNode(hasSetTextAction() and hasText("Sujet")).assertExists()
+        compose.onNodeWithText("Retour au message").assertExists()
+        compose.onNode(isDialog()).assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(PrivateMessageComposeChromeSurface.Header, f.adapter.surface)
+            assertFalse(f.adapter.draftOfferOpen)
+            assertEquals(0, bodyInputStarts)
+        }
+        recipients.performTextInput("alice")
+        compose.onNodeWithText("Retour au message").performClick()
+        bodyField().assertIsFocused()
+        val field = bodyField().fetchSemanticsNode().id
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
+        compose.onNode(isDialog()).assertExists()
+        compose.onNodeWithText("Retour au message").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(PrivateMessageComposeChromeSurface.Restore, f.adapter.surface)
+            assertTrue(f.adapter.draftOfferOpen)
+            assertEquals("alice", f.state.recipientState.buffer)
+        }
+        compose.onNodeWithContentDescription("Fermer l’offre de brouillon").performClick()
+        bodyField().assertIsFocused()
+        assertEquals(field, bodyField().fetchSemanticsNode().id)
+        compose.runOnIdle {
+            assertNull(f.adapter.surface)
+            assertEquals(1, f.adapter.returnGeneration)
+            assertFalse(f.adapter.consumeReturn())
+            assertTrue(f.calls.isEmpty())
+            assertEquals("alice", f.state.recipientState.buffer)
+        }
+        // Reopening the header must still focus its recipient field after the offer was closed.
+        compose.onNodeWithContentDescription(
+            "Modifier les destinataires et le sujet : Nouveau MP, Ajouter des destinataires · Ajouter un sujet")
+            .performClick()
+        recipients.assertIsFocused()
+        compose.onNode(hasSetTextAction() and hasText("Sujet")).assertExists()
+        compose.onNode(isDialog()).assertDoesNotExist()
     }
     @Test fun `ED45 explicit Masquer in the MP detail forwards acknowledgement without sending`() {
         prefill()

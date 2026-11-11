@@ -30,9 +30,7 @@ internal class PrivateMessageComposeChromeAdapter(
     actions.host,
     EditorHostSurfaces(PrivateMessageComposeChromeSurface.Smileys, PrivateMessageComposeChromeSurface.Options,
         PrivateMessageComposeChromeSurface.Picker, header = PrivateMessageComposeChromeSurface.Header,
-        canWrapSelection = true, returnsToBody = {
-            it !in setOf(PrivateMessageComposeChromeSurface.Header, PrivateMessageComposeChromeSurface.Restore)
-        }),
+        canWrapSelection = true, draftOffer = PrivateMessageComposeChromeSurface.Restore),
     launchPicker, openSmileys, memory.host, openSmileySearch,
 ) {
     val state get() = PrivateMessageComposeChromeState(source())
@@ -72,13 +70,13 @@ internal class PrivateMessageComposeChromeAdapter(
         actions.picker(event)
     }
     fun restoreDraft() {
-        if (state.restoreEnabled) { actions.restore(); closeSurface() }
+        if (state.restoreEnabled) { actions.restore(); closeDraftOffer() }
     }
     fun discardDraft() {
-        if (state.scaffold.controlsEnabled) { actions.discard(); closeSurface() }
+        if (state.scaffold.controlsEnabled) { actions.discard(); closeDraftOffer() }
     }
     fun retryFormLoad() = actions.reload()
-    /** ED-130 replaces the whole editor: no header, ↺ panel, sheet or detail comes back after « Réessayer ». */
+    /** ED-130 replaces the whole editor: no header, sheet or detail comes back after « Réessayer ». */
     fun closeLayersForFormFailure(dismissSmileys: () -> Unit) {
         if (surface == PrivateMessageComposeChromeSurface.Smileys) dismissSmileys()
         detail?.let { closeDetails(it.key) }
