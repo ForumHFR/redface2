@@ -1,4 +1,6 @@
-Redface 2 v0.69.10 — dev.
-- Fixes the 0.69.9 crash at launch (incomplete build).
-- Images: cancelling the picker no longer shows "No image received".
-- Edit a post: text locked until the original message has loaded.
+Redface 2 v0.69.11 — dev.
+- New editor for posts, topics and PMs: bottom action bar, header panel, restored after rotation.
+- New PM: recipients as chips.
+- Quote cards in their own panel.
+- Preview beside the text, hidden while typing.
+- Setting: action bar shortcut.
