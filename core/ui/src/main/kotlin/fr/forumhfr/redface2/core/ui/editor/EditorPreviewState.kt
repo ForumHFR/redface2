@@ -99,9 +99,6 @@ internal val LocalEditorPreviewCompactHeight = staticCompositionLocalOf { false 
 /** Scaffold suppresses automatic IME requests before returning from a keyboard-focused preview control. */
 internal val LocalEditorPreviewReturnFocus = staticCompositionLocalOf<(() -> Unit)?> { null }
 
-/** A covering preview's programmatic defocus must not retain the scaffold's tool capture. */
-internal val LocalEditorPreviewClearToolSelection = staticCompositionLocalOf<() -> Unit> { {} }
-
 /** Only an unmeasured layout may wait; a determined covering fallback consumes restoration. */
 internal val LocalEditorPreviewBodyFocusAvailability = staticCompositionLocalOf { EditorBodyFocusAvailability.Ready }
 

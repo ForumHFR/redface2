@@ -97,7 +97,6 @@ fun EditorPreview(
     val keyboard = LocalSoftwareKeyboardController.current
     val inputMode = LocalInputModeManager.current
     val returnToSource = LocalEditorPreviewReturnFocus.current
-    val clearToolSelection = LocalEditorPreviewClearToolSelection.current
     val focusMemory = LocalEditorPreviewFocusMemory.current ?: remember(bodyState) { EditorPreviewFocusMemory() }
     val focusManager = LocalFocusManager.current
     val previewScroll = rememberScrollState()
@@ -156,8 +155,6 @@ fun EditorPreview(
                 val selection = bodyState.selection
                 focusManager.clearFocus(force = true)
                 if (bodyState.selection != selection) bodyState.edit { this.selection = selection }
-                // This programmatic focus loss is not a handoff to a tool; discard its IME snapshot.
-                clearToolSelection()
             }
         }
         // A window/IME/font change cancels a gesture instead of releasing it against obsolete bounds.

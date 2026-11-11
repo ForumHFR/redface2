@@ -295,7 +295,6 @@ fun EditorScaffold(
                         Box(Modifier.weight(1f).fillMaxWidth()) {
                             CompositionLocalProvider(
                                 LocalEditorPreviewCompactHeight provides windowMetrics.compactHeight,
-                                LocalEditorPreviewClearToolSelection provides surfaceFocus::clearToolSelection,
                                 LocalEditorPreviewReturnFocus provides returnFromPreview) {
                                 fieldArea {
                                     RestoreRecreatedEditorBodyFocus(bodyFocus, bodyFocusRestoreAllowed, bodyState,
