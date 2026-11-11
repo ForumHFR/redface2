@@ -9,7 +9,7 @@ import androidx.compose.ui.res.stringResource
 import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.ui.R
 
-/** One presentation catalogue for the toolbar and the future settings picker (ED-36). */
+/** One presentation catalogue for the toolbar and the settings picker (ED-36). */
 data class EditorShortcutEntry(
     val choice: EditorShortcut,
     @param:StringRes val labelRes: Int,
@@ -26,7 +26,7 @@ internal val editorShortcutFormats = listOf(
     EditorShortcutEntry(EditorShortcut.STRIKE, R.string.bbcode_action_strike,
         R.drawable.ic_editor_strike, BbcodeAction.Strike),
     EditorShortcutEntry(EditorShortcut.QUOTE, R.string.bbcode_action_quote,
-        R.drawable.ic_editor_quote, BbcodeAction.Quote),
+        R.drawable.ic_editor_quote_text, BbcodeAction.Quote),
     EditorShortcutEntry(EditorShortcut.CODE, R.string.bbcode_action_cpp, R.drawable.ic_editor_code, BbcodeAction.Cpp),
     EditorShortcutEntry(EditorShortcut.FIXED, R.string.bbcode_action_fixed,
         R.drawable.ic_editor_fixed, BbcodeAction.Fixed),
@@ -47,9 +47,10 @@ val editorShortcutCatalog: List<EditorShortcutEntry> =
     listOf(EditorShortcutEntry(EditorShortcut.NONE, R.string.editor_shortcut_none)) +
         editorShortcutFormats + editorShortcutColors + listOf(
             EditorShortcutEntry(EditorShortcut.UPLOAD_IMAGE, R.string.editor_bar_upload, R.drawable.ic_image_upload),
-            EditorShortcutEntry(EditorShortcut.IMAGE_URL, R.string.editor_bar_image_url, R.drawable.ic_editor_link),
+            EditorShortcutEntry(EditorShortcut.IMAGE_URL, R.string.editor_bar_image_url,
+                R.drawable.ic_editor_image_url),
             EditorShortcutEntry(EditorShortcut.IMAGE_SELECTION, R.string.editor_bar_image_selection,
-                R.drawable.ic_editor_image, BbcodeAction.Image),
+                R.drawable.ic_editor_image_selection, BbcodeAction.Image),
             EditorShortcutEntry(EditorShortcut.SEARCH_SMILEYS, R.string.editor_shortcut_search_smileys,
                 R.drawable.ic_editor_search_smileys),
             EditorShortcutEntry(EditorShortcut.PERSONAL_SMILEY, R.string.editor_shortcut_personal_smiley,

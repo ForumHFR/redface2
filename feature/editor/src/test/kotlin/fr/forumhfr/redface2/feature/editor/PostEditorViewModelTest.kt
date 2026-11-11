@@ -92,6 +92,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorEventProjection
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorText
 import fr.forumhfr.redface2.core.ui.editor.OperationRef
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerOpenIntent
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.toEditorError
@@ -204,6 +205,23 @@ class PostEditorViewModelTest {
             get(this@forgetInitialBody) as MutableStateFlow<PostEditorState>
         }
         state.value = state.value.copy(draftHydratedFromForm = false)
+    }
+
+    @Test
+    fun `editor shortcut follows persisted changes including NONE without changing the draft`() = runTest {
+        val preferences = FakeUserPreferencesRepository()
+        preferences.setEditorShortcut(EditorShortcut.RED)
+        val vm = newReplyViewModel(userPreferencesRepository = preferences)
+        settleBody()
+        assertEquals(EditorShortcut.RED, vm.state.value.editorShortcut)
+        val body = vm.bodyFieldState.text.toString()
+        preferences.setEditorShortcut(EditorShortcut.IMAGE_URL)
+        settleBody()
+        assertEquals(EditorShortcut.IMAGE_URL, vm.state.value.editorShortcut)
+        preferences.setEditorShortcut(EditorShortcut.NONE)
+        settleBody()
+        assertEquals(EditorShortcut.NONE, vm.state.value.editorShortcut)
+        assertEquals(body, vm.bodyFieldState.text.toString())
     }
 
     @Test
@@ -656,7 +674,7 @@ class PostEditorViewModelTest {
         uploadRepository.uploadGate = gate
         val vm = newReplyViewModel()
         vm.editBody(TextFieldValue("body", TextRange(2)))
-        vm.smileyPicker.open()
+        vm.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         vm.submit(PostEditorIntent.ImagesPicked(listOf("content://pick/1")))
         val before = vm.bodyValue()
         for (intent in listOf(
@@ -2705,7 +2723,7 @@ class PostEditorViewModelTest {
         val gate = CompletableDeferred<Unit>()
         editPostRepository.formGate = gate
         val vm = newEditViewModel()
-        vm.smileyPicker.open()
+        vm.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         val before = vm.bodyValue()
         for (intent in listOf(
             PostEditorIntent.ToolbarActionClicked(BbcodeAction.Bold),
@@ -3315,7 +3333,7 @@ class PostEditorViewModelTest {
         val viewModel = newReplyViewModel()
         settleBody()
         val fetches = replyRepository.formFetches
-        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         val open = viewModel.smileyPicker.state.value as SmileyPickerState.Open
         assertEquals(listOf(smiley), open.mostUsedSmileys)
         requireNotNull(open.onLocalFavoriteChange)(smiley)
@@ -3333,7 +3351,7 @@ class PostEditorViewModelTest {
         val viewModel = newReplyViewModel()
         settleBody()
         val fetches = replyRepository.formFetches
-        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         viewModel.smileyPicker.onFavoriteClicked(wiki)
         settleBody()
         assertEquals(listOf(wiki.token), favoriteRepository.added)
@@ -3379,7 +3397,7 @@ class PostEditorViewModelTest {
 
             assertFalse(viewModel.state.value.isLoadingForm)
             assertNull(viewModel.state.value.submitError)
-            viewModel.smileyPicker.open()
+            viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
             val open = viewModel.smileyPicker.state.value as SmileyPickerState.Open
             assertTrue(open.favoriteSmileys.isEmpty())
             assertNull(open.onFavoriteChange)
@@ -3398,7 +3416,7 @@ class PostEditorViewModelTest {
         val viewModel = newReplyViewModel()
         settleBody()
 
-        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         val open = viewModel.smileyPicker.state.value as SmileyPickerState.Open
         assertEquals(listOf(favorite), open.favoriteSmileys)
         viewModel.editBody(TextFieldValue("hello", TextRange(5)))
@@ -3420,7 +3438,7 @@ class PostEditorViewModelTest {
         val viewModel = newReplyViewModel()
         settleBody()
 
-        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         assertEquals(listOf(favoriteA), (viewModel.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys)
         viewModel.editBody(TextFieldValue("Reply"))
 
@@ -3445,7 +3463,7 @@ class PostEditorViewModelTest {
         val viewModel = newReplyViewModel()
         settleBody() // form fetch → userId hydrated into state
 
-        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         viewModel.smileyPicker.onQueryChanged("jap")
         testScheduler.advanceTimeBy(400L)
         syncBody()
@@ -3458,7 +3476,7 @@ class PostEditorViewModelTest {
     @Test
     fun `the wiki search falls back to user id 0 while the form exposed no userId`() = runTest {
         val viewModel = newReplyViewModel() // fake form carries no userId → state.userId null
-        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         viewModel.smileyPicker.onQueryChanged("jap")
         testScheduler.advanceTimeBy(400L)
         syncBody()
@@ -3470,7 +3488,7 @@ class PostEditorViewModelTest {
     fun `failed wiki search does not leak user id or query through diagnostics`() = runTest {
         val diagnostics = DiagnosticsLog()
         val viewModel = newReplyViewModel(diagnostics = diagnostics)
-        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         viewModel.smileyPicker.onQueryChanged("secret")
         testScheduler.advanceTimeBy(400L)
         syncBody()
@@ -3491,7 +3509,7 @@ class PostEditorViewModelTest {
     fun `SmileySelected inserts the token at the caret and closes the picker`() = runTest {
         val viewModel = newReplyViewModel()
         viewModel.editBody(TextFieldValue("hello", TextRange(5)))
-        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         viewModel.dispatch(PostEditorIntent.SmileySelected(":jap:"))
         viewModel.state.test {
             val state = expectMostRecentItem()
@@ -5585,9 +5603,9 @@ class PostEditorViewModelTest {
 
         override fun observeImagePickerMode(): Flow<ImagePickerMode> = imagePickerMode
 
-        override fun observeEditorShortcut(): Flow<EditorShortcut> = MutableStateFlow(EditorShortcut.NONE)
-
-        override suspend fun setEditorShortcut(shortcut: EditorShortcut) = Unit
+        private val editorShortcut = MutableStateFlow(EditorShortcut.NONE)
+        override fun observeEditorShortcut(): Flow<EditorShortcut> = editorShortcut
+        override suspend fun setEditorShortcut(shortcut: EditorShortcut) { editorShortcut.value = shortcut }
 
         override suspend fun setImagePickerMode(mode: ImagePickerMode) {
             imagePickerMode.value = mode

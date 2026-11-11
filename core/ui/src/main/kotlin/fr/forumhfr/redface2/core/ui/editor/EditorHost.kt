@@ -24,6 +24,7 @@ open class EditorHost<S : Any>(
     private val launchPicker: () -> Unit,
     private val openSmileys: () -> Unit,
     private val memory: EditorHostMemory<S>,
+    private val openSmileySearch: (() -> Unit)? = null,
 ) {
     val surface get() = memory.surface
     val detail get() = memory.detail
@@ -37,7 +38,8 @@ open class EditorHost<S : Any>(
             firstStatus = firstStatus, secondStatus = secondStatus)
 
     val barActions get() = EditorActionBarActions(::gesture, ::format, {},
-        { open(surfaces.smileys, openSmileys) }, { open(surfaces.options) }, ::preview, ::activate)
+        { open(surfaces.smileys, openSmileys) }, { open(surfaces.options) }, ::preview, ::activate,
+        onSmileySearch = openSmileySearch?.let { search -> { open(surfaces.smileys, search) } })
     val imageActions get() = EditorBarImageActions({ open(surfaces.picker, launchPicker) },
         surfaces.imageUrl?.let { { open(it) } }, surfaces.canWrapSelection)
     val submitState get() = ArmedSubmitState(currentBar().arm != null, source().sendActivatable,

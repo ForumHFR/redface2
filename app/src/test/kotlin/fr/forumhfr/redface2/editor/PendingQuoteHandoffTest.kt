@@ -26,6 +26,7 @@ import fr.forumhfr.redface2.core.domain.write.ReplyRepository
 import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
@@ -754,6 +755,7 @@ class PendingQuoteHandoffTest {
             every { observeQuoteCardsEnabled() } returns flowOf(false)
             every { observeEditorImageInsert() } returns flowOf(EditorImageInsert.REDUCED)
             every { observeImagePickerMode() } returns flowOf(ImagePickerMode.DEFAULT)
+            every { observeEditorShortcut() } returns flowOf(EditorShortcut.NONE)
         }
         private val auth = mockk<AuthRepository> {
             every { observeAuthState() } returns flowOf(AuthState.Authenticated("tester"))

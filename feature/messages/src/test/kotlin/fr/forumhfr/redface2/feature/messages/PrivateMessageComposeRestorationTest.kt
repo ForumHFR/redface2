@@ -22,6 +22,7 @@ import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
@@ -83,6 +84,7 @@ class PrivateMessageComposeRestorationTest {
         every { preferences.observeConfirmBeforePosting() } returns flowOf(true)
         every { preferences.observeEditorImageInsert() } returns flowOf(EditorImageInsert.FULL)
         every { preferences.observeImagePickerMode() } returns flowOf(ImagePickerMode.DEFAULT)
+        every { preferences.observeEditorShortcut() } returns flowOf(EditorShortcut.NONE)
         coEvery { repository.fetchComposeForm(any()) } coAnswers {
             failure?.let { throw it }
             formGate?.await() ?: served

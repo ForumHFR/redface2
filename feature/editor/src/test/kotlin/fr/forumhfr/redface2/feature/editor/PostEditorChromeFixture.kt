@@ -79,15 +79,17 @@ internal class PostEditorChromeFixture {
 }
 
 @Composable
+@Suppress("LongParameterList") // Test host: state, intents, body, events, R2 host memory, R6 smiley picker.
 internal fun PostEditorTestContent(
     state: PostEditorState,
     onIntent: (PostEditorIntent) -> Unit = {},
     body: TextFieldState = remember { TextFieldState(state.bodyText) },
     events: PostEditorChromeEvents = remember { PostEditorChromeEvents() },
     memory: EditorHostMemory<PostEditorChromeSurface> = remember { EditorHostMemory() },
+    smileyPicker: SmileyPickerController? = null,
 ) {
     val scope = rememberCoroutineScope()
-    val smileys = remember { SmileyPickerController(scope, searchWiki = { _, _ -> emptyList() }) }
+    val smileys = smileyPicker ?: remember { SmileyPickerController(scope, searchWiki = { _, _ -> emptyList() }) }
     val previous = remember { arrayOf(state.copy(submitError = null,
         uploadError = null, legacyQuoteRequestDropped = false)) }
     SideEffect { events.observe(previous[0], state); previous[0] = state }

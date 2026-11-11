@@ -102,6 +102,7 @@ internal class EditorActionBarFixture {
                                 body.editBbcode { text, start, end -> applyBbcodeAction(action, text, start, end) }
                             },
                             onBodyFocus = { if (showBody) bodyFocus.requestFocus() },
+                            onSmileySearch = { calls += "search" },
                             onSmileys = { calls += "smileys" }, onOptions = { calls += "options" },
                             onPreview = { calls += "preview" },
                             onEvent = { key, action -> eventActions += key to action; event.value = null },

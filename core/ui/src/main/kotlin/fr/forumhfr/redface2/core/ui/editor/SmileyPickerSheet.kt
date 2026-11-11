@@ -29,6 +29,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.PrimaryTabRow
+import androidx.compose.material3.SheetState
 import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -55,11 +56,13 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -71,6 +74,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.input.InputMode
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
@@ -114,19 +118,30 @@ fun SmileyPickerSheet(
     modifier: Modifier = Modifier,
     layout: SmileyPickerLayoutSpec = SmileyPickerLayoutSpec.Current,
 ) {
+    // #1193: skip the partial anchor to avoid an underdamped opening overshooting the top butée.
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    SmileyPickerSheet(state, onDismiss, onQueryChange, onSmileyClicked, modifier, layout, sheetState)
+}
+
+/** Hoisted state lets screenshot tests explicitly finish expansion without exposing M3 in the public API. */
+@Suppress("LongParameterList") // Same sheet inputs, plus the hoisted M3 state.
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun SmileyPickerSheet(
+    state: SmileyPickerState.Open,
+    onDismiss: () -> Unit,
+    onQueryChange: (String) -> Unit,
+    onSmileyClicked: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    layout: SmileyPickerLayoutSpec = SmileyPickerLayoutSpec.Current,
+    sheetState: SheetState,
+) {
     // All four hosts remove the sheet on Hidden: expiration survives tab changes, not a new opening.
-    val favoriteOverlayExpired = rememberSmileyPickerOverlayExpired(state.favoriteFeedbackGeneration)
+    val uiState = rememberSmileyPickerUiState(state)
+    val favoriteOverlayExpired = uiState.favoriteOverlayExpired
     val gridState = rememberSaveableStateHolder()
-    val wikiAutofocus = rememberSaveable {
-        mutableStateOf(state.openingIntent != SmileyPickerOpenIntent.CONSULTATION && state.detailSmiley == null)
-    }
-    val uiState = SmileyPickerUiState(wikiAutofocus, favoriteOverlayExpired)
     val gestures = remember { SmileySheetGestures() }
     val scope = rememberCoroutineScope()
-    // #1193 — force skipPartiallyExpanded: the tall, scrollable picker otherwise anchors at M3's
-    // PartiallyExpanded and its underdamped settle overshoots the top butée on opening. Same fix as
-    // QuickReplySheet / MessageEditorComponents; scope is Fix 1 only (no tab/IME/search change).
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val height = remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
     SmileySheetTrace(state.diagnostics, sheetState, height.intValue)
@@ -169,10 +184,9 @@ fun SmileyPickerSheet(
             SmileySheetHandle(
                 onDismiss = { dismissAnimated(SmileyPickerCloseCause.SHEET_ACTION) },
                 modifier = Modifier.align(Alignment.CenterHorizontally),
-                takeInitialFocus = state.openingIntent == SmileyPickerOpenIntent.CONSULTATION,
             )
             SmileyDetailBackHandler(state)
-            SmileyDetailFocusEffect(state.detailSmiley, wikiAutofocus)
+            SmileyDetailFocusEffect(state.detailSmiley, uiState.wikiAutofocus)
             val sheetTitle = stringResource(
                 if (state.detailSmiley == null) R.string.editor_smiley_title else R.string.editor_smiley_detail_title,
             )
@@ -221,19 +235,9 @@ fun SmileyPickerSheet(
 /** Same M3 handle and touch target, with an explicit cause for taps and accessibility dismissal. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun SmileySheetHandle(
-    onDismiss: () -> Unit, modifier: Modifier = Modifier, takeInitialFocus: Boolean = false,
-) {
-    val focus = remember { FocusRequester() }
-    LaunchedEffect(Unit) {
-        if (takeInitialFocus) focus.requestFocus()
-    }
+private fun SmileySheetHandle(onDismiss: () -> Unit, modifier: Modifier = Modifier) {
     Box(
-        // The dialog's native initial focus otherwise lands on the Wiki field in touch mode,
-        // even when WikiTabContent does not request it. Keep an accessible, non-input target.
-        modifier.focusRequester(focus).focusProperties {
-            if (takeInitialFocus) canFocus = true
-        }.minimumInteractiveComponentSize().clickable(
+        modifier.testTag("smiley_picker_close").minimumInteractiveComponentSize().clickable(
             role = Role.Button,
             onClickLabel = stringResource(R.string.editor_smiley_picker_close),
             onClick = onDismiss,
@@ -243,9 +247,23 @@ private fun SmileySheetHandle(
     }
 }
 
-private data class SmileyPickerUiState(
+/** Save search autofocus, but allow the consultation sink to reclaim focus after recreation. */
+@Composable
+internal fun rememberSmileyPickerUiState(state: SmileyPickerState.Open): SmileyPickerUiState {
+    val wikiAutofocus = rememberSaveable {
+        mutableStateOf(state.openingIntent != SmileyPickerOpenIntent.CONSULTATION && state.detailSmiley == null)
+    }
+    // Survives grid/detail and tab changes within this sheet, but resets with its composition.
+    // An opening restored directly in detail must not acquire grid focus on return either.
+    val initialFocusHandled = remember { mutableStateOf(state.detailSmiley != null) }
+    return SmileyPickerUiState(wikiAutofocus,
+        rememberSmileyPickerOverlayExpired(state.favoriteFeedbackGeneration), initialFocusHandled)
+}
+
+internal data class SmileyPickerUiState(
     val wikiAutofocus: MutableState<Boolean>,
     val favoriteOverlayExpired: MutableState<Boolean>,
+    val initialFocusHandled: MutableState<Boolean>,
 )
 
 /** Read the dialog's locals, which replace the host's keyboard controller and focus manager. */
@@ -263,7 +281,7 @@ internal fun SmileyDetailFocusEffect(detail: EditorSmiley?, wikiAutofocus: Mutab
 }
 
 @Composable
-private fun SmileyPickerGridPage(
+internal fun SmileyPickerGridPage(
     state: SmileyPickerState.Open,
     onQueryChange: (String) -> Unit,
     onSmileyClicked: (String) -> Unit,
@@ -272,16 +290,36 @@ private fun SmileyPickerGridPage(
 ) {
     var tabIndex by rememberSmileyPickerTab(state.initialTab)
     val tabsState = rememberSaveableStateHolder()
+    val consultationFocus = remember { FocusRequester() }
+    val inputModeManager = LocalInputModeManager.current
     PrimaryTabRow(selectedTabIndex = tabIndex) {
         listOf(
             R.string.editor_smiley_tab_favorites, R.string.editor_smiley_tab_standard, R.string.editor_smiley_tab_wiki,
         ).forEachIndexed { index, title ->
+            val interactions = remember(inputModeManager) {
+                SmileyTabInteractionSource { inputModeManager.inputMode == InputMode.Touch }
+            }
+            // PrimaryTabRow uses a multi-content Layout; run once the selected Tab is attached.
+            // M3 supplies the selected Tab semantics; no visible title is needed for consultation.
+            if (tabIndex == index) LaunchedEffect(Unit) {
+                val consultation = state.openingIntent == SmileyPickerOpenIntent.CONSULTATION
+                if (consultation && !uiState.wikiAutofocus.value && !uiState.initialFocusHandled.value) {
+                    if (consultationFocus.requestFocus()) uiState.initialFocusHandled.value = true
+                }
+            }
             Tab(
                 selected = tabIndex == index,
+                interactionSource = interactions,
                 onClick = {
-                    uiState.wikiAutofocus.value = true
-                    tabIndex = index
+                    if (tabIndex != index) {
+                        uiState.wikiAutofocus.value = true
+                        tabIndex = index
+                    }
                 },
+                modifier = if (tabIndex == index) {
+                    Modifier.testTag("smiley_selected_tab").focusRequester(consultationFocus)
+                        .focusProperties { canFocus = true }
+                } else Modifier,
                 text = { Text(stringResource(title)) },
             )
         }
@@ -294,7 +332,7 @@ private fun SmileyPickerGridPage(
                     favorites = state, showFavoriteSection = true,
                 )
                 1 -> StandardTabContent(state, onSmileyClicked, layout)
-                else -> WikiTabContent(state, onQueryChange, onSmileyClicked, layout, uiState.wikiAutofocus.value)
+                else -> WikiTabContent(state, onQueryChange, onSmileyClicked, layout, uiState)
             }
         }
         key(state.favoriteFeedbackGeneration) {
@@ -353,12 +391,12 @@ private fun WikiTabContent(
     onQueryChange: (String) -> Unit,
     onSmileyClicked: (String) -> Unit,
     layout: SmileyPickerLayoutSpec,
-    autofocus: Boolean,
+    uiState: SmileyPickerUiState,
 ) {
     // #250 — focus on entry from another tab, but never on return from the smiley detail.
     val searchFocus = remember { FocusRequester() }
     LaunchedEffect(Unit) {
-        if (autofocus) searchFocus.requestFocus()
+        if (uiState.wikiAutofocus.value) searchFocus.requestFocus()
     }
     var fieldValue by rememberSmileyWikiFieldValue(state.query)
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -370,7 +408,10 @@ private fun WikiTabContent(
                 // in-flight search — a mid-word tap must not kill a pending debounce.
                 val textChanged = newValue.text != fieldValue.text
                 fieldValue = newValue
-                if (textChanged) onQueryChange(newValue.text)
+                if (textChanged) {
+                    uiState.wikiAutofocus.value = true
+                    onQueryChange(newValue.text)
+                }
             },
             singleLine = true,
             // #900 r1 (gate Sol) — the label STAYS a label : a placeholder disappears once the
@@ -380,7 +421,12 @@ private fun WikiTabContent(
             label = { Text(stringResource(R.string.editor_smiley_search_label)) },
             modifier = Modifier
                 .fillMaxWidth()
-                .focusRequester(searchFocus),
+                .focusRequester(searchFocus)
+                .onFocusChanged {
+                    if (it.isFocused) {
+                        uiState.wikiAutofocus.value = true
+                    }
+                },
         )
         WikiSearchContent(state, onSmileyClicked, layout)
     }
@@ -414,12 +460,19 @@ private fun WikiSearchContent(
     layout: SmileyPickerLayoutSpec,
 ) {
     when (val wiki = state.wiki) {
-        WikiSearchState.Idle -> Text(
-            text = stringResource(R.string.editor_smiley_search_hint),
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(vertical = 8.dp),
-        )
+        WikiSearchState.Idle -> {
+            val message = when {
+                state.query.length < SmileyPickerController.MIN_WIKI_QUERY_LENGTH -> R.string.editor_smiley_search_hint
+                state.query == state.restoredQuery -> R.string.editor_smiley_search_resume
+                else -> null // An edited query stays neutral during debounce, without a spinner.
+            }
+            if (message != null) Text(
+                text = stringResource(message),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(vertical = 8.dp),
+            )
+        }
         WikiSearchState.Loading -> {
             val loadingDescription = stringResource(R.string.editor_smiley_search_loading)
             Box(

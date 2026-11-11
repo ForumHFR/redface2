@@ -42,6 +42,7 @@ import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
@@ -339,6 +340,7 @@ class PrivateMessageComposeInputTest {
             every { observeConfirmBeforePosting() } returns MutableStateFlow(confirmBeforePosting)
             every { observeEditorImageInsert() } returns MutableStateFlow(EditorImageInsert.REDUCED)
             every { observeImagePickerMode() } returns MutableStateFlow(ImagePickerMode.DEFAULT)
+            every { observeEditorShortcut() } returns MutableStateFlow(EditorShortcut.NONE)
         }
         compose.runOnIdle {
             vm = PrivateMessageComposeViewModel(

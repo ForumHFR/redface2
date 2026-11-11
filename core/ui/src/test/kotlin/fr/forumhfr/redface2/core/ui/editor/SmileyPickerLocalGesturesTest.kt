@@ -172,7 +172,7 @@ class SmileyPickerLocalGesturesTest {
         controller.onQueryChanged("fictif")
         dispatcher.scheduler.advanceUntilIdle()
         controller.dismiss()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         mount(controller)
         val labels = listOf(R.string.editor_smiley_local_favorite_remove, R.string.editor_smiley_favorite_add)
         assertActions(wiki, labels)
@@ -227,7 +227,7 @@ class SmileyPickerLocalGesturesTest {
         val controller = controller()
         controller.onQueryChanged("fictif")
         controller.dismiss()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         // StateRestorationTester replaces the host registry, not ModalBottomSheet's dialog registry.
         // Exercise the production saveable state in the reachable registry instead of claiming a rotation.
         lateinit var selection: MutableState<Int>
@@ -265,7 +265,7 @@ class SmileyPickerLocalGesturesTest {
         val controller = controller()
         controller.onQueryChanged("fictif")
         controller.dismiss()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         mount(controller)
         tab(R.string.editor_smiley_tab_wiki).assertIsSelected()
         tab(R.string.editor_smiley_tab_standard).performClick()
@@ -274,7 +274,7 @@ class SmileyPickerLocalGesturesTest {
                 "alice", listOf(LocalFavoriteSmiley(wiki.token, wiki.imageUrl, 1)),
             )
             dispatcher.scheduler.runCurrent()
-            controller.open()
+            controller.open(SmileyPickerOpenIntent.CONSULTATION)
             controller.refreshFavorites(controller.favoriteFormStamp())
         }
         tab(R.string.editor_smiley_tab_standard).assertIsSelected()
@@ -303,7 +303,7 @@ class SmileyPickerLocalGesturesTest {
             ),
             localCollections = locals,
         ),
-    ).also { dispatcher.scheduler.runCurrent(); it.open() }
+    ).also { dispatcher.scheduler.runCurrent(); it.open(SmileyPickerOpenIntent.CONSULTATION) }
 
     private fun mount(controller: SmileyPickerController) = compose.setContent { Sheet(controller) }
 

@@ -27,6 +27,7 @@ internal class TopicFormChromeAdapter(
     launchPicker: () -> Unit,
     openSmileys: () -> Unit,
     val memory: TopicFormChromeMemory = TopicFormChromeMemory(),
+    openSmileySearch: (() -> Unit)? = null,
 ) {
     val state get() = TopicFormChromeState(source())
     // The completion port owns the header, including its focus target and return to the body.
@@ -49,7 +50,7 @@ internal class TopicFormChromeAdapter(
             TopicFormChromeSurface.Picker, imageUrl = TopicFormChromeSurface.Url,
             header = TopicFormChromeSurface.Header,
             returnsToBody = { it !in setOf(TopicFormChromeSurface.Header, TopicFormChromeSurface.Restore) }),
-        launchPicker, openSmileys, memory.host,
+        launchPicker, openSmileys, memory.host, openSmileySearch,
     )
     private fun completeHeader(cause: EditorCause) {
         memory.complete(cause)

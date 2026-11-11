@@ -84,6 +84,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
 import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
 import fr.forumhfr.redface2.core.ui.editor.EventKey
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerOpenIntent
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import fr.forumhfr.redface2.core.ui.editor.toEditorError
@@ -143,6 +144,23 @@ class TopicFormViewModelTest {
     fun tearDown() {
         viewModels.forEach { it.viewModelScope.cancel() }
         Dispatchers.resetMain()
+    }
+
+    @Test
+    fun `editor shortcut follows persisted changes including NONE without changing the draft`() = runTest {
+        val preferences = FakeUserPreferencesRepository()
+        preferences.setEditorShortcut(EditorShortcut.RED)
+        val vm = newTopicViewModel(entrySubcat = null, userPreferencesRepository = preferences)
+        syncBody()
+        assertEquals(EditorShortcut.RED, vm.state.value.editorShortcut)
+        val body = vm.bodyFieldState.text.toString()
+        preferences.setEditorShortcut(EditorShortcut.IMAGE_URL)
+        syncBody()
+        assertEquals(EditorShortcut.IMAGE_URL, vm.state.value.editorShortcut)
+        preferences.setEditorShortcut(EditorShortcut.NONE)
+        syncBody()
+        assertEquals(EditorShortcut.NONE, vm.state.value.editorShortcut)
+        assertEquals(body, vm.bodyFieldState.text.toString())
     }
 
     @Test
@@ -1055,7 +1073,7 @@ class TopicFormViewModelTest {
         syncBody()
         testScheduler.advanceUntilIdle()
         val fetches = topicFormRepository.formFetches
-        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         viewModel.smileyPicker.onFavoriteClicked(wiki)
         syncBody()
         testScheduler.advanceUntilIdle()
@@ -1093,7 +1111,7 @@ class TopicFormViewModelTest {
             testScheduler.advanceUntilIdle()
 
             assertFalse(viewModel.state.value.isLoadingForm)
-            viewModel.smileyPicker.open()
+            viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
             val open = viewModel.smileyPicker.state.value as SmileyPickerState.Open
             assertTrue(open.favoriteSmileys.isEmpty())
             assertNull(open.onFavoriteChange)
@@ -1114,7 +1132,7 @@ class TopicFormViewModelTest {
         syncBody()
         testScheduler.advanceUntilIdle()
 
-        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         val open = viewModel.smileyPicker.state.value as SmileyPickerState.Open
         assertEquals(listOf(favorite), open.favoriteSmileys)
         viewModel.editBody(TextFieldValue("hello", TextRange(5)))
@@ -1138,7 +1156,7 @@ class TopicFormViewModelTest {
         syncBody()
         testScheduler.advanceUntilIdle()
 
-        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         assertEquals(listOf(favoriteA), (viewModel.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys)
 
         topicFormRepository.formResult = topicFormRepository.formResult.copy(favoriteSmileys = listOf(favoriteB))
@@ -1166,7 +1184,7 @@ class TopicFormViewModelTest {
             awaitHydratedState()
             cancelAndIgnoreRemainingEvents()
         }
-        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         viewModel.smileyPicker.onQueryChanged("jap")
         testScheduler.advanceTimeBy(400L)
         testScheduler.runCurrent()
@@ -1185,7 +1203,7 @@ class TopicFormViewModelTest {
             awaitHydratedState()
             cancelAndIgnoreRemainingEvents()
         }
-        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         viewModel.smileyPicker.onQueryChanged("jap")
         testScheduler.advanceTimeBy(400L)
         testScheduler.runCurrent()
@@ -1196,7 +1214,7 @@ class TopicFormViewModelTest {
     fun `failed wiki search does not leak user id or query through diagnostics`() = runTest {
         val diagnostics = DiagnosticsLog()
         val viewModel = newViewModel(diagnostics = diagnostics)
-        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         viewModel.smileyPicker.onQueryChanged("secret")
         testScheduler.advanceTimeBy(400L)
         testScheduler.runCurrent()
@@ -1223,7 +1241,7 @@ class TopicFormViewModelTest {
         // Move caret to end of draft, open preview, then pick a smiley.
         viewModel.editBody(TextFieldValue("hello", TextRange(5)))
         viewModel.submit(TopicFormIntent.TogglePreview)
-        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         viewModel.submit(TopicFormIntent.SmileySelected(":jap:"))
         syncBody()
         viewModel.state.test {
@@ -1250,7 +1268,7 @@ class TopicFormViewModelTest {
             assertEquals(SAMPLE_USER_ID, hydrated.userId)
             cancelAndIgnoreRemainingEvents()
         }
-        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         viewModel.smileyPicker.onQueryChanged("jap")
         testScheduler.advanceTimeBy(400L)
         testScheduler.runCurrent()
@@ -4165,9 +4183,9 @@ class TopicFormViewModelTest {
 
         override fun observeImagePickerMode(): Flow<ImagePickerMode> = imagePickerMode
 
-        override fun observeEditorShortcut(): Flow<EditorShortcut> = MutableStateFlow(EditorShortcut.NONE)
-
-        override suspend fun setEditorShortcut(shortcut: EditorShortcut) = Unit
+        private val editorShortcut = MutableStateFlow(EditorShortcut.NONE)
+        override fun observeEditorShortcut(): Flow<EditorShortcut> = editorShortcut
+        override suspend fun setEditorShortcut(shortcut: EditorShortcut) { editorShortcut.value = shortcut }
 
         override suspend fun setImagePickerMode(mode: ImagePickerMode) {
             imagePickerMode.value = mode

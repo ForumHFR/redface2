@@ -38,6 +38,7 @@ import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyUsageEntry
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerContract
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
@@ -56,6 +57,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorLocalOperation
 import fr.forumhfr.redface2.core.ui.editor.EditorRecipientState
 import fr.forumhfr.redface2.core.ui.editor.EventKey
 import fr.forumhfr.redface2.core.ui.editor.OperationRef
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerOpenIntent
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
 import io.mockk.coEvery
@@ -97,6 +99,7 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 class PrivateMessageComposeViewModelTest {
 
+    private val shortcutPreference = MutableStateFlow(EditorShortcut.NONE)
     private val mainDispatcher = UnconfinedTestDispatcher()
     private var submissionClock = DiagnosticsClock { mainDispatcher.scheduler.currentTime * 1_000_000L }
 
@@ -121,6 +124,7 @@ class PrivateMessageComposeViewModelTest {
             // #459 — the composer now mirrors the image-insert preference on init.
             every { observeEditorImageInsert() } returns MutableStateFlow(EditorImageInsert.REDUCED)
             every { observeImagePickerMode() } returns MutableStateFlow(ImagePickerMode.DEFAULT)
+            every { observeEditorShortcut() } returns shortcutPreference
         }
 
     /** Mirrors the standalone composer's parsed shape (fixture `mp_compose_form.html`). */
@@ -193,6 +197,21 @@ class PrivateMessageComposeViewModelTest {
         }
         Snapshot.sendApplyNotifications()
         if (advanceMirror) mainDispatcher.scheduler.runCurrent()
+    }
+
+    @Test
+    fun `editor shortcut observes persisted choice and live changes without a draft mutation`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        shortcutPreference.value = EditorShortcut.BLUE
+        val vm = viewModel(repository)
+        assertEquals(EditorShortcut.BLUE, vm.state.value.editorShortcut)
+        val body = vm.bodyFieldState.text.toString()
+        shortcutPreference.value = EditorShortcut.PERSONAL_SMILEY
+        assertEquals(EditorShortcut.PERSONAL_SMILEY, vm.state.value.editorShortcut)
+        shortcutPreference.value = EditorShortcut.NONE
+        assertEquals(EditorShortcut.NONE, vm.state.value.editorShortcut)
+        assertEquals(body, vm.bodyFieldState.text.toString())
     }
 
     @Test
@@ -491,7 +510,7 @@ class PrivateMessageComposeViewModelTest {
         coEvery { repository.fetchComposeForm(any()) } returns composeForm()
         val viewModel = viewModel(repository)
         testScheduler.advanceUntilIdle()
-        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         val open = viewModel.smileyPicker.state.value as SmileyPickerState.Open
         assertEquals(listOf(smiley), open.mostUsedSmileys)
         requireNotNull(open.onLocalFavoriteChange)(smiley)
@@ -510,7 +529,7 @@ class PrivateMessageComposeViewModelTest {
         coEvery { repository.fetchComposeForm(any()) } returns composeForm()
         val viewModel = viewModel(repository)
         testScheduler.advanceUntilIdle()
-        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         viewModel.smileyPicker.onFavoriteClicked(wiki)
         testScheduler.advanceUntilIdle()
         assertEquals(listOf(wiki.token), favoriteRepository.added)
@@ -540,7 +559,7 @@ class PrivateMessageComposeViewModelTest {
         advanceUntilIdle()
 
         assertFalse(viewModel.state.value.isLoadingForm)
-        viewModel.smileyPicker.open()
+        viewModel.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         val open = viewModel.smileyPicker.state.value as SmileyPickerState.Open
         assertTrue(open.favoriteSmileys.isEmpty())
         assertNull(open.onFavoriteChange)
@@ -557,7 +576,7 @@ class PrivateMessageComposeViewModelTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchComposeForm(any()) } returns composeForm().copy(favoriteSmileys = listOf(favorite))
         val vm = viewModel(repository)
-        vm.smileyPicker.open()
+        vm.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         val open = vm.smileyPicker.state.value as SmileyPickerState.Open
         assertEquals(listOf(favorite), open.favoriteSmileys)
         vm.editBody(TextFieldValue("hello", TextRange(5)))
@@ -565,7 +584,7 @@ class PrivateMessageComposeViewModelTest {
         assertEquals("hello [:fictif espace:3] ", vm.bodyFieldState.text.toString())
         assertEquals(SmileyPickerState.Hidden, vm.smileyPicker.state.value)
 
-        vm.smileyPicker.open()
+        vm.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         val replacement = favorite.copy(token = "[:fictif_b]", imageUrl = "https://example.invalid/fictif_b.gif")
         coEvery { repository.fetchComposeForm(any()) } returns composeForm().copy(favoriteSmileys = listOf(replacement))
         vm.retryFormLoad()
@@ -586,7 +605,7 @@ class PrivateMessageComposeViewModelTest {
 
         val vm = viewModel(repository, smileyRepository = smileys)
 
-        vm.smileyPicker.open()
+        vm.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         vm.smileyPicker.onQueryChanged("jap")
         advanceUntilIdle()
 
@@ -1565,7 +1584,7 @@ class PrivateMessageComposeViewModelTest {
         vm.onRecipientStateChanged(EditorRecipientState(listOf("alice")))
         vm.onSubjectChanged("subject")
         vm.editBody(TextFieldValue("body", TextRange(4)))
-        vm.smileyPicker.open()
+        vm.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         vm.onSubmit()
         vm.onSmileySelected(":jap:")
         assertEquals("body", vm.bodyFieldState.text.toString())

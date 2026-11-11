@@ -32,7 +32,7 @@ class SmileyPickerWikiKeywordsTest {
             backgroundScope, { _, _ -> emptyList() },
             wikiKeywords = SmileyWikiKeywordsSource(load = { calls += it; gate.await() }),
         )
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onDetailChanged(perso)
         assertEquals(SmileyWikiKeywordsState.Loading, controller.openState().wikiKeywords)
         runCurrent()
@@ -49,7 +49,7 @@ class SmileyPickerWikiKeywordsTest {
             backgroundScope, { _, _ -> emptyList() },
             wikiKeywords = SmileyWikiKeywordsSource(load = { calls++; loaded }),
         )
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onDetailChanged(BUILTIN_HFR_SMILEYS.first())
         runCurrent()
         assertEquals(SmileyWikiKeywordsState.Hidden, controller.openState().wikiKeywords)
@@ -67,7 +67,7 @@ class SmileyPickerWikiKeywordsTest {
                 try { awaitCancellation() } finally { cancelled = true }
             }),
         )
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onDetailChanged(perso)
         runCurrent()
         val retry = controller.openState().onWikiKeywordsRetry
@@ -92,17 +92,17 @@ class SmileyPickerWikiKeywordsTest {
             }),
         )
         runCurrent()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onDetailChanged(perso)
         runCurrent()
         controller.dismiss()
         runCurrent()
         assertEquals(1, cancellations)
         assertEquals(SmileyPickerState.Hidden, controller.state.value)
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onDetailChanged(perso)
         runCurrent()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         runCurrent()
         assertEquals(2, cancellations)
         controller.onDetailChanged(perso)
@@ -125,7 +125,7 @@ class SmileyPickerWikiKeywordsTest {
                 loaded
             }),
         )
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onDetailChanged(perso)
         runCurrent()
         assertEquals(SmileyWikiKeywordsState.Failed, controller.openState().wikiKeywords)
@@ -146,7 +146,7 @@ class SmileyPickerWikiKeywordsTest {
             backgroundScope, { _, _ -> emptyList() },
             favoriteSources = SmileyPickerFavoriteSources(localCollections = locals), wikiKeywords = source,
         )
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onDetailChanged(perso)
         assertEquals(SmileyWikiKeywordsState.Loaded(loaded.keywords), controller.openState().wikiKeywords)
         locals.snapshot.value = SmileyLocalCollectionSnapshot("alice")
@@ -154,7 +154,7 @@ class SmileyPickerWikiKeywordsTest {
         controller.onDetailChanged(perso)
         assertEquals(SmileyWikiKeywordsState.Loaded(loaded.keywords), controller.openState().wikiKeywords)
         val recreated = SmileyPickerController(backgroundScope, { _, _ -> emptyList() }, wikiKeywords = source)
-        recreated.open()
+        recreated.open(SmileyPickerOpenIntent.CONSULTATION)
         recreated.onDetailChanged(perso)
         assertEquals(SmileyWikiKeywordsState.Loaded(loaded.keywords), recreated.openState().wikiKeywords)
         runCurrent()
@@ -168,7 +168,7 @@ class SmileyPickerWikiKeywordsTest {
             backgroundScope, { _, _ -> emptyList() },
             wikiKeywords = SmileyWikiKeywordsSource(load = { suspendCoroutine { continuations += it } }),
         )
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onDetailChanged(perso)
         runCurrent()
         controller.onDetailChanged(null)

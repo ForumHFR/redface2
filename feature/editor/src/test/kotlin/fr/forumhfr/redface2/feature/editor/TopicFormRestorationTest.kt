@@ -23,6 +23,7 @@ import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.write.NewTopicSubmitResult
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -34,6 +35,7 @@ import fr.forumhfr.redface2.core.model.write.TopicPollForm
 import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
+import fr.forumhfr.redface2.core.ui.editor.SmileyPickerOpenIntent
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -84,6 +86,7 @@ class TopicFormRestorationTest {
         every { preferences.observeConfirmBeforePosting() } returns flowOf(true)
         every { preferences.observeEditorImageInsert() } returns flowOf(EditorImageInsert.FULL)
         every { preferences.observeImagePickerMode() } returns flowOf(ImagePickerMode.DEFAULT)
+        every { preferences.observeEditorShortcut() } returns flowOf(EditorShortcut.NONE)
         coEvery { repository.fetchNewTopicForm(any()) } coAnswers { fetch() }
         coEvery { repository.fetchEditFirstPostForm(any()) } coAnswers { fetch() }
     }
@@ -136,7 +139,7 @@ class TopicFormRestorationTest {
         first.bodyScrollState.scrollTo(80)
         assertNotEquals(body, first.state.value.bodyText)
         first.submit(TopicFormIntent.TogglePreview)
-        first.smileyPicker.open()
+        first.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
         first.submit(TopicFormIntent.SubmitClicked())
         val arm = first.state.value.armToken
         assertNotNull(arm)

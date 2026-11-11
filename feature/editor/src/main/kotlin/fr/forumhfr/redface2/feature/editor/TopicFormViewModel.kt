@@ -46,6 +46,7 @@ import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.write.EditFirstPostContext
 import fr.forumhfr.redface2.core.model.write.MissingFirstPostSubcategoryException
@@ -340,6 +341,11 @@ class TopicFormViewModel @AssistedInject constructor(
         viewModelScope.launch {
             userPreferencesRepository.observeEditorImageInsert().collect { mode ->
                 imageInsertMode = mode
+            }
+        }
+        viewModelScope.launch {
+            userPreferencesRepository.observeEditorShortcut().collect { shortcut ->
+                updateState { it.copy(editorShortcut = shortcut) }
             }
         }
         viewModelScope.launch {

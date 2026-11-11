@@ -84,7 +84,14 @@ fun SettingsCategoryDetailScreen(
                         RedfaceSettingsSection(section.title)
                     }
                 }
-                items(section.items, key = { "item:${it.searchable.id}" }) { row ->
+                val shortcuts = section.items.filter { it.searchable.isEditorShortcut }
+                if (shortcuts.isNotEmpty()) {
+                    item(key = "editor_shortcuts") {
+                        EditorShortcutGroup { shortcuts.forEach { it.render() } }
+                    }
+                }
+                val others = section.items.filterNot { it.searchable.isEditorShortcut }
+                items(others, key = { "item:${it.searchable.id}" }) { row ->
                     row.render()
                 }
             }

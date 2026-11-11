@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.messages
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.PostContent
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
@@ -94,6 +95,7 @@ data class PrivateMessageReplyUiState(
     val uploadProgress: UploadProgress? = null,
     /** #1128 — observed continuously so the next image pick uses the current preference. */
     val imagePickerMode: ImagePickerMode = ImagePickerMode.DEFAULT,
+    val editorShortcut: EditorShortcut = EditorShortcut.NONE,
 ) {
     val armToken: ArmToken? get() = (submission as? EditorSubmissionState.Armed)?.token
 

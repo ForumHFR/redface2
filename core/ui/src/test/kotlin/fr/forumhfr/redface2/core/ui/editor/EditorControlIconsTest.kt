@@ -65,7 +65,7 @@ class EditorControlIconsTest {
             R.drawable.ic_editor_italic to R.string.bbcode_action_italic,
             R.drawable.ic_editor_underline to R.string.bbcode_action_underline,
             R.drawable.ic_editor_strike to R.string.bbcode_action_strike,
-            R.drawable.ic_editor_quote to R.string.bbcode_action_quote,
+            R.drawable.ic_editor_quote_text to R.string.bbcode_action_quote,
             R.drawable.ic_editor_code to R.string.bbcode_action_cpp,
             R.drawable.ic_editor_fixed to R.string.bbcode_action_fixed,
             R.drawable.ic_editor_spoiler to R.string.bbcode_action_spoiler,

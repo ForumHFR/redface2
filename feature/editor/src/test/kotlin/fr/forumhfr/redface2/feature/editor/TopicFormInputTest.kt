@@ -38,6 +38,7 @@ import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.write.NewTopicSubmitResult
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
@@ -336,6 +337,7 @@ class TopicFormInputTest {
             every { observeConfirmBeforePosting() } returns MutableStateFlow(confirmBeforePosting)
             every { observeEditorImageInsert() } returns MutableStateFlow(EditorImageInsert.REDUCED)
             every { observeImagePickerMode() } returns MutableStateFlow(ImagePickerMode.DEFAULT)
+            every { observeEditorShortcut() } returns MutableStateFlow(EditorShortcut.NONE)
         }
         compose.runOnIdle {
             vm = TopicFormViewModel(

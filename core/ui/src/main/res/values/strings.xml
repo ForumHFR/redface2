@@ -167,6 +167,7 @@
     <string name="editor_shortcut_personal_smiley">Smiley perso</string>
     <string name="editor_smiley_search_label">Rechercher un smiley perso</string>
     <string name="editor_smiley_search_hint">Tapez au moins 3 caractères pour interroger le wiki HFR.</string>
+    <string name="editor_smiley_search_resume">Modifiez la recherche pour interroger le wiki HFR.</string>
     <string name="editor_smiley_search_loading">Recherche…</string>
     <string name="editor_smiley_search_empty">Aucun smiley trouvé.</string>
     <string name="editor_smiley_search_error">Erreur réseau. Réessayez dans un instant.</string>

@@ -1,9 +1,11 @@
 package fr.forumhfr.redface2.feature.messages
 
+import fr.forumhfr.redface2.core.ui.editor.EditorBarShortcut
 import fr.forumhfr.redface2.core.ui.editor.EditorHostMemory
 import fr.forumhfr.redface2.core.ui.editor.EditorHostState
 import fr.forumhfr.redface2.core.ui.editor.EditorScaffoldChrome
 import fr.forumhfr.redface2.core.ui.post.PostMediaDiskCachePolicy
+import fr.forumhfr.redface2.core.model.editor.EditorShortcutSurface
 
 /** Reply policy projected into the common chrome, without a header or quote panel. */
 internal data class PrivateMessageReplyChromeState(val source: PrivateMessageReplyUiState) {
@@ -12,6 +14,8 @@ internal data class PrivateMessageReplyChromeState(val source: PrivateMessageRep
     val postAllowed = source.canSubmit
     val context = source.conversationTitle.takeIf { source.formAvailable }.orEmpty()
     val scaffold = EditorScaffoldChrome(
+        shortcut = source.editorShortcut.takeIf { it.isAvailableOn(EditorShortcutSurface.PRIVATE_MESSAGE_REPLY) }
+            ?.let { EditorBarShortcut(it, EditorShortcutSurface.PRIVATE_MESSAGE_REPLY) },
         previewVisible = source.isPreviewVisible,
         controlsEnabled = !source.isInitializing && !busy,
         bodyReadOnly = source.isInitializing || busy,

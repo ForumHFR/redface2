@@ -93,7 +93,7 @@ class SmileyPickerDetailFeedbackTest {
 
     private fun startMutation() {
         dispatcher.scheduler.runCurrent()
-        controller.open()
+        controller.open(SmileyPickerOpenIntent.CONSULTATION)
         controller.onFavoriteClicked(perso)
         dispatcher.scheduler.runCurrent()
     }
