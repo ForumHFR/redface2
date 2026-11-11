@@ -92,6 +92,8 @@ data class EditorScaffoldChrome(
  * registered later by the host. Open panels through the supplied header/event actions; other surfaces
  * must dispatch OpenSurface before showing; this also disarms submission and closes tool modes.
  * A panel open on entry defaults to a closed keyboard.
+ * [bodyCaretRevealResetKey] reads a snapshot-backed counter incremented with server hydration or draft
+ * restoration, in the same snapshot as the buffer change. The host retains scroll restoration.
  */
 @Composable
 @OptIn(ExperimentalLayoutApi::class)
@@ -114,6 +116,7 @@ fun EditorScaffold(
     bodyScrollState: ScrollState = rememberScrollState(),
     inputTransformation: InputTransformation? = null,
     autoFocus: Boolean = false,
+    bodyCaretRevealResetKey: () -> Int = { 0 },
     overlay: @Composable (onReturnToBody: () -> Unit, body: @Composable () -> Unit) -> Unit = { _, body -> body() },
 ) {
     val metrics = EditorChromeMetrics(windowMetrics.compactHeight)
@@ -176,9 +179,11 @@ fun EditorScaffold(
                             .semantics { isTraversalGroup = true; traversalIndex = 1f }
                             .tabMovesFocus(focusManager).onEditorBodyTap(bodyState) { restoreImeOnFocus = true },
                         inputTransformation = inputTransformation, readOnly = chrome.uploading || chrome.bodyReadOnly,
+                        placeholder = stringResource(R.string.editor_scaffold_placeholder), revealCaretOnChange = true,
                         scrollState = bodyScrollState, showLabel = metrics.showFieldLabel,
                         autoFocus = initialFocus,
                         showKeyboardOnFocus = initialFocus || restoreImeOnFocus,
+                        caretRevealResetKey = bodyCaretRevealResetKey,
                         onSemanticsClick = editorBodyClick(restoreImeOnFocus, bodyFocusRequester) {
                             restoreImeOnFocus = true
                         })

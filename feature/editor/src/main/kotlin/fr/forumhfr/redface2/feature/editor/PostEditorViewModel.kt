@@ -162,6 +162,15 @@ class PostEditorViewModel @AssistedInject constructor(
         ),
     )
     val state: StateFlow<PostEditorState> = _state.asStateFlow()
+    internal val chromeEvents = PostEditorChromeEvents()
+
+    /** Capture operation transitions synchronously; observing StateFlow would lose short operations. */
+    private fun updateChromeState(transform: (PostEditorState) -> PostEditorState) {
+        val previous = _state.value
+        _state.update(transform)
+        chromeEvents.open(submission.session)
+        chromeEvents.observe(previous, _state.value)
+    }
 
     private val _effects: Channel<PostEditorEffect> = Channel(capacity = Channel.BUFFERED)
     val effects: Flow<PostEditorEffect> = _effects.receiveAsFlow()
@@ -174,6 +183,7 @@ class PostEditorViewModel @AssistedInject constructor(
     private var loadedForm: ReplyForm? = null
         set(value) {
             field = value
+            _state.update { it.copy(hasLoadedForm = value != null, hasAuthenticatedForm = value?.isAnonymous == false) }
             if (value == null) smileyPicker.refreshFavorites(null)
         }
 
@@ -233,7 +243,7 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     /** #405 — debounced autosave coroutine ; relaunched (cancelling the previous) on each edit. */
-    private val submission = EditorSubmissionBinding(
+    private val submission: EditorSubmissionBinding<PostEditorEffect> = EditorSubmissionBinding(
         environment = EditorSubmissionEnvironment(viewModelScope, clock, diagnostics),
         drafts = EditorDraftSession(draftStore, draftKey),
         errors = EditorSubmissionErrors(
@@ -245,7 +255,7 @@ class PostEditorViewModel @AssistedInject constructor(
         ),
         callbacks = EditorSubmissionCallbacks<PostEditorEffect>(
             state = { value ->
-                _state.update {
+                updateChromeState {
                     it.copy(
                         submission = value,
                         isSubmitting = value is EditorSubmissionState.PersistingAttempt ||
@@ -255,7 +265,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 }
             },
             error = { value ->
-                _state.update {
+                updateChromeState {
                     val mapped = if (value?.cause == EditorCause.QuoteFetchFailed) {
                         EditorErrors.quoteFetchFailed(inline = it.pendingQuotes.isNotEmpty())
                     } else { value }
@@ -263,6 +273,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 }
             },
             success = { value -> _effects.trySend(value) },
+            durableWriteSucceeded = chromeEvents::durableWriteSucceeded,
             clearError = { error ->
                 _state.update { if (it.submitError == error) it.copy(submitError = null) else it }
             },
@@ -349,9 +360,10 @@ class PostEditorViewModel @AssistedInject constructor(
                 if (authObserved && newUserId != activeUserId) {
                     uploadJob?.cancel()
                     submission.accountChanged()
+                    loadedForm = null
                     restoration.invalidate()
                     inlineQuoteDeferredByUpload = false
-                    _state.update { it.copy(isUploading = false, uploadProgress = null) }
+                    updateChromeState { it.copy(isUploading = false, uploadProgress = null) }
                 }
                 authObserved = true
                 activeUserId = newUserId
@@ -436,7 +448,7 @@ class PostEditorViewModel @AssistedInject constructor(
     private fun reloadForm() {
         if (!draftRestored || submission.blocksMutation || _state.value.isLoadingForm) return
         if (_state.value.quoteStorageUnavailable) {
-            _state.update { it.copy(isLoadingForm = true) }
+            updateChromeState { it.copy(isLoadingForm = true) }
             viewModelScope.launch {
                 submission.flush(null)
                 restoreDraftIfAny(reconcile = true)
@@ -464,7 +476,7 @@ class PostEditorViewModel @AssistedInject constructor(
         if (!_state.value.canIgnorePendingQuote || submission.blocksMutation) return
         val pending = submission.drafts.pendingInlineQuoteRequest
         submission.disarm()
-        _state.update { it.copy(isLoadingForm = true) }
+        updateChromeState { it.copy(isLoadingForm = true) }
         viewModelScope.launch {
             val result = if (_state.value.unreadableQuoteRequest) {
                 submission.drafts.discardUnreadableInlineQuoteRequest()
@@ -478,7 +490,7 @@ class PostEditorViewModel @AssistedInject constructor(
                     resolveQuoteRenderingThenLoad()
                 } else {
                     finishInlineQuoteDelivery()
-                    if (loadedForm == null && submission.state !is EditorSubmissionState.Uncertain) {
+                    if (loadedForm == null) {
                         loadReplyFormIfPossible(preserveDraft = true)
                     }
                 }
@@ -497,7 +509,7 @@ class PostEditorViewModel @AssistedInject constructor(
 
     private fun quoteStorageFailed(result: EditorDraftStore.StoreWriteResult?) {
         submission.resolveDraftWrite(result)
-        _state.update {
+        updateChromeState {
             it.copy(
                 isLoadingForm = false,
                 quoteStorageUnavailable = it.quoteStorageUnavailable ||
@@ -516,7 +528,7 @@ class PostEditorViewModel @AssistedInject constructor(
         if (insertInline && (_state.value.restorableDraft != null || draftRestoreDiscarding)) return
         val missing = if (insertInline) missingInlineQuotes(quotes) else quotes
         if (missing.isEmpty()) {
-            _state.update { it.copy(isLoadingForm = true) }
+            updateChromeState { it.copy(isLoadingForm = true) }
             viewModelScope.launch {
                 commitInlineQuoteDelivery()
                 if (loadedForm == null) loadReplyFormIfPossible(preserveDraft = true)
@@ -540,7 +552,7 @@ class PostEditorViewModel @AssistedInject constructor(
     private fun finishInlineQuoteDelivery() {
         inlineQuoteDeferredByUpload = false
         savedStateHandle.remove<Int>(QUOTE_FAILURES_KEY)
-        _state.update {
+        updateChromeState {
             it.copy(
                 pendingQuotes = emptyList(), quoteFetchFailures = 0, isLoadingForm = false,
                 submitError = it.submitError.afterFormLoaded(quotesResolved = true),
@@ -554,12 +566,13 @@ class PostEditorViewModel @AssistedInject constructor(
         insertInline: Boolean,
     ) {
         val context = buildReplyContext() ?: run {
-            _state.update { it.copy(submitError = EditorErrors.missingSubcat) }
+            updateChromeState { it.copy(submitError = EditorErrors.missingSubcat) }
             return
         }
         val quoteContext = context.copy(quotedNumreponse = quotes.first().numreponse, quoteRef = null)
+        val opening = submission.session
         val favoriteStamp = smileyPicker.favoriteFormStamp()
-        _state.update { it.copy(isLoadingForm = true) }
+        updateChromeState { it.copy(isLoadingForm = true) }
         viewModelScope.launch {
             val outcome = runCatching {
                 quoteMaterializer.fetchFormWithQuotes(
@@ -568,6 +581,7 @@ class PostEditorViewModel @AssistedInject constructor(
                     truncate = quotes.any { it.truncate },
                 ).also { currentCoroutineContext().ensureActive() }
             }
+            if (submission.session != opening) return@launch
             outcome.fold(
                 onSuccess = { form ->
                     if (form.initialContent.isBlank()) {
@@ -579,12 +593,14 @@ class PostEditorViewModel @AssistedInject constructor(
                     if (_state.value.isAwaitingInitialBody || !acceptMutation(blockDuringUpload = insertInline)) {
                         inlineQuoteDeferredByUpload =
                             insertInline && _state.value.isUploading && !submission.blocksMutation
-                        _state.update { it.copy(isLoadingForm = false) }
+                        updateChromeState { it.copy(isLoadingForm = false) }
                         return@fold
                     }
                     if (!insertInline) {
                         applyFormHydration(form.copy(initialContent = ""))
-                        _state.update { it.copy(submitError = it.submitError.afterFormLoaded(quotesResolved = true)) }
+                        updateChromeState {
+                            it.copy(submitError = it.submitError.afterFormLoaded(quotesResolved = true))
+                        }
                         return@fold
                     }
                     // Typing or draft restoration may have supplied some tags while the GET ran.
@@ -605,7 +621,7 @@ class PostEditorViewModel @AssistedInject constructor(
                     if (existing.isBlank()) resetUndoBaseline()
                     applyFormHydration(form.copy(initialContent = ""))
                     val combined = bodyFieldState.text.toString()
-                    _state.update {
+                    updateChromeState {
                         it.copy(
                             isLoadingForm = true,
                             draftHydratedContent = combined.takeIf { existing.isBlank() },
@@ -654,7 +670,7 @@ class PostEditorViewModel @AssistedInject constructor(
     private suspend fun restoreDraftIfAny(reconcile: Boolean = false) {
         // v20 coordinates are deliberately never decoded or imported (ED-132).
         val legacy = savedStateHandle.remove<IntArray>("postEditor.pendingQuotes")
-        _state.update {
+        updateChromeState {
             it.copy(legacyQuoteRequestDropped = it.legacyQuoteRequestDropped || legacy?.isNotEmpty() == true)
         }
         if (reconcile) {
@@ -685,7 +701,7 @@ class PostEditorViewModel @AssistedInject constructor(
         val pending = submission.drafts.pendingInlineQuoteRequest
         val requestResolved = submission.isInitialized && pending == null
         if (requestResolved) savedStateHandle.remove<Int>(QUOTE_FAILURES_KEY)
-        _state.update {
+        updateChromeState {
             val unreadable = submission.drafts.hasUnreadableInlineQuoteRequest
             it.copy(
                 quoteStorageUnavailable = !submission.isInitialized, isLoadingForm = false,
@@ -742,7 +758,7 @@ class PostEditorViewModel @AssistedInject constructor(
             previousBody = draft.body
             resetUndoBaseline()
         }
-        _state.update {
+        updateChromeState {
             it.copy(
                 draftHydratedFromForm = it.draftHydratedFromForm ||
                     request.mode == PostEditorMode.Reply || bodyFieldState.text.isNotBlank(),
@@ -1061,6 +1077,7 @@ class PostEditorViewModel @AssistedInject constructor(
         when (event) {
             is ImagePickerEvent.Launched, is ImagePickerEvent.Cancelled -> Unit
             is ImagePickerEvent.Unavailable -> {
+                chromeEvents.pickerProblem(EditorErrors.pickerAbsent)
                 _state.update { it.copy(uploadError = EditorErrors.pickerAbsent) }
             }
             is ImagePickerEvent.Result -> {
@@ -1068,6 +1085,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 val showEmptyPickerBanner = pickedImages.isEmpty() && uploadJob?.isActive != true
                 onImagesPicked(event.uris)
                 if (showEmptyPickerBanner) {
+                    chromeEvents.pickerProblem(EditorErrors.noImageReceived)
                     _state.update { it.copy(uploadError = EditorErrors.noImageReceived) }
                 }
             }
@@ -1099,7 +1117,7 @@ class PostEditorViewModel @AssistedInject constructor(
         // One guard (ReturnCount): nothing in flight already, an authenticated owner, a non-empty pick.
         if (!canStartUpload(userId, targets)) return
         val multiple = targets.size > 1
-        _state.update {
+        updateChromeState {
             it.copy(
                 isUploading = true,
                 uploadError = if (received.size > MAX_IMAGES_PER_UPLOAD) EditorErrors.imageLimit else null,
@@ -1138,17 +1156,17 @@ class PostEditorViewModel @AssistedInject constructor(
                 }
                 completed += 1
                 if (multiple) {
-                    _state.update { it.copy(uploadProgress = UploadProgress(completed, targets.size)) }
+                    updateChromeState { it.copy(uploadProgress = UploadProgress(completed, targets.size)) }
                 }
             }
-            _state.update { it.copy(isUploading = false, uploadProgress = null) }
+            updateChromeState { it.copy(isUploading = false, uploadProgress = null) }
             resumeDeferredInlineQuotes()
         }
     }
 
     private fun handleUploadFailure(error: Throwable) {
         if (error is CancellationException) {
-            _state.update { it.copy(isUploading = false, uploadProgress = null) }
+            updateChromeState { it.copy(isUploading = false, uploadProgress = null) }
             throw error
         }
         val mapped = EditorErrors.stopped(error.toEditorUploadError(), _state.value.uploadProgress)
@@ -1157,7 +1175,7 @@ class PostEditorViewModel @AssistedInject constructor(
             LOG_TAG_VM,
             UploadFailureDiagnostics.describe(error, mapped.toString()),
         )
-        _state.update { it.copy(isUploading = false, uploadError = mapped, uploadProgress = null) }
+        updateChromeState { it.copy(isUploading = false, uploadError = mapped, uploadProgress = null) }
         resumeDeferredInlineQuotes()
     }
 
@@ -1183,7 +1201,7 @@ class PostEditorViewModel @AssistedInject constructor(
 
     private fun loadReplyFormIfPossible(preserveDraft: Boolean = false) {
         val context = buildReplyContext() ?: run {
-            _state.update { it.copy(submitError = EditorErrors.missingSubcat) }
+            updateChromeState { it.copy(submitError = EditorErrors.missingSubcat) }
             return
         }
         // #604 lot 3 (mockup P3) — with cards ON (or no citations at all) the open-time fetch is
@@ -1199,7 +1217,7 @@ class PostEditorViewModel @AssistedInject constructor(
 
     private fun loadEditFormIfPossible() {
         val context = buildEditPostContext() ?: run {
-            _state.update { it.copy(submitError = EditorErrors.missingSubcat, draftRestoreSeed = "") }
+            updateChromeState { it.copy(submitError = EditorErrors.missingSubcat, draftRestoreSeed = "") }
             return
         }
         launchFormFetch { editPostRepository.fetchEditPostForm(context) }
@@ -1207,10 +1225,12 @@ class PostEditorViewModel @AssistedInject constructor(
 
     /** Form hydration and metadata are separate from the single asynchronous preview pipeline. */
     private fun launchFormFetch(fetch: suspend () -> ReplyForm) {
+        val opening = submission.session
         val favoriteStamp = smileyPicker.favoriteFormStamp()
-        _state.update { it.copy(isLoadingForm = true) }
+        updateChromeState { it.copy(isLoadingForm = true) }
         viewModelScope.launch {
             val outcome = runCatching { fetch() }
+            if (submission.session != opening) return@launch
             outcome.fold(
                 onSuccess = { form ->
                     loadedForm = form
@@ -1231,7 +1251,7 @@ class PostEditorViewModel @AssistedInject constructor(
             resetUndoBaseline()
         }
         val liveBody = bodyFieldState.text.toString()
-        _state.update { it.withFormHydration(form, hydrate, liveBody) }
+        updateChromeState { it.withFormHydration(form, hydrate, liveBody) }
     }
 
     /** An empty edit textarea is a known server seed; a missing textarea is rejected by the parser. */
@@ -1271,11 +1291,12 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     private fun handleFetchFailure(error: Throwable, quoteFetch: Boolean = false) {
+        chromeEvents.readFailed()
         if (error is CancellationException) {
             // Symmetry with `handleSubmitFailure` : reset the in-flight flag before the throw so
             // a parent ViewModel that survives the cancellation (or any state observer reading
             // the snapshot before death) does not see `isLoadingForm = true` forever.
-            _state.update { it.copy(isLoadingForm = false) }
+            updateChromeState { it.copy(isLoadingForm = false) }
             throw error
         }
         if (quoteFetch && _state.value.pendingQuotes.isNotEmpty()) {
@@ -1301,7 +1322,7 @@ class PostEditorViewModel @AssistedInject constructor(
             "fetch bubbled: ${error::class.simpleName}: ${error.message ?: "(no message)"} " +
                 "→ ${mapped::class.simpleName}",
         )
-        _state.update {
+        updateChromeState {
             it.copy(
                 isLoadingForm = false,
                 draftRestoreSeed = it.draftRestoreSeed.orEmpty(),
@@ -1319,8 +1340,8 @@ class PostEditorViewModel @AssistedInject constructor(
     /** ED-164/166: confirmation carries the exact arm identity and never bypasses the controller. */
     private fun onSubmitConfirmed(intent: PostEditorIntent.SubmitConfirmed) {
         val snapshot = submissionSnapshot()
-        val form = loadedForm
-        if (!snapshot.canSubmit || form == null || closeRequested) return
+        if (!snapshot.canSubmit || closeRequested) return
+        val form = loadedForm?.takeUnless { it.isAnonymous } ?: return
         val permit = submission.confirm(intent.token)
         if (permit is SubmissionRequest.Accepted) launchSubmission(permit, snapshot, form)
     }
@@ -1330,7 +1351,7 @@ class PostEditorViewModel @AssistedInject constructor(
         val form = loadedForm
         if (!snapshot.canSubmit || form == null || closeRequested) return
         if (form.isAnonymous) {
-            _state.update { it.copy(submitError = ReplyFailureReason.LoginRequired.toEditorError()) }
+            updateChromeState { it.copy(submitError = ReplyFailureReason.LoginRequired.toEditorError()) }
         } else {
             val permit = submission.request(intent.timeoutMillis, snapshot.canSubmit && !closeRequested)
             if (permit is SubmissionRequest.Accepted) launchSubmission(permit, snapshot, form)

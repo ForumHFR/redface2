@@ -82,6 +82,8 @@ import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorAction
+import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
+import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.UploadProgress
@@ -577,6 +579,19 @@ class PostEditorViewModelTest {
         assertEquals(token, draftStore.entries[key]?.attempt?.token)
         assertEquals(0, replyRepository.formFetches)
         assertEquals(0, replyRepository.submitCalls)
+        val adapter = PostEditorChromeAdapter({ vm.state.value }, vm.bodyFieldState, vm.chromeEvents,
+            { vm.dispatch(it) }, {}, {})
+        val event = vm.chromeEvents.state.visibleEvent!!
+        adapter.barActions.onEvent(event.key, EditorEventAction.Details)
+        adapter.ignoreQuote(event.key)
+        settleBody()
+        assertEquals(1, replyRepository.formFetches) // One plain form GET, without the quote.
+        assertNull(draftStore.entries[key]?.draft?.pendingInlineQuoteRequest)
+        assertEquals("continued uncertainty", vm.bodyFieldState.text.toString())
+        assertFalse(vm.state.value.hasDormantQuote)
+        assertTrue(adapter.state.sendActivatable)
+        assertEquals(token, draftStore.entries[key]?.attempt?.token)
+        assertEquals(0, replyRepository.submitCalls)
     }
 
     @Test
@@ -799,10 +814,16 @@ class PostEditorViewModelTest {
     fun `m2 ordinary draft read failure does not block publication`() = runTest {
         draftStore.loadFailure = IOException("disk")
         replyRepository.submitResult = ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
-        val vm = newReplyViewModel()
+        val vm = newReplyViewModel(savedStateHandle = SavedStateHandle(
+            mapOf("postEditor.pendingQuotes" to intArrayOf(1, 101))))
         syncBody()
         assertFalse(vm.state.value.quoteStorageUnavailable)
         assertEquals(EditorErrors.draftSaveFailed, vm.state.value.submitError)
+        val events = vm.chromeEvents.state
+        assertEquals(2, events.events.size) // v20 notice AND read failure survive the final opening.
+        assertTrue(events.events.all { it.key.session == events.session && it.key.session.owner == "tester" })
+        assertTrue(events.events.any { it.content is EditorEventContent.Information })
+        assertEquals(EditorErrors.draftSaveFailed, (events.events.last().content as EditorEventContent.Problem).error)
         vm.editBody(TextFieldValue("current C"))
         assertTrue(vm.state.value.canSubmit)
         vm.dispatch(PostEditorIntent.SubmitClicked())
@@ -1116,11 +1137,17 @@ class PostEditorViewModelTest {
         replyRepository.formException = IOException("offline")
         vm.dispatch(PostEditorIntent.ReloadRequested)
         settleBody()
+        assertTrue(vm.chromeEvents.state.events.any {
+            (it.content as? EditorEventContent.Problem)?.error == EditorErrors.draftSaveFailed
+        })
         assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
         draftStore.saveFailure = null
         vm.editBody(TextFieldValue("saved body"))
         settleBody()
         assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
+        assertEquals(listOf(EditorErrors.formNetwork), vm.chromeEvents.state.events.mapNotNull {
+            (it.content as? EditorEventContent.Problem)?.error
+        })
         assertEquals("saved body", draftStore.saved[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)]?.body)
     }
 

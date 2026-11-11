@@ -36,6 +36,7 @@ data class EditorSubmissionCallbacks<E, F>(
     val success: (E) -> Unit,
     /** Clear only this error if it is still visible; other feature-local errors must survive. */
     val clearError: (F) -> Unit = {},
+    val durableWriteSucceeded: () -> Unit = {},
 )
 
 /** ED-88: the feature supplies its existing navigation effect, after terminal state and cleanup. */
@@ -70,6 +71,8 @@ class EditorSubmissionBinding<E, F>(
         private set
     val isInitialized: Boolean get() = initialized && !drafts.invalidated
     val state: EditorSubmissionState get() = controller.state
+    /** Content-free identity shared with the host's visual event queue. */
+    val session: EditorSession get() = controller.session
     val blocksMutation: Boolean get() = drafts.invalidated || controller.blocksBodyMutation
     val blocksClose: Boolean get() = controller.blocksClose
 
@@ -201,6 +204,7 @@ class EditorSubmissionBinding<E, F>(
         if (result is StoreWriteResult.Written) {
             pendingDraftFailure = false
             callbacks.clearError(errors.draftSaveFailed)
+            callbacks.durableWriteSucceeded()
         }
         reportDraftWriteFailure(result)
     }
