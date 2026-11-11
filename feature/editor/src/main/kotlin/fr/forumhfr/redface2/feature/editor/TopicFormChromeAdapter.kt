@@ -49,7 +49,8 @@ internal class TopicFormChromeAdapter(
         EditorHostSurfaces(TopicFormChromeSurface.Smileys, TopicFormChromeSurface.Options,
             TopicFormChromeSurface.Picker, imageUrl = TopicFormChromeSurface.Url,
             header = TopicFormChromeSurface.Header,
-            returnsToBody = { it !in setOf(TopicFormChromeSurface.Header, TopicFormChromeSurface.Restore) }),
+            returnsToBody = { it != TopicFormChromeSurface.Header },
+            draftOffer = TopicFormChromeSurface.Restore),
         launchPicker, openSmileys, memory.host, openSmileySearch,
     )
     private fun completeHeader(cause: EditorCause) {
@@ -69,12 +70,12 @@ internal class TopicFormChromeAdapter(
     fun restoreDraft() {
         val headerWritable = state.headerEnabled && !state.headerReadOnly
         val enabled = headerWritable && !source().isLoadingForm && !source().isUploading
-        if (enabled) { onIntent(TopicFormIntent.DraftRestoreRequested); host.closeSurface() }
+        if (enabled) { onIntent(TopicFormIntent.DraftRestoreRequested); host.closeDraftOffer() }
     }
     fun discardDraft() {
         if (state.scaffold.controlsEnabled) {
             onIntent(TopicFormIntent.DraftDiscardRequested)
-            host.closeSurface()
+            host.closeDraftOffer()
         }
     }
     fun back(layers: EditorBackState = EditorBackState(), onLayerBack: (EditorBackAction) -> Unit = {}) {

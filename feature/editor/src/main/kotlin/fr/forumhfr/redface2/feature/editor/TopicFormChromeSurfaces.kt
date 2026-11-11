@@ -5,7 +5,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import fr.forumhfr.redface2.core.ui.editor.EditorHeaderPanel
+import fr.forumhfr.redface2.core.ui.editor.EditorDraftOfferSheet
 import fr.forumhfr.redface2.core.ui.editor.EditorOptions
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsLabels
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
@@ -14,8 +14,7 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 
 /**
- * Stable overlay site: every panel keeps the live source composed, including its undo/viewport.
- * [compactHeight] is the host's EditorWindowMetrics.compactHeight, the scaffold's own signal.
+ * Stable overlay site: panels and the offer sheet keep the live source composed, including its undo/viewport.
  */
 @Composable
 @Suppress("LongParameterList") // Overlay slots plus the host's compact-height signal.
@@ -24,7 +23,7 @@ internal fun TopicFormChromeSurfaces(
     bodyState: TextFieldState,
     smileys: SmileyPickerController,
     onReturnToBody: () -> Unit,
-    compactHeight: Boolean,
+    @Suppress("UNUSED_PARAMETER") compactHeight: Boolean, // Retain the host's overlay call contract.
     body: @Composable () -> Unit,
 ) {
     val host = adapter.host
@@ -32,17 +31,13 @@ internal fun TopicFormChromeSurfaces(
         if (host.consumeReturn()) host.returnToBody(onReturnToBody)
     }
     TopicFormEventDetails(adapter, bodyState, onReturnToBody) {
-        TopicFormHeaderPanel(adapter, bodyState, onReturnToBody) {
-            // Short title: the offer sentence appears once, in the panel body (gate R1b T3 r1, minor 3).
-            EditorHeaderPanel(host.surface == TopicFormChromeSurface.Restore,
-                stringResource(R.string.editor_draft_restore_title), bodyState, host::closeSurface,
-                { host.returnToBody(onReturnToBody) }, body = body) {
-                DraftRestoreChoice(adapter::restoreDraft, adapter::discardDraft, compactHeight,
-                    restoreEnabled = adapter.state.scaffold.controlsEnabled &&
-                        !adapter.state.source.isLoadingForm && !adapter.state.source.isUploading)
-            }
-        }
+        TopicFormHeaderPanel(adapter, bodyState, onReturnToBody, body)
     }
+    val source = adapter.state.source
+    EditorDraftOfferSheet(host.draftOfferOpen, source.restorableDraft != null || source.restorableSubject != null,
+        host::closeDraftOffer, adapter::restoreDraft, adapter::discardDraft,
+        restoreEnabled = adapter.state.scaffold.controlsEnabled && !source.isLoadingForm && !source.isUploading,
+        discardEnabled = adapter.state.scaffold.controlsEnabled)
     when (host.surface) {
         TopicFormChromeSurface.Options -> TopicFormOptionsSurface(adapter)
         TopicFormChromeSurface.Url -> if (adapter.state.host.canInsert) {
