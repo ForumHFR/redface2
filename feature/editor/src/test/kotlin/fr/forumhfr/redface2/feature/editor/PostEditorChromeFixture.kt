@@ -36,6 +36,17 @@ internal class PostEditorChromeFixture {
                 insertBbcodeToken(intent.token, text, start, end)
             }
             PostEditorIntent.TogglePreview -> state = state.copy(isPreviewVisible = !state.isPreviewVisible)
+            is PostEditorIntent.QuoteRemoved -> state = state.copy(quotes = state.quotes.filterNot {
+                if (intent.quote == null) it.numreponse == intent.numreponse else it == intent.quote
+            })
+            is PostEditorIntent.QuoteMoved -> {
+                val cards = state.quotes.toMutableList()
+                val index = cards.indexOfFirst { if (intent.quote == null) it.numreponse == intent.numreponse
+                    else it == intent.quote }
+                cards.add(index + intent.delta, cards.removeAt(index))
+                state = state.copy(quotes = cards)
+            }
+            PostEditorIntent.QuotesCleared -> state = state.copy(quotes = emptyList())
             PostEditorIntent.SubmitConfirmationDismissed -> state = state.copy(
                 submission = fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState.Ready)
             else -> Unit

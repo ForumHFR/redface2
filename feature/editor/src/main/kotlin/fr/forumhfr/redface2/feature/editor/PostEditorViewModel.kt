@@ -29,6 +29,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorPreparationException
 import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionErrors
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.domain.editor.SubmissionRequest
 import fr.forumhfr.redface2.core.domain.editor.validateBbcodeDraft
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
@@ -305,6 +306,9 @@ class PostEditorViewModel @AssistedInject constructor(
     private var sharedDraftResumed = false
     private var draftRestoreDiscarding = false
     private var inlineQuoteDeferredByUpload = false
+    private var duplicateQuoteDelivery = false
+    private var deliveredInlineQuoteRequest: PendingInlineQuoteRequest? = null
+    private var quoteCardsDelivered = false
     private var screenStopped = false
     private var stoppedBody: String? = null
     private var pendingCheckpoints = 0
@@ -363,6 +367,7 @@ class PostEditorViewModel @AssistedInject constructor(
                     loadedForm = null
                     restoration.invalidate()
                     inlineQuoteDeferredByUpload = false
+                    deliveredInlineQuoteRequest = null
                     updateChromeState { it.copy(isUploading = false, uploadProgress = null) }
                 }
                 authObserved = true
@@ -422,11 +427,16 @@ class PostEditorViewModel @AssistedInject constructor(
     /** #1553: Room is the only authority for inline requests; handoffs contain transient cards only. */
     private fun resolveQuoteRenderingThenLoad() {
         val pending = submission.drafts.pendingInlineQuoteRequest
-        val inlinePosts = pending?.quotes?.map { it.numreponse }.orEmpty().toSet()
-        _state.update {
-            it.copy(quotes = request.initialQuotes.takeUnless { restoration.isRecreation }.orEmpty()
-                .distinctBy { quote -> quote.numreponse }
-                .filterNot { quote -> quote.numreponse in inlinePosts })
+        if (!quoteCardsDelivered) {
+            // Room owns the rendering of this durable handoff; never also deliver it as a card.
+            // Consume cards once, including across Room reconciliation after a failed write.
+            val inlinePosts = pending?.quotes?.map { it.numreponse }.orEmpty().toSet()
+            val delivered = request.initialQuotes.takeUnless { restoration.isRecreation }.orEmpty()
+                .filterNot { it.numreponse in inlinePosts }
+            val cards = distinctQuoteCards(request.cat, delivered)
+            _state.update { it.copy(quotes = cards) }
+            quoteCardsDelivered = true
+            if (cards.size < delivered.size) chromeEvents.quoteAlreadyDelivered()
         }
         if (pending != null) {
             setPendingQuotes(pending.quotes.map {
@@ -526,15 +536,15 @@ class PostEditorViewModel @AssistedInject constructor(
         // An offer is not the live body. Serialize quote GETs after its decision so accepting
         // cannot append a second copy of a quote that a GET already inserted into the field.
         if (insertInline && (_state.value.restorableDraft != null || draftRestoreDiscarding)) return
-        val missing = if (insertInline) missingInlineQuotes(quotes) else quotes
-        if (missing.isEmpty()) {
+        // #1553: retry a failed CAS without replaying an insertion the user may have edited.
+        if (insertInline && submission.drafts.pendingInlineQuoteRequest == deliveredInlineQuoteRequest) {
             updateChromeState { it.copy(isLoadingForm = true) }
             viewModelScope.launch {
                 commitInlineQuoteDelivery()
                 if (loadedForm == null) loadReplyFormIfPossible(preserveDraft = true)
             }
         } else {
-            fetchQuoteForm(missing, quotes, insertInline)
+            fetchQuoteForm(quotes, insertInline)
         }
     }
 
@@ -544,13 +554,9 @@ class PostEditorViewModel @AssistedInject constructor(
         return insertInline && (submission.drafts.pendingInlineQuoteRequest == null || _state.value.hasDormantQuote)
     }
 
-    private fun missingInlineQuotes(quotes: List<QuoteSelection>): List<QuoteSelection> {
-        val present = QuotedNumreponses.fromBbcode(bodyFieldState.text.toString()).toSet()
-        return quotes.filterNot { it.numreponse in present }
-    }
-
     private fun finishInlineQuoteDelivery() {
         inlineQuoteDeferredByUpload = false
+        deliveredInlineQuoteRequest = null
         savedStateHandle.remove<Int>(QUOTE_FAILURES_KEY)
         updateChromeState {
             it.copy(
@@ -562,7 +568,6 @@ class PostEditorViewModel @AssistedInject constructor(
 
     private fun fetchQuoteForm(
         quotes: List<QuoteSelection>,
-        requestedQuotes: List<QuoteSelection>,
         insertInline: Boolean,
     ) {
         val context = buildReplyContext() ?: run {
@@ -603,36 +608,41 @@ class PostEditorViewModel @AssistedInject constructor(
                         }
                         return@fold
                     }
-                    // Typing or draft restoration may have supplied some tags while the GET ran.
-                    // Reconcile again before insertion; fetch only what is still missing.
-                    if (missingInlineQuotes(quotes).size != quotes.size) {
-                        applyFormHydration(form.copy(initialContent = ""))
-                        loadReplyFormWithInlineQuotes(requestedQuotes)
-                        return@fold
-                    }
-                    val prefills = form.initialContent.trimEnd()
-                    val existing = bodyFieldState.text.toString()
-                    // ED-132: reconcile on the live field immediately before this single edit.
-                    // #881/#790: a quote alone ends with one newline; a prefix uses two.
-                    bodyFieldState.editBbcode { text, _, _ ->
-                        val combined = if (text.isBlank()) prefills + "\n" else prefills + "\n\n" + text
-                        BbcodeFormatResult(combined, combined.length, combined.length)
-                    }
-                    if (existing.isBlank()) resetUndoBaseline()
-                    applyFormHydration(form.copy(initialContent = ""))
-                    val combined = bodyFieldState.text.toString()
-                    updateChromeState {
-                        it.copy(
-                            isLoadingForm = true,
-                            draftHydratedContent = combined.takeIf { existing.isBlank() },
-                            restorableDraft = it.restorableDraft.takeIf { offered -> offered != combined },
-                        )
-                    }
-                    commitInlineQuoteDelivery()
+                    deliverInlineQuoteForm(form)
                 },
                 onFailure = { error -> handleFetchFailure(error, quoteFetch = true) },
             )
         }
+    }
+
+    private suspend fun deliverInlineQuoteForm(form: ReplyForm) {
+        // ED-52: compare content in the live field, including keystrokes made during GET.
+        val pending = checkNotNull(submission.drafts.pendingInlineQuoteRequest)
+        val existing = bodyFieldState.text.toString()
+        val delivery = filterInlineQuoteDelivery(
+            pending.cat,
+            request.cat, form.initialContent.trimEnd(), existing,
+        )
+        duplicateQuoteDelivery = delivery.duplicates > 0
+        val prefills = delivery.bbcode
+        // ED-132: reconcile on the live field immediately before this single edit.
+        // #881/#790: a quote alone ends with one newline; a prefix uses two.
+        if (prefills.isNotBlank()) bodyFieldState.editBbcode { text, _, _ ->
+            val combined = if (text.isBlank()) prefills + "\n" else prefills + "\n\n" + text
+            BbcodeFormatResult(combined, combined.length, combined.length)
+        }
+        deliveredInlineQuoteRequest = pending
+        if (existing.isBlank() && prefills.isNotBlank()) resetUndoBaseline()
+        applyFormHydration(form.copy(initialContent = ""))
+        val combined = bodyFieldState.text.toString()
+        updateChromeState {
+            it.copy(
+                isLoadingForm = true,
+                draftHydratedContent = combined.takeIf { existing.isBlank() },
+                restorableDraft = it.restorableDraft.takeIf { offered -> offered != combined },
+            )
+        }
+        commitInlineQuoteDelivery()
     }
 
     /** Deliver the current body and remove exactly this request in one awaited CAS. */
@@ -645,6 +655,8 @@ class PostEditorViewModel @AssistedInject constructor(
         if (result is EditorDraftStore.StoreWriteResult.Written && !submission.drafts.invalidated) {
             submission.resolveDraftWrite(result)
             finishInlineQuoteDelivery()
+            if (duplicateQuoteDelivery) chromeEvents.quoteAlreadyDelivered()
+            duplicateQuoteDelivery = false
             // Preserve keystrokes made while the CAS was suspended.
             scheduleAutosave()
         } else {
@@ -699,6 +711,7 @@ class PostEditorViewModel @AssistedInject constructor(
             }
         }
         val pending = submission.drafts.pendingInlineQuoteRequest
+        if (pending != deliveredInlineQuoteRequest) deliveredInlineQuoteRequest = null
         val requestResolved = submission.isInitialized && pending == null
         if (requestResolved) savedStateHandle.remove<Int>(QUOTE_FAILURES_KEY)
         updateChromeState {
@@ -923,24 +936,25 @@ class PostEditorViewModel @AssistedInject constructor(
             PostEditorIntent.UploadErrorDismissed -> _state.update { it.copy(uploadError = null) }
             PostEditorIntent.DraftRestoreRequested -> onDraftRestoreRequested()
             PostEditorIntent.DraftDiscardRequested -> onDraftDiscardRequested()
-            is PostEditorIntent.QuoteRemoved -> onQuoteRemoved(intent.numreponse)
-            is PostEditorIntent.QuoteMoved -> onQuoteMoved(intent.numreponse, intent.delta)
+            is PostEditorIntent.QuoteRemoved -> onQuoteRemoved(intent.numreponse, intent.quote)
+            is PostEditorIntent.QuoteMoved -> onQuoteMoved(intent.numreponse, intent.delta, intent.quote)
             PostEditorIntent.QuotesCleared -> _state.update { it.copy(quotes = emptyList()) }
             PostEditorIntent.CloseRequested -> onCloseRequested()
         }
     }
 
-    /** #604 lot 3 — same card semantics as the quick-reply sheet (remove by numreponse). */
-    private fun onQuoteRemoved(numreponse: Int) {
+    /** An exact snapshot distinguishes two portions of one post; legacy callers use numreponse. */
+    private fun onQuoteRemoved(numreponse: Int, quote: QuoteSelection?) {
         _state.update { current ->
-            current.copy(quotes = current.quotes.filterNot { it.numreponse == numreponse })
+            val index = current.quotes.indexOfFirst { if (quote == null) it.numreponse == numreponse else it == quote }
+            current.copy(quotes = current.quotes.filterIndexed { position, _ -> position != index })
         }
     }
 
     /** #604 lot 3 — move the card one slot up ([delta] = -1) or down (+1) ; out-of-range = no-op. */
-    private fun onQuoteMoved(numreponse: Int, delta: Int) {
+    private fun onQuoteMoved(numreponse: Int, delta: Int, quote: QuoteSelection?) {
         _state.update { current ->
-            val index = current.quotes.indexOfFirst { it.numreponse == numreponse }
+            val index = current.quotes.indexOfFirst { if (quote == null) it.numreponse == numreponse else it == quote }
             val target = index + delta
             if (index < 0 || target < 0 || target > current.quotes.lastIndex) return@update current
             val reordered = current.quotes.toMutableList().apply {
@@ -1467,14 +1481,15 @@ class PostEditorViewModel @AssistedInject constructor(
         )
         val quoteForm = fetchReplyQuoteForm(quoteContext, quotes)
         val body = snapshot.bodyText
+        // Compare materialised content, not card excerpts: keep another portion of the same post.
+        val prefills = filterInlineQuoteDelivery(
+            request.cat, request.cat, quoteForm.initialContent.trimEnd(), body,
+        ).bbcode
+        val content = listOf(prefills, body).filter { it.isNotBlank() }.joinToString("\n\n")
         return replyRepository.submitReply(
             context = quoteContext,
             form = quoteForm.copy(msgIcon = snapshot.msgIcon.toString()),
-            bbcodeContent = if (body.isBlank()) {
-                quoteForm.initialContent.trimEnd()
-            } else {
-                quoteForm.initialContent.trimEnd() + "\n\n" + body
-            },
+            bbcodeContent = content,
             options = options,
         )
     }

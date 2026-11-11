@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -23,6 +25,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -47,6 +50,7 @@ import fr.forumhfr.redface2.core.ui.R
  * then explicitly shows or hides the keyboard to restore that captured state (ED-53).
  * [initialFocusRequester], when supplied, must be attached to a field in [content] (title or recipients);
  * otherwise Return receives focus.
+ * [headerActions] stay pinned beside the title while the panel's content scrolls (ED-50).
  * The host opens this panel on CompleteHeader and closes it in [onClose]. No CSV mapping lives here.
  * Top/horizontal insets and the editor's outer BackHandler belong to the host. The panel owns its
  * bottom navigationBars/IME union, outside its scroll viewport.
@@ -61,11 +65,13 @@ fun EditorHeaderPanel(
     onReturnToBody: () -> Unit,
     modifier: Modifier = Modifier,
     initialFocusRequester: FocusRequester? = null,
+    headerActions: @Composable () -> Unit = {},
     body: @Composable () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
 ) {
     EditorPanelOverlay(
         isOpen, title, bodyState, onClose, onReturnToBody, modifier, initialFocusRequester, body,
+        headerActions = headerActions,
     ) { closeFocus ->
         TextButton(onClick = onClose, modifier = Modifier.focusRequester(closeFocus)) {
             Text(stringResource(R.string.editor_panel_return_to_body))
@@ -86,6 +92,7 @@ internal fun EditorPanelOverlay(
     modifier: Modifier = Modifier,
     initialFocusRequester: FocusRequester? = null,
     body: @Composable () -> Unit,
+    headerActions: @Composable () -> Unit = {},
     content: @Composable ColumnScope.(FocusRequester) -> Unit,
 ) {
     val focusManager = LocalFocusManager.current
@@ -112,12 +119,17 @@ internal fun EditorPanelOverlay(
             color = MaterialTheme.colorScheme.surface,
         ) {
             Column(
-                Modifier.fillMaxSize().windowInsetsPadding(editorBottomInsets())
-                    .verticalScroll(rememberScrollState()).padding(16.dp),
+                // The bottom navigationBars/IME union stays on the outer column, outside the scroll viewport.
+                Modifier.fillMaxSize().windowInsetsPadding(editorBottomInsets()).padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(title, Modifier.semantics { heading() }, style = MaterialTheme.typography.titleLarge)
-                content(closeFocus)
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text(title, Modifier.weight(1f).semantics { heading() },
+                        style = MaterialTheme.typography.titleLarge)
+                    headerActions()
+                }
+                Column(Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) { content(closeFocus) }
             }
         }
     }

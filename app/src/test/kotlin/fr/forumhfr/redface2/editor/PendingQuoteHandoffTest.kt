@@ -157,7 +157,17 @@ class PendingQuoteHandoffTest {
     }
 
     @Test
-    fun `tags typed during GET are reconciled without duplicating any requested quote`() = runTest {
+    fun `tags typed during GET are compared by content without duplicating any requested quote`() {
+        typedDuringGet(typed = "[quotemsg=101]quote[/quotemsg]", expectedTags101 = 1)
+    }
+
+    // ED-52: a tag of the same post with another content is another portion, kept next to the delivery.
+    @Test
+    fun `another portion typed during GET is kept next to the delivered quote`() {
+        typedDuringGet(typed = "[quotemsg=101]typed[/quotemsg]", expectedTags101 = 2)
+    }
+
+    private fun typedDuringGet(typed: String, expectedTags101: Int) = runTest {
         val scenario = Scenario()
         val session = EditorDraftSession(scenario.drafts, scenario.key)
         session.load()
@@ -167,10 +177,10 @@ class PendingQuoteHandoffTest {
         scenario.quoteGate = CompletableDeferred()
         val editor = scenario.editor()
         syncBody()
-        editor.editBody(TextFieldValue("[quotemsg=101]typed[/quotemsg]\nmy text"))
+        editor.editBody(TextFieldValue("$typed\nmy text"))
         scenario.quoteGate?.complete(Unit)
         settleBody()
-        assertEquals(1, Regex("\\[quotemsg=101").findAll(scenario.body.orEmpty()).count())
+        assertEquals(expectedTags101, Regex("\\[quotemsg=101").findAll(scenario.body.orEmpty()).count())
         assertEquals(1, Regex("\\[quotemsg=202").findAll(scenario.body.orEmpty()).count())
         assertTrue(scenario.body.orEmpty().endsWith("my text"))
         assertNull(scenario.pending)
@@ -342,19 +352,35 @@ class PendingQuoteHandoffTest {
         editor.viewModelScope.cancel()
     }
 
+    // ED-52: the request is fetched after acceptance and compared by content, never by post number alone.
     @Test
-    fun `accepting an offered quote consumes it without another GET`() = runTest {
+    fun `accepting an offered draft that already holds the quote consumes it without a duplicate`() {
+        acceptOfferedDraft(
+            offered = "[quotemsg=101]quote[/quotemsg]\nbody",
+            expected = "[quotemsg=101]quote[/quotemsg]\nbody",
+        )
+    }
+
+    @Test
+    fun `accepting an offered draft with another portion of the post adds the delivered quote`() {
+        acceptOfferedDraft(
+            offered = "[quotemsg=101]stored[/quotemsg]\nbody",
+            expected = "[quotemsg=101]quote[/quotemsg]\n\n[quotemsg=101]stored[/quotemsg]\nbody",
+        )
+    }
+
+    private fun acceptOfferedDraft(offered: String, expected: String) = runTest {
         val scenario = Scenario()
-        val offered = "[quotemsg=101]stored[/quotemsg]\nbody"
         scenario.drafts.preload(scenario.key, Draft(offered))
         scenario.enqueue()
         val editor = scenario.editor(resumeSharedDraft = false)
         settleBody()
         editor.submit(PostEditorIntent.DraftRestoreRequested)
         settleBody()
-        assertEquals(offered, scenario.body)
+        assertEquals(expected, scenario.body)
         assertNull(scenario.pending)
-        assertTrue(scenario.fetchedQuotes.isEmpty())
+        assertEquals(listOf(101), scenario.fetchedQuotes)
+        scenario.noPost()
         editor.viewModelScope.cancel()
     }
 

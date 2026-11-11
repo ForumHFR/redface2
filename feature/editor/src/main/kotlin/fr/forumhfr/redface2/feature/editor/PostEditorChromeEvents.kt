@@ -38,6 +38,8 @@ internal class PostEditorChromeEvents {
                 listOf((progress.completed + 1).coerceAtMost(progress.total), progress.total))))
     }
     fun readFailed() { readFailed = true }
+    fun quoteAlreadyDelivered() = deliver(local(EditorLocalOperation.Notice), EditorEventContent.Information(
+        EditorText(EditorR.string.editor_quote_already_delivered)))
     fun pickerProblem(error: EditorError) = problem(error, null)
     fun dispatch(input: EditorEventInput) = reduceEditorEvents(state, input).also { state = it.state }
     fun open(session: EditorSession) {

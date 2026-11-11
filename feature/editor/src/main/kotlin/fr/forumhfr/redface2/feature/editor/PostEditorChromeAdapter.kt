@@ -53,9 +53,10 @@ internal class PostEditorChromeAdapter(
     val state: PostEditorChromeState get() = PostEditorChromeState(source())
 
     @Composable
-    fun chrome() = state.scaffold.copy(
+    fun chrome(quotePanelOnly: Boolean = true) = state.scaffold.copy(
         bar = bar.withSubmission(source().submission), event = events.visibleEvent,
-        firstStatus = if (source().quotes.isEmpty() && !source().hasDormantQuote) null else EditorAppBarStatus(
+        firstStatus = if (!source().hasDormantQuote && (!quotePanelOnly || source().quotes.isEmpty())) null
+        else EditorAppBarStatus(
             UiR.drawable.ic_editor_quote,
             pluralStringResource(UiR.plurals.editor_status_quotes, quoteCount, quoteCount),
             { open(if (source().hasDormantQuote) PostEditorChromeSurface.PendingQuote
@@ -129,6 +130,10 @@ internal class PostEditorChromeAdapter(
     private fun option(intent: PostEditorIntent) {
         if (state.scaffold.controlsEnabled && !source().isLoadingForm) onIntent(intent)
     }
+    fun quoteIntent(intent: PostEditorIntent) {
+        if (state.scaffold.controlsEnabled) onIntent(intent)
+    }
+    fun clearQuotes() = quoteIntent(PostEditorIntent.QuotesCleared)
     fun smiley(token: String) = insert(PostEditorIntent.SmileySelected(token))
     fun imageUrl(url: String) = insert(PostEditorIntent.ImageUrlInserted(url))
     private fun insert(intent: PostEditorIntent) {
