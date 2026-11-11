@@ -7,6 +7,7 @@ import androidx.compose.ui.res.stringResource
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.ui.R as UiR
 import fr.forumhfr.redface2.core.ui.editor.EditorAppBarStatus
+import fr.forumhfr.redface2.core.ui.editor.EditorCause
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorAction
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
 import fr.forumhfr.redface2.core.ui.editor.EditorHost
@@ -48,11 +49,11 @@ internal class PostEditorChromeAdapter(
 
     @Composable
     fun chrome() = scaffoldChrome(
-        firstStatus = if (!source().hasDormantQuote && source().quotes.isEmpty()) null
+        firstStatus = if (!showPendingQuote && source().quotes.isEmpty()) null
         else EditorAppBarStatus(
             UiR.drawable.ic_editor_quote,
             pluralStringResource(UiR.plurals.editor_status_quotes, quoteCount, quoteCount),
-            { open(if (source().hasDormantQuote) PostEditorChromeSurface.PendingQuote
+            { open(if (showPendingQuote) PostEditorChromeSurface.PendingQuote
                 else PostEditorChromeSurface.Quotes) }, quoteCount, state.scaffold.controlsEnabled,
         ),
         secondStatus = if (source().restorableDraft == null) null else EditorAppBarStatus(
@@ -63,6 +64,11 @@ internal class PostEditorChromeAdapter(
     /** Render this keyed detail with the existing offer panel; EditorHost retains ED-45 acknowledgement. */
     val pendingQuoteDetailKey get() = detail?.key?.takeIf(events::isPendingQuoteEvent)
 
+    // The save information may be acknowledged or retired by autosave while Q still needs its CAS.
+    // Keep a recovery panel reachable from the quote status independently of that event's lifetime.
+    val hasPendingQuoteRecovery get() = source().pendingQuotes.isNotEmpty() &&
+        source().restorableDraft == null && !source().hasDormantQuote
+    private val showPendingQuote get() = source().hasDormantQuote || hasPendingQuoteRecovery
     private val quoteCount get() = source().quotes.size + source().pendingQuotes.size
     fun signature(enabled: Boolean) = option(PostEditorIntent.ToggleSignature(enabled))
     fun smileyDisabled(disabled: Boolean) = option(PostEditorIntent.ToggleSmileyDisabled(disabled))
@@ -119,11 +125,20 @@ internal class PostEditorChromeAdapter(
     } else {
         currentDetail(key) != null
     }
+    fun canReload(key: EventKey): Boolean {
+        val error = (currentDetail(key)?.content as? EditorEventContent.Problem)?.error ?: return false
+        val quoteRecovery = hasPendingQuoteRecovery && error.cause == EditorCause.DraftSaveFailed
+        return error.action == EditorErrorAction.Reload || source().isAwaitingInitialBody || quoteRecovery
+    }
     fun reload(key: EventKey) {
-        val error = (currentDetail(key)?.content as? EditorEventContent.Problem)?.error ?: return
-        val reload = error.action == EditorErrorAction.Reload || source().isAwaitingInitialBody
-        if (!reload || source().isLoadingForm) return
+        if (!canReload(key) || source().isLoadingForm) return
         onIntent(PostEditorIntent.ReloadRequested)
         closeDetails(key)
+    }
+    fun reloadPendingQuote() {
+        if (!hasPendingQuoteRecovery || source().isLoadingForm || !state.scaffold.controlsEnabled) return
+        if (surface != PostEditorChromeSurface.PendingQuote) return
+        onIntent(PostEditorIntent.ReloadRequested)
+        closeSurface()
     }
 }

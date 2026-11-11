@@ -51,8 +51,8 @@ internal fun PostEditorChromeSurfaces(
         }) { event ->
         if (source.hasDormantQuote) QuoteDecisions(adapter, event.key)
         val error = (event.content as? EditorEventContent.Problem)?.error
-        // Keep the uncertainty detail intact while offering the missing edit form's GET (#1574).
-        if (source.isAwaitingInitialBody && error != null && error.action != EditorErrorAction.Reload) {
+        // Host recovery also covers a pending quote's CAS; it must not replay the insertion.
+        if (adapter.canReload(event.key) && error?.action != EditorErrorAction.Reload) {
             TextButton(onClick = { adapter.reload(event.key) }, enabled = !source.isLoadingForm) {
                 Text(stringResource(UiR.string.editor_action_reload))
             }
@@ -124,8 +124,14 @@ private fun PostEditorSmileysSurface(adapter: PostEditorChromeAdapter, smileys: 
 @Composable
 private fun QuoteDecisions(adapter: PostEditorChromeAdapter, key: EventKey? = null) {
     val source = adapter.state.source
-    TextButton(onClick = { adapter.resumeQuote(key) }, enabled = source.hasDormantQuote && !source.isLoadingForm) {
-        Text(stringResource(R.string.editor_action_resume_quote))
+    if (source.hasDormantQuote) {
+        TextButton(onClick = { adapter.resumeQuote(key) }, enabled = !source.isLoadingForm) {
+            Text(stringResource(R.string.editor_action_resume_quote))
+        }
+    } else if (adapter.hasPendingQuoteRecovery) {
+        TextButton(onClick = adapter::reloadPendingQuote, enabled = !source.isLoadingForm) {
+            Text(stringResource(UiR.string.editor_action_reload))
+        }
     }
     TextButton(onClick = { adapter.ignoreQuote(key) }, enabled = source.canIgnorePendingQuote) {
         Text(stringResource(UiR.string.editor_action_ignore_quote))

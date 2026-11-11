@@ -829,10 +829,17 @@ class PostEditorViewModelTest {
         syncBody()
         assertTrue(vm.state.value.quoteStorageUnavailable)
         assertFalse(vm.state.value.canSubmit)
-        vm.dispatch(PostEditorIntent.ReloadRequested)
+        val adapter = PostEditorChromeAdapter({ vm.state.value }, vm.bodyFieldState, vm.chromeEvents,
+            { vm.dispatch(it) }, {}, {})
+        val error = vm.chromeEvents.visibleEvent!!
+        adapter.barActions.onEvent(error.key, EditorEventAction.Details)
+        assertTrue(adapter.canReload(error.key))
+        adapter.reload(error.key)
         syncBody()
         assertEquals("concurrent body", vm.state.value.restorableDraft)
-        assertEquals(1, replyRepository.formFetches)
+        assertEquals(listOf(101, null), replyRepository.fetchedContexts.map { it.quotedNumreponse })
+        assertEquals(1, replyRepository.fetchedContexts.count { it.isQuote })
+        assertEquals(1, replyRepository.fetchedContexts.count { !it.isQuote })
         vm.dispatch(PostEditorIntent.DraftRestoreRequested)
         settleBody()
         val persisted = checkNotNull(draftStore.saved[key])
@@ -840,6 +847,8 @@ class PostEditorViewModelTest {
         assertEquals(1, persisted.body.split("[quotemsg=101]").size - 1)
         assertNull(persisted.pendingInlineQuoteRequest)
         assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        // Reconciliation kept the exact request's delivery marker: only its CAS is retried.
+        assertEquals(listOf(101, null), replyRepository.fetchedContexts.map { it.quotedNumreponse })
         assertEquals(0, replyRepository.submitCalls)
     }
 
@@ -865,7 +874,12 @@ class PostEditorViewModelTest {
         // Remove the markup as well as the tail; the pending request was already delivered in memory.
         val trimmed = TextFieldValue("kept excerpt", TextRange(12, 4))
         vm.editBody(trimmed)
-        vm.dispatch(PostEditorIntent.ReloadRequested)
+        val adapter = PostEditorChromeAdapter({ vm.state.value }, vm.bodyFieldState, vm.chromeEvents,
+            { vm.dispatch(it) }, {}, {})
+        val error = vm.chromeEvents.visibleEvent!!
+        adapter.barActions.onEvent(error.key, EditorEventAction.Details)
+        assertTrue(adapter.canReload(error.key))
+        adapter.reload(error.key)
         settleBody()
         assertEquals(trimmed, vm.bodyValue())
         assertEquals(listOf(101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
@@ -4692,6 +4706,81 @@ class PostEditorViewModelTest {
         assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
         assertEquals(listOf(null, 101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
         assertPendingQuoteNotice(vm, expected = false)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `1450 failed delivery CAS retries from save details without reinserting the edited quote`() = runTest {
+        assertFailedQuoteDeliveryRecovery(afterAutosave = false)
+    }
+
+    @Test
+    fun `1450 successful autosave retires save information but leaves quote recovery reachable`() = runTest {
+        assertFailedQuoteDeliveryRecovery(afterAutosave = true)
+    }
+
+    private fun assertFailedQuoteDeliveryRecovery(afterAutosave: Boolean) {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val quote = "[quotemsg=101]requested quote[/quotemsg]"
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.success(authenticatedForm(quote)))
+        val vm = newPendingQuoteOfferViewModel()
+        settleBody()
+        val pending = checkNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        val adapter = PostEditorChromeAdapter({ vm.state.value }, vm.bodyFieldState, vm.chromeEvents,
+            { vm.dispatch(it) }, {}, {})
+        val notice = vm.chromeEvents.visibleEvent!!
+        adapter.barActions.onEvent(notice.key, EditorEventAction.Details)
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
+        adapter.restoreDraft()
+        syncBody()
+        assertNull(vm.state.value.restorableDraft)
+        assertEquals("offered D", draftStore.saved[key]?.body) // Restore is durable before the quote GET ends.
+        assertEquals(pending, draftStore.saved[key]?.pendingInlineQuoteRequest)
+        draftStore.saveFailure = IOException("delivery CAS failed")
+        get.complete(Unit)
+        settleBody()
+        assertEquals("$quote\n\noffered D", vm.bodyFieldState.text.toString())
+        assertEquals(EditorErrors.draftSaveFailed, vm.state.value.submitError)
+        assertEquals(pending, draftStore.saved[key]?.pendingInlineQuoteRequest)
+        assertPendingQuoteNotice(vm, expected = false)
+        assertFalse(vm.state.value.canSubmit)
+        assertFalse(adapter.state.sendActivatable)
+        assertTrue(adapter.hasPendingQuoteRecovery)
+        val failure = vm.chromeEvents.visibleEvent!!
+
+        // Strip even the quote markup: retry must save this exact field, never reinsert the prefill.
+        draftStore.saveFailure = null
+        val edited = TextFieldValue("edited excerpt\n\noffered D", TextRange(4, 1))
+        vm.editBody(edited)
+        if (afterAutosave) {
+            settleBody()
+            assertNull(vm.state.value.submitError)
+            assertNull(vm.chromeEvents.visibleEvent)
+            assertEquals(edited.text, draftStore.saved[key]?.body)
+            assertEquals(pending, draftStore.saved[key]?.pendingInlineQuoteRequest)
+            assertTrue(vm.state.value.pendingQuotes.isNotEmpty())
+            assertFalse(adapter.state.sendActivatable)
+            assertEquals(listOf(null, 101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
+            adapter.open(PostEditorChromeSurface.PendingQuote)
+            assertEquals(PostEditorChromeSurface.PendingQuote, adapter.surface)
+            adapter.reloadPendingQuote()
+            adapter.reloadPendingQuote() // A retained panel callback is inert after closing.
+        } else {
+            adapter.barActions.onEvent(failure.key, EditorEventAction.Details)
+            assertTrue(adapter.canReload(failure.key))
+            adapter.reload(failure.key)
+            adapter.reload(failure.key) // A retained detail callback cannot retry a resolved delivery.
+        }
+        settleBody()
+        assertEquals(edited, vm.bodyValue())
+        assertEquals(edited.text, draftStore.saved[key]?.body)
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        assertFalse(adapter.hasPendingQuoteRecovery)
+        assertTrue(adapter.state.sendActivatable)
+        assertEquals(listOf(null, 101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
+        assertEquals(0, vm.state.value.quoteFetchFailures)
         assertEquals(0, replyRepository.submitCalls)
     }
 

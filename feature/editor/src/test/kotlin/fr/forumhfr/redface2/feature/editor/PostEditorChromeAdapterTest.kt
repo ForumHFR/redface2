@@ -48,6 +48,40 @@ class PostEditorChromeAdapterTest {
         assertNull(host.adapter.surface)
     }
 
+    @Test fun `1450 save failure Reload is limited to an unresolved quote without a draft offer or uncertainty`() {
+        val pending = listOf(QuoteSelection(QuoteLocator(1, 101, null), "", ""))
+        host.transition(host.state.copy(pendingQuotes = pending, submitError = EditorErrors.draftSaveFailed))
+        val failure = host.events.visibleEvent!!
+        host.adapter.barActions.onEvent(failure.key, EditorEventAction.Details)
+        assertTrue(host.adapter.canReload(failure.key))
+        host.state = host.state.copy(restorableDraft = "D")
+        assertFalse(host.adapter.canReload(failure.key))
+        host.adapter.reload(failure.key)
+        host.state = host.state.copy(restorableDraft = null, submission = EditorSubmissionState.Uncertain(null))
+        assertFalse(host.adapter.canReload(failure.key))
+        host.adapter.reload(failure.key)
+        host.state = host.state.copy(submission = EditorSubmissionState.Ready, pendingQuotes = emptyList())
+        assertFalse(host.adapter.canReload(failure.key))
+        host.adapter.reload(failure.key)
+        assertTrue(host.calls.isEmpty())
+    }
+
+    @Test fun `1450 quote recovery rejects busy and stale panel callbacks`() {
+        host.state = host.state.copy(pendingQuotes = listOf(QuoteSelection(QuoteLocator(1, 101, null), "", "")))
+        host.adapter.open(PostEditorChromeSurface.PendingQuote)
+        host.state = host.state.copy(isLoadingForm = true)
+        host.adapter.reloadPendingQuote()
+        assertTrue(host.calls.isEmpty())
+        host.state = host.state.copy(isLoadingForm = false)
+        host.adapter.closeSurface()
+        host.adapter.reloadPendingQuote()
+        assertTrue(host.calls.isEmpty())
+        host.adapter.open(PostEditorChromeSurface.PendingQuote)
+        host.adapter.reloadPendingQuote()
+        host.adapter.reloadPendingQuote()
+        assertEquals(listOf(PostEditorIntent.ReloadRequested), host.calls)
+    }
+
     @Test fun `ED36 projects exactly the allowed shortcuts on this surface`() {
         val f = PostEditorChromeFixture()
         val surface = EditorShortcutSurface.POST

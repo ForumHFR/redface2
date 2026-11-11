@@ -57,7 +57,8 @@ internal class PostEditorChromeEvents : EditorHostEvents {
         val next = current.eventsProjection()
         collector.observe(previous.eventsProjection(), next)
         projection = next
-        if (previous.isLoadingForm && !current.isLoadingForm && !readFailed && current.isFetchingQuote) {
+        val readEnded = previous.isLoadingForm && !current.isLoadingForm
+        if (readEnded && !readFailed && current.isFetchingQuote) {
             // A quote form also supplies ordinary metadata. Retire a failed ordinary read that a
             // decision overtook, even though the collector correctly keeps distinct read identities.
             state.events.filter { event ->
