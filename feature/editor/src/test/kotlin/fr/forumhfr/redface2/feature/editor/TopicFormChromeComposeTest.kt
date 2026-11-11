@@ -259,11 +259,17 @@ class TopicFormChromeComposeTest {
         val dialog = compose.onNode(isDialog())
         val dialogNode = dialog.fetchSemanticsNode()
         val dialogBounds = dialogNode.boundsInRoot
-        val sheetBounds = compose.onNodeWithTag("editor-draft-offer-sheet").fetchSemanticsNode().boundsInRoot
-        val exposedHeight = sheetBounds.top - dialogBounds.top
+        // The tagged outer node is reported at y = 0, before M3's anchor offset: a settled expanded sheet is
+        // bottom-anchored, so its visible top is the dialog's bottom minus its height. The title proves it.
+        val sheetHeight = compose.onNodeWithTag("editor-draft-offer-sheet").fetchSemanticsNode().boundsInRoot.height
+        val sheetTop = dialogBounds.bottom - sheetHeight
+        val title = compose.onNodeWithText("Brouillon retrouvé").fetchSemanticsNode().boundsInRoot
+        assertTrue("The offer must sit inside the visible sheet: title=$title sheetTop=$sheetTop",
+            title.top >= sheetTop && title.bottom <= dialogBounds.bottom)
+        val exposedHeight = sheetTop - dialogBounds.top
         assertTrue("The sheet must expose a scrim above it", exposedHeight > 0f)
         val tap = Offset(dialogBounds.center.x, dialogBounds.top + exposedHeight / 2f)
-        assertFalse(sheetBounds.contains(tap))
+        assertTrue(tap.y < sheetTop)
         dialog.performTouchInput { click(tap - dialogNode.positionInRoot) }
     }
 

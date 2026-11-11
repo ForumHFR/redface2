@@ -40,12 +40,14 @@ import fr.forumhfr.redface2.core.ui.editor.EditorRecipientState
 import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.testing.captureRoboImage
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
@@ -68,6 +70,10 @@ class EditorBaselineRoborazziTest {
 
     @get:Rule
     val compose = createComposeRule()
+
+    // A ModalBottomSheet composes in its own dialog window: its density follows the system configuration,
+    // as in production, never the host LocalDensity. Tests at a font scale set both, then reset the system.
+    @After fun resetSystemFontScale() = RuntimeEnvironment.setFontScale(1f)
 
     @Test
     fun portraitFontScale1_0() = captureMatrix(orientation = "portrait", fontScale = 1.0f, dark = false)
@@ -100,6 +106,7 @@ class EditorBaselineRoborazziTest {
     private fun captureMatrix(orientation: String, fontScale: Float, dark: Boolean) {
         val scenario = mutableStateOf(Scenario(EditorSurface.Reply, filled = false))
         lateinit var focusManager: FocusManager
+        RuntimeEnvironment.setFontScale(fontScale) // Before any sheet's dialog window is created.
         compose.setContent {
             focusManager = LocalFocusManager.current
             val density = LocalDensity.current
@@ -219,6 +226,7 @@ class EditorBaselineRoborazziTest {
         val scenario = mutableStateOf(false to ComposeCapture.Header)
         lateinit var focus: FocusManager
         lateinit var bodyScroll: ScrollState
+        RuntimeEnvironment.setFontScale(scale) // Before any sheet's dialog window is created.
         compose.setContent {
             focus = LocalFocusManager.current
             val density = LocalDensity.current

@@ -52,7 +52,7 @@ class EditorActionBarRoborazziTest {
                 host.dark.value = dark; host.scale.value = scale; host.width.value = width
                 host.compact.value = compact; host.header.value = true
                 host.firstStatus.value = EditorAppBarStatus(R.drawable.ic_editor_quote, "12 citations", {}, 12)
-                host.secondStatus.value = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon retrouvé", {})
+                host.secondStatus.value = EditorAppBarStatus(R.drawable.ic_ms_restore_page, "Brouillon retrouvé", {})
                 showSample(sample)
             }
             val target = compose.onNodeWithTag("bar")

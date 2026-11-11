@@ -37,7 +37,7 @@ internal class PrivateMessageReplyChromeAdapter(
     @Composable fun title() = stringResource(R.string.messages_reply_title)
     @Composable fun chrome() = scaffoldChrome(
         firstStatus = if (source().restorableDraft == null) null else EditorAppBarStatus(
-            UiR.drawable.ic_editor_restore, stringResource(UiR.string.editor_status_restore),
+            UiR.drawable.ic_ms_restore_page, stringResource(UiR.string.editor_status_restore),
             { open(PrivateMessageReplyChromeSurface.Restore) }, enabled = state.scaffold.controlsEnabled,
         ),
         secondStatus = if (!source().canManageRecipients) null else EditorAppBarStatus(

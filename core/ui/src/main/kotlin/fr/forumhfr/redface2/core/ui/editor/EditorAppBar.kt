@@ -95,7 +95,7 @@ fun EditorAppBar(
 
 @Composable
 private fun EditorAppBarStatusSlot(status: EditorAppBarStatus?) {
-    EditorStatusIcon(status?.iconRes ?: R.drawable.ic_editor_restore, status?.label.orEmpty(),
+    EditorStatusIcon(status?.iconRes ?: R.drawable.ic_ms_restore_page, status?.label.orEmpty(),
         { status?.onClick?.invoke() }, badgeCount = status?.badgeCount,
         enabled = status?.enabled ?: false, visible = status != null)
 }

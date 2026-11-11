@@ -96,7 +96,7 @@ class EditorAppBarRoborazziTest {
                     firstStatus = if (variant == 0) null else
                         EditorAppBarStatus(R.drawable.ic_editor_quote, "$count citations", {}, count),
                     secondStatus = if (variant == 0) null else
-                        EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon retrouvé", {}),
+                        EditorAppBarStatus(R.drawable.ic_ms_restore_page, "Brouillon retrouvé", {}),
                     onOpenHeader = if (variant == 0) null else ({}), compactHeight = compact,
                     headerActionLabel = stringResource(R.string.editor_app_bar_open_topic_header),
                 )

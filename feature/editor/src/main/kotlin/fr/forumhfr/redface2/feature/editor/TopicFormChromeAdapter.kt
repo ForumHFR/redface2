@@ -103,7 +103,7 @@ internal class TopicFormChromeAdapter(
             { openHeader() }, enabled = state.scaffold.controlsEnabled,
         ),
         secondStatus = if (source().restorableDraft == null && source().restorableSubject == null) null
-        else EditorAppBarStatus(UiR.drawable.ic_editor_restore, stringResource(UiR.string.editor_status_restore),
+        else EditorAppBarStatus(UiR.drawable.ic_ms_restore_page, stringResource(UiR.string.editor_status_restore),
             { host.open(TopicFormChromeSurface.Restore) }, enabled = state.scaffold.controlsEnabled),
     )
     fun option(intent: TopicFormIntent) {

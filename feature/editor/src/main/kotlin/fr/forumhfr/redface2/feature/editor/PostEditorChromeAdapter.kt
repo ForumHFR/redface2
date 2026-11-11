@@ -57,7 +57,7 @@ internal class PostEditorChromeAdapter(
                 else PostEditorChromeSurface.Quotes) }, quoteCount, state.scaffold.controlsEnabled,
         ),
         secondStatus = if (source().restorableDraft == null) null else EditorAppBarStatus(
-            UiR.drawable.ic_editor_restore, stringResource(UiR.string.editor_status_restore),
+            UiR.drawable.ic_ms_restore_page, stringResource(UiR.string.editor_status_restore),
             ::openDraftOffer, enabled = state.scaffold.controlsEnabled,
             opensOnInformation = events::isPendingQuoteEvent,
         ),

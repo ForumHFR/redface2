@@ -104,7 +104,7 @@ class EditorShortcutRoborazziTest {
                 dark.value = variant.dark; scale.value = variant.scale; this.width.value = width
                 this.compact.value = compact; header.value = true
                 firstStatus.value = EditorAppBarStatus(R.drawable.ic_editor_quote, "12 citations", {}, 12)
-                secondStatus.value = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon retrouvé", {})
+                secondStatus.value = EditorAppBarStatus(R.drawable.ic_ms_restore_page, "Brouillon retrouvé", {})
                 val mp = choice == EditorShortcut.IMAGE_SELECTION
                 imageUrl.value = !mp
                 val surface = if (mp) EditorShortcutSurface.PRIVATE_MESSAGE_REPLY else EditorShortcutSurface.POST

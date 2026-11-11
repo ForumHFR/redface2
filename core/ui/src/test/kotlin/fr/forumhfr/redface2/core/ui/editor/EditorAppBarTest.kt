@@ -213,7 +213,7 @@ class EditorAppBarTest {
                             Modifier.testTag("bar"),
                             firstStatus = EditorAppBarStatus(R.drawable.ic_editor_quote, "Citations", {},
                                 badgeCount = 123456),
-                            secondStatus = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon", {}),
+                            secondStatus = EditorAppBarStatus(R.drawable.ic_ms_restore_page, "Brouillon", {}),
                             onOpenHeader = {},
                             headerActionLabel = stringResource(R.string.editor_app_bar_open_topic_header))
                     }
@@ -310,7 +310,7 @@ class EditorAppBarTest {
                     firstStatus = if (first.value)
                         EditorAppBarStatus(R.drawable.ic_editor_quote, labels[0], { clicks++ }, 3) else null,
                     secondStatus = if (second.value)
-                        EditorAppBarStatus(R.drawable.ic_editor_restore, labels[1], { clicks++ }) else null)
+                        EditorAppBarStatus(R.drawable.ic_ms_restore_page, labels[1], { clicks++ }) else null)
             }
         }
         val live = SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite)
@@ -387,7 +387,8 @@ class EditorAppBarTest {
                         .windowInsetsPadding(WindowInsets(left = 12.dp, right = 12.dp))) {
                         EditorAppBar("Nouveau sujet", "Titre et catégorie", {}, { actions++ }, Modifier.testTag("bar"),
                             firstStatus = EditorAppBarStatus(R.drawable.ic_editor_quote, "Citations", { actions++ }, 3),
-                            secondStatus = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon", { actions++ }),
+                            secondStatus = EditorAppBarStatus(R.drawable.ic_ms_restore_page, "Brouillon",
+                                { actions++ }),
                             onOpenHeader = { headers++ }, headerActionLabel = stringResource(
                                 if (hasCategory.value) R.string.editor_app_bar_open_topic_header
                                 else R.string.editor_app_bar_open_topic_title))
@@ -417,7 +418,7 @@ class EditorAppBarTest {
                     EditorAppBar("Nouveau sujet", "Titre et catégorie", {}, { previews++ },
                         Modifier.width(200.dp).testTag("bar"),
                         firstStatus = EditorAppBarStatus(R.drawable.ic_editor_quote, "Citations", {}, 3),
-                        secondStatus = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon", {}),
+                        secondStatus = EditorAppBarStatus(R.drawable.ic_ms_restore_page, "Brouillon", {}),
                         onOpenHeader = {}, headerActionLabel = "Modifier le titre")
                 }
             }
@@ -448,7 +449,7 @@ class EditorAppBarTest {
                     Column {
                         EditorAppBar("Nouveau sujet", context.value, {}, {}, Modifier.width(200.dp).testTag("bar"),
                             firstStatus = EditorAppBarStatus(R.drawable.ic_editor_quote, "Citations", {}, 3),
-                            secondStatus = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon", {}),
+                            secondStatus = EditorAppBarStatus(R.drawable.ic_ms_restore_page, "Brouillon", {}),
                             onOpenHeader = { headers++ }, headerActionLabel = "Modifier le titre")
                         Text("Nouveau sujet", style = MaterialTheme.typography.titleSmall, maxLines = 1,
                             overflow = TextOverflow.Ellipsis,

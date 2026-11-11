@@ -39,6 +39,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorBarGesture
 import fr.forumhfr.redface2.core.ui.editor.EditorBarMode
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import java.util.concurrent.ConcurrentHashMap
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -47,6 +48,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
@@ -57,6 +59,10 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class PrivateMessageReplyChromeSurfacesTest {
     @get:Rule val compose = createComposeRule()
+
+    // A ModalBottomSheet composes in its own dialog window: its density follows the system configuration,
+    // as in production, never the host LocalDensity. Tests at a font scale set both, then reset the system.
+    @After fun resetSystemFontScale() = RuntimeEnvironment.setFontScale(1f)
     private val f = PrivateMessageReplyChromeFixture()
 
     @Test fun `restore sheet wires both remedies and consumes exactly one body focus return`() {
@@ -82,6 +88,7 @@ class PrivateMessageReplyChromeSurfacesTest {
     @Config(qualifiers = "fr-rFR-w360dp-h760dp-port-xxhdpi")
     fun `restore sheet states its offer once and never ellipsizes it at font scale 1_3`() {
         f.state = f.state.copy(restorableDraft = "Brouillon privé")
+        RuntimeEnvironment.setFontScale(1.3f) // Before any sheet's dialog window is created.
         compose.setContent {
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density = density.density, fontScale = 1.3f)) {

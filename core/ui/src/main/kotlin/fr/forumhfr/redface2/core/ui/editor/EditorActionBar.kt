@@ -267,7 +267,7 @@ private fun EditorBarFixedSlot(
             Modifier.editorBarActivation(enabled, onPreview), enabled = enabled, compactHeight = compactHeight)
         else -> {
             val status = statuses[if (fixed == EditorFixedSlot.FirstStatus) 0 else 1]
-            EditorStatusIcon(status?.iconRes ?: R.drawable.ic_editor_restore, status?.label.orEmpty(),
+            EditorStatusIcon(status?.iconRes ?: R.drawable.ic_ms_restore_page, status?.label.orEmpty(),
                 { status?.let(onStatus) }, Modifier.testTag("editor-bar-${fixed.name}"),
                 badgeCount = status?.badgeCount,
                 enabled = enabled && status?.enabled == true, visible = visible && status != null,

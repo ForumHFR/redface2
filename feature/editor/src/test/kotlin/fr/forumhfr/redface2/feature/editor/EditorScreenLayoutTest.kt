@@ -49,6 +49,7 @@ import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.R as UiR
 import fr.forumhfr.redface2.core.ui.editor.EDITOR_DRAFT_MIN_HEIGHT
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -56,6 +57,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.shadows.ShadowDialog
@@ -69,6 +71,10 @@ class EditorScreenLayoutTest {
 
     @get:Rule
     val compose = createComposeRule()
+
+    // A ModalBottomSheet composes in its own dialog window: its density follows the system configuration,
+    // as in production, never the host LocalDensity. Tests at a font scale set both, then reset the system.
+    @After fun resetSystemFontScale() = RuntimeEnvironment.setFontScale(1f)
 
     @Test
     @Config(qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
@@ -223,10 +229,15 @@ class EditorScreenLayoutTest {
         }
     }
 
-    private fun setScaledContent(fontScale: Float = 1.3f, content: @Composable () -> Unit) = compose.setContent {
-        val density = LocalDensity.current
-        CompositionLocalProvider(LocalDensity provides Density(density = density.density, fontScale = fontScale)) {
-            RedfaceTheme(darkTheme = false, dynamicColor = false) { content() }
+    private fun setScaledContent(fontScale: Float = 1.3f, content: @Composable () -> Unit) {
+        RuntimeEnvironment.setFontScale(fontScale) // Before the sheet's dialog window is created.
+        compose.setContent {
+            val density = LocalDensity.current
+            CompositionLocalProvider(
+                LocalDensity provides Density(density = density.density, fontScale = fontScale),
+            ) {
+                RedfaceTheme(darkTheme = false, dynamicColor = false) { content() }
+            }
         }
     }
 

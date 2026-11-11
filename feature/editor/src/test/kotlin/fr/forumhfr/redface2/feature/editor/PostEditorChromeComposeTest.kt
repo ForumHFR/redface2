@@ -155,7 +155,7 @@ class PostEditorChromeComposeTest {
     @Test fun `1450 first restore tap under the pending event opens the same offer sheet`() {
         pendingOffer()
         compose.setContent { Content() }
-        compose.onNodeWithTag("editor-bar-event").assertExists()
+        eventControl().assertExists()
         compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
         compose.onNode(isDialog()).assertExists()
         compose.onNodeWithTag("editor-draft-offer-sheet").assertIsDisplayed()
@@ -177,13 +177,18 @@ class PostEditorChromeComposeTest {
         }
         compose.mainClock.autoAdvance = false
         val key = compose.runOnIdle { pendingOffer(); host.events.visibleEvent!!.key }
+        // Publish the snapshot and wake the recomposer before the delivery's first frame: with autoAdvance
+        // off, waiting only after that frame would start the timer one frame late.
+        compose.waitForIdle()
         compose.mainClock.advanceTimeByFrame() // Start the newly displayed event's timeout effect.
         compose.waitForIdle()
         advance(4_999L)
         compose.runOnIdle { assertEquals(key, host.events.visibleEvent?.key) }
         advance(1L)
+        compose.runOnIdle { assertNull(host.events.visibleEvent) } // Retired at five seconds exactly.
+        compose.mainClock.advanceTimeByFrame() // autoAdvance is off: render the retirement.
         compose.onNode(isDialog()).assertDoesNotExist()
-        compose.onNodeWithTag("editor-bar-event").assertDoesNotExist()
+        eventControl().assertDoesNotExist()
         compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").assertExists()
         compose.onNodeWithTag("editor-bar-submit-shape").assertIsNotEnabled()
         compose.runOnIdle {
@@ -211,7 +216,7 @@ class PostEditorChromeComposeTest {
         }
         compose.runOnIdle { sheetBack() }
         compose.onNode(isDialog()).assertDoesNotExist()
-        compose.onNodeWithTag("editor-bar-event").assertDoesNotExist()
+        eventControl().assertDoesNotExist()
         compose.onNodeWithTag("editor-bar-submit-shape").assertIsNotEnabled()
         compose.runOnIdle {
             assertNull(host.events.visibleEvent)
@@ -229,7 +234,7 @@ class PostEditorChromeComposeTest {
                 QuoteSelection(QuoteLocator(1, 101, null), "", "")), isLoadingForm = true))
             host.events.visibleEvent!!.key
         }
-        compose.onNodeWithTag("editor-bar-event").assertExists()
+        eventControl().assertExists()
         val error = compose.runOnIdle {
             host.events.readFailed()
             host.transition(host.state.copy(isLoadingForm = false, submitError = EditorErrors.formNetwork))
@@ -252,7 +257,7 @@ class PostEditorChromeComposeTest {
         compose.onNodeWithContentDescription("Hors connexion, Afficher les détails").assertExists()
         compose.runOnIdle { host.transition(host.state.copy(isLoadingForm = true)) }
         compose.runOnIdle { host.transition(host.state.copy(isLoadingForm = false, submitError = null)) }
-        compose.onNodeWithTag("editor-bar-event").assertDoesNotExist()
+        eventControl().assertDoesNotExist()
         compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").assertExists()
         compose.onNodeWithTag("editor-bar-submit-shape").assertIsNotEnabled()
         compose.runOnIdle {
@@ -608,13 +613,23 @@ class PostEditorChromeComposeTest {
         val dialog = compose.onNode(isDialog())
         val dialogNode = dialog.fetchSemanticsNode()
         val dialogBounds = dialogNode.boundsInRoot
-        val sheetBounds = compose.onNodeWithTag("editor-draft-offer-sheet").fetchSemanticsNode().boundsInRoot
-        val exposedHeight = sheetBounds.top - dialogBounds.top
+        // The tagged outer node is reported at y = 0, before M3's anchor offset: a settled expanded sheet is
+        // bottom-anchored, so its visible top is the dialog's bottom minus its height. The title proves it.
+        val sheetHeight = compose.onNodeWithTag("editor-draft-offer-sheet").fetchSemanticsNode().boundsInRoot.height
+        val sheetTop = dialogBounds.bottom - sheetHeight
+        val title = compose.onNodeWithText("Brouillon retrouvé").fetchSemanticsNode().boundsInRoot
+        assertTrue("The offer must sit inside the visible sheet: title=$title sheetTop=$sheetTop",
+            title.top >= sheetTop && title.bottom <= dialogBounds.bottom)
+        val exposedHeight = sheetTop - dialogBounds.top
         assertTrue("The sheet must expose a scrim above it", exposedHeight > 0f)
         val tap = Offset(dialogBounds.center.x, dialogBounds.top + exposedHeight / 2f)
-        assertFalse(sheetBounds.contains(tap))
+        assertTrue(tap.y < sheetTop)
         dialog.performTouchInput { click(tap - dialogNode.positionInRoot) }
     }
+
+    /** The slot is a permanent call site (1 dp when empty): an event is shown when its control is named. */
+    private fun eventControl() = compose.onNode(hasAnyAncestor(hasTestTag("editor-bar-event")) and
+        SemanticsMatcher.keyIsDefined(SemanticsProperties.ContentDescription))
 
     private fun advance(millis: Long) {
         compose.mainClock.advanceTimeBy(millis, ignoreFrameDuration = true)

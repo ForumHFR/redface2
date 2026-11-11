@@ -61,6 +61,7 @@ import io.mockk.every
 import io.mockk.mockk
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.flow.MutableStateFlow
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -68,6 +69,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.shadows.ShadowDialog
@@ -81,6 +83,10 @@ class PrivateMessageEditorLayoutTest {
 
     @get:Rule
     val compose = createComposeRule()
+
+    // A ModalBottomSheet composes in its own dialog window: its density follows the system configuration,
+    // as in production, never the host LocalDensity. Tests at a font scale set both, then reset the system.
+    @After fun resetSystemFontScale() = RuntimeEnvironment.setFontScale(1f)
 
     @OptIn(DelicateCoilApi::class)
     @Test fun replyPreviewDisablesCoilDiskReadsAndWrites() {
@@ -284,6 +290,7 @@ class PrivateMessageEditorLayoutTest {
     private fun assertCompactRestoreSheet(fontScale: Float, content: @Composable () -> Unit) {
         lateinit var view: View
         lateinit var density: Density
+        RuntimeEnvironment.setFontScale(fontScale) // Before any sheet's dialog window is created.
         compose.setContent {
             view = LocalView.current
             density = LocalDensity.current

@@ -232,21 +232,24 @@ class TopicFormRestorationScreenTest {
         val model = editor(owner, TopicFormMode.EditFirstPost)
         show(owner, model)
         compose.onNode(hasSetTextAction()).assertIsFocused()
-        compose.runOnIdle {
+        val entry = compose.runOnIdle {
             model.bodyFieldState.edit { selection = TextRange(8, 2) }
             ViewCompat.dispatchApplyWindowInsets(view, WindowInsetsCompat.Builder()
                 .setInsets(WindowInsetsCompat.Type.ime(), Insets.NONE)
                 .setVisible(WindowInsetsCompat.Type.ime(), false).build())
+            sessions
         }
         compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
         compose.onNode(isDialog()).assertExists()
         compose.onNodeWithTag("editor-draft-offer-sheet").assertIsDisplayed()
-        compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
+        // ED-80/ED-86: the sheet owns its own window, as Options does. Until a recreation the body keeps
+        // its node, its per-window focus and the session it already had (Robolectric does not move window
+        // focus to the dialog). What must hold is no new input session and a keyboard left closed.
         val before = compose.runOnIdle {
             assertEquals(TopicFormChromeSurface.Restore, model.chromeMemory.host.surface)
             assertEquals(0, model.chromeMemory.host.returnGeneration)
             assertFalse(model.chromeMemory.host.focus.imeBeforeSurface)
-            assertFalse(inputActive)
+            assertEquals(entry, sessions)
             sessions.also { displayed = host().get() to model }
         }
         compose.onNode(isDialog()).assertExists()

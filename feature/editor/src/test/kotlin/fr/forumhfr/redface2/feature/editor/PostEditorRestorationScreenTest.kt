@@ -227,21 +227,24 @@ class PostEditorRestorationScreenTest {
             }
         }
         compose.onNode(hasSetTextAction()).assertIsFocused()
-        compose.runOnIdle {
+        val entry = compose.runOnIdle {
             assertTrue(sessions > 0)
             // IME visibility is the real surface snapshot, independent of an active input connection.
             ViewCompat.dispatchApplyWindowInsets(view, WindowInsetsCompat.Builder()
                 .setInsets(WindowInsetsCompat.Type.ime(), Insets.NONE)
                 .setVisible(WindowInsetsCompat.Type.ime(), false).build())
+            sessions
         }
         compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
         assertPostCover(PostEditorChromeSurface.Restore)
-        compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
+        // ED-80/ED-86: the sheet owns its own window, as Options does. Until a recreation the body keeps
+        // its node, its per-window focus and the session it already had (Robolectric does not move window
+        // focus to the dialog). What must hold is no new input session and a keyboard left closed.
         val before = compose.runOnIdle {
             assertEquals(PostEditorChromeSurface.Restore, model.chromeMemory.surface)
             assertEquals(0, model.chromeMemory.returnGeneration)
             assertFalse(model.chromeMemory.focus.imeBeforeSurface)
-            assertFalse(inputActive)
+            assertEquals(entry, sessions)
             sessions.also { owner = host().get() }
         }
         assertPostCover(PostEditorChromeSurface.Restore)

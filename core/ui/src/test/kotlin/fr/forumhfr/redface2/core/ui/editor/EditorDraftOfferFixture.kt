@@ -56,7 +56,7 @@ internal class EditorDraftOfferFixture {
 
     @Composable
     fun Content() {
-        val status = if (!available) null else EditorAppBarStatus(R.drawable.ic_editor_restore, "Offre de brouillon",
+        val status = if (!available) null else EditorAppBarStatus(R.drawable.ic_ms_restore_page, "Offre de brouillon",
             { host.open(Surface.Offer) }, opensOnInformation = {
                 offerEventEnabled && it == offerKey
             })

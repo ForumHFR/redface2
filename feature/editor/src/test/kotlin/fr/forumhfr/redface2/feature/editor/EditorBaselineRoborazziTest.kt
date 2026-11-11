@@ -42,10 +42,12 @@ import fr.forumhfr.redface2.core.ui.R as UiR
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
 import fr.forumhfr.redface2.testing.captureRoboImage
+import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
@@ -70,6 +72,10 @@ class EditorBaselineRoborazziTest {
     @get:Rule
     val compose = createComposeRule()
 
+    // A ModalBottomSheet composes in its own dialog window: its density follows the system configuration,
+    // as in production, never the host LocalDensity. Tests at a font scale set both, then reset the system.
+    @After fun resetSystemFontScale() = RuntimeEnvironment.setFontScale(1f)
+
     @Test
     fun portraitFontScale1_0() = captureMatrix(orientation = "portrait", fontScale = 1.0f)
 
@@ -91,6 +97,7 @@ class EditorBaselineRoborazziTest {
         var pixelsPerDp = 1f
         lateinit var focusManager: FocusManager
         lateinit var previewLabel: String
+        RuntimeEnvironment.setFontScale(fontScale) // Before any sheet's dialog window is created.
         compose.setContent {
             view = LocalView.current
             focusManager = LocalFocusManager.current
