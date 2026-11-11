@@ -23,6 +23,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -44,6 +45,8 @@ fun QuoteCard(
     quote: QuoteSelection,
     controls: QuoteCardControls,
     removeFocusRequester: FocusRequester? = null,
+    moveUpFocusRequester: FocusRequester? = null,
+    moveDownFocusRequester: FocusRequester? = null,
 ) {
     val moveUpLabel = stringResource(R.string.editor_quote_move_up, quote.author)
     val moveDownLabel = stringResource(R.string.editor_quote_move_down, quote.author)
@@ -73,12 +76,14 @@ fun QuoteCard(
                 label = moveUpLabel,
                 glyph = "↑",
                 onClick = controls.onMoveUp,
+                focusRequester = moveUpFocusRequester,
             )
             QuoteCardAction(
                 enabled = controls.enabled && controls.canMoveDown,
                 label = moveDownLabel,
                 glyph = "↓",
                 onClick = controls.onMoveDown,
+                focusRequester = moveDownFocusRequester,
             )
             QuoteCardAction(
                 enabled = controls.enabled,
@@ -199,6 +204,6 @@ private fun QuoteCardAction(
         enabled = enabled,
         modifier = base.semantics { contentDescription = label },
     ) {
-        Text(text = glyph, style = MaterialTheme.typography.titleMedium)
+        Text(text = glyph, style = MaterialTheme.typography.titleMedium, modifier = Modifier.clearAndSetSemantics {})
     }
 }

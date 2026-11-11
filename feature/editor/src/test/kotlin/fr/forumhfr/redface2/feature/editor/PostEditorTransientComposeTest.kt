@@ -29,9 +29,13 @@ import androidx.compose.ui.platform.PlatformTextInputInterceptor
 import androidx.compose.ui.platform.SoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
@@ -39,6 +43,7 @@ import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.isEnabled
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -67,6 +72,7 @@ import fr.forumhfr.redface2.core.ui.R as UiR
 import fr.forumhfr.redface2.core.ui.editor.BbcodeTextField
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -84,6 +90,10 @@ class PostEditorTransientComposeTest {
     @get:Rule val compose = createComposeRule()
     private val host = transientHost()
     private val focus = FocusRequester()
+    private lateinit var quotePanelView: View
+    private lateinit var quoteInputMode: InputModeManager
+    private val quotePanelLive = SemanticsMatcher.keyIsDefined(SemanticsProperties.LiveRegion) and
+        hasAnyAncestor(SemanticsMatcher.expectValue(SemanticsProperties.PaneTitle, "Citations"))
 
     @Test fun `ED50 ED51 ED53 panel reorders removes announces and returns the same source selection`() {
         lateinit var inputMode: InputModeManager
@@ -99,6 +109,7 @@ class PostEditorTransientComposeTest {
         compose.onNodeWithContentDescription("3 citations, ouvrir le panneau citations").performClick()
         compose.onNode(hasSetTextAction()).assertDoesNotExist()
         compose.onNodeWithContentDescription("Descendre la citation de Alice").performScrollTo().performClick()
+        compose.mainClock.advanceTimeBy(500L)
         compose.onNodeWithContentDescription("Citation de Alice déplacée en position 2").assertExists()
         compose.runOnIdle { assertEquals(listOf("Bob", "Alice", "Chloé"), host.state.quotes.map { it.author }) }
         // Compose clickables only take focus outside touch mode (Focusability.SystemDefined), as in the
@@ -110,9 +121,11 @@ class PostEditorTransientComposeTest {
         compose.onNodeWithContentDescription("Retirer la citation de Alice")
             .performSemanticsAction(SemanticsActions.OnClick)
         compose.onNodeWithContentDescription("Retirer la citation de Chloé").assertIsFocused()
+        compose.mainClock.advanceTimeBy(500L)
         compose.onNodeWithContentDescription("Citation de Alice retirée. 2 citations restantes").assertExists()
         compose.onNodeWithText("Tout vider").performClick()
         compose.onNodeWithText("Aucune citation").assertIsFocused()
+        compose.mainClock.advanceTimeBy(500L)
         compose.onNodeWithContentDescription("Toutes les citations ont été retirées").assertExists()
         compose.onNodeWithText("Tout vider").assertDoesNotExist()
         compose.onNodeWithText("Retour au message").performScrollTo().performClick()
@@ -134,7 +147,125 @@ class PostEditorTransientComposeTest {
         compose.onNodeWithText("Tout vider").assertDoesNotExist()
         compose.onNodeWithContentDescription("Retirer la citation de Alice").performScrollTo().performClick()
         compose.onNodeWithText("Aucune citation").assertIsFocused()
+        compose.mainClock.advanceTimeBy(500L)
         compose.onNodeWithContentDescription("Citation de Alice retirée. 0 citation restante").assertExists()
+    }
+
+    @Test fun `R2a every panel live region with cards survives Android accessibility occlusion pruning`() {
+        openQuotePanel()
+        val nodes = compose.onAllNodes(quotePanelLive, useUnmergedTree = true).fetchSemanticsNodes()
+        assertTrue(nodes.isNotEmpty())
+        compose.runOnIdle {
+            nodes.forEach { node ->
+                // Unlike fetchSemanticsNode, Android's provider omits fully covered siblings.
+                val info = quotePanelView.accessibilityNodeProvider.createAccessibilityNodeInfo(node.id)
+                assertNotNull("Panel live region ${node.id} was pruned by Android", info)
+                assertTrue(requireNotNull(info).isVisibleToUser)
+                assertEquals(View.ACCESSIBILITY_LIVE_REGION_POLITE, info.liveRegion)
+            }
+        }
+        assertEquals("Only the panel owns a live region", 1, nodes.size)
+    }
+
+    @Test fun `R2a removal movement and clear all update the same Android panel live region`() {
+        openQuotePanel()
+        val id = compose.onNode(quotePanelLive, useUnmergedTree = true).fetchSemanticsNode().id
+        compose.onNodeWithContentDescription("Retirer la citation de Bob").performScrollTo().performClick()
+        compose.mainClock.advanceTimeBy(500L)
+        assertPanelAnnouncement(id, "Citation de Bob retirée. 2 citations restantes")
+        compose.onNodeWithContentDescription("Descendre la citation de Alice").performScrollTo().performClick()
+        compose.mainClock.advanceTimeBy(500L)
+        assertPanelAnnouncement(id, "Citation de Alice déplacée en position 2")
+        compose.onNodeWithText("Tout vider").performClick()
+        compose.mainClock.advanceTimeBy(500L)
+        assertPanelAnnouncement(id, "Toutes les citations ont été retirées")
+    }
+
+    @Test fun `R2a two identical moves expose an empty interval and the same announcement twice to Android`() {
+        host.state = host.state.copy(quotes = host.state.quotes.take(2).map { it.copy(author = "Alice") })
+        openQuotePanel()
+        val id = compose.onNode(quotePanelLive, useUnmergedTree = true).fetchSemanticsNode().id
+        val move = compose.onNode(hasContentDescription("Monter la citation de Alice") and isEnabled())
+        compose.mainClock.autoAdvance = false
+        try {
+            move.performSemanticsAction(SemanticsActions.OnClick)
+            compose.mainClock.advanceTimeBy(256L)
+            assertPanelAnnouncement(id, "Citation de Alice déplacée en position 1")
+            val first = host.state.quotes.first()
+            // The other Alice now occupies position 2: same author, same result, different snapshot.
+            // Queue it while the first message is still displayed, before its minimum dwell ends.
+            move.performSemanticsAction(SemanticsActions.OnClick)
+            compose.mainClock.advanceTimeBy(208L)
+            assertPanelAnnouncement(id, "")
+            compose.mainClock.advanceTimeBy(256L)
+            assertPanelAnnouncement(id, "Citation de Alice déplacée en position 1")
+            compose.runOnIdle { assertTrue(first != host.state.quotes.first()) }
+        } finally {
+            compose.mainClock.autoAdvance = true
+        }
+    }
+
+    @Test fun `R2a merged quote buttons omit glyph text and clear all uses its visible label once`() {
+        openQuotePanel()
+        listOf("Monter", "Descendre", "Retirer").forEach { action ->
+            val node = compose.onNodeWithContentDescription("$action la citation de Alice").fetchSemanticsNode()
+            assertFalse("$action must not merge its decorative glyph", node.config.contains(SemanticsProperties.Text))
+            compose.runOnIdle {
+                val info = requireNotNull(quotePanelView.accessibilityNodeProvider.createAccessibilityNodeInfo(node.id))
+                assertTrue(info.text.isNullOrEmpty())
+                assertEquals("$action la citation de Alice", info.contentDescription.toString())
+            }
+        }
+        val clear = compose.onNodeWithText("Tout vider").fetchSemanticsNode()
+        assertEquals(listOf("Tout vider"), clear.config[SemanticsProperties.Text].map { it.text })
+        assertFalse(clear.config.contains(SemanticsProperties.ContentDescription))
+        compose.runOnIdle {
+            val info = requireNotNull(quotePanelView.accessibilityNodeProvider.createAccessibilityNodeInfo(clear.id))
+            assertEquals("Tout vider", info.text.toString())
+            assertTrue(info.contentDescription.isNullOrEmpty())
+        }
+    }
+
+    @Test fun `R2a edge moves focus the other direction on the same card and interior moves keep focus`() {
+        openQuotePanel()
+        compose.runOnIdle { quoteInputMode.requestInputMode(InputMode.Keyboard) }
+        compose.runOnIdle { assertEquals(InputMode.Keyboard, quoteInputMode.inputMode) }
+        val up = compose.onNodeWithContentDescription("Monter la citation de Bob")
+        val down = compose.onNodeWithContentDescription("Descendre la citation de Bob")
+        up.performScrollTo().requestFocus().assertIsFocused().performSemanticsAction(SemanticsActions.OnClick)
+        up.assertIsNotEnabled()
+        down.assertIsEnabled().assertIsFocused()
+        compose.runOnIdle { assertEquals("Bob", host.state.quotes.first().author) }
+        val downId = down.fetchSemanticsNode().id
+        down.performSemanticsAction(SemanticsActions.OnClick)
+        down.assertIsFocused()
+        assertEquals(downId, down.fetchSemanticsNode().id)
+        down.performSemanticsAction(SemanticsActions.OnClick)
+        down.assertIsNotEnabled()
+        up.assertIsEnabled().assertIsFocused()
+        compose.runOnIdle { assertEquals("Bob", host.state.quotes.last().author) }
+    }
+
+    private fun openQuotePanel() {
+        compose.setContent {
+            quotePanelView = LocalView.current
+            quoteInputMode = LocalInputModeManager.current
+            RedfaceTheme { PostEditorTestContent(host.state, host::dispatch, host.body, host.events, host.memory) }
+        }
+        compose.onNodeWithContentDescription("${host.state.quotes.size} citations, ouvrir le panneau citations")
+            .performClick()
+    }
+
+    private fun assertPanelAnnouncement(id: Int, text: String) {
+        val node = compose.onNode(quotePanelLive, useUnmergedTree = true).fetchSemanticsNode()
+        assertEquals(id, node.id)
+        assertEquals(listOf(text), node.config[SemanticsProperties.ContentDescription])
+        compose.runOnIdle {
+            val info = requireNotNull(quotePanelView.accessibilityNodeProvider.createAccessibilityNodeInfo(id))
+            assertTrue(info.isVisibleToUser)
+            assertEquals(View.ACCESSIBILITY_LIVE_REGION_POLITE, info.liveRegion)
+            assertEquals(text, info.contentDescription?.toString().orEmpty())
+        }
     }
 
     @Test fun `R2a portrait exposes quotes only in the panel without reducing the field`() = quoteGeometry()

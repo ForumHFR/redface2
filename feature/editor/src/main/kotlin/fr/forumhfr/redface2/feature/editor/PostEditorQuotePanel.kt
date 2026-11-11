@@ -30,6 +30,8 @@ import fr.forumhfr.redface2.core.ui.R as UiR
 import fr.forumhfr.redface2.core.ui.editor.EditorHeaderPanel
 import fr.forumhfr.redface2.core.ui.editor.QuoteCard
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardControls
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 
 /** ED-50/53: keep mounted around the body; the scaffold callback restores the captured IME state. */
 @Composable
@@ -42,8 +44,19 @@ internal fun PostEditorQuotePanel(
     val quotes = adapter.state.source.quotes
     val enabled = adapter.state.scaffold.controlsEnabled
     var announcement by remember { mutableStateOf("") }
+    val announcements = remember { Channel<String>(Channel.UNLIMITED) }
+    val onAnnounce: (String) -> Unit = { announcements.trySend(it) }
+    LaunchedEffect(announcements) {
+        for (message in announcements) {
+            // A real empty interval lets Android observe even two identical consecutive messages.
+            // Queue them: a new action must not cancel a pending announcement.
+            announcement = ""
+            delay(QUOTE_ANNOUNCEMENT_INTERVAL_MILLIS)
+            announcement = message
+            delay(QUOTE_ANNOUNCEMENT_INTERVAL_MILLIS)
+        }
+    }
     val clearedLabel = stringResource(R.string.editor_quotes_cleared)
-    val clearActionLabel = stringResource(R.string.editor_quotes_clear_all_a11y)
     val emptyFocus = remember { FocusRequester() }
     var cleared by remember { mutableStateOf(false) }
     LaunchedEffect(quotes.isEmpty()) {
@@ -54,10 +67,11 @@ internal fun PostEditorQuotePanel(
         bodyState, adapter::closeSurface, { adapter.returnToBody(onReturnToBody) },
         headerActions = {
             if (quotes.size >= 2) TextButton(onClick = {
-                announcement = clearedLabel
+                onAnnounce(clearedLabel)
                 cleared = true
                 adapter.clearQuotes()
-            }, enabled = enabled, modifier = Modifier.semantics { contentDescription = clearActionLabel }) {
+            }, enabled = enabled) {
+                // The visible label is also the single accessible name (label-in-name).
                 Text(stringResource(R.string.editor_quotes_clear_all))
             }
         }, body = body,
@@ -69,7 +83,7 @@ internal fun PostEditorQuotePanel(
         })
         if (quotes.isEmpty()) Text(stringResource(R.string.editor_quote_panel_empty),
             Modifier.focusRequester(emptyFocus).focusable())
-        PostEditorQuoteCards(quotes, enabled, adapter::quoteIntent, { emptyFocus.requestFocus() })
+        PostEditorQuoteCards(quotes, enabled, adapter::quoteIntent, { emptyFocus.requestFocus() }, onAnnounce)
     }
 }
 
@@ -80,8 +94,8 @@ internal fun PostEditorQuoteCards(
     enabled: Boolean,
     onIntent: (PostEditorIntent) -> Unit,
     onEmpty: () -> Unit,
+    onAnnounce: (String) -> Unit,
 ) {
-    var announcement by remember { mutableStateOf("") }
     var pendingIndex by remember { mutableStateOf<Int?>(null) }
     val focus = remember(quotes.size) { List(quotes.size) { FocusRequester() } }
     LaunchedEffect(quotes) {
@@ -94,24 +108,33 @@ internal fun PostEditorQuoteCards(
     val moved = stringResource(UiR.string.editor_quote_a11y_moved)
     val remainingCount = (quotes.size - 1).coerceAtLeast(0)
     val remaining = pluralStringResource(R.plurals.editor_quotes_remaining, remainingCount, remainingCount)
-    Box {
-        Box(Modifier.size(1.dp).semantics { liveRegion = LiveRegionMode.Polite; contentDescription = announcement })
-        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            quotes.forEachIndexed { index, quote ->
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        quotes.forEachIndexed { index, quote ->
+            key(quote) {
+                val moveUpFocus = remember { FocusRequester() }
+                val moveDownFocus = remember { FocusRequester() }
+                var pendingMoveFocus by remember { mutableStateOf<FocusRequester?>(null) }
+                // Wait for the reordered card's buttons to receive their new enabled state.
+                LaunchedEffect(index) {
+                    pendingMoveFocus?.requestFocus()
+                    pendingMoveFocus = null
+                }
                 val move: (Int) -> Unit = { delta ->
-                    announcement = moved.format(quote.author, index + delta + 1)
+                    if (index + delta == 0) pendingMoveFocus = moveDownFocus
+                    if (index + delta == quotes.lastIndex) pendingMoveFocus = moveUpFocus
+                    onAnnounce(moved.format(quote.author, index + delta + 1))
                     onIntent(PostEditorIntent.QuoteMoved(quote.numreponse, delta, quote))
                 }
-                key(quote) {
-                    QuoteCard(quote, QuoteCardControls(index > 0, index < quotes.lastIndex, enabled,
-                        { move(-1) }, { move(1) }, {
-                            // Two portions may share an author: the count makes each removal announceable.
-                            announcement = removed.format(quote.author) + ". " + remaining
-                            pendingIndex = index
-                            onIntent(PostEditorIntent.QuoteRemoved(quote.numreponse, quote))
-                        }), focus[index])
-                }
+                QuoteCard(quote, QuoteCardControls(index > 0, index < quotes.lastIndex, enabled,
+                    { move(-1) }, { move(1) }, {
+                        onAnnounce(removed.format(quote.author) + ". " + remaining)
+                        pendingIndex = index
+                        onIntent(PostEditorIntent.QuoteRemoved(quote.numreponse, quote))
+                    }), focus[index], moveUpFocus, moveDownFocus)
             }
         }
     }
 }
+
+// Longer than Compose's 100 ms recurring accessibility-event interval; no spoken suffix or node replacement.
+private const val QUOTE_ANNOUNCEMENT_INTERVAL_MILLIS = 200L
