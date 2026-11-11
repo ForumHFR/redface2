@@ -15,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -123,7 +124,9 @@ internal fun PostEditorQuoteCards(
 ) {
     var pendingIndex by remember { mutableStateOf<Int?>(null) }
     var pendingMove by remember { mutableStateOf<Pair<QuoteSelection, List<QuoteSelection>>?>(null) }
-    LaunchedEffect(pendingMove) {
+    var moveSeq by remember { mutableIntStateOf(0) }
+    // Identical retries must renew expiry even when the request compares equal.
+    LaunchedEffect(moveSeq) {
         if (pendingMove != null) {
             delay(QUOTE_MOVE_REQUEST_MILLIS)
             pendingMove = null
@@ -134,7 +137,7 @@ internal fun PostEditorQuoteCards(
     val moveRequest = pendingMove
     LaunchedEffect(quotes) {
         // A removal or replacement also consumes the request, without stealing its focus.
-        pendingMove = null
+        if (pendingMove === moveRequest) pendingMove = null
         pendingIndex?.let { index ->
             if (quotes.isEmpty()) onEmpty() else focus[index.coerceAtMost(quotes.lastIndex)].requestFocus()
             pendingIndex = null
@@ -163,6 +166,7 @@ internal fun PostEditorQuoteCards(
                 }
                 val move: (Int) -> Unit = { delta ->
                     pendingMove = quote to quotes
+                    moveSeq++
                     onIntent(PostEditorIntent.QuoteMoved(quote.numreponse, delta, quote))
                 }
                 QuoteCard(quote, QuoteCardControls(index > 0, index < quotes.lastIndex, enabled,

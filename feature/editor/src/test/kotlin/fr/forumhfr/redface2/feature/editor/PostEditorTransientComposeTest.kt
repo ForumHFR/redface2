@@ -322,7 +322,7 @@ class PostEditorTransientComposeTest {
                     button.isClickable && button.isScreenReaderFocusable)
                 assertEquals("Only the button takes accessibility focus", 1, nodes.count { it.isScreenReaderFocusable })
                 assertEquals("The group must expose the button role exactly once", 1,
-                    nodes.count { it.className == "android.widget.Button" })
+                    nodes.count { it.className?.toString() == "android.widget.Button" })
                 assertTrue(nodes.drop(1).none { it.isClickable })
                 // Compose puts a merging parent's description on a virtual child to avoid clobbering
                 // descendants. Android/TalkBack computes the button's name from that whole group.
@@ -370,6 +370,39 @@ class PostEditorTransientComposeTest {
             }
             compose.onNodeWithContentDescription("Retirer la citation de Bob").assertIsFocused()
             compose.onNodeWithContentDescription("Descendre la citation de Bob").assertIsNotFocused()
+        } finally {
+            compose.mainClock.autoAdvance = true
+        }
+    }
+
+    @Test fun `R2a an identical retry renews move expiry until its deferred reorder commits`() {
+        val announcements = mutableListOf<String>()
+        val requests = mutableListOf<PostEditorIntent>()
+        compose.setContent { RedfaceTheme {
+            PostEditorQuoteCards(host.state.quotes, true, requests::add, {}, announcements::add)
+        } }
+        val original = host.state.quotes
+        val up = compose.onNodeWithContentDescription("Monter la citation de Bob")
+        compose.mainClock.autoAdvance = false
+        try {
+            up.performSemanticsAction(SemanticsActions.OnClick)
+            advanceQuotePanelTimeBy(768L)
+            compose.runOnIdle {
+                assertEquals(1, requests.size)
+                requests.clear() // Filter the first intent without changing the rendered list.
+            }
+            up.performSemanticsAction(SemanticsActions.OnClick)
+            advanceQuotePanelTimeBy(512L) // Past the first expiry, within the identical retry's lifetime.
+            compose.runOnIdle {
+                assertEquals(original, host.state.quotes)
+                assertTrue(announcements.isEmpty())
+                host.adapter.quoteIntent(requests.single())
+            }
+            advanceQuotePanelTimeBy(320L)
+            compose.runOnIdle {
+                assertEquals(listOf("Bob", "Alice", "Chloé"), host.state.quotes.map { it.author })
+                assertEquals(listOf("Citation de Bob déplacée en position 1"), announcements)
+            }
         } finally {
             compose.mainClock.autoAdvance = true
         }
