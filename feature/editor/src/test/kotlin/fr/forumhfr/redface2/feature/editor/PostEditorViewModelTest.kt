@@ -281,7 +281,7 @@ class PostEditorViewModelTest {
         val vm = newPendingQuoteOfferViewModel()
         vm.editBody(TextFieldValue("typed"))
         vm.dispatch(PostEditorIntent.DraftRestoreRequested)
-        runCurrent()
+        testScheduler.runCurrent()
         assertEquals("offered D\n\ntyped", vm.bodyFieldState.text.toString())
         get.complete(Unit)
         settleBody()
@@ -4780,7 +4780,7 @@ class PostEditorViewModelTest {
         settleBody()
         draftStore.saveFailure = IOException("disk full")
         vm.dispatch(PostEditorIntent.DraftRestoreRequested)
-        runCurrent()
+        testScheduler.runCurrent()
         assertEquals("offered D", vm.state.value.restorableDraft)
         val body = vm.bodyFieldState.text.toString()
         draftStore.saveFailure = null

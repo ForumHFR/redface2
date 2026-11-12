@@ -66,7 +66,7 @@ fun EditorStatusIcon(
     val badgeSize = measureEditorStatusBadge(badgeCount)
     // Stack while both fit; at large font scales overlap the badge instead of clipping either layer.
     val badgeWidth = badgeSize.width
-    val height = (24.dp + if (badgeCount != null) badgeSize.height else if (showDot) 6.dp else 0.dp)
+    val height = (24.dp + editorStatusMarkHeight(badgeCount, badgeSize.height, showDot))
         .coerceAtMost(EditorChromeMetrics(compactHeight).controlVisibleHeight)
     // Replace only the tooltip state on masking: its popup/job die, the live anchor keeps its ID.
     val tooltip = key(visible) { rememberEditorTooltipState() }
@@ -101,9 +101,8 @@ fun EditorStatusIcon(
                     val badgeAlpha = if (enabled) 1f else DISABLED_BADGE_ALPHA
                     // ED-40: decorative offer dot, tonal like a badge and below the glyph; the state is
                     // announced by this status node (stateDescription above), never by the dot.
-                    if (showDot && badgeCount == null) Box(Modifier.align(Alignment.BottomCenter).size(6.dp)
-                        .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = badgeAlpha), CircleShape)
-                        .testTag(EDITOR_STATUS_DOT_TAG).clearAndSetSemantics {})
+                    if (showDot && badgeCount == null) EditorStatusDot(badgeAlpha,
+                        Modifier.align(Alignment.BottomCenter))
                     if (badgeCount != null) Badge(
                         containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = badgeAlpha),
                         contentColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = badgeAlpha),
@@ -116,6 +115,22 @@ fun EditorStatusIcon(
         }
     }
 }
+
+/** Height reserved under the glyph: a count badge wins over the offer dot (ED-40). */
+private fun editorStatusMarkHeight(badgeCount: Int?, badgeHeight: Dp, showDot: Boolean): Dp = when {
+    badgeCount != null -> badgeHeight
+    showDot -> EDITOR_STATUS_DOT_SIZE
+    else -> 0.dp
+}
+
+@Composable
+private fun EditorStatusDot(alpha: Float, modifier: Modifier = Modifier) {
+    Box(modifier.size(EDITOR_STATUS_DOT_SIZE)
+        .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = alpha), CircleShape)
+        .testTag(EDITOR_STATUS_DOT_TAG).clearAndSetSemantics {})
+}
+
+private val EDITOR_STATUS_DOT_SIZE = 6.dp
 
 private fun editorStatusButtonModifier(visible: Boolean, compactHeight: Boolean, badgeWidth: Dp): Modifier = when {
     !visible -> Modifier.size(1.dp).clearAndSetSemantics {}
