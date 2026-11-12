@@ -22,6 +22,7 @@ import org.junit.Test
 @OptIn(ExperimentalCoroutinesApi::class)
 abstract class EditorSubmissionRecoveryContract {
     protected var submissionScenario = EditorSubmissionScenario()
+    private var independentOffers = emptyMap<String, List<EditorDraftStore.DraftOffer>>()
     protected abstract fun createAdapter(
         scope: TestScope,
         preferences: Flow<Boolean>,
@@ -101,7 +102,7 @@ abstract class EditorSubmissionRecoveryContract {
             runCurrent()
             assertEquals("edited after uncertainty", adapter.snapshot().body)
             assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
-            assertFalse(adapter.snapshot().restoreOffered)
+            assertOnlyIndependentOffers(adapter)
         }
     }
 
@@ -130,7 +131,7 @@ abstract class EditorSubmissionRecoveryContract {
             assertEquals(body, adapter.snapshot().body)
             assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
             assertEquals(entry.attempt, scenario.store.entries.values.single().attempt)
-            assertFalse(adapter.snapshot().restoreOffered)
+            assertOnlyIndependentOffers(adapter)
             assertFalse(adapter.snapshot().confirmationVisible)
             assertEquals("aucun renvoi automatique à la réouverture", 1, adapter.postCalls)
             assertEquals(0, adapter.successEffects)
@@ -223,7 +224,7 @@ abstract class EditorSubmissionRecoveryContract {
             assertEquals(entry.draft.body, adapter.snapshot().body)
             assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
             assertFalse(adapter.snapshot().isSending)
-            assertFalse(adapter.snapshot().restoreOffered)
+            assertOnlyIndependentOffers(adapter)
             assertFalse(adapter.snapshot().confirmationVisible)
             gate.complete(Unit)
             runCurrent()
@@ -461,6 +462,22 @@ abstract class EditorSubmissionRecoveryContract {
         assertTrue(adapter.snapshot().isSending)
     }
 
+    /**
+     * ED-121/161/170 v0.7.8 replaces "no offer at all" with "no attempted C as an offer".
+     * Compare the complete set with the exact pre-send D (identity, revision and fields), and
+     * the real visible offer with that set: neither publication nor uncertainty may invent D.
+     * All attempt-status, body, acknowledgement and POST-count assertions remain mandatory.
+     */
+    protected suspend fun assertOnlyIndependentOffers(adapter: EditorSubmissionAdapter) {
+        val (key, entry) = submissionScenario.store.entries.entries.single()
+        val expected = independentOffers[key].orEmpty()
+        assertEquals(expected, submissionScenario.store.loadOffers("tester", key))
+        assertTrue(expected.none { it.draft.body == entry.draft.body })
+        val probe = adapter.snapshot()
+        assertEquals(expected.firstOrNull()?.draft?.body, probe.offeredBody)
+        assertEquals(expected.isNotEmpty(), probe.restoreOffered)
+    }
+
     protected fun withReadyAdapter(
         preferences: Flow<Boolean> = flowOf(false),
         delayedSharedRestore: Boolean = false,
@@ -471,6 +488,13 @@ abstract class EditorSubmissionRecoveryContract {
         val adapter = createAdapter(this, preferences, delayedSharedRestore)
         try {
             runCurrent()
+            // Only an actually offered, ordinary reply draft is D. The sheet's auto-resumed
+            // body is C; the other surfaces keep their existing non-ED-121 restoration contract.
+            independentOffers = scenario.store.entries.mapValues { (key, entry) ->
+                if (adapter.snapshot().restoreOffered && entry.attempt == null &&
+                    (key.startsWith("reply:") || key.startsWith("mpreply:"))
+                ) listOf(EditorDraftStore.DraftOffer.from(entry)) else emptyList()
+            }
             adapter.editBody("contract body")
             runCurrent()
             assertTrue("formulaire valide avant l'exercice du contrat", adapter.snapshot().canSubmit)

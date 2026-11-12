@@ -700,8 +700,11 @@ class PostEditorRestorationTest {
     @Test
     fun oldBundleCannotResurrectPublishedContentEvenBeforeErasure() = runTest(dispatcher) {
         val frozen = checkpoint("sent body")
-        val begun = store.beginAttempt("tester", key, Draft("sent body"), checkNotNull(store.entries[key]).version)
+        // ED-81/121: this is the checkpointed live C, not an independently offered D.
+        val begun = store.beginAttempt("tester", key, Draft("sent body", protectCurrent = false),
+            checkNotNull(store.entries[key]).version)
         store.finishAttempt((begun as BeginAttemptResult.Started).token, AttemptOutcome.PUBLISHED)
+        assertTrue(store.loadOffers("tester", key).isEmpty())
         val restored = open(frozen)
         runCurrent()
         assertResumed(restored, "")
@@ -712,10 +715,12 @@ class PostEditorRestorationTest {
     fun unresolvedAttemptWinsOverOldCheckpointAndKeepsItsQuoteDormant() = runTest(dispatcher) {
         val frozen = checkpoint("old body")
         val begun = store.beginAttempt(
-            "tester", key, Draft("possibly sent body", pendingInlineQuoteRequest = pending()),
+            // Same interrupted C: a raw test write must not reclassify its old checkpoint as D.
+            "tester", key, Draft("possibly sent body", pendingInlineQuoteRequest = pending(), protectCurrent = false),
             checkNotNull(store.entries[key]).version,
         )
         assertTrue(begun is BeginAttemptResult.Started)
+        assertTrue(store.loadOffers("tester", key).isEmpty())
         val restored = open(frozen)
         runCurrent()
         assertResumed(restored, "possibly sent body")

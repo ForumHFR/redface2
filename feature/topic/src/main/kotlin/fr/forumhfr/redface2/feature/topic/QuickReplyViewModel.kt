@@ -359,6 +359,9 @@ class QuickReplyViewModel @AssistedInject constructor(
             val body = entry?.draft?.body.orEmpty()
             val offer = body.takeIf { it.isNotBlank() && pending != null && entry?.attempt == null }
                 ?: opening.drafts.offers.firstOrNull { it.draft.body != body }?.draft?.body
+            // The sheet auto-applies ordinary C. It must not preserve that same session as D
+            // on its next autosave/send; only a body awaiting a quote decision is an offer.
+            if (entry != null && offer != body) opening.drafts.resumeContent()
             seedDraft(if (offer == body) "" else body)
             retainedText?.takeIf { it.text.isNotBlank() }?.let { value -> _state.update { it.copy(text = value) } }
             _state.update { current ->

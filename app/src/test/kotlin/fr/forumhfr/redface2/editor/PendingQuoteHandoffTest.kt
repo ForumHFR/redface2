@@ -265,7 +265,7 @@ class PendingQuoteHandoffTest {
     }
 
     @Test
-    fun `matching checkpoint resumes the delivered body and missing checkpoint offers it without replay`() = runTest {
+    fun `matching checkpoint resumes quote-only C and a fresh opening durably discards it without replay`() = runTest {
         val scenario = Scenario()
         scenario.enqueue()
         val saved = SavedStateHandle()
@@ -285,13 +285,14 @@ class PendingQuoteHandoffTest {
         editor.viewModelScope.cancel()
         editor = scenario.editor(resumeSharedDraft = false)
         settleBody()
-        // Without any checkpoint, ED-81 keeps the ordinary explicit restore offer.
+        // ED-81/121 v0.7.8: a fresh opening discards an intact quote-only C, never offers it as D.
         assertEquals("", editor.bodyFieldState.text.toString())
-        assertEquals(delivered, editor.state.value.restorableDraft)
+        assertNull(editor.state.value.restorableDraft)
+        assertEquals("", scenario.body)
         assertTrue(editor.state.value.pendingQuotes.isEmpty())
         editor.submit(PostEditorIntent.DraftRestoreRequested)
         settleBody()
-        assertEquals(delivered, editor.bodyFieldState.text.toString())
+        assertEquals("", editor.bodyFieldState.text.toString())
         assertEquals(fetches, scenario.fetchedQuotes.size)
         scenario.noPost()
         editor.viewModelScope.cancel()

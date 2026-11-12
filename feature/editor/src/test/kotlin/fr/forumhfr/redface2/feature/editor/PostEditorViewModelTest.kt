@@ -370,15 +370,20 @@ class PostEditorViewModelTest {
         val first = deliver(truncate = true)
         assertEquals("$portionA\n", first.bodyFieldState.text.toString())
         assertEquals(0, first.chromeEvents.state.events.count { it.content == notice })
+        // ED-121 v0.7.8: a fresh Cite replaces a quote-only C. Keep user text here so this
+        // scenario exercises ED-52 replay/recitation against an existing composition instead.
+        val existing = "$portionA\nRéponse"
+        first.editBody(TextFieldValue(existing))
+        settleBody()
         first.viewModelScope.cancel()
 
         val replay = deliver(truncate = true)
-        assertEquals("$portionA\n", replay.bodyFieldState.text.toString())
+        assertEquals(existing, replay.bodyFieldState.text.toString())
         assertEquals(1, replay.chromeEvents.state.events.count { it.content == notice })
         replay.viewModelScope.cancel()
 
         val second = deliver(truncate = false)
-        val expected = "$fullQuote\n\n$portionA\n"
+        val expected = "$fullQuote\n\n$existing"
         assertEquals(expected, second.bodyFieldState.text.toString())
         assertEquals(0, second.chromeEvents.state.events.count { it.content == notice })
         assertEquals(listOf(101, null, 101, null, 101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
@@ -3254,6 +3259,7 @@ class PostEditorViewModelTest {
                         else -> null
                     },
                     restoreOffered = it.restorableDraft != null,
+                    offeredBody = it.restorableDraft,
                     blocksClose = it.submission.blocksBodyMutation,
                 )
             }

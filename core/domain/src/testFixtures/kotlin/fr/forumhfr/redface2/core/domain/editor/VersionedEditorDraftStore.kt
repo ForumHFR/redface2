@@ -118,7 +118,9 @@ open class VersionedEditorDraftStore : EditorDraftStore {
         entries[key] = DraftEntry(draft.copy(offerToPreserve = null, offerToResolve = null, protectCurrent = true,
             pendingInlineQuoteRequest = previous.draft.pendingInlineQuoteRequest), expectedVersion + 1)
         offers(owner, key).removeAll { it.id == offer.id }
+        saveCount++
         writes++
+        lastSavedOwner = owner
         saveReturnGate?.await()
         return StoreWriteResult.Written(expectedVersion + 1)
     }
