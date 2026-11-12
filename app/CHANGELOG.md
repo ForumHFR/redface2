@@ -16,6 +16,10 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.69.15` — `internal` (dev) — 2026-11-12
+
+Bouton d'envoi de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417), PR [#1612](https://github.com/ForumHFR/redface2/pull/1612)) : la pilule « Envoyer » devient un avion en papier dans un rond de 48 dp (40 dp en paysage avec le clavier), dans les éditeurs plein écran (réponse, nouveau sujet, MP, modification). La barre gagne de la place pour les formats ; armé par « Confirmation avant publication », le bouton passe à une coche ; un appui long affiche « Envoyer » ou « Confirmer l'envoi ». La réponse rapide garde son bouton texte.
+
 ## `0.69.14` — `internal` (dev) — 2026-11-12
 
 Icônes de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417), PR [#1610](https://github.com/ForumHFR/redface2/pull/1610)) : le trait passe de 2,5 à 2 dp sur les icônes propres à l'éditeur, B compris, plus proche de la graisse des Material Symbols ; la barre paraît moins grasse et le B se distingue de I, U et S. La flèche retour, les chevrons et le crayon, partagés avec le reste de l'app, restent à 2,5 en attendant une décision sur la portée.
