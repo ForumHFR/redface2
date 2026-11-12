@@ -195,7 +195,8 @@ interface EditorDraftDao {
     suspend fun preserveOffer(previous: EditorDraftEntity?, offer: EditorDraftOfferEntity?) {
         if (previous != null && offer != null && previous.contentVersion == offer.sourceVersion &&
             previous.ownerId == offer.ownerId && previous.draftKey == "${offer.ownerId}|${offer.contextKey}" &&
-            previous.body == offer.body && previous.subject == offer.subject && previous.recipients == offer.recipients &&
+            previous.body == offer.body && previous.subject == offer.subject &&
+            previous.recipients == offer.recipients &&
             previous.attemptState == null
         ) insertOffer(offer)
     }
@@ -213,12 +214,14 @@ interface EditorDraftDao {
         val stored = offers(offer.ownerId, offer.contextKey).any { it == offer }
         val source = previous.contentVersion == offer.sourceVersion && previous.body == offer.body &&
             previous.subject == offer.subject && previous.recipients == offer.recipients
-        if (previous.contentVersion != expectedVersion || previous.attemptState != null || (!stored && !source)) {
-            return false
+        val offerUnavailable = !stored && !source
+        return if (previous.contentVersion != expectedVersion || previous.attemptState != null || offerUnavailable) {
+            false
+        } else {
+            if (protection?.offerId != offer.offerId) preserveOffer(previous, protection)
+            upsert(draft)
+            deleteOffer(offer.ownerId, offer.contextKey, offer.offerId)
+            true
         }
-        if (protection?.offerId != offer.offerId) preserveOffer(previous, protection)
-        upsert(draft)
-        deleteOffer(offer.ownerId, offer.contextKey, offer.offerId)
-        return true
     }
 }

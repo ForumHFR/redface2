@@ -599,9 +599,8 @@ class QuickReplyViewModel @AssistedInject constructor(
     }
 
     fun onDraftDiscardRequested() {
-        if (_state.value.restorableDraft == null || _state.value.isDiscardingDraft || resolvingDraftOffer ||
-            submission.blocksMutation
-        ) return
+        val hasDiscardableDraft = _state.value.restorableDraft != null && !_state.value.isDiscardingDraft
+        if (!hasDiscardableDraft || resolvingDraftOffer || submission.blocksMutation) return
         submission.disarm()
         autosaveJob?.cancel()
         resolveDraftOffer(checkNotNull(_state.value.restorableDraft))

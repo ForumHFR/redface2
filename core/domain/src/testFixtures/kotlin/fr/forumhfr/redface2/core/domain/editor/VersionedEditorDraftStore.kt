@@ -60,7 +60,8 @@ open class VersionedEditorDraftStore : EditorDraftStore {
                     deletedKeys += key
                 } else {
                     owned[key] = entry.copy(draft = entry.draft.copy(
-                        body = "", subject = null, recipients = null, pendingInlineQuoteRequest = null, bodyProvenance = null,
+                        body = "", subject = null, recipients = null,
+                        pendingInlineQuoteRequest = null, bodyProvenance = null,
                     ))
                 }
                 writes++
@@ -107,30 +108,37 @@ open class VersionedEditorDraftStore : EditorDraftStore {
         owner: String?, key: String, offer: DraftOffer, expectedVersion: Long, draft: Draft,
     ): StoreWriteResult {
         if (owner == null || owner != activeOwner) return StoreWriteResult.OwnerChanged
-        saveFailure?.let { return StoreWriteResult.Failed(it) }
-        val previous = entries[key] ?: return StoreWriteResult.Conflict
-        val source = previous.version == offer.sourceVersion &&
-            previous.draft.restoreOfferFingerprint() == offer.draft.restoreOfferFingerprint()
-        if (previous.version != expectedVersion || previous.attempt != null ||
-            (!source && offer !in offers(owner, key))
-        ) return StoreWriteResult.Conflict
-        if (draft.offerToPreserve?.id != offer.id) protect(owner, key, previous, draft.offerToPreserve)
-        entries[key] = DraftEntry(draft.copy(offerToPreserve = null, offerToResolve = null, protectCurrent = true,
-            pendingInlineQuoteRequest = previous.draft.pendingInlineQuoteRequest), expectedVersion + 1)
-        offers(owner, key).removeAll { it.id == offer.id }
-        saveCount++
-        writes++
-        lastSavedOwner = owner
-        saveReturnGate?.await()
-        return StoreWriteResult.Written(expectedVersion + 1)
+        return saveFailure?.let { StoreWriteResult.Failed(it) } ?: entries[key]?.let { previous ->
+            val source = previous.version == offer.sourceVersion &&
+                previous.draft.restoreOfferFingerprint() == offer.draft.restoreOfferFingerprint()
+            val revisionBlocked = previous.version != expectedVersion || previous.attempt != null
+            if (revisionBlocked || (!source && offer !in offers(owner, key))) {
+                StoreWriteResult.Conflict
+            } else {
+                if (draft.offerToPreserve?.id != offer.id) protect(owner, key, previous, draft.offerToPreserve)
+                entries[key] = DraftEntry(draft.copy(
+                    offerToPreserve = null, offerToResolve = null, protectCurrent = true,
+                    pendingInlineQuoteRequest = previous.draft.pendingInlineQuoteRequest,
+                ), expectedVersion + 1)
+                offers(owner, key).removeAll { it.id == offer.id }
+                saveCount++
+                writes++
+                lastSavedOwner = owner
+                saveReturnGate?.await()
+                StoreWriteResult.Written(expectedVersion + 1)
+            }
+        } ?: StoreWriteResult.Conflict
     }
 
     @Suppress("ComplexCondition") // Mirrors the exact-source Room transaction guard.
     private fun protect(owner: String?, key: String, previous: DraftEntry?, offer: DraftOffer?) {
         if (previous != null && offer != null && previous.version == offer.sourceVersion &&
-            previous.attempt == null && previous.draft.restoreOfferFingerprint() == offer.draft.restoreOfferFingerprint() &&
+            previous.attempt == null &&
+            previous.draft.restoreOfferFingerprint() == offer.draft.restoreOfferFingerprint() &&
             offers(owner, key).none { it.id == offer.id }
-        ) offers(owner, key).add(offer.copy(draft = offer.draft.copy(offerToPreserve = null, offerToResolve = null, protectCurrent = true)))
+        ) offers(owner, key).add(offer.copy(draft = offer.draft.copy(
+            offerToPreserve = null, offerToResolve = null, protectCurrent = true,
+        )))
     }
 
     @Suppress("ComplexCondition") // Mirrors raw reply writer eligibility.
@@ -202,7 +210,10 @@ open class VersionedEditorDraftStore : EditorDraftStore {
             } else {
                 protect(owner, key, entry, draft?.let { protection(key, entry, it) })
                 entries[key] = entry.copy(
-                    draft = (draft ?: entry.draft).copy(pendingInlineQuoteRequest = null, offerToPreserve = null, offerToResolve = null, protectCurrent = true),
+                    draft = (draft ?: entry.draft).copy(
+                        pendingInlineQuoteRequest = null, offerToPreserve = null,
+                        offerToResolve = null, protectCurrent = true,
+                    ),
                     version = expectedVersion + 1,
                 )
                 writes++
@@ -229,8 +240,11 @@ open class VersionedEditorDraftStore : EditorDraftStore {
             entry?.version != expectedVersion || !entry.hasUnresolvedAttempt(token) -> StoreWriteResult.Conflict
             else -> {
                 protect(token.owner, token.key, entry, protection(token.key, entry, draft))
-                entries[token.key] = DraftEntry(draft.copy(offerToPreserve = null, offerToResolve = null, protectCurrent = true), expectedVersion + 1,
-                    Attempt(token, AttemptStatus.UNCERTAIN))
+                entries[token.key] = DraftEntry(
+                    draft.copy(offerToPreserve = null, offerToResolve = null, protectCurrent = true),
+                    expectedVersion + 1,
+                    Attempt(token, AttemptStatus.UNCERTAIN),
+                )
                 saveCount++
                 writes++
                 lastSavedOwner = token.owner
@@ -253,7 +267,9 @@ open class VersionedEditorDraftStore : EditorDraftStore {
             (entry?.version ?: 0) != expected || !writable -> StoreWriteResult.Conflict
             else -> {
                 protect(owner, key, entry, protection(key, entry, draft))
-                entries[key] = DraftEntry(draft.copy(offerToPreserve = null, offerToResolve = null, protectCurrent = true), expected + 1)
+                entries[key] = DraftEntry(
+                    draft.copy(offerToPreserve = null, offerToResolve = null, protectCurrent = true), expected + 1,
+                )
                 saveCount++
                 writes++
                 lastSavedOwner = owner
@@ -295,8 +311,10 @@ open class VersionedEditorDraftStore : EditorDraftStore {
         if (rejection != null) return BeginAttemptResult.Rejected(rejection)
         val token = AttemptToken(checkNotNull(owner), key, attemptId, expectedVersion + 1)
         protect(owner, key, entries[key], protection(key, entries[key], snapshot))
-        entries[key] = DraftEntry(snapshot.copy(offerToPreserve = null, offerToResolve = null, protectCurrent = true), token.version,
-            Attempt(token, AttemptStatus.IN_PROGRESS))
+        entries[key] = DraftEntry(
+            snapshot.copy(offerToPreserve = null, offerToResolve = null, protectCurrent = true), token.version,
+            Attempt(token, AttemptStatus.IN_PROGRESS),
+        )
         writes++
         beginReturnGate?.await() // Owner was checked and the transaction committed before this suspension.
         return BeginAttemptResult.Started(token)

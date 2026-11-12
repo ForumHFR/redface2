@@ -491,9 +491,10 @@ abstract class EditorSubmissionRecoveryContract {
             // Only an actually offered, ordinary reply draft is D. The sheet's auto-resumed
             // body is C; the other surfaces keep their existing non-ED-121 restoration contract.
             independentOffers = scenario.store.entries.mapValues { (key, entry) ->
-                if (adapter.snapshot().restoreOffered && entry.attempt == null &&
-                    (key.startsWith("reply:") || key.startsWith("mpreply:"))
-                ) listOf(EditorDraftStore.DraftOffer.from(entry)) else emptyList()
+                val reply = key.startsWith("reply:") || key.startsWith("mpreply:")
+                if (adapter.snapshot().restoreOffered && entry.attempt == null && reply) {
+                    listOf(EditorDraftStore.DraftOffer.from(entry))
+                } else emptyList()
             }
             adapter.editBody("contract body")
             runCurrent()

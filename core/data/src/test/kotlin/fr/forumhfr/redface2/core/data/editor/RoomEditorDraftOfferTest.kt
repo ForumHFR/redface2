@@ -169,7 +169,8 @@ class RoomEditorDraftOfferTest {
         assertNull(store.loadEntry("alice", mp.key))
     }
 
-    @Test fun `death before delivery keeps Q and D while a committed delivery is authoritative before callback`() = runTest {
+    @Test
+    fun `death before delivery keeps Q and D while a committed delivery is authoritative before callback`() = runTest {
         val store = store()
         store.saveIfVersion("alice", key, Draft("D"), 0)
         val opening = EditorDraftSession(store, key)
@@ -234,7 +235,8 @@ class RoomEditorDraftOfferTest {
         assertNull(store.loadEntry("alice", key)?.draft?.pendingInlineQuoteRequest)
     }
 
-    @Test fun `failed offer consumption rolls back C and a committed consumption needs no callback to survive`() = runTest {
+    @Test
+    fun `failed offer consumption rolls back C and a committed consumption needs no callback to survive`() = runTest {
         val store = store()
         store.saveIfVersion("alice", key, Draft("D"), 0)
         val editor = EditorDraftSession(store, key)

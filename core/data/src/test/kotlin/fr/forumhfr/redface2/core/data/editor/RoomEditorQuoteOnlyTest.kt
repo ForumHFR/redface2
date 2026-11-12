@@ -120,7 +120,8 @@ class RoomEditorQuoteOnlyTest {
         }
     }
 
-    @Test fun `discard and new Cite roll back entirely on disk failure and reject stale owners and versions`() = runTest {
+    @Test
+    fun `discard and new Cite roll back entirely on disk failure and reject stale owners and versions`() = runTest {
         val request = requests.first()
         val store = store()
         seedQuoteOnly(request)
@@ -129,7 +130,8 @@ class RoomEditorQuoteOnlyTest {
         database.openHelper.writableDatabase.execSQL("""CREATE TRIGGER reject_quote_discard BEFORE UPDATE ON editor_drafts
             BEGIN SELECT RAISE(ABORT, 'disk failure'); END""")
         assertTrue(store.discardQuoteOnly("alice", request.key, before.version) is StoreWriteResult.Failed)
-        assertTrue(store.enqueueInlineQuoteRequest("alice", request.key, request, before.version) is StoreWriteResult.Failed)
+        assertTrue(store.enqueueInlineQuoteRequest("alice", request.key, request, before.version)
+            is StoreWriteResult.Failed)
         assertEquals(before, store.loadEntry("alice", request.key))
         assertEquals(offers, store.loadOffers("alice", request.key))
         database.openHelper.writableDatabase.execSQL("DROP TRIGGER reject_quote_discard")
@@ -169,7 +171,9 @@ class RoomEditorQuoteOnlyTest {
         val session = EditorDraftSession(store, request.key)
         session.load()
         session.enqueueInlineQuoteRequest(request)
-        session.consumeInlineQuoteRequest(request, Draft(quoteA + "\n  ", isPrivate = request.isPrivate), deliveredBody = quoteA)
+        session.consumeInlineQuoteRequest(
+            request, Draft(quoteA + "\n  ", isPrivate = request.isPrivate), deliveredBody = quoteA,
+        )
     }
 
     private fun store(dao: EditorDraftDao = database.editorDraftDao()) = RoomEditorDraftStore(

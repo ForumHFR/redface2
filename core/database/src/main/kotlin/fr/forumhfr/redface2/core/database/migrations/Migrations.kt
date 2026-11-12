@@ -554,6 +554,9 @@ val MIGRATION_21_22: Migration = object : Migration(21, 22) {
             )
             """.trimIndent(),
         )
-        db.execSQL("CREATE INDEX IF NOT EXISTS `index_editor_draft_offers_updatedAt` ON `editor_draft_offers` (`updatedAt`)")
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_editor_draft_offers_updatedAt` " +
+                "ON `editor_draft_offers` (`updatedAt`)",
+        )
     }
 }

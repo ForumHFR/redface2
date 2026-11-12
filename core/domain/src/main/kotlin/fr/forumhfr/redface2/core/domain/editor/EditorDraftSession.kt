@@ -183,9 +183,8 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
                     (it.bodyProvenance ?: EditorBodyProvenance()).delivered(request.scope, deliveredBody))
             }
             val unresolvedOffer = snapshot?.offerToResolve?.id?.let { it !in resolvedOffers } == true
-            val result = if (pendingInlineQuoteRequest != request || (draft != null && unresolved != null) ||
-                unresolvedOffer
-            ) {
+            val deliveryBlocked = draft != null && unresolved != null
+            val result = if (pendingInlineQuoteRequest != request || deliveryBlocked || unresolvedOffer) {
                 StoreWriteResult.Conflict
             } else {
                 checkpointWrite(snapshot) {
@@ -223,7 +222,9 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         if (!canWrite()) return@withLock BeginAttemptResult.Rejected(StoreWriteResult.OwnerChanged)
         val snapshot = ownedDraft(draft)
         val needsResolution = snapshot.offerToResolve?.id?.let { it !in resolvedOffers } == true
-        val prepared = if (published || needsResolution) writeComposition(snapshot) else StoreWriteResult.Written(version)
+        val prepared = if (published || needsResolution) {
+            writeComposition(snapshot)
+        } else StoreWriteResult.Written(version)
         adopt(prepared)
         if (prepared !is StoreWriteResult.Written) return@withLock BeginAttemptResult.Rejected(prepared)
         store.beginAttempt(owner, checkNotNull(key), protected(snapshot), version, attemptId).also { result ->

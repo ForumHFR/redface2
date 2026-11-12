@@ -156,7 +156,8 @@ class RoomEditorDraftStore @Inject constructor(
             updatedAt = composition.updatedAt,
             isPrivate = composition.isPrivate || request.isPrivate,
         )
-        editorDraftDao.mutateInlineQuoteRequest(next, previous, offerCandidate(previous, key)).result(next.contentVersion)
+        editorDraftDao.mutateInlineQuoteRequest(next, previous, offerCandidate(previous, key))
+            .result(next.contentVersion)
     }
 
     override suspend fun discardQuoteOnly(
@@ -187,7 +188,8 @@ class RoomEditorDraftStore @Inject constructor(
             contentVersion = expectedVersion + 1,
             updatedAt = if (draft == null) previous.updatedAt else clock.millis(),
         )
-        editorDraftDao.mutateInlineQuoteRequest(next, previous, draft?.protection(owner, key)).result(next.contentVersion)
+        editorDraftDao.mutateInlineQuoteRequest(next, previous, draft?.protection(owner, key))
+            .result(next.contentVersion)
     }
 
     override suspend fun loadOffers(owner: String?, key: String): List<DraftOffer> = try {
@@ -325,7 +327,9 @@ class RoomEditorDraftStore @Inject constructor(
             recipients = recipients,
             updatedAt = clock.millis(),
             isPrivate = isPrivate || key.startsWith("mpreply:") || key == "mpnew",
-            pendingInlineQuoteRequest = pendingInlineQuoteRequest?.let { PendingInlineQuoteRequestCodec.encode(it, key) },
+            pendingInlineQuoteRequest = pendingInlineQuoteRequest?.let {
+                PendingInlineQuoteRequestCodec.encode(it, key)
+            },
             bodyProvenance = provenance?.let(EditorBodyProvenanceCodec::encode),
         )
     }
@@ -361,11 +365,14 @@ class RoomEditorDraftStore @Inject constructor(
             !(key.startsWith("reply:") || key.startsWith("mpreply:"))
         ) return null
         val draft = previous.toDraft(key)
-        if (draft.bodyProvenance?.isQuoteOnly(draft.body) == true) return null
-        return editorDraftDao.offers(previous.ownerId, key).firstOrNull {
-            it.body == previous.body && it.subject == previous.subject && it.recipients == previous.recipients &&
-                it.updatedAt == previous.updatedAt
-        } ?: DraftOffer.from(DraftEntry(draft, previous.contentVersion)).toEntity(previous.ownerId, key)
+        return if (draft.bodyProvenance?.isQuoteOnly(draft.body) == true) {
+            null
+        } else {
+            editorDraftDao.offers(previous.ownerId, key).firstOrNull {
+                it.body == previous.body && it.subject == previous.subject && it.recipients == previous.recipients &&
+                    it.updatedAt == previous.updatedAt
+            } ?: DraftOffer.from(DraftEntry(draft, previous.contentVersion)).toEntity(previous.ownerId, key)
+        }
     }
     private fun rowKey(owner: String, key: String): String = "$owner|$key"
     private suspend fun activeOwnerId(): String? =

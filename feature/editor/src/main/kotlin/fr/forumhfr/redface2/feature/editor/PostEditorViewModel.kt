@@ -1107,7 +1107,9 @@ class PostEditorViewModel @AssistedInject constructor(
                 submission.flush(null)
                 val draft = EditorDraftStore.Draft(body = bodyFieldState.text.toString())
                 val offer = submission.drafts.offered(body)
-                val result = if (offer != null) submission.drafts.resolveOffer(offer, draft) else submission.persist(draft)
+                val result = if (offer != null) {
+                    submission.drafts.resolveOffer(offer, draft)
+                } else submission.persist(draft)
                 submission.resolveDraftWrite(result)
                 if (result !is EditorDraftStore.StoreWriteResult.Written || submission.drafts.invalidated) {
                     if (!submission.drafts.invalidated) updateChromeState { it.copy(restorableDraft = body) }

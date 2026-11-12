@@ -20,7 +20,8 @@ class EditorDraftOfferSessionTest {
     private val key = request.key
     private val quote = "[quotemsg=101]one[/quotemsg]"
 
-    @Test fun `fresh opening discards quote-only C before autosave and preserves D across another death`() = runBlocking {
+    @Test
+    fun `fresh opening discards quote-only C before autosave and preserves D across another death`() = runBlocking {
         val store = VersionedEditorDraftStore()
         store.preload(key, Draft("D", updatedAt = 1234))
         val first = EditorDraftSession(store, key)
@@ -94,7 +95,8 @@ class EditorDraftOfferSessionTest {
         assertEquals(original.draft.bodyProvenance, session.bodyProvenance)
     }
 
-    @Test fun `autosave during Undo then Redo of Restore keeps the insertion boundary before first delivery`() = runBlocking {
+    @Test
+    fun `autosave during Undo then Redo of Restore keeps the insertion boundary before first delivery`() = runBlocking {
         val store = VersionedEditorDraftStore()
         store.preload(key, Draft("D"))
         val session = EditorDraftSession(store, key)
@@ -110,7 +112,8 @@ class EditorDraftOfferSessionTest {
         assertEquals(merged.provenance, session.bodyProvenance)
         val inserted = insertEditorQuotes(merged.body, quote, checkNotNull(session.bodyProvenance))
         assertEquals("D\n\n$quote\n\ntyped", inserted.body)
-        assertTrue(session.consumeInlineQuoteRequest(request, Draft(inserted.body, bodyProvenance = inserted.provenance),
+        assertTrue(session.consumeInlineQuoteRequest(request,
+            Draft(inserted.body, bodyProvenance = inserted.provenance),
             deliveredBody = quote) is StoreWriteResult.Written)
         assertTrue(store.loadOffers("tester", key).isEmpty())
         val afterDeath = EditorDraftSession(store, key)

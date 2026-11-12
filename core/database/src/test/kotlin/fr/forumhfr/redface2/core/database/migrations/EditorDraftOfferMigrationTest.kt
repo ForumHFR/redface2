@@ -27,7 +27,8 @@ class EditorDraftOfferMigrationTest {
 
     @Test fun `21 to 22 preserves drafts requests attempts and dates without manufacturing offers`() = runTest {
         val name = "draft-offers-21-to-22.db"
-        val request = """{"version":1,"scope":{"type":"topic","cat":23,"post":42},"quotes":[{"numreponse":101,"page":1,"ref":null,"truncate":false}]}"""
+        val request = """{"version":1,"scope":{"type":"topic","cat":23,"post":42},"quotes":[""" +
+            """{"numreponse":101,"page":1,"ref":null,"truncate":false}]}"""
         helper.createDatabase(name, 21).use { old ->
             listOf(null, "IN_PROGRESS", "UNCERTAIN", "PUBLISHED").forEachIndexed { index, state ->
                 old.execSQL("""INSERT INTO editor_drafts (draftKey, ownerId, body, subject, recipients,

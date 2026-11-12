@@ -108,7 +108,9 @@ internal class PrivateMessageReplyDraftSession(
         if (bodyKnown) restoration.decide(EditorSessionField.Body)
         updateState {
             it.copy(draftHydratedFromForm = bodyKnown,
-                restorableDraft = submission.drafts.offers.firstOrNull { offer -> offer.draft.body != draft.body }?.draft?.body)
+                restorableDraft = submission.drafts.offers.firstOrNull { offer ->
+                    offer.draft.body != draft.body
+                }?.draft?.body)
         }
     }
 
@@ -300,7 +302,9 @@ internal class PrivateMessageReplyDraftSession(
     }
 
     private fun captureCheckpoint(draft: EditorDraftStore.Draft, version: Long) {
-        if (version >= lastCheckpointVersion && draft.restoreOfferFingerprint() == draftSnapshot()?.restoreOfferFingerprint()) captureSessionCheckpoint(draft, version)
+        if (version >= lastCheckpointVersion &&
+            draft.restoreOfferFingerprint() == draftSnapshot()?.restoreOfferFingerprint()
+        ) captureSessionCheckpoint(draft, version)
     }
 
     private fun captureSessionCheckpoint(draft: EditorDraftStore.Draft, version: Long) {

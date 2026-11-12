@@ -238,7 +238,9 @@ class PrivateMessageReplyViewModelTest {
         val previous = EditorDraftSession(draftStore, key)
         previous.load()
         previous.enqueueInlineQuoteRequest(pending)
-        previous.consumeInlineQuoteRequest(pending, EditorDraftStore.Draft(quote, isPrivate = true), deliveredBody = quote)
+        previous.consumeInlineQuoteRequest(
+            pending, EditorDraftStore.Draft(quote, isPrivate = true), deliveredBody = quote,
+        )
         val offers = draftStore.loadOffers("tester", key)
         val saved = SavedStateHandle()
         val fresh = viewModel(repository, savedStateHandle = saved)

@@ -48,7 +48,8 @@ data class EditorBodyMerge(val body: String, val provenance: EditorBodyProvenanc
  * it in one undoable edit, preserving selection/history. Server edit seeds keep their old rule.
  * Activation of this ordering in the full editors belongs to #1450 PR 2.
  */
-@Suppress("CyclomaticComplexMethod") // ED-89 ordered seed cases and retained/modified/deleted quote handling.
+// ED-89 ordered seed cases and retained/modified/deleted quote handling.
+@Suppress("CyclomaticComplexMethod", "LongParameterList") // Explicit merge inputs retain dependent scope defaults.
 fun mergeEditorBody(
     offered: String,
     current: String,
@@ -56,53 +57,56 @@ fun mergeEditorBody(
     provenance: EditorBodyProvenance = EditorBodyProvenance(),
     scope: QuoteScope? = provenance.deliveries.lastOrNull()?.scope,
     currentScope: QuoteScope? = scope,
-): EditorBodyMerge {
-    if (offered.isBlank()) return EditorBodyMerge(current, provenance)
-    if (current == offered) return EditorBodyMerge(current,
-        provenance.copy(draftEnd = offered.length, quotesEnd = offered.length))
-    if (seed.isNotEmpty()) {
+): EditorBodyMerge = when {
+    offered.isBlank() -> EditorBodyMerge(current, provenance)
+    current == offered -> EditorBodyMerge(
+        current, provenance.copy(draftEnd = offered.length, quotesEnd = offered.length),
+    )
+    seed.isNotEmpty() -> {
         val suffix = current.takeIf { it.startsWith(seed) }?.substring(seed.length)
         val body = when {
             current.isBlank() || current == seed || suffix?.isBlank() == true -> offered
             suffix != null -> offered + "\n\n" + suffix.trimStart()
             else -> current.trimEnd() + "\n\n" + offered
         }
-        return EditorBodyMerge(body, provenance)
+        EditorBodyMerge(body, provenance)
     }
-    val delivered = provenance.deliveries.flatMap { delivery ->
-        editorQuoteBlocks(delivery.body, outerOnly = true).map { delivery.scope to it.identity }
-    }
-    val present = editorQuoteBlocks(offered).map { it.identity }.toSet()
-    val retained = mutableListOf<Pair<Int, String>>()
-    var cursor = 0
-    var followsQuote = false
-    val typing = buildString {
-        editorQuoteBlocks(current, outerOnly = true).forEach { block ->
-            val exact = delivered.indexOfFirst { (deliveredScope, identity) ->
-                deliveredScope == currentScope && identity == block.identity
-            }
-            val sourceIndex = if (exact >= 0) exact else delivered.indexOfFirst { (deliveredScope, identity) ->
-                deliveredScope == currentScope && identity.first == block.identity.first
-            }
-            val source = delivered.getOrNull(sourceIndex)
-            if (source != null) {
-                val between = current.substring(cursor, block.range.first)
-                if (between.isNotBlank()) append(if (followsQuote) removeEditorSeparator(between) else between)
-                val intact = source.second == block.identity
-                if (!intact || scope != currentScope || block.identity !in present) {
-                    retained += sourceIndex to current.substring(block.range)
-                }
-                cursor = block.range.last + 1
-                followsQuote = true
-            }
+    else -> {
+        val delivered = provenance.deliveries.flatMap { delivery ->
+            editorQuoteBlocks(delivery.body, outerOnly = true).map { delivery.scope to it.identity }
         }
-        val tail = current.substring(cursor)
-        append(if (followsQuote) removeEditorSeparator(tail) else tail)
-    }.takeUnless { it.isBlank() }.orEmpty()
-    val quotes = retained.sortedBy { it.first }.joinToString("\n\n") { it.second }
-    val prefix = joinEditorParts(offered, quotes)
-    val body = joinEditorParts(prefix, typing)
-    return EditorBodyMerge(body, provenance.copy(draftEnd = offered.length, quotesEnd = prefix.length))
+        val present = editorQuoteBlocks(offered).map { it.identity }.toSet()
+        val retained = mutableListOf<Pair<Int, String>>()
+        var cursor = 0
+        var followsQuote = false
+        val typing = buildString {
+            editorQuoteBlocks(current, outerOnly = true).forEach { block ->
+                val exact = delivered.indexOfFirst { (deliveredScope, identity) ->
+                    deliveredScope == currentScope && identity == block.identity
+                }
+                val sourceIndex = if (exact >= 0) exact else delivered.indexOfFirst { (deliveredScope, identity) ->
+                    deliveredScope == currentScope && identity.first == block.identity.first
+                }
+                val source = delivered.getOrNull(sourceIndex)
+                if (source != null) {
+                    val between = current.substring(cursor, block.range.first)
+                    if (between.isNotBlank()) append(if (followsQuote) removeEditorSeparator(between) else between)
+                    val intact = source.second == block.identity
+                    if (!intact || scope != currentScope || block.identity !in present) {
+                        retained += sourceIndex to current.substring(block.range)
+                    }
+                    cursor = block.range.last + 1
+                    followsQuote = true
+                }
+            }
+            val tail = current.substring(cursor)
+            append(if (followsQuote) removeEditorSeparator(tail) else tail)
+        }.takeUnless { it.isBlank() }.orEmpty()
+        val quotes = retained.sortedBy { it.first }.joinToString("\n\n") { it.second }
+        val prefix = joinEditorParts(offered, quotes)
+        val body = joinEditorParts(prefix, typing)
+        EditorBodyMerge(body, provenance.copy(draftEnd = offered.length, quotesEnd = prefix.length))
+    }
 }
 
 /** ED-132: insert a successful whole batch after restored D and older deliveries, before typing. */

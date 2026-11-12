@@ -128,7 +128,10 @@ interface EditorDraftStore {
         companion object {
             fun from(entry: DraftEntry): DraftOffer = DraftOffer(
                 "${entry.version}:${entry.draft.updatedAt}:${entry.draft.restoreOfferFingerprint()}", entry.version,
-                entry.draft.copy(pendingInlineQuoteRequest = null, offerToPreserve = null, offerToResolve = null, protectCurrent = true),
+                entry.draft.copy(
+                    pendingInlineQuoteRequest = null, offerToPreserve = null,
+                    offerToResolve = null, protectCurrent = true,
+                ),
             )
         }
     }
