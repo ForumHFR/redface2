@@ -4,7 +4,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
@@ -16,6 +18,7 @@ import fr.forumhfr.redface2.core.model.editor.EditorShortcutSurface
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotEquals
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -45,7 +48,8 @@ class EditorActionBarRoborazziTest {
     }
 
     private fun recordSamples(dark: Boolean, scale: Float, width: Dp, compact: Boolean) {
-        (0..18).forEach { sample ->
+        val samples = if (compact) 0..19 else 0..18
+        samples.forEach { sample ->
             compose.runOnIdle {
                 // Reset remembered tool scroll, focus and event-announcement state for every capture.
                 host = EditorActionBarFixture()
@@ -57,13 +61,43 @@ class EditorActionBarRoborazziTest {
             }
             val target = compose.onNodeWithTag("bar")
             assertEquals(if (compact) 48f else 56f, target.getUnclippedBoundsInRoot().height.value, 0.5f)
+            if (sample == 19) assertCompactSweepStaysInsideDisc()
             target.captureRoboImage("src/test/screenshots/editor_action_bar_" +
                 "${sample}_${dark}_${scale}_${width.value}_$compact.png")
         }
     }
 
+    private fun assertCompactSweepStaysInsideDisc() {
+        val target = compose.onNodeWithTag("editor-bar-submit")
+        val bounds = target.getUnclippedBoundsInRoot()
+        assertEquals(48f, bounds.width.value, 0.5f)
+        assertEquals(48f, bounds.height.value, 0.5f)
+        val image = target.captureToImage().asAndroidBitmap()
+        val pixelsPerDp = image.width / 48f
+        val barColor = image.getPixel(0, 0)
+        // Exclude one pixel of antialiasing at the visible 40 dp circle's edge.
+        val radius = 20f * pixelsPerDp + 1f
+        for (y in 0 until image.height) for (x in 0 until image.width) {
+            val dx = x + 0.5f - image.width / 2f
+            val dy = y + 0.5f - image.height / 2f
+            if (dx * dx + dy * dy > radius * radius) {
+                assertEquals("Countdown must leave the bar visible outside the 40 dp disc at ($x, $y)",
+                    barColor, image.getPixel(x, y))
+            }
+        }
+        // Both samples are inside the disc and outside the icon: an absent or full scrim must fail too.
+        assertNotEquals("The right half must be swept while the left half stays unswept",
+            image.getPixel((10f * pixelsPerDp).toInt(), image.height / 2),
+            image.getPixel((38f * pixelsPerDp).toInt(), image.height / 2))
+    }
+
     private fun showSample(sample: Int) {
-        host.bar.value = EditorBarState(sampleMode(sample), if (sample == 6 || sample == 16) host.frozenArm else null)
+        val arm = when (sample) {
+            6, 16 -> host.frozenArm
+            19 -> host.frozenHalfArm
+            else -> null
+        }
+        host.bar.value = EditorBarState(sampleMode(sample), arm)
         host.enabled.value = sample != 17 && sample != 18
         host.imageUrl.value = sample != 5
         host.shortcut.value = if (sample == 1) {

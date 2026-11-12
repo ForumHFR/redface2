@@ -15,6 +15,7 @@ import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
@@ -36,7 +37,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** ED-133: summary text budget and the real full-screen editor submit button at system 1.3 × L. */
+/** ED-133: summary text budget and both submit controls at system 1.3 × L. */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
@@ -81,6 +82,11 @@ class EditorErrorSummaryLayoutTest {
                                 compactHeight = false,
                                 consumeInformation = { false },
                             )
+                            ArmedSubmitButton(
+                                ArmedSubmitState(armed, enabled = true),
+                                ArmedSubmitLabels("Envoyer", "Confirmer"),
+                                ArmedSubmitActions({}, {}, {}),
+                            )
                         }
                     }
                 }
@@ -99,8 +105,7 @@ class EditorErrorSummaryLayoutTest {
                 "ellipse=${layout.isLineEllipsized(0)}, budget=$EDITOR_SUMMARY_TEXT_WIDTH_DP")
             summaryViolations(label, layout).takeIf { it.isNotEmpty() }?.let { violations[label] = it }
         }
-        // Banner TextButtons (including “Ignorer la citation”) wrap outside this summary slot;
-        // only EditorBarSubmit participates in the ED-133 horizontal width reservation.
+        // Keep the full-screen control's 48 dp reservation and the legacy button's width coverage.
         listOf("Envoyer", "Confirmer").forEach { label ->
             val bounds = compose.onNodeWithContentDescription(label).getUnclippedBoundsInRoot()
             println("ED-133 EditorBarSubmit $label: width=${bounds.width} height=${bounds.height}, target=48dp")
@@ -108,6 +113,9 @@ class EditorErrorSummaryLayoutTest {
                 kotlin.math.abs(bounds.height.value - 48f) > 0.5f) {
                 failures += AssertionError("EditorBarSubmit $label: $bounds != 48 × 48dp")
             }
+            val width = compose.onNodeWithText(label).getUnclippedBoundsInRoot().width.value
+            println("ED-133 ArmedSubmitButton $label: width=${width}dp, budget=150")
+            if (width > 150f) failures += AssertionError("ArmedSubmitButton $label: ${width}dp > 150dp")
         }
         val d44Labels = setOf("Envoi incertain", "Brouillon non écrit")
         val ordinary = violations.filterKeys { it !in d44Labels }

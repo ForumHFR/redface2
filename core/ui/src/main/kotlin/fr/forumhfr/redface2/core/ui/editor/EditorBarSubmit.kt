@@ -15,6 +15,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
@@ -78,20 +79,24 @@ internal fun EditorBarSubmit(
                     .testTag("editor-bar-submit-shape").semantics {
                         contentDescription = if (state.armed) confirm else submit
                         stateDescription = description; liveRegion = LiveRegionMode.Polite
-                    }
-                    .clip(CircleShape)
-                    .drawWithContent {
+                    },
+            ) {
+                // Draw inside the visible disc, after Surface's minimum interactive size.
+                Box(
+                    modifier = Modifier.size(metrics.controlVisibleHeight).clip(CircleShape).drawWithContent {
                         drawContent()
                         if (state.armed) drawRect(scrim, Offset(size.width * (1f - fraction), 0f),
                             Size(size.width * fraction, size.height))
                     },
-            ) {
-                RedfaceVectorIcon(
-                    if (state.armed) R.drawable.ic_editor_done else R.drawable.ic_editor_send,
-                    Modifier.testTag(
-                        if (state.armed) "editor-bar-submit-confirm-icon" else "editor-bar-submit-send-icon",
-                    ),
-                )
+                    contentAlignment = Alignment.Center,
+                ) {
+                    RedfaceVectorIcon(
+                        if (state.armed) R.drawable.ic_editor_done else R.drawable.ic_editor_send,
+                        Modifier.testTag(
+                            if (state.armed) "editor-bar-submit-confirm-icon" else "editor-bar-submit-send-icon",
+                        ),
+                    )
+                }
             }
         }
     }
