@@ -16,6 +16,9 @@ import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.domain.editor.EditorBodyProvenance
+import fr.forumhfr.redface2.core.domain.editor.mergeEditorBody
+import fr.forumhfr.redface2.core.model.write.QuoteScope
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -35,6 +38,32 @@ class TextFieldStateBbcodeIntegrationTest {
     val compose = createComposeRule()
 
     private val state = TextFieldState()
+
+    @Test
+    fun commonDraftQuoteMergeIsOneUndoStepAndKeepsTheEarlierTypingHistory() {
+        setFieldContent()
+        val quote = "[quotemsg=101]one[/quotemsg]"
+        field().performTextInput(quote + "\n\ntyped")
+        val before = state.text.toString()
+        val selection = TextRange(8, 2)
+        change { state.edit { this.selection = selection } }
+        change {
+            state.editBbcode { text, _, _ ->
+                val merged = mergeEditorBody("D", text, provenance = EditorBodyProvenance()
+                    .delivered(QuoteScope.Topic(23, 42), quote))
+                BbcodeFormatResult(merged.body, merged.body.length, merged.body.length)
+            }
+        }
+        assertValue("D\n\n$quote\n\ntyped", TextRange(state.text.length))
+        change { state.undoState.undo() }
+        assertValue(before, selection)
+        compose.runOnIdle { assertTrue(state.undoState.canUndo) }
+        change { state.undoState.redo() }
+        assertValue("D\n\n$quote\n\ntyped", TextRange(state.text.length))
+        change { state.undoState.undo() }
+        change { state.undoState.undo() }
+        assertValue("", TextRange.Zero)
+    }
 
     @Test
     fun personalSmileyIsOneUndoTransactionWithEmptyAndReversedSelections() {

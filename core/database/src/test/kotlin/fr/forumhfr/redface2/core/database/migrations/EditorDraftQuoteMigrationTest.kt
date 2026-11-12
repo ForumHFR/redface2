@@ -37,7 +37,7 @@ class EditorDraftQuoteMigrationTest {
         helper.runMigrationsAndValidate(name, 21, true, MIGRATION_20_21).use { migrated ->
             migrated.assertNullableRequestColumn()
         }
-        val database = Room.databaseBuilder(context(), RedfaceDatabase::class.java, name).build()
+        val database = Room.databaseBuilder(context(), RedfaceDatabase::class.java, name).addMigrations(MIGRATION_21_22).build()
         try {
             for (row in expected) assertEquals(row, database.editorDraftDao().get(row.draftKey))
         } finally {
@@ -50,10 +50,10 @@ class EditorDraftQuoteMigrationTest {
         val name = "draft-quotes-room-open.db"
         val expected = createVersion20(name)
         val database = Room.databaseBuilder(context(), RedfaceDatabase::class.java, name)
-            .addMigrations(MIGRATION_20_21).build()
+            .addMigrations(MIGRATION_20_21, MIGRATION_21_22).build()
         try {
             for (row in expected) assertEquals(row, database.editorDraftDao().get(row.draftKey))
-            assertEquals(21, database.openHelper.readableDatabase.version)
+            assertEquals(22, database.openHelper.readableDatabase.version)
         } finally {
             database.close()
         }
@@ -74,7 +74,7 @@ class EditorDraftQuoteMigrationTest {
             name, 21, true, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14, MIGRATION_14_15,
             MIGRATION_15_16, MIGRATION_16_17, MIGRATION_17_18, MIGRATION_18_19, MIGRATION_19_20, MIGRATION_20_21,
         ).close()
-        val database = Room.databaseBuilder(context(), RedfaceDatabase::class.java, name).build()
+        val database = Room.databaseBuilder(context(), RedfaceDatabase::class.java, name).addMigrations(MIGRATION_21_22).build()
         try {
             val row = checkNotNull(database.editorDraftDao().get("alice|mpnew"))
             assertEquals(EditorDraftEntity("alice|mpnew", "alice", "old body", "old subject", "bob", 1234, true), row)

@@ -8,9 +8,9 @@ package fr.forumhfr.redface2.core.model.write
  * to represent honestly. The scope also completes a quoted message's identity: `numreponse` is
  * unique only inside an HFR category, never forum-wide.
  *
- * Deliberately not serializable. Quote scopes and selections are handed over in memory and are
- * dropped on process death; the scoped quote basket must not be embedded in navigation routes or
- * persistence, nor emitted to diagnostics.
+ * Deliberately not serializable. The scoped quote basket and card selections remain transient,
+ * outside navigation routes, persistence and diagnostics. Durable inline requests and delivery
+ * provenance encode their own scope/coordinates through the editor store's versioned codecs.
  */
 sealed interface QuoteScope {
 

@@ -77,6 +77,14 @@ interface EditorDraftStore {
         owner: String?, key: String, request: PendingInlineQuoteRequest, expectedVersion: Long, draft: Draft? = null,
     ): StoreWriteResult
 
+    /** ED-121: offers are read independently of C's publication status, newest first. */
+    suspend fun loadOffers(owner: String?, key: String): List<DraftOffer>
+
+    /** ED-121: write live C and consume exactly this offer in the same transaction (also for Ignore). */
+    suspend fun resolveOffer(
+        owner: String?, key: String, offer: DraftOffer, expectedVersion: Long, draft: Draft,
+    ): StoreWriteResult
+
     /** Clear only the request of the revision observed by the unreadable load; otherwise reload. */
     suspend fun discardUnreadableInlineQuoteRequest(
         owner: String?, key: String, expectedVersion: Long,
@@ -106,6 +114,16 @@ interface EditorDraftStore {
 
     /** ED-170: migrated drafts start at version 0, also used for absent rows when writing. */
     data class DraftEntry(val draft: Draft, val version: Long, val attempt: Attempt? = null)
+
+    /** Identity includes the source revision and content; occupied offers are never replaced. */
+    data class DraftOffer(val id: String, val sourceVersion: Long, val draft: Draft) {
+        companion object {
+            fun from(entry: DraftEntry): DraftOffer = DraftOffer(
+                "${entry.version}:${entry.draft.updatedAt}:${entry.draft.restoreOfferFingerprint()}", entry.version,
+                entry.draft.copy(pendingInlineQuoteRequest = null, offerToPreserve = null, offerToResolve = null, protectCurrent = true),
+            )
+        }
+    }
 
     /** ED-170: identity bound to an account, context and initial revision; later edits keep this version. */
     data class AttemptToken(val owner: String, val key: String, val id: String, val version: Long)
@@ -142,6 +160,14 @@ interface EditorDraftStore {
         val updatedAt: Long = 0L,
         /** #1553: owned by the draft session, never restored from a field or navigation snapshot. */
         val pendingInlineQuoteRequest: PendingInlineQuoteRequest? = null,
+        /** ED-89/121: durable delivery proof and D | quotes | typing boundaries; never in a Bundle. */
+        val bodyProvenance: EditorBodyProvenance? = null,
+        /** Write-only session protection. The store copies it transactionally, never stores it in C. */
+        val offerToPreserve: DraftOffer? = null,
+        /** Session-only restore decision: a post-merge autosave also resolves D atomically. */
+        val offerToResolve: DraftOffer? = null,
+        /** Raw/legacy writers protect the current source by default; a loaded session decides explicitly. */
+        val protectCurrent: Boolean = true,
     ) {
         /**
          * Content-only marker for the restore-offer guard (#1415). The full draft must not be put

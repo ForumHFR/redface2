@@ -27,6 +27,30 @@ class PendingInlineQuoteRequestCodecTest {
     }
 
     @Test
+    fun `MP scope round trips with required page and reference and rejects public keys`() {
+        val request = PendingInlineQuoteRequest.privateMessage(42,
+            listOf(PendingInlineQuoteRequest.Quote(101, 2, 0), PendingInlineQuoteRequest.Quote(202, 4, 7, true)))
+        val raw = PendingInlineQuoteRequestCodec.encode(request, request.key)
+        assertEquals(request, PendingInlineQuoteRequestCodec.decode(raw, request.key))
+        assertEquals("mpreply:42", request.key)
+        for (bad in listOf(raw.replace("\"page\":2", "\"page\":0"),
+            raw.replace("\"ref\":0", "\"ref\":null"), raw.replace("\"page\":2,", ""))) {
+            assertThrows(UnreadableInlineQuoteRequestException::class.java) {
+                PendingInlineQuoteRequestCodec.decode(bad, request.key)
+            }
+        }
+        assertThrows(UnreadableInlineQuoteRequestException::class.java) {
+            PendingInlineQuoteRequestCodec.decode(raw, key)
+        }
+        assertThrows(UnreadableInlineQuoteRequestException::class.java) {
+            PendingInlineQuoteRequestCodec.decode(document, request.key)
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            PendingInlineQuoteRequest.privateMessage(42, listOf(PendingInlineQuoteRequest.Quote(101, 1)))
+        }
+    }
+
+    @Test
     fun `decoder keeps first occurrence and selection order`() {
         val raw = document.replace(
             "\"quotes\":[", "\"quotes\":[{\"numreponse\":101,\"page\":3,\"ref\":4,\"truncate\":true},",

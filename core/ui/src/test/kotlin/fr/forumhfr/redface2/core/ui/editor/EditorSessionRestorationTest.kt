@@ -3,6 +3,8 @@ package fr.forumhfr.redface2.core.ui.editor
 import android.os.Bundle
 import androidx.compose.ui.text.TextRange
 import androidx.lifecycle.SavedStateHandle
+import fr.forumhfr.redface2.core.domain.editor.EditorBodyProvenance
+import fr.forumhfr.redface2.core.model.write.QuoteScope
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.Attempt
@@ -37,6 +39,29 @@ class EditorSessionRestorationTest {
     private val key = EditorDraftKey.mpCompose()
     private val recipients = EditorRecipientState(listOf("Alice", "Bob with spaces"), "half a pseudo")
     private val draft = Draft("body", "subject", recipients.encode(), isPrivate = true)
+
+    @Test fun `older Bundle resumes only the complete intact delivered batch and never a fresh opening`() {
+        val replyKey = EditorDraftKey.reply(23, 42)
+        val saved = SavedStateHandle()
+        EditorSessionRestoration(saved, EditorSessionSurface.Post).apply {
+            bind(owner, replyKey)
+            capture(EditorSessionCheckpoint(Draft(""), 1, TextRange.Zero, 0), bodyKnown = true)
+        }
+        val batch = "[quotemsg=101]one[/quotemsg]\n\n[quotemsg=202]two[/quotemsg]"
+        val proof = EditorBodyProvenance().delivered(QuoteScope.Topic(23, 42), batch)
+        val delivered = DraftEntry(Draft(batch + "\n", bodyProvenance = proof), 2)
+        assertEquals(EditorSessionRestore.Resume,
+            EditorSessionRestoration(saved, EditorSessionSurface.Post).resolve(delivered, owner, replyKey))
+        for (body in listOf(batch + "typed", batch.replace("one", "edited"), "[quotemsg=101]one[/quotemsg]")) {
+            assertEquals(EditorSessionRestore.Offer, EditorSessionRestoration(saved, EditorSessionSurface.Post)
+                .resolve(delivered.copy(draft = delivered.draft.copy(body = body)), owner, replyKey))
+        }
+        assertEquals(EditorSessionRestore.None, EditorSessionRestoration(SavedStateHandle(), EditorSessionSurface.Post)
+            .resolve(delivered, owner, replyKey))
+        assertEquals(EditorSessionRestore.None, EditorSessionRestoration(saved, EditorSessionSurface.Post)
+            .resolve(delivered, "other", replyKey))
+        assertFalse(saved.keys().any { key -> saved.get<Any?>(key).toString().contains("quotemsg") })
+    }
 
     @Test fun `fingerprint covers body title chips and buffer but ignores write timestamps`() {
         val saved = checkpoint()

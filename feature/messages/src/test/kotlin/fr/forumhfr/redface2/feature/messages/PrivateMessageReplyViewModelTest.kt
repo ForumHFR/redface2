@@ -1430,6 +1430,19 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
+    fun `1450 ignoring an MP offer keeps the live quote and typing in durable C`() = runTest {
+        val vm = replyWithRestoreOffer(seed = "seed")
+        vm.editBody(TextFieldValue("seed\n\ntyped", TextRange(3)))
+        vm.onDraftDiscardRequested()
+        advanceUntilIdle()
+        val key = EditorDraftKey.mpReply(request.threadId)
+        assertEquals("seed\n\ntyped", vm.bodyFieldState.text.toString())
+        assertEquals("seed\n\ntyped", draftStore.saved[key]?.body)
+        assertTrue(draftStore.loadOffers(draftStore.activeOwner, key).isEmpty())
+        assertNull(vm.state.value.restorableDraft)
+    }
+
+    @Test
     fun `discarding deletes the cached MP draft`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         val savedStateHandle = SavedStateHandle()

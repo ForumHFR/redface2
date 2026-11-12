@@ -737,6 +737,85 @@ class PendingQuoteHandoffTest {
         sheet.viewModelScope.cancel()
     }
 
+    @Test
+    fun `1450 quick reply autosave keeps D and Q across death and a full editor opening`() = runTest {
+        val scenario = Scenario()
+        scenario.drafts.preload(scenario.key, Draft("offered D", updatedAt = 1234))
+        scenario.enqueue()
+        val sheet = scenario.sheet()
+        sheet.onSheetOpened()
+        settleBody()
+        sheet.onTextChanged(TextFieldValue("typed C before GET"))
+        advanceTimeBy(751)
+        syncBody()
+        assertEquals("typed C before GET", scenario.body)
+        assertEquals("offered D", scenario.drafts.loadOffers("tester", scenario.key).single().draft.body)
+        assertEquals(1234L, scenario.drafts.loadOffers("tester", scenario.key).single().draft.updatedAt)
+        sheet.viewModelScope.cancel()
+        val editor = scenario.editor(resumeSharedDraft = false)
+        settleBody()
+        assertEquals(scenario.request, scenario.pending)
+        assertTrue(scenario.fetchedQuotes.isEmpty()) // PR 1 retains the decision-before-fetch contract.
+        assertEquals(listOf("offered D"), scenario.drafts.loadOffers("tester", scenario.key).map { it.draft.body })
+        assertEquals("typed C before GET", editor.state.value.restorableDraft)
+        scenario.noPost()
+    }
+
+    @Test
+    fun `1450 escalating a quote alone continues C without offering or replaying it`() = runTest {
+        val scenario = Scenario()
+        scenario.enqueue()
+        val sheet = scenario.sheet()
+        sheet.onSheetOpened()
+        settleBody()
+        val body = sheet.state.value.text.text
+        assertTrue(body.contains("[quotemsg=101]"))
+        assertNull(scenario.pending)
+        sheet.onEscalateRequested()
+        settleBody()
+        val handoff = sheet.effects.first() as QuickReplyEffect.EscalateToFullEditor
+        val editor = scenario.editor(cards = handoff.quotes)
+        settleBody()
+        assertEquals(body, editor.bodyFieldState.text.toString())
+        assertNull(editor.state.value.restorableDraft)
+        assertEquals(listOf(101), scenario.fetchedQuotes)
+        scenario.noPost()
+        sheet.viewModelScope.cancel()
+    }
+
+    @Test
+    fun `1450 old Bundle silently resumes a quote alone but offers a quote with user typing`() = runTest {
+        for (typing in listOf("", "typed before GET")) {
+            val scenario = Scenario()
+            scenario.enqueue()
+            scenario.quoteGate = CompletableDeferred()
+            val saved = SavedStateHandle()
+            val editor = scenario.editor(saved, resumeSharedDraft = false)
+            syncBody()
+            val frozen = snapshot(saved)
+            if (typing.isNotEmpty()) editor.editBody(TextFieldValue(typing))
+            scenario.quoteGate?.complete(Unit)
+            settleBody()
+            val delivered = editor.bodyFieldState.text.toString()
+            val entry = checkNotNull(scenario.drafts.loadEntry("tester", scenario.key))
+            assertEquals(typing.isEmpty(), entry.draft.bodyProvenance?.isQuoteOnly(delivered))
+            assertNull(scenario.pending)
+            editor.viewModelScope.cancel()
+            val reopened = scenario.editor(SavedStateHandle(frozen), resumeSharedDraft = false)
+            settleBody()
+            if (typing.isEmpty()) {
+                assertEquals(delivered, reopened.bodyFieldState.text.toString())
+                assertNull(reopened.state.value.restorableDraft)
+            } else {
+                assertEquals(delivered, reopened.state.value.restorableDraft)
+                assertEquals("", reopened.bodyFieldState.text.toString())
+            }
+            assertEquals(listOf(101), scenario.fetchedQuotes)
+            scenario.noPost()
+            reopened.viewModelScope.cancel()
+        }
+    }
+
     private fun snapshot(handle: SavedStateHandle): Map<String, Any?> =
         handle.keys().associateWith { handle.get<Any?>(it) }
 

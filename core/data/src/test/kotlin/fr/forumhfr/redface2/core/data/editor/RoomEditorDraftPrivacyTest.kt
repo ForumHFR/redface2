@@ -150,6 +150,37 @@ class RoomEditorDraftPrivacyTest {
         assertEquals(StoreWriteResult.Conflict, dispatchedStore.finishAttempt(token, AttemptOutcome.CERTAIN_FAILURE))
     }
 
+    @Test
+    fun `A to B to A cannot recreate an offer or Q from a suspended private writer or restore`() = runTest {
+        for (operation in listOf("save", "quote", "delivery", "restore")) {
+            val mp = PendingInlineQuoteRequest.privateMessage(42,
+                listOf(PendingInlineQuoteRequest.Quote(101, 1, 0)))
+            store.saveIfVersion("alice", mp.key, Draft("D", isPrivate = true), 0)
+            val editor = EditorDraftSession(store, mp.key)
+            editor.load()
+            editor.save(Draft("C", isPrivate = true))
+            val offered = store.loadOffers("alice", mp.key).single()
+            if (operation == "delivery") editor.enqueueInlineQuoteRequest(mp)
+            val gate = Gate().also { ownerReadGate = it }
+            val write = async {
+                when (operation) {
+                    "save" -> editor.save(Draft("late C", isPrivate = true))
+                    "quote" -> editor.enqueueInlineQuoteRequest(mp)
+                    "delivery" -> editor.consumeInlineQuoteRequest(mp, Draft("quoted C", isPrivate = true))
+                    else -> editor.resolveOffer(offered, Draft("D\n\nC", isPrivate = true))
+                }
+            }
+            gate.entered.await()
+            auth.value = AuthState.Authenticated("Bob")
+            store.purgePrivateForUser("alice")
+            auth.value = AuthState.Authenticated("Alice")
+            gate.resume.complete(Unit)
+            assertEquals(operation, StoreWriteResult.OwnerChanged, write.await())
+            assertTrue(store.loadOffers("alice", mp.key).isEmpty())
+            assertNull(store.loadEntry("alice", mp.key))
+        }
+    }
+
     private suspend fun assertStaleAutosaveRejected(reconnectBeforeResume: Boolean) = coroutineScope {
         val token = (store.beginAttempt("alice", key, snapshot, 0) as BeginAttemptResult.Started).token
         store.finishAttempt(token, AttemptOutcome.UNCERTAIN)
@@ -314,9 +345,10 @@ class RoomEditorDraftPrivacyTest {
             draft: EditorDraftEntity,
             expectedVersion: Long,
             newComposition: Boolean,
+            offer: fr.forumhfr.redface2.core.database.entities.EditorDraftOfferEntity?,
         ): Boolean {
             writeGate?.pause()
-            return delegate.saveVersioned(draft, expectedVersion, newComposition)
+            return delegate.saveVersioned(draft, expectedVersion, newComposition, offer)
         }
 
         override suspend fun deletePrivateForUser(ownerId: String) {

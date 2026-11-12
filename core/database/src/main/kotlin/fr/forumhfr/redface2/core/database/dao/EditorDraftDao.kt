@@ -1,10 +1,13 @@
 package fr.forumhfr.redface2.core.database.dao
 
 import androidx.room.Dao
+import androidx.room.Insert
+import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Transaction
 import androidx.room.Upsert
 import fr.forumhfr.redface2.core.database.entities.EditorDraftEntity
+import fr.forumhfr.redface2.core.database.entities.EditorDraftOfferEntity
 
 /**
  * Read/write access to the per-account editor drafts (#405). See [EditorDraftEntity] for the
@@ -24,9 +27,10 @@ interface EditorDraftDao {
 
     /** Legacy autosaves cannot overwrite a durable attempt (ED-161/170). */
     @Transaction
-    suspend fun saveLegacy(draft: EditorDraftEntity) {
+    suspend fun saveLegacy(draft: EditorDraftEntity, offer: EditorDraftOfferEntity? = null) {
         val previous = get(draft.draftKey)
         if (previous?.attemptState == null) {
+            preserveOffer(previous, offer)
             upsert(draft.copy(
                 contentVersion = (previous?.contentVersion ?: 0L) + 1,
                 pendingInlineQuoteRequest = previous?.pendingInlineQuoteRequest,
@@ -36,34 +40,50 @@ interface EditorDraftDao {
 
     /** ED-170: compare and write within one Room transaction, including the absent-row case. */
     @Transaction
-    suspend fun saveVersioned(draft: EditorDraftEntity, expectedVersion: Long, newComposition: Boolean): Boolean {
+    suspend fun saveVersioned(
+        draft: EditorDraftEntity, expectedVersion: Long, newComposition: Boolean,
+        offer: EditorDraftOfferEntity? = null,
+    ): Boolean {
         val previous = get(draft.draftKey)
         val versionMatches = (previous?.contentVersion ?: 0L) == expectedVersion
         val attemptState = previous?.attemptState
         val writable = attemptState == null || (newComposition && attemptState == "PUBLISHED")
-        if (versionMatches && writable) upsert(draft)
+        if (versionMatches && writable) {
+            preserveOffer(previous, offer)
+            upsert(draft)
+        }
         return versionMatches && writable
     }
 
     /** ED-170: content has its own revision; editing never turns uncertainty into an ordinary draft. */
     @Transaction
-    suspend fun saveUnresolved(draft: EditorDraftEntity, expectedVersion: Long): Boolean {
+    suspend fun saveUnresolved(
+        draft: EditorDraftEntity, expectedVersion: Long, offer: EditorDraftOfferEntity? = null,
+    ): Boolean {
         val previous = get(draft.draftKey)
         val matches = previous != null && previous.contentVersion == expectedVersion &&
             previous.attemptId == draft.attemptId && previous.attemptVersion == draft.attemptVersion &&
             previous.attemptState in listOf("IN_PROGRESS", "UNCERTAIN")
-        if (matches) upsert(draft.copy(attemptState = "UNCERTAIN"))
+        if (matches) {
+            preserveOffer(previous, offer)
+            upsert(draft.copy(attemptState = "UNCERTAIN"))
+        }
         return matches
     }
 
     /** ED-170: snapshot plus attempt are committed together; unresolved live sends are exclusive. */
     @Transaction
-    suspend fun beginAttempt(draft: EditorDraftEntity, expectedVersion: Long): Boolean {
+    suspend fun beginAttempt(
+        draft: EditorDraftEntity, expectedVersion: Long, offer: EditorDraftOfferEntity? = null,
+    ): Boolean {
         val previous = get(draft.draftKey)
         val versionMatches = (previous?.contentVersion ?: 0L) == expectedVersion
         val attemptState = previous?.attemptState
         val writable = attemptState == null
-        if (versionMatches && writable) upsert(draft)
+        if (versionMatches && writable) {
+            preserveOffer(previous, offer)
+            upsert(draft)
+        }
         return versionMatches && writable
     }
 
@@ -73,10 +93,15 @@ interface EditorDraftDao {
      * prepares the merged request and preserves fields/status without using saveUnresolved.
      */
     @Transaction
-    suspend fun mutateInlineQuoteRequest(draft: EditorDraftEntity, expected: EditorDraftEntity?): Boolean {
+    suspend fun mutateInlineQuoteRequest(
+        draft: EditorDraftEntity, expected: EditorDraftEntity?, offer: EditorDraftOfferEntity? = null,
+    ): Boolean {
         val previous = get(draft.draftKey)
         val matches = previous == expected && draft.contentVersion == (previous?.contentVersion ?: 0L) + 1
-        if (matches) upsert(draft)
+        if (matches) {
+            preserveOffer(previous, offer)
+            upsert(draft)
+        }
         return matches
     }
 
@@ -109,7 +134,7 @@ interface EditorDraftDao {
     @Query(
         """
         UPDATE editor_drafts SET body = '', subject = NULL, recipients = NULL,
-            pendingInlineQuoteRequest = NULL, updatedAt = :updatedAt
+            pendingInlineQuoteRequest = NULL, bodyProvenance = NULL, updatedAt = :updatedAt
         WHERE draftKey = :draftKey AND contentVersion = :version AND attemptVersion = :version
             AND attemptId = :attemptId AND attemptState = 'PUBLISHED'
         """,
@@ -123,6 +148,7 @@ interface EditorDraftDao {
      */
     @Transaction
     suspend fun deletePrivateForUser(ownerId: String) {
+        deletePrivateOffers(ownerId)
         deletePrivateWithoutAttempt(ownerId)
         erasePrivateAttemptContent(ownerId)
     }
@@ -132,13 +158,67 @@ interface EditorDraftDao {
 
     @Query(
         """
-        UPDATE editor_drafts SET body = '', subject = NULL, recipients = NULL, pendingInlineQuoteRequest = NULL
+        UPDATE editor_drafts SET body = '', subject = NULL, recipients = NULL, pendingInlineQuoteRequest = NULL,
+            bodyProvenance = NULL
         WHERE ownerId = :ownerId AND isPrivate = 1 AND attemptState IN ('IN_PROGRESS', 'UNCERTAIN', 'PUBLISHED')
         """,
     )
     suspend fun erasePrivateAttemptContent(ownerId: String)
 
     /** Retention purge run on app start: drops drafts last touched before [cutoffMillis]. */
+    @Transaction
+    suspend fun deleteOlderThan(cutoffMillis: Long) {
+        deleteOldOffers(cutoffMillis)
+        deleteOldContent(cutoffMillis)
+    }
+
     @Query("DELETE FROM editor_drafts WHERE updatedAt < :cutoffMillis")
-    suspend fun deleteOlderThan(cutoffMillis: Long)
+    suspend fun deleteOldContent(cutoffMillis: Long)
+
+    @Query("DELETE FROM editor_draft_offers WHERE updatedAt < :cutoffMillis")
+    suspend fun deleteOldOffers(cutoffMillis: Long)
+
+    @Query("DELETE FROM editor_draft_offers WHERE ownerId = :ownerId AND isPrivate = 1")
+    suspend fun deletePrivateOffers(ownerId: String)
+
+    @Query(
+        """SELECT * FROM editor_draft_offers WHERE ownerId = :ownerId AND contextKey = :key
+        ORDER BY updatedAt DESC, sourceVersion DESC, offerId DESC""",
+    )
+    suspend fun offers(ownerId: String, key: String): List<EditorDraftOfferEntity>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertOffer(offer: EditorDraftOfferEntity)
+
+    /** The first replacement copies the exact source revision. Later saves never recreate an expired offer. */
+    @Suppress("ComplexCondition") // Copy only the exact owner/context/revision/fields, never an unresolved attempt.
+    suspend fun preserveOffer(previous: EditorDraftEntity?, offer: EditorDraftOfferEntity?) {
+        if (previous != null && offer != null && previous.contentVersion == offer.sourceVersion &&
+            previous.ownerId == offer.ownerId && previous.draftKey == "${offer.ownerId}|${offer.contextKey}" &&
+            previous.body == offer.body && previous.subject == offer.subject && previous.recipients == offer.recipients &&
+            previous.attemptState == null
+        ) insertOffer(offer)
+    }
+
+    @Query("DELETE FROM editor_draft_offers WHERE ownerId = :ownerId AND contextKey = :key AND offerId = :offerId")
+    suspend fun deleteOffer(ownerId: String, key: String, offerId: String)
+
+    /** C + consumption commit together. A second invocation cannot restore the same offer twice. */
+    @Transaction
+    suspend fun resolveOffer(
+        draft: EditorDraftEntity, expectedVersion: Long, offer: EditorDraftOfferEntity,
+        protection: EditorDraftOfferEntity? = null,
+    ): Boolean {
+        val previous = get(draft.draftKey) ?: return false
+        val stored = offers(offer.ownerId, offer.contextKey).any { it == offer }
+        val source = previous.contentVersion == offer.sourceVersion && previous.body == offer.body &&
+            previous.subject == offer.subject && previous.recipients == offer.recipients
+        if (previous.contentVersion != expectedVersion || previous.attemptState != null || (!stored && !source)) {
+            return false
+        }
+        if (protection?.offerId != offer.offerId) preserveOffer(previous, protection)
+        upsert(draft)
+        deleteOffer(offer.ownerId, offer.contextKey, offer.offerId)
+        return true
+    }
 }
