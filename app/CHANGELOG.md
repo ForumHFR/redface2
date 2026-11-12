@@ -16,6 +16,13 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.69.13` — `internal` (dev) — 2026-11-12
+
+Suite du correctif de l'éditeur ([#1450](https://github.com/ForumHFR/redface2/issues/1450), PR [#1608](https://github.com/ForumHFR/redface2/pull/1608)) : l'offre de brouillon ↺ s'ouvre en feuille du bas, et l'information « Brouillon retrouvé, citation en attente » disparaît seule.
+
+- **Offre de brouillon** : dans la réponse et la modification d'un post, le nouveau sujet, la réponse MP et le nouveau MP, ↺ ouvre une feuille du bas avec Restaurer et Ignorer, plus la mention « Citation en attente » quand une citation attend. Elle ne s'ouvre jamais d'elle-même ; la fermer sans choisir garde ↺. Nouvelle icône (symbole Material `restore_page`). La réponse rapide est inchangée.
+- **« Brouillon retrouvé, citation en attente »** : l'information se retire seule après 5 s, davantage si le délai d'accessibilité d'Android est allongé, en ne comptant que le temps où l'éditeur est à l'écran. Un premier tap sur ↺ ouvre directement la feuille.
+
 ## `0.69.12` — `internal` (dev) — 2026-11-11
 
 Correctif de l'éditeur de réponse ([#1450](https://github.com/ForumHFR/redface2/issues/1450), PR [#1606](https://github.com/ForumHFR/redface2/pull/1606)) : « Citer » alors qu'un brouillon attend une décision charge de nouveau le formulaire (titre du sujet, favoris HFR, Envoyer). La citation attend Restaurer ou Ignorer, signalée par « Citation en attente », puis s'insère une seule fois.
