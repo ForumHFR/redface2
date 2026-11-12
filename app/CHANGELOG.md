@@ -16,6 +16,10 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.69.14` — `internal` (dev) — 2026-11-12
+
+Icônes de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417), PR [#1610](https://github.com/ForumHFR/redface2/pull/1610)) : le trait passe de 2,5 à 2 dp sur les icônes propres à l'éditeur, B compris, plus proche de la graisse des Material Symbols ; la barre paraît moins grasse et le B se distingue de I, U et S. La flèche retour, les chevrons et le crayon, partagés avec le reste de l'app, restent à 2,5 en attendant une décision sur la portée.
+
 ## `0.69.13` — `internal` (dev) — 2026-11-12
 
 Suite du correctif de l'éditeur ([#1450](https://github.com/ForumHFR/redface2/issues/1450), PR [#1608](https://github.com/ForumHFR/redface2/pull/1608)) : l'offre de brouillon ↺ s'ouvre en feuille du bas, et l'information « Brouillon retrouvé, citation en attente » disparaît seule.
