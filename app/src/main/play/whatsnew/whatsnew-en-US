@@ -1,3 +1,2 @@
-Redface 2 v0.69.13 — dev.
-- Editor: the draft offer (↺) opens in a bottom sheet, with Restore or Discard.
-- The "Draft found, quote pending" notice now clears itself after a few seconds; tapping ↺ opens the sheet.
+Redface 2 v0.69.14 — dev.
+- Editor: thinner icon strokes (2 dp); the Bold icon stands out better.
