@@ -16,7 +16,8 @@ import androidx.compose.ui.unit.dp
  *
  * Le projet **interdit `androidx.compose.material.*`** (détekt `ForbiddenImport`) : pas d'`Icons.*`
  * Material. Les icônes sont donc des **vector drawables locaux** (`:core:ui/res/drawable`) tracés en
- * *stroke* (`strokeWidth` 2.5, caps/joins ronds) pour un poids optique homogène — c'est ce composable
+ * *stroke* (`strokeWidth` 2.5, ou 2 pour les icônes de l'éditeur depuis l'amendement du 12/11/2026 ;
+ * caps/joins ronds) pour un poids optique homogène — c'est ce composable
  * qui matérialise la convention décidée pour la flèche retour et étendue aux chevrons de page et au
  * crayon (cf. ADR-015).
  *
