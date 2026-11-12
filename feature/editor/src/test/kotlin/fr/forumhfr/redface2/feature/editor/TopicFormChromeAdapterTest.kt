@@ -310,6 +310,23 @@ class TopicFormChromeAdapterTest {
             assertNull(f.events.visibleEvent)
         }
     }
+    @Test fun `1450 topic offer keeps ordinary information gesture consumption in both modes`() {
+        TopicFormMode.entries.forEach { mode ->
+            val f = TopicFormChromeFixture(mode)
+            f.error(EditorErrors.noImageReceived)
+            f.adapter.host.open(TopicFormChromeSurface.Restore)
+            assertFalse(f.adapter.host.draftOfferOpen)
+            assertNull(f.events.visibleEvent)
+            assertTrue(f.calls.isEmpty())
+            f.adapter.host.open(TopicFormChromeSurface.Restore)
+            assertTrue(f.adapter.host.draftOfferOpen)
+            f.adapter.back()
+            assertFalse(f.adapter.host.draftOfferOpen)
+            assertTrue(f.adapter.host.consumeReturn())
+            assertFalse(f.adapter.host.consumeReturn())
+            assertTrue(f.calls.isEmpty())
+        }
+    }
     @Test fun `ED44 information consumes the send gesture before validation and session reset drops the header`() {
         val f = TopicFormChromeFixture()
         f.error(EditorErrors.noImageReceived)

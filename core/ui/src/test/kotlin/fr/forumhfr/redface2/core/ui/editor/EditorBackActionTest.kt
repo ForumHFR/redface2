@@ -27,6 +27,10 @@ class EditorBackActionTest {
             EditorBackAction.CloseSheet(EditorSheet.Options),
             resolveEditorBack(sheet.copy(sheet = EditorSheet.Options)),
         )
+        assertEquals(
+            EditorBackAction.CloseSheet(EditorSheet.DraftOffer),
+            resolveEditorBack(sheet.copy(sheet = EditorSheet.DraftOffer)),
+        )
         val tooltip = sheet.copy(sheet = null)
         assertEquals(EditorBackAction.CloseTooltip, resolveEditorBack(tooltip))
         val detail = tooltip.copy(tooltipOpen = false)

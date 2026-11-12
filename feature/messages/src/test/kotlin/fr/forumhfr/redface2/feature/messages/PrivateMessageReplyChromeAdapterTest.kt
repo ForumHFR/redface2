@@ -33,6 +33,24 @@ class PrivateMessageReplyChromeAdapterTest {
     private val f = PrivateMessageReplyChromeFixture()
     private val uncertain = EditorErrors.uncertain(EditorErrorSurface.MessageReply)
 
+    @Test fun `1450 Back closes the draft sheet before disarming and schedules one return without a decision`() {
+        f.state = f.state.copy(restorableDraft = "Brouillon privé")
+        f.adapter.open(PrivateMessageReplyChromeSurface.Restore)
+        assertTrue(f.adapter.draftOfferOpen)
+        val arm = ArmToken(1, f.session, 0, 4_000L)
+        f.state = f.state.copy(submission = EditorSubmissionState.Armed(arm))
+        f.adapter.back()
+        assertFalse(f.adapter.draftOfferOpen)
+        assertNull(f.adapter.surface)
+        assertEquals(EditorSubmissionState.Armed(arm), f.state.submission)
+        assertTrue(f.calls.isEmpty())
+        assertTrue(f.adapter.consumeReturn())
+        f.adapter.closeDraftOffer()
+        assertFalse(f.adapter.consumeReturn())
+        f.adapter.back()
+        assertEquals(listOf("disarm"), f.calls)
+    }
+
     @Test fun `ED36 projects exactly the allowed shortcuts on this surface`() {
         val f = PrivateMessageReplyChromeFixture()
         val surface = EditorShortcutSurface.PRIVATE_MESSAGE_REPLY

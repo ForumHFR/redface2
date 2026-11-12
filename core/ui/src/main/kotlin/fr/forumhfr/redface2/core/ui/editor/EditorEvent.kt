@@ -34,7 +34,14 @@ sealed interface EditorEventContent {
         val detail: EditorText? = null,
         val accessibleSummary: EditorText = summary,
     ) : EditorEventContent
-    data class Information(val summary: EditorText, val detail: EditorText? = null) : EditorEventContent
+    /** No automatic retirement by default (ED-44); a surface may opt in for one notice only. */
+    data class Information(
+        val summary: EditorText,
+        val detail: EditorText? = null,
+        val timeoutMillis: Long? = null,
+    ) : EditorEventContent {
+        init { require(timeoutMillis == null || timeoutMillis > 0) }
+    }
 }
 
 enum class EditorEventRank(val priority: Int) { Information(0), InProgress(1), Error(2) }

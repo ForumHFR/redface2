@@ -56,8 +56,6 @@
     <string name="messages_draft_restore_message">Un brouillon non envoyé a été retrouvé.</string>
     <string name="messages_draft_restore">Restaurer</string>
     <string name="messages_draft_discard">Ignorer</string>
-    <!-- R1b — titre court du panneau ↺ (réponse et nouveau MP) : la phrase ci-dessus reste dans son corps. -->
-    <string name="messages_draft_restore_title">Brouillon retrouvé</string>
 
     <!-- #606 — gestion des membres d'une discussion de groupe (réservé au créateur). -->
     <string name="messages_members_title">Membres de la discussion</string>

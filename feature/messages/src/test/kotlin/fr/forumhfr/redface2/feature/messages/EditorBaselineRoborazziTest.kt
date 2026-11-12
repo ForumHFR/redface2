@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.feature.messages
 
+import android.content.res.Configuration
+import android.content.res.Resources
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.input.InputTransformation
@@ -11,6 +13,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -40,6 +43,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorRecipientState
 import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.testing.captureRoboImage
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -51,7 +55,7 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * Actual reply and new-MP content on the common scaffold; the legacy submit bar and options were removed at
- * the R3/C4 junction, and both ↺ panels render [MessageDraftRestoreChoice].
+ * the R3/C4 junction. Both ↺ offers open the shared draft offer sheet, captured through its dialog window.
  * Reply: portrait/landscape × font scale 1.0/1.3 × light/dark × empty/multiline, plus restore/event/preview/
  * owner states, an armed send, both statuses at rest and under an event, and the full-screen form failure.
  * Light names are historical; dark reply names end in `_dark`.
@@ -68,6 +72,24 @@ class EditorBaselineRoborazziTest {
 
     @get:Rule
     val compose = createComposeRule()
+
+    private var activityResources: Resources? = null
+
+    @After fun resetSheetFontScale() = setSheetFontScale(1f)
+
+    /**
+     * A ModalBottomSheet composes in its own dialog window, whose density reads the activity resources, never the
+     * host LocalDensity. RuntimeEnvironment.setFontScale applies to all resources of the process: observed, called
+     * mid-test it loses the compose hierarchy, and called before setContent the reply body no longer reveals its caret
+     * (cause not established). Restore scenes only update the activity resources' font scale, without a configuration
+     * change, right before the sheet window opens.
+     */
+    @Suppress("DEPRECATION") // Resources.updateConfiguration: deliberately dispatches no configuration change.
+    private fun setSheetFontScale(scale: Float) {
+        val resources = activityResources ?: return
+        resources.updateConfiguration(Configuration(resources.configuration).apply { fontScale = scale },
+            resources.displayMetrics)
+    }
 
     @Test
     fun portraitFontScale1_0() = captureMatrix(orientation = "portrait", fontScale = 1.0f, dark = false)
@@ -100,8 +122,10 @@ class EditorBaselineRoborazziTest {
     private fun captureMatrix(orientation: String, fontScale: Float, dark: Boolean) {
         val scenario = mutableStateOf(Scenario(EditorSurface.Reply, filled = false))
         lateinit var focusManager: FocusManager
+        // Options and the recipient manager still render at the system font scale: prior gap, outside PR B.
         compose.setContent {
             focusManager = LocalFocusManager.current
+            activityResources = LocalContext.current.resources
             val density = LocalDensity.current
             CompositionLocalProvider(
                 LocalDensity provides Density(density = density.density, fontScale = fontScale),
@@ -126,6 +150,8 @@ class EditorBaselineRoborazziTest {
         cases.forEach { current ->
             compose.runOnIdle { scenario.value = current }
             compose.waitForIdle()
+            // The ↺ sheet window takes the scale when it opens, after the body has revealed its caret.
+            if (current.chrome == ReplyChrome.Restore) setSheetFontScale(fontScale)
             current.chrome.tap?.let { compose.onNodeWithContentDescription(it).performClick() }
             if (current.chrome == ReplyChrome.Preview) assertSharedPreview()
             compose.runOnIdle { focusManager.clearFocus(force = true) }
@@ -140,6 +166,7 @@ class EditorBaselineRoborazziTest {
             capture.captureRoboImage(filePath = "src/test/screenshots/" +
                 "${current.surface.fileName}_${orientation}_fs${fontScale}_${current.state}${theme(dark)}.png")
             compose.mainClock.autoAdvance = true
+            setSheetFontScale(1f)
         }
     }
 
@@ -186,7 +213,7 @@ class EditorBaselineRoborazziTest {
     /** [scene] names the PNG; [tap] is the content description opened before capture; sheets capture their dialog. */
     private enum class ReplyChrome(val scene: String?, val tap: String? = null, val sheet: Boolean = false) {
         Ready(null),
-        Restore("restore", tap = "Brouillon retrouvé, restaurer ou ignorer"),
+        Restore("restore", tap = "Brouillon retrouvé, restaurer ou ignorer", sheet = true),
         Owner("owner"),
         Manager("manager", tap = "2 destinataires, gérer", sheet = true),
         Options("options", tap = "Options", sheet = true),
@@ -219,8 +246,10 @@ class EditorBaselineRoborazziTest {
         val scenario = mutableStateOf(false to ComposeCapture.Header)
         lateinit var focus: FocusManager
         lateinit var bodyScroll: ScrollState
+        // Options still renders at the system font scale: prior gap, tracked outside PR B.
         compose.setContent {
             focus = LocalFocusManager.current
+            activityResources = LocalContext.current.resources
             val density = LocalDensity.current
             CompositionLocalProvider(LocalDensity provides Density(density.density, scale)) {
                 RedfaceTheme(darkTheme = scenario.value.first, dynamicColor = false) {
@@ -233,6 +262,8 @@ class EditorBaselineRoborazziTest {
         }
         listOf(false, true).forEach { dark ->
             ComposeCapture.entries.forEach { state ->
+                // The adapter pre-opens ↺ while mounting the scene: its dialog window takes the scale then.
+                if (state == ComposeCapture.Restore) setSheetFontScale(scale)
                 compose.runOnIdle { scenario.value = dark to state }
                 compose.waitForIdle()
                 if (state == ComposeCapture.Options) {
@@ -250,11 +281,12 @@ class EditorBaselineRoborazziTest {
                 compose.runOnIdle { focus.clearFocus(force = true) }
                 compose.mainClock.advanceTimeBy(1_000L)
                 compose.mainClock.autoAdvance = false
-                // The options sheet is a ModalBottomSheet: it renders in its own dialog window.
-                val target = if (state == ComposeCapture.Options) compose.onNode(isDialog()) else compose.onRoot()
+                // The options and draft offer sheets are ModalBottomSheets: each renders in its own dialog window.
+                val target = if (state.sheet) compose.onNode(isDialog()) else compose.onRoot()
                 target.captureRoboImage(filePath = "src/test/screenshots/" +
                     "private_message_new_${state}_${orientation}_fs${scale}_dark$dark.png")
                 compose.mainClock.autoAdvance = true
+                setSheetFontScale(1f)
             }
         }
     }
@@ -310,6 +342,9 @@ class EditorBaselineRoborazziTest {
     private enum class ComposeCapture(val routed: Boolean = true, val restorable: Boolean = false) {
         Normal, Header, Preview, Restore(restorable = true), Armed, Event(restorable = true),
         States(restorable = true), EmptyEntry(routed = false), EmptySummary(routed = false), Options, FormError,
+        ;
+
+        val sheet get() = this == Restore || this == Options
     }
 
     private enum class EditorSurface(val fileName: String) {

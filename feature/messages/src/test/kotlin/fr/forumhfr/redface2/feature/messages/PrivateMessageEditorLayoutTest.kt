@@ -12,13 +12,17 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsNodeInteraction
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsAtLeast
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -57,6 +61,7 @@ import io.mockk.every
 import io.mockk.mockk
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.flow.MutableStateFlow
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -64,10 +69,12 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.shadows.ShadowDialog
 
-/** Both MP editors use the shared chrome budget; their ↺ panels render the same [MessageDraftRestoreChoice]. */
+/** Both MP editors use the shared chrome budget and a separate draft offer sheet. */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "fr-rFR-w360dp-h330dp-xxhdpi")
@@ -76,6 +83,10 @@ class PrivateMessageEditorLayoutTest {
 
     @get:Rule
     val compose = createComposeRule()
+
+    // A ModalBottomSheet composes in its own dialog window: its density follows the system configuration,
+    // as in production, never the host LocalDensity. Tests at a font scale set both, then reset the system.
+    @After fun resetSystemFontScale() = RuntimeEnvironment.setFontScale(1f)
 
     @OptIn(DelicateCoilApi::class)
     @Test fun replyPreviewDisablesCoilDiskReadsAndWrites() {
@@ -129,7 +140,7 @@ class PrivateMessageEditorLayoutTest {
 
     @Test
     @Config(qualifiers = "fr-rFR-w360dp-h200dp-xxhdpi")
-    fun replyRestorePanelKeepsBothDraftActionsReachableOnShortWindow() {
+    fun replyRestoreSheetKeepsBothDraftActionsReachableOnShortWindow() {
         setReplyContent { readyReply().copy(restorableDraft = "Brouillon") }
         openRestore()
         compose.onNodeWithText("Restaurer").performScrollTo()
@@ -149,7 +160,7 @@ class PrivateMessageEditorLayoutTest {
         compose.onNodeWithText("Réessayer").assertIsEnabled()
         assertDraftActionsFullyVisible()
         compose.runOnIdle { state.value = state.value.copy(formAvailable = true, formError = false) }
-        // The full-screen failure closed the panel: the retry returns to the bare editor, whose ↺ reopens it.
+        // The full-screen failure closed the sheet: the retry returns to the bare editor, whose ↺ reopens it.
         compose.onNodeWithText("Restaurer").assertDoesNotExist()
         openRestore()
         compose.onNodeWithText("Restaurer").assertIsEnabled()
@@ -189,8 +200,10 @@ class PrivateMessageEditorLayoutTest {
     private fun restorableReply() = readyReply().copy(restorableDraft = "Brouillon")
 
     /** Same ↺ status and offer on both surfaces. */
-    private fun openRestore() =
+    private fun openRestore() {
         compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
+        compose.onNode(isDialog()).assertExists()
+    }
 
     @Test
     fun `new message keeps 160 dp body and both draft actions on short viewport`() {
@@ -250,37 +263,34 @@ class PrivateMessageEditorLayoutTest {
 
     @Test
     @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
-    fun `reply restore offer and actions share one row above a landscape keyboard at font scale 1_0`() =
-        assertCompactRestoreRow(1.0f) { PrivateMessageReplyTestContent(restorableReply()) }
+    fun `reply restore sheet offer and actions are reachable above a landscape keyboard at font scale 1_0`() =
+        assertCompactRestoreSheet(1.0f) { PrivateMessageReplyTestContent(restorableReply()) }
 
     @Test
     @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
-    fun `reply restore offer and actions share one row above a landscape keyboard at font scale 1_3`() =
-        assertCompactRestoreRow(1.3f) { PrivateMessageReplyTestContent(restorableReply()) }
+    fun `reply restore sheet offer and actions are reachable above a landscape keyboard at font scale 1_3`() =
+        assertCompactRestoreSheet(1.3f) { PrivateMessageReplyTestContent(restorableReply()) }
 
     @Test
     @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
-    fun `new message restore offer and actions share one row above a landscape keyboard at font scale 1_3`() {
+    fun `new message restore sheet offer and actions are reachable above a landscape keyboard at font scale 1_3`() {
         val f = PrivateMessageComposeChromeFixture()
         f.state = f.state.copy(recipients = "alice", subject = "Sujet privé",
             recipientState = EditorRecipientState(listOf("alice")), restorableDraft = "Brouillon à restaurer")
         val picker = mockk<SmileyPickerController>(relaxed = true)
         every { picker.state } returns MutableStateFlow<SmileyPickerState>(SmileyPickerState.Hidden)
-        assertCompactRestoreRow(1.3f) {
+        assertCompactRestoreSheet(1.3f) {
             PrivateMessageComposeContent(f.state, f.body, InputTransformation {}, f.recipients, f.subject,
                 f.actions, picker, chromeEvents = f.events, chromeMemory = f.memory,
                 windowMetrics = EditorWindowMetrics(360.dp, 0.dp, 0.dp))
         }
     }
 
-    /**
-     * Gate R1b minors r1 C1, as the post and topic: a 760 × 360 dp landscape with a 190 dp keyboard leaves the ↺ panel
-     * about 100 dp of viewport. At this compact height the offer takes the rest of the actions' row: the whole sentence
-     * and both labels stay in view, each action inside the window above the keyboard. Stacked, both fall below.
-     */
-    private fun assertCompactRestoreRow(fontScale: Float, content: @Composable () -> Unit) {
+    /** The expanded sheet scrolls the whole offer and both 48 dp actions above the landscape IME. */
+    private fun assertCompactRestoreSheet(fontScale: Float, content: @Composable () -> Unit) {
         lateinit var view: View
         lateinit var density: Density
+        RuntimeEnvironment.setFontScale(fontScale) // Before any sheet's dialog window is created.
         compose.setContent {
             view = LocalView.current
             density = LocalDensity.current
@@ -288,27 +298,29 @@ class PrivateMessageEditorLayoutTest {
                 RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) { content() }
             }
         }
+        openRestore()
         compose.runOnIdle {
             val ime = with(density) { LANDSCAPE_KEYBOARD.roundToPx() }
-            ViewCompat.dispatchApplyWindowInsets(view, WindowInsetsCompat.Builder()
+            val insets = WindowInsetsCompat.Builder()
                 .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, ime))
-                .setVisible(WindowInsetsCompat.Type.ime(), true).build())
+                .setVisible(WindowInsetsCompat.Type.ime(), true).build()
+            ViewCompat.dispatchApplyWindowInsets(view, insets)
+            // ModalBottomSheet owns a separate window; activity insets alone cannot exercise it.
+            ViewCompat.dispatchApplyWindowInsets(ShadowDialog.getLatestDialog().window!!.decorView, insets)
         }
-        openRestore()
-        val offer = assertOfferLaidOutWhole(fontScale)
+        compose.onAllNodesWithText(RESTORE_OFFER, useUnmergedTree = true).assertCountEquals(1)
+        val offer = assertOfferLaidOutWhole(fontScale).performScrollTo().assertIsDisplayed()
         val offerBounds = offer.getUnclippedBoundsInRoot()
         assertEquals("The offer must be entirely in view", offerBounds, offer.getBoundsInRoot())
-        val keyboardTop = compose.onRoot().getUnclippedBoundsInRoot().bottom - LANDSCAPE_KEYBOARD
-        var previousRight = offerBounds.right
+        val keyboardTop = compose.onNode(isDialog()).getUnclippedBoundsInRoot().bottom - LANDSCAPE_KEYBOARD
         for (label in listOf("Restaurer", "Ignorer")) {
-            val bounds = compose.onNodeWithText(label).assertHeightIsAtLeast(48.dp).getUnclippedBoundsInRoot()
+            val bounds = compose.onNodeWithText(label).performScrollTo().assertIsDisplayed()
+                .assertHeightIsAtLeast(48.dp).getUnclippedBoundsInRoot()
             assertTrue("$label must stay in the window above the keyboard", bounds.bottom <= keyboardTop)
             val text = compose.onNodeWithText(label, useUnmergedTree = true)
             assertEquals("$label must be entirely in view", text.getUnclippedBoundsInRoot(), text.getBoundsInRoot())
-            assertEquals("$label must share the offer's row", offerBounds.centerY, bounds.centerY, 1f)
-            assertTrue("$label must follow the offer and the previous action", bounds.left >= previousRight)
-            previousRight = bounds.right
         }
+        assertDraftActionsFullyVisible()
     }
 
     /** The offer is laid out whole at [fontScale]: no line cap, no ellipsis, every character. */
@@ -355,11 +367,11 @@ class PrivateMessageEditorLayoutTest {
             }
         }
         if (openRestore) openComposeRestore()
-        // An already open panel remains readable while submission disables its controls.
+        // An already open sheet remains readable while submission disables its controls.
         compose.runOnIdle { f.state = f.state.copy(submission = submission) }
     }
 
-    /** At this compact height the offer shares the actions' row; scroll the panel to them, as the reply at 200 dp. */
+    /** Scroll the expanded sheet to its actions, including on a 200 dp window. */
     private fun openComposeRestore() {
         openRestore()
         compose.onNodeWithText("Restaurer").performScrollTo()
@@ -381,7 +393,10 @@ class PrivateMessageEditorLayoutTest {
         val unclippedBounds = action.getUnclippedBoundsInRoot()
         assertEquals("Action $label is clipped", unclippedBounds, clippedBounds)
 
-        val windowBounds = compose.onRoot().getUnclippedBoundsInRoot()
+        // The form-failure offer stays in the activity; the ↺ offer lives in the sheet's window.
+        val window = if (compose.onAllNodes(isDialog()).fetchSemanticsNodes().isEmpty()) compose.onRoot()
+            else compose.onNode(isDialog())
+        val windowBounds = window.getUnclippedBoundsInRoot()
         assertTrue(
             "Action $label must stay entirely inside the window",
             unclippedBounds.left >= windowBounds.left &&
@@ -400,5 +415,3 @@ private const val RESTORE_OFFER = "Un brouillon non envoyé a été retrouvé."
 
 /** Same keyboard as the post and topic landscape restore checks (EditorScreenLayoutTest). */
 private val LANDSCAPE_KEYBOARD = 190.dp
-
-private val DpRect.centerY: Float get() = ((top + bottom) / 2).value

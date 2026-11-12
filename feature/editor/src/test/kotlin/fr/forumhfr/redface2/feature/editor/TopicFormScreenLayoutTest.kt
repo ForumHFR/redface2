@@ -34,13 +34,13 @@ import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
-import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performScrollTo
@@ -145,14 +145,15 @@ class TopicFormScreenLayoutTest {
         fixture.state = fixture.state.copy(restorableDraft = "Brouillon", isLoadingForm = true)
         compose.setContent { Content() }
         compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
-        // Panel focus follows the post's SystemDefined close button contract.
+        compose.onNode(isDialog()).assertExists()
+        compose.onNodeWithTag("editor-draft-offer-sheet").assertIsDisplayed()
         compose.runOnIdle { inputMode.requestInputMode(InputMode.Keyboard) }
         val restore = compose.onNodeWithText("Restaurer").assertHeightIsAtLeast(48.dp)
         val discard = compose.onNodeWithText("Ignorer").assertHeightIsAtLeast(48.dp)
         for (action in listOf(restore, discard)) {
             val bounds = action.getUnclippedBoundsInRoot()
             assertEquals(bounds, action.getBoundsInRoot())
-            val window = compose.onRoot().getUnclippedBoundsInRoot()
+            val window = compose.onNode(isDialog()).getUnclippedBoundsInRoot()
             assertTrue(bounds.left >= window.left)
             assertTrue(bounds.top >= window.top)
             assertTrue(bounds.right <= window.right)

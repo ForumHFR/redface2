@@ -10,6 +10,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.ui.editor.EditorDraftOfferSheet
 import fr.forumhfr.redface2.core.ui.editor.EditorEventDetails
 import fr.forumhfr.redface2.core.ui.editor.EditorHeaderPanel
 import fr.forumhfr.redface2.core.ui.editor.EditorOptions
@@ -25,10 +26,7 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.post.PostMediaDiskCachePolicy
 
-/**
- * EditorScaffold.overlay keeps the body in composition with its original viewport (C7).
- * [compactHeight] is the host's EditorWindowMetrics.compactHeight, the scaffold's own signal.
- */
+/** EditorScaffold.overlay keeps the body in composition with its original viewport (C7). */
 @Composable
 @Suppress("LongParameterList") // Live input owners and overlay slots, without private-text savers.
 internal fun PrivateMessageComposeChromeSurfaces(
@@ -38,7 +36,6 @@ internal fun PrivateMessageComposeChromeSurfaces(
     subject: EditorSubjectInput,
     smileys: SmileyPickerController,
     onReturnToBody: () -> Unit,
-    compactHeight: Boolean,
     body: @Composable () -> Unit,
 ) {
     val source = adapter.state.source
@@ -51,8 +48,12 @@ internal fun PrivateMessageComposeChromeSurfaces(
     }
     EditorEventDetails(adapter.detail, bodyState, adapter::closeDetails, adapter::reload,
         { adapter.returnToBody(onReturnToBody) }, onDismiss = adapter::dismissDetails, body = {
-            ComposeHeader(adapter, bodyState, recipients, subject, onReturnToBody, compactHeight, body)
+            ComposeHeader(adapter, bodyState, recipients, subject, onReturnToBody, body)
         })
+    EditorDraftOfferSheet(adapter.draftOfferOpen, source.restorableDraft != null, adapter::closeDraftOffer,
+        adapter::restoreDraft, adapter::discardDraft,
+        restoreEnabled = adapter.state.restoreEnabled, discardEnabled = adapter.state.scaffold.controlsEnabled,
+        message = stringResource(R.string.messages_draft_restore_message))
     when (adapter.surface) {
         PrivateMessageComposeChromeSurface.Options -> EditorOptionsSheet(adapter::closeSurface) {
             EditorOptions(source.signatureEnabled, source.smileyDisabled, source.emailNotificationEnabled,
@@ -81,27 +82,18 @@ private fun ComposeHeader(
     recipients: EditorRecipientInput,
     subject: EditorSubjectInput,
     onReturnToBody: () -> Unit,
-    compactHeight: Boolean,
     body: @Composable () -> Unit,
 ) {
     val recipientFocus = remember { FocusRequester() }
     val subjectFocus = remember { FocusRequester() }
-    val restore = adapter.surface == PrivateMessageComposeChromeSurface.Restore
     val header = adapter.surface == PrivateMessageComposeChromeSurface.Header
     val focus = if (adapter.memory.field == PrivateMessageComposeHeaderField.Subject) subjectFocus else recipientFocus
-    EditorHeaderPanel(header || restore, stringResource(if (restore) R.string.messages_draft_restore_title
-        else R.string.messages_compose_header), bodyState, adapter::closeSurface,
+    EditorHeaderPanel(header, stringResource(R.string.messages_compose_header), bodyState, adapter::closeSurface,
         { adapter.returnToBody(onReturnToBody) }, initialFocusRequester = focus.takeIf { header }, body = body) {
-        // Same short title and uncapped offer as the reply's ↺ panel (gate C4 r2, minor 2).
-        if (restore) {
-            MessageDraftRestoreChoice(adapter::restoreDraft, adapter::discardDraft, adapter.state.restoreEnabled,
-                compactHeight)
-        } else {
-            EditorRecipientField(adapter.state.source.recipientState, recipients, { subjectFocus.requestFocus() },
-                Modifier.focusRequester(recipientFocus), enabled = adapter.state.scaffold.controlsEnabled)
-            EditorSubjectField(adapter.state.source.subject, subject,
-                Modifier.fillMaxWidth().focusRequester(subjectFocus), enabled = adapter.state.scaffold.controlsEnabled)
-        }
+        EditorRecipientField(adapter.state.source.recipientState, recipients, { subjectFocus.requestFocus() },
+            Modifier.focusRequester(recipientFocus), enabled = adapter.state.scaffold.controlsEnabled)
+        EditorSubjectField(adapter.state.source.subject, subject,
+            Modifier.fillMaxWidth().focusRequester(subjectFocus), enabled = adapter.state.scaffold.controlsEnabled)
     }
 }
 

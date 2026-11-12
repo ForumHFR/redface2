@@ -6,8 +6,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.res.stringResource
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.ui.editor.EditorDraftOfferSheet
 import fr.forumhfr.redface2.core.ui.editor.EditorEventDetails
-import fr.forumhfr.redface2.core.ui.editor.EditorHeaderPanel
 import fr.forumhfr.redface2.core.ui.editor.EditorOptions
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsLabels
 import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
@@ -16,10 +16,7 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 
-/**
- * Mounted around the live field, like the post: panels hide it without losing its viewport/undo.
- * [compactHeight] is the host's EditorWindowMetrics.compactHeight, the scaffold's own signal.
- */
+/** Mounted around the live field, like the post: panels hide it without losing its viewport/undo. */
 @Composable
 @Suppress("LongParameterList") // Live field, picker and the scaffold's focus callback are separate ports.
 internal fun PrivateMessageReplyChromeSurfaces(
@@ -28,20 +25,15 @@ internal fun PrivateMessageReplyChromeSurfaces(
     smileys: SmileyPickerController,
     autoOpenRecipients: Boolean,
     onReturnToBody: () -> Unit,
-    compactHeight: Boolean,
     body: @Composable () -> Unit,
 ) {
     // ED-45/170: only the detail's Masquer may acknowledge; its closing, Back and reload stay visual.
     EditorEventDetails(adapter.detail, bodyState, adapter::closeDetails, adapter::reload,
-        { adapter.returnToBody(onReturnToBody) }, onDismiss = adapter::dismissDetails, body = {
-            // Short title: the offer sentence appears once, in the panel body (gate R1b R3, minor 2).
-            EditorHeaderPanel(adapter.surface == PrivateMessageReplyChromeSurface.Restore,
-                stringResource(R.string.messages_draft_restore_title), bodyState, adapter::closeSurface,
-                { adapter.returnToBody(onReturnToBody) }, body = body) {
-                MessageDraftRestoreChoice(adapter::restoreDraft, adapter::discardDraft, adapter.state.restoreEnabled,
-                    compactHeight)
-            }
-        })
+        { adapter.returnToBody(onReturnToBody) }, onDismiss = adapter::dismissDetails, body = body)
+    EditorDraftOfferSheet(adapter.draftOfferOpen, adapter.state.source.restorableDraft != null,
+        adapter::closeDraftOffer, adapter::restoreDraft, adapter::discardDraft,
+        restoreEnabled = adapter.state.restoreEnabled, discardEnabled = adapter.state.scaffold.controlsEnabled,
+        message = stringResource(R.string.messages_draft_restore_message))
     PrivateMessageReplyChromeSheets(adapter, autoOpenRecipients, onReturnToBody)
     if (adapter.surface == PrivateMessageReplyChromeSurface.Smileys && adapter.state.canInsert) {
         val picker = smileys.state.collectAsStateWithLifecycle().value as? SmileyPickerState.Open

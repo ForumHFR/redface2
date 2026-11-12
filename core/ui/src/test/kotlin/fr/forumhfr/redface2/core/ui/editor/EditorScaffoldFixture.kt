@@ -91,7 +91,7 @@ internal class EditorScaffoldFixture(private val retainSurfaceFocus: Boolean = t
     val frozenArm = arm.copy(armedAtNanos = Long.MAX_VALUE / 4)
     val statuses = listOf(
         EditorAppBarStatus(R.drawable.ic_editor_quote, "12 citations", { calls += "quotes" }, 12),
-        EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon retrouvé", { calls += "restore" }),
+        EditorAppBarStatus(R.drawable.ic_ms_restore_page, "Brouillon retrouvé", { calls += "restore" }),
     )
 
     @Suppress("LongParameterList") // Independent inset edges and visibility, including a floating IME.

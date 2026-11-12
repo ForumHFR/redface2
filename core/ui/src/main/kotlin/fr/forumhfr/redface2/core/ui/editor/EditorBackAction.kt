@@ -2,7 +2,7 @@ package fr.forumhfr.redface2.core.ui.editor
 
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 
-enum class EditorSheet { Smileys, Options }
+enum class EditorSheet { Smileys, Options, DraftOffer }
 
 /** Snapshot of visible layers; the host keeps dispatchers, focus, and saving responsibilities. */
 data class EditorBackState(

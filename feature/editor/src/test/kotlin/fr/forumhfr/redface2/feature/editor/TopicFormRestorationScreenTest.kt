@@ -2,6 +2,7 @@ package fr.forumhfr.redface2.feature.editor
 
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.ComponentDialog
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.runtime.CompositionLocalProvider
@@ -20,6 +21,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -81,6 +83,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.android.controller.ActivityController
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.shadows.ShadowDialog
 
 /** Same Android registry / ON_STOP / measured viewport harness as the post, including topic headers. */
 @RunWith(RobolectricTestRunner::class)
@@ -223,30 +226,55 @@ class TopicFormRestorationScreenTest {
         }
     }
 
-    @Test fun closedImeAndSelectionSurviveRestorePanelRecreationWithRetainedViewModel() {
+    @Test fun closedImeAndSelectionSurviveRestoreSheetRecreationWithRetainedViewModel() {
         store.preload(draftKey(TopicFormMode.EditFirstPost), EditorDraftStore.Draft("Brouillon", "Titre"))
         val owner = host().get()
         val model = editor(owner, TopicFormMode.EditFirstPost)
         show(owner, model)
         compose.onNode(hasSetTextAction()).assertIsFocused()
-        compose.runOnIdle {
+        val entry = compose.runOnIdle {
             model.bodyFieldState.edit { selection = TextRange(8, 2) }
             ViewCompat.dispatchApplyWindowInsets(view, WindowInsetsCompat.Builder()
                 .setInsets(WindowInsetsCompat.Type.ime(), Insets.NONE)
                 .setVisible(WindowInsetsCompat.Type.ime(), false).build())
+            sessions
         }
         compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
-        compose.onNode(hasSetTextAction()).assertDoesNotExist()
+        compose.onNode(isDialog()).assertExists()
+        compose.onNodeWithTag("editor-draft-offer-sheet").assertIsDisplayed()
+        // ED-80/ED-86: the sheet owns its own window, as Options does. Until a recreation the body keeps
+        // its node, its per-window focus and the session it already had (Robolectric does not move window
+        // focus to the dialog). What must hold is no new input session and a keyboard left closed.
         val before = compose.runOnIdle {
+            assertEquals(TopicFormChromeSurface.Restore, model.chromeMemory.host.surface)
+            assertEquals(0, model.chromeMemory.host.returnGeneration)
             assertFalse(model.chromeMemory.host.focus.imeBeforeSurface)
-            assertFalse(inputActive)
+            assertEquals(entry, sessions)
             sessions.also { displayed = host().get() to model }
         }
-        compose.onNode(hasSetTextAction()).assertDoesNotExist()
-        compose.runOnIdle { back.onBackPressed() }
+        compose.onNode(isDialog()).assertExists()
+        compose.onNodeWithTag("editor-draft-offer-sheet").assertIsDisplayed()
+        compose.onNode(hasSetTextAction(), useUnmergedTree = true).assertIsNotFocused()
+        compose.runOnIdle {
+            assertEquals(TopicFormChromeSurface.Restore, model.chromeMemory.host.surface)
+            assertEquals(0, model.chromeMemory.host.returnGeneration)
+            assertFalse(inputActive)
+            assertEquals(before, sessions)
+            (ShadowDialog.getLatestDialog() as ComponentDialog).onBackPressedDispatcher.onBackPressed()
+        }
+        compose.onNode(isDialog()).assertDoesNotExist()
         compose.onNode(hasSetTextAction()).assertIsFocused()
         compose.runOnIdle {
+            assertNull(model.chromeMemory.host.surface)
+            assertEquals(1, model.chromeMemory.host.returnGeneration)
             assertEquals(TextRange(8, 2), model.bodyFieldState.selection)
+            assertEquals(before, sessions)
+            assertFalse(inputActive)
+        }
+        compose.mainClock.advanceTimeBy(600L)
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            assertEquals(1, model.chromeMemory.host.returnGeneration)
             assertEquals(before, sessions)
             assertFalse(inputActive)
         }

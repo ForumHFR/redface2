@@ -77,15 +77,19 @@ internal class PostEditorChromeEvents : EditorHostEvents {
     // ED-44 can acknowledge the notice while its open offer still awaits a decision.
     fun isPendingQuoteEvent(key: EventKey): Boolean = key == pendingQuoteEvent
 
+    fun acknowledgePendingQuote() {
+        pendingQuoteEvent?.let { collector.dispatch(EditorEventInput.Acknowledge(it)) }
+    }
+
     private fun observePendingQuote(current: PostEditorState) {
         val waiting = current.isQuoteAwaitingDraftDecision && state.session.owner != null
         if (waiting && !quoteAwaitingDecision) {
             // ED-43: waiting for a decision is Information, below errors and active operations.
-            // ED-44: normal information acknowledgement/next-gesture rules apply; ED-132 also
-            // retires this exact notice when its condition ends. It must never outlive the offer.
+            // The next gesture or the accessible five-second timeout acknowledges only this notice;
+            // ED-132 also retires its exact key when the offer ends. Q still needs a draft decision.
             // The shared event control announces Information with a polite live region (ED-95).
-            pendingQuoteEvent = collector.information(EditorText(R.string.editor_quote_pending),
-                EditorText(R.string.editor_quote_pending))
+            pendingQuoteEvent = collector.information(EditorText(R.string.editor_quote_pending_event),
+                EditorText(R.string.editor_quote_pending), timeoutMillis = 5_000)
         } else if (!waiting) {
             pendingQuoteEvent?.let { collector.dispatch(EditorEventInput.Acknowledge(it)) }
             pendingQuoteEvent = null

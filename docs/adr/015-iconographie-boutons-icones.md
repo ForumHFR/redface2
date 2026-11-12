@@ -68,8 +68,9 @@ Drawables de la famille : `ic_arrow_back`, `ic_chevron_left`, `ic_chevron_right`
   une flèche, plus épais et cohérent — c'est l'effet recherché ;
 - coût : maintenir les drawables à la main (pas de dépendance `material-icons`, dont c'était
   l'objectif de la règle detekt) ;
-- les icônes denses préexistantes (`ic_ms_*`, Material Symbols recadrés grille 960, p.ex.
-  `ic_ms_edit_square` du shell réglages #494) ne sont **pas** retracées en stroke : ce sont des
+- les icônes denses `ic_ms_*` (Material Symbols recadrés grille 960), préexistantes comme
+  `ic_ms_edit_square` du shell réglages #494 ou ajoutées depuis sur décision du mainteneur, comme
+  `ic_ms_restore_page` (offre de restauration de l'éditeur, #1450, 11/11/2026), ne sont **pas** retracées en stroke : ce sont des
   pictogrammes pleins, pas des boutons-icônes simples ; elles peuvent toujours passer par
   `RedfaceVectorIcon` pour la taille/a11y.
 

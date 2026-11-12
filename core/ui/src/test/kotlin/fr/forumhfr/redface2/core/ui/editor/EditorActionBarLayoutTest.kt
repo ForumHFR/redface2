@@ -83,7 +83,7 @@ class EditorActionBarLayoutTest {
     fun `ED25 ED30 event reserve masks fixed slots before shrinking the summary`() {
         host.compact.value = true; host.header.value = true; host.scale.value = 1.3f; host.width.value = 760.dp
         host.firstStatus.value = EditorAppBarStatus(R.drawable.ic_editor_quote, "12 citations", {}, 12)
-        host.secondStatus.value = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon retrouvé", {})
+        host.secondStatus.value = EditorAppBarStatus(R.drawable.ic_ms_restore_page, "Brouillon retrouvé", {})
         host.bar.value = EditorBarState(EditorBarMode.Format); compose.setContent { host.Content() }
         val preview = compose.onNodeWithContentDescription("Aperçu")
         assertTrue(preview.targetBounds().right <= bounds("editor-bar-scroll").left)
@@ -123,7 +123,7 @@ class EditorActionBarLayoutTest {
     fun `ED44 first gesture only acknowledges information in fixed and overflow locations`() {
         host.compact.value = true; host.header.value = true; host.scale.value = 1.3f
         host.firstStatus.value = EditorAppBarStatus(R.drawable.ic_editor_quote, "Citations", { host.calls += "quotes" })
-        host.secondStatus.value = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon",
+        host.secondStatus.value = EditorAppBarStatus(R.drawable.ic_ms_restore_page, "Brouillon",
             { host.calls += "draft" })
         compose.setContent { host.Content() }
         listOf(760.dp, headerBoundary() - 1.dp).forEach { width ->
@@ -160,7 +160,7 @@ class EditorActionBarLayoutTest {
     fun `ED25 ED30 events mask lower priorities and retained slots never shift through acknowledgement`() {
         host.compact.value = true; host.header.value = true; host.scale.value = 1.3f
         host.firstStatus.value = EditorAppBarStatus(R.drawable.ic_editor_quote, "12 citations", {}, 12)
-        host.secondStatus.value = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon retrouvé", {})
+        host.secondStatus.value = EditorAppBarStatus(R.drawable.ic_ms_restore_page, "Brouillon retrouvé", {})
         compose.setContent { host.Content() }
         val labels = listOf("Titre et sous-catégorie", "Aperçu", "12 citations", "Brouillon retrouvé")
         listOf(1f, 1.3f).forEach { scale ->
@@ -223,7 +223,7 @@ class EditorActionBarLayoutTest {
         host.bar.value = EditorBarState(EditorBarMode.Format); compose.setContent { host.Content() }
         val tags = listOf("editor-bar-FirstStatus", "editor-bar-SecondStatus")
         val statuses = listOf(EditorAppBarStatus(R.drawable.ic_editor_quote, "Citations", {}, 12),
-            EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon", {}))
+            EditorAppBarStatus(R.drawable.ic_ms_restore_page, "Brouillon", {}))
         val ids = tags.map { compose.onNodeWithTag(it, useUnmergedTree = true).fetchSemanticsNode().id }
         listOf(false to false, false to true, true to true, true to false, false to false).forEach { (a, b) ->
             compose.runOnIdle {
@@ -293,7 +293,7 @@ class EditorActionBarLayoutTest {
     fun `ED91 ED92 ED133 full summaries fit the 360 dp bar in every mode height and supported scale`() {
         host.header.value = true
         host.firstStatus.value = EditorAppBarStatus(R.drawable.ic_editor_quote, "12 citations", {}, 12)
-        host.secondStatus.value = EditorAppBarStatus(R.drawable.ic_editor_restore, "Brouillon retrouvé", {})
+        host.secondStatus.value = EditorAppBarStatus(R.drawable.ic_ms_restore_page, "Brouillon retrouvé", {})
         compose.setContent { host.Content() }
         val events = editorErrorSamples.map { controlEvent(EditorEventContent.Problem(it)) } + listOf(
             controlEvent(EditorEventContent.InProgress(EditorText(R.string.editor_event_sending))),

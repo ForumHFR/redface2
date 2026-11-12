@@ -101,21 +101,19 @@ fun EditorActionBar(
     val mode = if (armed) EditorBarMode.Normal else state.visibleMode(event)
     val metrics = EditorChromeMetrics(compactHeight)
     val height = metrics.actionBarHeight
-    val normalScroll = rememberScrollState()
-    val formatScroll = rememberScrollState()
-    val colorScroll = rememberScrollState()
-    val imageScroll = rememberScrollState()
+    val scroll = rememberEditorBarScroll(mode)
     val statuses = listOf(firstStatus, secondStatus)
     val statusWidths = editorBarStatusWidths(statuses)
     val focus = rememberEditorBarFocus(mode, masked = armed || event != null)
     // Bar gestures settle focus themselves; a Back reduced by the host is restored on the transition.
     val own = actions.copy(onGesture = focus.ownGestures(actions.onGesture))
-    val external: (() -> Unit) -> Unit = { action ->
-        if (!consumeEditorBarInformation(event, actions.onEvent)) {
+    fun open(action: () -> Unit, opensOnInformation: (EventKey) -> Boolean = { false }) {
+        if (!consumeEditorBarInformation(event, actions.onEvent, opensOnInformation)) {
             own.onGesture(EditorBarGesture.OpenSurface)
             action()
         }
     }
+    val external: (() -> Unit) -> Unit = { open(it) }
     val insert: (BbcodeAction) -> Unit = { action -> actions.onBbcode(action); actions.onBodyFocus() }
     val back = {
         focus.navigateBack(mode) { own.onGesture(EditorBarGesture.Back) }
@@ -124,12 +122,6 @@ fun EditorActionBar(
     BackHandler(!armed && (backAction == EditorBackAction.CloseSublevel ||
         backAction == EditorBackAction.CloseFormat), onBack = back)
     val enabled = controlsEnabled && insertionsEnabled && !uploading
-    val scroll = when (mode) {
-        EditorBarMode.Normal -> normalScroll
-        EditorBarMode.Format -> formatScroll
-        EditorBarMode.Color -> colorScroll
-        EditorBarMode.Image -> imageScroll
-    }
     val slot: @Composable (EditorFixedSlot, Boolean) -> Unit = { fixed, visible ->
         EditorBarFixedSlot(fixed, statuses, headerLabel, onOpenHeader,
             {
@@ -137,7 +129,8 @@ fun EditorActionBar(
                     focus.ownGestures { onPreviewWithoutImeChange() }(EditorBarGesture.OpenSurface)
                 } else external(actions.onPreview)
             },
-            previewVisible, controlsEnabled, visible, compactHeight, external)
+            previewVisible, controlsEnabled, visible, compactHeight, external,
+            onStatus = { open(it.onClick, it.opensOnInformation) })
     }
     val format: @Composable () -> Unit = {
         val expanded = mode == EditorBarMode.Format
@@ -175,6 +168,21 @@ fun EditorActionBar(
 }
 
 @Composable
+private fun rememberEditorBarScroll(mode: EditorBarMode): ScrollState {
+    // Keep every mode's scroll state mounted while another mode is visible.
+    val normal = rememberScrollState()
+    val format = rememberScrollState()
+    val color = rememberScrollState()
+    val image = rememberScrollState()
+    return when (mode) {
+        EditorBarMode.Normal -> normal
+        EditorBarMode.Format -> format
+        EditorBarMode.Color -> color
+        EditorBarMode.Image -> image
+    }
+}
+
+@Composable
 private fun editorBarStatusWidths(statuses: List<EditorAppBarStatus?>): List<Dp?> {
     return statuses.map { status -> status?.let {
         maxOf(EditorChromeMetrics.minimumTargetSize, measureEditorStatusBadge(it.badgeCount).width)
@@ -189,7 +197,12 @@ private fun editorBarSubmitState(
     enabled = submit.enabled && !uploading && !loadingForm && !submit.showProgress,
 )
 
-internal fun consumeEditorBarInformation(event: EditorEvent?, onEvent: (EventKey, EditorEventAction) -> Unit): Boolean {
+internal fun consumeEditorBarInformation(
+    event: EditorEvent?,
+    onEvent: (EventKey, EditorEventAction) -> Unit,
+    opensOnInformation: (EventKey) -> Boolean = { false },
+): Boolean {
+    if (event != null && opensOnInformation(event.key)) return false
     val information = event?.content is EditorEventContent.Information ||
         (event?.content as? EditorEventContent.Problem)?.error?.errorClass == EditorErrorClass.Information
     if (information && event != null) onEvent(event.key, EditorEventAction.Dismiss)
@@ -245,6 +258,7 @@ private fun EditorBarFixedSlot(
     onPreview: () -> Unit, previewVisible: Boolean, enabled: Boolean, visible: Boolean,
     compactHeight: Boolean,
     external: (() -> Unit) -> Unit,
+    onStatus: (EditorAppBarStatus) -> Unit,
 ) {
     when (fixed) {
         EditorFixedSlot.Header -> EditorBarIcon(R.drawable.ic_editor_header, headerLabel,
@@ -253,8 +267,8 @@ private fun EditorBarFixedSlot(
             Modifier.editorBarActivation(enabled, onPreview), enabled = enabled, compactHeight = compactHeight)
         else -> {
             val status = statuses[if (fixed == EditorFixedSlot.FirstStatus) 0 else 1]
-            EditorStatusIcon(status?.iconRes ?: R.drawable.ic_editor_restore, status?.label.orEmpty(),
-                { status?.let { external(it.onClick) } }, Modifier.testTag("editor-bar-${fixed.name}"),
+            EditorStatusIcon(status?.iconRes ?: R.drawable.ic_ms_restore_page, status?.label.orEmpty(),
+                { status?.let(onStatus) }, Modifier.testTag("editor-bar-${fixed.name}"),
                 badgeCount = status?.badgeCount,
                 enabled = enabled && status?.enabled == true, visible = visible && status != null,
                 compactHeight = compactHeight)

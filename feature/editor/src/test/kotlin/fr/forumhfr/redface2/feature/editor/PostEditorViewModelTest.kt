@@ -4688,13 +4688,43 @@ class PostEditorViewModelTest {
         assertPendingQuoteOfferDecision(PostEditorIntent.DraftDiscardRequested, "")
     }
 
-    private fun assertPendingQuoteOfferDecision(decision: PostEditorIntent, suffix: String) {
+    @Test
+    fun `1450 pending event offer sheet Restore delivers persisted Q exactly once`() = runTest {
+        assertPendingQuoteOfferDecision(PostEditorIntent.DraftRestoreRequested, "offered D", throughEvent = true)
+    }
+
+    @Test
+    fun `1450 pending event offer sheet Ignore delivers persisted Q exactly once`() = runTest {
+        assertPendingQuoteOfferDecision(PostEditorIntent.DraftDiscardRequested, "", throughEvent = true)
+    }
+
+    private fun assertPendingQuoteOfferDecision(
+        decision: PostEditorIntent,
+        suffix: String,
+        throughEvent: Boolean = false,
+    ) {
         val quote = "[quotemsg=101]requested quote[/quotemsg]"
         replyRepository.formResultsByNumrep = mapOf(101 to Result.success(authenticatedForm(quote)))
         val vm = newPendingQuoteOfferViewModel()
         settleBody()
         assertPendingQuoteNotice(vm, expected = true)
-        vm.dispatch(decision)
+        val adapter = PostEditorChromeAdapter({ vm.state.value }, vm.bodyFieldState, vm.chromeEvents,
+            { vm.dispatch(it) }, {}, {}, vm.chromeMemory)
+        if (throughEvent) {
+            val event = vm.chromeEvents.visibleEvent!!
+            adapter.barActions.onEvent(event.key, EditorEventAction.Details)
+            assertEquals(event.key, adapter.draftOfferDetailKey)
+            // A gesture/timeout can retire the notice while its sheet still awaits the decision.
+            vm.chromeEvents.dispatch(EditorEventInput.Acknowledge(event.key))
+            assertNull(vm.chromeEvents.visibleEvent)
+            assertEquals(event.key, adapter.draftOfferDetailKey)
+        } else adapter.open(PostEditorChromeSurface.Restore)
+        assertTrue(adapter.draftOfferOpen)
+        if (decision == PostEditorIntent.DraftRestoreRequested) adapter.restoreDraft() else adapter.discardDraft()
+        assertFalse(adapter.draftOfferOpen)
+        assertNull(adapter.detail)
+        assertTrue(adapter.consumeReturn())
+        assertFalse(adapter.consumeReturn())
         vm.dispatch(decision) // A retained callback must not deliver a second copy.
         settleBody()
         val expected = if (suffix.isEmpty()) "$quote\n" else "$quote\n\n$suffix"
@@ -5098,7 +5128,7 @@ class PostEditorViewModelTest {
 
     private fun assertPendingQuoteNotice(vm: PostEditorViewModel, expected: Boolean) {
         assertEquals(expected, vm.chromeEvents.state.events.any {
-            it.summary == EditorText(R.string.editor_quote_pending)
+            it.summary == EditorText(R.string.editor_quote_pending_event)
         })
     }
 

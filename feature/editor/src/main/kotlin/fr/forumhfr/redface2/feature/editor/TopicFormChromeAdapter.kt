@@ -49,7 +49,8 @@ internal class TopicFormChromeAdapter(
         EditorHostSurfaces(TopicFormChromeSurface.Smileys, TopicFormChromeSurface.Options,
             TopicFormChromeSurface.Picker, imageUrl = TopicFormChromeSurface.Url,
             header = TopicFormChromeSurface.Header,
-            returnsToBody = { it !in setOf(TopicFormChromeSurface.Header, TopicFormChromeSurface.Restore) }),
+            returnsToBody = { it != TopicFormChromeSurface.Header },
+            draftOffer = TopicFormChromeSurface.Restore),
         launchPicker, openSmileys, memory.host, openSmileySearch,
     )
     private fun completeHeader(cause: EditorCause) {
@@ -69,12 +70,12 @@ internal class TopicFormChromeAdapter(
     fun restoreDraft() {
         val headerWritable = state.headerEnabled && !state.headerReadOnly
         val enabled = headerWritable && !source().isLoadingForm && !source().isUploading
-        if (enabled) { onIntent(TopicFormIntent.DraftRestoreRequested); host.closeSurface() }
+        if (enabled) { onIntent(TopicFormIntent.DraftRestoreRequested); host.closeDraftOffer() }
     }
     fun discardDraft() {
         if (state.scaffold.controlsEnabled) {
             onIntent(TopicFormIntent.DraftDiscardRequested)
-            host.closeSurface()
+            host.closeDraftOffer()
         }
     }
     fun back(layers: EditorBackState = EditorBackState(), onLayerBack: (EditorBackAction) -> Unit = {}) {
@@ -102,7 +103,7 @@ internal class TopicFormChromeAdapter(
             { openHeader() }, enabled = state.scaffold.controlsEnabled,
         ),
         secondStatus = if (source().restorableDraft == null && source().restorableSubject == null) null
-        else EditorAppBarStatus(UiR.drawable.ic_editor_restore, stringResource(UiR.string.editor_status_restore),
+        else EditorAppBarStatus(UiR.drawable.ic_ms_restore_page, stringResource(UiR.string.editor_status_restore),
             { host.open(TopicFormChromeSurface.Restore) }, enabled = state.scaffold.controlsEnabled),
     )
     fun option(intent: TopicFormIntent) {
