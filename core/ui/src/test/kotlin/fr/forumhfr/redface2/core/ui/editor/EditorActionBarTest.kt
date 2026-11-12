@@ -15,6 +15,7 @@ import androidx.compose.ui.test.assertAll
 import androidx.compose.ui.test.assertAny
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHasNoClickAction
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.click
@@ -24,6 +25,7 @@ import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -154,7 +156,7 @@ class EditorActionBarTest {
         compose.runOnIdle { host.bar.value = EditorBarState(EditorBarMode.Format, host.arm) }
         compose.onNodeWithContentDescription("Gras").assertDoesNotExist()
         compose.onNodeWithContentDescription("Mise en forme").assertDoesNotExist()
-        compose.onNodeWithText("Confirmer").assertExists()
+        compose.onNodeWithContentDescription("Confirmer").assertExists()
         compose.runOnIdle { host.bar.value = host.bar.value.copy(arm = null) }
         compose.onNodeWithContentDescription("Gras").assertExists(); assertFalse(host.calls.contains("disarm"))
     }
@@ -209,9 +211,86 @@ class EditorActionBarTest {
         host.event.value = controlEvent(
             EditorEventContent.Information(EditorText(R.string.editor_event_already_quoted)))
         val key = host.event.value!!.key; compose.setContent { host.Content() }
-        compose.onNodeWithText("Envoyer").performTouchInput { click() }
+        compose.onNodeWithContentDescription("Envoyer").performTouchInput { click() }
         assertTrue(host.calls.isEmpty()); assertEquals(listOf(key to EditorEventAction.Dismiss), host.eventActions)
-        compose.onNodeWithText("Envoyer").performTouchInput { click() }; assertEquals(listOf("send"), host.calls)
+        compose.onNodeWithContentDescription("Envoyer").performTouchInput { click() }
+        assertEquals(listOf("send"), host.calls)
+    }
+
+    @Test
+    fun `ED34 ED90 submit keeps its named live button and focus while swapping decorative icons`() {
+        compose.setContent { host.Content() }
+        compose.runOnIdle { assertTrue(host.inputMode.requestInputMode(InputMode.Keyboard)) }
+        val button = compose.onNodeWithTag("editor-bar-submit-shape")
+        button.requestFocus().assertIsFocused()
+        val id = button.fetchSemanticsNode().id
+        listOf(false, true, false).forEach { armed ->
+            compose.runOnIdle { host.bar.value = EditorBarState(arm = if (armed) host.frozenArm else null) }
+            val label = if (armed) "Confirmer" else "Envoyer"
+            button.assert(hasContentDescription(label)).assertIsFocused().assert(
+                SemanticsMatcher.expectValue(SemanticsProperties.StateDescription,
+                    if (armed) "Confirmation requise" else "Prêt à envoyer")).assert(
+                SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite)).assert(
+                SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
+            assertEquals(id, button.fetchSemanticsNode().id)
+            compose.onAllNodes(hasContentDescription(label) and hasClickAction()).assertCountEquals(1)
+            val icon = if (armed) "editor-bar-submit-confirm-icon" else "editor-bar-submit-send-icon"
+            val absent = if (armed) "editor-bar-submit-send-icon" else "editor-bar-submit-confirm-icon"
+            compose.onNodeWithTag(icon, useUnmergedTree = true).assertExists().assert(
+                SemanticsMatcher.keyNotDefined(SemanticsProperties.ContentDescription)).assert(
+                SemanticsMatcher.keyNotDefined(SemanticsProperties.Text))
+            compose.onNodeWithTag(absent, useUnmergedTree = true).assertDoesNotExist()
+        }
+        assertTrue(host.calls.isEmpty())
+    }
+
+    @Test
+    fun `ED34 long press shows Send tooltip without arming or sending`() = assertSubmitTooltip(armed = false)
+
+    @Test
+    fun `ED34 armed long press shows confirmation tooltip without confirming or sending`() =
+        assertSubmitTooltip(armed = true)
+
+    private fun assertSubmitTooltip(armed: Boolean) {
+        if (armed) host.bar.value = EditorBarState(arm = host.frozenArm)
+        host.event.value = controlEvent(
+            EditorEventContent.Information(EditorText(R.string.editor_event_already_quoted)))
+        val initial = host.bar.value
+        compose.setContent { host.Content() }
+        compose.onNodeWithTag("editor-bar-submit-shape").performTouchInput { longClick() }
+        compose.onNodeWithText(if (armed) "Confirmer l’envoi" else "Envoyer", useUnmergedTree = true)
+            .assertIsDisplayed()
+        compose.runOnIdle {
+            assertEquals(initial, host.bar.value)
+            assertTrue(host.calls.isEmpty())
+            assertTrue(host.eventActions.isEmpty())
+        }
+    }
+
+    @Test
+    fun `ED34 confirming through the icon still requires 400 ms on the controller clock`() {
+        var nanos = android.os.SystemClock.elapsedRealtimeNanos()
+        val controller = EditorSubmissionController(DiagnosticsClock { nanos }, host.arm.session)
+        fun sync() {
+            host.bar.value = host.bar.value.withSubmission(controller.state)
+            host.sending.value = controller.blocksBodyMutation
+        }
+        host.submitActions = ArmedSubmitActions({ host.calls += "fallback" }, {
+            if (controller.confirm(requireNotNull(host.bar.value.arm)) is SubmissionRequest.Accepted) {
+                host.calls += "post"
+            }
+            sync()
+        }, { host.calls += "legacy-disarm" }, { timeout ->
+            controller.requestSubmit(timeout, true); sync()
+        })
+        compose.setContent { host.Content() }
+        compose.onNodeWithContentDescription("Envoyer").performClick()
+        compose.runOnIdle { nanos += 399_000_000L }
+        compose.onNodeWithContentDescription("Confirmer").performClick()
+        compose.runOnIdle { assertTrue(host.calls.isEmpty()); nanos += 1_000_000L }
+        compose.onNodeWithContentDescription("Confirmer").performClick()
+        compose.onNodeWithTag("editor-bar-submit-shape").assertIsNotEnabled()
+        assertEquals(listOf("post"), host.calls)
     }
 
     @Test
@@ -234,7 +313,7 @@ class EditorActionBarTest {
             override fun calculateRecommendedTimeoutMillis(originalTimeoutMillis: Long,
                 containsIcons: Boolean, containsText: Boolean, containsControls: Boolean): Long {
                 assertEquals(4_000L, originalTimeoutMillis)
-                assertTrue(!containsIcons && containsText && containsControls)
+                assertTrue(containsIcons && containsText && containsControls)
                 return 8_000L
             }
         }
@@ -244,12 +323,13 @@ class EditorActionBarTest {
         fun state(description: String) = button.assert(
             SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, description)).assert(
             SemanticsMatcher.expectValue(SemanticsProperties.LiveRegion, LiveRegionMode.Polite))
+        state("Prêt à envoyer")
         button.requestFocus().performKeyInput { pressKey(Key.Enter) }
-        state("Confirmation requise")
+        state("Confirmation requise"); button.assertIsFocused()
         compose.runOnIdle { nanos += 4_000_000_000L; controller.expireArm(); sync() }
         state("Confirmation requise")
         compose.runOnIdle { nanos += 4_000_000_000L; controller.expireArm(); sync() }
-        state("Prêt à envoyer"); assertEquals(listOf("send:8000"), host.calls)
+        state("Prêt à envoyer"); button.assertIsFocused(); assertEquals(listOf("send:8000"), host.calls)
         button.performKeyInput { pressKey(Key.Spacebar) }
         compose.runOnIdle { host.event.value = controlEvent(
             EditorEventContent.Information(EditorText(R.string.editor_event_already_quoted))) }
@@ -297,13 +377,13 @@ class EditorActionBarTest {
         host.loading.value = true
         compose.setContent { host.Content() }; compose.onNodeWithTag("editor-bar-progress").assertExists()
         compose.onNodeWithContentDescription("Mise en forme").assertExists()
-        compose.onNodeWithText("Envoyer").assertIsNotEnabled()
+        compose.onNodeWithContentDescription("Envoyer").assertIsNotEnabled()
         compose.runOnIdle {
             host.loading.value = false; host.uploading.value = true; host.progress.value = UploadProgress(1, 3)
             host.event.value = controlEvent(EditorEventContent.Problem(EditorErrors.network))
         }
         compose.onNodeWithTag("editor-bar-progress").assertHasNoClickAction()
-        compose.onNodeWithText("Envoyer").assertIsNotEnabled()
+        compose.onNodeWithContentDescription("Envoyer").assertIsNotEnabled()
         compose.onNodeWithContentDescription("Options").assertDoesNotExist()
         compose.runOnIdle { host.event.value = controlEvent(EditorEventContent.InProgress(uploadText(2))) }
         compose.onAllNodes(hasClickAction() and hasAnyAncestor(hasTestTag("bar")))

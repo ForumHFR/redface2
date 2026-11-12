@@ -72,6 +72,14 @@ internal class EditorActionBarFixture {
     /** Captures only: armed far in the future, the decorative countdown stays at 0 whatever the scheduling. */
     val frozenArm get() = arm.copy(armedAtNanos = Long.MAX_VALUE / 4)
 
+    /** Captures only: a long decorative interval keeps 0.5 at Float precision while rendering settles. */
+    val frozenHalfArm: ArmToken get() {
+        val token = arm
+        val timeoutMillis = 8_000_000_000_000L
+        return token.copy(armedAtNanos = token.armedAtNanos - timeoutMillis * 500_000L,
+            timeoutMillis = timeoutMillis)
+    }
+
     fun finished() = controlEvent(EditorEventContent.Finished(
         EditorText(R.plurals.editor_event_images_inserted_summary, listOf(3), quantity = 3),
         accessibleSummary = EditorText(R.plurals.editor_event_images_inserted, listOf(3), quantity = 3),

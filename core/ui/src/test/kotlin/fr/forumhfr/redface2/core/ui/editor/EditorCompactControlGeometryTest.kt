@@ -14,7 +14,6 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
-import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.DpRect
 import androidx.compose.ui.unit.dp
@@ -147,15 +146,27 @@ class EditorCompactControlGeometryTest {
         val initialField = bounds("editor-scaffold-field")
         compose.onNodeWithTag("editor-bar-submit-shape", useUnmergedTree = true).assert(hasClickAction())
         assertControlBounds(submit, "editor-bar-submit-shape", visibleHeight)
+        val initialSubmit = submit.getUnclippedBoundsInRoot()
+        val initialShape = bounds("editor-bar-submit-shape")
+        assertEquals(48f, initialSubmit.width.value, 0.5f)
+        assertEquals(48f, initialSubmit.height.value, 0.5f)
+        assertEquals(initialSubmit, compose.onNodeWithTag("editor-bar-submit-shape").targetBounds())
+        assertEquals(visibleHeight, initialShape.width.value, 0.5f)
+        assertEquals((initialSubmit.left + initialSubmit.width / 2).value,
+            (initialShape.left + initialShape.width / 2).value, 0.5f)
+        assertTrue(compose.onNodeWithContentDescription("Mise en forme").targetBounds().right <= initialSubmit.left)
         assertControlBounds(compose.onNodeWithContentDescription("Mise en forme"),
             "editor-bar-format-shape", visibleHeight, nativeTarget = true)
         if (visibleHeight == 40f) assertCompactStatusBounds()
         show(EditorScaffoldChrome(bar = EditorBarState(arm = host.frozenArm)))
-        compose.onNodeWithText("Confirmer").assertExists()
+        compose.onNodeWithContentDescription("Confirmer").assertExists()
         assertControlBounds(submit, "editor-bar-submit-shape", visibleHeight)
+        assertEquals(initialSubmit, submit.getUnclippedBoundsInRoot())
+        assertEquals(initialShape, bounds("editor-bar-submit-shape"))
         show(EditorScaffoldChrome(event = controlEvent(EditorEventContent.Problem(EditorErrors.missingTitle))))
         assertControlBounds(submit, "editor-bar-submit-shape", visibleHeight)
         assertControlBounds(event, "editor-bar-event-shape", visibleHeight)
+        assertTrue(event.getUnclippedBoundsInRoot().right <= submit.getUnclippedBoundsInRoot().left - 8.dp)
         show(EditorScaffoldChrome(event = controlEvent(EditorEventContent.InProgress(
             EditorText(R.string.editor_event_sending)))))
         assertControlBounds(compose.onNodeWithContentDescription("Envoi…"),
