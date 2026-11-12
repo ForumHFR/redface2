@@ -246,6 +246,36 @@ class QuickReplyViewModelTest {
     }
 
     @Test
+    fun `auto-resumed C never becomes D after autosave or an uncertain send`() = runTest {
+        val store = FakeQuickReplyDraftStore(initialBody = "live composition")
+        val repository = FakeQuickReplyRepository().apply { submitException = IOException("response lost") }
+        val first = quickReplyViewModel(replyRepository = repository, draftStore = store)
+        first.onSheetOpened()
+        runCurrent()
+        first.onTextChanged(TextFieldValue("edited live composition"))
+        advanceTimeBy(AUTOSAVE_DEBOUNCE_PLUS_MS)
+        runCurrent()
+        assertTrue(store.loadOffers("xaat", EditorDraftKey.reply(23, 35421)).isEmpty())
+        first.onSubmitClicked()
+        runCurrent()
+        val attempt = store.entries.values.single().attempt
+        assertEquals(EditorDraftStore.AttemptStatus.UNCERTAIN, attempt?.status)
+        first.viewModelScope.cancel()
+
+        val recreated = quickReplyViewModel(replyRepository = repository, draftStore = store)
+        recreated.onSheetOpened()
+        runCurrent()
+        assertEquals("edited live composition", recreated.state.value.text.text)
+        assertEquals(EditorErrors.uncertain, recreated.state.value.submitError)
+        assertNull(recreated.state.value.restorableDraft)
+        assertTrue(recreated.state.value.canSubmit)
+        assertEquals(attempt, store.entries.values.single().attempt)
+        assertTrue(store.loadOffers("xaat", EditorDraftKey.reply(23, 35421)).isEmpty())
+        assertEquals(1, repository.submitCalls)
+        recreated.viewModelScope.cancel()
+    }
+
+    @Test
     fun `reopening the sheet re-seeds the field after the row changed elsewhere`() = runTest {
         // Gate #788 — the VM outlives the sheet: escalate → the full-screen editor rewrites the
         // shared #405 row → back → reopen. The row must win over the VM's cached text.
@@ -1074,6 +1104,7 @@ class QuickReplyViewModelTest {
         }
         val arms = mutableMapOf<Long, ArmToken>()
         return object : EditorSubmissionAdapter {
+            override val supportsIndependentDraftOffers = true
             override val unsupportedMutations = mapOf(
                 SubmissionBodyMutation.SMILEY to "la feuille n'a pas de picker smiley",
                 SubmissionBodyMutation.FORMAT to "la feuille n'a pas de barre de formatage",
@@ -1098,6 +1129,9 @@ class QuickReplyViewModelTest {
             override fun dismissConfirmation() = viewModel.onSubmitConfirmDismissed()
             override fun close() = viewModel.onDismissed()
             override fun completePost() { postGate.complete(Unit) }
+            override fun resolveOfferedDraft(restoring: Boolean) {
+                if (restoring) viewModel.onDraftRestoreRequested() else viewModel.onDraftDiscardRequested()
+            }
             override fun dispose() = viewModel.viewModelScope.cancel()
             override fun startUpload(): Unit = error("cas explicitement désactivé")
             override fun completeUpload(): Unit = error("cas explicitement désactivé")
@@ -1108,6 +1142,8 @@ class QuickReplyViewModelTest {
                 token?.let { arms[it.id] = it }
                 SubmissionProbe(
                     it.text.text, it.canSubmit, it.isSubmitting, false, it.confirmVisible,
+                    restoreOffered = it.restorableDraft != null,
+                    offeredBody = it.restorableDraft,
                     armId = token?.id,
                     blocksClose = it.isSubmitting,
                     error = when (it.submitError) {

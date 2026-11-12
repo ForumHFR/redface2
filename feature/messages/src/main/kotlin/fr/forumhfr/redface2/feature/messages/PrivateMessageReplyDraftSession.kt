@@ -9,6 +9,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.text.TextRange
 import androidx.lifecycle.SavedStateHandle
+import fr.forumhfr.redface2.core.domain.editor.EditorBodyProvenance
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionBinding
 import fr.forumhfr.redface2.core.ui.editor.BbcodeFormatResult
@@ -52,6 +53,9 @@ internal class PrivateMessageReplyDraftSession(
     private var lastCheckpointVersion = 0L
     private var previousBody = bodyFieldState.text.toString()
     private var bodyEditedBeforeHydration = false
+    private var restoredOfferAwaitingWrite: String? = null
+    private var mergedDraftOffer: String? = null
+    private var resolvingOffer = false
 
     init {
         submission.drafts.checkpointObserver = { draft, version, result ->
@@ -78,9 +82,15 @@ internal class PrivateMessageReplyDraftSession(
         }
         restoration.bind(owner, draftKey)
         val resolution = restoration.resolve(entry, owner, draftKey)
-        if (entry == null || submission.blocksMutation) return
+        if (submission.blocksMutation) return
+        if (resolution == EditorSessionRestore.None && !restoration.isRecreation &&
+            entry?.draft?.bodyProvenance?.isQuoteOnly(entry.draft.body) == true
+        ) submission.resolveDraftWrite(submission.drafts.discardQuoteOnly())
+        submission.drafts.offers.firstOrNull()?.let { offerDraftRestore(it.draft) }
+        if (entry == null) return
         when (resolution) {
             EditorSessionRestore.Resume, EditorSessionRestore.Uncertain -> {
+                if (resolution == EditorSessionRestore.Resume) submission.drafts.resumeContent()
                 val matching = restoration.matches(entry, owner, draftKey)
                 restoreSessionContent(entry.draft, matching)
                 if (matching) bodyFieldState.edit { selection = restoration.selection(length) }
@@ -97,7 +107,12 @@ internal class PrivateMessageReplyDraftSession(
         previousBody = draft.body
         val bodyKnown = certified || draft.body.isNotBlank()
         if (bodyKnown) restoration.decide(EditorSessionField.Body)
-        updateState { it.copy(draftHydratedFromForm = bodyKnown, restorableDraft = null) }
+        updateState {
+            it.copy(draftHydratedFromForm = bodyKnown,
+                restorableDraft = submission.drafts.offers.firstOrNull { offer ->
+                    offer.draft.body != draft.body
+                }?.draft?.body)
+        }
     }
 
     private fun offerDraftRestore(draft: EditorDraftStore.Draft) {
@@ -174,6 +189,7 @@ internal class PrivateMessageReplyDraftSession(
     /** Replace the untouched seed, retain its typed suffix, or append after other live text. */
     fun restoreOfferedDraft() {
         val snapshot = readState()
+        if (resolvingOffer) return
         val offeredBody = snapshot.restorableDraft ?: return
         val liveBody = bodyFieldState.text.toString()
         val seed = snapshot.draftHydratedContent
@@ -184,19 +200,54 @@ internal class PrivateMessageReplyDraftSession(
             typedAfterSeed != null -> offeredBody + "\n\n" + typedAfterSeed.trimStart()
             else -> liveBody.trimEnd() + "\n\n" + offeredBody
         }
-        replaceBody(body)
+        val needsMerge = mergedDraftOffer != offeredBody
+        mergedDraftOffer = offeredBody
+        restoredOfferAwaitingWrite = offeredBody
+        if (needsMerge) replaceBody(body)
         restoration.decide(EditorSessionField.Body)
         updateState { it.copy(restorableDraft = null, draftHydratedFromForm = true) }
-        scheduleAutosave()
+        resolveOffer(offeredBody, restoring = true)
     }
 
-    /** ED-170: clear the offered content through CAS, preserving a newer generation. */
+    private fun resolveOffer(body: String, restoring: Boolean = false) {
+        if (resolvingOffer) return
+        resolvingOffer = true
+        scope.launch {
+            try {
+                submission.flush(null)
+                val offer = submission.drafts.offered(body)
+                val live = bodyFieldState.text.toString()
+                val provenance = if (restoring && live.startsWith(body)) {
+                    (submission.drafts.bodyProvenance ?: EditorBodyProvenance())
+                        .copy(draftEnd = body.length, quotesEnd = body.length)
+                } else null
+                val draft = EditorDraftStore.Draft(body = live, isPrivate = true, bodyProvenance = provenance,
+                    offerToResolve = offer.takeIf { restoring })
+                val result = if (offer != null && !restoring) submission.drafts.resolveOffer(offer, draft)
+                    else submission.persist(draft)
+                submission.resolveDraftWrite(result)
+                if (result !is EditorDraftStore.StoreWriteResult.Written && !submission.drafts.invalidated) {
+                    updateState { it.copy(restorableDraft = body) }
+                } else if (result is EditorDraftStore.StoreWriteResult.Written) {
+                    if (!restoring) saved[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] =
+                        EditorDraftStore.Draft(body = body, isPrivate = true).restoreOfferFingerprint()
+                    restoredOfferAwaitingWrite = null
+                    mergedDraftOffer = null
+                }
+            } finally {
+                restoredOfferAwaitingWrite = null
+                resolvingOffer = false
+                scheduleAutosave()
+            }
+        }
+    }
+
+    /** ED-121: consume only this offer, preserving live input and any pending request. */
     fun discardOfferedDraft() {
+        if (resolvingOffer) return
         val body = readState().restorableDraft ?: return
-        saved[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] =
-            EditorDraftStore.Draft(body = body, isPrivate = true).restoreOfferFingerprint()
         updateState { it.copy(restorableDraft = null) }
-        scope.launch { submission.flush(EditorDraftStore.Draft(body = "", isPrivate = true)) }
+        resolveOffer(body)
     }
 
     /** A failed GET or an undecided offer cannot certify an unknown/placeholder body (#1574). */
@@ -207,12 +258,19 @@ internal class PrivateMessageReplyDraftSession(
         val undecidedOffer = snapshot.restorableDraft != null &&
             (liveBody.isBlank() || liveBody == snapshot.draftHydratedContent)
         if (!restoration.canCheckpoint(bodyKnown, undecidedOffer)) return null
-        return EditorDraftStore.Draft(body = liveBody, isPrivate = true)
+        val restoring = restoredOfferAwaitingWrite ?: mergedDraftOffer
+        val offer = restoring?.let(submission.drafts::offered)
+        val provenance = if (restoring != null && liveBody.startsWith(restoring)) {
+            (submission.drafts.bodyProvenance ?: EditorBodyProvenance())
+                .copy(draftEnd = restoring.length, quotesEnd = restoring.length)
+        } else null
+        return EditorDraftStore.Draft(body = liveBody, isPrivate = true, bodyProvenance = provenance,
+            offerToResolve = offer)
     }
 
     /** Debounced while visible, immediate while stopped; a stale owner never writes private content. */
     fun scheduleAutosave() {
-        if (!draftRestored) return
+        if (!draftRestored || resolvingOffer) return
         if (screenStopped) {
             if (stoppedDraft != draftSnapshot()) persistDraftNow()
         } else submission.autosave(::draftSnapshot)
@@ -249,7 +307,9 @@ internal class PrivateMessageReplyDraftSession(
     }
 
     private fun captureCheckpoint(draft: EditorDraftStore.Draft, version: Long) {
-        if (version >= lastCheckpointVersion && draft == draftSnapshot()) captureSessionCheckpoint(draft, version)
+        if (version >= lastCheckpointVersion &&
+            draft.restoreOfferFingerprint() == draftSnapshot()?.restoreOfferFingerprint()
+        ) captureSessionCheckpoint(draft, version)
     }
 
     private fun captureSessionCheckpoint(draft: EditorDraftStore.Draft, version: Long) {

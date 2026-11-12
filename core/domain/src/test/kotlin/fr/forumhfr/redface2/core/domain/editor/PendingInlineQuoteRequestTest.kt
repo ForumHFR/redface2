@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.core.domain.editor
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** #1553: durable requests contain valid, ordered coordinates in one topic scope. */
@@ -28,6 +29,23 @@ class PendingInlineQuoteRequestTest {
         for (other in listOf(otherCategory, otherTopic)) {
             assertNotEquals(first, other)
             assertThrows(IllegalArgumentException::class.java) { first.merge(other) }
+        }
+    }
+
+    @Test
+    fun `MP requests have their own key and require a reference for every ordered coordinate`() {
+        val first = PendingInlineQuoteRequest.privateMessage(42,
+            listOf(PendingInlineQuoteRequest.Quote(101, 2, 0)))
+        val next = PendingInlineQuoteRequest.privateMessage(42,
+            listOf(PendingInlineQuoteRequest.Quote(101, 3, 4), PendingInlineQuoteRequest.Quote(202, 4, 7)))
+        assertEquals("mpreply:42", first.key)
+        assertTrue(first.isPrivate)
+        assertEquals(listOf(first.quotes.single(), next.quotes.last()), first.merge(next).quotes)
+        assertThrows(IllegalArgumentException::class.java) {
+            first.merge(PendingInlineQuoteRequest(23, 42, first.quotes))
+        }
+        assertThrows(IllegalArgumentException::class.java) {
+            PendingInlineQuoteRequest.privateMessage(42, listOf(PendingInlineQuoteRequest.Quote(101, 2)))
         }
     }
 

@@ -12,12 +12,14 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorPreparationException
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionAdapter
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionScenario
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.domain.editor.SubmissionBodyMutation
 import fr.forumhfr.redface2.core.domain.editor.SubmissionErrorProbe
 import fr.forumhfr.redface2.core.domain.editor.SubmissionProbe
@@ -222,6 +224,38 @@ class PrivateMessageReplyViewModelTest {
         }
         Snapshot.sendApplyNotifications()
         if (advanceMirror) mainDispatcher.scheduler.runCurrent()
+    }
+
+    @Test
+    fun `fresh quote-only opening discards private C before another death and preserves offered D`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val key = EditorDraftKey.mpReply(request.threadId)
+        val pending = PendingInlineQuoteRequest.privateMessage(request.threadId,
+            listOf(PendingInlineQuoteRequest.Quote(101, 1, 0)))
+        val quote = "[quotemsg=101]one[/quotemsg]"
+        draftStore.preload(key, EditorDraftStore.Draft("D", isPrivate = true, updatedAt = 1234))
+        val previous = EditorDraftSession(draftStore, key)
+        previous.load()
+        previous.enqueueInlineQuoteRequest(pending)
+        previous.consumeInlineQuoteRequest(
+            pending, EditorDraftStore.Draft(quote, isPrivate = true), deliveredBody = quote,
+        )
+        val offers = draftStore.loadOffers("tester", key)
+        val saved = SavedStateHandle()
+        val fresh = viewModel(repository, savedStateHandle = saved)
+        runCurrent()
+        assertEquals("", fresh.bodyFieldState.text.toString())
+        assertEquals("D", fresh.state.value.restorableDraft)
+        assertEquals("", draftStore.saved[key]?.body)
+        assertNull(draftStore.saved[key]?.bodyProvenance)
+        fresh.viewModelScope.cancel()
+        val frozen = SavedStateHandle(saved.keys().associateWith { saved.get<Any?>(it) })
+        val afterDeath = viewModel(repository, savedStateHandle = frozen)
+        runCurrent()
+        assertEquals("", afterDeath.bodyFieldState.text.toString())
+        assertEquals("D", afterDeath.state.value.restorableDraft)
+        assertEquals(offers, draftStore.loadOffers("tester", key))
     }
 
     @Test
@@ -1427,6 +1461,19 @@ class PrivateMessageReplyViewModelTest {
 
         assertEquals("rescued MP", viewModel.state.value.restorableDraft)
         assertEquals("rescued MP", draftStore.saved[key]?.body)
+    }
+
+    @Test
+    fun `1450 ignoring an MP offer keeps the live quote and typing in durable C`() = runTest {
+        val vm = replyWithRestoreOffer(seed = "seed")
+        vm.editBody(TextFieldValue("seed\n\ntyped", TextRange(3)))
+        vm.onDraftDiscardRequested()
+        advanceUntilIdle()
+        val key = EditorDraftKey.mpReply(request.threadId)
+        assertEquals("seed\n\ntyped", vm.bodyFieldState.text.toString())
+        assertEquals("seed\n\ntyped", draftStore.saved[key]?.body)
+        assertTrue(draftStore.loadOffers(draftStore.activeOwner, key).isEmpty())
+        assertNull(vm.state.value.restorableDraft)
     }
 
     @Test
@@ -3168,6 +3215,7 @@ class PrivateMessageReplyViewModelTest {
         }
         val arms = mutableMapOf<Long, ArmToken>()
         return object : EditorSubmissionAdapter {
+            override val supportsIndependentDraftOffers = true
             override val unsupportedMutations = mapOf(
                 SubmissionBodyMutation.IMAGE_URL to "aucune entrée URL d'image dans cet éditeur MP",
                 SubmissionBodyMutation.SHARED_RESTORE to "aucune entrée resumeSharedDraft pour les MP",
@@ -3200,6 +3248,9 @@ class PrivateMessageReplyViewModelTest {
                 insert.invoke(viewModel, "[img]https://example.test/late.png[/img]", false)
             }
             override fun dispose() = viewModel.viewModelScope.cancel()
+            override fun resolveOfferedDraft(restoring: Boolean) {
+                if (restoring) viewModel.onDraftRestoreRequested() else viewModel.onDraftDiscardRequested()
+            }
             override fun startUpload() = viewModel.onImagesPicked(listOf("content://pick/1"))
 
             override fun snapshot(): SubmissionProbe = viewModel.state.value.let {
@@ -3218,6 +3269,7 @@ class PrivateMessageReplyViewModelTest {
                         else -> null
                     },
                     restoreOffered = it.restorableDraft != null,
+                    offeredBody = it.restorableDraft,
                     blocksClose = it.submission.blocksBodyMutation,
                 )
             }

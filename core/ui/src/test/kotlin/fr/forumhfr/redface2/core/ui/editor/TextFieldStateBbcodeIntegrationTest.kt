@@ -16,6 +16,15 @@ import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.domain.editor.EditorBodyProvenance
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.Draft
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
+import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.insertEditorQuotes
+import fr.forumhfr.redface2.core.domain.editor.mergeEditorBody
+import fr.forumhfr.redface2.core.model.write.QuoteScope
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Rule
@@ -35,6 +44,69 @@ class TextFieldStateBbcodeIntegrationTest {
     val compose = createComposeRule()
 
     private val state = TextFieldState()
+
+    @Test
+    fun restoreBeforeDeliveryKeepsItsBoundaryAfterUndoAutosaveAndRedo() = runBlocking {
+        val request = PendingInlineQuoteRequest(23, 42, listOf(PendingInlineQuoteRequest.Quote(101, 1)))
+        val store = VersionedEditorDraftStore()
+        store.preload(request.key, Draft("D"))
+        val session = EditorDraftSession(store, request.key)
+        session.load()
+        session.enqueueInlineQuoteRequest(request)
+        setFieldContent()
+        field().performTextInput("typed")
+        session.save(Draft(state.text.toString()))
+        val offer = checkNotNull(session.offered("D"))
+        val restored = mergeEditorBody("D", state.text.toString())
+        change { state.editBbcode { _, _, _ ->
+            BbcodeFormatResult(restored.body, restored.body.length, restored.body.length)
+        } }
+        session.resolveOffer(offer, Draft(restored.body, bodyProvenance = restored.provenance))
+        change { state.undoState.undo() }
+        assertValue("typed", TextRange(5))
+        session.save(Draft(state.text.toString()))
+        change { state.undoState.redo() }
+        assertValue("D\n\ntyped", TextRange(8))
+        session.save(Draft(state.text.toString()))
+        assertEquals(restored.provenance, session.bodyProvenance)
+        val quote = "[quotemsg=101]one[/quotemsg]"
+        val inserted = insertEditorQuotes(state.text.toString(), quote, checkNotNull(session.bodyProvenance))
+        change { state.editBbcode { _, _, _ ->
+            BbcodeFormatResult(inserted.body, inserted.body.length, inserted.body.length)
+        } }
+        assertValue("D\n\n$quote\n\ntyped", TextRange(inserted.body.length))
+        change { state.undoState.undo() }
+        assertValue("D\n\ntyped", TextRange(8))
+        change { state.undoState.undo() }
+        assertValue("typed", TextRange(5))
+        assertTrue(store.loadOffers("tester", request.key).isEmpty())
+    }
+
+    @Test
+    fun commonDraftQuoteMergeIsOneUndoStepAndKeepsTheEarlierTypingHistory() {
+        setFieldContent()
+        val quote = "[quotemsg=101]one[/quotemsg]"
+        field().performTextInput(quote + "\n\ntyped")
+        val before = state.text.toString()
+        val selection = TextRange(8, 2)
+        change { state.edit { this.selection = selection } }
+        change {
+            state.editBbcode { text, _, _ ->
+                val merged = mergeEditorBody("D", text, provenance = EditorBodyProvenance()
+                    .delivered(QuoteScope.Topic(23, 42), quote))
+                BbcodeFormatResult(merged.body, merged.body.length, merged.body.length)
+            }
+        }
+        assertValue("D\n\n$quote\n\ntyped", TextRange(state.text.length))
+        change { state.undoState.undo() }
+        assertValue(before, selection)
+        compose.runOnIdle { assertTrue(state.undoState.canUndo) }
+        change { state.undoState.redo() }
+        assertValue("D\n\n$quote\n\ntyped", TextRange(state.text.length))
+        change { state.undoState.undo() }
+        change { state.undoState.undo() }
+        assertValue("", TextRange.Zero)
+    }
 
     @Test
     fun personalSmileyIsOneUndoTransactionWithEmptyAndReversedSelections() {

@@ -326,11 +326,13 @@ abstract class EditorSubmissionContract : EditorSubmissionRecoveryContract() {
     fun recreatingInProgressAttemptRestoresUncertain() = withReadyAdapter { adapter ->
         startSending(adapter)
         val body = adapter.snapshot().body
+        val attempt = submissionScenario.store.entries.values.single().attempt
         submissionScenario.recreateEditor()
         runCurrent()
         assertEquals(body, adapter.snapshot().body)
+        assertEquals(attempt, submissionScenario.store.entries.values.single().attempt)
         assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
-        assertFalse(adapter.snapshot().restoreOffered)
+        assertOnlyIndependentOffers(adapter)
         assertFalse(adapter.snapshot().confirmationVisible)
         assertEquals(1, adapter.postCalls)
     }
@@ -347,9 +349,11 @@ abstract class EditorSubmissionContract : EditorSubmissionRecoveryContract() {
                 EditorDraftStore.AttemptStatus.PUBLISHED, scenario.store.entries.values.single().attempt?.status,
             )
             assertTrue(scenario.store.entries.values.single().draft.body.isNotBlank())
+            val published = scenario.store.entries.values.single()
             scenario.recreateEditor()
             runCurrent()
-            assertFalse(adapter.snapshot().restoreOffered)
+            assertOnlyIndependentOffers(adapter)
+            assertEquals(published, scenario.store.entries.values.single())
             assertFalse(adapter.snapshot().body.contains("contract body"))
             assertEquals(1, adapter.successEffects)
         }
@@ -492,11 +496,13 @@ abstract class EditorSubmissionContract : EditorSubmissionRecoveryContract() {
                 EditorDraftStore.AttemptStatus.UNCERTAIN, scenario.store.entries.values.single().attempt?.status,
             )
             val body = adapter.snapshot().body
+            val attempt = scenario.store.entries.values.single().attempt
             scenario.recreateEditor()
             runCurrent()
             assertEquals(body, adapter.snapshot().body)
+            assertEquals(attempt, scenario.store.entries.values.single().attempt)
             assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
-            assertFalse(adapter.snapshot().restoreOffered)
+            assertOnlyIndependentOffers(adapter)
         }
     }
 
@@ -530,6 +536,8 @@ abstract class EditorSubmissionContract : EditorSubmissionRecoveryContract() {
 interface EditorSubmissionAdapter {
     val unsupportedMutations: Map<SubmissionBodyMutation, String>
     val uploadUnsupportedReason: String?
+    /** ED-121 independent draft offers apply to topic replies, MP replies and quick reply. */
+    val supportsIndependentDraftOffers: Boolean
     val postCalls: Int
     val formFetchCalls: Int
     val uploadCalls: Int
@@ -550,6 +558,7 @@ interface EditorSubmissionAdapter {
     fun completeUpload()
     fun deliverLateUploadCallback()
     fun completePost()
+    fun resolveOfferedDraft(restoring: Boolean): Unit = error("This surface has no independent reply offers")
     fun dispose()
 }
 
@@ -562,6 +571,7 @@ data class SubmissionProbe(
     val armId: Long? = null,
     val error: SubmissionErrorProbe? = null,
     val restoreOffered: Boolean = false,
+    val offeredBody: String? = null,
     val blocksClose: Boolean = isSending,
 )
 

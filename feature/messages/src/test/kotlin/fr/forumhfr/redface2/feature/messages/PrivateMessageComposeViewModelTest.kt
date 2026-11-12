@@ -2221,6 +2221,7 @@ class PrivateMessageComposeViewModelTest {
         }
         val arms = mutableMapOf<Long, ArmToken>()
         return object : EditorSubmissionAdapter {
+            override val supportsIndependentDraftOffers = false
             override val unsupportedMutations = mapOf(
                 SubmissionBodyMutation.IMAGE_URL to "aucune entrée URL d'image dans cet éditeur MP",
                 SubmissionBodyMutation.SHARED_RESTORE to "aucune entrée resumeSharedDraft pour les MP",
@@ -2273,6 +2274,7 @@ class PrivateMessageComposeViewModelTest {
                         else -> null
                     },
                     restoreOffered = it.restorableDraft != null,
+                    offeredBody = it.restorableDraft,
                     blocksClose = it.submission.blocksBodyMutation,
                 )
             }

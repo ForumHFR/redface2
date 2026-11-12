@@ -533,3 +533,30 @@ val MIGRATION_20_21: Migration = object : Migration(20, 21) {
         db.execSQL("ALTER TABLE editor_drafts ADD COLUMN pendingInlineQuoteRequest TEXT")
     }
 }
+
+/** v21 → v22 (#1450): D outlives C; delivery proof and insertion boundaries travel with C. */
+val MIGRATION_21_22: Migration = object : Migration(21, 22) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE editor_drafts ADD COLUMN bodyProvenance TEXT")
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `editor_draft_offers` (
+                `ownerId` TEXT NOT NULL,
+                `contextKey` TEXT NOT NULL,
+                `offerId` TEXT NOT NULL,
+                `sourceVersion` INTEGER NOT NULL,
+                `body` TEXT NOT NULL,
+                `subject` TEXT,
+                `recipients` TEXT,
+                `updatedAt` INTEGER NOT NULL,
+                `isPrivate` INTEGER NOT NULL,
+                PRIMARY KEY(`ownerId`, `contextKey`, `offerId`)
+            )
+            """.trimIndent(),
+        )
+        db.execSQL(
+            "CREATE INDEX IF NOT EXISTS `index_editor_draft_offers_updatedAt` " +
+                "ON `editor_draft_offers` (`updatedAt`)",
+        )
+    }
+}

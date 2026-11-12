@@ -53,6 +53,7 @@ class EditorSessionRestoration(private val saved: SavedStateHandle, surface: Edi
     private val previousSubcategory = savedSubcategory()
     private val decided = mutableSetOf<EditorSessionField>()
     private var resumed = false
+    private var quoteOnlyWithoutViewport = false
     private var invalidated = false
     var scrollToRestore: Int? = null
         private set
@@ -72,6 +73,7 @@ class EditorSessionRestoration(private val saved: SavedStateHandle, surface: Edi
      * Resolving does not decide fields: the surface calls decide only after actually applying them.
      * In particular, an uncertain blank edit may still need a successful GET to recover its body.
      */
+    @Suppress("CyclomaticComplexMethod") // Ordered publication, attempt, certified resume and quote-only exceptions.
     fun resolve(
         entry: DraftEntry?, owner: String?, key: String?, allowResume: Boolean = true,
     ): EditorSessionRestore {
@@ -82,7 +84,16 @@ class EditorSessionRestoration(private val saved: SavedStateHandle, surface: Edi
             !ownsAttempt(entry, owner, key) || attempt?.status == AttemptStatus.PUBLISHED -> EditorSessionRestore.None
             attempt != null -> EditorSessionRestore.Uncertain
             allowResume && matches(entry, owner, key) -> EditorSessionRestore.Resume
+            // ED-121: only an interrupted session may resume a whole, intact quote-only batch
+            // without a matching pre-delivery Bundle. A fresh opening leaves the field empty.
+            allowResume && !invalidated && belongsTo(owner, key) &&
+                entry.draft.bodyProvenance?.isQuoteOnly(entry.draft.body) == true -> EditorSessionRestore.Resume
+            entry.draft.bodyProvenance?.isQuoteOnly(entry.draft.body) == true -> EditorSessionRestore.None
             else -> EditorSessionRestore.Offer
+        }
+        // ED-121: a pre-delivery Bundle has no selection or viewport for the delivered body.
+        if (result == EditorSessionRestore.Resume) {
+            quoteOnlyWithoutViewport = !matches(checkNotNull(entry), owner, key)
         }
         // Reconciliation may reread a newer revision before the form arrives (D3).
         // Only invalidate() can revoke a resume already applied by this instance.
@@ -121,6 +132,10 @@ class EditorSessionRestoration(private val saved: SavedStateHandle, surface: Edi
         bodyKnown && !hasUndecidedOffer
 
     fun selection(length: Int): TextRange {
+        if (quoteOnlyWithoutViewport) {
+            scrollToRestore = null
+            return TextRange(length)
+        }
         scrollToRestore = previousScroll.coerceAtLeast(0)
         return TextRange(previousStart.coerceIn(0, length), previousEnd.coerceIn(0, length))
     }

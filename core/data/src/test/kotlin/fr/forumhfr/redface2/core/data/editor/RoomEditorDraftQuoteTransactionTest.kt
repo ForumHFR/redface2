@@ -134,6 +134,7 @@ class RoomEditorDraftQuoteTransactionTest {
         )
         assertTrue(store.consumeInlineQuoteRequest("alice", key, request, 1, Draft("after")) is StoreWriteResult.Failed)
         assertEquals(before, store.loadEntry("alice", key))
+        assertTrue(store.loadOffers("alice", key).isEmpty())
     }
 
     @Test
@@ -148,6 +149,7 @@ class RoomEditorDraftQuoteTransactionTest {
         )
         assertTrue(store.enqueueInlineQuoteRequest("alice", key, request, 1) is StoreWriteResult.Failed)
         assertEquals(before, store.loadEntry("alice", key))
+        assertTrue(store.loadOffers("alice", key).isEmpty())
     }
 
     @Test
@@ -258,14 +260,14 @@ class RoomEditorDraftQuoteTransactionTest {
     }
 
     @Test
-    fun `request mutations refresh retention time and terminal cleanup never increments content version`() = runTest {
+    fun `request metadata keeps the body date and terminal cleanup never increments content version`() = runTest {
         store.enqueueInlineQuoteRequest("alice", key, request, 0)
         val laterClock = Clock.fixed(Instant.ofEpochMilli(5000), ZoneOffset.UTC)
         val later = newStore(laterClock)
         later.enqueueInlineQuoteRequest("alice", key, request, 1)
-        assertEquals(5000L, later.loadEntry("alice", key)?.draft?.updatedAt)
+        assertEquals(1234L, later.loadEntry("alice", key)?.draft?.updatedAt)
         later.consumeInlineQuoteRequest("alice", key, request, 2)
-        assertEquals(5000L, later.loadEntry("alice", key)?.draft?.updatedAt)
+        assertEquals(1234L, later.loadEntry("alice", key)?.draft?.updatedAt)
         val snapshot = Draft("sent body", pendingInlineQuoteRequest = request)
         val token = (store.beginAttempt("alice", key, snapshot, 3) as BeginAttemptResult.Started).token
         later.finishAttempt(token, AttemptOutcome.PUBLISHED)
@@ -360,7 +362,7 @@ class RoomEditorDraftQuoteTransactionTest {
     }
 
     @Test
-    fun `405 saving C in the main row refreshes retention while the offered D stays in memory`() = runTest {
+    fun `1450 C refreshes retention but D expires using its own original date`() = runTest {
         val day = 86_400_000L
         val oldStore = newStore(Clock.fixed(Instant.ofEpochMilli(clock.millis() - 31 * day), ZoneOffset.UTC))
         oldStore.saveIfVersion("alice", key, Draft("D"), 0)
@@ -370,6 +372,7 @@ class RoomEditorDraftQuoteTransactionTest {
         database.editorDraftDao().deleteOlderThan(clock.millis() - 30 * day)
         val retained = checkNotNull(newStore().loadEntry("alice", key))
         assertEquals("D", offered)
+        assertTrue(newStore().loadOffers("alice", key).isEmpty())
         assertEquals("C", retained.draft.body)
         assertEquals(clock.millis(), retained.draft.updatedAt)
     }

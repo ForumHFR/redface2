@@ -14,9 +14,9 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 /**
- * One-shot retention sweep of the `editor_drafts` table run at app start (#405): drops every draft
- * (public or MP) last touched more than [RETENTION] ago, so an abandoned draft cannot linger on
- * disk indefinitely. Independent of the auth state — unlike the logout purge owned by
+ * One-shot retention sweep of active drafts and immutable offers run at app start (#405/#1450).
+ * Each version (public or MP) is dropped when last touched more than [RETENTION] ago, so abandoned
+ * content cannot linger on disk indefinitely. Independent of the auth state — unlike the logout purge owned by
  * `CacheInvalidator` — hence its own component rather than a branch inside the auth-driven
  * invalidator.
  *

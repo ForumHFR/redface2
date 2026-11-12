@@ -42,4 +42,6 @@ data class EditorDraftEntity(
     val attemptState: String? = null,
     /** #1553: versioned coordinates encoded by :core:data, never card content or HFR credentials. */
     val pendingInlineQuoteRequest: String? = null,
+    /** ED-89/121: versioned private provenance, encoded by :core:data, never put in a Bundle. */
+    val bodyProvenance: String? = null,
 )

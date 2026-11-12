@@ -16,12 +16,14 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 
 /** Astra gate regressions: real adapters, writes suspended at commit/return and cleanup boundaries. */
 @OptIn(ExperimentalCoroutinesApi::class)
 abstract class EditorSubmissionRecoveryContract {
     protected var submissionScenario = EditorSubmissionScenario()
+    private var independentOffers = emptyMap<String, List<EditorDraftStore.DraftOffer>>()
     protected abstract fun createAdapter(
         scope: TestScope,
         preferences: Flow<Boolean>,
@@ -101,15 +103,20 @@ abstract class EditorSubmissionRecoveryContract {
             runCurrent()
             assertEquals("edited after uncertainty", adapter.snapshot().body)
             assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
-            assertFalse(adapter.snapshot().restoreOffered)
+            assertOnlyIndependentOffers(adapter)
         }
     }
 
     /** An unrecognised POST response cannot prove refusal: retain the attempt across reopening. */
     @Test
-    fun unknownPostResponsePersistsAndRestoresUncertainty() {
+    fun unknownPostResponsePersistsAndRestoresUncertainty() = unknownResponse(preloadIndependentDraft = false)
+
+    @Test
+    fun unknownPostResponseKeepsPreloadedIndependentDraft() = unknownResponse(preloadIndependentDraft = true)
+
+    private fun unknownResponse(preloadIndependentDraft: Boolean) {
         val scenario = EditorSubmissionScenario().apply { postRejection = ReplyFailureReason.Unknown }
-        withReadyAdapter(scenario = scenario) { adapter ->
+        withReadyAdapter(scenario = scenario, preloadIndependentDraft = preloadIndependentDraft) { adapter ->
             startSending(adapter)
             val body = adapter.snapshot().body
             adapter.completePost()
@@ -130,10 +137,112 @@ abstract class EditorSubmissionRecoveryContract {
             assertEquals(body, adapter.snapshot().body)
             assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
             assertEquals(entry.attempt, scenario.store.entries.values.single().attempt)
-            assertFalse(adapter.snapshot().restoreOffered)
+            assertOnlyIndependentOffers(adapter)
             assertFalse(adapter.snapshot().confirmationVisible)
             assertEquals("aucun renvoi automatique à la réouverture", 1, adapter.postCalls)
             assertEquals(0, adapter.successEffects)
+        }
+    }
+
+    @Test
+    fun restoreIndependentDraftAfterPublishedSend() = resolveIndependentDraft(uncertain = false, restoring = true)
+
+    @Test
+    fun ignoreIndependentDraftAfterPublishedSend() = resolveIndependentDraft(uncertain = false, restoring = false)
+
+    @Test
+    fun restoreIndependentDraftAfterUncertainSend() = resolveIndependentDraft(uncertain = true, restoring = true)
+
+    @Test
+    fun ignoreIndependentDraftAfterUncertainSend() = resolveIndependentDraft(uncertain = true, restoring = false)
+
+    @Test
+    fun failedRestoreDoesNotBlockTypingOrDuplicateTheMerge() =
+        resolveIndependentDraft(uncertain = false, restoring = true, failResolution = true)
+
+    @Test
+    fun failedRestoreAfterUncertainSendDoesNotSealAutosave() =
+        resolveIndependentDraft(uncertain = true, restoring = true, failResolution = true)
+
+    @Test
+    fun typingDuringOfferResolutionIsSavedAfterItsCallback() = withReadyAdapter(
+        preloadIndependentDraft = true,
+    ) { adapter ->
+        val key = submissionScenario.store.entries.keys.single()
+        assertTrue("ED-121 applies to reply surfaces", isReply(key))
+        startSending(adapter)
+        adapter.completePost()
+        runCurrent()
+        submissionScenario.recreateEditor()
+        runCurrent()
+        assertOnlyIndependentOffers(adapter)
+        val gate = CompletableDeferred<Unit>()
+        submissionScenario.store.saveReturnGate = gate
+        adapter.resolveOfferedDraft(restoring = true)
+        runCurrent()
+        val continued = adapter.snapshot().body + " typed while resolving"
+        adapter.editBody(continued)
+        runCurrent()
+        gate.complete(Unit)
+        advanceTimeBy(751)
+        runCurrent()
+        assertEquals(continued, submissionScenario.store.entries.getValue(key).draft.body)
+        assertFalse(adapter.snapshot().restoreOffered)
+        assertEquals(1, adapter.postCalls)
+    }
+
+    /** ED-121 applies to topic replies, the sheet and MP replies; other editors keep their contract. */
+    private fun resolveIndependentDraft(uncertain: Boolean, restoring: Boolean, failResolution: Boolean = false) {
+        val scenario = EditorSubmissionScenario().apply {
+            if (uncertain) postFailure = IOException("response lost")
+        }
+        withReadyAdapter(scenario = scenario, preloadIndependentDraft = true) { adapter ->
+            val key = scenario.store.entries.keys.single()
+            assertTrue("ED-121 applies to reply surfaces", isReply(key))
+            startSending(adapter)
+            adapter.completePost()
+            runCurrent()
+            val attempt = scenario.store.entries.getValue(key).attempt
+            assertEquals(if (uncertain) EditorDraftStore.AttemptStatus.UNCERTAIN
+                else EditorDraftStore.AttemptStatus.PUBLISHED, attempt?.status)
+            scenario.recreateEditor()
+            runCurrent()
+            assertOnlyIndependentOffers(adapter)
+            val before = adapter.snapshot().body
+            val offered = checkNotNull(adapter.snapshot().offeredBody)
+            if (failResolution) scenario.store.saveFailure = IOException("disk full")
+            adapter.resolveOfferedDraft(restoring)
+            runCurrent()
+            val resolvedBody = adapter.snapshot().body
+            if (failResolution) {
+                assertEquals(offered, adapter.snapshot().offeredBody)
+                scenario.store.saveFailure = null
+                adapter.editBody(resolvedBody + " more typing")
+                advanceTimeBy(751)
+                runCurrent()
+                assertEquals(adapter.snapshot().body, scenario.store.entries.getValue(key).draft.body)
+                adapter.resolveOfferedDraft(restoring)
+                runCurrent()
+                assertEquals(resolvedBody + " more typing", adapter.snapshot().body)
+            }
+            assertFalse(adapter.snapshot().restoreOffered)
+            if (restoring) assertTrue(adapter.snapshot().body.contains(offered))
+            else assertEquals(before, adapter.snapshot().body)
+            assertEquals(adapter.snapshot().body, scenario.store.entries.getValue(key).draft.body)
+            val expected = independentOffers[key].orEmpty().filterNot { it.draft.body == offered }
+            assertEquals(expected, scenario.store.loadOffers(scenario.store.currentOwner(), key))
+            val resolvedAttempt = scenario.store.entries.getValue(key).attempt
+            if (uncertain) assertEquals(attempt, resolvedAttempt) else assertNull(resolvedAttempt)
+            adapter.editBody("typing after the decision")
+            advanceTimeBy(751)
+            runCurrent()
+            assertEquals("typing after the decision", scenario.store.entries.getValue(key).draft.body)
+            assertEquals("no automatic resend", 1, adapter.postCalls)
+            if (!uncertain) {
+                adapter.clickSubmit()
+                runCurrent()
+                assertEquals("the next send is not blocked by offer resolution", 2, adapter.postCalls)
+            }
         }
     }
 
@@ -223,7 +332,7 @@ abstract class EditorSubmissionRecoveryContract {
             assertEquals(entry.draft.body, adapter.snapshot().body)
             assertEquals(SubmissionErrorProbe.UNCERTAIN, adapter.snapshot().error)
             assertFalse(adapter.snapshot().isSending)
-            assertFalse(adapter.snapshot().restoreOffered)
+            assertOnlyIndependentOffers(adapter)
             assertFalse(adapter.snapshot().confirmationVisible)
             gate.complete(Unit)
             runCurrent()
@@ -270,6 +379,7 @@ abstract class EditorSubmissionRecoveryContract {
             runCurrent()
             assertEquals(1, scenario.preparationCalls)
             assertEquals(0, adapter.postCalls)
+            val owner = scenario.store.currentOwner()
             scenario.switchAccount()
             runCurrent()
             val invalidated = adapter.snapshot()
@@ -279,7 +389,7 @@ abstract class EditorSubmissionRecoveryContract {
             assertEquals(invalidated.error, adapter.snapshot().error)
             assertEquals(0, adapter.postCalls)
             assertEquals(0, adapter.successEffects)
-            scenario.store.activeOwner = "tester"
+            scenario.store.activeOwner = owner
             assertNull(scenario.store.entries.values.single().attempt)
         }
     }
@@ -461,16 +571,55 @@ abstract class EditorSubmissionRecoveryContract {
         assertTrue(adapter.snapshot().isSending)
     }
 
+    /**
+     * ED-121/161/170 v0.7.8 replaces "no offer at all" with "no attempted C as an offer".
+     * Compare the complete set with the exact pre-send D (identity, revision and fields), and
+     * the real visible offer with that set: neither publication nor uncertainty may invent D.
+     * All attempt-status, body, acknowledgement and POST-count assertions remain mandatory.
+     */
+    protected suspend fun assertOnlyIndependentOffers(adapter: EditorSubmissionAdapter) {
+        val (key, entry) = submissionScenario.store.entries.entries.single()
+        val expected = independentOffers[key].orEmpty()
+        assertEquals(expected, submissionScenario.store.loadOffers(submissionScenario.store.currentOwner(), key))
+        assertTrue(expected.none { it.draft.body == entry.draft.body })
+        val probe = adapter.snapshot()
+        assertEquals(expected.firstOrNull()?.draft?.body, probe.offeredBody)
+        assertEquals(expected.isNotEmpty(), probe.restoreOffered)
+    }
+
     protected fun withReadyAdapter(
         preferences: Flow<Boolean> = flowOf(false),
         delayedSharedRestore: Boolean = false,
         scenario: EditorSubmissionScenario = EditorSubmissionScenario(),
+        preloadIndependentDraft: Boolean = false,
         block: suspend TestScope.(EditorSubmissionAdapter) -> Unit,
     ) = runTest {
         submissionScenario = scenario
         val adapter = createAdapter(this, preferences, delayedSharedRestore)
         try {
+            if (preloadIndependentDraft) {
+                assumeTrue("ED-121 requires independent reply draft offers", adapter.supportsIndependentDraftOffers)
+            }
             runCurrent()
+            if (preloadIndependentDraft) {
+                scenario.store.entries.keys.filter(::isReply).forEach { key ->
+                    val draft = EditorDraftStore.Draft("independent D", isPrivate = key.startsWith("mpreply:"),
+                        updatedAt = 1234)
+                    scenario.store.preloadOffer(key,
+                        EditorDraftStore.DraftOffer.from(EditorDraftStore.DraftEntry(draft, 0)))
+                }
+            }
+            // Only an actually offered, ordinary reply draft is D. The sheet's auto-resumed
+            // body is C; the other surfaces keep their existing non-ED-121 restoration contract.
+            independentOffers = scenario.store.entries.mapValues { (key, entry) ->
+                val source = if (adapter.snapshot().restoreOffered && entry.attempt == null && isReply(key)) {
+                    listOf(EditorDraftStore.DraftOffer.from(entry))
+                } else emptyList()
+                (scenario.store.loadOffers(scenario.store.currentOwner(), key) + source)
+                    .distinctBy { it.id }.sortedWith(compareByDescending<EditorDraftStore.DraftOffer> {
+                        it.draft.updatedAt
+                    }.thenByDescending { it.sourceVersion })
+            }
             adapter.editBody("contract body")
             runCurrent()
             assertTrue("formulaire valide avant l'exercice du contrat", adapter.snapshot().canSubmit)
@@ -480,4 +629,6 @@ abstract class EditorSubmissionRecoveryContract {
             runCurrent()
         }
     }
+
+    private fun isReply(key: String): Boolean = key.startsWith("reply:") || key.startsWith("mpreply:")
 }

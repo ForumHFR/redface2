@@ -3679,6 +3679,7 @@ class TopicFormViewModelTest {
         }
         val arms = mutableMapOf<Long, ArmToken>()
         return object : EditorSubmissionAdapter {
+            override val supportsIndependentDraftOffers = false
             override val unsupportedMutations = mapOf(
                 SubmissionBodyMutation.SHARED_RESTORE to "aucune entrée resumeSharedDraft pour un sujet",
             )
@@ -3734,6 +3735,7 @@ class TopicFormViewModelTest {
                         else -> null
                     },
                     restoreOffered = it.restorableDraft != null,
+                    offeredBody = it.restorableDraft,
                     blocksClose = it.submission.blocksBodyMutation,
                 )
             }
