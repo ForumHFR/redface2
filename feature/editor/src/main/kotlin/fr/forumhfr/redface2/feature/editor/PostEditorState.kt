@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.editor
 
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.DraftOffer
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
@@ -56,6 +57,7 @@ data class PostEditorState(
     val blocksFormReload: Boolean = false,
     /** Read identity is independent of a pending request: ordinary metadata may load under its offer. */
     val isFetchingQuote: Boolean = false,
+    val quoteCommitPending: Boolean = false,
     /** Availability is evidence from the private loadedForm, never inferred from a finished GET. */
     val hasLoadedForm: Boolean = false,
     val hasAuthenticatedForm: Boolean = false,
@@ -121,6 +123,7 @@ data class PostEditorState(
      * an unrelated revision remains an explicit offer.
      */
     val restorableDraft: String? = null,
+    val draftOffers: List<DraftOffer> = emptyList(),
     /**
      * #459 PR2 — `true` while an image picked from the photo picker is being read + uploaded to the
      * selected host. The toolbar's image-upload affordance shows a progress indicator and is
@@ -174,16 +177,14 @@ data class PostEditorState(
             !isLoadingForm && !quoteStorageUnavailable && pendingQuotes.isEmpty() &&
             !isUploading
 
-    /** ED-132: a readable inline request waits for this offer's explicit decision. */
-    val isQuoteAwaitingDraftDecision: Boolean
-        get() = mode == PostEditorMode.Reply && restorableDraft != null && pendingQuotes.isNotEmpty() &&
-            !hasDormantQuote && !unreadableQuoteRequest && !quoteStorageUnavailable
-
     val hasDormantQuote: Boolean
         get() = pendingQuotes.isNotEmpty() && submission is EditorSubmissionState.Uncertain
 
     val canRestoreDraft: Boolean
-        get() = !isInitializing && draftRestoreSeed != null && (mode != PostEditorMode.Edit || !isLoadingForm)
+        get() = !isInitializing && !quoteCommitPending && restoreSeedAvailable
+
+    private val restoreSeedAvailable: Boolean
+        get() = draftRestoreSeed != null && (mode != PostEditorMode.Edit || !isLoadingForm)
 
     @Suppress("ComplexCondition") // Explicit recovery, or an eligible readable request, plus busy-state guards.
     val canIgnorePendingQuote: Boolean

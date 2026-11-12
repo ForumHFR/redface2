@@ -28,11 +28,7 @@ open class EditorHost<S : Any>(
 ) {
     val surface get() = memory.surface
     val detail get() = memory.detail
-    /** Use this captured identity to exclude the offer from generic event panels, even after retirement. */
-    val draftOfferDetailKey get() = detail?.key?.takeIf { memory.detailSheet == EditorSheet.DraftOffer }
-    /** Both the status surface and the keyed event detail use one offer sheet. */
-    val draftOfferOpen get() = memory.detailSheet == EditorSheet.DraftOffer ||
-        surfaces.draftOffer != null && surface == surfaces.draftOffer
+    val draftOfferOpen get() = surfaces.draftOffer != null && surface == surfaces.draftOffer
     val returnGeneration get() = memory.returnGeneration
     val focusMemory get() = memory.focus
     val onOpenHeader: (() -> Unit)? get() = surfaces.header?.let { { open(it) } }
@@ -73,10 +69,7 @@ open class EditorHost<S : Any>(
         if (!consumeInformation() && source().canInsert) actions.onFormat(action)
     }
     fun open(name: S, action: () -> Unit = {}) {
-        val openAfterInformation = name == surfaces.draftOffer &&
-            events.visibleEvent?.let { surfaces.isDraftOfferDetail(it.key) } == true
-        val consumed = consumeInformation()
-        if ((consumed && !openAfterInformation) || !source().scaffold.controlsEnabled) return
+        if (consumeInformation() || !source().scaffold.controlsEnabled) return
         val insertion = name in setOf(surfaces.smileys, surfaces.picker, surfaces.imageUrl)
         if (insertion && !source().canInsert) return
         captureBody()
@@ -102,8 +95,7 @@ open class EditorHost<S : Any>(
     }
     /** Closing is visual acknowledgement only, never a restore/discard or other business intent. */
     fun closeDraftOffer() {
-        if (memory.detailSheet == EditorSheet.DraftOffer) detail?.key?.let(::closeDetails)
-        else if (surfaces.draftOffer != null && surface == surfaces.draftOffer) closeSurface()
+        if (surfaces.draftOffer != null && surface == surfaces.draftOffer) closeSurface()
     }
     fun consumeReturn(): Boolean {
         if (memory.returnedGeneration == returnGeneration) return false
@@ -133,9 +125,6 @@ open class EditorHost<S : Any>(
                 is EditorEventCommand.OpenDetails -> {
                     captureBody()
                     memory.detail = command.event
-                    memory.detailSheet = if (surfaces.isDraftOfferDetail(command.event.key)) {
-                        EditorSheet.DraftOffer
-                    } else null
                 }
                 is EditorEventCommand.CompleteHeader -> complete(command.cause)
                 is EditorEventCommand.ReturnToBody -> Unit
@@ -169,8 +158,6 @@ open class EditorHost<S : Any>(
         if (detail?.key != key) return
         events.dispatch(EditorEventInput.CloseDetails(key))
         memory.detail = null
-        if (memory.detailSheet != null) memory.returnGeneration++
-        memory.detailSheet = null
     }
     /** The open detail while its delivery key is current; a replaced or acknowledged delivery is stale. */
     protected fun currentDetail(key: EventKey) = detail?.takeIf {
@@ -199,7 +186,7 @@ open class EditorHost<S : Any>(
         }
     }
     private fun backState(layers: EditorBackState): EditorBackState {
-        val sheet = memory.detailSheet ?: when (surface) {
+        val sheet = when (surface) {
             surfaces.smileys -> EditorSheet.Smileys
             surfaces.options -> EditorSheet.Options
             surfaces.draftOffer -> if (surface != null) EditorSheet.DraftOffer else null

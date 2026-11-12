@@ -29,63 +29,21 @@ import org.junit.Test
 class PostEditorChromeAdapterTest {
     private val host = PostEditorChromeFixture()
 
-    @Test fun `1450 pending event opens the offer sheet and retains its identity after acknowledgement`() {
-        host.transition(host.state.copy(restorableDraft = "D", pendingQuotes = listOf(
-            QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
-        val pending = host.events.visibleEvent!!
-        assertNull(host.adapter.surface)
-        assertFalse(host.adapter.draftOfferOpen)
-        assertFalse(host.adapter.state.sendActivatable)
-        host.adapter.barActions.onEvent(pending.key, EditorEventAction.Details)
-        assertTrue(host.adapter.draftOfferOpen)
-        assertEquals(pending.key, host.adapter.draftOfferDetailKey)
-        assertEquals(pending.key, host.adapter.detail?.key)
-        assertEquals(pending, host.events.visibleEvent) // ED-45 acknowledges on closing, not opening.
-        host.adapter.gesture(EditorBarGesture.ToggleFormat)
+    @Test fun `v078 the draft status opens directly and closing never decides the offer`() {
+        host.transition(host.state.copy(restorableDraft = "D", bodyText = "live quote"))
         assertNull(host.events.visibleEvent)
-        assertEquals(pending.key, host.adapter.draftOfferDetailKey)
-        assertEquals(pending.key, host.adapter.detail?.key)
-        assertTrue(host.calls.isEmpty())
-        assertTrue(host.state.pendingQuotes.isNotEmpty())
-        host.transition(host.state.copy(restorableDraft = null))
-        // Presentation stays captured until the sheet's unavailable-offer effect closes it.
-        assertEquals(pending.key, host.adapter.draftOfferDetailKey)
-        assertFalse(host.events.isPendingQuoteEvent(pending.key))
-        host.adapter.closeDraftOffer()
-        assertFalse(host.adapter.draftOfferOpen)
-        assertTrue(host.adapter.consumeReturn())
-        host.adapter.closeDraftOffer()
-        assertFalse(host.adapter.consumeReturn())
-        assertNull(host.adapter.detail)
-        assertNull(host.events.visibleEvent)
-        host.adapter.barActions.onEvent(pending.key, EditorEventAction.Details)
-        assertNull(host.adapter.surface)
-    }
-
-    @Test fun `1450 first restore tap under pending notice opens the sheet and Back only acknowledges it`() {
-        host.transition(host.state.copy(restorableDraft = "D", pendingQuotes = listOf(
-            QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
-        val pending = host.events.visibleEvent!!
+        assertTrue(host.adapter.state.sendActivatable)
         host.adapter.openDraftOffer()
         assertTrue(host.adapter.draftOfferOpen)
-        assertNull(host.adapter.draftOfferDetailKey)
-        assertNull(host.events.visibleEvent)
-        val layers = mutableListOf<EditorBackAction>()
-        host.adapter.back(onLayerBack = layers::add)
-        assertEquals(listOf(EditorBackAction.CloseSheet(EditorSheet.DraftOffer)), layers)
+        host.adapter.closeDraftOffer()
         assertFalse(host.adapter.draftOfferOpen)
         assertTrue(host.adapter.consumeReturn())
         assertFalse(host.adapter.consumeReturn())
-        host.transition(host.state.copy(bodyText = "typing"))
-        assertNull(host.events.visibleEvent)
-        assertTrue(host.events.isPendingQuoteEvent(pending.key))
         assertEquals("D", host.state.restorableDraft)
-        assertTrue(host.state.pendingQuotes.isNotEmpty())
-        assertFalse(host.adapter.state.sendActivatable)
         assertTrue(host.calls.isEmpty())
     }
 
-    @Test fun `1450 save failure Reload is limited to an unresolved quote without a draft offer or uncertainty`() {
+    @Test fun `v078 save failure Reload remains available with D and refuses uncertainty or invalidation`() {
         val pending = listOf(QuoteSelection(QuoteLocator(1, 101, null), "", ""))
         host.transition(host.state.copy(pendingQuotes = pending, submitError = EditorErrors.draftSaveFailed))
         val failure = host.events.visibleEvent!!
@@ -96,8 +54,7 @@ class PostEditorChromeAdapterTest {
         host.adapter.reload(failure.key)
         host.state = host.state.copy(blocksFormReload = false)
         host.state = host.state.copy(restorableDraft = "D")
-        assertFalse(host.adapter.canReload(failure.key))
-        host.adapter.reload(failure.key)
+        assertTrue(host.adapter.canReload(failure.key))
         host.state = host.state.copy(restorableDraft = null, submission = EditorSubmissionState.Uncertain(null))
         assertFalse(host.adapter.canReload(failure.key))
         host.adapter.reload(failure.key)

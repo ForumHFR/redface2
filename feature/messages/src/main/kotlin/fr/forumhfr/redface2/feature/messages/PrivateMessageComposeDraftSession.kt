@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.messages
 
+import fr.forumhfr.redface2.core.domain.editor.mergeEditorBody
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.text.input.TextFieldState
@@ -123,6 +124,7 @@ internal class PrivateMessageComposeDraftSession(
         if (shouldOffer && untouched && !ignored) {
             updateState {
                 it.copy(restorableDraft = draft.body, restorableSubject = draft.subject,
+                    draftOffers = listOf(EditorDraftStore.DraftOffer.from(EditorDraftStore.DraftEntry(draft, 0L))),
                     restorableRecipients = draft.recipients)
             }
         }
@@ -191,7 +193,7 @@ internal class PrivateMessageComposeDraftSession(
         val offered = snapshot.restorableDraft ?: return
         val live = bodyFieldState.text.toString()
         if (offered.isNotBlank()) {
-            replaceBody(if (live.isBlank() || live == offered) offered else live.trimEnd() + "\n\n" + offered)
+            replaceBody(mergeEditorBody(offered, live).body)
             decide(EditorSessionField.Body)
         }
         val recipients = EditorRecipientState.decode(snapshot.restorableRecipients)

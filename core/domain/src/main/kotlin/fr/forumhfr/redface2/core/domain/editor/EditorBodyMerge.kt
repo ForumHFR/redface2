@@ -15,33 +15,15 @@ data class EditorBodyProvenance(
 
     fun delivered(scope: QuoteScope, body: String, currentBody: String = body): EditorBodyProvenance =
         if (body.isBlank()) this else InlineQuoteDelivery(scope, body).let { latest ->
-            copy(deliveries = retainedDeliveries(currentBody, latest) + latest)
+            copy(deliveries = deliveries.filterNot { it == latest }.distinct() + latest).retainFor(currentBody)
         }
 
-    /** Keep the last whole request for ED-121; older evidence is bounded by quotes still in C. */
-    fun retainFor(body: String): EditorBodyProvenance = deliveries.lastOrNull()?.let { latest ->
-        copy(deliveries = copy(deliveries = deliveries.dropLast(1)).retainedDeliveries(body, latest) + latest)
-    } ?: this
-
-    private fun retainedDeliveries(body: String, latest: InlineQuoteDelivery): List<InlineQuoteDelivery> {
-        val present = editorQuoteBlocks(body, outerOnly = true).map { it.identity }.toSet()
-        val numbers = present.map { it.first }.toSet()
-        val covered = editorQuoteBlocks(latest.body, outerOnly = true).map { latest.scope to it.identity }.toSet()
-        val blocks = deliveries.flatMap { delivery ->
-            editorQuoteBlocks(delivery.body, outerOnly = true).filter { it.identity.first in numbers }.map {
-                (delivery.scope to it.identity) to InlineQuoteDelivery(delivery.scope,
-                    delivery.body.substring(it.range))
-            }
-        }
-        val exact = blocks.filter { it.first.second in present && it.first !in covered }.map { it.first }.toSet()
-        val exactPosts = (exact + covered).map { it.first to it.second.first }.toSet()
-        // Intact variants of one post need separate content identities. A modified block needs
-        // only one original scoped identity to be recognized; deleted blocks need no replay proof.
-        val modified = blocks.asReversed().distinctBy { it.first.first to it.first.second.first }
-            .filter { (it.first.first to it.first.second.first) !in exactPosts }.map { it.first }
-        val retained = exact + modified
-        return blocks.filter { it.first in retained }.distinctBy { it.first }.map { it.second }
-    }
+    /** Deleted blocks can be reinserted after autosave/death; retain their scoped proof too (ED-89). */
+    fun retainFor(body: String): EditorBodyProvenance = copy(
+        deliveries = deliveries.distinct(),
+        draftEnd = draftEnd.coerceAtMost(body.length),
+        quotesEnd = quotesEnd.coerceAtMost(body.length),
+    )
 
     /** Move the durable insertion boundaries with a live edit, including an edit before autosave. */
     fun rebase(previous: String, current: String): EditorBodyProvenance {
@@ -76,7 +58,6 @@ data class EditorBodyMerge(val body: String, val provenance: EditorBodyProvenanc
 /**
  * ED-89: D | retained deliveries | live typing. This computes one replacement; the surface applies
  * it in one undoable edit, preserving selection/history. Server edit seeds keep their old rule.
- * Activation of this ordering in the full editors belongs to #1450 PR 2.
  */
 // ED-89 ordered seed cases and retained/modified/deleted quote handling.
 @Suppress("CyclomaticComplexMethod", "LongParameterList") // Explicit merge inputs retain dependent scope defaults.
@@ -160,6 +141,24 @@ private fun joinEditorParts(first: String, second: String): String = when {
     first.isEmpty() -> second
     second.isEmpty() -> first
     else -> first + "\n\n" + second
+}
+
+/** ED-52: compare intact blocks by number and content inside an already validated owning scope. */
+data class FilteredEditorQuotes(val body: String, val duplicates: Int)
+
+fun filterEditorQuotes(delivered: String, current: String): FilteredEditorQuotes {
+    val present = editorQuoteBlocks(current).map { it.identity }.toMutableSet()
+    var duplicates = 0
+    var cursor = 0
+    val filtered = buildString {
+        editorQuoteBlocks(delivered, outerOnly = true).forEach { block ->
+            append(delivered.substring(cursor, block.range.first))
+            if (present.add(block.identity)) append(delivered.substring(block.range)) else duplicates++
+            cursor = block.range.last + 1
+        }
+        append(delivered.substring(cursor))
+    }
+    return FilteredEditorQuotes(if (duplicates == 0) delivered else filtered.trim(), duplicates)
 }
 
 /** Same content comparison as inline delivery: number AND content, within a known scope. */

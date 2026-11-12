@@ -23,7 +23,9 @@ import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDelivery
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorSession
 import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionBinding
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionCallbacks
@@ -38,13 +40,15 @@ import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadFailureDiagnostics
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
+import fr.forumhfr.redface2.core.domain.write.MaterializedPrivateMessageReplyForm
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
-import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
+import fr.forumhfr.redface2.core.model.write.QuoteLocator
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.PrivateMessageReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
@@ -111,7 +115,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     smileyRepository: SmileyRepository,
     hfrFavoriteSmileyRepository: HfrFavoriteSmileyRepository,
     smileyLocalCollections: SmileyLocalCollections,
-    savedStateHandle: SavedStateHandle = SavedStateHandle(),
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
 
     /** Body and IME state belong to this ViewModel, never to a Bundle saver. */
@@ -142,7 +146,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     private val context = PrivateMessageReplyContext(
         threadId = request.threadId,
         page = request.page.coerceAtLeast(1),
-        quote = request.quote,
+        quote = null,
     )
     private val quoteMaterializer = PrivateMessageReplyQuoteMaterializer(repository)
 
@@ -205,7 +209,10 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             error = { value -> updateState { it.copy(submitError = value) } },
             success = { value -> _effects.trySend(value) },
             clearError = { error -> updateState { it.copy(submitError = it.submitError.takeUnless { it == error }) } },
-            durableWriteSucceeded = { editorEvents.durableWriteSucceeded() },
+            durableWriteSucceeded = {
+                editorEvents.durableWriteSucceeded()
+                draftSession.refreshOffers()
+            },
         ),
         errors = EditorSubmissionErrors(
             uncertain = EditorErrors.uncertain(EditorErrorSurface.MessageReply),
@@ -298,7 +305,8 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                     draftSession.invalidate()
                     updateState {
                         it.copy(formAvailable = false, isUploading = false, uploadProgress = null,
-                            restorableDraft = null, conversationTitle = "", canManageRecipients = false,
+                            restorableDraft = null, draftOffers = emptyList(), conversationTitle = "",
+                            canManageRecipients = false,
                             recipients = emptyList(), recipientsDirty = false)
                     }
                 }
@@ -308,6 +316,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         }
         viewModelScope.launch {
             draftSession.restore()
+            refreshQuoteState()
             loadForm()
         }
     }
@@ -341,7 +350,24 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         }
     }
 
-    fun retryFormLoad() = loadForm()
+    fun retryFormLoad() {
+        viewModelScope.launch {
+            if (!submission.isInitialized && !submission.drafts.invalidated) draftSession.restore()
+            refreshQuoteState()
+            loadForm()
+        }
+    }
+
+    private fun refreshQuoteState() {
+        val pending = submission.drafts.pendingInlineQuoteRequest != null
+        val unreadable = submission.drafts.hasUnreadableInlineQuoteRequest
+        val dormant = pending && _state.value.submission is EditorSubmissionState.Uncertain
+        val recovery = unreadable || dormant
+        updateState { it.copy(quotePending = pending || unreadable, unreadableQuoteRequest = unreadable,
+            quoteStorageUnavailable = !submission.isInitialized,
+            formError = it.formError || recovery, isLoadingForm = if (recovery) false else it.isLoadingForm,
+            quoteFetchFailures = if (pending) savedStateHandle[QUOTE_FAILURES_KEY] ?: 0 else 0) }
+    }
 
     /** #803 pattern — one-shot latch : a committed close is never re-emitted. */
     private var closeRequested = false
@@ -385,21 +411,56 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     fun onStopped() = draftSession.onStopped()
     suspend fun restoreBodyScroll() = draftSession.restoreBodyScroll()
 
-    fun onDraftRestoreRequested() {
-        if (_state.value.isLoadingForm || !acceptMutation(blockDuringUpload = true)) return
-        draftSession.restoreOfferedDraft()
+    fun onDraftRestoreRequested(offerId: String? = null) {
+        if (!acceptMutation(blockDuringUpload = true)) return
+        draftSession.restoreOfferedDraft(offerId)
     }
 
-    fun onDraftDiscardRequested() {
+    fun onDraftDiscardRequested(offerId: String? = null) {
         if (!acceptMutation()) return
-        draftSession.discardOfferedDraft()
+        draftSession.discardOfferedDraft(offerId)
+    }
+
+    private var deliveredRequest: PendingInlineQuoteRequest? = null
+    private var deliveredBody = ""
+
+    private fun pendingSelections(request: PendingInlineQuoteRequest): List<QuoteSelection> = request.quotes.map {
+        QuoteSelection(QuoteLocator(it.page, it.numreponse, it.ref), "", "", it.truncate)
+    }
+
+    fun onPendingQuoteResumed() {
+        if (!_state.value.hasDormantQuote || !acceptMutation()) return
+        submission.acknowledge { loadForm() }
+    }
+
+    fun onPendingQuoteIgnored() {
+        if (!_state.value.canIgnorePendingQuote || !acceptMutation()) return
+        viewModelScope.launch {
+            val pending = submission.drafts.pendingInlineQuoteRequest
+            val result = if (submission.drafts.hasUnreadableInlineQuoteRequest) {
+                submission.drafts.discardUnreadableInlineQuoteRequest()
+            } else if (pending != null && draftSession.deliveryPending) {
+                draftSession.commitQuote(pending, deliveredBody)
+            } else pending?.let { submission.drafts.consumeInlineQuoteRequest(it) }
+            submission.resolveDraftWrite(result)
+            if (result is EditorDraftStore.StoreWriteResult.Written) {
+                savedStateHandle.remove<Int>(QUOTE_FAILURES_KEY)
+                updateState { it.copy(quotePending = false, quoteFetchFailures = 0, quoteStorageUnavailable = false) }
+                if (!submission.isInitialized) draftSession.restore()
+                loadForm()
+            }
+        }
     }
 
     private fun loadForm() {
         if (!submission.isInitialized) return
+        val pending = submission.drafts.pendingInlineQuoteRequest
+        if (pending != null && _state.value.submission is EditorSubmissionState.Uncertain) return
         formJob?.cancel()
         val favoriteStamp = smileyPicker.favoriteFormStamp()
         updateState { it.copy(isLoadingForm = true, formError = false) }
+        val opening = submission.session
+        updateState { it.copy(quotePending = pending != null) }
         formJob = viewModelScope.launch {
             try {
                 // #618 — when the user came specifically to MANAGE recipients, the form MUST be the
@@ -407,25 +468,11 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                 // fallback (no newdest → no member editor → silently lands on a plain composer). A
                 // failed message.php GET then surfaces as a form error (retry) rather than a dead end.
                 val materialized = quoteMaterializer.fetchFormWithQuotes(
-                    context = context,
-                    selections = request.initialQuotes,
+                    context = if (pending != null) context else loadedSubmitContext ?: context,
+                    selections = pending?.let(::pendingSelections).orEmpty(),
                     allowEmbeddedFallback = !request.openRecipientManager,
                 )
-                if (!submission.isInitialized) return@launch
-                val form = materialized.form
-                if (form.isAnonymous) {
-                    // Session vanished between opening the thread and replying — treat like a form
-                    // error so the user re-authenticates (the reply route is only reachable while
-                    // authenticated, so this is rare).
-                    loadedForm = null
-                    loadedSubmitContext = null
-                    updateState { it.copy(isLoadingForm = false, formAvailable = false, formError = true) }
-                    return@launch
-                }
-                loadedForm = form
-                smileyPicker.refreshFavorites(favoriteStamp)
-                loadedSubmitContext = materialized.submitContext
-                applyFormHydration(form)
+                acceptLoadedForm(materialized, pending, opening, favoriteStamp)
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (_: IOException) {
@@ -436,6 +483,43 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                 formLoadFailed()
             }
         }
+    }
+
+    private suspend fun acceptLoadedForm(
+        materialized: MaterializedPrivateMessageReplyForm,
+        pending: PendingInlineQuoteRequest?,
+        opening: EditorSession,
+        favoriteStamp: SmileyPickerController.FavoriteFormStamp,
+    ) {
+        if (!submission.isInitialized || submission.session != opening) return
+        val form = materialized.form
+        if (form.isAnonymous) {
+            formLoadFailed()
+            return
+        }
+        loadedForm = form
+        smileyPicker.refreshFavorites(favoriteStamp)
+        loadedSubmitContext = materialized.submitContext
+        if (pending == null) applyFormHydration(form) else deliverQuote(form, pending, opening)
+    }
+
+    private suspend fun deliverQuote(form: ReplyForm, pending: PendingInlineQuoteRequest, opening: EditorSession) {
+        uploadJob?.join()
+        draftSession.awaitOfferDecision()
+        submission.flush(null)
+        if (!submission.isInitialized || submission.session != opening) return
+        if (deliveredRequest != pending) {
+            draftSession.insertQuote(form.initialContent)
+            deliveredRequest = pending
+            deliveredBody = form.initialContent
+        }
+        val committed = draftSession.commitQuote(pending, deliveredBody)
+        if (!submission.isInitialized || submission.session != opening) return
+        if (committed is EditorDraftStore.StoreWriteResult.Written) {
+            savedStateHandle.remove<Int>(QUOTE_FAILURES_KEY)
+            applyFormHydration(form.copy(initialContent = ""))
+            updateState { it.copy(quotePending = false, quoteFetchFailures = 0) }
+        } else formLoadFailed()
     }
 
     private fun PrivateMessageReplyUiState.withLoadedForm(form: ReplyForm): PrivateMessageReplyUiState {
@@ -500,7 +584,10 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         if (!submission.isInitialized) return
         loadedForm = null
         loadedSubmitContext = null
-        updateState { it.copy(isLoadingForm = false, formAvailable = false, formError = true) }
+        val failures = if (_state.value.quotePending) (_state.value.quoteFetchFailures + 1).coerceAtMost(2) else 0
+        savedStateHandle[QUOTE_FAILURES_KEY] = failures
+        updateState { it.copy(isLoadingForm = false, formAvailable = false, formError = true,
+            quoteFetchFailures = failures) }
     }
 
     fun onToolbarAction(action: BbcodeAction) {
@@ -677,10 +764,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             return
         }
         draftSession.hydrateBody(form.initialContent)
-        val liveBody = bodyFieldState.text.toString()
-        updateState { current ->
-            current.withLoadedForm(form).copy(restorableDraft = current.restorableDraft.takeIf { it != liveBody })
-        }
+        updateState { current -> current.withLoadedForm(form) }
     }
 
     /** #1573 — cancellation only records diagnostics; a successful empty callback retains #1128 feedback. */
@@ -808,6 +892,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     }
 
     private companion object {
+        const val QUOTE_FAILURES_KEY = "mpReply.quoteFailures"
         // #459 — diagnostics tag of the upload failures (shared shape with the topic-side editors).
         private const val LOG_TAG_UPLOAD = "MpReplyVM"
     }

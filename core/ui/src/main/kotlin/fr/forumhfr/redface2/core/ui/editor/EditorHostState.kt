@@ -49,8 +49,6 @@ data class EditorHostActions(
  * EditorHeaderPanel; other panels doing the same return false from [returnsToBody]. Sheets/dialogs
  * use the host's deferred return generation.
  * [draftOffer] always uses that deferred return, even with a legacy [returnsToBody] policy.
- * [isDraftOfferDetail] identifies the event detail shown in the same sheet. It also permits the
- * first tap on [draftOffer] under that information; all other information keeps ED-44 consumption.
  */
 @Suppress("LongParameterList") // Optional surface capabilities share one host, without surface variants.
 data class EditorHostSurfaces<S : Any>(
@@ -62,7 +60,6 @@ data class EditorHostSurfaces<S : Any>(
     val canWrapSelection: Boolean = false,
     val returnsToBody: (S) -> Boolean = { it != header },
     val draftOffer: S? = null,
-    val isDraftOfferDetail: (EventKey) -> Boolean = { false },
 )
 
 /** Synchronous VM-owned reducer port, supplied by EditorEventCollector or a surface-specific adapter. */

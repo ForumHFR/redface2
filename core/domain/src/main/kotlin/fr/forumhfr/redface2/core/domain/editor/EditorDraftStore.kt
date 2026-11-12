@@ -96,7 +96,7 @@ interface EditorDraftStore {
      * published row starts a new composition; unresolved attempts keep their identity as UNCERTAIN.
      */
     suspend fun resolveOffer(
-        owner: String?, key: String, offer: DraftOffer, expectedVersion: Long, draft: Draft,
+        owner: String?, key: String, offer: DraftOffer, expected: Revision, draft: Draft,
     ): StoreWriteResult
 
     /** Clear only the request of the revision observed by the unreadable load; otherwise reload. */
@@ -141,6 +141,9 @@ interface EditorDraftStore {
             )
         }
     }
+
+    /** The session's last owning read/write, including state changes that do not increment contentVersion. */
+    data class Revision(val contentVersion: Long, val attemptStatus: AttemptStatus?)
 
     /** ED-170: identity bound to an account, context and initial revision; later edits keep this version. */
     data class AttemptToken(val owner: String, val key: String, val id: String, val version: Long)

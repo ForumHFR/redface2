@@ -11,6 +11,8 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
  * surface ; quote / edit / create-topic surface in #146 / #147 / #148 / #149.
  */
 sealed interface PostEditorIntent {
+    data class DraftOfferRestored(val id: String) : PostEditorIntent
+    data class DraftOfferDiscarded(val id: String) : PostEditorIntent
     data object Started : PostEditorIntent
     /** Lifecycle ON_STOP: persist without closing the editor or cancelling an upload. */
     data object Stopped : PostEditorIntent

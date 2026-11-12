@@ -17,7 +17,8 @@ internal val PostEditorIntent.mutatesBody: Boolean
     get() = when (this) {
         is PostEditorIntent.ToolbarActionClicked, is PostEditorIntent.SmileySelected,
         is PostEditorIntent.ImageUrlInserted, is PostEditorIntent.ImagePicked,
-        is PostEditorIntent.ImagesPicked, PostEditorIntent.DraftRestoreRequested -> true
+        is PostEditorIntent.ImagesPicked, PostEditorIntent.DraftRestoreRequested,
+        is PostEditorIntent.DraftOfferRestored -> true
         else -> false
     }
 

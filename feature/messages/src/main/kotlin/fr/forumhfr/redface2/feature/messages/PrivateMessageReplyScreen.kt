@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.text.input.InputTransformation
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.material3.CircularProgressIndicator
@@ -37,6 +38,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.ui.editor.LocalEditorPreviewState
+import fr.forumhfr.redface2.core.ui.editor.EditorDraftOfferList
 import fr.forumhfr.redface2.core.ui.editor.EditorBackAction
 import fr.forumhfr.redface2.core.ui.editor.EditorBackState
 import fr.forumhfr.redface2.core.ui.editor.EditorScaffold
@@ -209,16 +211,24 @@ private fun ReplyFormFailure(
     LaunchedEffect(host) { host.closeLayersForFormFailure { smileys.dismiss() } }
     BackHandler { host.closeRequested() }
     Surface(modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize().statusBarsPadding()) {
+        Column(Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState())) {
             MessageEditorHeader(host.title(), host::closeRequested)
             if (state.source.restorableDraft != null) Surface(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHighest, tonalElevation = 2.dp,
             ) {
-                MessageDraftRestoreChoice(host::restoreDraft, host::discardDraft, state.restoreEnabled,
-                    Modifier.padding(start = 8.dp, top = 8.dp, end = 8.dp))
+                Column(Modifier.padding(8.dp)) {
+                    if (state.source.draftOffers.isEmpty()) {
+                        MessageDraftRestoreChoice(host::restoreDraft, host::discardDraft, state.restoreEnabled)
+                    } else EditorDraftOfferList(state.source.draftOffers, host::restoreOffer, host::discardOffer,
+                        state.restoreEnabled, state.scaffold.controlsEnabled)
+                }
             }
-            MessageFormErrorState(onRetry = host::retryFormLoad)
+            MessageFormErrorState(onRetry = host::retryFormLoad,
+                retryLabel = androidx.compose.ui.res.stringResource(
+                    fr.forumhfr.redface2.core.ui.R.string.editor_action_reload),
+                onIgnoreQuote = (host::ignoreQuote).takeIf { state.source.canIgnorePendingQuote },
+                onResumeQuote = (host::resumeQuote).takeIf { state.source.hasDormantQuote })
         }
     }
 }

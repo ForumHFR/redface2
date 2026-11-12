@@ -205,12 +205,11 @@ class RoomEditorDraftStore @Inject constructor(
     }
 
     override suspend fun resolveOffer(
-        owner: String?, key: String, offer: DraftOffer, expectedVersion: Long, draft: Draft,
+        owner: String?, key: String, offer: DraftOffer, expected: EditorDraftStore.Revision, draft: Draft,
     ): StoreWriteResult = write(owner) {
-        val expectedAttemptState = editorDraftDao.get(rowKey(checkNotNull(owner), key))?.attemptState
-        val next = draft.toEntity(checkNotNull(owner), key).copy(contentVersion = expectedVersion + 1)
-        editorDraftDao.resolveOffer(next, expectedVersion, offer.toEntity(owner, key), expectedAttemptState,
-            draft.protection(owner, key))
+        val next = draft.toEntity(checkNotNull(owner), key).copy(contentVersion = expected.contentVersion + 1)
+        editorDraftDao.resolveOffer(next, expected.contentVersion, offer.toEntity(owner, key),
+            expected.attemptStatus?.name, draft.protection(owner, key))
             .result(next.contentVersion)
     }
 

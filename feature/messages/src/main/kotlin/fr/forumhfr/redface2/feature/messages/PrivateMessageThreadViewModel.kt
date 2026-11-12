@@ -10,6 +10,9 @@ import fr.forumhfr.redface2.core.domain.author.AuthorRoleRepository
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.media.ImageSaveException
@@ -67,7 +70,25 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     private val mpStorageRepository: MpStorageRepository,
     private val writeRepository: PrivateMessageWriteRepository,
     private val postImageSaver: PostImageSaver,
+    private val draftStore: EditorDraftStore,
 ) : ViewModel() {
+
+    /** Persist Q before navigation; opening/recreating the reply never enqueues a route snapshot. */
+    fun enqueueQuotes(quotes: List<PendingInlineQuoteRequest.Quote>, onReady: () -> Unit) {
+        if (quotes.isEmpty()) return
+        viewModelScope.launch {
+            val pending = PendingInlineQuoteRequest.privateMessage(request.threadId, quotes)
+            val drafts = EditorDraftSession(draftStore, pending.key)
+            val result = try {
+                drafts.load()
+                drafts.enqueueInlineQuoteRequest(pending)
+            } catch (error: java.io.IOException) {
+                EditorDraftStore.StoreWriteResult.Failed(error)
+            }
+            if (result is EditorDraftStore.StoreWriteResult.Written && drafts.ownsCurrentAccount()) onReady()
+            else _effects.send(PrivateMessageThreadEffect.RefreshFailed)
+        }
+    }
 
     private val _state = MutableStateFlow(PrivateMessageThreadUiState.initial(request))
     val state: StateFlow<PrivateMessageThreadUiState> = _state.asStateFlow()

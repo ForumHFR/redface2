@@ -10,6 +10,7 @@ import fr.forumhfr.redface2.core.database.entities.EditorDraftOfferEntity
 import fr.forumhfr.redface2.core.domain.editor.insertEditorQuotes
 import fr.forumhfr.redface2.core.domain.editor.mergeEditorBody
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptStatus
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptOutcome
@@ -54,6 +55,22 @@ class RoomEditorDraftOfferTest {
             RedfaceDatabase::class.java).allowMainThreadQueries().build()
     }
     @After fun tearDown() { database.close() }
+
+    @Test fun `resolution uses the attempt state from the session read before concurrent publication`() = runTest {
+        val store = store()
+        store.saveIfVersion("alice", key, Draft("D"), 0)
+        val sending = EditorDraftSession(store, key)
+        sending.load()
+        sending.save(Draft("C"))
+        val token = (sending.begin(Draft("C"), "send") as BeginAttemptResult.Started).token
+        val stale = EditorDraftSession(store(), key)
+        stale.load()
+        val offer = stale.offers.single()
+        sending.finish(token, AttemptOutcome.PUBLISHED)
+        assertEquals(StoreWriteResult.Conflict, stale.resolveOffer(offer, Draft("D restored")))
+        assertEquals(AttemptStatus.PUBLISHED, store.loadEntry("alice", key)?.attempt?.status)
+        assertEquals(listOf(offer), store.loadOffers("alice", key))
+    }
 
     @Test fun `typing before GET protects D with its original date and keeps multiple versions`() = runTest {
         val store = store()
@@ -245,7 +262,8 @@ class RoomEditorDraftOfferTest {
         editor.load()
         editor.save(Draft("C"))
         val offer = store.loadOffers("alice", key).single()
-        database.openHelper.writableDatabase.execSQL("""CREATE TRIGGER reject_offer_delete BEFORE DELETE ON editor_draft_offers
+        database.openHelper.writableDatabase.execSQL("""CREATE TRIGGER reject_offer_delete
+            BEFORE DELETE ON editor_draft_offers
             BEGIN SELECT RAISE(ABORT, 'disk failure'); END""")
         assertTrue(editor.resolveOffer(offer, Draft("D\n\nC")) is StoreWriteResult.Failed)
         assertEquals("C", store.load("alice", key)?.body)
@@ -305,7 +323,8 @@ class RoomEditorDraftOfferTest {
                 val draft = Draft(if (restoring) "D\n\n$current" else current)
                 val version = before?.version ?: 0L
                 assertEquals(StoreWriteResult.Conflict,
-                    store.resolveOffer("alice", caseKey, offer, version - 1, draft))
+                    store.resolveOffer("alice", caseKey, offer,
+                        EditorDraftStore.Revision(version - 1, before?.attempt?.status), draft))
                 assertEquals(before, store.loadEntry("alice", caseKey))
                 assertEquals(listOf(offer), store.loadOffers("alice", caseKey))
                 assertTrue(editor.resolveOffer(offer, draft) is StoreWriteResult.Written)

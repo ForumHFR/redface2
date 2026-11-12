@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.editor
 
+import fr.forumhfr.redface2.core.domain.editor.mergeEditorBody
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.text.input.InputTransformation
@@ -46,7 +47,6 @@ import fr.forumhfr.redface2.core.domain.write.TopicFormRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
-import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.write.EditFirstPostContext
 import fr.forumhfr.redface2.core.model.write.MissingFirstPostSubcategoryException
@@ -454,7 +454,8 @@ class TopicFormViewModel @AssistedInject constructor(
         val fingerprint = draft.restoreOfferFingerprint()
         val ignored = savedStateHandle.get<String>(DRAFT_RESTORE_OFFER_FINGERPRINT_KEY) == fingerprint
         if (hasContent && !ignored && _state.value.canOfferDraftRestore(draft)) {
-            updateState { it.copy(restorableDraft = draft.body, restorableSubject = draft.subject) }
+            updateState { it.copy(restorableDraft = draft.body, restorableSubject = draft.subject,
+                draftOffers = listOf(EditorDraftStore.DraftOffer.from(EditorDraftStore.DraftEntry(draft, 0L)))) }
         }
     }
 
@@ -682,14 +683,7 @@ class TopicFormViewModel @AssistedInject constructor(
 
     /** ED-89 body rule, extracted from [onDraftRestoreRequested] to keep it under the detekt complexity threshold. */
     private fun restoredBody(liveBody: String, offeredBody: String, seed: String): String {
-        val typedAfterSeed = liveBody.takeIf { seed.isNotEmpty() && it.startsWith(seed) }?.substring(seed.length)
-        return when {
-            offeredBody.isBlank() -> liveBody
-            liveBody.isBlank() || liveBody == offeredBody || liveBody == seed -> offeredBody
-            typedAfterSeed != null && typedAfterSeed.isBlank() -> offeredBody
-            typedAfterSeed != null -> offeredBody + "\n\n" + typedAfterSeed.trimStart()
-            else -> liveBody.trimEnd() + "\n\n" + offeredBody
-        }
+        return mergeEditorBody(offeredBody, liveBody, seed).body
     }
 
     /** Explicit restore/hydration is one undoable edit, independent of the current selection. */

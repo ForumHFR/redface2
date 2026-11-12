@@ -11,6 +11,13 @@ class EditorBodyMergeTest {
     private val q1 = "[quotemsg=101]one[/quotemsg]"
     private val q2 = "[quotemsg=202]two[/quotemsg]"
 
+    @Test fun `delivery filter preserves whole batch separators for the durable quote-only fingerprint`() {
+        val batch = "\n$q1\n\n$q2\n"
+        assertEquals(FilteredEditorQuotes(batch, 0), filterEditorQuotes(batch, "typing"))
+        assertEquals(FilteredEditorQuotes(q2, 1), filterEditorQuotes(batch, q1))
+        assertEquals(FilteredEditorQuotes(batch, 0), filterEditorQuotes(batch, q1.replace("one", "edited")))
+    }
+
     @Test
     fun `restore orders D then quotes then typing made during GET`() {
         val body = "$q1\n\ntext typed during GET"
@@ -139,21 +146,21 @@ class EditorBodyMergeTest {
     }
 
     @Test
-    fun `delivery evidence keeps only last batch and original blocks still present in C`() {
+    fun `delivery evidence survives deleted blocks and compacts only repeated exact requests`() {
         val modified = q1.replace("one", "edited")
         val q3 = "[quotemsg=303]three[/quotemsg]"
         val q4 = "[quotemsg=404]four[/quotemsg]"
         var proof = EditorBodyProvenance().delivered(scope, q1)
         proof = proof.delivered(scope, q2, "$q1\n\n$q2\n\ntyped")
         proof = proof.delivered(scope, q3, "$modified\n\n$q3\n\ntyped")
-        assertEquals(listOf(q1, q3), proof.deliveries.map { it.body })
+        assertEquals(listOf(q1, q2, q3), proof.deliveries.map { it.body })
         assertEquals("D\n\n$modified\n\n$q3\n\ntyped",
             mergeEditorBody("D", "$modified\n\n$q3\n\ntyped", provenance = proof).body)
-        // Removing old blocks and repeated deliveries cannot accumulate historical bodies.
+        // ED-89: removed blocks may return. Repeating an exact request does not grow its proof.
         repeat(100) { proof = proof.delivered(scope, q4, q4) }
-        assertEquals(listOf(q4), proof.deliveries.map { it.body })
+        assertEquals(listOf(q1, q2, q3, q4), proof.deliveries.map { it.body })
         proof = proof.rebase(q4, "typed only")
-        assertEquals(listOf(q4), proof.deliveries.map { it.body })
+        assertEquals(listOf(q1, q2, q3, q4), proof.deliveries.map { it.body })
         assertTrue(proof.isQuoteOnly(q4 + "\n  "))
         assertFalse(proof.isQuoteOnly(q3))
     }

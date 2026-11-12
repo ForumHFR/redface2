@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.messages
 
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import android.content.res.Configuration
 import android.content.res.Resources
 import androidx.compose.foundation.ScrollState
@@ -193,6 +194,7 @@ class EditorBaselineRoborazziTest {
         bodyText = body, conversationTitle = "Conversation de démonstration",
         canManageRecipients = chrome.owner, recipients = listOf("CorrespondantTest", "Administration"),
         restorableDraft = if (chrome.draftOffer) "Brouillon privé" else null,
+        draftOffers = if (chrome.draftOffer) baselineOffers() else emptyList(),
         submitError = if (chrome.antiFlood) EditorErrors.antiFlood else null,
         // Far-future arm, as in the post baseline: the countdown scrim stays frozen at its start.
         submission = if (chrome == ReplyChrome.Armed) {
@@ -211,6 +213,9 @@ class EditorBaselineRoborazziTest {
     }
 
     /** [scene] names the PNG; [tap] is the content description opened before capture; sheets capture their dialog. */
+    private fun baselineOffers() = listOf(EditorDraftStore.DraftOffer("baseline", 1,
+        EditorDraftStore.Draft("[b]Brouillon privé[/b]", isPrivate = true, updatedAt = 0)))
+
     private enum class ReplyChrome(val scene: String?, val tap: String? = null, val sheet: Boolean = false) {
         Ready(null),
         Restore("restore", tap = "Brouillon retrouvé, restaurer ou ignorer", sheet = true),
@@ -315,6 +320,7 @@ class EditorBaselineRoborazziTest {
             bodyText = body, isPreviewVisible = capture == ComposeCapture.Preview,
             preview = PostContent(listOf(PostBlock.Paragraph(listOf(PostInline.Text("Aperçu du message privé"))))),
             restorableDraft = if (capture.restorable) "Brouillon privé" else null,
+            draftOffers = if (capture.restorable) baselineOffers() else emptyList(),
             submission = if (capture == ComposeCapture.Armed) EditorSubmissionState.Armed(
                 ArmToken(1, session, Long.MAX_VALUE / 4, 60_000L)) // Far-future arm: frozen countdown.
             else EditorSubmissionState.Ready,

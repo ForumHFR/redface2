@@ -56,7 +56,8 @@ internal class PrivateMessageComposeChromeAdapter(
     @Composable fun chrome() = scaffoldChrome(
         firstStatus = if (source().restorableDraft == null) null else EditorAppBarStatus(
             UiR.drawable.ic_ms_restore_page, stringResource(UiR.string.editor_status_restore),
-            { open(PrivateMessageComposeChromeSurface.Restore) }, enabled = state.scaffold.controlsEnabled),
+            { open(PrivateMessageComposeChromeSurface.Restore) }, enabled = state.scaffold.controlsEnabled,
+            showDot = true),
     )
     fun signature(value: Boolean) { if (state.optionsEnabled) actions.signature(value) }
     fun smileyDisabled(value: Boolean) { if (state.optionsEnabled) actions.smileyDisabled(value) }

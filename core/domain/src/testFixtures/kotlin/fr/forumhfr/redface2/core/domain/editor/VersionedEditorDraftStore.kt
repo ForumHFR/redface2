@@ -110,12 +110,14 @@ open class VersionedEditorDraftStore : EditorDraftStore {
             draft.bodyProvenance?.isQuoteOnly(draft.body) == true
 
     override suspend fun resolveOffer(
-        owner: String?, key: String, offer: DraftOffer, expectedVersion: Long, draft: Draft,
+        owner: String?, key: String, offer: DraftOffer, expected: EditorDraftStore.Revision, draft: Draft,
     ): StoreWriteResult {
         if (owner == null || owner != activeOwner) return StoreWriteResult.OwnerChanged
         val previous = entries[key]
         return saveFailure?.let { StoreWriteResult.Failed(it) } ?: run {
-            if (!canResolveOffer(owner, key, previous, offer, expectedVersion)) {
+            if (previous?.attempt?.status != expected.attemptStatus ||
+                !canResolveOffer(owner, key, previous, offer, expected.contentVersion)
+            ) {
                 StoreWriteResult.Conflict
             } else {
                 if (draft.offerToPreserve?.id != offer.id) protect(owner, key, previous, draft.offerToPreserve)
@@ -123,14 +125,14 @@ open class VersionedEditorDraftStore : EditorDraftStore {
                     offerToPreserve = null, offerToResolve = null, protectCurrent = true,
                     pendingInlineQuoteRequest = previous?.takeUnless { it.attempt?.status == AttemptStatus.PUBLISHED }
                         ?.draft?.pendingInlineQuoteRequest,
-                ), expectedVersion + 1, previous?.attempt?.takeUnless { it.status == AttemptStatus.PUBLISHED }
+                ), expected.contentVersion + 1, previous?.attempt?.takeUnless { it.status == AttemptStatus.PUBLISHED }
                     ?.copy(status = AttemptStatus.UNCERTAIN))
                 offers(owner, key).removeAll { it.id == offer.id }
                 saveCount++
                 writes++
                 lastSavedOwner = owner
                 saveReturnGate?.await()
-                StoreWriteResult.Written(expectedVersion + 1)
+                StoreWriteResult.Written(expected.contentVersion + 1)
             }
         }
     }

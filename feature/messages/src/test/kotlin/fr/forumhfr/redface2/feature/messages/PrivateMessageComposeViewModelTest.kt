@@ -933,7 +933,7 @@ class PrivateMessageComposeViewModelTest {
         assertFalse(vm.state.value.isUploading)
         val uploadedBody = vm.bodyFieldState.text.toString()
         vm.onDraftRestoreRequested()
-        assertEquals("$uploadedBody\n\nrescued body", vm.bodyFieldState.text.toString())
+        assertEquals("rescued body\n\n$uploadedBody", vm.bodyFieldState.text.toString())
         assertNull(vm.state.value.restorableDraft)
     }
 
@@ -1015,12 +1015,12 @@ class PrivateMessageComposeViewModelTest {
         recreated.onDraftRestoreRequested()
         advanceUntilIdle()
         assertNull(savedStateHandle.get<String>("messageComposeEditor.ignoredOfferFingerprint"))
-        assertEquals("new live MP\n\nrescued MP", draftStore.saved[key]?.body)
+        assertEquals("rescued MP\n\nnew live MP", draftStore.saved[key]?.body)
 
         val afterRestore = viewModel(repository, savedStateHandle = savedStateHandle)
         advanceUntilIdle()
         assertNull(afterRestore.state.value.restorableDraft)
-        assertEquals("new live MP\n\nrescued MP", afterRestore.bodyFieldState.text.toString())
+        assertEquals("rescued MP\n\nnew live MP", afterRestore.bodyFieldState.text.toString())
     }
 
     @Test
@@ -1095,7 +1095,7 @@ class PrivateMessageComposeViewModelTest {
         viewModel.editBody(TextFieldValue("fresh body"))
         viewModel.onDraftRestoreRequested()
 
-        assertEquals("fresh body\n\nrescued body", viewModel.bodyFieldState.text.toString())
+        assertEquals("rescued body\n\nfresh body", viewModel.bodyFieldState.text.toString())
         assertEquals("fresh subject", viewModel.state.value.subject)
         assertEquals("bob", viewModel.state.value.recipients)
         assertNull(viewModel.state.value.restorableDraft)
@@ -1454,12 +1454,12 @@ class PrivateMessageComposeViewModelTest {
         vm.bodyFieldState.edit { append("typed") }
         assertEquals("", vm.state.value.bodyText)
         vm.onDraftRestoreRequested()
-        assertEquals("typed\n\nstored", vm.bodyFieldState.text.toString())
+        assertEquals("stored\n\ntyped", vm.bodyFieldState.text.toString())
         assertEquals(TextRange(13), vm.bodyFieldState.selection)
         assertNull(vm.state.value.restorableDraft)
         Snapshot.sendApplyNotifications()
         advanceUntilIdle()
-        assertEquals("typed\n\nstored", draftStore.saved[key]?.body)
+        assertEquals("stored\n\ntyped", draftStore.saved[key]?.body)
     }
 
     @Test

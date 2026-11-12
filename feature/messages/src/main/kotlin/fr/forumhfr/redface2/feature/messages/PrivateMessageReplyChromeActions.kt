@@ -17,6 +17,10 @@ internal data class PrivateMessageReplyChromeActions(
     val addRecipient: (String) -> Unit,
     val removeRecipient: (String) -> Unit,
     val reloadForm: () -> Unit,
+    val restoreOffer: (String) -> Unit = { restoreDraft() },
+    val discardOffer: (String) -> Unit = { discardDraft() },
+    val ignoreQuote: () -> Unit = {},
+    val resumeQuote: () -> Unit = {},
 )
 
 internal fun PrivateMessageReplyViewModel.chromeActions() = PrivateMessageReplyChromeActions(
@@ -32,9 +36,13 @@ internal fun PrivateMessageReplyViewModel.chromeActions() = PrivateMessageReplyC
     notification = ::onToggleEmailNotification,
     smiley = ::onSmileySelected,
     picker = ::onImagePickerEvent,
-    restoreDraft = ::onDraftRestoreRequested,
-    discardDraft = ::onDraftDiscardRequested,
+    restoreDraft = { onDraftRestoreRequested() },
+    discardDraft = { onDraftDiscardRequested() },
     addRecipient = ::onAddRecipient,
     removeRecipient = ::onRemoveRecipient,
     reloadForm = ::retryFormLoad,
+    restoreOffer = { onDraftRestoreRequested(it) },
+    discardOffer = { onDraftDiscardRequested(it) },
+    ignoreQuote = ::onPendingQuoteIgnored,
+    resumeQuote = ::onPendingQuoteResumed,
 )

@@ -7,8 +7,6 @@ import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.animation.ContentTransform
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -95,7 +93,6 @@ import fr.forumhfr.redface2.R
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
 import fr.forumhfr.redface2.core.model.AuthState
-import fr.forumhfr.redface2.core.model.write.PrivateMessageQuote
 import fr.forumhfr.redface2.core.model.write.QuoteScope
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
@@ -227,6 +224,7 @@ data class PrivateMessageReplyRoute(
     val quotedNumreponse: Int? = null,
     /** #1074 — server-provided 1-based rank in the source page; never guessed or omitted. */
     val quoteRef: Int? = null,
+    val consumesQuoteBasket: Boolean = false,
 ) : RedfaceNavKey {
     init {
         require((quotedNumreponse == null) == (quoteRef == null)) {
@@ -2552,13 +2550,11 @@ private fun RedfaceNavHost(
                     onReply = { threadId, page ->
                         backStack.add(PrivateMessageReplyRoute(threadId = threadId, page = page))
                     },
-                    onQuote = { threadId, page, quote ->
+                    onQuote = { threadId, page, _ ->
                         backStack.add(
                             PrivateMessageReplyRoute(
                                 threadId = threadId,
                                 page = page,
-                                quotedNumreponse = quote.numreponse,
-                                quoteRef = quote.ref,
                             ),
                         )
                     },
@@ -2570,20 +2566,8 @@ private fun RedfaceNavHost(
                         multiQuoteNavState.onToggle(privateMessageQuoteScope, selection)
                     },
                     onMultiQuote = { threadId, page ->
-                        val selections = multiQuoteNavState.basket
-                            ?.takeIf { it.matches(privateMessageQuoteScope) }
-                            ?.selections
-                            .orEmpty()
-                        if (selections.isNotEmpty()) {
-                            multiQuoteNavState.onEditorQuotesHandoff(
-                                EditorQuotesHandoff(
-                                    scope = privateMessageQuoteScope,
-                                    quotes = selections,
-                                    consumesBasket = true,
-                                ),
-                            )
-                            backStack.add(PrivateMessageReplyRoute(threadId = threadId, page = page))
-                        }
+                        backStack.add(PrivateMessageReplyRoute(threadId = threadId, page = page,
+                            consumesQuoteBasket = true))
                     },
                     onClearMultiQuote = multiQuoteNavState.onClear,
                     onRemoveMultiQuotes = { numreponses ->
@@ -2609,22 +2593,11 @@ private fun RedfaceNavHost(
             }
             entry<PrivateMessageReplyRoute> { route ->
                 val privateMessageQuoteScope = QuoteScope.PrivateMessage(route.threadId)
-                val editorQuotesHandoff = remember(route) {
-                    multiQuoteNavState.pendingEditorQuotes.forScope(privateMessageQuoteScope)
-                }
-                LaunchedEffect(Unit) { multiQuoteNavState.onEditorQuotesHandoff(null) }
                 PrivateMessageReplyScreen(
                     request = PrivateMessageReplyRequest(
                         threadId = route.threadId,
                         page = route.page,
                         openRecipientManager = route.openRecipientManager,
-                        quote = route.quotedNumreponse?.let { numreponse ->
-                            PrivateMessageQuote(
-                                numreponse = numreponse,
-                                ref = requireNotNull(route.quoteRef),
-                            )
-                        },
-                        initialQuotes = editorQuotesHandoff?.quotes.orEmpty(),
                     ),
                     onSubmitSucceeded = { threadId, page ->
                         // #1040 lot 6 — arm the opaque result BEFORE popping, and only when the
@@ -2634,7 +2607,7 @@ private fun RedfaceNavHost(
                         if (isPrivateMessageThreadEntryFor(below, threadId)) {
                             privateMessageSubmitNavState.onPublish(threadId, page)
                         }
-                        if (editorQuotesHandoff?.consumesBasket == true &&
+                        if (route.consumesQuoteBasket &&
                             multiQuoteNavState.basket?.matches(privateMessageQuoteScope) == true
                         ) {
                             multiQuoteNavState.onClear()

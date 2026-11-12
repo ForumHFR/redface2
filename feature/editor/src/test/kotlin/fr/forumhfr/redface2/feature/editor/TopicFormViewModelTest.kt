@@ -2115,14 +2115,14 @@ class TopicFormViewModelTest {
     fun restoreTrimsTrailingWhitespaceBeforeSeparator() = runTest {
         draftStore.preload(EditorDraftKey.newTopic(SAMPLE_CAT), EditorDraftStore.Draft(body = "draft"))
         val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
-        assertRestoreAndSingleUndo(vm, TextFieldValue("typed \n\n", TextRange(2)), "typed\n\ndraft")
+        assertRestoreAndSingleUndo(vm, TextFieldValue("typed \n\n", TextRange(2)), "draft\n\ntyped \n\n")
     }
 
     @Test
     fun restoreAppendsAfterTypedTextWhenSeedEmpty() = runTest {
         draftStore.preload(EditorDraftKey.newTopic(SAMPLE_CAT), EditorDraftStore.Draft(body = "draft"))
         val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
-        assertRestoreAndSingleUndo(vm, TextFieldValue("typed  \n", TextRange(1, 3)), "typed\n\ndraft")
+        assertRestoreAndSingleUndo(vm, TextFieldValue("typed  \n", TextRange(1, 3)), "draft\n\ntyped  \n")
         assertEquals("", vm.state.value.draftHydratedContent)
     }
 
@@ -2935,7 +2935,7 @@ class TopicFormViewModelTest {
         syncBody()
         testScheduler.advanceUntilIdle()
         assertNull(savedStateHandle.get<String>("draft_restore_offer_fingerprint"))
-        assertEquals("new live body\n\nrescued body", draftStore.saved[key]?.body)
+        assertEquals("rescued body\n\nnew live body", draftStore.saved[key]?.body)
 
         val afterRestore = newTopicViewModel(
             entrySubcat = SAMPLE_SUBCAT,
@@ -2944,7 +2944,7 @@ class TopicFormViewModelTest {
         syncBody()
         testScheduler.advanceUntilIdle()
         assertNull(afterRestore.state.value.restorableDraft)
-        assertEquals("new live body\n\nrescued body", afterRestore.bodyFieldState.text.toString())
+        assertEquals("rescued body\n\nnew live body", afterRestore.bodyFieldState.text.toString())
         assertEquals("new live title", afterRestore.state.value.subject.text)
     }
 
@@ -3069,7 +3069,7 @@ class TopicFormViewModelTest {
         viewModel.submit(TopicFormIntent.DraftRestoreRequested)
 
         syncBody()
-        assertEquals("fresh body\n\nrescued body", viewModel.state.value.bodyText)
+        assertEquals("rescued body\n\nfresh body", viewModel.state.value.bodyText)
         assertEquals("fresh title", viewModel.state.value.subject.text)
         assertNull(viewModel.state.value.restorableDraft)
     }

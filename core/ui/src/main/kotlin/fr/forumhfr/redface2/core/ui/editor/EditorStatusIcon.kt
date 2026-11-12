@@ -1,6 +1,11 @@
 package fr.forumhfr.redface2.core.ui.editor
 
 import androidx.annotation.DrawableRes
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.stateDescription
+import fr.forumhfr.redface2.core.ui.R
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.sizeIn
@@ -50,13 +55,15 @@ fun EditorStatusIcon(
     enabled: Boolean = true,
     visible: Boolean = true,
     compactHeight: Boolean = false,
+    showDot: Boolean = false,
 ) {
     require(badgeCount == null || badgeCount > 0)
+    val dotState = stringResource(R.string.editor_status_draft_pending)
     val style = MaterialTheme.typography.labelSmall
     val badgeSize = measureEditorStatusBadge(badgeCount)
     // Stack while both fit; at large font scales overlap the badge instead of clipping either layer.
     val badgeWidth = badgeSize.width
-    val height = (24.dp + if (badgeCount == null) 0.dp else badgeSize.height)
+    val height = (24.dp + if (badgeCount != null) badgeSize.height else if (showDot) 6.dp else 0.dp)
         .coerceAtMost(EditorChromeMetrics(compactHeight).controlVisibleHeight)
     // Replace only the tooltip state on masking: its popup/job die, the live anchor keeps its ID.
     val tooltip = key(visible) { rememberEditorTooltipState() }
@@ -69,6 +76,7 @@ fun EditorStatusIcon(
             liveRegion = LiveRegionMode.Polite
             if (visible) {
                 contentDescription = label
+                if (showDot) stateDescription = dotState
                 role = Role.Button
                 if (!enabled) disabled()
                 onClick {
@@ -88,6 +96,9 @@ fun EditorStatusIcon(
                 if (visible) Box(Modifier.size(maxOf(24.dp, badgeWidth), height)) {
                     RedfaceVectorIcon(iconRes, Modifier.align(Alignment.TopCenter).testTag(EDITOR_STATUS_GLYPH_TAG))
                     val badgeAlpha = if (enabled) 1f else DISABLED_BADGE_ALPHA
+                    if (showDot && badgeCount == null) Box(Modifier.align(Alignment.BottomCenter).size(6.dp)
+                        .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape)
+                        .testTag(EDITOR_STATUS_DOT_TAG).clearAndSetSemantics {})
                     if (badgeCount != null) Badge(
                         containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = badgeAlpha),
                         contentColor = MaterialTheme.colorScheme.onSecondaryContainer.copy(alpha = badgeAlpha),
@@ -118,6 +129,7 @@ internal fun measureEditorStatusBadge(count: Int?): DpSize {
     return with(LocalDensity.current) { DpSize(size.width.toDp() + 8.dp, maxOf(16.dp, size.height.toDp())) }
 }
 
+internal const val EDITOR_STATUS_DOT_TAG = "editor-status-dot"
 internal const val EDITOR_STATUS_GLYPH_TAG = "editor-status-glyph"
 internal const val EDITOR_STATUS_BADGE_TAG = "editor-status-badge"
 internal const val EDITOR_STATUS_BADGE_TEXT_TAG = "editor-status-badge-text"

@@ -28,6 +28,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
     private var lastBody = ""
     /** Text Undo/Redo can return to the last restore after an intervening autosave lost its offsets. */
     private var restoredBody: EditorBodyMerge? = null
+    private var stagedBody: EditorBodyMerge? = null
     var bodyProvenance: EditorBodyProvenance? = null
         private set
     private var writingVersion: Long? = null
@@ -35,6 +36,28 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
     val nextContentVersion: Long get() = (writingVersion ?: version) + 1
     /** Optional surface checkpoint; null result announces the revision before the first suspension. */
     var checkpointObserver: ((Draft, Long, StoreWriteResult?) -> Unit)? = null
+    /** Includes the source D before its first transactional copy. Identities survive equal bodies. */
+    val availableOffers: List<DraftOffer>
+        get() = (offers + listOfNotNull(protectedOffer)).distinctBy { it.id }
+            .filterNot { it.id in resolvedOffers }
+            .sortedWith(compareByDescending<DraftOffer> { it.draft.updatedAt }.thenByDescending { it.sourceVersion })
+    private var expectedAttemptStatus: AttemptStatus? = null
+
+    /** Reconcile offsets with input that has not reached the autosave/mirror yet. */
+    fun provenanceFor(body: String): EditorBodyProvenance {
+        val live = stagedBody ?: restoredBody?.takeIf { it.body == body }
+        val proof = bodyProvenance ?: EditorBodyProvenance()
+        return if (live == null) proof.rebase(lastBody, body) else live.provenance.copy(
+            deliveries = (live.provenance.deliveries + proof.deliveries).distinct(),
+        ).rebase(live.body, body)
+    }
+
+    /** A committing older autosave must not adopt away these newer live boundaries. */
+    fun stageBodyMerge(merge: EditorBodyMerge) {
+        stagedBody = merge
+        restoredBody = merge
+    }
+
     private var published = false
     private var readable = false
     private var unresolved: AttemptToken? = null
@@ -52,6 +75,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         offersLoaded = false
         resolvedOffers.clear()
         restoredBody = null
+        stagedBody = null
         protectedOffer = null
         offers = emptyList()
         hasUnreadableInlineQuoteRequest = false
@@ -74,6 +98,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         lastBody = composition?.draft?.body.orEmpty()
         bodyProvenance = composition?.draft?.bodyProvenance
         version = entry?.version ?: 0L
+        expectedAttemptStatus = entry?.attempt?.status
         published = entry?.attempt?.status == AttemptStatus.PUBLISHED
         unresolved = entry?.attempt?.token?.takeUnless { published }
         pendingInlineQuoteRequest = entry?.draft?.pendingInlineQuoteRequest.takeUnless { published }
@@ -95,7 +120,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         return entry
     }
 
-    fun invalidate() { invalidated = true }
+    fun invalidate() { invalidated = true; stagedBody = null }
 
     suspend fun ownsCurrentAccount(): Boolean {
         val current = store.currentOwner()
@@ -126,6 +151,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
                 bodyProvenance = null
                 protectedOffer = null
                 restoredBody = null
+                stagedBody = null
             }
             adopt(result)
             result
@@ -141,9 +167,11 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         withContext(NonCancellable) {
             val snapshot = ownedDraft(draft)
             val result = checkpointWrite(snapshot) {
-                mutation { store.resolveOffer(owner, checkNotNull(key), offer, version, protected(snapshot)) }
+                mutation { store.resolveOffer(owner, checkNotNull(key), offer,
+                    EditorDraftStore.Revision(version, expectedAttemptStatus), protected(snapshot)) }
             }
             if (result is StoreWriteResult.Written) {
+                expectedAttemptStatus = unresolved?.let { AttemptStatus.UNCERTAIN }
                 adoptResolvedOffer(offer, snapshot)
                 adoptBody(snapshot)
             }
@@ -164,6 +192,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
                     lastBody = ""
                     bodyProvenance = null
                     restoredBody = null
+                    stagedBody = null
                 }
                 pendingInlineQuoteRequest = pendingInlineQuoteRequest?.merge(request) ?: request
             }
@@ -233,6 +262,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
             if (result is BeginAttemptResult.Started) {
                 version = result.token.version
                 unresolved = result.token
+                expectedAttemptStatus = AttemptStatus.IN_PROGRESS
                 adoptBody(snapshot)
             }
         }
@@ -242,6 +272,11 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         store.finishAttempt(token, outcome).also { result ->
             adopt(result)
             if (result is StoreWriteResult.Written) {
+                expectedAttemptStatus = when (outcome) {
+                    AttemptOutcome.PUBLISHED -> AttemptStatus.PUBLISHED
+                    AttemptOutcome.UNCERTAIN -> AttemptStatus.UNCERTAIN
+                    AttemptOutcome.CERTAIN_FAILURE -> null
+                }
                 published = outcome == AttemptOutcome.PUBLISHED
                 unresolved = token.takeIf { outcome == AttemptOutcome.UNCERTAIN }
                 if (published) {
@@ -250,6 +285,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
                     lastBody = ""
                     protectedOffer = null
                     restoredBody = null
+                    stagedBody = null
                 }
             }
         }
@@ -291,6 +327,11 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
     private fun adoptBody(draft: Draft) {
         lastBody = draft.body
         bodyProvenance = draft.bodyProvenance
+        val staged = stagedBody
+        val matches = staged != null && staged.body == draft.body &&
+            staged.provenance.draftEnd == draft.bodyProvenance?.draftEnd &&
+            staged.provenance.quotesEnd == draft.bodyProvenance?.quotesEnd
+        if (matches) stagedBody = null
     }
 
     private suspend fun mutation(operation: suspend () -> StoreWriteResult): StoreWriteResult = try {
@@ -304,11 +345,17 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         val offer = snapshot.offerToResolve?.takeUnless { it.id in resolvedOffers }
         val attempt = unresolved
         when {
-            offer != null -> store.resolveOffer(owner, checkNotNull(key), offer, version, draft).also {
-                if (it is StoreWriteResult.Written) adoptResolvedOffer(offer, snapshot)
+            offer != null -> store.resolveOffer(owner, checkNotNull(key), offer,
+                EditorDraftStore.Revision(version, expectedAttemptStatus), draft).also {
+                if (it is StoreWriteResult.Written) {
+                    expectedAttemptStatus = unresolved?.let { AttemptStatus.UNCERTAIN }
+                    adoptResolvedOffer(offer, snapshot)
+                }
             }
             published -> store.startNewComposition(owner, checkNotNull(key), draft, version)
-            attempt != null -> store.saveUnresolved(attempt, draft, version)
+            attempt != null -> store.saveUnresolved(attempt, draft, version).also {
+                if (it is StoreWriteResult.Written) expectedAttemptStatus = AttemptStatus.UNCERTAIN
+            }
             else -> store.saveIfVersion(owner, checkNotNull(key), draft, version)
         }
     } catch (error: IOException) {
@@ -327,6 +374,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
     private fun adopt(result: StoreWriteResult) {
         if (result is StoreWriteResult.Written) {
             version = result.version
+            if (published) expectedAttemptStatus = null
             published = false
         }
     }

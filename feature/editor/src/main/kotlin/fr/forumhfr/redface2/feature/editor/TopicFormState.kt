@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.editor
 
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.DraftOffer
 import androidx.compose.ui.text.input.TextFieldValue
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
@@ -114,6 +115,7 @@ data class TopicFormState(
      * « Restaurer » and are dropped on « Ignorer ».
      */
     val restorableDraft: String? = null,
+    val draftOffers: List<DraftOffer> = emptyList(),
     val restorableSubject: String? = null,
     /**
      * #459 — `true` while an image upload (single or batch) is in flight. Drives the toolbar

@@ -28,7 +28,8 @@ import fr.forumhfr.redface2.core.domain.diagnostics.recordImagesPicked
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
-import fr.forumhfr.redface2.core.domain.editor.EditorBodyProvenance
+import fr.forumhfr.redface2.core.domain.editor.mergeEditorBody
+import fr.forumhfr.redface2.core.domain.editor.insertEditorQuotes
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorPreparationException
 import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
@@ -52,7 +53,6 @@ import fr.forumhfr.redface2.core.domain.write.TopicReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
-import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
@@ -90,6 +90,7 @@ import fr.forumhfr.redface2.core.ui.editor.pickedImagesForUpload
 import fr.forumhfr.redface2.core.ui.editor.toEditorError
 import fr.forumhfr.redface2.core.ui.editor.toEditorUploadError
 import java.io.IOException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineStart
@@ -295,7 +296,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 }
             },
             success = { value -> _effects.trySend(value) },
-            durableWriteSucceeded = chromeEvents::durableWriteSucceeded,
+            durableWriteSucceeded = { chromeEvents.durableWriteSucceeded(); refreshDraftOffers() },
             clearError = { error ->
                 updateChromeState { if (it.submitError == error) it.copy(submitError = null) else it }
             },
@@ -326,8 +327,10 @@ class PostEditorViewModel @AssistedInject constructor(
     private var draftRestored = false
     private var sharedDraftResumed = false
     private var draftRestoreDeciding = false
+    private var draftDecisionCompleted: CompletableDeferred<Unit>? = null
     private var restoredOfferAwaitingWrite: String? = null
     private var mergedDraftOffer: String? = null
+    private var selectedDraftOffer: EditorDraftStore.DraftOffer? = null
     private var inlineQuoteDeliveryRequested = false
     private var duplicateQuoteDelivery = false
     private var deliveredInlineQuoteRequest: PendingInlineQuoteRequest? = null
@@ -398,7 +401,8 @@ class PostEditorViewModel @AssistedInject constructor(
                     restoredOfferAwaitingWrite = null
                     mergedDraftOffer = null
                     deliveredInlineQuoteRequest = null
-                    updateChromeState { it.copy(isUploading = false, uploadProgress = null) }
+                    updateChromeState { it.copy(isUploading = false, uploadProgress = null,
+                        restorableDraft = null, draftOffers = emptyList()) }
                 }
                 authObserved = true
                 activeUserId = newUserId
@@ -473,7 +477,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 QuoteSelection(QuoteLocator(it.page, it.numreponse, it.ref), "", "", it.truncate)
             })
             _state.update { it.copy(isInitializing = false) }
-            servePendingInlineQuoteIfEligible(requestDelivery = true, loadFormUnderOffer = true)
+            servePendingInlineQuoteIfEligible(requestDelivery = true)
         } else {
             savedStateHandle.remove<Int>(QUOTE_FAILURES_KEY)
             _state.update { it.copy(quoteFetchFailures = 0, isInitializing = false) }
@@ -505,7 +509,7 @@ class PostEditorViewModel @AssistedInject constructor(
         val pending = _state.value.pendingQuotes
         when {
             pending.isNotEmpty() -> servePendingInlineQuoteIfEligible(
-                requestDelivery = true, loadFormUnderOffer = true,
+                requestDelivery = true,
             )
             _state.value.quotes.isNotEmpty() && _state.value.submitError?.cause == EditorCause.QuoteFetchFailed ->
                 loadReplyFormWithInlineQuotes(_state.value.quotes, insertInline = false)
@@ -523,7 +527,12 @@ class PostEditorViewModel @AssistedInject constructor(
             val result = if (_state.value.unreadableQuoteRequest) {
                 submission.drafts.discardUnreadableInlineQuoteRequest()
             } else {
-                submission.drafts.consumeInlineQuoteRequest(checkNotNull(pending))
+                if (pending == deliveredInlineQuoteRequest) {
+                    submission.drafts.consumeInlineQuoteRequest(checkNotNull(pending),
+                        EditorDraftStore.Draft(bodyFieldState.text.toString(),
+                            bodyProvenance = submission.drafts.provenanceFor(bodyFieldState.text.toString())),
+                        deliveredBody = deliveredQuoteBody)
+                } else submission.drafts.consumeInlineQuoteRequest(checkNotNull(pending))
             }
             if (result is EditorDraftStore.StoreWriteResult.Written && !submission.drafts.invalidated) {
                 submission.resolveDraftWrite(result)
@@ -565,9 +574,6 @@ class PostEditorViewModel @AssistedInject constructor(
         if (inlineQuoteLoadBlocked(insertInline)) return
         submission.disarm()
         if (insertInline) setPendingQuotes(quotes)
-        // An offer is not the live body. Serialize quote GETs after its decision so accepting
-        // cannot append a second copy of a quote that a GET already inserted into the field.
-        if (insertInline && (_state.value.restorableDraft != null || draftRestoreDeciding)) return
         // #1553: retry a failed CAS without replaying an insertion the user may have edited.
         if (insertInline && submission.drafts.pendingInlineQuoteRequest == deliveredInlineQuoteRequest) {
             updateChromeState { it.copy(isLoadingForm = true) }
@@ -594,7 +600,7 @@ class PostEditorViewModel @AssistedInject constructor(
         savedStateHandle.remove<Int>(QUOTE_FAILURES_KEY)
         updateChromeState {
             it.copy(
-                pendingQuotes = emptyList(), quoteFetchFailures = 0, isLoadingForm = false,
+                pendingQuotes = emptyList(), quoteFetchFailures = 0, isLoadingForm = false, quoteCommitPending = false,
                 submitError = it.submitError.afterFormLoaded(quotesResolved = true),
             )
         }
@@ -627,6 +633,8 @@ class PostEditorViewModel @AssistedInject constructor(
                         handleFetchFailure(IllegalStateException("empty quote prefill"), quoteFetch = true)
                         return@fold
                     }
+                    draftDecisionCompleted?.await()
+                    if (submission.session != opening) return@fold
                     loadedForm = form
                     smileyPicker.refreshFavorites(favoriteStamp)
                     if (_state.value.isAwaitingInitialBody || !acceptMutation(blockDuringUpload = insertInline)) {
@@ -665,7 +673,9 @@ class PostEditorViewModel @AssistedInject constructor(
         // #881/#790: a quote alone ends with one newline; a prefix uses two.
         chromeMemory.focus.clearToolSelection()
         if (prefills.isNotBlank()) bodyFieldState.editBbcode { text, _, _ ->
-            val combined = if (text.isBlank()) prefills + "\n" else prefills + "\n\n" + text
+            val inserted = insertEditorQuotes(text, prefills, submission.drafts.provenanceFor(text))
+            val combined = if (text.isBlank()) inserted.body + "\n" else inserted.body
+            submission.drafts.stageBodyMerge(inserted.copy(body = combined))
             BbcodeFormatResult(combined, combined.length, combined.length)
         }
         deliveredInlineQuoteRequest = pending
@@ -675,7 +685,7 @@ class PostEditorViewModel @AssistedInject constructor(
         val combined = bodyFieldState.text.toString()
         updateChromeState {
             it.copy(
-                isLoadingForm = true,
+                isLoadingForm = true, quoteCommitPending = true,
                 draftHydratedContent = combined.takeIf { existing.isBlank() },
                 restorableDraft = it.restorableDraft.takeIf { offered -> offered != combined },
             )
@@ -688,7 +698,9 @@ class PostEditorViewModel @AssistedInject constructor(
         val pending = submission.drafts.pendingInlineQuoteRequest ?: return
         submission.flush(null)
         val result = submission.drafts.consumeInlineQuoteRequest(
-            pending, EditorDraftStore.Draft(body = bodyFieldState.text.toString()), deliveredBody = deliveredQuoteBody,
+            pending, EditorDraftStore.Draft(bodyFieldState.text.toString(),
+                bodyProvenance = submission.drafts.provenanceFor(bodyFieldState.text.toString())),
+            deliveredBody = deliveredQuoteBody,
         )
         if (result is EditorDraftStore.StoreWriteResult.Written && !submission.drafts.invalidated) {
             submission.resolveDraftWrite(result)
@@ -767,11 +779,9 @@ class PostEditorViewModel @AssistedInject constructor(
             request.mode == PostEditorMode.Reply && request.resumeSharedDraft &&
             !restoration.isRecreation && !reconcile
         ) resumeSharedDraft(entry.draft.body)
-        // PR 1 keeps the single-offer chrome; older durable versions remain readable by the session.
-        if (_state.value.restorableDraft == null) {
-            submission.drafts.offers.firstOrNull { it.draft.body != bodyFieldState.text.toString() }?.let { offer ->
-                _state.update { it.copy(restorableDraft = offer.draft.body) }
-            }
+        if (request.mode == PostEditorMode.Reply) refreshDraftOffers()
+        else if (_state.value.restorableDraft != null && entry != null) {
+            _state.update { it.copy(draftOffers = listOf(EditorDraftStore.DraftOffer.from(entry))) }
         }
         val pending = submission.drafts.pendingInlineQuoteRequest
         if (pending != deliveredInlineQuoteRequest) {
@@ -797,6 +807,16 @@ class PostEditorViewModel @AssistedInject constructor(
                     else -> it.submitError
                 },
             )
+        }
+    }
+
+    private fun refreshDraftOffers() {
+        if (request.mode != PostEditorMode.Reply) return
+        val offers = submission.drafts.availableOffers.takeUnless { submission.drafts.invalidated }.orEmpty()
+        updateChromeState { it.copy(draftOffers = offers, restorableDraft = offers.firstOrNull()?.draft?.body) }
+        if (selectedDraftOffer != null && offers.none { it.id == selectedDraftOffer?.id }) {
+            selectedDraftOffer = null
+            mergedDraftOffer = null
         }
     }
 
@@ -919,17 +939,16 @@ class PostEditorViewModel @AssistedInject constructor(
 
     private fun draftSnapshot(): EditorDraftStore.Draft? {
         val snapshot = _state.value
+        if (deliveredInlineQuoteRequest != null) return null
         val liveBody = bodyFieldState.text.toString()
         // ED-121: a blank placeholder cannot replace an undecided D; other writes protect D transactionally.
         val undecidedBlank = liveBody.isBlank() && snapshot.restorableDraft != null
         // #1574: only a known body can resume ED-81, including an intentional user clearing.
         return if (restoration.canCheckpoint(!snapshot.isAwaitingInitialBody, undecidedBlank)) {
             val restoring = restoredOfferAwaitingWrite ?: mergedDraftOffer
-            val offer = restoring?.let(submission.drafts::offered)
-            val provenance = if (restoring != null && liveBody.startsWith(restoring)) {
-                (submission.drafts.bodyProvenance ?: EditorBodyProvenance())
-                    .copy(draftEnd = restoring.length, quotesEnd = restoring.length)
-            } else null
+            val offer = selectedDraftOffer?.takeIf { restoring != null }
+                ?: restoring?.let(submission.drafts::offered)
+            val provenance = submission.drafts.provenanceFor(liveBody)
             EditorDraftStore.Draft(body = liveBody, bodyProvenance = provenance, offerToResolve = offer)
         } else null
     }
@@ -978,7 +997,9 @@ class PostEditorViewModel @AssistedInject constructor(
     @Suppress("CyclomaticComplexMethod") // MVI when-dispatch over the PostEditorIntent variants ; flat by design.
     fun submit(intent: PostEditorIntent) {
         // Unknown seed must refuse restoration before disarming an existing confirmation.
-        if (intent == PostEditorIntent.DraftRestoreRequested && !_state.value.canRestoreDraft) return
+        val restoring = intent == PostEditorIntent.DraftRestoreRequested ||
+            intent is PostEditorIntent.DraftOfferRestored
+        if (restoring && !_state.value.canRestoreDraft) return
         if (intent.mutatesEditor && !acceptMutation(blockDuringUpload = intent.mutatesBody)) return
         when (intent) {
             PostEditorIntent.Started -> { screenStopped = false }
@@ -1021,6 +1042,8 @@ class PostEditorViewModel @AssistedInject constructor(
             is PostEditorIntent.ImagePickerEventReceived -> onImagePickerEvent(intent.event)
             PostEditorIntent.UploadErrorDismissed -> _state.update { it.copy(uploadError = null) }
             PostEditorIntent.DraftRestoreRequested -> onDraftRestoreRequested()
+            is PostEditorIntent.DraftOfferRestored -> onDraftRestoreRequested(intent.id)
+            is PostEditorIntent.DraftOfferDiscarded -> onDraftDiscardRequested(intent.id)
             PostEditorIntent.DraftDiscardRequested -> onDraftDiscardRequested()
             is PostEditorIntent.QuoteRemoved -> onQuoteRemoved(intent.numreponse, intent.quote)
             is PostEditorIntent.QuoteMoved -> onQuoteMoved(intent.numreponse, intent.delta, intent.quote)
@@ -1052,37 +1075,33 @@ class PostEditorViewModel @AssistedInject constructor(
 
     /** ED-89: replace the untouched seed, keep its typed suffix, or append after other live text. */
     @Suppress("CyclomaticComplexMethod") // Ordered ED-89 cases plus the durable, retryable ED-132 handoff.
-    private fun onDraftRestoreRequested() {
+    private fun onDraftRestoreRequested(offerId: String? = null) {
         val snapshot = _state.value
-        if (!snapshot.canRestoreDraft || snapshot.isUploading) return
-        val offeredBody = snapshot.restorableDraft?.takeIf { it.isNotBlank() } ?: return
+        if (!snapshot.canRestoreDraft || snapshot.isUploading || draftRestoreDeciding) return
+        val selected = if (offerId == null) snapshot.draftOffers.firstOrNull()
+            else snapshot.draftOffers.firstOrNull { it.id == offerId }
+        val legacy = snapshot.restorableDraft.takeIf { offerId == null && snapshot.draftOffers.isEmpty() }
+        val offeredBody = (selected?.draft?.body ?: legacy)?.takeIf { it.isNotBlank() } ?: return
+        selectedDraftOffer = selected.takeIf { request.mode == PostEditorMode.Reply }
         val seed = snapshot.draftRestoreSeed.orEmpty()
         val liveBody = bodyFieldState.text.toString()
-        val suffix = liveBody.takeIf { seed.isNotEmpty() && it.startsWith(seed) }?.substring(seed.length)
-        val body = when {
-            liveBody.isBlank() || liveBody == offeredBody || liveBody == seed -> offeredBody
-            suffix != null && suffix.isBlank() -> offeredBody
-            suffix != null -> offeredBody + "\n\n" + suffix.trimStart()
-            else -> liveBody.trimEnd() + "\n\n" + offeredBody
-        }
+        val merge = mergeEditorBody(offeredBody, liveBody, seed,
+            submission.drafts.provenanceFor(liveBody))
         draftRestoreDeciding = true
+        draftDecisionCompleted = CompletableDeferred()
         // A failed write reoffers the decision, but C already contains the restored D. Retrying
         // persists the live field (including newer typing), without replaying the ED-89 merge.
         val needsMerge = mergedDraftOffer != offeredBody
         mergedDraftOffer = offeredBody
         restoredOfferAwaitingWrite = offeredBody
-        if (needsMerge) replaceBody(body)
+        if (needsMerge && merge.body != liveBody) replaceBody(merge.body)
+        if (needsMerge) submission.drafts.stageBodyMerge(merge)
         updateChromeState { it.copy(restorableDraft = null, draftHydratedFromForm = true) }
         viewModelScope.launch {
             try {
                 submission.flush(null)
-                val draft = draftSnapshot()?.let { current ->
-                    if (!current.body.startsWith(offeredBody)) current else current.copy(bodyProvenance =
-                        (current.bodyProvenance ?: submission.drafts.bodyProvenance
-                            ?: EditorBodyProvenance()).copy(
-                                draftEnd = offeredBody.length, quotesEnd = offeredBody.length))
-                }
-                val offer = submission.drafts.offered(offeredBody)
+                val draft = draftSnapshot()
+                val offer = selectedDraftOffer ?: submission.drafts.offered(offeredBody)
                 val result = if (offer != null && draft != null) {
                     submission.persist(draft.copy(offerToResolve = offer))
                 } else submission.persist(draft)
@@ -1094,9 +1113,13 @@ class PostEditorViewModel @AssistedInject constructor(
                 }
                 restoredOfferAwaitingWrite = null
                 mergedDraftOffer = null
+                updateChromeState { it.copy(draftOffers = emptyList()) }
+                refreshDraftOffers()
             } finally {
                 restoredOfferAwaitingWrite = null
                 draftRestoreDeciding = false
+                draftDecisionCompleted?.complete(Unit)
+                draftDecisionCompleted = null
                 scheduleAutosave()
             }
             servePendingInlineQuoteIfEligible()
@@ -1104,15 +1127,21 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     /** Discard only the offered body; retain current typing and the session-owned request. */
-    private fun onDraftDiscardRequested() {
-        val body = _state.value.restorableDraft ?: return
+    private fun onDraftDiscardRequested(offerId: String? = null) {
+        if (draftRestoreDeciding || deliveredInlineQuoteRequest != null) return
+        val snapshot = _state.value
+        val selected = if (offerId == null) snapshot.draftOffers.firstOrNull()
+            else snapshot.draftOffers.firstOrNull { it.id == offerId }
+        val legacy = snapshot.restorableDraft.takeIf { offerId == null && snapshot.draftOffers.isEmpty() }
+        val body = selected?.draft?.body ?: legacy ?: return
         draftRestoreDeciding = true
+        draftDecisionCompleted = CompletableDeferred()
         updateChromeState { it.copy(restorableDraft = null) }
         viewModelScope.launch {
             try {
                 submission.flush(null)
                 val draft = EditorDraftStore.Draft(body = bodyFieldState.text.toString())
-                val offer = submission.drafts.offered(body)
+                val offer = selected.takeIf { request.mode == PostEditorMode.Reply } ?: submission.drafts.offered(body)
                 val result = if (offer != null) {
                     submission.drafts.resolveOffer(offer, draft)
                 } else submission.persist(draft)
@@ -1124,8 +1153,12 @@ class PostEditorViewModel @AssistedInject constructor(
                 markDraftRestoreOfferIgnored(body)
                 restoredOfferAwaitingWrite = null
                 mergedDraftOffer = null
+                updateChromeState { it.copy(draftOffers = emptyList()) }
+                refreshDraftOffers()
             } finally {
                 draftRestoreDeciding = false
+                draftDecisionCompleted?.complete(Unit)
+                draftDecisionCompleted = null
             }
             // Finish the discard before any insertion/autosave can repopulate the row.
             servePendingInlineQuoteIfEligible()
@@ -1140,17 +1173,11 @@ class PostEditorViewModel @AssistedInject constructor(
     @Suppress("ReturnCount") // Independent lifecycle guards retain one pending delivery, without retrying failures.
     private fun servePendingInlineQuoteIfEligible(
         requestDelivery: Boolean = false,
-        loadFormUnderOffer: Boolean = false,
     ) {
         if (requestDelivery) inlineQuoteDeliveryRequested = true
         val snapshot = _state.value
         if (!inlineQuoteDeliveryRequested || inlineQuoteLoadBlocked(insertInline = true)) return
         if (draftRestoreDeciding) return
-        if (snapshot.restorableDraft != null) {
-            // ED-132 defers the quote GET, not ordinary form metadata. Never hydrate C from this GET.
-            if (loadFormUnderOffer) loadReplyFormIfPossible(preserveDraft = true)
-            return
-        }
         // An explicit Reload may fetch during upload; insertion and CAS still wait for its end.
         if (snapshot.isUploading && (!requestDelivery || deliveredInlineQuoteRequest != null)) return
         inlineQuoteDeliveryRequested = false

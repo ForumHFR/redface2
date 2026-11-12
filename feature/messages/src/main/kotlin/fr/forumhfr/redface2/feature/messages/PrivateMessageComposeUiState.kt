@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.messages
 
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.DraftOffer
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.PostContent
@@ -54,6 +55,7 @@ data class PrivateMessageComposeUiState(
      * [restorableRecipients] is the private encoded checkpoint (or a historical CSV), never POST data.
      */
     val restorableDraft: String? = null,
+    val draftOffers: List<DraftOffer> = emptyList(),
     val restorableSubject: String? = null,
     val restorableRecipients: String? = null,
     /**

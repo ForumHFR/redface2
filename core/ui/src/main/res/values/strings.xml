@@ -292,4 +292,16 @@
     <string name="editor_preview_close_keyboard">Fermer le clavier</string>
     <string name="editor_preview_release_keyboard">Relâcher pour fermer le clavier</string>
     <string name="editor_preview_hidden_while_typing">Aperçu ouvert, masqué pendant la frappe</string>
+    <string name="editor_status_draft_pending">Brouillon à traiter</string>
+    <string name="editor_draft_date_now">à l’instant</string>
+    <string name="editor_draft_date_minutes">il y a %1$d min</string>
+    <string name="editor_draft_date_hours">il y a %1$d h</string>
+    <string name="editor_draft_date_yesterday">hier à %1$s</string>
+    <string name="editor_draft_date_days">il y a %1$d j</string>
+    <string name="editor_draft_date_absolute">le %1$s à %2$s</string>
+    <string name="editor_draft_quote">Citation</string>
+    <string name="editor_draft_quote_author">Citation de %1$s</string>
+    <string name="editor_action_resume_quote">Après vérification, reprendre la citation</string>
+    <string name="editor_draft_restore_description">Restaurer ce brouillon, %1$s</string>
+    <string name="editor_draft_discard_description">Ignorer ce brouillon, %1$s</string>
 </resources>
