@@ -169,7 +169,7 @@ abstract class EditorSubmissionRecoveryContract {
         preloadIndependentDraft = true,
     ) { adapter ->
         val key = submissionScenario.store.entries.keys.single()
-        assumeTrue("ED-121 applies to reply surfaces", isReply(key))
+        assertTrue("ED-121 applies to reply surfaces", isReply(key))
         startSending(adapter)
         adapter.completePost()
         runCurrent()
@@ -198,7 +198,7 @@ abstract class EditorSubmissionRecoveryContract {
         }
         withReadyAdapter(scenario = scenario, preloadIndependentDraft = true) { adapter ->
             val key = scenario.store.entries.keys.single()
-            assumeTrue("ED-121 applies to reply surfaces", isReply(key))
+            assertTrue("ED-121 applies to reply surfaces", isReply(key))
             startSending(adapter)
             adapter.completePost()
             runCurrent()
@@ -597,6 +597,9 @@ abstract class EditorSubmissionRecoveryContract {
         submissionScenario = scenario
         val adapter = createAdapter(this, preferences, delayedSharedRestore)
         try {
+            if (preloadIndependentDraft) {
+                assumeTrue("ED-121 requires independent reply draft offers", adapter.supportsIndependentDraftOffers)
+            }
             runCurrent()
             if (preloadIndependentDraft) {
                 scenario.store.entries.keys.filter(::isReply).forEach { key ->

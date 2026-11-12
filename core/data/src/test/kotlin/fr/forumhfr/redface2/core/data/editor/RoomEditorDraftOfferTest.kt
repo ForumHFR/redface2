@@ -347,11 +347,15 @@ class RoomEditorDraftOfferTest {
         for (resumed in listOf(false, true)) {
             val request = PendingInlineQuoteRequest(23, if (resumed) 42 else 43, q.quotes)
             val store = store()
-            store.enqueueInlineQuoteRequest("alice", request.key, request, 0)
-            if (resumed) store.saveIfVersion("alice", request.key, Draft("C", protectCurrent = false), 1)
+            assertTrue(store.enqueueInlineQuoteRequest("alice", request.key, request, 0) is StoreWriteResult.Written)
+            // Raw CAS snapshots must retain Q; session saves supply it through ownedDraft.
+            if (resumed) assertTrue(store.saveIfVersion("alice", request.key,
+                Draft("C", pendingInlineQuoteRequest = request, protectCurrent = false), 1) is StoreWriteResult.Written)
             val editor = EditorDraftSession(store, request.key)
             editor.load()
-            if (resumed) editor.resumeContent() else editor.save(Draft("C"))
+            if (resumed) editor.resumeContent() else assertTrue(editor.save(Draft("C")) is StoreWriteResult.Written)
+            assertEquals(request, editor.pendingInlineQuoteRequest)
+            assertEquals(request, store.load("alice", request.key)?.pendingInlineQuoteRequest)
             assertTrue(editor.consumeInlineQuoteRequest(request) is StoreWriteResult.Written)
             assertTrue(editor.save(Draft("C continued")) is StoreWriteResult.Written)
             assertTrue(store().loadOffers("alice", request.key).isEmpty())
@@ -366,8 +370,9 @@ class RoomEditorDraftOfferTest {
 
     @Test fun `Ignore with unread offers still protects the loaded source before its revision changes`() = runTest {
         val store = store()
-        store.enqueueInlineQuoteRequest("alice", key, q, 0)
-        store.saveIfVersion("alice", key, Draft("D", protectCurrent = false), 1)
+        assertTrue(store.enqueueInlineQuoteRequest("alice", key, q, 0) is StoreWriteResult.Written)
+        assertTrue(store.saveIfVersion("alice", key,
+            Draft("D", pendingInlineQuoteRequest = q, protectCurrent = false), 1) is StoreWriteResult.Written)
         val delegate = database.editorDraftDao()
         var unread = true
         val unreadable = object : EditorDraftDao by delegate {
@@ -381,6 +386,8 @@ class RoomEditorDraftOfferTest {
         }
         val editor = EditorDraftSession(store(unreadable), key)
         assertTrue(runCatching { editor.load() }.isFailure)
+        assertEquals(q, editor.pendingInlineQuoteRequest)
+        assertEquals(q, store().load("alice", key)?.pendingInlineQuoteRequest)
         assertTrue(editor.consumeInlineQuoteRequest(q) is StoreWriteResult.Written)
         assertEquals(listOf("D"), store().loadOffers("alice", key).map { it.draft.body })
         assertEquals("D", store().load("alice", key)?.body)

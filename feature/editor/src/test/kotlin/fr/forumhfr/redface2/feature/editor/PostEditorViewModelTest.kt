@@ -3214,6 +3214,7 @@ class PostEditorViewModelTest {
         }
         val arms = mutableMapOf<Long, ArmToken>()
         return object : EditorSubmissionAdapter {
+            override val supportsIndependentDraftOffers = !editing
             override val unsupportedMutations = if (editing) {
                 mapOf(SubmissionBodyMutation.SHARED_RESTORE to "resumeSharedDraft réservé aux réponses/citations")
             } else {

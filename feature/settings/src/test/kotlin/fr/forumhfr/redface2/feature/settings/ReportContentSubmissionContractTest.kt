@@ -104,6 +104,7 @@ private class ReportSubmissionAdapter(
     override val unsupportedMutations = SubmissionBodyMutation.entries.filter { it != SubmissionBodyMutation.TYPING }
         .associateWith { "le formulaire de signalement n'expose ni toolbar, ni upload, ni offre de restauration" }
     override val uploadUnsupportedReason = "aucun upload dans le signalement"
+    override val supportsIndependentDraftOffers = false
     override val uploadCalls = 0
     override val draftSaves get() = scenario.store.saveCount
     override val draftWrites get() = scenario.store.writes

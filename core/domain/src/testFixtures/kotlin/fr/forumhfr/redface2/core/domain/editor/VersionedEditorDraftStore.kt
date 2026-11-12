@@ -228,13 +228,13 @@ open class VersionedEditorDraftStore : EditorDraftStore {
     ): StoreWriteResult {
         val rejection = quoteMutationRejection(owner, key, request, expectedVersion)
         if (rejection != null) return rejection
-        return entries[key]?.let { entry ->
-            val deliveryBlocked = draft != null && entry.attempt != null
-            if (entry.draft.pendingInlineQuoteRequest != request || entry.attempt?.status == AttemptStatus.PUBLISHED ||
-                deliveryBlocked
-            ) {
-                StoreWriteResult.Conflict
-            } else {
+        val entry = entries[key]
+        val deliveryBlocked = draft != null && entry?.attempt != null
+        return when {
+            entry == null -> StoreWriteResult.Conflict
+            entry.draft.pendingInlineQuoteRequest != request || entry.attempt?.status == AttemptStatus.PUBLISHED ||
+                deliveryBlocked -> StoreWriteResult.Conflict
+            else -> {
                 val candidate = if (draft != null) protection(key, entry, draft) else {
                     offerToPreserve ?: if (protectCurrent) offerCandidate(owner, key, entry) else null
                 }
@@ -250,7 +250,7 @@ open class VersionedEditorDraftStore : EditorDraftStore {
                 saveReturnGate?.await()
                 StoreWriteResult.Written(expectedVersion + 1)
             }
-        } ?: StoreWriteResult.Conflict
+        }
     }
 
     private fun quoteMutationRejection(

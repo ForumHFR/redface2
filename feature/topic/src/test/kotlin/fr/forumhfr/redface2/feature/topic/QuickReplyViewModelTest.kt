@@ -1104,6 +1104,7 @@ class QuickReplyViewModelTest {
         }
         val arms = mutableMapOf<Long, ArmToken>()
         return object : EditorSubmissionAdapter {
+            override val supportsIndependentDraftOffers = true
             override val unsupportedMutations = mapOf(
                 SubmissionBodyMutation.SMILEY to "la feuille n'a pas de picker smiley",
                 SubmissionBodyMutation.FORMAT to "la feuille n'a pas de barre de formatage",

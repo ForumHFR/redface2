@@ -536,6 +536,8 @@ abstract class EditorSubmissionContract : EditorSubmissionRecoveryContract() {
 interface EditorSubmissionAdapter {
     val unsupportedMutations: Map<SubmissionBodyMutation, String>
     val uploadUnsupportedReason: String?
+    /** ED-121 independent draft offers apply to topic replies, MP replies and quick reply. */
+    val supportsIndependentDraftOffers: Boolean
     val postCalls: Int
     val formFetchCalls: Int
     val uploadCalls: Int

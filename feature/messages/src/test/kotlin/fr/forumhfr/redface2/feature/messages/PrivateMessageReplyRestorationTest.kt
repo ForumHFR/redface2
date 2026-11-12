@@ -246,6 +246,7 @@ class PrivateMessageReplyRestorationTest {
         editor.onStopped()
         settle()
         val frozen = freeze(saved)
+        assertPrivateMessageReplySavedState(frozen, listOf("C\n\nD continued"))
         editor.viewModelScope.cancel()
         val recreated = open(frozen)
         settle()
@@ -466,8 +467,10 @@ class PrivateMessageReplyRestorationTest {
     }
     @Suppress("DEPRECATION") // Actual Parcel round-trip of primitives, never TextFieldState or private content.
     private fun freeze(saved: SavedStateHandle): SavedStateHandle {
+        // An empty form seed cannot identify leaked content; the assertion requires nonempty fragments.
         assertPrivateMessageReplySavedState(
-            saved, listOf(served.sujet, served.initialContent, "private seed", "alice", served.hashCheck),
+            saved, listOf(served.sujet, served.initialContent, "private seed", "alice", served.hashCheck)
+                .filter(String::isNotEmpty),
         )
         val bundle = Bundle()
         for (key in saved.keys()) {
