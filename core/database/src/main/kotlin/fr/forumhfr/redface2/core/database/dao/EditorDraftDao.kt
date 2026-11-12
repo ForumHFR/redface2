@@ -204,10 +204,14 @@ interface EditorDraftDao {
     @Query("DELETE FROM editor_draft_offers WHERE ownerId = :ownerId AND contextKey = :key AND offerId = :offerId")
     suspend fun deleteOffer(ownerId: String, key: String, offerId: String)
 
-    /** C + consumption commit together. A second invocation cannot restore the same offer twice. */
+    /**
+     * C + consumption commit together. A second invocation cannot restore the same offer twice.
+     * Attempt status is part of the CAS: publication does not advance the content revision.
+     */
     @Transaction
     suspend fun resolveOffer(
         draft: EditorDraftEntity, expectedVersion: Long, offer: EditorDraftOfferEntity,
+        expectedAttemptState: String?,
         protection: EditorDraftOfferEntity? = null,
     ): Boolean {
         val previous = get(draft.draftKey)
@@ -215,7 +219,9 @@ interface EditorDraftDao {
         val source = previous?.contentVersion == offer.sourceVersion && previous.body == offer.body &&
             previous.subject == offer.subject && previous.recipients == offer.recipients
         val offerUnavailable = !stored && !(source && previous?.attemptState == null)
-        return if ((previous?.contentVersion ?: 0L) != expectedVersion || offerUnavailable) {
+        val versionMatches = (previous?.contentVersion ?: 0L) == expectedVersion
+        val attemptMatches = previous?.attemptState == expectedAttemptState
+        return if (!versionMatches || !attemptMatches || offerUnavailable) {
             false
         } else {
             if (protection?.offerId != offer.offerId) preserveOffer(previous, protection)

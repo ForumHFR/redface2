@@ -191,7 +191,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
             } else {
                 checkpointWrite(snapshot) {
                     mutation { store.consumeInlineQuoteRequest(owner, checkNotNull(key), request, version,
-                        snapshot?.let(::protected)) }
+                        snapshot?.let(::protected), offerToPreserve = protectedOffer, protectCurrent = !offersLoaded) }
                 }
             }
             if (result is StoreWriteResult.Written) {

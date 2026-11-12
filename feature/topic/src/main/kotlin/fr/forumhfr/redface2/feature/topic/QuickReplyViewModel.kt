@@ -303,7 +303,7 @@ class QuickReplyViewModel @AssistedInject constructor(
         legacyQuoteRequestDropped: Boolean = false,
     ) {
         if (!restored || !hasOpened) {
-            onSheetOpened(currentPage, initialQuotes)
+            openSheet(currentPage, initialQuotes, restored = restored)
             if (legacyQuoteRequestDropped) _state.update { it.copy(legacyQuoteRequestDropped = true) }
         }
     }
@@ -323,6 +323,7 @@ class QuickReplyViewModel @AssistedInject constructor(
     @Suppress("CyclomaticComplexMethod") // One opening sequence: reset, Room read, restore offer, then state seed.
     private fun openSheet(
         currentPage: Int, initialQuotes: List<QuoteSelection>, retainedText: TextFieldValue? = null,
+        restored: Boolean = false,
     ) {
         if (submission.isExecuting) return
         hasOpened = true
@@ -358,9 +359,12 @@ class QuickReplyViewModel @AssistedInject constructor(
             val pending = opening.drafts.pendingInlineQuoteRequest
             val quoteOnly = pending == null && entry?.attempt == null &&
                 entry?.draft?.bodyProvenance?.isQuoteOnly(entry.draft.body) == true
-            if (quoteOnly && submission === opening) opening.resolveDraftWrite(opening.drafts.discardQuoteOnly())
+            val discardQuoteOnly = quoteOnly && retainedText == null && !restored
+            if (discardQuoteOnly && submission === opening) {
+                opening.resolveDraftWrite(opening.drafts.discardQuoteOnly())
+            }
             if (submission !== opening) return@launch
-            val body = if (quoteOnly) "" else entry?.draft?.body.orEmpty()
+            val body = if (discardQuoteOnly) "" else entry?.draft?.body.orEmpty()
             val offer = body.takeIf { it.isNotBlank() && pending != null && entry?.attempt == null }
                 ?: opening.drafts.offers.firstOrNull { it.draft.body != body }?.draft?.body
             // The sheet auto-applies ordinary C. It must not preserve that same session as D
@@ -756,7 +760,7 @@ class QuickReplyViewModel @AssistedInject constructor(
         // ED-121: C stays in the shared row; a first replacement protects the offered version transactionally.
         if (snapshot.text.text.isBlank() && snapshot.restorableDraft != null) return null
         val body = snapshot.text.text
-        val restoring = restoredOfferAwaitingWrite
+        val restoring = restoredOfferAwaitingWrite ?: mergedDraftOffer
         val offer = restoring?.let(submission.drafts::offered)
         val provenance = if (restoring != null && body.startsWith(restoring)) {
             (submission.drafts.bodyProvenance ?: EditorBodyProvenance())

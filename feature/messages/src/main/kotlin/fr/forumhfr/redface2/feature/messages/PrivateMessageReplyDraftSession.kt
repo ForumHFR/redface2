@@ -258,7 +258,7 @@ internal class PrivateMessageReplyDraftSession(
         val undecidedOffer = snapshot.restorableDraft != null &&
             (liveBody.isBlank() || liveBody == snapshot.draftHydratedContent)
         if (!restoration.canCheckpoint(bodyKnown, undecidedOffer)) return null
-        val restoring = restoredOfferAwaitingWrite
+        val restoring = restoredOfferAwaitingWrite ?: mergedDraftOffer
         val offer = restoring?.let(submission.drafts::offered)
         val provenance = if (restoring != null && liveBody.startsWith(restoring)) {
             (submission.drafts.bodyProvenance ?: EditorBodyProvenance())

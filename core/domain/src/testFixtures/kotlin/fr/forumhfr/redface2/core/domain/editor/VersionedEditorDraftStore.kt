@@ -221,8 +221,10 @@ open class VersionedEditorDraftStore : EditorDraftStore {
         return StoreWriteResult.Written(expectedVersion + 1)
     }
 
+    @Suppress("LongParameterList") // Mirrors the store's request CAS and independent offer protection.
     override suspend fun consumeInlineQuoteRequest(
         owner: String?, key: String, request: PendingInlineQuoteRequest, expectedVersion: Long, draft: Draft?,
+        offerToPreserve: DraftOffer?, protectCurrent: Boolean,
     ): StoreWriteResult {
         val rejection = quoteMutationRejection(owner, key, request, expectedVersion)
         if (rejection != null) return rejection
@@ -233,7 +235,9 @@ open class VersionedEditorDraftStore : EditorDraftStore {
             ) {
                 StoreWriteResult.Conflict
             } else {
-                val candidate = if (draft == null) offerCandidate(owner, key, entry) else protection(key, entry, draft)
+                val candidate = if (draft != null) protection(key, entry, draft) else {
+                    offerToPreserve ?: if (protectCurrent) offerCandidate(owner, key, entry) else null
+                }
                 protect(owner, key, entry, candidate)
                 entries[key] = entry.copy(
                     draft = (draft ?: entry.draft).copy(

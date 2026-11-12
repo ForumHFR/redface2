@@ -224,6 +224,35 @@ class PrivateMessageReplyRestorationTest {
         assertResumed(offered, "draft")
     }
 
+    @Test fun failedRestoreThenAutosaveConsumesMergedDraftBeforeProcessDeath() = runTest(dispatcher) {
+        served = form().copy(initialContent = "")
+        store.preload(key, Draft("D", isPrivate = true))
+        val saved = SavedStateHandle()
+        val editor = open(saved)
+        settle()
+        type(editor, "C")
+        store.saveFailure = IOException("disk full")
+        editor.onDraftRestoreRequested()
+        settle()
+        assertEquals("D", editor.state.value.restorableDraft)
+        assertEquals("C\n\nD", editor.bodyFieldState.text.toString())
+        store.saveFailure = null
+        type(editor, "C\n\nD continued")
+        settle()
+        dispatcher.scheduler.advanceTimeBy(751)
+        settle()
+        assertEquals("C\n\nD continued", store.saved[key]?.body)
+        assertTrue(store.loadOffers("tester", key).isEmpty())
+        editor.onStopped()
+        settle()
+        val frozen = freeze(saved)
+        editor.viewModelScope.cancel()
+        val recreated = open(frozen)
+        settle()
+        assertResumed(recreated, "C\n\nD continued")
+        assertTrue(store.loadOffers("tester", key).isEmpty())
+    }
+
     @Test fun canHydrateRejectsALateGetAfterEditingAndClearingAnUncertifiedAttempt() = runTest(dispatcher) {
         val token = AttemptToken("tester", key, "attempt", 1)
         store.entries[key] = DraftEntry(Draft("", isPrivate = true), 1, Attempt(token, AttemptStatus.IN_PROGRESS))

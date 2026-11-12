@@ -73,9 +73,12 @@ interface EditorDraftStore {
      * #1553: CAS removal of exactly [request]. With [draft], atomically deliver the reconciled body
      * and remove the request; unresolved attempts reject delivery. Without [draft], ignore only the
      * request, retaining all fields and attempt metadata. Failures leave the entire row unchanged.
+     * Ignore uses the session's [offerToPreserve]; raw callers can still [protectCurrent] by default.
      */
+    @Suppress("LongParameterList") // Request CAS plus the session's independent offer protection on Ignore.
     suspend fun consumeInlineQuoteRequest(
         owner: String?, key: String, request: PendingInlineQuoteRequest, expectedVersion: Long, draft: Draft? = null,
+        offerToPreserve: DraftOffer? = null, protectCurrent: Boolean = true,
     ): StoreWriteResult
 
     /** ED-121: offers are read independently of C's publication status, newest first. */

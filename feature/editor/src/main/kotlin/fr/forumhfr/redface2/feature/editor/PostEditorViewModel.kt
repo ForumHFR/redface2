@@ -924,7 +924,7 @@ class PostEditorViewModel @AssistedInject constructor(
         val undecidedBlank = liveBody.isBlank() && snapshot.restorableDraft != null
         // #1574: only a known body can resume ED-81, including an intentional user clearing.
         return if (restoration.canCheckpoint(!snapshot.isAwaitingInitialBody, undecidedBlank)) {
-            val restoring = restoredOfferAwaitingWrite
+            val restoring = restoredOfferAwaitingWrite ?: mergedDraftOffer
             val offer = restoring?.let(submission.drafts::offered)
             val provenance = if (restoring != null && liveBody.startsWith(restoring)) {
                 (submission.drafts.bodyProvenance ?: EditorBodyProvenance())

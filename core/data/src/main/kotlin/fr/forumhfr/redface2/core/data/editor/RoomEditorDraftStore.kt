@@ -171,8 +171,10 @@ class RoomEditorDraftStore @Inject constructor(
         editorDraftDao.mutateInlineQuoteRequest(next, previous).result(next.contentVersion)
     }
 
+    @Suppress("LongParameterList") // Request CAS plus the session's independent offer protection on Ignore.
     override suspend fun consumeInlineQuoteRequest(
         owner: String?, key: String, request: PendingInlineQuoteRequest, expectedVersion: Long, draft: Draft?,
+        offerToPreserve: DraftOffer?, protectCurrent: Boolean,
     ): StoreWriteResult = write(owner) {
         if (request.key != key) return@write StoreWriteResult.Conflict
         val previous = editorDraftDao.get(rowKey(checkNotNull(owner), key)) ?: return@write StoreWriteResult.Conflict
@@ -188,7 +190,8 @@ class RoomEditorDraftStore @Inject constructor(
             contentVersion = expectedVersion + 1,
             updatedAt = if (draft == null) previous.updatedAt else clock.millis(),
         )
-        val protection = if (draft == null) offerCandidate(previous, key) else draft.protection(owner, key)
+        val protection = (draft ?: Draft("", offerToPreserve = offerToPreserve, protectCurrent = protectCurrent))
+            .protection(owner, key)
         editorDraftDao.mutateInlineQuoteRequest(next, previous, protection)
             .result(next.contentVersion)
     }
@@ -204,8 +207,10 @@ class RoomEditorDraftStore @Inject constructor(
     override suspend fun resolveOffer(
         owner: String?, key: String, offer: DraftOffer, expectedVersion: Long, draft: Draft,
     ): StoreWriteResult = write(owner) {
+        val expectedAttemptState = editorDraftDao.get(rowKey(checkNotNull(owner), key))?.attemptState
         val next = draft.toEntity(checkNotNull(owner), key).copy(contentVersion = expectedVersion + 1)
-        editorDraftDao.resolveOffer(next, expectedVersion, offer.toEntity(owner, key), draft.protection(owner, key))
+        editorDraftDao.resolveOffer(next, expectedVersion, offer.toEntity(owner, key), expectedAttemptState,
+            draft.protection(owner, key))
             .result(next.contentVersion)
     }
 

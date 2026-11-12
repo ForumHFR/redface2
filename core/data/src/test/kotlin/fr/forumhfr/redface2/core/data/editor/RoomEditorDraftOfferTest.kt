@@ -20,6 +20,7 @@ import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.model.AuthState
 import io.mockk.every
 import io.mockk.mockk
+import java.io.IOException
 import java.time.Clock
 import java.time.Instant
 import java.time.ZoneOffset
@@ -256,8 +257,8 @@ class RoomEditorDraftOfferTest {
         val paused = object : EditorDraftDao by delegate {
             override suspend fun resolveOffer(
                 draft: EditorDraftEntity, expectedVersion: Long, offer: EditorDraftOfferEntity,
-                protection: EditorDraftOfferEntity?,
-            ): Boolean = delegate.resolveOffer(draft, expectedVersion, offer, protection).also {
+                expectedAttemptState: String?, protection: EditorDraftOfferEntity?,
+            ): Boolean = delegate.resolveOffer(draft, expectedVersion, offer, expectedAttemptState, protection).also {
                 committed.complete(Unit)
                 returnGate.await()
             }
@@ -340,6 +341,93 @@ class RoomEditorDraftOfferTest {
         assertTrue(editor.resolveOffer(offer, Draft("D\n\nC")) is StoreWriteResult.Written)
         assertEquals("D\n\nC", store.load("alice", key)?.body)
         assertTrue(store.loadOffers("alice", key).isEmpty())
+    }
+
+    @Test fun `Ignore after typing or certified resume never offers the session body after publication`() = runTest {
+        for (resumed in listOf(false, true)) {
+            val request = PendingInlineQuoteRequest(23, if (resumed) 42 else 43, q.quotes)
+            val store = store()
+            store.enqueueInlineQuoteRequest("alice", request.key, request, 0)
+            if (resumed) store.saveIfVersion("alice", request.key, Draft("C", protectCurrent = false), 1)
+            val editor = EditorDraftSession(store, request.key)
+            editor.load()
+            if (resumed) editor.resumeContent() else editor.save(Draft("C"))
+            assertTrue(editor.consumeInlineQuoteRequest(request) is StoreWriteResult.Written)
+            assertTrue(editor.save(Draft("C continued")) is StoreWriteResult.Written)
+            assertTrue(store().loadOffers("alice", request.key).isEmpty())
+            val token = (editor.begin(Draft("C continued"), "send") as BeginAttemptResult.Started).token
+            editor.finish(token, AttemptOutcome.PUBLISHED)
+            val reopened = EditorDraftSession(store(), request.key)
+            reopened.load()
+            assertTrue(reopened.offers.isEmpty())
+            assertNull(store().load("alice", request.key))
+        }
+    }
+
+    @Test fun `Ignore with unread offers still protects the loaded source before its revision changes`() = runTest {
+        val store = store()
+        store.enqueueInlineQuoteRequest("alice", key, q, 0)
+        store.saveIfVersion("alice", key, Draft("D", protectCurrent = false), 1)
+        val delegate = database.editorDraftDao()
+        var unread = true
+        val unreadable = object : EditorDraftDao by delegate {
+            override suspend fun offers(ownerId: String, key: String): List<EditorDraftOfferEntity> {
+                if (unread) {
+                    unread = false
+                    throw IOException("offers unavailable")
+                }
+                return delegate.offers(ownerId, key)
+            }
+        }
+        val editor = EditorDraftSession(store(unreadable), key)
+        assertTrue(runCatching { editor.load() }.isFailure)
+        assertTrue(editor.consumeInlineQuoteRequest(q) is StoreWriteResult.Written)
+        assertEquals(listOf("D"), store().loadOffers("alice", key).map { it.draft.body })
+        assertEquals("D", store().load("alice", key)?.body)
+        assertNull(store().load("alice", key)?.pendingInlineQuoteRequest)
+    }
+
+    @Test fun `publication between offer preparation and transaction rejects the stale composition`() = runTest {
+        val requests = listOf(q,
+            PendingInlineQuoteRequest.privateMessage(42, listOf(PendingInlineQuoteRequest.Quote(101, 1, 0))))
+        for (request in requests) {
+            val store = store()
+            store.saveIfVersion("alice", request.key, Draft("D", isPrivate = request.isPrivate), 0)
+            val sending = EditorDraftSession(store, request.key)
+            sending.load()
+            val token = (sending.begin(Draft("C", isPrivate = request.isPrivate), "send")
+                as BeginAttemptResult.Started).token
+            val prepared = CompletableDeferred<Unit>()
+            val proceed = CompletableDeferred<Unit>()
+            val delegate = database.editorDraftDao()
+            val paused = object : EditorDraftDao by delegate {
+                override suspend fun resolveOffer(
+                    draft: EditorDraftEntity, expectedVersion: Long, offer: EditorDraftOfferEntity,
+                    expectedAttemptState: String?, protection: EditorDraftOfferEntity?,
+                ): Boolean {
+                    prepared.complete(Unit)
+                    proceed.await()
+                    return delegate.resolveOffer(draft, expectedVersion, offer, expectedAttemptState, protection)
+                }
+            }
+            val restoring = EditorDraftSession(store(paused), request.key)
+            restoring.load()
+            val offer = restoring.offers.single()
+            val restore = async { restoring.resolveOffer(offer, Draft("D\n\nC", isPrivate = request.isPrivate)) }
+            prepared.await()
+            try {
+                assertTrue(sending.finish(token, AttemptOutcome.PUBLISHED) is StoreWriteResult.Written)
+                assertEquals(token.version, store.loadEntry("alice", request.key)?.version)
+            } finally {
+                proceed.complete(Unit)
+            }
+            assertEquals(StoreWriteResult.Conflict, restore.await())
+            val durable = checkNotNull(store().loadEntry("alice", request.key))
+            assertEquals(AttemptStatus.PUBLISHED, durable.attempt?.status)
+            assertEquals("C", durable.draft.body)
+            assertEquals(listOf(offer), store().loadOffers("alice", request.key))
+            assertNull(store().load("alice", request.key))
+        }
     }
 
     @Test fun `invalid optional provenance never blocks reading writing or enqueueing C`() = runTest {

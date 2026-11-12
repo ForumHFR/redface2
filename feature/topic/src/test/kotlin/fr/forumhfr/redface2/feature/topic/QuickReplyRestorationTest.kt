@@ -246,7 +246,7 @@ class QuickReplyRestorationTest {
                 savedStateHandle = savedStateHandle,
                 quoteCardsEnabled = false,
             )
-            viewModel.onSheetOpened(currentPage = REQUEST.page)
+            viewModel.onSheetAttached(REQUEST.page, emptyList(), restored = true)
             advanceUntilIdle()
 
             assertEquals(1, Regex("""\[quotemsg=""").findAll(viewModel.state.value.text.text).count())

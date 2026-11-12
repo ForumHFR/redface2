@@ -151,13 +151,17 @@ class QuickReplyDurableQuoteTest {
         assertNull(scenario.pending)
         assertEquals("keep this body", scenario.body)
         assertTrue(sheet.state.value.canSubmit)
+        sheet.onTextChanged(TextFieldValue("keep this body continued"))
+        advanceUntilIdle()
+        assertTrue(scenario.store.loadOffers("tester", scenario.key).isEmpty())
         sheet.viewModelScope.cancel()
         scenario.offline = false
         val restored = scenario.open(SavedStateHandle(mapOf("quickReply.pendingQuotes" to intArrayOf(101, 1, -1, 0))))
         advanceUntilIdle()
         assertTrue(restored.state.value.pendingQuotes.isEmpty())
         assertEquals(listOf(101, 101), scenario.fetches)
-        assertEquals("keep this body", restored.state.value.text.text)
+        assertEquals("keep this body continued", restored.state.value.text.text)
+        assertNull(restored.state.value.restorableDraft)
     }
 
     @Test
@@ -750,6 +754,82 @@ class QuickReplyDurableQuoteTest {
         }
     }
 
+    @Test
+    fun `restored mount after process death keeps quote-only C and its delivery proof`() = runTest {
+        val scenario = Scenario()
+        val quote = scenario.seedQuoteOnly()
+        val before = checkNotNull(scenario.store.entries[scenario.key])
+        val sheet = scenario.create()
+        sheet.onSheetAttached(1, emptyList(), restored = true)
+        runCurrent()
+        assertEquals(quote, sheet.state.value.text.text)
+        assertEquals(before, scenario.store.entries[scenario.key])
+        assertNull(sheet.state.value.restorableDraft)
+        sheet.onTextChanged(TextFieldValue(quote + "\n  "))
+        advanceUntilIdle()
+        val saved = checkNotNull(scenario.store.saved[scenario.key])
+        assertTrue(checkNotNull(saved.bodyProvenance).isQuoteOnly(saved.body))
+        assertTrue(scenario.store.loadOffers("tester", scenario.key).isEmpty())
+        assertTrue(scenario.fetches.isEmpty())
+    }
+
+    @Test
+    fun `internal reload and unreadable Ignore retain quote-only provenance through autosave`() = runTest {
+        for (ignoring in listOf(false, true)) {
+            val scenario = Scenario()
+            val quote = scenario.seedQuoteOnly()
+            scenario.store.loadFailure = UnreadableInlineQuoteRequestException()
+            val sheet = scenario.open()
+            sheet.onTextChanged(TextFieldValue(quote))
+            assertTrue(sheet.state.value.quoteStorageUnavailable)
+            if (ignoring) sheet.onPendingQuoteIgnored() else {
+                scenario.store.loadFailure = null
+                sheet.onQuoteReloadRequested()
+            }
+            runCurrent()
+            assertEquals(quote, sheet.state.value.text.text)
+            assertEquals(quote, scenario.body)
+            assertFalse(sheet.state.value.quoteStorageUnavailable)
+            sheet.onTextChanged(TextFieldValue(quote + "\n  "))
+            advanceUntilIdle()
+            val saved = checkNotNull(scenario.store.saved[scenario.key])
+            assertTrue(checkNotNull(saved.bodyProvenance).isQuoteOnly(saved.body))
+            assertTrue(scenario.store.loadOffers("tester", scenario.key).isEmpty())
+            sheet.viewModelScope.cancel()
+            val fresh = scenario.open()
+            runCurrent()
+            assertEquals("", fresh.state.value.text.text)
+            assertNull(fresh.state.value.restorableDraft)
+        }
+    }
+
+    @Test
+    fun `failed sheet Restore then autosave consumes merged D before process death`() = runTest {
+        val scenario = Scenario()
+        scenario.store.preload(scenario.key, Draft("D"))
+        val previous = EditorDraftSession(scenario.store, scenario.key)
+        previous.load()
+        previous.save(Draft("C"))
+        val sheet = scenario.open()
+        assertEquals("D", sheet.state.value.restorableDraft)
+        scenario.store.saveFailure = IOException("disk full")
+        sheet.onDraftRestoreRequested()
+        advanceUntilIdle()
+        assertEquals("D", sheet.state.value.restorableDraft)
+        assertEquals("C\n\nD", sheet.state.value.text.text)
+        scenario.store.saveFailure = null
+        sheet.onTextChanged(TextFieldValue("C\n\nD continued"))
+        advanceUntilIdle()
+        assertEquals("C\n\nD continued", scenario.body)
+        assertTrue(scenario.store.loadOffers("tester", scenario.key).isEmpty())
+        sheet.viewModelScope.cancel()
+        val recreated = scenario.open()
+        runCurrent()
+        assertEquals("C\n\nD continued", recreated.state.value.text.text)
+        assertNull(recreated.state.value.restorableDraft)
+        assertTrue(scenario.store.loadOffers("tester", scenario.key).isEmpty())
+    }
+
     private inner class Scenario {
         val key = EditorDraftKey.reply(23, 35421)
         val store = VersionedEditorDraftStore()
@@ -785,6 +865,16 @@ class QuickReplyDurableQuoteTest {
             val session = EditorDraftSession(store, key)
             session.load()
             assertTrue(session.enqueueInlineQuoteRequest(request) is StoreWriteResult.Written)
+        }
+
+        suspend fun seedQuoteOnly(): String {
+            val quote = "[quotemsg=101]quote[/quotemsg]"
+            val delivery = EditorDraftSession(store, key)
+            delivery.load()
+            delivery.enqueueInlineQuoteRequest(request)
+            assertTrue(delivery.consumeInlineQuoteRequest(request, Draft(quote), deliveredBody = quote)
+                is StoreWriteResult.Written)
+            return quote
         }
 
         suspend fun uncertain() = (store.beginAttempt("tester", key, Draft("uncertain body"), 0)
