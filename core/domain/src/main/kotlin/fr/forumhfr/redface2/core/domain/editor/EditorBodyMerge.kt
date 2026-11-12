@@ -13,12 +13,39 @@ data class EditorBodyProvenance(
         it.isNotBlank() && body.trimEnd() == it.trimEnd()
     } == true
 
-    fun delivered(scope: QuoteScope, body: String): EditorBodyProvenance =
-        if (body.isBlank()) this else copy(deliveries = deliveries + InlineQuoteDelivery(scope, body))
+    fun delivered(scope: QuoteScope, body: String, currentBody: String = body): EditorBodyProvenance =
+        if (body.isBlank()) this else InlineQuoteDelivery(scope, body).let { latest ->
+            copy(deliveries = retainedDeliveries(currentBody, latest) + latest)
+        }
+
+    /** Keep the last whole request for ED-121; older evidence is bounded by quotes still in C. */
+    fun retainFor(body: String): EditorBodyProvenance = deliveries.lastOrNull()?.let { latest ->
+        copy(deliveries = copy(deliveries = deliveries.dropLast(1)).retainedDeliveries(body, latest) + latest)
+    } ?: this
+
+    private fun retainedDeliveries(body: String, latest: InlineQuoteDelivery): List<InlineQuoteDelivery> {
+        val present = editorQuoteBlocks(body, outerOnly = true).map { it.identity }.toSet()
+        val numbers = present.map { it.first }.toSet()
+        val covered = editorQuoteBlocks(latest.body, outerOnly = true).map { latest.scope to it.identity }.toSet()
+        val blocks = deliveries.flatMap { delivery ->
+            editorQuoteBlocks(delivery.body, outerOnly = true).filter { it.identity.first in numbers }.map {
+                (delivery.scope to it.identity) to InlineQuoteDelivery(delivery.scope,
+                    delivery.body.substring(it.range))
+            }
+        }
+        val exact = blocks.filter { it.first.second in present && it.first !in covered }.map { it.first }.toSet()
+        val exactPosts = (exact + covered).map { it.first to it.second.first }.toSet()
+        // Intact variants of one post need separate content identities. A modified block needs
+        // only one original scoped identity to be recognized; deleted blocks need no replay proof.
+        val modified = blocks.asReversed().distinctBy { it.first.first to it.first.second.first }
+            .filter { (it.first.first to it.first.second.first) !in exactPosts }.map { it.first }
+        val retained = exact + modified
+        return blocks.filter { it.first in retained }.distinctBy { it.first }.map { it.second }
+    }
 
     /** Move the durable insertion boundaries with a live edit, including an edit before autosave. */
     fun rebase(previous: String, current: String): EditorBodyProvenance {
-        if (previous == current) return this
+        if (previous == current) return retainFor(current)
         val prefix = previous.commonPrefixWith(current).length
         val suffix = previous.substring(prefix).commonSuffixWith(current.substring(prefix)).length
         val oldEnd = previous.length - suffix
@@ -36,7 +63,10 @@ data class EditorBodyProvenance(
                 else -> prefix
             }.coerceIn(0, current.length)
         }
-        return copy(draftEnd = move(draftEnd), quotesEnd = move(quotesEnd))
+        val movedDraftEnd = move(draftEnd)
+        return retainFor(current).copy(
+            draftEnd = movedDraftEnd, quotesEnd = move(quotesEnd).coerceAtLeast(movedDraftEnd),
+        )
     }
 }
 

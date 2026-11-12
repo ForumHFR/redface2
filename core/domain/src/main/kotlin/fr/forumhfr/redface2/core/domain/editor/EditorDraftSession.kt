@@ -70,11 +70,18 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
             readable = true
             throw error
         }
-        offers = key?.let { store.loadOffers(owner, it) }.orEmpty()
-        offersLoaded = true
         val composition = entry?.takeUnless { it.attempt?.status == AttemptStatus.PUBLISHED }
         lastBody = composition?.draft?.body.orEmpty()
         bodyProvenance = composition?.draft?.bodyProvenance
+        version = entry?.version ?: 0L
+        published = entry?.attempt?.status == AttemptStatus.PUBLISHED
+        unresolved = entry?.attempt?.token?.takeUnless { published }
+        pendingInlineQuoteRequest = entry?.draft?.pendingInlineQuoteRequest.takeUnless { published }
+        // Offer reads are best effort too: keep the loaded revision writable and let the store
+        // protect the current row when offersLoaded remains false after an IOException.
+        readable = true
+        offers = key?.let { store.loadOffers(owner, it) }.orEmpty()
+        offersLoaded = true
         val eligible = entry?.takeIf {
             it.attempt == null && it.draft.body.isNotBlank() &&
                 bodyProvenance?.isQuoteOnly(it.draft.body) != true &&
@@ -85,11 +92,6 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
                 it.draft.updatedAt == candidate.draft.updatedAt
             } ?: DraftOffer.from(candidate)
         }
-        version = entry?.version ?: 0L
-        published = entry?.attempt?.status == AttemptStatus.PUBLISHED
-        unresolved = entry?.attempt?.token?.takeUnless { published }
-        pendingInlineQuoteRequest = entry?.draft?.pendingInlineQuoteRequest.takeUnless { published }
-        readable = true
         return entry
     }
 
@@ -180,7 +182,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         withContext(NonCancellable) {
             val snapshot = draft?.let(::ownedDraft)?.let {
                 if (deliveredBody == null) it else it.copy(bodyProvenance =
-                    (it.bodyProvenance ?: EditorBodyProvenance()).delivered(request.scope, deliveredBody))
+                    (it.bodyProvenance ?: EditorBodyProvenance()).delivered(request.scope, deliveredBody, it.body))
             }
             val unresolvedOffer = snapshot?.offerToResolve?.id?.let { it !in resolvedOffers } == true
             val deliveryBlocked = draft != null && unresolved != null

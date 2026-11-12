@@ -3240,6 +3240,9 @@ class PostEditorViewModelTest {
             }
 
             override fun dispose() = viewModel.viewModelScope.cancel()
+            override fun resolveOfferedDraft(restoring: Boolean) = viewModel.submit(
+                if (restoring) PostEditorIntent.DraftRestoreRequested else PostEditorIntent.DraftDiscardRequested,
+            )
             override fun startUpload() = viewModel.submit(PostEditorIntent.ImagesPicked(listOf("content://pick/1")))
 
             override fun snapshot(): SubmissionProbe = viewModel.state.value.let {

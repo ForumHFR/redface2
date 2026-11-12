@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.domain.editor
 
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptStatus
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptOutcome
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.BeginAttemptResult
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.Draft
@@ -217,6 +218,85 @@ class EditorDraftOfferSessionTest {
         assertTrue(session.begin(snapshot, "send") is BeginAttemptResult.Started)
         assertTrue(store.loadOffers("tester", key).isEmpty())
         assertEquals(snapshot.body, store.saved[key]?.body)
+    }
+
+    @Test fun `offer resolution through save preserves uncertainty and starts a composition after publication`() =
+        runBlocking {
+            for (outcome in listOf(AttemptOutcome.PUBLISHED, AttemptOutcome.UNCERTAIN)) {
+                for (restoring in listOf(false, true)) {
+                    val store = VersionedEditorDraftStore()
+                    store.preload(key, Draft("D"))
+                    val sending = EditorDraftSession(store, key)
+                    sending.load()
+                    val token = (sending.begin(Draft("C"), "send") as BeginAttemptResult.Started).token
+                    sending.finish(token, outcome)
+                    if (outcome == AttemptOutcome.PUBLISHED) sending.erase(token)
+                    val editor = EditorDraftSession(store, key)
+                    editor.load()
+                    val offer = editor.offers.single()
+                    val body = if (restoring) "D restored" else "new C"
+                    assertTrue(editor.save(Draft(body, offerToResolve = offer)) is StoreWriteResult.Written)
+                    assertTrue(store.loadOffers(store.activeOwner, key).isEmpty())
+                    assertEquals(body, store.saved[key]?.body)
+                    if (outcome == AttemptOutcome.UNCERTAIN) {
+                        assertEquals(token, store.entries[key]?.attempt?.token)
+                        assertEquals(AttemptStatus.UNCERTAIN, store.entries[key]?.attempt?.status)
+                        assertTrue(editor.save(Draft("edited")) is StoreWriteResult.Written)
+                        assertEquals(token, store.entries[key]?.attempt?.token)
+                    } else {
+                        assertNull(store.entries[key]?.attempt)
+                        assertTrue(editor.begin(Draft("next send"), "next") is BeginAttemptResult.Started)
+                    }
+                }
+            }
+        }
+
+    @Test fun `begin can atomically consume a preserved D after publication before starting the next send`() =
+        runBlocking {
+            val store = VersionedEditorDraftStore()
+            store.preload(key, Draft("D"))
+            val first = EditorDraftSession(store, key)
+            first.load()
+            val token = (first.begin(Draft("C"), "first") as BeginAttemptResult.Started).token
+            first.finish(token, AttemptOutcome.PUBLISHED)
+            first.erase(token)
+            val second = EditorDraftSession(store, key)
+            second.load()
+            val offer = second.offers.single()
+            assertTrue(second.begin(Draft("D", offerToResolve = offer), "second") is BeginAttemptResult.Started)
+            assertEquals("D", store.saved[key]?.body)
+            assertTrue(store.loadOffers(store.activeOwner, key).isEmpty())
+            assertEquals(AttemptStatus.IN_PROGRESS, store.entries[key]?.attempt?.status)
+        }
+
+    @Test fun `a durable offer can be resolved when C was deleted before reopening`() = runBlocking {
+        val store = VersionedEditorDraftStore()
+        store.preload(key, Draft("D"))
+        val first = EditorDraftSession(store, key)
+        first.load()
+        first.save(Draft("C"))
+        store.entries.remove(key)
+        val reopened = EditorDraftSession(store, key)
+        assertNull(reopened.load())
+        val offer = reopened.offers.single()
+        assertTrue(reopened.resolveOffer(offer, Draft("D")) is StoreWriteResult.Written)
+        assertEquals("D", store.saved[key]?.body)
+        assertTrue(store.loadOffers(store.activeOwner, key).isEmpty())
+        assertTrue(reopened.save(Draft("typing")) is StoreWriteResult.Written)
+    }
+
+    @Test fun `offer read IOException keeps the loaded revision writable and protects D`() = runBlocking {
+        val store = VersionedEditorDraftStore()
+        store.preload(key, Draft("D"))
+        store.saveIfVersion(store.activeOwner, key, Draft("D", protectCurrent = false), 0)
+        store.loadOffersFailure = IOException("disk read")
+        val editor = EditorDraftSession(store, key)
+        val failure = runCatching { editor.load() }.exceptionOrNull()
+        assertTrue(failure is IOException)
+        store.loadOffersFailure = null
+        assertTrue(editor.save(Draft("C")) is StoreWriteResult.Written)
+        assertEquals("C", store.saved[key]?.body)
+        assertEquals(listOf("D"), store.loadOffers(store.activeOwner, key).map { it.draft.body })
     }
 
     @Test fun `a raw writer also protects the old reply before its first replacement`() = runBlocking {

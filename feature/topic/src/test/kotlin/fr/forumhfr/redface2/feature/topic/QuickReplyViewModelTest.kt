@@ -1128,6 +1128,9 @@ class QuickReplyViewModelTest {
             override fun dismissConfirmation() = viewModel.onSubmitConfirmDismissed()
             override fun close() = viewModel.onDismissed()
             override fun completePost() { postGate.complete(Unit) }
+            override fun resolveOfferedDraft(restoring: Boolean) {
+                if (restoring) viewModel.onDraftRestoreRequested() else viewModel.onDraftDiscardRequested()
+            }
             override fun dispose() = viewModel.viewModelScope.cancel()
             override fun startUpload(): Unit = error("cas explicitement désactivé")
             override fun completeUpload(): Unit = error("cas explicitement désactivé")

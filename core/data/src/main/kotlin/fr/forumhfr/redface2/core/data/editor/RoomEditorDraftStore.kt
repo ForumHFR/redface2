@@ -188,7 +188,8 @@ class RoomEditorDraftStore @Inject constructor(
             contentVersion = expectedVersion + 1,
             updatedAt = if (draft == null) previous.updatedAt else clock.millis(),
         )
-        editorDraftDao.mutateInlineQuoteRequest(next, previous, draft?.protection(owner, key))
+        val protection = if (draft == null) offerCandidate(previous, key) else draft.protection(owner, key)
+        editorDraftDao.mutateInlineQuoteRequest(next, previous, protection)
             .result(next.contentVersion)
     }
 
@@ -203,10 +204,7 @@ class RoomEditorDraftStore @Inject constructor(
     override suspend fun resolveOffer(
         owner: String?, key: String, offer: DraftOffer, expectedVersion: Long, draft: Draft,
     ): StoreWriteResult = write(owner) {
-        val previous = editorDraftDao.get(rowKey(checkNotNull(owner), key)) ?: return@write StoreWriteResult.Conflict
-        val next = draft.copy(pendingInlineQuoteRequest = previous.pendingInlineQuoteRequest?.let {
-            PendingInlineQuoteRequestCodec.decode(it, key)
-        }).toEntity(owner, key).copy(contentVersion = expectedVersion + 1)
+        val next = draft.toEntity(checkNotNull(owner), key).copy(contentVersion = expectedVersion + 1)
         editorDraftDao.resolveOffer(next, expectedVersion, offer.toEntity(owner, key), draft.protection(owner, key))
             .result(next.contentVersion)
     }
@@ -317,7 +315,7 @@ class RoomEditorDraftStore @Inject constructor(
     private suspend fun Draft.toEntity(owner: String, key: String): EditorDraftEntity {
         val previous = editorDraftDao.get(rowKey(owner, key))?.takeUnless { it.attemptState == "PUBLISHED" }
         val provenance = bodyProvenance ?: previous?.bodyProvenance?.let {
-            EditorBodyProvenanceCodec.decode(it).rebase(previous.body, body)
+            EditorBodyProvenanceCodec.decode(it)?.rebase(previous.body, body)
         }
         return EditorDraftEntity(
             draftKey = rowKey(owner, key),
@@ -330,19 +328,19 @@ class RoomEditorDraftStore @Inject constructor(
             pendingInlineQuoteRequest = pendingInlineQuoteRequest?.let {
                 PendingInlineQuoteRequestCodec.encode(it, key)
             },
-            bodyProvenance = provenance?.let(EditorBodyProvenanceCodec::encode),
+            bodyProvenance = provenance?.retainFor(body)?.let(EditorBodyProvenanceCodec::encode),
         )
     }
 
     private fun EditorDraftEntity.toDraft(key: String): Draft = Draft(
         body, subject, recipients, isPrivate, updatedAt,
         pendingInlineQuoteRequest?.let { PendingInlineQuoteRequestCodec.decode(it, key) },
-        bodyProvenance?.let(EditorBodyProvenanceCodec::decode),
+        bodyProvenance?.let(EditorBodyProvenanceCodec::decode)?.retainFor(body),
     )
 
     private fun EditorDraftEntity.isQuoteOnly(key: String): Boolean =
         attemptState == null && (key.startsWith("reply:") || key.startsWith("mpreply:")) &&
-            bodyProvenance?.let { EditorBodyProvenanceCodec.decode(it).isQuoteOnly(body) } == true
+            bodyProvenance?.let { EditorBodyProvenanceCodec.decode(it)?.isQuoteOnly(body) } == true
 
     private suspend fun Draft.protection(owner: String, key: String): EditorDraftOfferEntity? =
         offerToPreserve?.toEntity(owner, key) ?: if (protectCurrent) {

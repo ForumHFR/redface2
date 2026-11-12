@@ -11,6 +11,7 @@ import fr.forumhfr.redface2.core.domain.editor.insertEditorQuotes
 import fr.forumhfr.redface2.core.domain.editor.mergeEditorBody
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptStatus
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptOutcome
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.BeginAttemptResult
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.Draft
@@ -273,6 +274,95 @@ class RoomEditorDraftOfferTest {
             returnGate.complete(Unit)
         }
         assertTrue(restore.await() is StoreWriteResult.Written)
+    }
+
+    @Test fun `resolve D after sending C accepts missing published and unresolved rows atomically`() = runTest {
+        val states = listOf(null, AttemptStatus.PUBLISHED, AttemptStatus.IN_PROGRESS, AttemptStatus.UNCERTAIN)
+        for ((index, status) in states.withIndex()) {
+            for (restoring in listOf(false, true)) {
+                val topic = 100 + index * 2 + if (restoring) 1 else 0
+                val request = PendingInlineQuoteRequest(23, topic, q.quotes)
+                val caseKey = request.key
+                val store = store()
+                store.saveIfVersion("alice", caseKey, Draft("D", updatedAt = 1234), 0)
+                val sending = EditorDraftSession(store, caseKey)
+                sending.load()
+                sending.enqueueInlineQuoteRequest(request)
+                sending.save(Draft("C"))
+                if (status == null) database.editorDraftDao().deleteByKey("alice|$caseKey") else {
+                    val token = (sending.begin(Draft("C"), "send") as BeginAttemptResult.Started).token
+                    if (status != AttemptStatus.IN_PROGRESS) {
+                        sending.finish(token, if (status == AttemptStatus.PUBLISHED) AttemptOutcome.PUBLISHED
+                            else AttemptOutcome.UNCERTAIN)
+                    }
+                    if (status == AttemptStatus.PUBLISHED) sending.erase(token)
+                }
+                val editor = EditorDraftSession(store(), caseKey)
+                val before = editor.load()
+                val offer = editor.offers.single()
+                val current = store.load("alice", caseKey)?.body.orEmpty()
+                val draft = Draft(if (restoring) "D\n\n$current" else current)
+                val version = before?.version ?: 0L
+                assertEquals(StoreWriteResult.Conflict,
+                    store.resolveOffer("alice", caseKey, offer, version - 1, draft))
+                assertEquals(before, store.loadEntry("alice", caseKey))
+                assertEquals(listOf(offer), store.loadOffers("alice", caseKey))
+                assertTrue(editor.resolveOffer(offer, draft) is StoreWriteResult.Written)
+                val after = checkNotNull(store().loadEntry("alice", caseKey))
+                assertEquals(version + 1, after.version)
+                assertEquals(draft.body, after.draft.body)
+                assertEquals(before?.draft?.pendingInlineQuoteRequest, after.draft.pendingInlineQuoteRequest)
+                assertTrue(store().loadOffers("alice", caseKey).isEmpty())
+                if (status in listOf(AttemptStatus.IN_PROGRESS, AttemptStatus.UNCERTAIN)) {
+                    assertEquals(before?.attempt?.token, after.attempt?.token)
+                    assertEquals(AttemptStatus.UNCERTAIN, after.attempt?.status)
+                } else assertNull(after.attempt)
+                assertEquals(StoreWriteResult.Conflict, editor.resolveOffer(offer, draft))
+                assertTrue(editor.save(Draft("later typing")) is StoreWriteResult.Written)
+            }
+        }
+    }
+
+    @Test fun `ignoring Q protects a newly appeared D before the metadata revision changes`() = runTest {
+        val store = store()
+        store.enqueueInlineQuoteRequest("alice", key, q, 0)
+        // D appeared after enqueue (typing while GET fails); the next opening offers this revision.
+        val row = checkNotNull(database.editorDraftDao().get("alice|$key"))
+        database.editorDraftDao().upsert(row.copy(body = "D", updatedAt = 1234))
+        val editor = EditorDraftSession(store, key)
+        editor.load()
+        val offer = checkNotNull(editor.offered("D"))
+        assertTrue(editor.consumeInlineQuoteRequest(q) is StoreWriteResult.Written)
+        assertEquals(listOf(offer), store.loadOffers("alice", key))
+        assertEquals(1234L, store.loadEntry("alice", key)?.draft?.updatedAt)
+        assertTrue(editor.save(Draft("C")) is StoreWriteResult.Written)
+        assertEquals(listOf(offer), store.loadOffers("alice", key))
+        assertTrue(editor.resolveOffer(offer, Draft("D\n\nC")) is StoreWriteResult.Written)
+        assertEquals("D\n\nC", store.load("alice", key)?.body)
+        assertTrue(store.loadOffers("alice", key).isEmpty())
+    }
+
+    @Test fun `invalid optional provenance never blocks reading writing or enqueueing C`() = runTest {
+        val invalid = listOf("not json",
+            """{"version":1,"draftEnd":21,"quotesEnd":4,"deliveries":[]}""",
+            """{"version":99,"draftEnd":0,"quotesEnd":0,"deliveries":[]}""")
+        for ((index, raw) in invalid.withIndex()) {
+            val request = PendingInlineQuoteRequest(23, 700 + index, q.quotes)
+            val caseKey = request.key
+            val store = store()
+            database.editorDraftDao().upsert(EditorDraftEntity("alice|$caseKey", "alice", "C", "subject", null,
+                1234, false, bodyProvenance = raw))
+            val loaded = checkNotNull(store.loadEntry("alice", caseKey))
+            assertEquals("C", loaded.draft.body)
+            assertNull(loaded.draft.bodyProvenance)
+            // Both paths used to decode the corrupt source before writing.
+            assertTrue(store.enqueueInlineQuoteRequest("alice", caseKey, request, 0) is StoreWriteResult.Written)
+            assertTrue(store.saveIfVersion("alice", caseKey, Draft("C edited", subject = "subject"), 1)
+                is StoreWriteResult.Written)
+            assertEquals("C edited", store.load("alice", caseKey)?.body)
+            assertNull(store.load("alice", caseKey)?.bodyProvenance)
+            assertEquals(listOf("C"), store.loadOffers("alice", caseKey).map { it.draft.body })
+        }
     }
 
     private fun store(dao: EditorDraftDao = database.editorDraftDao()) = RoomEditorDraftStore(

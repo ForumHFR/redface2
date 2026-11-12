@@ -88,7 +88,10 @@ interface EditorDraftStore {
      */
     suspend fun discardQuoteOnly(owner: String?, key: String, expectedVersion: Long): StoreWriteResult
 
-    /** ED-121: write live C and consume exactly this offer in the same transaction (also for Ignore). */
+    /**
+     * ED-121: write C and consume exactly this offer atomically (also for Ignore). An absent or
+     * published row starts a new composition; unresolved attempts keep their identity as UNCERTAIN.
+     */
     suspend fun resolveOffer(
         owner: String?, key: String, offer: DraftOffer, expectedVersion: Long, draft: Draft,
     ): StoreWriteResult

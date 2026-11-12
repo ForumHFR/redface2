@@ -327,6 +327,7 @@ class PostEditorViewModel @AssistedInject constructor(
     private var sharedDraftResumed = false
     private var draftRestoreDeciding = false
     private var restoredOfferAwaitingWrite: String? = null
+    private var mergedDraftOffer: String? = null
     private var inlineQuoteDeliveryRequested = false
     private var duplicateQuoteDelivery = false
     private var deliveredInlineQuoteRequest: PendingInlineQuoteRequest? = null
@@ -395,6 +396,7 @@ class PostEditorViewModel @AssistedInject constructor(
                     restoration.invalidate()
                     inlineQuoteDeliveryRequested = false
                     restoredOfferAwaitingWrite = null
+                    mergedDraftOffer = null
                     deliveredInlineQuoteRequest = null
                     updateChromeState { it.copy(isUploading = false, uploadProgress = null) }
                 }
@@ -1066,7 +1068,8 @@ class PostEditorViewModel @AssistedInject constructor(
         draftRestoreDeciding = true
         // A failed write reoffers the decision, but C already contains the restored D. Retrying
         // persists the live field (including newer typing), without replaying the ED-89 merge.
-        val needsMerge = restoredOfferAwaitingWrite != offeredBody
+        val needsMerge = mergedDraftOffer != offeredBody
+        mergedDraftOffer = offeredBody
         restoredOfferAwaitingWrite = offeredBody
         if (needsMerge) replaceBody(body)
         updateChromeState { it.copy(restorableDraft = null, draftHydratedFromForm = true) }
@@ -1090,8 +1093,11 @@ class PostEditorViewModel @AssistedInject constructor(
                     return@launch
                 }
                 restoredOfferAwaitingWrite = null
+                mergedDraftOffer = null
             } finally {
+                restoredOfferAwaitingWrite = null
                 draftRestoreDeciding = false
+                scheduleAutosave()
             }
             servePendingInlineQuoteIfEligible()
         }
@@ -1117,6 +1123,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 }
                 markDraftRestoreOfferIgnored(body)
                 restoredOfferAwaitingWrite = null
+                mergedDraftOffer = null
             } finally {
                 draftRestoreDeciding = false
             }

@@ -3,7 +3,6 @@ package fr.forumhfr.redface2.core.data.editor
 import fr.forumhfr.redface2.core.domain.editor.EditorBodyProvenance
 import fr.forumhfr.redface2.core.domain.editor.InlineQuoteDelivery
 import fr.forumhfr.redface2.core.model.write.QuoteScope
-import java.io.IOException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -23,7 +22,7 @@ internal object EditorBodyProvenanceCodec {
     ))
 
     @Suppress("SwallowedException") // Serialization errors can contain private bodies.
-    fun decode(raw: String): EditorBodyProvenance = try {
+    fun decode(raw: String): EditorBodyProvenance? = try {
         val value = json.decodeFromString<Document>(raw)
         require(value.version == 1 && value.draftEnd >= 0 && value.quotesEnd >= value.draftEnd)
         EditorBodyProvenance(value.draftEnd, value.quotesEnd, value.deliveries.map {
@@ -39,7 +38,7 @@ internal object EditorBodyProvenanceCodec {
             InlineQuoteDelivery(scope, it.body)
         })
     } catch (_: IllegalArgumentException) {
-        throw IOException("Invalid editor body provenance")
+        null // Provenance is optional evidence; corrupt metadata must never seal the live body.
     }
 
     @Serializable

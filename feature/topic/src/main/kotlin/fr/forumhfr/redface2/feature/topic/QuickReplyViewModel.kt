@@ -347,6 +347,7 @@ class QuickReplyViewModel @AssistedInject constructor(
         )
         deliveredQuoteBody = null
         restoredOfferAwaitingWrite = null
+        mergedDraftOffer = null
         resolvingDraftOffer = false
         val opening = newSubmission()
         val ready = CompletableDeferred<Unit>()
@@ -354,9 +355,12 @@ class QuickReplyViewModel @AssistedInject constructor(
         sessionReady = ready
         openJob = viewModelScope.launch {
             val entry = opening.restore(draftKey)
-            if (submission !== opening) return@launch
             val pending = opening.drafts.pendingInlineQuoteRequest
-            val body = entry?.draft?.body.orEmpty()
+            val quoteOnly = pending == null && entry?.attempt == null &&
+                entry?.draft?.bodyProvenance?.isQuoteOnly(entry.draft.body) == true
+            if (quoteOnly && submission === opening) opening.resolveDraftWrite(opening.drafts.discardQuoteOnly())
+            if (submission !== opening) return@launch
+            val body = if (quoteOnly) "" else entry?.draft?.body.orEmpty()
             val offer = body.takeIf { it.isNotBlank() && pending != null && entry?.attempt == null }
                 ?: opening.drafts.offers.firstOrNull { it.draft.body != body }?.draft?.body
             // The sheet auto-applies ordinary C. It must not preserve that same session as D
@@ -407,6 +411,7 @@ class QuickReplyViewModel @AssistedInject constructor(
     /** GETs may suspend while the user types; reconcile against the LIVE body before committing. */
     private var deliveredQuoteBody: String? = null
     private var restoredOfferAwaitingWrite: String? = null
+    private var mergedDraftOffer: String? = null
     private var resolvingDraftOffer = false
 
     private fun materializeInlineQuotes() {
@@ -558,7 +563,8 @@ class QuickReplyViewModel @AssistedInject constructor(
         submission.disarm()
         autosaveJob?.cancel()
         val existing = _state.value.text.text
-        val needsMerge = restoredOfferAwaitingWrite != offered
+        val needsMerge = mergedDraftOffer != offered
+        mergedDraftOffer = offered
         restoredOfferAwaitingWrite = offered
         if (needsMerge) {
             seedDraft(if (existing.isBlank() || existing == offered) offered else existing.trimEnd() + "\n\n" + offered)
@@ -584,6 +590,7 @@ class QuickReplyViewModel @AssistedInject constructor(
                 opening.resolveDraftWrite(result)
                 if (result is EditorDraftStore.StoreWriteResult.Written) {
                     restoredOfferAwaitingWrite = null
+                    mergedDraftOffer = null
                     _state.update { it.copy(restorableDraft = null, isDiscardingDraft = false) }
                     scheduleAutosave()
                     resumePendingInlineQuotes()
@@ -592,7 +599,11 @@ class QuickReplyViewModel @AssistedInject constructor(
                     quoteStorageFailed(result)
                 }
             } finally {
-                if (submission === opening) resolvingDraftOffer = false
+                if (submission === opening) {
+                    restoredOfferAwaitingWrite = null
+                    resolvingDraftOffer = false
+                    scheduleAutosave()
+                }
             }
         }
         materializeJob?.start()

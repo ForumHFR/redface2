@@ -35,6 +35,7 @@ open class VersionedEditorDraftStore : EditorDraftStore {
     var finishGate: CompletableDeferred<Unit>? = null
     var cleanupGate: CompletableDeferred<Unit>? = null
     var loadFailure: IOException? = null
+    var loadOffersFailure: IOException? = null
     var saveFailure: IOException? = null
     var beginFailure: IOException? = null
     var cleanupFailure: IOException? = null
@@ -83,9 +84,13 @@ open class VersionedEditorDraftStore : EditorDraftStore {
         loadGate?.await()
         return entries[key].takeIf { owner != null && owner == activeOwner }
     }
-    override suspend fun loadOffers(owner: String?, key: String): List<DraftOffer> =
-        if (owner == null || owner != activeOwner) emptyList() else offers(owner, key)
+    override suspend fun loadOffers(owner: String?, key: String): List<DraftOffer> {
+        loadOffersFailure?.let { throw it }
+        return if (owner == null || owner != activeOwner) emptyList() else offers(owner, key)
             .sortedWith(compareByDescending<DraftOffer> { it.draft.updatedAt }.thenByDescending { it.sourceVersion })
+    }
+
+    fun preloadOffer(key: String, offer: DraftOffer) { offers(activeOwner, key).add(offer) }
 
     @Suppress("ReturnCount") // Explicit owner/failure/revision/eligibility guards mirror the Room CAS.
     override suspend fun discardQuoteOnly(owner: String?, key: String, expectedVersion: Long): StoreWriteResult {
@@ -108,18 +113,18 @@ open class VersionedEditorDraftStore : EditorDraftStore {
         owner: String?, key: String, offer: DraftOffer, expectedVersion: Long, draft: Draft,
     ): StoreWriteResult {
         if (owner == null || owner != activeOwner) return StoreWriteResult.OwnerChanged
-        return saveFailure?.let { StoreWriteResult.Failed(it) } ?: entries[key]?.let { previous ->
-            val source = previous.version == offer.sourceVersion &&
-                previous.draft.restoreOfferFingerprint() == offer.draft.restoreOfferFingerprint()
-            val revisionBlocked = previous.version != expectedVersion || previous.attempt != null
-            if (revisionBlocked || (!source && offer !in offers(owner, key))) {
+        val previous = entries[key]
+        return saveFailure?.let { StoreWriteResult.Failed(it) } ?: run {
+            if (!canResolveOffer(owner, key, previous, offer, expectedVersion)) {
                 StoreWriteResult.Conflict
             } else {
                 if (draft.offerToPreserve?.id != offer.id) protect(owner, key, previous, draft.offerToPreserve)
                 entries[key] = DraftEntry(draft.copy(
                     offerToPreserve = null, offerToResolve = null, protectCurrent = true,
-                    pendingInlineQuoteRequest = previous.draft.pendingInlineQuoteRequest,
-                ), expectedVersion + 1)
+                    pendingInlineQuoteRequest = previous?.takeUnless { it.attempt?.status == AttemptStatus.PUBLISHED }
+                        ?.draft?.pendingInlineQuoteRequest,
+                ), expectedVersion + 1, previous?.attempt?.takeUnless { it.status == AttemptStatus.PUBLISHED }
+                    ?.copy(status = AttemptStatus.UNCERTAIN))
                 offers(owner, key).removeAll { it.id == offer.id }
                 saveCount++
                 writes++
@@ -127,7 +132,17 @@ open class VersionedEditorDraftStore : EditorDraftStore {
                 saveReturnGate?.await()
                 StoreWriteResult.Written(expectedVersion + 1)
             }
-        } ?: StoreWriteResult.Conflict
+        }
+    }
+
+    private fun canResolveOffer(
+        owner: String, key: String, previous: DraftEntry?, offer: DraftOffer, expectedVersion: Long,
+    ): Boolean {
+        val source = previous?.takeIf { it.attempt == null }?.let {
+            it.version == offer.sourceVersion &&
+                it.draft.restoreOfferFingerprint() == offer.draft.restoreOfferFingerprint()
+        } == true
+        return (previous?.version ?: 0L) == expectedVersion && (source || offer in offers(owner, key))
     }
 
     @Suppress("ComplexCondition") // Mirrors the exact-source Room transaction guard.
@@ -148,6 +163,16 @@ open class VersionedEditorDraftStore : EditorDraftStore {
                 it.draft.bodyProvenance?.isQuoteOnly(it.draft.body) != true &&
                 (key.startsWith("reply:") || key.startsWith("mpreply:"))
         }?.let(DraftOffer::from)
+
+    private fun offerCandidate(owner: String?, key: String, entry: DraftEntry?): DraftOffer? {
+        val source = entry?.let { protection(key, it, it.draft.copy(offerToPreserve = null, protectCurrent = true)) }
+        return source?.let { candidate ->
+            offers(owner, key).firstOrNull {
+                it.draft.restoreOfferFingerprint() == candidate.draft.restoreOfferFingerprint() &&
+                    it.draft.updatedAt == candidate.draft.updatedAt
+            } ?: candidate
+        }
+    }
 
     override suspend fun save(owner: String?, key: String, draft: Draft) {
         val entry = entries[key]
@@ -208,7 +233,8 @@ open class VersionedEditorDraftStore : EditorDraftStore {
             ) {
                 StoreWriteResult.Conflict
             } else {
-                protect(owner, key, entry, draft?.let { protection(key, entry, it) })
+                val candidate = if (draft == null) offerCandidate(owner, key, entry) else protection(key, entry, draft)
+                protect(owner, key, entry, candidate)
                 entries[key] = entry.copy(
                     draft = (draft ?: entry.draft).copy(
                         pendingInlineQuoteRequest = null, offerToPreserve = null,

@@ -3247,6 +3247,9 @@ class PrivateMessageReplyViewModelTest {
                 insert.invoke(viewModel, "[img]https://example.test/late.png[/img]", false)
             }
             override fun dispose() = viewModel.viewModelScope.cancel()
+            override fun resolveOfferedDraft(restoring: Boolean) {
+                if (restoring) viewModel.onDraftRestoreRequested() else viewModel.onDraftDiscardRequested()
+            }
             override fun startUpload() = viewModel.onImagesPicked(listOf("content://pick/1"))
 
             override fun snapshot(): SubmissionProbe = viewModel.state.value.let {

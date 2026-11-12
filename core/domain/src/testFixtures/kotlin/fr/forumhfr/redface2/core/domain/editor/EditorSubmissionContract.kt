@@ -556,6 +556,7 @@ interface EditorSubmissionAdapter {
     fun completeUpload()
     fun deliverLateUploadCallback()
     fun completePost()
+    fun resolveOfferedDraft(restoring: Boolean): Unit = error("This surface has no independent reply offers")
     fun dispose()
 }
 

@@ -54,6 +54,7 @@ internal class PrivateMessageReplyDraftSession(
     private var previousBody = bodyFieldState.text.toString()
     private var bodyEditedBeforeHydration = false
     private var restoredOfferAwaitingWrite: String? = null
+    private var mergedDraftOffer: String? = null
     private var resolvingOffer = false
 
     init {
@@ -199,7 +200,8 @@ internal class PrivateMessageReplyDraftSession(
             typedAfterSeed != null -> offeredBody + "\n\n" + typedAfterSeed.trimStart()
             else -> liveBody.trimEnd() + "\n\n" + offeredBody
         }
-        val needsMerge = restoredOfferAwaitingWrite != offeredBody
+        val needsMerge = mergedDraftOffer != offeredBody
+        mergedDraftOffer = offeredBody
         restoredOfferAwaitingWrite = offeredBody
         if (needsMerge) replaceBody(body)
         restoration.decide(EditorSessionField.Body)
@@ -230,9 +232,12 @@ internal class PrivateMessageReplyDraftSession(
                     if (!restoring) saved[DRAFT_RESTORE_OFFER_FINGERPRINT_KEY] =
                         EditorDraftStore.Draft(body = body, isPrivate = true).restoreOfferFingerprint()
                     restoredOfferAwaitingWrite = null
+                    mergedDraftOffer = null
                 }
             } finally {
+                restoredOfferAwaitingWrite = null
                 resolvingOffer = false
+                scheduleAutosave()
             }
         }
     }

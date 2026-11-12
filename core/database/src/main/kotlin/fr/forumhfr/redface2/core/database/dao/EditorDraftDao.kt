@@ -210,18 +210,30 @@ interface EditorDraftDao {
         draft: EditorDraftEntity, expectedVersion: Long, offer: EditorDraftOfferEntity,
         protection: EditorDraftOfferEntity? = null,
     ): Boolean {
-        val previous = get(draft.draftKey) ?: return false
+        val previous = get(draft.draftKey)
         val stored = offers(offer.ownerId, offer.contextKey).any { it == offer }
-        val source = previous.contentVersion == offer.sourceVersion && previous.body == offer.body &&
+        val source = previous?.contentVersion == offer.sourceVersion && previous.body == offer.body &&
             previous.subject == offer.subject && previous.recipients == offer.recipients
-        val offerUnavailable = !stored && !source
-        return if (previous.contentVersion != expectedVersion || previous.attemptState != null || offerUnavailable) {
+        val offerUnavailable = !stored && !(source && previous?.attemptState == null)
+        return if ((previous?.contentVersion ?: 0L) != expectedVersion || offerUnavailable) {
             false
         } else {
             if (protection?.offerId != offer.offerId) preserveOffer(previous, protection)
-            upsert(draft)
+            upsert(draft.resolvingOffer(previous))
             deleteOffer(offer.ownerId, offer.contextKey, offer.offerId)
             true
         }
     }
+}
+
+/** Start a composition after publication; unresolved sends keep their identity as with saveUnresolved. */
+private fun EditorDraftEntity.resolvingOffer(previous: EditorDraftEntity?): EditorDraftEntity {
+    val attempt = previous?.takeIf { it.attemptState in listOf("IN_PROGRESS", "UNCERTAIN") }
+    return copy(
+        attemptId = attempt?.attemptId,
+        attemptVersion = attempt?.attemptVersion,
+        attemptState = attempt?.let { "UNCERTAIN" },
+        pendingInlineQuoteRequest = previous?.takeUnless { it.attemptState == "PUBLISHED" }
+            ?.pendingInlineQuoteRequest,
+    )
 }

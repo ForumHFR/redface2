@@ -723,6 +723,33 @@ class QuickReplyDurableQuoteTest {
         assertNull(scenario.pending)
     }
 
+    @Test
+    fun `fresh sheet drops quote-only C durably on every reopening and leaves D independent`() = runTest {
+        for (withDraft in listOf(false, true)) {
+            val scenario = Scenario()
+            if (withDraft) scenario.store.preload(scenario.key, Draft("D", updatedAt = 1234))
+            val delivery = EditorDraftSession(scenario.store, scenario.key)
+            delivery.load()
+            delivery.enqueueInlineQuoteRequest(scenario.request)
+            val quote = "[quotemsg=101]quote[/quotemsg]"
+            delivery.consumeInlineQuoteRequest(scenario.request, Draft(quote + "\n  "), deliveredBody = quote)
+            val offers = scenario.store.loadOffers(scenario.store.activeOwner, scenario.key)
+            val first = scenario.open()
+            runCurrent() // Discard itself must commit before the autosave debounce.
+            assertEquals("", first.state.value.text.text)
+            assertEquals("", scenario.body)
+            assertNull(scenario.store.saved[scenario.key]?.bodyProvenance)
+            assertEquals(if (withDraft) "D" else null, first.state.value.restorableDraft)
+            first.viewModelScope.cancel()
+            val second = scenario.open()
+            runCurrent()
+            assertEquals("", second.state.value.text.text)
+            assertEquals(offers, scenario.store.loadOffers(scenario.store.activeOwner, scenario.key))
+            assertTrue(scenario.fetches.isEmpty())
+            second.viewModelScope.cancel()
+        }
+    }
+
     private inner class Scenario {
         val key = EditorDraftKey.reply(23, 35421)
         val store = VersionedEditorDraftStore()

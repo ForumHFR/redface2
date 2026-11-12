@@ -125,6 +125,63 @@ class EditorBodyMergeTest {
     }
 
     @Test
+    fun `coalesced edits to D and typing never move quotes before D`() {
+        val longQuote = "[quotemsg=101]" + "one ".repeat(30) + "[/quotemsg]"
+        val restored = mergeEditorBody("draft", "$longQuote\n\ntyped",
+            provenance = EditorBodyProvenance().delivered(scope, longQuote))
+        val current = restored.body.replace("draft", "draft expanded").replace("typed", "rewritten tail")
+        val rebased = restored.provenance.rebase(restored.body, current)
+        assertEquals("draft expanded".length, rebased.draftEnd)
+        assertTrue(rebased.quotesEnd >= rebased.draftEnd)
+        assertTrue(rebased.quotesEnd <= current.length)
+        val inserted = insertEditorQuotes(current, q2, rebased)
+        assertTrue(inserted.body.startsWith("draft expanded\n\n$q2"))
+    }
+
+    @Test
+    fun `delivery evidence keeps only last batch and original blocks still present in C`() {
+        val modified = q1.replace("one", "edited")
+        val q3 = "[quotemsg=303]three[/quotemsg]"
+        val q4 = "[quotemsg=404]four[/quotemsg]"
+        var proof = EditorBodyProvenance().delivered(scope, q1)
+        proof = proof.delivered(scope, q2, "$q1\n\n$q2\n\ntyped")
+        proof = proof.delivered(scope, q3, "$modified\n\n$q3\n\ntyped")
+        assertEquals(listOf(q1, q3), proof.deliveries.map { it.body })
+        assertEquals("D\n\n$modified\n\n$q3\n\ntyped",
+            mergeEditorBody("D", "$modified\n\n$q3\n\ntyped", provenance = proof).body)
+        // Removing old blocks and repeated deliveries cannot accumulate historical bodies.
+        repeat(100) { proof = proof.delivered(scope, q4, q4) }
+        assertEquals(listOf(q4), proof.deliveries.map { it.body })
+        proof = proof.rebase(q4, "typed only")
+        assertEquals(listOf(q4), proof.deliveries.map { it.body })
+        assertTrue(proof.isQuoteOnly(q4 + "\n  "))
+        assertFalse(proof.isQuoteOnly(q3))
+    }
+
+    @Test
+    fun `compaction keeps distinct intact contents of the same scoped post for ED-89`() {
+        val revised = q1.replace("one", "revised")
+        val current = "$q1\n\n$revised\n\n$q2\n\ntyped"
+        val proof = EditorBodyProvenance().delivered(scope, q1)
+            .delivered(scope, revised, current).delivered(scope, q2, current).retainFor(current)
+        assertEquals(listOf(q1, revised, q2), proof.deliveries.map { it.body })
+        assertEquals(current, mergeEditorBody(q1, current, provenance = proof).body)
+    }
+
+    @Test
+    fun `compaction retains the whole last batch and scopes older evidence by category`() {
+        val otherScope = QuoteScope.Topic(24, 1)
+        val batch = "$q1\n\n$q2"
+        val proof = EditorBodyProvenance().delivered(otherScope, q1)
+            .delivered(scope, batch, batch).retainFor(batch)
+        assertEquals(batch, proof.deliveries.last().body)
+        assertTrue(proof.isQuoteOnly(batch + "\n"))
+        assertEquals(otherScope, proof.deliveries.first().scope)
+        assertEquals("D\n\n$batch\n\ntyped", mergeEditorBody("D", "$batch\n\ntyped",
+            provenance = proof, scope = scope, currentScope = scope).body)
+    }
+
+    @Test
     fun `quote alone compares the complete last delivery ignoring trailing whitespace only`() {
         val state = EditorBodyProvenance().delivered(scope, "$q1\n\n$q2")
         assertTrue(state.isQuoteOnly("$q1\n\n$q2\n  "))
