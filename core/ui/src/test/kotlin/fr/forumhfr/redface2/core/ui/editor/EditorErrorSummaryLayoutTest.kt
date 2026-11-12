@@ -105,18 +105,7 @@ class EditorErrorSummaryLayoutTest {
                 "ellipse=${layout.isLineEllipsized(0)}, budget=$EDITOR_SUMMARY_TEXT_WIDTH_DP")
             summaryViolations(label, layout).takeIf { it.isNotEmpty() }?.let { violations[label] = it }
         }
-        // Keep the full-screen control's 48 dp reservation and the legacy button's width coverage.
-        listOf("Envoyer", "Confirmer").forEach { label ->
-            val bounds = compose.onNodeWithContentDescription(label).getUnclippedBoundsInRoot()
-            println("ED-133 EditorBarSubmit $label: width=${bounds.width} height=${bounds.height}, target=48dp")
-            if (kotlin.math.abs(bounds.width.value - 48f) > 0.5f ||
-                kotlin.math.abs(bounds.height.value - 48f) > 0.5f) {
-                failures += AssertionError("EditorBarSubmit $label: $bounds != 48 × 48dp")
-            }
-            val width = compose.onNodeWithText(label).getUnclippedBoundsInRoot().width.value
-            println("ED-133 ArmedSubmitButton $label: width=${width}dp, budget=150")
-            if (width > 150f) failures += AssertionError("ArmedSubmitButton $label: ${width}dp > 150dp")
-        }
+        failures += submitControlFailures()
         val d44Labels = setOf("Envoi incertain", "Brouillon non écrit")
         val ordinary = violations.filterKeys { it !in d44Labels }
         val d44 = violations.filterKeys { it in d44Labels }
@@ -124,6 +113,21 @@ class EditorErrorSummaryLayoutTest {
         // Separate assertion: D44 text is protected and must never be shortened to make this green.
         if (d44.isNotEmpty()) failures += AssertionError("Réserve D44 — textes inchangés, budget 150 dp : $d44")
         MultipleFailureException.assertEmpty(failures)
+    }
+
+    /** Keep the full-screen control's 48 dp reservation and the legacy button's width coverage. */
+    private fun submitControlFailures(): List<Throwable> = buildList {
+        listOf("Envoyer", "Confirmer").forEach { label ->
+            val bounds = compose.onNodeWithContentDescription(label).getUnclippedBoundsInRoot()
+            println("ED-133 EditorBarSubmit $label: width=${bounds.width} height=${bounds.height}, target=48dp")
+            if (kotlin.math.abs(bounds.width.value - 48f) > 0.5f ||
+                kotlin.math.abs(bounds.height.value - 48f) > 0.5f) {
+                add(AssertionError("EditorBarSubmit $label: $bounds != 48 × 48dp"))
+            }
+            val width = compose.onNodeWithText(label).getUnclippedBoundsInRoot().width.value
+            println("ED-133 ArmedSubmitButton $label: width=${width}dp, budget=150")
+            if (width > 150f) add(AssertionError("ArmedSubmitButton $label: ${width}dp > 150dp"))
+        }
     }
 
     private fun summaryViolations(label: String, layout: TextLayoutResult): List<String> = buildList {
