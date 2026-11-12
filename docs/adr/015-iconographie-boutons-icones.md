@@ -10,7 +10,9 @@ permalink: /adr/015-iconographie-boutons-icones
 
 ## Statut
 
-Accepté — 2026-06-16
+Accepté — 2026-06-16 · **amendé 2026-11-12** ([#1417](https://github.com/ForumHFR/redface2/issues/1417) :
+les icônes de l'éditeur passent à `strokeWidth="2"`, la famille hors éditeur reste à 2,5 — voir la
+note sous § Décision)
 
 ## Contexte
 
@@ -48,6 +50,18 @@ Convention de tracé (famille homogène) :
 
 Le `strokeWidth` 2.5 donne un trait **plus épais** que l'ancien `ic_arrow_back` en `fillColor`
 (retour nicko) et un poids identique d'une icône à l'autre.
+
+> **Amendement 2026-11-12 ([#1417](https://github.com/ForumHFR/redface2/issues/1417), refonte de
+> l'éditeur)** — les icônes propres à l'éditeur sont désormais tracées à **`strokeWidth="2"`**, gras
+> compris, pour une graisse proche des Material Symbols en poids 400. C'est une décision du
+> mainteneur, prise en deux temps : le 11/11/2026, il retient le trait de 2 pour l'éditeur d'abord,
+> avec le B (`ic_editor_bold`) à 3 ; le 12/11/2026, il ramène aussi le B à 2. Fichiers concernés :
+> les 28 `ic_editor_*` et `ic_image_upload`, qui ne sert qu'aux surfaces d'édition (barre BBCode,
+> rangée image, catalogue des raccourcis). La famille hors éditeur (`ic_arrow_back`,
+> `ic_chevron_left`, `ic_chevron_right`, `ic_edit`, `ic_expand_less`, `ic_expand_more`) **reste à
+> 2,5** en attendant une décision sur la portée, y compris là où l'éditeur l'emprunte (flèche retour
+> de la top bar et des rangées, chevron d'ouverture de l'en-tête). Le reste de la convention
+> (viewport, caps et joins ronds, teinte à l'usage, `RedfaceVectorIcon`) est inchangé.
 
 Primitive partagé : **`RedfaceVectorIcon`** (`:core:ui`, package `core.ui.icon`) encapsule
 `material3 Icon` + `painterResource` + la taille canonique (`RedfaceIconDefaults.Size = 24.dp`)
