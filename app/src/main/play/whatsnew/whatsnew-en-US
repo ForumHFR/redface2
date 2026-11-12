@@ -1,3 +1,3 @@
-Redface 2 v0.69.12 — dev.
-- Editor: quoting while a draft is pending loads the topic title, HFR favourites and Send again.
-- The quote waits until the draft is restored or discarded, then is inserted once.
+Redface 2 v0.69.13 — dev.
+- Editor: the draft offer (↺) opens in a bottom sheet, with Restore or Discard.
+- The "Draft found, quote pending" notice now clears itself after a few seconds; tapping ↺ opens the sheet.
