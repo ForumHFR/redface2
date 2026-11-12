@@ -10,7 +10,9 @@ import androidx.lifecycle.viewModelScope
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.editor.EditorBodyProvenance
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptOutcome
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptStatus
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.BeginAttemptResult
@@ -107,6 +109,41 @@ class PostEditorRestorationTest {
         store.saveReturnGate?.complete(Unit)
         dispatcher.scheduler.runCurrent()
         Dispatchers.resetMain()
+    }
+
+    @Test
+    fun freshQuoteOnlyOpeningDiscardsTheRowBeforeAnotherDeathAndKeepsDOffered() = runTest(dispatcher) {
+        store.preload(key, Draft("D", updatedAt = 1234))
+        val previous = EditorDraftSession(store, key)
+        previous.load()
+        previous.enqueueInlineQuoteRequest(pending())
+        previous.consumeInlineQuoteRequest(pending(), Draft(QUOTE), deliveredBody = QUOTE)
+        val offers = store.loadOffers("tester", key)
+        val saved = SavedStateHandle()
+        val fresh = open(saved)
+        runCurrent()
+        assertEquals("", fresh.bodyFieldState.text.toString())
+        assertEquals("D", fresh.state.value.restorableDraft)
+        assertEquals("", store.saved[key]?.body)
+        assertNull(store.saved[key]?.bodyProvenance)
+        val frozen = freeze(saved) // No ON_STOP or autosave after this new opening.
+        fresh.viewModelScope.cancel()
+        val afterDeath = open(frozen)
+        runCurrent()
+        assertEquals("", afterDeath.bodyFieldState.text.toString())
+        assertEquals("D", afterDeath.state.value.restorableDraft)
+        assertTrue(afterDeath.state.value.pendingQuotes.isEmpty())
+        assertEquals(offers, store.loadOffers("tester", key))
+    }
+
+    @Test
+    fun explicitSharedHandoffKeepsQuoteOnlyCInsteadOfDiscardingIt() = runTest(dispatcher) {
+        store.preload(key, Draft(QUOTE, bodyProvenance = EditorBodyProvenance().delivered(pending().scope, QUOTE)))
+        val shared = open(request = request().copy(resumeSharedDraft = true))
+        runCurrent()
+        assertResumed(shared, QUOTE)
+        assertEquals(QUOTE, store.saved[key]?.body)
+        assertTrue(checkNotNull(store.saved[key]?.bodyProvenance).isQuoteOnly(QUOTE))
     }
 
     @Test

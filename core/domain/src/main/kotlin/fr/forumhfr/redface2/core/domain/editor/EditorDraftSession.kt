@@ -26,6 +26,8 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
     private var offersLoaded = false
     private val resolvedOffers = mutableSetOf<String>()
     private var lastBody = ""
+    /** Text Undo/Redo can return to the last restore after an intervening autosave lost its offsets. */
+    private var restoredBody: EditorBodyMerge? = null
     var bodyProvenance: EditorBodyProvenance? = null
         private set
     private var writingVersion: Long? = null
@@ -49,6 +51,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         readable = false
         offersLoaded = false
         resolvedOffers.clear()
+        restoredBody = null
         protectedOffer = null
         offers = emptyList()
         hasUnreadableInlineQuoteRequest = false
@@ -112,6 +115,21 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
     /** A certified resume is C, not a new offered D. Existing durable offers remain untouched. */
     fun resumeContent() { protectedOffer = null }
 
+    /** Fresh opening only, after restoration declined C; shared handoffs/recreations keep C. */
+    suspend fun discardQuoteOnly(): StoreWriteResult = writes.withLock {
+        withContext(NonCancellable) {
+            val result = mutation { store.discardQuoteOnly(owner, checkNotNull(key), version) }
+            if (result is StoreWriteResult.Written) {
+                lastBody = ""
+                bodyProvenance = null
+                protectedOffer = null
+                restoredBody = null
+            }
+            adopt(result)
+            result
+        }
+    }
+
     /** Resolve the legacy single-offer UI to a stable version, including the not-yet-copied source. */
     fun offered(body: String): DraftOffer? =
         (listOfNotNull(protectedOffer) + offers).firstOrNull { it.draft.body == body }
@@ -124,7 +142,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
                 mutation { store.resolveOffer(owner, checkNotNull(key), offer, version, protected(snapshot)) }
             }
             if (result is StoreWriteResult.Written) {
-                adoptResolvedOffer(offer)
+                adoptResolvedOffer(offer, snapshot)
                 adoptBody(snapshot)
             }
             adopt(result)
@@ -139,6 +157,12 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
                 store.enqueueInlineQuoteRequest(owner, checkNotNull(key), request, version)
             }
             if (result is StoreWriteResult.Written) {
+                val reply = key?.startsWith("reply:") == true || key?.startsWith("mpreply:") == true
+                if (reply && unresolved == null && bodyProvenance?.isQuoteOnly(lastBody) == true) {
+                    lastBody = ""
+                    bodyProvenance = null
+                    restoredBody = null
+                }
                 pendingInlineQuoteRequest = pendingInlineQuoteRequest?.merge(request) ?: request
             }
             adopt(result)
@@ -222,6 +246,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
                     bodyProvenance = null
                     lastBody = ""
                     protectedOffer = null
+                    restoredBody = null
                 }
             }
         }
@@ -248,7 +273,12 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
 
     private fun ownedDraft(draft: Draft): Draft = draft.copy(
         pendingInlineQuoteRequest = pendingInlineQuoteRequest,
-        bodyProvenance = draft.bodyProvenance ?: bodyProvenance?.rebase(lastBody, draft.body),
+        bodyProvenance = draft.bodyProvenance ?: bodyProvenance?.let { provenance ->
+            val restored = restoredBody?.takeIf { it.body == draft.body }?.provenance
+            if (restored == null) provenance.rebase(lastBody, draft.body)
+            // Reuse only the boundaries. A later delivery remains delivered even if its text was undone.
+            else provenance.copy(draftEnd = restored.draftEnd, quotesEnd = restored.quotesEnd)
+        },
     )
 
     private fun protected(draft: Draft): Draft = draft.copy(
@@ -272,7 +302,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         val attempt = unresolved
         when {
             offer != null -> store.resolveOffer(owner, checkNotNull(key), offer, version, draft).also {
-                if (it is StoreWriteResult.Written) adoptResolvedOffer(offer)
+                if (it is StoreWriteResult.Written) adoptResolvedOffer(offer, snapshot)
             }
             published -> store.startNewComposition(owner, checkNotNull(key), draft, version)
             attempt != null -> store.saveUnresolved(attempt, draft, version)
@@ -282,10 +312,13 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         StoreWriteResult.Failed(error)
     }
 
-    private fun adoptResolvedOffer(offer: DraftOffer) {
+    private fun adoptResolvedOffer(offer: DraftOffer, draft: Draft) {
         resolvedOffers += offer.id
         offers = offers.filterNot { it.id == offer.id }
         if (protectedOffer?.id == offer.id) protectedOffer = null
+        draft.bodyProvenance?.takeIf { it.draftEnd > 0 }?.let {
+            restoredBody = EditorBodyMerge(draft.body, it)
+        }
     }
 
     private fun adopt(result: StoreWriteResult) {

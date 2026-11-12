@@ -69,6 +69,50 @@ class EditorBodyMergeTest {
     }
 
     @Test
+    fun `editing the middle of restored D moves both boundaries before the next quote`() {
+        val restored = mergeEditorBody("draft old text", "$q1\n\ntyped",
+            provenance = EditorBodyProvenance().delivered(scope, q1))
+        val editedBody = restored.body.replace("old", "a longer replacement")
+        val edited = restored.provenance.rebase(restored.body, editedBody)
+        val draft = "draft a longer replacement text"
+        assertEquals(draft.length, edited.draftEnd)
+        assertEquals("$draft\n\n$q1".length, edited.quotesEnd)
+        assertEquals("$draft\n\n$q1\n\n$q2\n\ntyped", insertEditorQuotes(editedBody, q2, edited).body)
+    }
+
+    @Test
+    fun `deleting a separator keeps later delivery outside D and outside typing`() {
+        val restored = mergeEditorBody("draft", "$q1\n\ntyped",
+            provenance = EditorBodyProvenance().delivered(scope, q1))
+        val bodies = listOf("draft$q1\n\ntyped", "draft\n\n${q1}typed")
+        val expected = listOf("draft$q1\n\n$q2\n\ntyped", "draft\n\n$q1\n\n$q2\n\ntyped")
+        bodies.zip(expected).forEach { (body, result) ->
+            val edited = restored.provenance.rebase(restored.body, body)
+            assertEquals("draft".length, edited.draftEnd)
+            assertEquals(result, insertEditorQuotes(body, q2, edited).body)
+        }
+        val beforeGet = mergeEditorBody("draft", "typed")
+        val withoutSeparator = "drafttyped"
+        assertEquals("draft\n\n$q1\n\ntyped", insertEditorQuotes(withoutSeparator, q1,
+            beforeGet.provenance.rebase(beforeGet.body, withoutSeparator)).body)
+    }
+
+    @Test
+    fun `typing between two delivered blocks moves behind the complete batch on restore`() {
+        val batch = "$q1\n\n$q2"
+        val proof = EditorBodyProvenance().delivered(scope, batch)
+        val body = "$q1\n\nbetween\n\n$q2\n\ntail"
+        assertFalse(proof.isQuoteOnly(body))
+        val restored = mergeEditorBody("D", body, provenance = proof)
+        assertEquals("D\n\n$q1\n\n$q2\n\nbetween\n\ntail", restored.body)
+        assertEquals("D".length, restored.provenance.draftEnd)
+        assertEquals("D\n\n$batch".length, restored.provenance.quotesEnd)
+        val q3 = "[quotemsg=303]three[/quotemsg]"
+        assertEquals("D\n\n$batch\n\n$q3\n\nbetween\n\ntail",
+            insertEditorQuotes(restored.body, q3, restored.provenance).body)
+    }
+
+    @Test
     fun `D and typed whitespace are preserved on restore and later delivery`() {
         val offered = "  D  \n"
         val typed = "  typed  \n"

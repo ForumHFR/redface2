@@ -60,8 +60,9 @@ interface EditorDraftStore {
 
     /**
      * #1553: persist a new explicit quote action before opening an editor. Owner/version checked;
-     * merge with an ordinary draft without touching its fields. A published row starts an empty
-     * composition; an unresolved attempt keeps its exact identity/status and a dormant request.
+     * merge with an ordinary draft, preserving user content. An intact quote-only reply is cleared
+     * first (ED-121: new Cite B gives B alone), without touching offers. A published row starts an
+     * empty composition; an unresolved attempt keeps its exact identity/status and a dormant request.
      * No saved-instance-state restoration may call this mutation to replay old coordinates.
      */
     suspend fun enqueueInlineQuoteRequest(
@@ -79,6 +80,13 @@ interface EditorDraftStore {
 
     /** ED-121: offers are read independently of C's publication status, newest first. */
     suspend fun loadOffers(owner: String?, key: String): List<DraftOffer>
+
+    /**
+     * ED-121: a fresh reply opening durably drops an intact quote-only body and its provenance.
+     * CAS-guarded; preserves offers, pending requests and headers, and rejects every attempt.
+     * Keep the empty revision so a stale writer or a later Bundle cannot resurrect the old quote.
+     */
+    suspend fun discardQuoteOnly(owner: String?, key: String, expectedVersion: Long): StoreWriteResult
 
     /** ED-121: write live C and consume exactly this offer in the same transaction (also for Ignore). */
     suspend fun resolveOffer(

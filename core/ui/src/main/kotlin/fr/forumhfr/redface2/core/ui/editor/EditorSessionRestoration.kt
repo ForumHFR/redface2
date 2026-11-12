@@ -53,6 +53,7 @@ class EditorSessionRestoration(private val saved: SavedStateHandle, surface: Edi
     private val previousSubcategory = savedSubcategory()
     private val decided = mutableSetOf<EditorSessionField>()
     private var resumed = false
+    private var quoteOnlyWithoutViewport = false
     private var invalidated = false
     var scrollToRestore: Int? = null
         private set
@@ -89,6 +90,10 @@ class EditorSessionRestoration(private val saved: SavedStateHandle, surface: Edi
                 entry.draft.bodyProvenance?.isQuoteOnly(entry.draft.body) == true -> EditorSessionRestore.Resume
             entry.draft.bodyProvenance?.isQuoteOnly(entry.draft.body) == true -> EditorSessionRestore.None
             else -> EditorSessionRestore.Offer
+        }
+        // ED-121: a pre-delivery Bundle has no selection or viewport for the delivered body.
+        if (result == EditorSessionRestore.Resume) {
+            quoteOnlyWithoutViewport = !matches(checkNotNull(entry), owner, key)
         }
         // Reconciliation may reread a newer revision before the form arrives (D3).
         // Only invalidate() can revoke a resume already applied by this instance.
@@ -127,6 +132,10 @@ class EditorSessionRestoration(private val saved: SavedStateHandle, surface: Edi
         bodyKnown && !hasUndecidedOffer
 
     fun selection(length: Int): TextRange {
+        if (quoteOnlyWithoutViewport) {
+            scrollToRestore = null
+            return TextRange(length)
+        }
         scrollToRestore = previousScroll.coerceAtLeast(0)
         return TextRange(previousStart.coerceIn(0, length), previousEnd.coerceIn(0, length))
     }

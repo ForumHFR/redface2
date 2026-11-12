@@ -12,12 +12,14 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorPreparationException
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionAdapter
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionScenario
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.domain.editor.SubmissionBodyMutation
 import fr.forumhfr.redface2.core.domain.editor.SubmissionErrorProbe
 import fr.forumhfr.redface2.core.domain.editor.SubmissionProbe
@@ -222,6 +224,36 @@ class PrivateMessageReplyViewModelTest {
         }
         Snapshot.sendApplyNotifications()
         if (advanceMirror) mainDispatcher.scheduler.runCurrent()
+    }
+
+    @Test
+    fun `fresh quote-only opening discards private C before another death and preserves offered D`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val key = EditorDraftKey.mpReply(request.threadId)
+        val pending = PendingInlineQuoteRequest.privateMessage(request.threadId,
+            listOf(PendingInlineQuoteRequest.Quote(101, 1, 0)))
+        val quote = "[quotemsg=101]one[/quotemsg]"
+        draftStore.preload(key, EditorDraftStore.Draft("D", isPrivate = true, updatedAt = 1234))
+        val previous = EditorDraftSession(draftStore, key)
+        previous.load()
+        previous.enqueueInlineQuoteRequest(pending)
+        previous.consumeInlineQuoteRequest(pending, EditorDraftStore.Draft(quote, isPrivate = true), deliveredBody = quote)
+        val offers = draftStore.loadOffers("tester", key)
+        val saved = SavedStateHandle()
+        val fresh = viewModel(repository, savedStateHandle = saved)
+        runCurrent()
+        assertEquals("", fresh.bodyFieldState.text.toString())
+        assertEquals("D", fresh.state.value.restorableDraft)
+        assertEquals("", draftStore.saved[key]?.body)
+        assertNull(draftStore.saved[key]?.bodyProvenance)
+        fresh.viewModelScope.cancel()
+        val frozen = SavedStateHandle(saved.keys().associateWith { saved.get<Any?>(it) })
+        val afterDeath = viewModel(repository, savedStateHandle = frozen)
+        runCurrent()
+        assertEquals("", afterDeath.bodyFieldState.text.toString())
+        assertEquals("D", afterDeath.state.value.restorableDraft)
+        assertEquals(offers, draftStore.loadOffers("tester", key))
     }
 
     @Test

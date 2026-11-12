@@ -13,6 +13,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptToken
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.Draft
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.DraftEntry
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.StoreWriteResult
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
@@ -45,13 +46,16 @@ class EditorSessionRestorationTest {
         val saved = SavedStateHandle()
         EditorSessionRestoration(saved, EditorSessionSurface.Post).apply {
             bind(owner, replyKey)
-            capture(EditorSessionCheckpoint(Draft(""), 1, TextRange.Zero, 0), bodyKnown = true)
+            capture(EditorSessionCheckpoint(Draft("before delivery"), 1, TextRange(8, 2), 500), bodyKnown = true)
         }
         val batch = "[quotemsg=101]one[/quotemsg]\n\n[quotemsg=202]two[/quotemsg]"
         val proof = EditorBodyProvenance().delivered(QuoteScope.Topic(23, 42), batch)
         val delivered = DraftEntry(Draft(batch + "\n", bodyProvenance = proof), 2)
-        assertEquals(EditorSessionRestore.Resume,
-            EditorSessionRestoration(saved, EditorSessionSurface.Post).resolve(delivered, owner, replyKey))
+        val restored = EditorSessionRestoration(saved, EditorSessionSurface.Post)
+        assertEquals(EditorSessionRestore.Resume, restored.resolve(delivered, owner, replyKey))
+        assertFalse(restored.matches(delivered, owner, replyKey))
+        assertEquals(TextRange(delivered.draft.body.length), restored.selection(delivered.draft.body.length))
+        assertNull(restored.scrollToRestore)
         for (body in listOf(batch + "typed", batch.replace("one", "edited"), "[quotemsg=101]one[/quotemsg]")) {
             assertEquals(EditorSessionRestore.Offer, EditorSessionRestoration(saved, EditorSessionSurface.Post)
                 .resolve(delivered.copy(draft = delivered.draft.copy(body = body)), owner, replyKey))
@@ -61,6 +65,47 @@ class EditorSessionRestorationTest {
         assertEquals(EditorSessionRestore.None, EditorSessionRestoration(saved, EditorSessionSurface.Post)
             .resolve(delivered, "other", replyKey))
         assertFalse(saved.keys().any { key -> saved.get<Any?>(key).toString().contains("quotemsg") })
+    }
+
+    @Test fun `matching quote-only checkpoint still restores its selection and scroll`() {
+        val replyKey = EditorDraftKey.mpReply(42)
+        val body = "[quotemsg=101]one[/quotemsg]"
+        val content = Draft(body, isPrivate = true,
+            bodyProvenance = EditorBodyProvenance().delivered(QuoteScope.PrivateMessage(42), body))
+        val saved = SavedStateHandle()
+        EditorSessionRestoration(saved, EditorSessionSurface.MessageReply).apply {
+            bind(owner, replyKey)
+            capture(EditorSessionCheckpoint(content, 2, TextRange(8, 2), 500), bodyKnown = true)
+        }
+        val restored = EditorSessionRestoration(saved, EditorSessionSurface.MessageReply)
+        assertEquals(EditorSessionRestore.Resume, restored.resolve(DraftEntry(content, 2), owner, replyKey))
+        assertEquals(TextRange(8, 2), restored.selection(body.length))
+        assertEquals(500, restored.scrollToRestore)
+    }
+
+    @Test fun `fresh opening discard prevents quote resurrection after death before the next autosave`() = runTest {
+        val replyKey = EditorDraftKey.reply(23, 42)
+        val body = "[quotemsg=101]one[/quotemsg]"
+        val store = VersionedEditorDraftStore()
+        val request = PendingInlineQuoteRequest(23, 42, listOf(PendingInlineQuoteRequest.Quote(101, 1)))
+        store.preload(replyKey, Draft("D", updatedAt = 1234))
+        val first = EditorDraftSession(store, replyKey)
+        first.load()
+        first.enqueueInlineQuoteRequest(request)
+        first.consumeInlineQuoteRequest(request, Draft(body), deliveredBody = body)
+        val fresh = EditorDraftSession(store, replyKey)
+        val entry = fresh.load()
+        val saved = SavedStateHandle()
+        val session = EditorSessionRestoration(saved, EditorSessionSurface.Post)
+        session.bind(owner, replyKey)
+        assertEquals(EditorSessionRestore.None, session.resolve(entry, owner, replyKey))
+        assertTrue(fresh.discardQuoteOnly() is StoreWriteResult.Written)
+        // Only bind metadata reached the Bundle; no ON_STOP/autosave checkpoint followed.
+        val next = EditorSessionRestoration(saved, EditorSessionSurface.Post)
+        assertEquals(EditorSessionRestore.Offer, next.resolve(store.entries[replyKey], owner, replyKey))
+        assertEquals("", store.saved[replyKey]?.body)
+        assertNull(store.saved[replyKey]?.bodyProvenance)
+        assertEquals(listOf("D"), store.loadOffers(owner, replyKey).map { it.draft.body })
     }
 
     @Test fun `fingerprint covers body title chips and buffer but ignores write timestamps`() {

@@ -734,6 +734,13 @@ class PostEditorViewModel @AssistedInject constructor(
         }
         restoration.bind(owner, draftKey)
         val restore = restoration.resolve(entry, owner, draftKey, allowResume = !reconcile)
+        if (restore == EditorSessionRestore.None && entry?.attempt == null &&
+            entry?.draft?.bodyProvenance?.isQuoteOnly(entry.draft.body) == true &&
+            !restoration.isRecreation && !reconcile && !request.resumeSharedDraft
+        ) {
+            // The field stays empty on fresh openings; persist that decision before any autosave.
+            submission.resolveDraftWrite(submission.drafts.discardQuoteOnly())
+        }
         if (entry != null && !submission.blocksMutation && restore != EditorSessionRestore.None) {
             if (restore == EditorSessionRestore.Uncertain) {
                 restoreAttempt(entry.draft)

@@ -86,6 +86,23 @@ open class VersionedEditorDraftStore : EditorDraftStore {
         if (owner == null || owner != activeOwner) emptyList() else offers(owner, key)
             .sortedWith(compareByDescending<DraftOffer> { it.draft.updatedAt }.thenByDescending { it.sourceVersion })
 
+    @Suppress("ReturnCount") // Explicit owner/failure/revision/eligibility guards mirror the Room CAS.
+    override suspend fun discardQuoteOnly(owner: String?, key: String, expectedVersion: Long): StoreWriteResult {
+        if (owner == null || owner != activeOwner) return StoreWriteResult.OwnerChanged
+        saveFailure?.let { return StoreWriteResult.Failed(it) }
+        val previous = entries[key] ?: return StoreWriteResult.Conflict
+        if (previous.version != expectedVersion || !previous.isQuoteOnly(key)) return StoreWriteResult.Conflict
+        entries[key] = previous.copy(draft = previous.draft.copy(body = "", bodyProvenance = null),
+            version = expectedVersion + 1)
+        writes++
+        saveReturnGate?.await()
+        return StoreWriteResult.Written(expectedVersion + 1)
+    }
+
+    private fun DraftEntry.isQuoteOnly(key: String): Boolean =
+        attempt == null && (key.startsWith("reply:") || key.startsWith("mpreply:")) &&
+            draft.bodyProvenance?.isQuoteOnly(draft.body) == true
+
     override suspend fun resolveOffer(
         owner: String?, key: String, offer: DraftOffer, expectedVersion: Long, draft: Draft,
     ): StoreWriteResult {
@@ -150,7 +167,9 @@ open class VersionedEditorDraftStore : EditorDraftStore {
         val entry = entries[key]
         val rejection = quoteMutationRejection(owner, key, request, expectedVersion)
         if (rejection != null) return rejection
-        val composition = entry?.takeUnless { it.attempt?.status == AttemptStatus.PUBLISHED }
+        val composition = entry?.takeUnless { it.attempt?.status == AttemptStatus.PUBLISHED }?.let {
+            if (it.isQuoteOnly(key)) it.copy(draft = it.draft.copy(body = "", bodyProvenance = null)) else it
+        }
         val candidate = composition?.takeIf {
             it.draft.body.isNotBlank() && it.draft.bodyProvenance?.isQuoteOnly(it.draft.body) != true &&
                 offers(owner, key).none { offer -> offer.draft.restoreOfferFingerprint() ==

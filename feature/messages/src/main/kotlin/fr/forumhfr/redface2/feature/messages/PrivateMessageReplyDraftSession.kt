@@ -82,6 +82,9 @@ internal class PrivateMessageReplyDraftSession(
         restoration.bind(owner, draftKey)
         val resolution = restoration.resolve(entry, owner, draftKey)
         if (submission.blocksMutation) return
+        if (resolution == EditorSessionRestore.None && !restoration.isRecreation &&
+            entry?.draft?.bodyProvenance?.isQuoteOnly(entry.draft.body) == true
+        ) submission.resolveDraftWrite(submission.drafts.discardQuoteOnly())
         submission.drafts.offers.firstOrNull()?.let { offerDraftRestore(it.draft) }
         if (entry == null) return
         when (resolution) {

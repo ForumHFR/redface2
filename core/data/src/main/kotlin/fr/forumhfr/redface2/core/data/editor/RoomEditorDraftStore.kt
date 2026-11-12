@@ -144,8 +144,12 @@ class RoomEditorDraftStore @Inject constructor(
         } else {
             previous
         }
-        val pending = composition.pendingInlineQuoteRequest?.let { PendingInlineQuoteRequestCodec.decode(it, key) }
-        val next = composition.copy(
+        // ED-121: a new Cite B replaces quote-only A. A was never a draft; D stays in offers.
+        val current = if (composition.isQuoteOnly(key)) {
+            composition.copy(body = "", bodyProvenance = null)
+        } else composition
+        val pending = current.pendingInlineQuoteRequest?.let { PendingInlineQuoteRequestCodec.decode(it, key) }
+        val next = current.copy(
             pendingInlineQuoteRequest = PendingInlineQuoteRequestCodec.encode(pending?.merge(request) ?: request, key),
             contentVersion = expectedVersion + 1,
             // Q is metadata: D keeps the date of its own last modification (ED-40/121).
@@ -153,6 +157,17 @@ class RoomEditorDraftStore @Inject constructor(
             isPrivate = composition.isPrivate || request.isPrivate,
         )
         editorDraftDao.mutateInlineQuoteRequest(next, previous, offerCandidate(previous, key)).result(next.contentVersion)
+    }
+
+    override suspend fun discardQuoteOnly(
+        owner: String?, key: String, expectedVersion: Long,
+    ): StoreWriteResult = write(owner) {
+        val previous = editorDraftDao.get(rowKey(checkNotNull(owner), key)) ?: return@write StoreWriteResult.Conflict
+        if (previous.contentVersion != expectedVersion || !previous.isQuoteOnly(key)) {
+            return@write StoreWriteResult.Conflict
+        }
+        val next = previous.copy(body = "", bodyProvenance = null, contentVersion = expectedVersion + 1)
+        editorDraftDao.mutateInlineQuoteRequest(next, previous).result(next.contentVersion)
     }
 
     override suspend fun consumeInlineQuoteRequest(
@@ -320,6 +335,10 @@ class RoomEditorDraftStore @Inject constructor(
         pendingInlineQuoteRequest?.let { PendingInlineQuoteRequestCodec.decode(it, key) },
         bodyProvenance?.let(EditorBodyProvenanceCodec::decode),
     )
+
+    private fun EditorDraftEntity.isQuoteOnly(key: String): Boolean =
+        attemptState == null && (key.startsWith("reply:") || key.startsWith("mpreply:")) &&
+            bodyProvenance?.let { EditorBodyProvenanceCodec.decode(it).isQuoteOnly(body) } == true
 
     private suspend fun Draft.protection(owner: String, key: String): EditorDraftOfferEntity? =
         offerToPreserve?.toEntity(owner, key) ?: if (protectCurrent) {
