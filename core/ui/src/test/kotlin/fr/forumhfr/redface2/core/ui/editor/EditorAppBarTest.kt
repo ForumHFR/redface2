@@ -270,6 +270,36 @@ class EditorAppBarTest {
         }
     }
 
+    // v0.7.8 ED-40/41/95: the offer dot is a state distinct from a badge count. It stays under the
+    // glyph inside the bar, changes no bar geometry, and the status node itself announces the state.
+    @Test
+    fun `ED40 offer dot fits under the glyph and its state is announced by the status node`() {
+        val dot = mutableStateOf(true)
+        compose.setContent {
+            RedfaceTheme {
+                EditorAppBar("Répondre", "Contexte", {}, {}, Modifier.width(360.dp).testTag("bar"),
+                    firstStatus = EditorAppBarStatus(R.drawable.ic_ms_restore_page, "Brouillon retrouvé", {},
+                        showDot = dot.value))
+            }
+        }
+        val barNode = compose.onNodeWithTag("bar")
+        val bar = barNode.getUnclippedBoundsInRoot()
+        val pixelsPerDp = barNode.fetchSemanticsNode().boundsInRoot.height / bar.height.value
+        val glyph = assertStatusPartFits(EDITOR_STATUS_GLYPH_TAG, bar, pixelsPerDp)
+        val mark = assertStatusPartFits(EDITOR_STATUS_DOT_TAG, bar, pixelsPerDp)
+        assertEquals(6f, mark.width.value, 0.5f)
+        assertEquals(6f, mark.height.value, 0.5f)
+        assertTrue("The dot must not cover the glyph", mark.top >= glyph.bottom)
+        compose.onNodeWithTag(EDITOR_STATUS_BADGE_TAG, useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithContentDescription("Brouillon retrouvé")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Brouillon à traiter"))
+        compose.runOnIdle { dot.value = false }
+        compose.onNodeWithTag(EDITOR_STATUS_DOT_TAG, useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithContentDescription("Brouillon retrouvé")
+            .assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.StateDescription))
+        assertEquals(bar, compose.onNodeWithTag("bar").getUnclippedBoundsInRoot())
+    }
+
     @Test
     fun `ED10 geometry oracle accepts loose constraints but rejects clipped digits and line height`() {
         compose.setContent {

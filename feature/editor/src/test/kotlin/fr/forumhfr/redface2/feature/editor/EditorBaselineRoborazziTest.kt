@@ -296,8 +296,9 @@ class EditorBaselineRoborazziTest {
         return host
     }
 
+    // A relative date (« il y a 5 min ») keeps the capture independent of the host time zone and day.
     private fun baselineOffers() = listOf(EditorDraftStore.DraftOffer("baseline", 1,
-        EditorDraftStore.Draft("[b]Brouillon conservé[/b]", updatedAt = 0)))
+        EditorDraftStore.Draft("[b]Brouillon conservé[/b]", updatedAt = System.currentTimeMillis() - 301_000L)))
 
     private enum class PostScene { Normal, Format, Armed, Event, Restore, Cards, Panel, Preview }
     private enum class TopicScene {

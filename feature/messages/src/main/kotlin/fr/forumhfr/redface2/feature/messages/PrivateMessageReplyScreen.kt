@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.messages
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.compose.foundation.ScrollState
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -16,6 +17,7 @@ import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -31,12 +33,14 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import fr.forumhfr.redface2.core.ui.R as UiR
 import fr.forumhfr.redface2.core.ui.editor.LocalEditorPreviewState
 import fr.forumhfr.redface2.core.ui.editor.EditorDraftOfferList
 import fr.forumhfr.redface2.core.ui.editor.EditorBackAction
@@ -199,7 +203,11 @@ private fun PrivateMessageReplyChrome(
         })
 }
 
-/** Inline MP quote materialization failures keep the full-screen retry and draft offer. */
+/**
+ * ED-130/132: the form or quote GET failure replaces the editor, so this screen carries the offers
+ * in line (ED-40: date, excerpt, decisions per version) and the quote remedies: « Recharger » (GET
+ * only), « Ignorer la citation » after two failures, and the dormant-quote decision.
+ */
 @Composable
 private fun ReplyFormFailure(
     host: PrivateMessageReplyChromeAdapter,
@@ -210,23 +218,30 @@ private fun ReplyFormFailure(
     // The retry returns to the bare editor; the ↺ status still offers the draft (gate R1b R3, minor 3).
     LaunchedEffect(host) { host.closeLayersForFormFailure { smileys.dismiss() } }
     BackHandler { host.closeRequested() }
+    val offered = state.source.restorableDraft != null
+    // Several offers may outgrow the window: they scroll with the remedies. Without an offer the
+    // error keeps its centered layout.
+    val scroll = if (offered) Modifier.verticalScroll(rememberScrollState()) else Modifier
     Surface(modifier.fillMaxSize()) {
-        Column(Modifier.fillMaxSize().statusBarsPadding().verticalScroll(rememberScrollState())) {
+        Column(Modifier.fillMaxSize().statusBarsPadding().then(scroll)) {
             MessageEditorHeader(host.title(), host::closeRequested)
-            if (state.source.restorableDraft != null) Surface(
+            if (offered) Surface(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHighest, tonalElevation = 2.dp,
             ) {
-                Column(Modifier.padding(8.dp)) {
-                    if (state.source.draftOffers.isEmpty()) {
-                        MessageDraftRestoreChoice(host::restoreDraft, host::discardDraft, state.restoreEnabled)
-                    } else EditorDraftOfferList(state.source.draftOffers, host::restoreOffer, host::discardOffer,
+                val offers = state.source.draftOffers
+                if (offers.isEmpty()) {
+                    MessageDraftRestoreChoice(host::restoreDraft, host::discardDraft, state.restoreEnabled,
+                        Modifier.padding(start = 8.dp, top = 8.dp, end = 8.dp))
+                } else Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(stringResource(R.string.messages_draft_restore_message),
+                        style = MaterialTheme.typography.bodyMedium)
+                    EditorDraftOfferList(offers, host::restoreOffer, host::discardOffer,
                         state.restoreEnabled, state.scaffold.controlsEnabled)
                 }
             }
             MessageFormErrorState(onRetry = host::retryFormLoad,
-                retryLabel = androidx.compose.ui.res.stringResource(
-                    fr.forumhfr.redface2.core.ui.R.string.editor_action_reload),
+                retryLabel = stringResource(UiR.string.editor_action_reload),
                 onIgnoreQuote = (host::ignoreQuote).takeIf { state.source.canIgnorePendingQuote },
                 onResumeQuote = (host::resumeQuote).takeIf { state.source.hasDormantQuote })
         }

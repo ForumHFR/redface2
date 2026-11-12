@@ -145,6 +145,20 @@ class PrivateMessageThreadViewModelTest {
     }
 
     @Test
+    fun `MP quote storage failure keeps the reader on the thread and reports it - ED132`() = runTest {
+        val drafts = VersionedEditorDraftStore()
+        val vm = threadViewModel(loadedRepository(), draftStore = drafts)
+        drafts.saveFailure = IOException("disk")
+        var navigated = false
+
+        vm.enqueueQuotes(listOf(PendingInlineQuoteRequest.Quote(101, 2, 7))) { navigated = true }
+
+        assertFalse(navigated)
+        assertNull(drafts.saved[EditorDraftKey.mpReply(42)])
+        assertEquals(PrivateMessageThreadEffect.QuotePreparationFailed, vm.effects.first())
+    }
+
+    @Test
     fun `loads the thread on init without private route metadata fallback`() = runTest {
         val repository = mockk<MessagesRepository>()
         val thread = thread(page = 1, totalPages = 1)

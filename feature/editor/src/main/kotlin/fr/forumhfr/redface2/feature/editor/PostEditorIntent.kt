@@ -11,7 +11,9 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
  * surface ; quote / edit / create-topic surface in #146 / #147 / #148 / #149.
  */
 sealed interface PostEditorIntent {
+    /** ED-40: « Restaurer » on the offered version chosen in the sheet's list, by its identity. */
     data class DraftOfferRestored(val id: String) : PostEditorIntent
+    /** ED-121: « Ignorer » removes only the chosen offered version; the field and Q are untouched. */
     data class DraftOfferDiscarded(val id: String) : PostEditorIntent
     data object Started : PostEditorIntent
     /** Lifecycle ON_STOP: persist without closing the editor or cancelling an upload. */

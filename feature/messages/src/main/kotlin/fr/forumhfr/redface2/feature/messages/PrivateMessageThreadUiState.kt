@@ -171,6 +171,9 @@ sealed interface PrivateMessageThreadEffect {
      */
     data object RefreshFailed : PrivateMessageThreadEffect
 
+    /** ED-132 — the quote request could not be stored; the reply is not opened without it. */
+    data object QuotePreparationFailed : PrivateMessageThreadEffect
+
     /** #831/#1051 — the image was written to the shared Pictures collection. */
     data object ImageSaved : PrivateMessageThreadEffect
 

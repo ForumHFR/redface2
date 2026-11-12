@@ -220,10 +220,15 @@ data class PrivateMessageReplyRoute(
      * no custom NavType.
      */
     val openRecipientManager: Boolean = false,
-    /** #1074 — cited message id; null together with [quoteRef] for a simple reply. */
+    /**
+     * #1074 — legacy quote coordinates, kept so an older serialised back stack still decodes. Since
+     * #1450 (ED-132 v0.7.8) they are never written nor read: the quote request is durable in the
+     * owner's draft row, enqueued before this route is pushed.
+     */
     val quotedNumreponse: Int? = null,
-    /** #1074 — server-provided 1-based rank in the source page; never guessed or omitted. */
+    /** Legacy, see [quotedNumreponse]; present together with it or not at all. */
     val quoteRef: Int? = null,
+    /** #868-#870 — true for a « Citer N » launch: its successful submit empties the hoisted basket. */
     val consumesQuoteBasket: Boolean = false,
 ) : RedfaceNavKey {
     init {
@@ -1992,9 +1997,10 @@ private data class PrivateMessageSubmitNavState(
  * hoisted-state bundles ([TopicScrollNavState], `TopicTitleNavState`).
  *
  * #604 lot 3 — also carries the editor quote HANDOFF : [pendingEditorQuotes] is set (via
- * [onEditorQuotesHandoff]) right before a topic or MP editor is pushed with citations (« Citer N »
- * or a sheet escalation), read once by that editor entry into its assisted request, then cleared
- * (null). Never serialised into the route — the selections are transient by decision.
+ * [onEditorQuotesHandoff]) right before a topic editor is pushed with citations (« Citer N » or a
+ * sheet escalation), read once by that editor entry into its assisted request, then cleared (null).
+ * Never serialised into the route — the selections are transient by decision. The MP reply no
+ * longer uses it (#1450): its request is durable and its route only carries `consumesQuoteBasket`.
  *
  * #868/#869/#870 — the handoff also says whether the editor session CONSUMED the hoisted basket
  * ([EditorQuotesHandoff.consumesBasket]): only a « Citer N » launch (or a sheet escalation of one)

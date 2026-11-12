@@ -41,6 +41,10 @@ import fr.forumhfr.redface2.core.ui.R
  * exactly-once deferred focus/selection return through its usual consumeReturn/returnToBody effect.
  * Restore/discard callbacks own their guarded intent and closing. Do not also render this offer
  * through EditorHeaderPanel/EditorEventDetails: those panels have their own focus-return effect.
+ *
+ * ED-41 — a non-empty [offers] replaces the single-offer body by one row per draft, each decided
+ * through [onRestoreOffer]/[onDiscardOffer] with its offer id; both default to the single-offer
+ * callbacks for hosts that only ever hold one.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,7 +89,11 @@ fun EditorDraftOfferSheet(
     }
 }
 
-/** Also used inline on the MP form-failure surface, which has no chrome to open a sheet. */
+/**
+ * ED-40: offered versions, most recent first, each with its own date, a two-line excerpt and its
+ * decisions. Also used inline on the MP form-failure surface, which has no chrome to open a sheet.
+ * The excerpt is recomputed from the offer and never saved (ED-81).
+ */
 @Composable
 fun EditorDraftOfferList(
     offers: List<DraftOffer>,
@@ -103,10 +111,11 @@ fun EditorDraftOfferList(
                 val date = editorDraftOfferDate(offer.draft.updatedAt, now).resolve()
                 val excerpt = editorDraftOfferExcerpt(offer.draft.body, context)
                 Text(date, style = MaterialTheme.typography.labelLarge)
-                Text(excerpt, style = MaterialTheme.typography.bodyMedium, maxLines = 2,
+                // A header-only offer (title or recipients, blank body) has no excerpt line.
+                if (excerpt.isNotEmpty()) Text(excerpt, style = MaterialTheme.typography.bodyMedium, maxLines = 2,
                     overflow = TextOverflow.Ellipsis)
                 EditorDraftOfferDecisions({ onRestore(offer.id) }, { onDiscard(offer.id) },
-                    restoreEnabled, discardEnabled, date + ", " + excerpt)
+                    restoreEnabled, discardEnabled, listOf(date, excerpt).filter(String::isNotEmpty).joinToString())
             }
         }
 }

@@ -9,9 +9,9 @@ import fr.forumhfr.redface2.core.model.write.QuoteSelection
  *
  * Openings carry only thread/page. Q is enqueued in the owner-bound draft store before navigation,
  * for simple and multiple citations alike (ED-132 v0.7.8). [quote] and [initialQuotes] remain legacy
- * input fields for source compatibility; the reply never imports them into Q or serves them. The form's `hash_check`,
- * hidden fields, subject, quoted BBCode and user pseudo are always read from fresh HFR forms, so no
- * private message content is serialised into the back stack.
+ * input fields for source compatibility; the reply never imports them into Q or serves them. The
+ * form's `hash_check`, hidden fields, subject, quoted BBCode and user pseudo are always read from
+ * fresh HFR forms, so no private message content is serialised into the back stack.
  */
 data class PrivateMessageReplyRequest(
     val threadId: Int,
@@ -24,10 +24,7 @@ data class PrivateMessageReplyRequest(
     val openRecipientManager: Boolean = false,
     /** Legacy launch coordinate, ignored: the owning draft row supplies Q. */
     val quote: PrivateMessageQuote? = null,
-    /**
-     * #1074 — transient selections handed to a « Citer N » editor opening. Their complete locators
-     * stay in memory and are materialised sequentially; they are never serialised in the route.
-     */
+    /** Legacy « Citer N » selections, ignored like [quote]: the owning draft row supplies the ordered Q. */
     val initialQuotes: List<QuoteSelection> = emptyList(),
 ) {
     init {

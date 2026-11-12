@@ -29,10 +29,15 @@ data class PrivateMessageReplyUiState(
     val conversationTitle: String = "",
     /** True when the form GET failed (network / session / parse / anonymous) → show retry. */
     val formError: Boolean = false,
+    /** ED-132 — a durable quote request (Q) is still owed to this reply; Send stays off until it lands. */
     val quotePending: Boolean = false,
+    /** The served quote is being written to the draft row; Restore waits for that write (ED-89). */
     val quoteCommitPending: Boolean = false,
+    /** Q exists but cannot be decoded: only "ignore the quote" can release the reply. */
     val unreadableQuoteRequest: Boolean = false,
+    /** Consecutive failed form reloads with Q pending, capped at 2: the second one offers Ignore. */
     val quoteFetchFailures: Int = 0,
+    /** Draft storage is not restored or was invalidated: Q's presence is unknown, Send stays off. */
     val quoteStorageUnavailable: Boolean = false,
     /** Text-only mirror; selection and undo history stay in the ViewModel. */
     val bodyText: String = "",

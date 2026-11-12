@@ -116,14 +116,15 @@ class PostEditorRestoreOfferTest {
         assertRestored(editor, OFFER + "\n\n" + "typed suffix  ")
     }
 
+    // v0.7.8 ED-89 case 4, empty seed: D, separator, then the typing (was typing then D until v0.7.7).
     @Test
-    fun restoreAppendsAfterTypedTextWhenSeedEmpty() = runTest(dispatcher) {
+    fun restorePutsDraftBeforeTypedTextWhenSeedEmpty() = runTest(dispatcher) {
         val editor = open(PostEditorMode.Reply)
         runCurrent()
         assertEquals("", editor.state.value.draftRestoreSeed)
         type(editor, "typed response")
         editor.submit(PostEditorIntent.DraftRestoreRequested)
-        assertRestored(editor, "typed response\n\n" + OFFER)
+        assertRestored(editor, OFFER + "\n\n" + "typed response")
     }
 
     @Test
@@ -165,13 +166,14 @@ class PostEditorRestoreOfferTest {
         assertRestored(editor, OFFER)
     }
 
+    // v0.7.8 ED-89 case 4, empty seed: the typing now follows D and keeps its own trailing whitespace.
     @Test
-    fun restoreTrimsTrailingWhitespaceBeforeSeparator() = runTest(dispatcher) {
+    fun restoreKeepsTrailingWhitespaceOfTypedTextAfterDraft() = runTest(dispatcher) {
         val editor = open(PostEditorMode.Reply)
         runCurrent()
         type(editor, "typed response \t\n\n")
         editor.submit(PostEditorIntent.DraftRestoreRequested)
-        assertRestored(editor, "typed response\n\n" + OFFER)
+        assertRestored(editor, OFFER + "\n\n" + "typed response \t\n\n")
     }
 
     @Test
@@ -287,7 +289,8 @@ class PostEditorRestoreOfferTest {
     fun restoreEmitsOneBodyMutationWithCollapsedCaretForEveryRule() = runTest(dispatcher) {
         for ((mode, live, expected) in listOf(
             Triple(PostEditorMode.Edit, SEED, OFFER),
-            Triple(PostEditorMode.Reply, "typed", "typed\n\n" + OFFER),
+            // v0.7.8 ED-89 case 4, empty seed: D then typing; edit seeds below keep their rule.
+            Triple(PostEditorMode.Reply, "typed", OFFER + "\n\ntyped"),
             Triple(PostEditorMode.Edit, SEED + " suffix", OFFER + "\n\nsuffix"),
             Triple(PostEditorMode.Edit, SEED + " \t\n", OFFER),
             Triple(PostEditorMode.Edit, "edited seed", "edited seed\n\n" + OFFER),

@@ -199,6 +199,7 @@ fun PrivateMessageThreadScreen(
     // page on screen and surfaces a Toast inviting a retry (pull again / tap the pager again).
     val context = LocalContext.current
     val refreshFailedMsg = stringResource(R.string.messages_thread_refresh_failed)
+    val quotePreparationFailedMsg = stringResource(R.string.messages_quote_preparation_failed)
     val imageShareFailedMsg = stringResource(
         fr.forumhfr.redface2.core.ui.R.string.post_image_menu_share_failed,
     )
@@ -209,6 +210,13 @@ fun PrivateMessageThreadScreen(
                     android.widget.Toast.makeText(
                         context,
                         refreshFailedMsg,
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
+                PrivateMessageThreadEffect.QuotePreparationFailed -> {
+                    android.widget.Toast.makeText(
+                        context,
+                        quotePreparationFailedMsg,
                         android.widget.Toast.LENGTH_LONG,
                     ).show()
                 }

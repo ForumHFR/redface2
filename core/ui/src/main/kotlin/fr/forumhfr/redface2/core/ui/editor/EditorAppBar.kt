@@ -40,6 +40,7 @@ data class EditorAppBarStatus(
     val onClick: () -> Unit,
     val badgeCount: Int? = null,
     val enabled: Boolean = true,
+    /** ED-40: undecided draft offer under ↺; a state distinct from [badgeCount], announced by the node. */
     val showDot: Boolean = false,
 )
 

@@ -39,6 +39,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.ui.R as UiR
 
 /**
  * Building blocks shared by the two private-message editors — the conversation reply
@@ -221,13 +222,13 @@ internal fun MessageFormErrorState(
                 color = MaterialTheme.colorScheme.error,
             )
             if (onResumeQuote != null) TextButton(onClick = onResumeQuote) {
-                Text(stringResource(fr.forumhfr.redface2.core.ui.R.string.editor_action_resume_quote))
+                Text(stringResource(UiR.string.editor_action_resume_quote))
             }
             Button(onClick = onRetry, enabled = onResumeQuote == null) {
                 Text(text = retryLabel)
             }
             if (onIgnoreQuote != null) TextButton(onClick = onIgnoreQuote) {
-                Text(stringResource(fr.forumhfr.redface2.core.ui.R.string.editor_action_ignore_quote))
+                Text(stringResource(UiR.string.editor_action_ignore_quote))
             }
         }
     }

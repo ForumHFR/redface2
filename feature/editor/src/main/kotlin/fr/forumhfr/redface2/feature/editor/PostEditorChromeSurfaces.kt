@@ -36,8 +36,6 @@ internal fun PostEditorChromeSurfaces(
         if (adapter.consumeReturn()) adapter.returnToBody(onReturnToBody)
     }
     val source = adapter.state.source
-    // ED-45: the pending notice's detail IS the offer. Keep its captured sheet identity even if
-    // the notice retires, and leave the body and ordinary event/pending-quote panels mounted.
     EditorEventDetails(adapter.detail,
         bodyState, adapter::closeDetails, adapter::reload,
         { adapter.returnToBody(onReturnToBody) },
@@ -122,7 +120,7 @@ private fun QuoteDecisions(adapter: PostEditorChromeAdapter, key: EventKey? = nu
     val source = adapter.state.source
     if (source.hasDormantQuote) {
         TextButton(onClick = { adapter.resumeQuote(key) }, enabled = !source.isLoadingForm) {
-            Text(stringResource(R.string.editor_action_resume_quote))
+            Text(stringResource(UiR.string.editor_action_resume_quote))
         }
     } else if (adapter.hasPendingQuoteRecovery) {
         TextButton(onClick = adapter::reloadPendingQuote, enabled = !source.isLoadingForm) {

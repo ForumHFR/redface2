@@ -292,7 +292,8 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                         // This owner-bound editor is revoked; navigation opens the next account's editor.
                         it.copy(isLoadingForm = false, formAvailable = false,
                             isUploading = false, uploadProgress = null,
-                            restorableDraft = null, draftOffers = emptyList(), restorableSubject = null, restorableRecipients = null)
+                            restorableDraft = null, draftOffers = emptyList(), restorableSubject = null,
+                            restorableRecipients = null)
                     }
                 }
                 authObserved = true

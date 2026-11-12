@@ -687,7 +687,6 @@ class PostEditorViewModel @AssistedInject constructor(
             it.copy(
                 isLoadingForm = true, quoteCommitPending = true,
                 draftHydratedContent = combined.takeIf { existing.isBlank() },
-                restorableDraft = it.restorableDraft.takeIf { offered -> offered != combined },
             )
         }
         commitInlineQuoteDelivery()
@@ -834,6 +833,8 @@ class PostEditorViewModel @AssistedInject constructor(
                 !ignored && _state.value.canOfferDraftRestore(body, bodyFieldState.text.toString())
             }
             if (shouldOffer) _state.update { it.copy(restorableDraft = body) }
+            // A reconciled row equal to the field is this composition's own C, never an offered D.
+            else if (reconcile) submission.drafts.resumeContent()
         }
     }
 
@@ -1073,8 +1074,11 @@ class PostEditorViewModel @AssistedInject constructor(
         }
     }
 
-    /** ED-89: replace the untouched seed, keep its typed suffix, or append after other live text. */
-    @Suppress("CyclomaticComplexMethod") // Ordered ED-89 cases plus the durable, retryable ED-132 handoff.
+    /**
+     * ED-89: one undoable merge. A reply gets D, the delivered quotes, then the typing; an edit seed
+     * keeps its rule (replace untouched, keep the typed suffix, else append D). Q never waits for it.
+     */
+    @Suppress("CyclomaticComplexMethod") // Selected offer, ED-89 merge and the durable, retryable resolution.
     private fun onDraftRestoreRequested(offerId: String? = null) {
         val snapshot = _state.value
         if (!snapshot.canRestoreDraft || snapshot.isUploading || draftRestoreDeciding) return
@@ -1166,9 +1170,9 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     /**
-     * One idempotent delivery entry point. A blocked opening/decision keeps its request until the
-     * ordinary GET, durable decision or upload ends. Consume it before starting work: failures need
-     * an explicit Reload, never an automatic retry on an unrelated completion.
+     * One idempotent delivery entry point. ED-132: an undecided offer never defers it; a decision
+     * being written or an upload keeps the request until it ends. Consume it before starting work:
+     * failures need an explicit Reload, never an automatic retry on an unrelated completion.
      */
     @Suppress("ReturnCount") // Independent lifecycle guards retain one pending delivery, without retrying failures.
     private fun servePendingInlineQuoteIfEligible(

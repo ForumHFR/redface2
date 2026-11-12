@@ -347,12 +347,13 @@ class PrivateMessageReplyChromeComposeTest {
         compose.runOnIdle { assertEquals(3, memories.size) }
     }
 
-    @Test fun `ED130 form or inline quote failure stays full screen with the existing retry`() {
+    // v0.7.8 ED-132: the reply failure screen's GET-only remedy is labelled « Recharger ».
+    @Test fun `ED130 form or inline quote failure stays full screen with its Reload remedy`() {
         f.state = f.state.copy(formError = true, formAvailable = false)
         compose.setContent { Content() }
         compose.onNode(hasSetTextAction()).assertDoesNotExist()
         compose.onNodeWithContentDescription("Options").assertDoesNotExist()
-        compose.onNodeWithText("Réessayer").performClick()
+        compose.onNodeWithText("Recharger").performClick()
         compose.runOnIdle { assertEquals(listOf("reload"), f.calls) }
     }
 

@@ -383,11 +383,6 @@ class PostEditorChromeComposeTest {
         }
     }
 
-    private fun pendingOffer() {
-        host.transition(host.state.copy(restorableDraft = "saved D", pendingQuotes = listOf(
-            QuoteSelection(QuoteLocator(1, 101, null), "", ""))))
-    }
-
     private fun sheetBack() {
         (ShadowDialog.getLatestDialog() as ComponentDialog).onBackPressedDispatcher.onBackPressed()
     }
@@ -413,11 +408,6 @@ class PostEditorChromeComposeTest {
     /** The slot is a permanent call site (1 dp when empty): an event is shown when its control is named. */
     private fun eventControl() = compose.onNode(hasAnyAncestor(hasTestTag("editor-bar-event")) and
         SemanticsMatcher.keyIsDefined(SemanticsProperties.ContentDescription))
-
-    private fun advance(millis: Long) {
-        compose.mainClock.advanceTimeBy(millis, ignoreFrameDuration = true)
-        compose.waitForIdle()
-    }
 
     /** The app bar also has a « Retour » control: scope lookups to the action bar. */
     private fun barControl(label: String) = compose.onNode(hasContentDescription(label) and

@@ -187,7 +187,8 @@ class PrivateMessageReplyInputTest {
             assertEquals("stored", vm.state.value.restorableDraft)
             vm.onDraftRestoreRequested()
             val state = vm.bodyFieldState
-            assertEquals("typed\n\nstored", state.text.toString())
+            // v0.7.8 ED-89 case 4, empty seed: D, then the typing.
+            assertEquals("stored\n\ntyped", state.text.toString())
             assertTrue(state.undoState.canUndo)
             state.undoState.undo()
             assertEquals("typed", state.text.toString())

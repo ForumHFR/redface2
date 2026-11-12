@@ -42,7 +42,10 @@ import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import kotlinx.coroutines.launch
 
-/** Keep composed across [visible] changes; [label] includes state/count and destination. See [EditorActionIcon]. */
+/**
+ * Keep composed across [visible] changes; [label] includes state/count and destination. See [EditorActionIcon].
+ * [showDot] is the undecided-offer state of ↺ (ED-40), distinct from [badgeCount] and ignored beside one.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 @Suppress("LongParameterList") // Independent icon, count, visibility and enabled state at the host boundary.
@@ -96,8 +99,10 @@ fun EditorStatusIcon(
                 if (visible) Box(Modifier.size(maxOf(24.dp, badgeWidth), height)) {
                     RedfaceVectorIcon(iconRes, Modifier.align(Alignment.TopCenter).testTag(EDITOR_STATUS_GLYPH_TAG))
                     val badgeAlpha = if (enabled) 1f else DISABLED_BADGE_ALPHA
+                    // ED-40: decorative offer dot, tonal like a badge and below the glyph; the state is
+                    // announced by this status node (stateDescription above), never by the dot.
                     if (showDot && badgeCount == null) Box(Modifier.align(Alignment.BottomCenter).size(6.dp)
-                        .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape)
+                        .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = badgeAlpha), CircleShape)
                         .testTag(EDITOR_STATUS_DOT_TAG).clearAndSetSemantics {})
                     if (badgeCount != null) Badge(
                         containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = badgeAlpha),

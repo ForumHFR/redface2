@@ -212,10 +212,11 @@ class EditorBaselineRoborazziTest {
         val state get() = chrome.scene ?: if (filled) "multiline" else "empty"
     }
 
-    /** [scene] names the PNG; [tap] is the content description opened before capture; sheets capture their dialog. */
-    private fun baselineOffers() = listOf(EditorDraftStore.DraftOffer("baseline", 1,
-        EditorDraftStore.Draft("[b]Brouillon privé[/b]", isPrivate = true, updatedAt = 0)))
+    // A relative date (« il y a 5 min ») keeps the capture independent of the host time zone and day.
+    private fun baselineOffers() = listOf(EditorDraftStore.DraftOffer("baseline", 1, EditorDraftStore.Draft(
+        "[b]Brouillon privé[/b]", isPrivate = true, updatedAt = System.currentTimeMillis() - 301_000L)))
 
+    /** [scene] names the PNG; [tap] is the content description opened before capture; sheets capture their dialog. */
     private enum class ReplyChrome(val scene: String?, val tap: String? = null, val sheet: Boolean = false) {
         Ready(null),
         Restore("restore", tap = "Brouillon retrouvé, restaurer ou ignorer", sheet = true),

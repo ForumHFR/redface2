@@ -89,6 +89,23 @@ class EditorHostTest {
         assertTrue(calls.isEmpty())
     }
 
+    // ED-44/45 (kept): without the offer capability, information still consumes the gesture and an
+    // ordinary detail keeps its panel focus ownership, with no deferred sheet return.
+    @Test fun `offer capability disabled keeps ED44 and ordinary detail focus ownership`() {
+        val host = host()
+        val information = error(EditorErrors.noImageReceived)
+        host.open(Surface.Restore)
+        assertNull(host.surface)
+        assertNull(events.state.visibleEvent)
+        val problem = error(EditorErrors.network, 2)
+        host.barActions.onEvent(problem.key, EditorEventAction.Details)
+        host.closeDetails(information.key)
+        assertEquals(problem, host.detail)
+        host.closeDetails(problem.key)
+        assertFalse(host.consumeReturn()) // EditorHeaderPanel remains the owner for ordinary details.
+        assertFalse(host.draftOfferOpen)
+    }
+
     @Test fun `ED34 retained callbacks capture their arm and use current eligibility`() {
         val host = host()
         val token = ArmToken(1, session, 0, 4_000L)

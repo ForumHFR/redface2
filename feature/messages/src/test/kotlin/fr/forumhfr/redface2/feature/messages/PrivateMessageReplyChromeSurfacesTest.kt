@@ -117,7 +117,7 @@ class PrivateMessageReplyChromeSurfacesTest {
         compose.onNodeWithContentDescription("Options").performClick()
         compose.onNodeWithText("Activer la signature").assertExists()
         compose.runOnIdle { f.state = f.state.copy(formError = true, formAvailable = false) }
-        compose.onNodeWithText("Réessayer").assertIsDisplayed()
+        compose.onNodeWithText("Recharger").assertIsDisplayed()
         compose.runOnIdle {
             assertNull(f.adapter.surface)
             f.state = f.state.copy(formError = false, formAvailable = true)
