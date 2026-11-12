@@ -55,12 +55,13 @@ class EditorActionBarLayoutTest {
         EditorChromeMetrics.minimumTargetSize + EditorChromeMetrics.formatMinimumWidth
 
     @Test
-    fun `ED21 ED30 ED38 two formats or three normal actions fit at 360 and 1_3 times L`() {
+    fun `ED21 ED30 ED38 four formats or five normal actions fit at 360 and 1_3 times L`() {
         host.scale.value = 1.3f
         host.shortcut.value = EditorBarShortcut(EditorShortcut.BOLD, EditorShortcutSurface.POST)
         compose.setContent { host.Content() }
         val submit = bounds("editor-bar-submit"); val scroll = bounds("editor-bar-scroll")
-        listOf("Mise en forme", "Smileys", "Gras").forEach { label ->
+        assertEquals(48.dp, submit.width)
+        listOf("Mise en forme", "Smileys", "Gras", "Image", "Options").forEach { label ->
             val target = compose.onNodeWithContentDescription(label).getUnclippedBoundsInRoot()
             assertTrue(target.left >= scroll.left && target.right <= scroll.right)
             assertTrue(target.width >= 48.dp && target.height >= 48.dp)
@@ -68,7 +69,7 @@ class EditorActionBarLayoutTest {
         compose.onNodeWithContentDescription("Options").performScrollTo().assertIsDisplayed()
         compose.runOnIdle { host.bar.value = EditorBarState(EditorBarMode.Format) }
         val viewport = bounds("editor-bar-scroll")
-        listOf("Gras", "Italique").forEach { label ->
+        listOf("Gras", "Italique", "Souligné", "Barré").forEach { label ->
             val target = compose.onNodeWithContentDescription(label).getUnclippedBoundsInRoot()
             assertTrue(target.left >= viewport.left && target.right <= viewport.right)
             assertEquals(48f, target.width.value, 0.5f)
@@ -77,6 +78,28 @@ class EditorActionBarLayoutTest {
         compose.onNodeWithContentDescription("Couleur").performScrollTo().assertIsDisplayed()
         assertEquals(trigger, compose.onNodeWithContentDescription("Mise en forme").getUnclippedBoundsInRoot())
         assertEquals(submit, bounds("editor-bar-submit"))
+    }
+
+    @Test
+    fun `ED21 send circle leaves five complete format icons at 411 dp`() {
+        host.width.value = 411.dp
+        host.bar.value = EditorBarState(EditorBarMode.Format)
+        compose.setContent { host.Content() }
+        listOf(1f, 1.3f).forEach { scale ->
+            compose.runOnIdle { host.scale.value = scale }
+            val submit = bounds("editor-bar-submit")
+            val viewport = bounds("editor-bar-scroll")
+            assertEquals(48.dp, submit.width)
+            assertEquals(283.dp, viewport.width)
+            listOf("Gras", "Italique", "Souligné", "Barré", "Citation").forEach { label ->
+                val target = compose.onNodeWithContentDescription(label).getUnclippedBoundsInRoot()
+                assertEquals(48.dp, target.width)
+                assertTrue(target.left >= viewport.left && target.right <= viewport.right)
+                assertTrue(target.right <= submit.left)
+            }
+            val sixth = compose.onNodeWithContentDescription("Code").getUnclippedBoundsInRoot()
+            assertTrue(sixth.right > viewport.right)
+        }
     }
 
     @Test
@@ -313,10 +336,17 @@ class EditorActionBarLayoutTest {
     private fun assertEventEnvelopes(compact: Boolean, events: List<EditorEvent>) {
         compose.runOnIdle { host.compact.value = compact; host.event.value = events.first() }
         val event = bounds("editor-bar-event"); val send = bounds("editor-bar-submit")
-        listOf("Titre et sous-catégorie", "Aperçu", "12 citations", "Brouillon retrouvé").forEach {
+        val header = compose.onNodeWithContentDescription("Titre et sous-catégorie")
+        if (compact) {
+            header.assertIsDisplayed()
+            assertEquals(16f, header.targetBounds().left.value, 0.5f)
+            assertEquals(64f, header.targetBounds().right.value, 0.5f)
+            assertTrue(header.targetBounds().right <= event.left)
+        } else header.assertDoesNotExist()
+        listOf("Aperçu", "12 citations", "Brouillon retrouvé").forEach {
             compose.onNodeWithContentDescription(it).assertDoesNotExist()
         }
-        assertEquals(12f, event.left.value, 0.5f)
+        assertEquals(if (compact) 64f else 12f, event.left.value, 0.5f)
         assertTrue(event.width >= 185.dp)
         assertTrue(send.left - event.right >= 7.9.dp)
         assertEquals(if (compact) 48f else 56f, bounds("bar").height.value, 0.5f)

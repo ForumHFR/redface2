@@ -610,7 +610,7 @@ class EditorPreviewComposeTest {
 
     @Test fun `send stays enabled during split without closing preview`() {
         mount(); open()
-        compose.onNodeWithText("Envoyer").performClick()
+        compose.onNodeWithContentDescription("Envoyer").performClick()
         assertTrue(host.calls.contains("send"))
         compose.onNodeWithTag("editor-preview-rendered").assertIsDisplayed()
     }
