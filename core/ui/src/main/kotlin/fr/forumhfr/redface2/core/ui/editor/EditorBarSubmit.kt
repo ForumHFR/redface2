@@ -61,8 +61,9 @@ internal fun EditorBarSubmit(
     val fraction = rememberEditorBarArmFraction(state)
     val metrics = EditorChromeMetrics(compactHeight)
     val scrim = MaterialTheme.colorScheme.onTertiary.copy(alpha = 0.16f)
-    EditorIconTooltip(tooltip) {
-        Box(Modifier.testTag("editor-bar-submit")) {
+    // The tag sits outside the tooltip anchor, which merges its descendants (a tag inside would vanish).
+    Box(Modifier.testTag("editor-bar-submit")) {
+        EditorIconTooltip(tooltip) {
             Button(onClick = click, enabled = state.enabled,
                 contentPadding = PaddingValues(0.dp),
                 shape = CircleShape,
@@ -87,7 +88,9 @@ internal fun EditorBarSubmit(
             ) {
                 RedfaceVectorIcon(
                     if (state.armed) R.drawable.ic_editor_done else R.drawable.ic_editor_send,
-                    Modifier.testTag(if (state.armed) "editor-bar-submit-confirm-icon" else "editor-bar-submit-send-icon"),
+                    Modifier.testTag(
+                        if (state.armed) "editor-bar-submit-confirm-icon" else "editor-bar-submit-send-icon",
+                    ),
                 )
             }
         }

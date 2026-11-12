@@ -213,7 +213,8 @@ class EditorActionBarTest {
         val key = host.event.value!!.key; compose.setContent { host.Content() }
         compose.onNodeWithContentDescription("Envoyer").performTouchInput { click() }
         assertTrue(host.calls.isEmpty()); assertEquals(listOf(key to EditorEventAction.Dismiss), host.eventActions)
-        compose.onNodeWithContentDescription("Envoyer").performTouchInput { click() }; assertEquals(listOf("send"), host.calls)
+        compose.onNodeWithContentDescription("Envoyer").performTouchInput { click() }
+        assertEquals(listOf("send"), host.calls)
     }
 
     @Test
