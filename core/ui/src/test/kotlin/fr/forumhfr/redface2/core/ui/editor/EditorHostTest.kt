@@ -24,6 +24,7 @@ class EditorHostTest {
     private val body = TextFieldState("Bonjour", TextRange(6, 1))
     private var state = EditorHostState(EditorScaffoldChrome(), EditorSubmissionState.Ready, true, true)
     private val calls = mutableListOf<Any?>()
+    private var formatAction: (BbcodeAction) -> Unit = { calls.add(it) }
     private var uncertainty: Pair<EventKey, EditorDraftStore.AttemptToken>? = null
     private val events = object : EditorHostEvents {
         override var state = EditorEventState(session)
@@ -40,7 +41,7 @@ class EditorHostTest {
         { state }, body, events,
         EditorHostActions({ calls.add(it) }, { calls.add(it) }, {
             calls.add("disarm"); state = state.copy(submission = EditorSubmissionState.Ready)
-        }, { calls.add(it) }, {
+        }, formatAction, {
             calls.add("preview")
             state = state.copy(scaffold = state.scaffold.copy(previewVisible = !state.scaffold.previewVisible))
         }, { calls.add("close") }, onComplete = onComplete, onAcknowledgeUncertain = onAcknowledgeUncertain,
@@ -130,6 +131,55 @@ class EditorHostTest {
         host.formatFromOptions(BbcodeAction.Bold)
         assertEquals(listOf<Any?>(BbcodeAction.Bold), calls)
         assertEquals(inserted, body.selection)
+    }
+
+    @Test fun `callbacks from closed Options cannot change a reopened sheet`() {
+        assertOptionsCallbacksExpire { it.closeSurface() }
+    }
+
+    @Test fun `reset invalidates Options callbacks before a new opening`() {
+        assertOptionsCallbacksExpire { memory.reset() }
+    }
+
+    @Test fun `opening Options again invalidates callbacks even without an explicit close`() {
+        assertOptionsCallbacksExpire {}
+    }
+
+    private fun assertOptionsCallbacksExpire(close: (EditorHost<Surface>) -> Unit) {
+        formatAction = { action ->
+            calls.add(action)
+            body.editBbcode { text, start, end -> applyBbcodeAction(action, text, start, end) }
+        }
+        val initial = host()
+        initial.barActions.onOptions()
+        val stale = initial.optionsFormats
+        stale.onTab(EditorOptionsTab.Formats)
+        close(initial)
+        // The memory, including its opening identity, also survives recreation of the host.
+        val reopened = host()
+        reopened.barActions.onOptions()
+        val returnGeneration = reopened.returnGeneration
+        body.edit { selection = TextRange(3) }
+        stale.onTab(EditorOptionsTab.Formats)
+        assertEquals(EditorOptionsTab.Options, reopened.optionsFormats.tab)
+        reopened.optionsFormats.onTab(EditorOptionsTab.Formats)
+        stale.onTab(EditorOptionsTab.Options)
+        assertEquals(EditorOptionsTab.Formats, reopened.optionsFormats.tab)
+        stale.onFormat(BbcodeAction.Bold)
+        assertTrue(calls.isEmpty())
+        assertEquals("Bonjour", body.text.toString())
+        assertEquals(TextRange(3), body.selection)
+        assertEquals(EditorOptionsTab.Formats, reopened.optionsFormats.tab)
+        assertEquals(Surface.Options, reopened.surface)
+        assertEquals(returnGeneration, reopened.returnGeneration)
+        // A callback from the new opening still formats the captured selection and closes once.
+        reopened.optionsFormats.onFormat(BbcodeAction.Bold)
+        assertEquals(listOf<Any?>(BbcodeAction.Bold), calls)
+        assertEquals("B[b]onjou[/b]r", body.text.toString())
+        assertNull(reopened.surface)
+        assertEquals(returnGeneration + 1, reopened.returnGeneration)
+        assertTrue(reopened.consumeReturn())
+        assertFalse(reopened.consumeReturn())
     }
 
     @Test fun `ED44 information consumes a formats tap without changing the selection or closing the sheet`() {
