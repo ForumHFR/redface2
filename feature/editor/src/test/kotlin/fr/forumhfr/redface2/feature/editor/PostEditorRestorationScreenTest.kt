@@ -31,6 +31,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
@@ -634,7 +635,11 @@ class PostEditorRestorationScreenTest {
                 compose.onNodeWithText("Brouillon retrouvé").assertIsDisplayed()
                 compose.onNodeWithText("Retour au message").assertDoesNotExist()
             }
-            PostEditorChromeSurface.Options -> compose.onNodeWithText("Options du message").assertIsDisplayed()
+            // #1417: the sheet title is a pane title only; the Options tab opens on the settings row.
+            PostEditorChromeSurface.Options -> {
+                compose.onNodeWithTag("editor-options-tab-Options").assertIsSelected()
+                compose.onNodeWithText("Réglages de l’éditeur").assertIsDisplayed()
+            }
             else -> compose.onNodeWithTag("editor-preview-fallback").assertIsDisplayed()
         }
     }
