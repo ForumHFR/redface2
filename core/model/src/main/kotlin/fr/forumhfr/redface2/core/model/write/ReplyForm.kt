@@ -13,7 +13,8 @@ import fr.forumhfr.redface2.core.model.EditorSmiley
  * adds and removes hidden fields freely between deploys and we'd rather forward
  * them all than dropdown one and silently break the contract. Sensitive fields
  * (`password`, `pseudo` for an anonymous form) are filtered out at parse time —
- * see [ReplyForm.hiddenFields] — so the repository never re-posts them.
+ * see [ReplyForm.hiddenFields]. Private edits may recreate the served `password` slot as empty;
+ * no password value is retained or forwarded.
  *
  * [isAnonymous] is true when the parsed form exposes an editable `pseudo`/`password`
  * pair, which HFR serves whenever the session cookie is missing or expired. The
@@ -95,6 +96,14 @@ data class ReplyForm(
     val recipientsRoster: String? = null,
     /** Read-only HFR account favorites, in server order ; empty when absent or anonymous. */
     val favoriteSmileys: List<EditorSmiley> = emptyList(),
+    /** True when HFR serves a non-hidden subject input (notably the first MP message). */
+    val isSubjectEditable: Boolean = false,
+    /**
+     * Input/textarea names in DOM order, including unchecked options, without duplicate radios.
+     * Contains names only, never password values. Private edits use this order to echo the served
+     * fields; their legacy `password` slot is always empty and `delete` is always omitted.
+     */
+    val submitFieldOrder: List<String> = emptyList(),
 ) {
     /**
      * #606 — CSV of the DT/MultiMP members HFR prefills inside `<input name="newdest">`, served

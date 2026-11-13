@@ -1,10 +1,15 @@
 package fr.forumhfr.redface2.core.data.write
 
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.auth.SessionExpiredException
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageLocationStore
+import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.write.EditPostRepository
+import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.write.EditPostContext
+import fr.forumhfr.redface2.core.model.write.PrivateMessageEditContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
@@ -17,6 +22,7 @@ import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import okhttp3.FormBody
 
@@ -40,14 +46,20 @@ import okhttp3.FormBody
  * Everything else (`hash_check`, `verifrequet=1100`, `cat`/`subcat`/`post`/
  * `page`/`sujet`, per-post options, anti-flood / locked-topic / invalid-token
  * classifier) is shared with the reply repository.
+ *
+ * Private edits (#1625) validate their separate target, preserve DOM field order and server-owned
+ * parents, and protect the MPStorage document. Their diagnostics contain no private content or ids.
  */
 @Singleton
+@Suppress("LongParameterList") // MPStorage protection needs the active owner and its local location cache.
 class DefaultEditPostRepository @Inject constructor(
     private val hfrClient: HfrClient,
     private val replyFormParser: ReplyFormParser,
     private val replySubmitResponseParser: ReplySubmitResponseParser,
     private val diagnostics: DiagnosticsLog,
     private val smileyUsageRecorder: SuccessfulSmileyUsageRecorder,
+    private val authRepository: AuthRepository,
+    private val mpStorageLocationStore: MpStorageLocationStore,
     @param:IoDispatcher private val ioDispatcher: CoroutineDispatcher,
 ) : EditPostRepository {
 
@@ -78,7 +90,7 @@ class DefaultEditPostRepository @Inject constructor(
                             DiagnosticsLog.Level.DEBUG,
                             LOG_TAG,
                             "edit form parsed: hiddenFields=${form.hiddenFields.size} " +
-                                "anonymous=${form.isAnonymous} sujet=\"${form.sujet}\" " +
+                                "anonymous=${form.isAnonymous} " +
                                 "initialContent.length=${form.initialContent.length}",
                         )
                         form
@@ -184,6 +196,110 @@ class DefaultEditPostRepository @Inject constructor(
             )
             throw error
         }
+    }
+
+    override suspend fun fetchEditPostForm(context: PrivateMessageEditContext): ReplyForm = withContext(ioDispatcher) {
+        guardPrivateStorageMessage(context)
+        diagnostics.record(DiagnosticsLog.Level.INFO, LOG_TAG, "GET MP edit form")
+        val html = hfrClient.getPrivateMessageEditForm(context.threadId, context.numreponse, context.page)
+        replyFormParser.parseEditPost(html, context).getOrThrow().also { form ->
+            guardPrivateEditForm(context, form)
+        }
+    }
+
+    /** PENDING(#1625): MP edit success response not yet observed live. */
+    override suspend fun submitEditPost(
+        context: PrivateMessageEditContext,
+        form: ReplyForm,
+        bbcodeContent: String,
+        options: ReplyFormOptions,
+    ): ReplySubmitResult = withContext(ioDispatcher) {
+        guardPrivateStorageMessage(context)
+        guardPrivateEditForm(context, form)
+        guardAgainstInvalidSubmission(form, bbcodeContent)?.let { return@withContext it }
+        val body = buildPrivateEditFormBody(context, form, bbcodeContent, options)
+        // No private ids, titles, bodies, refresh URLs or exception messages in diagnostics.
+        diagnostics.record(DiagnosticsLog.Level.INFO, LOG_TAG, "POST MP edit")
+        val owner = smileyUsageRecorder.captureOwner()
+        val parsed = replySubmitResponseParser.parse(hfrClient.submitEditPost(body))
+        val outcome = if (parsed is ReplySubmitResult.Success) {
+            smileyUsageRecorder.record(owner, body, options.smileyDisabled, form.initialContent)
+            // Private refresh URL syntax is unobserved; the edit target already owns these coordinates.
+            parsed.copy(targetPage = context.page, numreponse = context.numreponse, topicId = context.threadId)
+        } else {
+            // Unknown stays Unknown: the durable submission adapter treats it as UNCERTAIN.
+            parsed
+        }
+        diagnostics.record(
+            DiagnosticsLog.Level.INFO, LOG_TAG,
+            "POST MP edit ${if (outcome is ReplySubmitResult.Success) "Success" else "Failure"}",
+        )
+        outcome
+    }
+
+    /** Never discover storage over the network to decide whether an ordinary message is editable. */
+    private suspend fun guardPrivateStorageMessage(context: PrivateMessageEditContext) {
+        val owner = (authRepository.observeAuthState().first() as? AuthState.Authenticated)?.pseudo
+        val storage = mpStorageLocationStore.read(owner)
+        check(storage == null || storage.threadId != context.threadId || storage.numreponse != context.numreponse) {
+            "MPStorage document cannot be edited through the message editor"
+        }
+        // A cold cache cannot identify the storage thread before GET. PR 2 must also hide its edit
+        // action from the loaded thread's subject; the form subject guard below protects POST here.
+    }
+
+    private fun guardPrivateEditForm(context: PrivateMessageEditContext, form: ReplyForm) {
+        check(
+            form.hiddenFields["cat"] == "prive" &&
+                form.hiddenFields["post"] == context.threadId.toString() &&
+                form.hiddenFields["numreponse"] == context.numreponse.toString() &&
+                form.hiddenFields["numrep"] == "" &&
+                form.submitFieldOrder.containsAll(
+                    listOf(
+                        "hash_check", "cat", "post", "numreponse", "numrep", "page", "verifrequet", "sujet",
+                        "content_form",
+                    ),
+                ),
+        ) { "Private edit form target mismatch or incomplete form" }
+        check(
+            form.sujet != MpStorageRepository.STORAGE_SUBJECT_HASH &&
+                form.hiddenFields["sujet"] != MpStorageRepository.STORAGE_SUBJECT_HASH,
+        ) {
+            "MPStorage document cannot be edited through the message editor"
+        }
+        check("dest" !in form.hiddenFields && "newdest" !in form.hiddenFields) {
+            "Private edit form cannot change recipients"
+        }
+    }
+
+    private fun buildPrivateEditFormBody(
+        context: PrivateMessageEditContext,
+        form: ReplyForm,
+        bbcodeContent: String,
+        options: ReplyFormOptions,
+    ): FormBody {
+        val values = form.hiddenFields.toMutableMap().apply {
+            put("hash_check", form.hashCheck)
+            put("verifrequet", HfrConstants.VERIF_REQUET)
+            put("content_form", sanitizeContentForm(bbcodeContent))
+            put("page", context.page.toString())
+            put("sujet", if (form.isSubjectEditable) form.sujet else getValue("sujet"))
+            // The parser drops all password values. Only this empty legacy slot may be submitted.
+            put("password", "")
+            form.msgIcon?.let { put("MsgIcon", it) }
+            remove("signature")
+            remove("smiley")
+            remove("emaill")
+            if (options.signatureEnabled) put("signature", "1")
+            if (options.smileyDisabled) put("smiley", "1")
+            if (options.emailNotificationEnabled) put("emaill", "1")
+            remove("delete")
+        }
+        return FormBody.Builder(Charsets.UTF_8).apply {
+            form.submitFieldOrder.distinct().forEach { name ->
+                values[name]?.let { add(name, it) }
+            }
+        }.build()
     }
 
     private fun guardAgainstInvalidSubmission(

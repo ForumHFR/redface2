@@ -1,6 +1,8 @@
 package fr.forumhfr.redface2.core.data.write
 
+import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
+import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageLocationStore
 import fr.forumhfr.redface2.core.domain.smiley.SmileyUsageFailure
 import fr.forumhfr.redface2.core.domain.smiley.SmileyUsageMutationResult
 import fr.forumhfr.redface2.core.model.write.EditPostContext
@@ -9,6 +11,7 @@ import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
 import fr.forumhfr.redface2.core.network.HfrClient
 import fr.forumhfr.redface2.core.parser.write.ReplyFormParser
 import fr.forumhfr.redface2.core.parser.write.ReplySubmitResponseParser
+import io.mockk.mockk
 import java.io.IOException
 import java.net.URLDecoder
 import kotlinx.coroutines.Dispatchers
@@ -64,6 +67,8 @@ class DefaultEditPostRepositoryTest {
             replySubmitResponseParser = ReplySubmitResponseParser(),
             diagnostics = diagnostics,
             smileyUsageRecorder = usage.recorder,
+            authRepository = mockk<AuthRepository>(),
+            mpStorageLocationStore = mockk<MpStorageLocationStore>(),
             ioDispatcher = Dispatchers.Unconfined,
         )
     }
