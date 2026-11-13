@@ -386,7 +386,10 @@ internal class PrivateMessageReplyDraftSession(
             val delivered = stagedDelivery
             if (deliveryPending && pending != null && delivered != null) commitQuoteLocked(pending, delivered)
         }
-        return !deliveryPending && submission.flushForClose(::draftSnapshot)
+        return !deliveryPending && submission.flushForClose(
+            live = { EditorDraftStore.Draft(body = bodyFieldState.text.toString(), isPrivate = true) },
+            snapshot = ::draftSnapshot,
+        )
     }
 
     /**

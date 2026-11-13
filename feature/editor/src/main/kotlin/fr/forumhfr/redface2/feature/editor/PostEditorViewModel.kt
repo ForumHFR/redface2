@@ -1029,7 +1029,10 @@ class PostEditorViewModel @AssistedInject constructor(
         if (deliveredInlineQuoteRequest != null) commitInlineQuoteDelivery()
         // Still not durable: nothing typed since the delivery can be saved without risking a
         // duplicate quote. Otherwise the last write of the field must itself succeed.
-        deliveredInlineQuoteRequest == null && submission.flushForClose(::draftSnapshot)
+        deliveredInlineQuoteRequest == null && submission.flushForClose(
+            live = { EditorDraftStore.Draft(body = bodyFieldState.text.toString()) },
+            snapshot = ::draftSnapshot,
+        )
     } catch (_: IOException) {
         false
     }

@@ -252,16 +252,23 @@ class EditorSubmissionBinding<E, F>(
      * - a conflict always asks: another writer replaced the row, this session's last view of it
      *   proves nothing;
      * - a failure asks unless the row already holds this exact content;
-     * - content changed while the write was suspended asks too, whatever the write returned: the
-     *   live fields are read again and must still be what was just written or held.
+     * - fields changed while the write was suspended ask too, whatever the write returned.
      * Nothing to write is not a failure: no snapshot, or an invalidated owner, whose editor is
-     * retired and can never write again. [recipients] gives stored and live recipients one form.
+     * retired and can never write again.
+     *
+     * [snapshot] is what may be saved and can be null (an undecided offer, a sealed delivery);
+     * [live] is always the raw fields (body, subject, recipients), read before and after the
+     * write. Eligibility may change across a successful write; only the fields prove typing.
+     * [recipients] gives stored and live recipients one form. [snapshot] comes last on purpose:
+     * a trailing lambda can only be the content to save.
      */
     suspend fun flushForClose(
-        snapshot: () -> EditorDraftStore.Draft?,
+        live: () -> EditorDraftStore.Draft,
         recipients: (String) -> Any = { it },
+        snapshot: () -> EditorDraftStore.Draft?,
     ): Boolean {
         autosave?.cancelAndJoin()
+        val before = live()
         val draft = snapshot()
         val result = persist(draft)
         if (drafts.invalidated) return true
@@ -270,17 +277,16 @@ class EditorSubmissionBinding<E, F>(
             StoreWriteResult.Conflict -> false
             else -> draft != null && drafts.holds(draft, recipients)
         }
-        return durable && sameContent(draft, snapshot(), recipients)
+        return durable && sameContent(before, live(), recipients)
     }
 
     /** Same content rule as [EditorDraftSession.holds]: body, subject and recipients only. */
     private fun sameContent(
-        written: EditorDraftStore.Draft?,
-        live: EditorDraftStore.Draft?,
+        before: EditorDraftStore.Draft,
+        after: EditorDraftStore.Draft,
         recipients: (String) -> Any,
-    ): Boolean = if (written == null || live == null) written == live else written.body == live.body &&
-        written.subject.orEmpty() == live.subject.orEmpty() &&
-        recipients(written.recipients.orEmpty()) == recipients(live.recipients.orEmpty())
+    ): Boolean = before.body == after.body && before.subject.orEmpty() == after.subject.orEmpty() &&
+        recipients(before.recipients.orEmpty()) == recipients(after.recipients.orEmpty())
 
     fun launch(
         permit: SubmissionRequest.Accepted,

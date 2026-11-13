@@ -231,7 +231,15 @@ internal class PrivateMessageComposeDraftSession(
      * that is not durable, so the caller asks before abandoning it. Recipients compare decoded: a
      * historical CSV row, an absent row and the envelope written today can all name the same list.
      */
-    suspend fun flushForClose(): Boolean = submission.flushForClose(::draftSnapshot, ::decodedRecipients)
+    suspend fun flushForClose(): Boolean = submission.flushForClose(
+        live = {
+            val fields = readState()
+            EditorDraftStore.Draft(bodyFieldState.text.toString(), fields.subject, fields.recipientState.encode(),
+                isPrivate = true)
+        },
+        recipients = ::decodedRecipients,
+        snapshot = ::draftSnapshot,
+    )
 
     /** An unreadable value only equals itself; the stored format is never rewritten here. */
     private fun decodedRecipients(stored: String): Any = try {

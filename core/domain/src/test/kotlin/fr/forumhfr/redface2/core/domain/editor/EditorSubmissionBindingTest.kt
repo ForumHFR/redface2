@@ -316,16 +316,16 @@ class EditorSubmissionBindingTest {
         val store = VersionedEditorDraftStore()
         val binding = binding(store)
         binding.restore("key")
-        assertTrue(binding.flushForClose({ Draft("body", subject = "first title") }))
+        assertTrue(binding.closes { Draft("body", subject = "first title") })
         store.saveFailure = IOException("disk full")
         // Unchanged content: the refused rewrite loses nothing, whatever the null/empty header form.
-        assertTrue(binding.flushForClose({ Draft("body", subject = "first title", recipients = "") }))
+        assertTrue(binding.closes { Draft("body", subject = "first title", recipients = "") })
         // Only the title changed: it is durable nowhere, the close must ask.
-        assertFalse(binding.flushForClose({ Draft("body", subject = "second title") }))
-        assertFalse(binding.flushForClose({ Draft("body") }))
+        assertFalse(binding.closes { Draft("body", subject = "second title") })
+        assertFalse(binding.closes { Draft("body") })
         assertEquals("first title", store.saved["key"]?.subject)
         store.saveFailure = null
-        assertTrue(binding.flushForClose({ Draft("body", subject = "second title") }))
+        assertTrue(binding.closes { Draft("body", subject = "second title") })
         assertEquals("second title", store.saved["key"]?.subject)
     }
 
@@ -334,10 +334,10 @@ class EditorSubmissionBindingTest {
         val store = VersionedEditorDraftStore()
         val binding = binding(store)
         binding.restore("key")
-        assertTrue(binding.flushForClose({ Draft("body", recipients = "alice", isPrivate = true) }))
+        assertTrue(binding.closes { Draft("body", recipients = "alice", isPrivate = true) })
         store.saveFailure = IOException("disk full")
-        assertTrue(binding.flushForClose({ Draft("body", recipients = "alice", isPrivate = true) }))
-        assertFalse(binding.flushForClose({ Draft("body", recipients = "alice;bob", isPrivate = true) }))
+        assertTrue(binding.closes { Draft("body", recipients = "alice", isPrivate = true) })
+        assertFalse(binding.closes { Draft("body", recipients = "alice;bob", isPrivate = true) })
         assertEquals("alice", store.saved["key"]?.recipients)
     }
 
@@ -348,9 +348,9 @@ class EditorSubmissionBindingTest {
         val binding = binding(store)
         binding.restore("key")
         store.saveFailure = IOException("disk full")
-        assertTrue(binding.flushForClose({ Draft("body", subject = "loaded title") }))
-        assertFalse(binding.flushForClose({ Draft("body", subject = "edited title") }))
-        assertTrue(binding.flushForClose({ null }))
+        assertTrue(binding.closes { Draft("body", subject = "loaded title") })
+        assertFalse(binding.closes { Draft("body", subject = "edited title") })
+        assertTrue(binding.closes { null })
     }
 
     @Test
@@ -361,9 +361,9 @@ class EditorSubmissionBindingTest {
         val second = binding(store)
         first.restore("key")
         second.restore("key")
-        assertTrue(second.flushForClose({ Draft("B") }))
+        assertTrue(second.closes { Draft("B") })
         // The first session still believes the row holds A; the store answers Conflict: A is gone.
-        assertFalse(first.flushForClose({ Draft("A") }))
+        assertFalse(first.closes { Draft("A") })
         assertEquals("B", store.saved["key"]?.body)
     }
 
@@ -373,21 +373,35 @@ class EditorSubmissionBindingTest {
         val binding = binding(store)
         binding.restore("key")
         // The write succeeds with A, but the field holds B by the time it returns.
-        var reads = 0
-        val moving = { Draft(if (reads++ == 0) "A" else "B", subject = "t") }
-        assertFalse(binding.flushForClose(moving))
+        var field = Draft("A", subject = "t")
+        val typeDuringWrite = { field.also { field = Draft("B", subject = "t") } }
+        assertFalse(binding.flushForClose(live = { field }, snapshot = typeDuringWrite))
         assertEquals("A", store.saved["key"]?.body)
         // Same when only a header moved, and when the refused rewrite was of content already held.
-        reads = 0
-        assertFalse(binding.flushForClose({ Draft("A", subject = if (reads++ == 0) "t" else "u") }))
+        field = Draft("A", subject = "t")
+        val retitleDuringWrite = { field.also { field = Draft("A", subject = "u") } }
+        assertFalse(binding.flushForClose(live = { field }, snapshot = retitleDuringWrite))
         store.saveFailure = IOException("disk full")
-        reads = 0
-        assertFalse(binding.flushForClose(moving))
-        assertTrue(binding.flushForClose({ Draft("A", subject = "t") }))
+        field = Draft("A", subject = "t")
+        assertFalse(binding.flushForClose(live = { field }, snapshot = typeDuringWrite))
+        assertTrue(binding.closes { Draft("A", subject = "t") })
         // "Rester" then a new close writes what is in the field now.
         store.saveFailure = null
-        assertTrue(binding.flushForClose({ Draft("B", subject = "t") }))
+        assertTrue(binding.closes { Draft("B", subject = "t") })
         assertEquals("B", store.saved["key"]?.body)
+    }
+
+    @Test
+    fun `a snapshot that stops being eligible after its write never asks over unchanged fields - ED10`() = runTest {
+        val store = VersionedEditorDraftStore()
+        val binding = binding(store)
+        binding.restore("key")
+        // The cleared field is saved; an offer shown again by that write then seals the snapshot.
+        var eligible = true
+        val snapshot = { if (eligible) Draft("").also { eligible = false } else null }
+        assertTrue(binding.flushForClose(live = { Draft("") }, snapshot = snapshot))
+        // Nothing eligible to write and untouched fields: still nothing to ask.
+        assertTrue(binding.flushForClose(live = { Draft("kept in the field") }, snapshot = { null }))
     }
 
     @Test
@@ -399,10 +413,10 @@ class EditorSubmissionBindingTest {
         store.saveFailure = IOException("disk full")
         val oneForm = { stored: String -> stored.removePrefix("v1:") }
         // The live envelope names the list the row already holds: nothing is lost.
-        assertTrue(binding.flushForClose({ Draft("body", recipients = "v1:alice,bob", isPrivate = true) }, oneForm))
-        assertFalse(binding.flushForClose({ Draft("body", recipients = "v1:alice", isPrivate = true) }, oneForm))
+        assertTrue(binding.closes(oneForm) { Draft("body", recipients = "v1:alice,bob", isPrivate = true) })
+        assertFalse(binding.closes(oneForm) { Draft("body", recipients = "v1:alice", isPrivate = true) })
         // Raw strings differ: without the shared form the same list would ask for nothing.
-        assertFalse(binding.flushForClose({ Draft("body", recipients = "v1:alice,bob", isPrivate = true) }))
+        assertFalse(binding.closes { Draft("body", recipients = "v1:alice,bob", isPrivate = true) })
         assertEquals("alice,bob", store.saved["key"]?.recipients)
     }
 
@@ -720,6 +734,12 @@ class EditorSubmissionBindingTest {
         assertEquals(2, store.beginCalls)
         assertNotEquals(store.attemptedIds[0], store.attemptedIds[1])
     }
+
+    /** A close whose fields are exactly the snapshot offered to the store, before and after. */
+    private suspend fun EditorSubmissionBinding<Unit, String>.closes(
+        recipients: (String) -> Any = { it },
+        draft: () -> Draft?,
+    ): Boolean = flushForClose(live = { draft() ?: Draft("") }, recipients = recipients, snapshot = draft)
 
     private fun VersionedEditorDraftStore.storageActivity() = listOf(writes, beginCalls, finishCalls, saveCount)
 

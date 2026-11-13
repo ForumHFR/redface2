@@ -583,7 +583,12 @@ class TopicFormViewModel @AssistedInject constructor(
         closeRequested = true
         viewModelScope.launch {
             val saved = try {
-                submission.flushForClose(::draftSnapshot)
+                submission.flushForClose(
+                    live = {
+                        EditorDraftStore.Draft(bodyFieldState.text.toString(), subject = _state.value.subject.text)
+                    },
+                    snapshot = ::draftSnapshot,
+                )
             } catch (_: IOException) {
                 false
             }

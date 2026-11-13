@@ -4897,6 +4897,32 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `clearing a field that hid its offer then closing saves and never asks - ED10 ED121`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.preload(key, EditorDraftStore.Draft("offered D"))
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val vm = newReplyViewModel()
+        val effects = mutableListOf<PostEditorEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        settleBody()
+        assertEquals("offered D", vm.state.value.restorableDraft)
+        // The field now equals D: the offer is kept in the store but hidden from the list.
+        vm.editBody(TextFieldValue("offered D"))
+        testScheduler.advanceTimeBy(751)
+        settleBody()
+        assertNull(vm.state.value.restorableDraft)
+        // Clear and close before the autosave: the write succeeds and shows D again, which makes
+        // the cleared field ineligible for a second snapshot. The field itself did not move.
+        vm.editBody(TextFieldValue(""))
+        vm.dispatch(PostEditorIntent.CloseRequested)
+        settleBody()
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(1, effects.count { it == PostEditorEffect.CloseCommitted })
+        assertEquals("", draftStore.saved[key]?.body)
+        assertEquals("offered D", vm.state.value.restorableDraft)
+    }
+
+    @Test
     fun `close with nothing to write never asks even when storage fails - ED10`() = runTest {
         replyRepository.formResult = Result.success(authenticatedForm())
         val vm = newReplyViewModel()

@@ -457,6 +457,30 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
+    fun `MP clearing a field that hid its offer then closing saves and never asks - ED10 ED121`() = runTest {
+        val key = EditorDraftKey.mpReply(request.threadId)
+        val repository = mockk<PrivateMessageWriteRepository>()
+        // The form hydrates the field with the offered body: the offer is kept but hidden.
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form(initialContent = "offered D")
+        draftStore.preload(key, EditorDraftStore.Draft(body = "offered D", isPrivate = true))
+        val vm = viewModel(repository)
+        val effects = mutableListOf<PrivateMessageReplyEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        runCurrent()
+        assertEquals("offered D", vm.bodyFieldState.text.toString())
+        assertNull(vm.state.value.restorableDraft)
+        // Clear and close before the autosave: the write succeeds and shows D again, which makes
+        // the cleared field ineligible for a second snapshot. The field itself did not move.
+        vm.editBody(TextFieldValue(""))
+        vm.onCloseRequested()
+        runCurrent()
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(1, effects.count { it == PrivateMessageReplyEffect.CloseCommitted })
+        assertEquals("", draftStore.saved[key]?.body)
+        assertEquals("offered D", vm.state.value.restorableDraft)
+    }
+
+    @Test
     fun `MP close with nothing to write never asks even when storage fails - ED10`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } returns form()
