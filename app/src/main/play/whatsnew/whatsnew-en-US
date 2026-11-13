@@ -1,2 +1,2 @@
-Redface 2 v0.69.17 — dev.
-- Editor: images show in the preview; format row reordered, with Bullet and E-mail; "Editor settings" in Options; message tone as a named grid.
+Redface 2 v0.69.18 — dev.
+- Editor: Options sheet with two tabs, Options and Formats; editor settings on top; sheets no longer resize when opened over the keyboard.
