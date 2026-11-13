@@ -1525,7 +1525,7 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
-    fun `restoring appends the offered private reply after live text`() = runTest {
+    fun `restoring puts the offered private reply before live text - ED89`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } returns form()
         draftStore.preload(
@@ -1542,7 +1542,8 @@ class PrivateMessageReplyViewModelTest {
         viewModel.editBody(TextFieldValue("fresh MP"))
         viewModel.onDraftRestoreRequested()
 
-        assertEquals("fresh MP\n\nrescued MP", viewModel.bodyFieldState.text.toString())
+        // ED-89 case 4 (v0.7.8): empty seed and typed text give the draft, then the typing.
+        assertEquals("rescued MP\n\nfresh MP", viewModel.bodyFieldState.text.toString())
         assertNull(viewModel.state.value.restorableDraft)
     }
 
@@ -2453,7 +2454,9 @@ class PrivateMessageReplyViewModelTest {
         val uploaded = vm.bodyFieldState.text.toString()
         assertTrue(uploaded.startsWith("seed[url="))
         assertRestoreAndSingleUndo(
-            vm, TextFieldValue(uploaded, TextRange(1, 3)), "draft\n\n" + uploaded.removePrefix("seed"),
+            // ED-89 (v0.7.8): an MP reply no longer has a seed that the draft replaces; whatever the
+            // form put in the field stays after the restored draft.
+            vm, TextFieldValue(uploaded, TextRange(1, 3)), "draft\n\n" + uploaded,
         )
     }
 
@@ -2646,12 +2649,13 @@ class PrivateMessageReplyViewModelTest {
         vm.bodyFieldState.edit { append("typed") }
         assertEquals("", vm.state.value.bodyText)
         vm.onDraftRestoreRequested()
-        assertEquals("typed\n\nstored", vm.bodyFieldState.text.toString())
+        // ED-89 case 4 (v0.7.8): the offered draft comes first, the live typing after it.
+        assertEquals("stored\n\ntyped", vm.bodyFieldState.text.toString())
         assertEquals(TextRange(13), vm.bodyFieldState.selection)
         assertNull(vm.state.value.restorableDraft)
         Snapshot.sendApplyNotifications()
         advanceUntilIdle()
-        assertEquals("typed\n\nstored", draftStore.saved[key]?.body)
+        assertEquals("stored\n\ntyped", draftStore.saved[key]?.body)
     }
 
     @Test
@@ -2669,7 +2673,9 @@ class PrivateMessageReplyViewModelTest {
         assertEquals("", vm.state.value.bodyText)
         loadGate.complete(Unit)
         runCurrent()
-        assertNull(vm.state.value.restorableDraft)
+        // ED-121 (v0.7.8): the stored draft is durable and stays offered under the status icon instead
+        // of being silently overwritten by the next autosave; the live typing is left untouched.
+        assertEquals("stored", vm.state.value.restorableDraft)
         assertEquals("typed before load", vm.bodyFieldState.text.toString())
     }
 

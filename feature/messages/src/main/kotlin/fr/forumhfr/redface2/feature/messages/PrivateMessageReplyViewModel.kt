@@ -706,7 +706,12 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             return
         }
         draftSession.hydrateBody(form.initialContent)
-        updateState { current -> current.withLoadedForm(form, submission.blocksMutation) }
+        val liveBody = bodyFieldState.text.toString()
+        // An offer identical to the field has nothing to restore; a later divergence reoffers it (ED-121).
+        updateState { current ->
+            current.withLoadedForm(form, submission.blocksMutation)
+                .copy(restorableDraft = current.restorableDraft.takeIf { it != liveBody })
+        }
     }
 
     /** #1573 — cancellation only records diagnostics; a successful empty callback retains #1128 feedback. */
