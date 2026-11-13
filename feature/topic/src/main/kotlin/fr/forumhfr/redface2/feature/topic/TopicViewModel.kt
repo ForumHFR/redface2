@@ -392,7 +392,10 @@ class TopicViewModel @AssistedInject constructor(
         val overflowRedirectAllowed: Boolean,
         val submittedElsewhereNotificationAllowed: Boolean,
         val lastPageRedirectAllowed: Boolean = false,
-    )
+    ) {
+        fun needsTailRedirect(target: Int, totalPages: Int): Boolean =
+            if (lastPageRedirectAllowed) totalPages != target else totalPages > target
+    }
 
     /** #782 — departure page + return landing captured before resolving the jump. */
     private data class TopicJumpFrame(val page: Int, val landing: PendingLanding?)
@@ -2097,7 +2100,8 @@ class TopicViewModel @AssistedInject constructor(
      * BEFORE the refresh ends beyond the submit target: such a submit never redirects, and a pager
      * that shrank meanwhile (deletions) is resolved by the click's own redirect. The acknowledgement
      * then carries the offer at once instead of gaining it after a slow refresh. The canonical
-     * pager is read, not the displayed topic: a transsearch page has its own.
+     * pager is read, not the displayed topic: a transsearch page has its own, and the plan excludes
+     * submissions from its results from both prediction and terminal enrichment.
      */
     private fun predictedSubmitLastPage(plan: SubmitRefreshPlan): Int? =
         _state.value.availablePages.lastOrNull()?.takeIf {
@@ -2136,7 +2140,10 @@ class TopicViewModel @AssistedInject constructor(
      *   explicit jump to the end of the topic; totalPages does not locate the submitted post.
      */
     private fun submitRefreshPlan(target: Int, scrollTo: Int?, quotedNumreponse: Int?): SubmitRefreshPlan {
-        val loadedMode = _state.value.mode as? TopicUiState.Mode.Loaded
+        val current = _state.value
+        val loadedMode = current.mode as? TopicUiState.Mode.Loaded
+        // Capture before performSubmitRefresh takes ownership and clears the search cursor/state.
+        val fromSearchResults = current.search.showingFilteredResults || searchCursorIndex >= 0
         val displayedTargetTopic = loadedMode?.topic?.takeIf { it.page == target }
         val terminalTargetTopic = displayedTargetTopic?.takeIf { !loadedMode.provisional }
         val targetWasKnownTail = terminalTargetTopic?.totalPages == target
@@ -2154,7 +2161,8 @@ class TopicViewModel @AssistedInject constructor(
                 else -> null
             },
             overflowRedirectAllowed = scrollTo == null && quotedNumreponse == null && targetWasKnownTail,
-            submittedElsewhereNotificationAllowed = scrollTo == null || quotedNumreponse != null,
+            submittedElsewhereNotificationAllowed = !fromSearchResults &&
+                (scrollTo == null || quotedNumreponse != null),
         )
     }
 
@@ -2261,7 +2269,7 @@ class TopicViewModel @AssistedInject constructor(
                 try {
                     val topic = topicRepository.refreshTopicPage(request.cat, request.post, target)
                     if (generation != ownerGeneration) return@launch
-                    val shouldRedirect = redirectAvailable && topic.totalPages > target
+                    val shouldRedirect = redirectAvailable && plan.needsTailRedirect(target, topic.totalPages)
                     _state.update {
                         it.copy(
                             mode = loadedMode(topic),
@@ -2287,6 +2295,7 @@ class TopicViewModel @AssistedInject constructor(
                         adoptSubmitTarget(target, plan.landing)
                         continue
                     }
+                    alignSubmittedPage(plan, topic)
                     recordSnapshot(topic)
                     dispatchPendingLanding(topic, terminal = true)
                     val offeredLastPage = topic.totalPages.takeIf {
@@ -2305,6 +2314,14 @@ class TopicViewModel @AssistedInject constructor(
                 }
                 return@launch
             }
+        }
+    }
+
+    /** HFR may normalize the page even after our single redirect: the response owns the cursor. */
+    private fun alignSubmittedPage(plan: SubmitRefreshPlan, topic: Topic) {
+        if (plan.lastPageRedirectAllowed && topic.page != request.page) {
+            updateCanonicalPage(topic.page)
+            armLanding(plan.landing)
         }
     }
 

@@ -4296,6 +4296,88 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `late shrinking pager withdraws the predicted offer without navigating`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flowOf(fakeTopic(2, 5))),
+            refreshTopicsToReturn = listOf(fakeTopic(2, 2)),
+        ).apply { refreshHook = { _, _, _ -> gate.await() } }
+        val viewModel = topicViewModel(
+            request = topicRequest(2), topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        viewModel.effects.test {
+            viewModel.applySubmitResult(2, null)
+            advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
+            runCurrent()
+            val offer = requireNotNull(viewModel.submitAcknowledgements.feedback.value)
+            assertEquals(5, offer.lastPage)
+            viewModel.submitAcknowledgements.presented(offer.id, 10_000, offer.revision)
+            gate.complete(Unit)
+            runCurrent()
+            assertNull(viewModel.submitAcknowledgements.feedback.value)
+            assertNull(viewModel.submitAcknowledgements.takeOffer(offer.id, "xaat", offer.revision))
+            assertEquals(2, viewModel.state.value.request.page)
+            assertEquals(listOf(1, 2), viewModel.state.value.availablePages)
+            assertEquals(listOf(2), repository.refreshCalls.map { it.third })
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+        destroyViewModel(viewModel)
+    }
+
+    @Test
+    fun `quote from transsearch results neither predicts nor gains an offer after search takeover`() = runTest {
+        repeat(2) { filtered ->
+            val gate = CompletableDeferred<Unit>()
+            val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+            val results = fakeTopic(
+                1, 1, posts = listOf(fakePost(640)), searchForm = form.copy(firstnum = null, currentNum = 640),
+            )
+            val repository = FakeTopicRepository(
+                flowsToReturn = listOf(flowOf(fakeTopic(1, 5, searchForm = form))),
+                refreshTopicsToReturn = listOf(fakeTopic(1, 6, posts = listOf(fakePost(640)), searchForm = form)),
+            ).apply { refreshHook = { _, _, _ -> gate.await() } }
+            val viewModel = topicViewModel(
+                request = topicRequest(1), topicRepository = repository,
+                authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+                topicSearchRepository = FakeTopicSearchRepository(result = results),
+            )
+            viewModel.effects.test {
+                viewModel.send(TopicIntent.OpenSearch)
+                viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+                viewModel.send(TopicIntent.SearchOnlyMatchesChanged(filtered == 1))
+                viewModel.send(TopicIntent.SubmitSearch)
+                assertEquals(
+                    if (filtered == 1) TopicEffect.ScrollToTopOfResults else TopicEffect.ScrollToPost(640),
+                    awaitItem(),
+                )
+                assertEquals((1..5).toList(), viewModel.state.value.availablePages)
+                viewModel.applySubmitResult(1, 640, listOf(640))
+                advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
+                runCurrent()
+                val confirmation = requireNotNull(viewModel.submitAcknowledgements.feedback.value)
+                assertNull("search results must not predict the canonical tail", confirmation.lastPage)
+                assertFalse(viewModel.state.value.search.showingFilteredResults)
+                viewModel.submitAcknowledgements.presented(confirmation.id, 4_000, confirmation.revision)
+                gate.complete(Unit)
+                runCurrent()
+                assertEquals(TopicEffect.ScrollToPost(640), awaitItem())
+                assertNull(
+                    "the frozen plan must also exclude late enrichment",
+                    viewModel.submitAcknowledgements.feedback.value,
+                )
+                assertNull(viewModel.submitAcknowledgements.takeOffer(confirmation.id, "xaat"))
+                assertEquals(1, viewModel.state.value.request.page)
+                assertEquals(listOf(1), repository.refreshCalls.map { it.third })
+                expectNoEvents()
+                cancelAndIgnoreRemainingEvents()
+            }
+            destroyViewModel(viewModel)
+        }
+    }
+
+    @Test
     fun `slow plain reply from the last page acknowledges once without any offer`() = runTest {
         val gate = CompletableDeferred<Unit>()
         val repository = FakeTopicRepository(
@@ -4760,6 +4842,34 @@ class TopicViewModelTest {
             expectNoEvents()
             cancelAndIgnoreRemainingEvents()
         }
+    }
+
+    @Test
+    fun `last-page action resolves tail shrinkage once and aligns a normalized final response`() = runTest {
+        val saved = SavedStateHandle()
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flowOf(fakeTopic(2, 5))),
+            // The tail shrinks from 5 to 2, then to 1 during our one allowed redirect.
+            refreshTopicsToReturn = listOf(fakeTopic(2, 2), fakeTopic(1, 1)),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(2), topicRepository = repository, savedStateHandle = saved,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        viewModel.effects.test {
+            viewModel.openSubmittedPostPage(5)
+            assertEquals(TopicEffect.ScrollToEndOfPage(1), awaitItem())
+            assertEquals(listOf(5, 2), repository.refreshCalls.map { it.third })
+            assertEquals(1, viewModel.state.value.request.page)
+            assertEquals(1, saved.get<Int>("topic.currentPage"))
+            assertEquals(1, assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).topic.page)
+            assertEquals(listOf(1), viewModel.state.value.availablePages)
+            assertEquals(TopicRefreshKind.None, viewModel.state.value.refreshKind)
+            assertNull(viewModel.submitAcknowledgements.feedback.value)
+            expectNoEvents()
+            cancelAndIgnoreRemainingEvents()
+        }
+        destroyViewModel(viewModel)
     }
 
     @Test

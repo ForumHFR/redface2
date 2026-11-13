@@ -18,7 +18,11 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import kotlinx.coroutines.CoroutineScope
@@ -399,6 +403,135 @@ class TopicSubmitFeedbackEffectTest {
         assertNull(fixture.store.feedback.value)
         compose.waitUntil { host.currentSnackbarData == null }
         assertEquals(listOf(first), shown)
+    }
+
+    @Test
+    fun `rotation of a predicted offer presents the success only once and preserves its deadline`() {
+        val restoration = StateRestorationTester(compose)
+        val fixture = lateFeedback()
+        val hosts = mutableListOf<SnackbarHostState>()
+        val shown = mutableListOf<String>()
+        val opened = mutableListOf<Int>()
+        restoration.setContent {
+            val host = remember { SnackbarHostState().also { hosts += it } }
+            LaunchedEffect(host) {
+                snapshotFlow { host.currentSnackbarData }.filterNotNull().collect { shown += it.visuals.message }
+            }
+            TopicSubmitFeedbackEffect(fixture.store, host, true, "xaat") { opened += it }
+        }
+        compose.runOnIdle { fixture.acceptAtDeadline(predictedLastPage = 5) }
+        compose.waitUntil { fixture.store.feedback.value?.expiresAtMillis != null && shown.size == 1 }
+        val deadline = fixture.store.feedback.value?.expiresAtMillis
+        assertEquals(listOf("Message publié"), shown)
+        val oldHost = hosts.last()
+        compose.runOnIdle {
+            fixture.clock.advanceTimeBy(500)
+            fixture.clock.runCurrent()
+        }
+        restoration.emulateSavedInstanceStateRestore()
+        compose.waitUntil { hosts.size == 2 && shown.size == 2 }
+        assertNull(oldHost.currentSnackbarData)
+        assertEquals(listOf("Message publié", "Aller à la dernière page"), shown)
+        assertEquals(deadline, fixture.store.feedback.value?.expiresAtMillis)
+        assertEquals(9_500L, fixture.store.remainingMillis(fixture.store.feedback.value!!.id))
+        compose.runOnIdle { hosts.last().currentSnackbarData!!.performAction() }
+        compose.waitUntil { opened == listOf(5) }
+        assertEquals(1, shown.count { it == "Message publié" })
+        assertNull(fixture.store.feedback.value)
+    }
+
+    @Test
+    fun `returning to the foreground with a predicted offer never repeats the success`() {
+        val fixture = lateFeedback()
+        val owner = object : LifecycleOwner {
+            val registry = LifecycleRegistry(this)
+            override val lifecycle: Lifecycle get() = registry
+        }
+        owner.registry.currentState = Lifecycle.State.RESUMED
+        val shown = mutableListOf<String>()
+        compose.setContent {
+            LaunchedEffect(fixture.host) {
+                snapshotFlow { fixture.host.currentSnackbarData }.filterNotNull()
+                    .collect { shown += it.visuals.message }
+            }
+            CompositionLocalProvider(LocalLifecycleOwner provides owner) {
+                TopicSubmitFeedbackEffect(fixture.store, fixture.host, true, "xaat", openPage = {})
+            }
+        }
+        compose.runOnIdle { fixture.acceptAtDeadline(predictedLastPage = 5) }
+        compose.waitUntil { fixture.store.feedback.value?.expiresAtMillis != null && shown.size == 1 }
+        val deadline = fixture.store.feedback.value?.expiresAtMillis
+        compose.runOnIdle { owner.registry.currentState = Lifecycle.State.STARTED }
+        compose.waitUntil { fixture.host.currentSnackbarData == null }
+        compose.runOnIdle {
+            fixture.clock.advanceTimeBy(500)
+            fixture.clock.runCurrent()
+            owner.registry.currentState = Lifecycle.State.RESUMED
+        }
+        compose.waitUntil { fixture.host.currentSnackbarData != null && shown.size == 2 }
+        assertEquals(listOf("Message publié", "Aller à la dernière page"), shown)
+        assertEquals("Dernière page", fixture.host.currentSnackbarData?.visuals?.actionLabel)
+        assertEquals(deadline, fixture.store.feedback.value?.expiresAtMillis)
+        assertEquals(9_500L, fixture.store.remainingMillis(fixture.store.feedback.value!!.id))
+    }
+
+    @Test
+    fun `a contradicted prediction removes the displayed offer without presenting another snackbar`() {
+        val fixture = lateFeedback()
+        val shown = mutableListOf<SnackbarData>()
+        val opened = mutableListOf<Int>()
+        compose.setContent {
+            LaunchedEffect(fixture.host) {
+                snapshotFlow { fixture.host.currentSnackbarData }.filterNotNull().collect { shown += it }
+            }
+            TopicSubmitFeedbackEffect(fixture.store, fixture.host, true, "xaat") { opened += it }
+        }
+        var id = 0L
+        compose.runOnIdle { id = fixture.acceptAtDeadline(predictedLastPage = 5) }
+        compose.waitUntil { fixture.store.feedback.value?.expiresAtMillis != null && shown.size == 1 }
+        val old = requireNotNull(fixture.host.currentSnackbarData)
+        compose.runOnIdle { fixture.store.refreshed(id, lastPage = null) }
+        compose.waitUntil { fixture.host.currentSnackbarData == null }
+        compose.runOnIdle { old.performAction() }
+        compose.waitForIdle()
+        assertEquals(listOf(old), shown)
+        assertEquals(emptyList<Int>(), opened)
+        assertNull(fixture.store.feedback.value)
+    }
+
+    @Test
+    fun `a contradicted prediction waiting for the host presents only one short confirmation`() {
+        val fixture = lateFeedback()
+        val blocker = fixture.scope.launch {
+            fixture.host.showSnackbar("Busy", duration = SnackbarDuration.Indefinite)
+        }
+        fixture.clock.runCurrent()
+        val shown = mutableListOf<SnackbarData>()
+        compose.setContent {
+            LaunchedEffect(fixture.host) {
+                snapshotFlow { fixture.host.currentSnackbarData }.filterNotNull().collect { shown += it }
+            }
+            TopicSubmitFeedbackEffect(fixture.store, fixture.host, true, "xaat", openPage = {})
+        }
+        var id = 0L
+        compose.runOnIdle { id = fixture.acceptAtDeadline(predictedLastPage = 5) }
+        compose.waitForIdle()
+        assertEquals("Busy", fixture.host.currentSnackbarData?.visuals?.message)
+        assertNull(fixture.store.feedback.value?.expiresAtMillis)
+        compose.runOnIdle { fixture.store.refreshed(id, lastPage = null) }
+        compose.waitForIdle()
+        compose.runOnIdle {
+            fixture.host.currentSnackbarData!!.dismiss()
+            fixture.clock.runCurrent()
+        }
+        compose.waitUntil { fixture.host.currentSnackbarData?.visuals?.message == "Message publié" }
+        val confirmation = requireNotNull(fixture.host.currentSnackbarData)
+        assertNull(confirmation.visuals.actionLabel)
+        assertEquals(SnackbarDuration.Short, confirmation.visuals.duration)
+        compose.runOnIdle { confirmation.dismiss() }
+        compose.waitUntil { fixture.host.currentSnackbarData == null }
+        assertEquals(1, shown.count { it.visuals.message == "Message publié" })
+        blocker.cancel()
     }
 
     @Test
