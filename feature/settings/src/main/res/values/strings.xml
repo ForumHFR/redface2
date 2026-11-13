@@ -591,5 +591,11 @@
     <string name="settings_editor_shortcut_post_topic">Post et sujet</string>
     <string name="settings_editor_shortcut_messages">Éditeurs MP</string>
     <string name="settings_editor_shortcut_none">Aucun raccourci dans la barre</string>
+    <string name="settings_editor_shortcut_bullet">
+        Insérer une puce [*] devant le texte sélectionné ou au curseur
+    </string>
+    <string name="settings_editor_shortcut_email">
+        Encadrer la sélection avec [email]…[/email] ou insérer les balises au curseur
+    </string>
     <string name="settings_editor_shortcut_persist_failed">Impossible d’enregistrer le raccourci. Le choix précédent est conservé.</string>
 </resources>

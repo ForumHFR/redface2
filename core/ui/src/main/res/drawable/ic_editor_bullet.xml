@@ -1,0 +1,7 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+    <!-- Material Symbols format_list_bulleted silhouette, retraced at the editor's 2 dp stroke (ADR-015). -->
+    <path android:fillColor="@android:color/transparent" android:strokeColor="#FF000000"
+        android:strokeWidth="2" android:strokeLineJoin="round" android:strokeLineCap="round"
+        android:pathData="M4,5 A1,1 0,1 0,4,7 A1,1 0,1 0,4,5 M4,11 A1,1 0,1 0,4,13 A1,1 0,1 0,4,11 M4,17 A1,1 0,1 0,4,19 A1,1 0,1 0,4,17 M9,6 L21,6 M9,12 L21,12 M9,18 L21,18" />
+</vector>

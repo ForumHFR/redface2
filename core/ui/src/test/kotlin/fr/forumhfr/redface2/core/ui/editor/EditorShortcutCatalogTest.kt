@@ -11,12 +11,27 @@ class EditorShortcutCatalogTest {
     @Test
     fun `closed catalogue has one entry and a stable distinct ID per choice`() {
         assertEquals(EditorShortcut.entries.toSet(), editorShortcutCatalog.map { it.choice }.toSet())
-        assertEquals(20, editorShortcutCatalog.size)
-        assertEquals(20, EditorShortcut.entries.map { it.id }.distinct().size)
+        assertEquals(22, editorShortcutCatalog.size)
+        assertEquals(22, EditorShortcut.entries.map { it.id }.distinct().size)
         assertEquals("search_smileys", EditorShortcut.SEARCH_SMILEYS.id)
+        assertEquals("bullet", EditorShortcut.BULLET.id)
+        assertEquals("email", EditorShortcut.EMAIL.id)
         assertEquals(EditorShortcut.NONE, EditorShortcut.fromId(null))
         assertEquals(EditorShortcut.NONE, EditorShortcut.fromId("unknown_future_action"))
         EditorShortcut.entries.forEach { assertEquals(it, EditorShortcut.fromId(it.id)) }
+    }
+
+    @Test
+    fun `existing persisted choices keep their IDs when the presentation order changes`() {
+        val choices = listOf(EditorShortcut.NONE, EditorShortcut.BOLD, EditorShortcut.ITALIC, EditorShortcut.UNDERLINE,
+            EditorShortcut.STRIKE, EditorShortcut.QUOTE, EditorShortcut.CODE, EditorShortcut.FIXED,
+            EditorShortcut.SPOILER, EditorShortcut.LINK, EditorShortcut.RED, EditorShortcut.BLUE, EditorShortcut.GREEN,
+            EditorShortcut.ORANGE, EditorShortcut.GREY, EditorShortcut.UPLOAD_IMAGE, EditorShortcut.IMAGE_URL,
+            EditorShortcut.IMAGE_SELECTION, EditorShortcut.SEARCH_SMILEYS, EditorShortcut.PERSONAL_SMILEY)
+        val ids = listOf("none", "bold", "italic", "underline", "strike", "quote", "code", "fixed", "spoiler", "link",
+            "color_red", "color_blue", "color_green", "color_orange", "color_grey", "upload_image", "image_url",
+            "image_selection", "search_smileys", "personal_smiley")
+        assertEquals(choices, ids.map { EditorShortcut.fromId(it) })
     }
 
     @Test
@@ -39,8 +54,14 @@ class EditorShortcutCatalogTest {
     @Test
     fun `formats and drawn colors share exact toolbar payloads without a Color sublevel`() {
         assertEquals(listOf(BbcodeAction.Bold, BbcodeAction.Italic, BbcodeAction.Underline, BbcodeAction.Strike,
-            BbcodeAction.Quote, BbcodeAction.Cpp, BbcodeAction.Fixed, BbcodeAction.Spoiler, BbcodeAction.Url),
+            BbcodeAction.Url, BbcodeAction.Spoiler, BbcodeAction.Bullet, BbcodeAction.Quote, BbcodeAction.Cpp,
+            BbcodeAction.Fixed, BbcodeAction.Email),
             editorShortcutFormats.map { it.bbcode })
+        assertEquals(listOf(EditorShortcut.BOLD, EditorShortcut.ITALIC, EditorShortcut.UNDERLINE,
+            EditorShortcut.STRIKE, EditorShortcut.LINK, EditorShortcut.SPOILER),
+            editorShortcutFormatsBeforeColor.map { it.choice })
+        assertEquals(listOf(EditorShortcut.BULLET, EditorShortcut.QUOTE, EditorShortcut.CODE,
+            EditorShortcut.FIXED, EditorShortcut.EMAIL), editorShortcutFormatsAfterColor.map { it.choice })
         assertEquals(listOf("#FF0000", "#0000FF", "#008000", "#FF6600", "#808080"),
             editorShortcutColors.map { (it.bbcode as BbcodeAction.Color).colorHex })
         assertTrue(editorShortcutColors.all { it.iconRes == null })

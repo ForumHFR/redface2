@@ -215,7 +215,9 @@ class TopicFormScreenLayoutTest {
             compose.onNodeWithContentDescription(label).assertIsEnabled()
         }
         compose.onNodeWithContentDescription("Mise en forme").performClick()
-        for (label in listOf("Gras", "Citation")) compose.onNodeWithContentDescription(label).assertIsEnabled()
+        for (label in listOf("Gras", "Lien", "Puce", "Citation", "E-mail")) {
+            compose.onNodeWithContentDescription(label).assertIsEnabled()
+        }
         compose.onNodeWithContentDescription("Mise en forme").performClick()
         compose.onNodeWithContentDescription("Image").performScrollTo().performClick()
         for (label in listOf("Insérer par URL", "Uploader une image")) {

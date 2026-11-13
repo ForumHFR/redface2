@@ -526,6 +526,12 @@ class PostContentParser {
         "img" -> parseImageInline(element)
         "font" -> parseFont(element)
         "span" -> parseSpan(element)
+        // HFR's [*] items are <ul><li> in topic_page_multipage.html:161 onwards.
+        // Keep the existing paragraph AST and give reading the same bullet/line structure as preview.
+        "ul" -> parseInlineChildren(element) + PostInline.LineBreak
+        "li" -> if (element.parent()?.tagName() == "ul") {
+            listOf(PostInline.LineBreak, PostInline.Text("• ")) + parseInlineChildren(element)
+        } else parseInlineChildren(element)
         else -> parseInlineChildren(element)
     }
 

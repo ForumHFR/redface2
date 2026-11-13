@@ -57,13 +57,24 @@ class SettingsEditorShortcutTest {
             rows.single { it.searchable.id == "editor_shortcut_image_url" }.searchable.description)
         assertEquals("Éditeurs MP",
             rows.single { it.searchable.id == "editor_shortcut_image_selection" }.searchable.description)
+        assertEquals(listOf("Aucun", "Gras", "Italique", "Souligné", "Barré", "Lien", "Spoiler", "Puce",
+            "Citation", "Code", "Bloc fixé", "E-mail"), rows.take(12).map { it.searchable.title })
+        assertEquals("Insérer une puce [*] devant le texte sélectionné ou au curseur",
+            rows.single { it.searchable.id == "editor_shortcut_bullet" }.searchable.description)
+        assertEquals("Encadrer la sélection avec [email]…[/email] ou insérer les balises au curseur",
+            rows.single { it.searchable.id == "editor_shortcut_email" }.searchable.description)
         rows.filterNot { it.searchable.id in setOf("editor_shortcut_none", "editor_shortcut_image_url",
-            "editor_shortcut_image_selection") }.forEach { assertNull(it.searchable.description) }
+            "editor_shortcut_image_selection", "editor_shortcut_bullet", "editor_shortcut_email") }
+            .forEach { assertNull(it.searchable.description) }
         val searchable = catalogue.map { it.toSearchable() }
         assertEquals(rows.map { it.searchable.id }, filterSettingsSections(searchable, "raccourci")
             .flatMap { it.items }.map { it.id })
         assertTrue(filterSettingsSections(searchable, "smiley perso").flatMap { it.items }
             .any { it.id == "editor_shortcut_personal_smiley" })
+        listOf("puce" to "bullet", "e-mail" to "email").forEach { (query, id) ->
+            assertTrue(filterSettingsSections(searchable, query).flatMap { it.items }
+                .any { it.id == "editor_shortcut_$id" })
+        }
         assertEquals(rows.map { it.searchable.id }, filterSettingsSections(searchable, "raccourci de la barre")
             .flatMap { it.items }.map { it.id })
         rows.forEach { assertTrue("édition" !in it.searchable.keywords) }
@@ -105,6 +116,11 @@ class SettingsEditorShortcutTest {
             }
         }
         compose.onNodeWithText("Bleu").performScrollTo().assertIsSelected()
+        listOf("Puce" to EditorShortcut.BULLET, "E-mail" to EditorShortcut.EMAIL).forEach { (label, choice) ->
+            compose.onNodeWithText(label).performScrollTo().performClick()
+            assertEquals(SettingsIntent.SetEditorShortcut(choice), intents.last())
+        }
+        intents.clear()
         compose.onNodeWithText("Smiley perso").performScrollTo().performClick()
         assertEquals(listOf(SettingsIntent.SetEditorShortcut(EditorShortcut.PERSONAL_SMILEY)), intents)
         compose.runOnIdle { state.value = state.value.copy(editorShortcutError = true) }

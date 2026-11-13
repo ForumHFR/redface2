@@ -42,6 +42,7 @@ class SettingsEditorShortcutRoborazziTest {
             EditorShortcut.ORANGE, EditorShortcut.GREY),
         listOf(EditorShortcut.UPLOAD_IMAGE, EditorShortcut.IMAGE_URL,
             EditorShortcut.IMAGE_SELECTION, EditorShortcut.SEARCH_SMILEYS),
+        listOf(EditorShortcut.BULLET, EditorShortcut.EMAIL),
     )
 
     @Test fun `settings icons drawn swatches restrictions and write failure in both themes and scales`() {

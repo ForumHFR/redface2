@@ -92,6 +92,7 @@ class BbcodeContentParserTest {
         val paragraph = ast.blocks.single() as PostBlock.Paragraph
         val link = paragraph.inlines.single() as PostInline.Link
         assertEquals("mailto:a@b.c", link.url)
+        assertEquals(listOf(PostInline.Text("a@b.c")), link.children)
     }
 
     @Test
@@ -465,18 +466,15 @@ class BbcodeContentParserTest {
     }
 
     @Test
-    fun `bullet star is preserved as raw text without crashing`() {
-        // We don't model BBCode lists yet — keep [*] visible so users see what they typed.
+    fun `bullet star renders as a visible bullet without a closing tag`() {
         val ast = parser.parse("[*] item 1")
         val paragraph = ast.blocks.single() as PostBlock.Paragraph
-        assertTrue(paragraph.inlines.any { it is PostInline.Text && it.value.contains("[*]") })
+        assertEquals(listOf(PostInline.Text("•  item 1")), paragraph.inlines)
     }
 
     @Test
     fun `full list block survives the parser without crashing and stays readable`() {
-        // Phase 2B-B explicitly defers BBCode lists from the AST (cf. roadmap.md).
-        // The contract is : `[list]…[*]…[/list]` is forwarded verbatim into the
-        // output so the user reads what they typed instead of an empty paragraph.
+        // [list] is not an HFR toolbar tag: keep it visible while rendering standalone [*] markers.
         val ast = parser.parse("[list][*]a[*]b[/list]")
         assertNotNull(ast)
         val rendered = ast.blocks
@@ -486,7 +484,7 @@ class BbcodeContentParserTest {
             .joinToString(separator = "") { it.value }
         // Both items + their bullet markers must still be visible in the output.
         assertTrue("expected '[list]' to survive — rendered=$rendered", rendered.contains("[list]"))
-        assertTrue("expected '[*]a' to survive — rendered=$rendered", rendered.contains("[*]"))
+        assertTrue("expected bullet markers — rendered=$rendered", rendered.contains("•"))
         assertTrue("expected 'a' content to survive — rendered=$rendered", rendered.contains("a"))
         assertTrue("expected 'b' content to survive — rendered=$rendered", rendered.contains("b"))
         assertTrue("expected '[/list]' to survive — rendered=$rendered", rendered.contains("[/list]"))
