@@ -330,31 +330,32 @@ class PendingQuoteHandoffTest {
         editor.viewModelScope.cancel()
     }
 
+    // v0.7.8 ED-121/132: Q is independent of D; discard only consumes the selected offer.
     @Test
-    fun `discarding the offered draft preserves the new request and awaits storage before GET`() = runTest {
+    fun `discarding D after immediate delivery keeps Q content while its offer CAS finishes`() = runTest {
         val scenario = Scenario()
         scenario.drafts.preload(scenario.key, Draft("offered draft"))
         scenario.enqueue()
         val editor = scenario.editor(resumeSharedDraft = false)
         settleBody()
-        assertTrue(scenario.fetchedQuotes.isEmpty())
+        val delivered = "[quotemsg=101]quote[/quotemsg]\n"
+        assertEquals(listOf(101), scenario.fetchedQuotes)
+        assertNull(scenario.pending)
         val discardReturn = CompletableDeferred<Unit>()
         scenario.drafts.saveReturnGate = discardReturn
         editor.submit(PostEditorIntent.DraftDiscardRequested)
         syncBody()
-        assertEquals("", scenario.body)
-        assertEquals(scenario.request, scenario.pending)
-        assertTrue(scenario.fetchedQuotes.isEmpty())
+        assertEquals(delivered, scenario.body)
+        assertNull(scenario.pending)
         discardReturn.complete(Unit)
         settleBody()
-        assertEquals(listOf(101), scenario.fetchedQuotes)
-        assertNull(scenario.pending)
-        assertEquals("[quotemsg=101]quote[/quotemsg]\n", scenario.body)
+        assertEquals(delivered, editor.bodyFieldState.text.toString())
+        assertTrue(editor.state.value.draftOffers.isEmpty())
         scenario.noPost()
         editor.viewModelScope.cancel()
     }
 
-    // ED-52: the request is fetched after acceptance and compared by content, never by post number alone.
+    // ED-52/89 v0.7.8: restore deduplicates the already delivered intact scoped quote by content.
     @Test
     fun `accepting an offered draft that already holds the quote consumes it without a duplicate`() {
         acceptOfferedDraft(
@@ -367,7 +368,7 @@ class PendingQuoteHandoffTest {
     fun `accepting an offered draft with another portion of the post adds the delivered quote`() {
         acceptOfferedDraft(
             offered = "[quotemsg=101]stored[/quotemsg]\nbody",
-            expected = "[quotemsg=101]quote[/quotemsg]\n\n[quotemsg=101]stored[/quotemsg]\nbody",
+            expected = "[quotemsg=101]stored[/quotemsg]\nbody\n\n[quotemsg=101]quote[/quotemsg]",
         )
     }
 
@@ -400,18 +401,21 @@ class PendingQuoteHandoffTest {
         val scenario = Scenario()
         scenario.drafts.preload(scenario.key, Draft("offered body"))
         scenario.enqueue()
-        var editor = scenario.editor(resumeSharedDraft = false)
+        val saved = SavedStateHandle()
+        var editor = scenario.editor(saved, resumeSharedDraft = false)
         settleBody()
         assertEquals("offered body", editor.state.value.restorableDraft)
+        val frozen = snapshot(saved)
         editor.viewModelScope.cancel()
-        editor = scenario.editor(resumeSharedDraft = false)
+        editor = scenario.editor(SavedStateHandle(frozen), resumeSharedDraft = false)
         settleBody()
         assertEquals("offered body", editor.state.value.restorableDraft)
-        assertEquals(scenario.request, scenario.pending)
-        assertTrue(scenario.fetchedQuotes.isEmpty())
+        assertNull(scenario.pending)
+        assertEquals(listOf(101), scenario.fetchedQuotes)
         editor.submit(if (discard) PostEditorIntent.DraftDiscardRequested else PostEditorIntent.DraftRestoreRequested)
         settleBody()
-        val expected = "[quotemsg=101]quote[/quotemsg]\n" + if (discard) "" else "\noffered body"
+        val expected = if (discard) "[quotemsg=101]quote[/quotemsg]\n"
+            else "offered body\n\n[quotemsg=101]quote[/quotemsg]"
         assertEquals(expected, scenario.body)
         assertNull(scenario.pending)
         scenario.noPost()
@@ -755,10 +759,12 @@ class PendingQuoteHandoffTest {
         sheet.viewModelScope.cancel()
         val editor = scenario.editor(resumeSharedDraft = false)
         settleBody()
-        assertEquals(scenario.request, scenario.pending)
-        assertTrue(scenario.fetchedQuotes.isEmpty()) // PR 1 retains the decision-before-fetch contract.
-        assertEquals(listOf("offered D"), scenario.drafts.loadOffers("tester", scenario.key).map { it.draft.body })
-        assertEquals("typed C before GET", editor.state.value.restorableDraft)
+        assertNull(scenario.pending)
+        assertEquals(listOf(101), scenario.fetchedQuotes) // ED-132 v0.7.8: full editor activates Q immediately.
+        assertEquals(listOf("offered D", "typed C before GET"),
+            scenario.drafts.loadOffers("tester", scenario.key).map { it.draft.body }.sorted())
+        assertEquals(listOf("offered D", "typed C before GET"),
+            editor.state.value.draftOffers.map { it.draft.body }.sorted())
         scenario.noPost()
     }
 

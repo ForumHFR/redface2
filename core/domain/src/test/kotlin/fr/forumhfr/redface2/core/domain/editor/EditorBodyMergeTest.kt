@@ -11,6 +11,13 @@ class EditorBodyMergeTest {
     private val q1 = "[quotemsg=101]one[/quotemsg]"
     private val q2 = "[quotemsg=202]two[/quotemsg]"
 
+    @Test fun `delivery filter preserves whole batch separators for the durable quote-only fingerprint`() {
+        val batch = "\n$q1\n\n$q2\n"
+        assertEquals(FilteredEditorQuotes(batch, 0), filterEditorQuotes(batch, "typing"))
+        assertEquals(FilteredEditorQuotes(q2, 1), filterEditorQuotes(batch, q1))
+        assertEquals(FilteredEditorQuotes(batch, 0), filterEditorQuotes(batch, q1.replace("one", "edited")))
+    }
+
     @Test
     fun `restore orders D then quotes then typing made during GET`() {
         val body = "$q1\n\ntext typed during GET"
@@ -35,6 +42,18 @@ class EditorBodyMergeTest {
             provenance = state).body)
         assertEquals("D\n\n$q2\n\ntyped", mergeEditorBody("D", "$q2\n\ntyped", provenance = state).body)
         assertEquals("D\n\ntyped", mergeEditorBody("D", "typed", provenance = state).body)
+    }
+
+    @Test
+    fun `restore keeps the delivered order whatever older evidence of the same posts says - ED89`() {
+        val batch = "$q1\n\n$q2"
+        // Post 2 was quoted alone earlier, or the same posts in the other order: evidence is never dropped.
+        listOf(q2, "$q2\n\n$q1").forEach { older ->
+            val proof = EditorBodyProvenance().delivered(scope, older).delivered(scope, batch, batch)
+            assertEquals(older, "D\n\n$batch", mergeEditorBody("D", batch, provenance = proof).body)
+            assertEquals(older, "D\n\n$batch\n\ntyped",
+                mergeEditorBody("D", "$batch\n\ntyped", provenance = proof).body)
+        }
     }
 
     @Test
@@ -66,6 +85,64 @@ class EditorBodyMergeTest {
         assertEquals("D\n\n$q1\n\ntyped", insertEditorQuotes(restored.body, q1, restored.provenance).body)
         val edited = restored.provenance.rebase(restored.body, "Draft\n\ntyped more")
         assertEquals("Draft\n\n$q1\n\ntyped more", insertEditorQuotes("Draft\n\ntyped more", q1, edited).body)
+    }
+
+    @Test
+    fun `typing appended after a restore into an empty field stays behind a later quote - ED89`() {
+        val restored = mergeEditorBody("D", "")
+        assertEquals("D", restored.body)
+        val typed = "D\n\ntexte"
+        val rebased = restored.provenance.rebase(restored.body, typed)
+        assertEquals("D".length, rebased.draftEnd)
+        assertEquals("D".length, rebased.quotesEnd)
+        assertEquals("D\n\n$q1\n\ntexte", insertEditorQuotes(typed, q1, rebased).body)
+        // Same boundary rule after a delivered quote: later typing never moves the next quote behind it.
+        val delivered = insertEditorQuotes(typed, q1, rebased)
+        val more = delivered.body + " encore"
+        assertEquals("D\n\n$q1\n\n$q2\n\ntexte encore",
+            insertEditorQuotes(more, q2, delivered.provenance.rebase(delivered.body, more)).body)
+    }
+
+    @Test
+    fun `an insertion exactly at the boundary is typing with or without text after it - ED89`() {
+        // Without a suffix: appended to a field holding only the restored D.
+        val alone = mergeEditorBody("D", "")
+        val appended = alone.provenance.rebase(alone.body, "D more")
+        assertEquals("D".length, appended.draftEnd)
+        assertEquals("D".length, appended.quotesEnd)
+        // With an intact suffix: the same insertion in front of older typing follows the same rule.
+        val restored = mergeEditorBody("D", "typed")
+        val inserted = "D more\n\ntyped"
+        val rebased = restored.provenance.rebase(restored.body, inserted)
+        assertEquals("D".length, rebased.draftEnd)
+        assertEquals("D".length, rebased.quotesEnd)
+        val delivered = insertEditorQuotes(inserted, q1, rebased).body
+        assertTrue(delivered.startsWith("D\n\n$q1"))
+        assertTrue(delivered.endsWith("typed"))
+        // After delivered quotes too: typing at the end of the quotes stays behind the next quote.
+        val quoted = insertEditorQuotes(restored.body, q1, restored.provenance)
+        val typedAtQuotesEnd = quoted.body.replace("$q1\n\ntyped", "$q1 aside\n\ntyped")
+        val moved = quoted.provenance.rebase(quoted.body, typedAtQuotesEnd)
+        assertEquals("D\n\n$q1".length, moved.quotesEnd)
+        assertTrue(insertEditorQuotes(typedAtQuotesEnd, q2, moved).body.startsWith("D\n\n$q1\n\n$q2"))
+    }
+
+    @Test
+    fun `an offer identical to the field is hidden without hiding or deleting the others - ED121`() {
+        val same = EditorDraftStore.DraftOffer("a", 1, EditorDraftStore.Draft("same", updatedAt = 2))
+        val other = EditorDraftStore.DraftOffer("b", 1, EditorDraftStore.Draft("other", updatedAt = 1))
+        val offers = listOf(same, other)
+        val none = emptyList<EditorDraftStore.DraftOffer>()
+        assertEquals(listOf(other), offers.visibleOver("same"))
+        // The field differs again: the hidden offer is back, it was never removed.
+        assertEquals(offers, offers.visibleOver("same, edited"))
+        assertEquals(listOf(other) to "other", narrowDraftOffers(offers, "same", "same"))
+        assertEquals(none to null, narrowDraftOffers(listOf(same), "same", "same"))
+        // A decision in flight (nothing shown) is never shown again by a hydration.
+        assertEquals(listOf(other) to null, narrowDraftOffers(offers, null, "same"))
+        // Single legacy offer without a list.
+        assertEquals(none to "kept", narrowDraftOffers(emptyList(), "kept", "typed"))
+        assertEquals(none to null, narrowDraftOffers(emptyList(), "kept", "kept"))
     }
 
     @Test
@@ -139,21 +216,21 @@ class EditorBodyMergeTest {
     }
 
     @Test
-    fun `delivery evidence keeps only last batch and original blocks still present in C`() {
+    fun `delivery evidence survives deleted blocks and compacts only repeated exact requests`() {
         val modified = q1.replace("one", "edited")
         val q3 = "[quotemsg=303]three[/quotemsg]"
         val q4 = "[quotemsg=404]four[/quotemsg]"
         var proof = EditorBodyProvenance().delivered(scope, q1)
         proof = proof.delivered(scope, q2, "$q1\n\n$q2\n\ntyped")
         proof = proof.delivered(scope, q3, "$modified\n\n$q3\n\ntyped")
-        assertEquals(listOf(q1, q3), proof.deliveries.map { it.body })
+        assertEquals(listOf(q1, q2, q3), proof.deliveries.map { it.body })
         assertEquals("D\n\n$modified\n\n$q3\n\ntyped",
             mergeEditorBody("D", "$modified\n\n$q3\n\ntyped", provenance = proof).body)
-        // Removing old blocks and repeated deliveries cannot accumulate historical bodies.
+        // ED-89: removed blocks may return. Repeating an exact request does not grow its proof.
         repeat(100) { proof = proof.delivered(scope, q4, q4) }
-        assertEquals(listOf(q4), proof.deliveries.map { it.body })
+        assertEquals(listOf(q1, q2, q3, q4), proof.deliveries.map { it.body })
         proof = proof.rebase(q4, "typed only")
-        assertEquals(listOf(q4), proof.deliveries.map { it.body })
+        assertEquals(listOf(q1, q2, q3, q4), proof.deliveries.map { it.body })
         assertTrue(proof.isQuoteOnly(q4 + "\n  "))
         assertFalse(proof.isQuoteOnly(q3))
     }

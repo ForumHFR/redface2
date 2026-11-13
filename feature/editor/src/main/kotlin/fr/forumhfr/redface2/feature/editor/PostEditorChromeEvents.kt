@@ -28,8 +28,6 @@ internal class PostEditorChromeEvents : EditorHostEvents {
     ))
     override val state get() = collector.state
     override val visibleEvent get() = collector.visibleEvent
-    private var pendingQuoteEvent: EventKey? = null
-    private var quoteAwaitingDecision = false
     private var readFailed = false
     private var projection = EditorEventProjection(state.session)
 
@@ -38,8 +36,6 @@ internal class PostEditorChromeEvents : EditorHostEvents {
     fun open(session: EditorSession) {
         if (session != state.session) {
             projection = EditorEventProjection(session)
-            pendingQuoteEvent = null
-            quoteAwaitingDecision = false
         }
         collector.open(session)
     }
@@ -67,34 +63,10 @@ internal class PostEditorChromeEvents : EditorHostEvents {
                     error != null && error.afterFormLoaded(current.pendingQuotes.isEmpty()) == null
             }.forEach { collector.dispatch(EditorEventInput.Acknowledge(it.key)) }
         }
-        observePendingQuote(current)
         if (current.legacyQuoteRequestDropped && !previous.legacyQuoteRequestDropped) {
             collector.information(EditorText(R.string.editor_chrome_legacy_quote_summary),
                 EditorText(R.string.editor_legacy_quote_dropped))
         }
-    }
-
-    // ED-44 can acknowledge the notice while its open offer still awaits a decision.
-    fun isPendingQuoteEvent(key: EventKey): Boolean = key == pendingQuoteEvent
-
-    fun acknowledgePendingQuote() {
-        pendingQuoteEvent?.let { collector.dispatch(EditorEventInput.Acknowledge(it)) }
-    }
-
-    private fun observePendingQuote(current: PostEditorState) {
-        val waiting = current.isQuoteAwaitingDraftDecision && state.session.owner != null
-        if (waiting && !quoteAwaitingDecision) {
-            // ED-43: waiting for a decision is Information, below errors and active operations.
-            // The next gesture or the accessible five-second timeout acknowledges only this notice;
-            // ED-132 also retires its exact key when the offer ends. Q still needs a draft decision.
-            // The shared event control announces Information with a polite live region (ED-95).
-            pendingQuoteEvent = collector.information(EditorText(R.string.editor_quote_pending_event),
-                EditorText(R.string.editor_quote_pending), timeoutMillis = 5_000)
-        } else if (!waiting) {
-            pendingQuoteEvent?.let { collector.dispatch(EditorEventInput.Acknowledge(it)) }
-            pendingQuoteEvent = null
-        }
-        quoteAwaitingDecision = waiting
     }
 
     private fun PostEditorState.eventsProjection() = EditorEventProjection(

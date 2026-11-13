@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.messages
 
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.DraftOffer
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.PostContent
@@ -54,8 +55,11 @@ data class PrivateMessageComposeUiState(
      * [restorableRecipients] is the private encoded checkpoint (or a historical CSV), never POST data.
      */
     val restorableDraft: String? = null,
+    val draftOffers: List<DraftOffer> = emptyList(),
     val restorableSubject: String? = null,
     val restorableRecipients: String? = null,
+    /** ED-10/85: a close could not save the fields; the dialog asks before anything is abandoned. */
+    val showUnsavedCloseDialog: Boolean = false,
     /**
      * #459 — `true` while an image upload (single or batch) is in flight: toolbar spinner + body
      * field locked (`readOnly`) so the caret cannot move between two programmatic `[img]` insertions.

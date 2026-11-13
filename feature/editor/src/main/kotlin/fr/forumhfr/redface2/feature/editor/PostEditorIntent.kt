@@ -11,6 +11,10 @@ import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
  * surface ; quote / edit / create-topic surface in #146 / #147 / #148 / #149.
  */
 sealed interface PostEditorIntent {
+    /** ED-40: « Restaurer » on the offered version chosen in the sheet's list, by its identity. */
+    data class DraftOfferRestored(val id: String) : PostEditorIntent
+    /** ED-121: « Ignorer » removes only the chosen offered version; the field and Q are untouched. */
+    data class DraftOfferDiscarded(val id: String) : PostEditorIntent
     data object Started : PostEditorIntent
     /** Lifecycle ON_STOP: persist without closing the editor or cancelling an upload. */
     data object Stopped : PostEditorIntent
@@ -112,6 +116,12 @@ sealed interface PostEditorIntent {
      * (a plain pop would cancel the debounce with the ViewModel).
      */
     data object CloseRequested : PostEditorIntent
+
+    /** "Rester": the unsaved-close dialog is dismissed, the editor stays open with its field. */
+    data object UnsavedCloseDismissed : PostEditorIntent
+
+    /** "Quitter sans enregistrer": the explicit abandonment of what could not be saved. */
+    data object UnsavedCloseConfirmed : PostEditorIntent
 }
 
 /**

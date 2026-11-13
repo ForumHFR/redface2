@@ -107,8 +107,8 @@ fun EditorActionBar(
     val focus = rememberEditorBarFocus(mode, masked = armed || event != null)
     // Bar gestures settle focus themselves; a Back reduced by the host is restored on the transition.
     val own = actions.copy(onGesture = focus.ownGestures(actions.onGesture))
-    fun open(action: () -> Unit, opensOnInformation: (EventKey) -> Boolean = { false }) {
-        if (!consumeEditorBarInformation(event, actions.onEvent, opensOnInformation)) {
+    fun open(action: () -> Unit) {
+        if (!consumeEditorBarInformation(event, actions.onEvent)) {
             own.onGesture(EditorBarGesture.OpenSurface)
             action()
         }
@@ -130,7 +130,7 @@ fun EditorActionBar(
                 } else external(actions.onPreview)
             },
             previewVisible, controlsEnabled, visible, compactHeight, external,
-            onStatus = { open(it.onClick, it.opensOnInformation) })
+            onStatus = { open(it.onClick) })
     }
     val format: @Composable () -> Unit = {
         val expanded = mode == EditorBarMode.Format
@@ -200,9 +200,7 @@ private fun editorBarSubmitState(
 internal fun consumeEditorBarInformation(
     event: EditorEvent?,
     onEvent: (EventKey, EditorEventAction) -> Unit,
-    opensOnInformation: (EventKey) -> Boolean = { false },
 ): Boolean {
-    if (event != null && opensOnInformation(event.key)) return false
     val information = event?.content is EditorEventContent.Information ||
         (event?.content as? EditorEventContent.Problem)?.error?.errorClass == EditorErrorClass.Information
     if (information && event != null) onEvent(event.key, EditorEventAction.Dismiss)
@@ -269,7 +267,7 @@ private fun EditorBarFixedSlot(
             val status = statuses[if (fixed == EditorFixedSlot.FirstStatus) 0 else 1]
             EditorStatusIcon(status?.iconRes ?: R.drawable.ic_ms_restore_page, status?.label.orEmpty(),
                 { status?.let(onStatus) }, Modifier.testTag("editor-bar-${fixed.name}"),
-                badgeCount = status?.badgeCount,
+                badgeCount = status?.badgeCount, showDot = status?.showDot == true,
                 enabled = enabled && status?.enabled == true, visible = visible && status != null,
                 compactHeight = compactHeight)
         }

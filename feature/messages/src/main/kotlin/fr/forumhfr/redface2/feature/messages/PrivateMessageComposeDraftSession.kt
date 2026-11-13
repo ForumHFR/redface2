@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.messages
 
+import fr.forumhfr.redface2.core.domain.editor.mergeEditorBody
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.text.input.TextFieldState
@@ -123,6 +124,7 @@ internal class PrivateMessageComposeDraftSession(
         if (shouldOffer && untouched && !ignored) {
             updateState {
                 it.copy(restorableDraft = draft.body, restorableSubject = draft.subject,
+                    draftOffers = listOf(EditorDraftStore.DraftOffer.from(EditorDraftStore.DraftEntry(draft, 0L))),
                     restorableRecipients = draft.recipients)
             }
         }
@@ -191,7 +193,7 @@ internal class PrivateMessageComposeDraftSession(
         val offered = snapshot.restorableDraft ?: return
         val live = bodyFieldState.text.toString()
         if (offered.isNotBlank()) {
-            replaceBody(if (live.isBlank() || live == offered) offered else live.trimEnd() + "\n\n" + offered)
+            replaceBody(mergeEditorBody(offered, live).body)
             decide(EditorSessionField.Body)
         }
         val recipients = EditorRecipientState.decode(snapshot.restorableRecipients)
@@ -222,6 +224,28 @@ internal class PrivateMessageComposeDraftSession(
         if (unreadableRecipients || !restoration.canCheckpoint(snapshot.bodyKnown, undecided)) return null
         return EditorDraftStore.Draft(body, snapshot.subject.ifBlank { null }, snapshot.recipientState.encode(),
             isPrivate = true)
+    }
+
+    /**
+     * ED-10: the awaited last save of a close. False when recipients, subject or body hold content
+     * that is not durable, so the caller asks before abandoning it. Recipients compare decoded: a
+     * historical CSV row, an absent row and the envelope written today can all name the same list.
+     */
+    suspend fun flushForClose(): Boolean = submission.flushForClose(
+        live = {
+            val fields = readState()
+            EditorDraftStore.Draft(bodyFieldState.text.toString(), fields.subject, fields.recipientState.encode(),
+                isPrivate = true)
+        },
+        recipients = ::decodedRecipients,
+        snapshot = ::draftSnapshot,
+    )
+
+    /** An unreadable value only equals itself; the stored format is never rewritten here. */
+    private fun decodedRecipients(stored: String): Any = try {
+        EditorRecipientState.decode(stored)
+    } catch (_: IOException) {
+        stored
     }
 
     private fun replaceBody(body: String) {

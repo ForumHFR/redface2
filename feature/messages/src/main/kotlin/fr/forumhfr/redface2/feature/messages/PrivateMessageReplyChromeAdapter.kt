@@ -39,6 +39,7 @@ internal class PrivateMessageReplyChromeAdapter(
         firstStatus = if (source().restorableDraft == null) null else EditorAppBarStatus(
             UiR.drawable.ic_ms_restore_page, stringResource(UiR.string.editor_status_restore),
             { open(PrivateMessageReplyChromeSurface.Restore) }, enabled = state.scaffold.controlsEnabled,
+            showDot = true,
         ),
         secondStatus = if (!source().canManageRecipients) null else EditorAppBarStatus(
             UiR.drawable.ic_editor_recipients,
@@ -88,6 +89,14 @@ internal class PrivateMessageReplyChromeAdapter(
         detail?.let { closeDetails(it.key) }
         closeSurface()
     }
+    fun restoreOffer(id: String) {
+        if (state.restoreEnabled) { actions.restoreOffer(id); closeDraftOffer() }
+    }
+    fun discardOffer(id: String) {
+        if (state.scaffold.controlsEnabled) { actions.discardOffer(id); closeDraftOffer() }
+    }
+    fun resumeQuote() { if (source().hasDormantQuote) actions.resumeQuote() }
+    fun ignoreQuote() { if (source().canIgnorePendingQuote) actions.ignoreQuote() }
     fun restoreDraft() {
         if (state.restoreEnabled) { actions.restoreDraft(); closeDraftOffer() }
     }

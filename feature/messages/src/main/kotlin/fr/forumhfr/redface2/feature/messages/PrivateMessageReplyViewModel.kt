@@ -23,7 +23,9 @@ import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDelivery
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.EditorSession
 import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionBinding
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionCallbacks
@@ -38,13 +40,15 @@ import fr.forumhfr.redface2.core.domain.smiley.SmileyRepository
 import fr.forumhfr.redface2.core.domain.upload.ImageUploadReader
 import fr.forumhfr.redface2.core.domain.upload.UploadFailureDiagnostics
 import fr.forumhfr.redface2.core.domain.upload.UploadRepository
+import fr.forumhfr.redface2.core.domain.write.MaterializedPrivateMessageReplyForm
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageReplyQuoteMaterializer
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
-import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
+import fr.forumhfr.redface2.core.model.write.QuoteLocator
+import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.PrivateMessageReplyContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
@@ -111,7 +115,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     smileyRepository: SmileyRepository,
     hfrFavoriteSmileyRepository: HfrFavoriteSmileyRepository,
     smileyLocalCollections: SmileyLocalCollections,
-    savedStateHandle: SavedStateHandle = SavedStateHandle(),
+    private val savedStateHandle: SavedStateHandle = SavedStateHandle(),
 ) : ViewModel() {
 
     /** Body and IME state belong to this ViewModel, never to a Bundle saver. */
@@ -142,7 +146,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     private val context = PrivateMessageReplyContext(
         threadId = request.threadId,
         page = request.page.coerceAtLeast(1),
-        quote = request.quote,
+        quote = null,
     )
     private val quoteMaterializer = PrivateMessageReplyQuoteMaterializer(repository)
 
@@ -188,7 +192,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     private val draftKey: String = EditorDraftKey.mpReply(request.threadId)
 
     /** #405 — debounced autosave coroutine ; relaunched (cancelling the previous) on each edit. */
-    private val submission = EditorSubmissionBinding(
+    private val submission: EditorSubmissionBinding<PrivateMessageReplyEffect, EditorError> = EditorSubmissionBinding(
         environment = EditorSubmissionEnvironment(viewModelScope, clock, diagnostics),
         drafts = EditorDraftSession(draftStore, draftKey),
         callbacks = EditorSubmissionCallbacks<PrivateMessageReplyEffect, EditorError>(
@@ -205,7 +209,10 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             error = { value -> updateState { it.copy(submitError = value) } },
             success = { value -> _effects.trySend(value) },
             clearError = { error -> updateState { it.copy(submitError = it.submitError.takeUnless { it == error }) } },
-            durableWriteSucceeded = { editorEvents.durableWriteSucceeded() },
+            durableWriteSucceeded = {
+                editorEvents.durableWriteSucceeded()
+                draftSession.refreshOffers()
+            },
         ),
         errors = EditorSubmissionErrors(
             uncertain = EditorErrors.uncertain(EditorErrorSurface.MessageReply),
@@ -218,7 +225,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         ),
     )
 
-    private val draftSession = PrivateMessageReplyDraftSession(
+    private val draftSession: PrivateMessageReplyDraftSession = PrivateMessageReplyDraftSession(
         saved = savedStateHandle, submission = submission, scope = viewModelScope, draftKey = draftKey,
         state = PrivateMessageDraftState(read = { _state.value }, update = ::updateState),
         clearToolSelection = { chromeMemory.host.focus.clearToolSelection() },
@@ -261,6 +268,10 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         return submission.tryDisarm()
     }
 
+    // Declared before `init`: a delivery can run synchronously during construction.
+    private var deliveredRequest: PendingInlineQuoteRequest? = null
+    private var deliveredBody = ""
+
     init {
         observeBody()
         observePreview()
@@ -298,7 +309,8 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                     draftSession.invalidate()
                     updateState {
                         it.copy(formAvailable = false, isUploading = false, uploadProgress = null,
-                            restorableDraft = null, conversationTitle = "", canManageRecipients = false,
+                            restorableDraft = null, draftOffers = emptyList(), conversationTitle = "",
+                            canManageRecipients = false,
                             recipients = emptyList(), recipientsDirty = false)
                     }
                 }
@@ -308,6 +320,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         }
         viewModelScope.launch {
             draftSession.restore()
+            refreshQuoteState()
             loadForm()
         }
     }
@@ -341,7 +354,25 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         }
     }
 
-    fun retryFormLoad() = loadForm()
+    fun retryFormLoad() {
+        viewModelScope.launch {
+            if (!submission.isInitialized && !submission.drafts.invalidated) draftSession.restore()
+            draftSession.reconcileAfterConflict()
+            refreshQuoteState()
+            loadForm()
+        }
+    }
+
+    private fun refreshQuoteState() {
+        val pending = submission.drafts.pendingInlineQuoteRequest != null
+        val unreadable = submission.drafts.hasUnreadableInlineQuoteRequest
+        val dormant = pending && _state.value.submission is EditorSubmissionState.Uncertain
+        val recovery = unreadable || dormant
+        updateState { it.copy(quotePending = pending || unreadable, unreadableQuoteRequest = unreadable,
+            quoteStorageUnavailable = !submission.isInitialized,
+            formError = it.formError || recovery, isLoadingForm = if (recovery) false else it.isLoadingForm,
+            quoteFetchFailures = if (pending) savedStateHandle[QUOTE_FAILURES_KEY] ?: 0 else 0) }
+    }
 
     /** #803 pattern — one-shot latch : a committed close is never re-emitted. */
     private var closeRequested = false
@@ -353,31 +384,43 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
      * after typing (system back or the header's back arrow) cancelled the debounce with the
      * ViewModel and silently dropped the tail of the PRIVATE draft.
      *
-     * Two guards (gate #803) :
+     * Three guards (gate #803 ; ED-10) :
      * - INERT while a POST is in flight — popping would cancel the submit with the viewModelScope
      *   and leave the server state unknown ; on failure `isSubmitting` drops and the back works
      *   again, on success SubmitSucceeded pops anyway ;
      * - ONE-SHOT — a second close racing the first CloseCommitted must not emit a second effect
-     *   (the pop is blind : a second one would remove the screen BELOW).
+     *   (the pop is blind : a second one would remove the screen BELOW) ;
+     * - NEVER SILENT — when the field cannot be saved (delivered quote not durable, or last write
+     *   refused) the reply stays open and asks. The latch is released so a later close retries the
+     *   save ; only "Quitter sans enregistrer" abandons. A storage failure therefore never leaves
+     *   the screen unclosable. CancellationException propagates (scope teardown is not an error).
      */
     fun onCloseRequested() {
         if (submission.blocksClose || closeRequested) return
         submission.disarm()
         closeRequested = true
         viewModelScope.launch {
-            // The close must NEVER stay blocked on a failing flush (Room is not contractually
-            // non-throwing — disk full, corrupted store) : the one-shot latch is already set, so
-            // a swallowed failure here only costs the last <750 ms of typing (the debounced
-            // autosave already persisted the rest) while a rethrow would leave the screen
-            // unclosable. CancellationException still propagates (scope teardown is not an error).
-            try {
-                submission.flush(draftSession::draftSnapshot)
-            } catch (e: CancellationException) {
-                throw e
+            val saved = try {
+                draftSession.flushForClose()
             } catch (_: IOException) {
-                // Best effort — the previous debounced write is what remains.
+                false
             }
-            _effects.send(PrivateMessageReplyEffect.CloseCommitted)
+            if (saved) {
+                _effects.send(PrivateMessageReplyEffect.CloseCommitted)
+            } else {
+                closeRequested = false
+                updateState { it.copy(showUnsavedCloseDialog = true) }
+            }
+        }
+    }
+
+    /** The informed choice of the unsaved-close dialog; leaving pops exactly once, without a write. */
+    fun onUnsavedCloseDecided(leave: Boolean) {
+        if (!_state.value.showUnsavedCloseDialog) return
+        updateState { it.copy(showUnsavedCloseDialog = false) }
+        if (leave && !closeRequested) {
+            closeRequested = true
+            _effects.trySend(PrivateMessageReplyEffect.CloseCommitted)
         }
     }
 
@@ -385,21 +428,43 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     fun onStopped() = draftSession.onStopped()
     suspend fun restoreBodyScroll() = draftSession.restoreBodyScroll()
 
-    fun onDraftRestoreRequested() {
-        if (_state.value.isLoadingForm || !acceptMutation(blockDuringUpload = true)) return
-        draftSession.restoreOfferedDraft()
+    fun onDraftRestoreRequested(offerId: String? = null) {
+        if (!acceptMutation(blockDuringUpload = true)) return
+        draftSession.restoreOfferedDraft(offerId)
     }
 
-    fun onDraftDiscardRequested() {
+    fun onDraftDiscardRequested(offerId: String? = null) {
         if (!acceptMutation()) return
-        draftSession.discardOfferedDraft()
+        draftSession.discardOfferedDraft(offerId)
+    }
+
+
+    fun onPendingQuoteResumed() {
+        if (!_state.value.hasDormantQuote || !acceptMutation()) return
+        submission.acknowledge { loadForm() }
+    }
+
+    fun onPendingQuoteIgnored() {
+        if (!_state.value.canIgnorePendingQuote || !acceptMutation()) return
+        viewModelScope.launch {
+            if (draftSession.ignoreQuote()) {
+                savedStateHandle.remove<Int>(QUOTE_FAILURES_KEY)
+                updateState { it.copy(quotePending = false, quoteFetchFailures = 0, quoteStorageUnavailable = false) }
+                if (!submission.isInitialized) draftSession.restore()
+                loadForm()
+            }
+        }
     }
 
     private fun loadForm() {
         if (!submission.isInitialized) return
+        val pending = submission.drafts.pendingInlineQuoteRequest
+        if (pending != null && _state.value.submission is EditorSubmissionState.Uncertain) return
         formJob?.cancel()
         val favoriteStamp = smileyPicker.favoriteFormStamp()
         updateState { it.copy(isLoadingForm = true, formError = false) }
+        val opening = submission.session
+        updateState { it.copy(quotePending = pending != null) }
         formJob = viewModelScope.launch {
             try {
                 // #618 — when the user came specifically to MANAGE recipients, the form MUST be the
@@ -407,25 +472,11 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                 // fallback (no newdest → no member editor → silently lands on a plain composer). A
                 // failed message.php GET then surfaces as a form error (retry) rather than a dead end.
                 val materialized = quoteMaterializer.fetchFormWithQuotes(
-                    context = context,
-                    selections = request.initialQuotes,
+                    context = if (pending != null) context else loadedSubmitContext ?: context,
+                    selections = pending?.let(::pendingSelections).orEmpty(),
                     allowEmbeddedFallback = !request.openRecipientManager,
                 )
-                if (!submission.isInitialized) return@launch
-                val form = materialized.form
-                if (form.isAnonymous) {
-                    // Session vanished between opening the thread and replying — treat like a form
-                    // error so the user re-authenticates (the reply route is only reachable while
-                    // authenticated, so this is rare).
-                    loadedForm = null
-                    loadedSubmitContext = null
-                    updateState { it.copy(isLoadingForm = false, formAvailable = false, formError = true) }
-                    return@launch
-                }
-                loadedForm = form
-                smileyPicker.refreshFavorites(favoriteStamp)
-                loadedSubmitContext = materialized.submitContext
-                applyFormHydration(form)
+                acceptLoadedForm(materialized, pending, opening, favoriteStamp)
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (_: IOException) {
@@ -438,69 +489,51 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         }
     }
 
-    private fun PrivateMessageReplyUiState.withLoadedForm(form: ReplyForm): PrivateMessageReplyUiState {
-        // Body hydration is already applied outside this state update. A silent refetch
-        // refreshes only the form metadata, options and unchanged recipient list below.
-        if (this@PrivateMessageReplyViewModel.submission.blocksMutation) return copy(isLoadingForm = false)
-        val hydrated = this
-        // HFR's private "quick reply" form carries the per-post options as plain hidden
-        // inputs (e.g. `signature=1`), not checkboxes — so `ReplyForm.options` (read from
-        // `checked` attributes) is all-false here. Hydrate from the hidden fields too,
-        // OR'ing with the checkbox view, so the user keeps HFR's default (signature on).
-        //
-        // Hydrate ONLY on the first successful load: a silent refetch after an expired
-        // `hash_check` (InvalidHashCheck) must not reset a toggle the user changed in
-        // between — mirror the post editor's `optionsHydratedFromForm` guard.
-        val hydrateOptions = !hydrated.optionsHydratedFromForm
-        return hydrated.copy(
-            isLoadingForm = false,
-            formAvailable = true,
-            conversationTitle = form.sujet,
-            formError = false,
-            // InvalidForm here is a submission preparation failure, never a failed GET (ED-44).
-            // A GET clears neither submitError nor its event. Masquer retires the event; only an explicit Masquer of
-            // the bound uncertainty also acknowledges its attempt durably, which then clears submitError (ED-170),
-            // and an explicit Masquer of a failed attempt write clears it locally, without storage.
-            signatureEnabled = if (hydrateOptions) {
-                form.options.signatureEnabled || form.hiddenFields["signature"] == "1"
-            } else {
-                hydrated.signatureEnabled
-            },
-            smileyDisabled = if (hydrateOptions) {
-                form.options.smileyDisabled || form.hiddenFields["smiley"] == "1"
-            } else {
-                hydrated.smileyDisabled
-            },
-            emailNotificationEnabled = if (hydrateOptions) {
-                form.options.emailNotificationEnabled || form.hiddenFields["emaill"] == "1"
-            } else {
-                hydrated.emailNotificationEnabled
-            },
-            optionsHydratedFromForm = true,
-            // #606 — owner-only member editor. Hydrate the working list from HFR's
-            // `newdest` CSV on the FIRST load only : a silent refetch after an expired
-            // hash_check (InvalidHashCheck) must not clobber a member the user added /
-            // removed in between — same `hydrateOptions` guard as the option toggles.
-            canManageRecipients = form.canManageRecipients,
-            // Re-hydrate from the freshly-parsed `newdest` on the first load AND on any
-            // silent refetch where the user has NOT edited the list : that way a
-            // concurrent membership change made elsewhere is picked up, and — since a
-            // non-dirty submit sends `recipientsOverride = null` — the original `newdest`
-            // is still forwarded verbatim. Only an in-progress edit (`recipientsDirty`)
-            // is preserved across the refetch.
-            recipients = if (hydrateOptions || !hydrated.recipientsDirty) {
-                RecipientCsv.parse(form.manageableRecipients)
-            } else {
-                hydrated.recipients
-            },
-        )
+    private suspend fun acceptLoadedForm(
+        materialized: MaterializedPrivateMessageReplyForm,
+        pending: PendingInlineQuoteRequest?,
+        opening: EditorSession,
+        favoriteStamp: SmileyPickerController.FavoriteFormStamp,
+    ) {
+        if (!submission.isInitialized || submission.session != opening) return
+        val form = materialized.form
+        if (form.isAnonymous) {
+            formLoadFailed()
+            return
+        }
+        loadedForm = form
+        smileyPicker.refreshFavorites(favoriteStamp)
+        loadedSubmitContext = materialized.submitContext
+        if (pending == null) applyFormHydration(form) else deliverQuote(form, pending, opening)
+    }
+
+    private suspend fun deliverQuote(form: ReplyForm, pending: PendingInlineQuoteRequest, opening: EditorSession) {
+        uploadJob?.join()
+        draftSession.awaitOfferDecision()
+        submission.flush(null)
+        if (!submission.isInitialized || submission.session != opening) return
+        if (deliveredRequest != pending) {
+            draftSession.insertQuote(form.initialContent)
+            deliveredRequest = pending
+            deliveredBody = form.initialContent
+        }
+        val committed = draftSession.commitQuote(pending, deliveredBody)
+        if (!submission.isInitialized || submission.session != opening) return
+        if (committed is EditorDraftStore.StoreWriteResult.Written) {
+            savedStateHandle.remove<Int>(QUOTE_FAILURES_KEY)
+            applyFormHydration(form.copy(initialContent = ""))
+            updateState { it.copy(quotePending = false, quoteFetchFailures = 0) }
+        } else formLoadFailed()
     }
 
     private fun formLoadFailed() {
         if (!submission.isInitialized) return
         loadedForm = null
         loadedSubmitContext = null
-        updateState { it.copy(isLoadingForm = false, formAvailable = false, formError = true) }
+        val failures = if (_state.value.quotePending) (_state.value.quoteFetchFailures + 1).coerceAtMost(2) else 0
+        savedStateHandle[QUOTE_FAILURES_KEY] = failures
+        updateState { it.copy(isLoadingForm = false, formAvailable = false, formError = true,
+            quoteFetchFailures = failures) }
     }
 
     fun onToolbarAction(action: BbcodeAction) {
@@ -624,7 +657,9 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         form: ReplyForm,
     ) {
         val submitContext = checkNotNull(loadedSubmitContext)
-        submission.launch(permit, EditorDraftStore.Draft(body = snapshot.bodyText, isPrivate = true)) {
+        val draft = EditorDraftStore.Draft(body = snapshot.bodyText, isPrivate = true,
+            offerToResolve = draftSession.pendingOfferResolution())
+        submission.launch(permit, draft) {
             val options = ReplyFormOptions(
                 signatureEnabled = snapshot.signatureEnabled, smileyDisabled = snapshot.smileyDisabled,
                 emailNotificationEnabled = snapshot.emailNotificationEnabled,
@@ -677,10 +712,8 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             return
         }
         draftSession.hydrateBody(form.initialContent)
-        val liveBody = bodyFieldState.text.toString()
-        updateState { current ->
-            current.withLoadedForm(form).copy(restorableDraft = current.restorableDraft.takeIf { it != liveBody })
-        }
+        updateState { current -> current.withLoadedForm(form, submission.blocksMutation) }
+        draftSession.hideOffersEqualToField()
     }
 
     /** #1573 — cancellation only records diagnostics; a successful empty callback retains #1128 feedback. */
@@ -808,6 +841,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     }
 
     private companion object {
+        const val QUOTE_FAILURES_KEY = "mpReply.quoteFailures"
         // #459 — diagnostics tag of the upload failures (shared shape with the topic-side editors).
         private const val LOG_TAG_UPLOAD = "MpReplyVM"
     }
@@ -857,4 +891,70 @@ internal object RecipientCsv {
             .filter { it.isNotEmpty() }
 
     fun join(recipients: List<String>): String = recipients.joinToString(SEPARATOR)
+}
+
+/** Form metadata, options and recipients of a served reply form; the body is hydrated elsewhere. */
+private fun PrivateMessageReplyUiState.withLoadedForm(
+    form: ReplyForm,
+    blocksMutation: Boolean,
+): PrivateMessageReplyUiState {
+    // Body hydration is already applied outside this state update. A silent refetch
+    // refreshes only the form metadata, options and unchanged recipient list below.
+    if (blocksMutation) return copy(isLoadingForm = false)
+    val hydrated = this
+    // HFR's private "quick reply" form carries the per-post options as plain hidden
+    // inputs (e.g. `signature=1`), not checkboxes — so `ReplyForm.options` (read from
+    // `checked` attributes) is all-false here. Hydrate from the hidden fields too,
+    // OR'ing with the checkbox view, so the user keeps HFR's default (signature on).
+    //
+    // Hydrate ONLY on the first successful load: a silent refetch after an expired
+    // `hash_check` (InvalidHashCheck) must not reset a toggle the user changed in
+    // between — mirror the post editor's `optionsHydratedFromForm` guard.
+    val hydrateOptions = !hydrated.optionsHydratedFromForm
+    return hydrated.copy(
+        isLoadingForm = false,
+        formAvailable = true,
+        conversationTitle = form.sujet,
+        formError = false,
+        // InvalidForm here is a submission preparation failure, never a failed GET (ED-44).
+        // A GET clears neither submitError nor its event. Masquer retires the event; only an explicit Masquer of
+        // the bound uncertainty also acknowledges its attempt durably, which then clears submitError (ED-170),
+        // and an explicit Masquer of a failed attempt write clears it locally, without storage.
+        signatureEnabled = if (hydrateOptions) {
+            form.options.signatureEnabled || form.hiddenFields["signature"] == "1"
+        } else {
+            hydrated.signatureEnabled
+        },
+        smileyDisabled = if (hydrateOptions) {
+            form.options.smileyDisabled || form.hiddenFields["smiley"] == "1"
+        } else {
+            hydrated.smileyDisabled
+        },
+        emailNotificationEnabled = if (hydrateOptions) {
+            form.options.emailNotificationEnabled || form.hiddenFields["emaill"] == "1"
+        } else {
+            hydrated.emailNotificationEnabled
+        },
+        optionsHydratedFromForm = true,
+        // #606 — owner-only member editor. Hydrate the working list from HFR's
+        // `newdest` CSV on the FIRST load only : a silent refetch after an expired
+        // hash_check (InvalidHashCheck) must not clobber a member the user added /
+        // removed in between — same `hydrateOptions` guard as the option toggles.
+        canManageRecipients = form.canManageRecipients,
+        // Re-hydrate from the freshly-parsed `newdest` on the first load AND on any
+        // silent refetch where the user has NOT edited the list : that way a
+        // concurrent membership change made elsewhere is picked up, and — since a
+        // non-dirty submit sends `recipientsOverride = null` — the original `newdest`
+        // is still forwarded verbatim. Only an in-progress edit (`recipientsDirty`)
+        // is preserved across the refetch.
+        recipients = if (hydrateOptions || !hydrated.recipientsDirty) {
+            RecipientCsv.parse(form.manageableRecipients)
+        } else {
+            hydrated.recipients
+        },
+    )
+}
+
+private fun pendingSelections(request: PendingInlineQuoteRequest): List<QuoteSelection> = request.quotes.map {
+    QuoteSelection(QuoteLocator(it.page, it.numreponse, it.ref), "", "", it.truncate)
 }

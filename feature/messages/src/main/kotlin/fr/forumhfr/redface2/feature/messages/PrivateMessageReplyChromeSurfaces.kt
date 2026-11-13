@@ -32,6 +32,8 @@ internal fun PrivateMessageReplyChromeSurfaces(
         { adapter.returnToBody(onReturnToBody) }, onDismiss = adapter::dismissDetails, body = body)
     EditorDraftOfferSheet(adapter.draftOfferOpen, adapter.state.source.restorableDraft != null,
         adapter::closeDraftOffer, adapter::restoreDraft, adapter::discardDraft,
+        offers = adapter.state.source.draftOffers,
+        onRestoreOffer = adapter::restoreOffer, onDiscardOffer = adapter::discardOffer,
         restoreEnabled = adapter.state.restoreEnabled, discardEnabled = adapter.state.scaffold.controlsEnabled,
         message = stringResource(R.string.messages_draft_restore_message))
     PrivateMessageReplyChromeSheets(adapter, autoOpenRecipients, onReturnToBody)

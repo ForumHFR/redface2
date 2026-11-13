@@ -38,9 +38,7 @@ import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyForm
-import fr.forumhfr.redface2.core.ui.editor.EditorBarGesture
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
-import fr.forumhfr.redface2.core.ui.editor.EditorEventAction
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerOpenIntent
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import io.mockk.coEvery
@@ -341,8 +339,10 @@ class PostEditorRestorationTest {
         assertEquals("offered body", store.saved[key]?.body)
         assertEquals(pending(), store.saved[key]?.pendingInlineQuoteRequest)
         assertEquals(0, store.saveCount)
-        coVerify(exactly = 1) { replies.fetchReplyForm(match { !it.isQuote }) }
-        coVerify(exactly = 0) { replies.fetchReplyForm(match { it.isQuote }) }
+        // ED-132 (v0.7.8): the quote is fetched at once, without waiting for the offer decision; its
+        // form also carries the ordinary metadata, so no separate ordinary GET is made.
+        coVerify(exactly = 1) { replies.fetchReplyForm(match { it.isQuote }) }
+        coVerify(exactly = 0) { replies.fetchReplyForm(match { !it.isQuote }) }
     }
 
     @Test
@@ -618,20 +618,15 @@ class PostEditorRestorationTest {
     }
 
     @Test
-    fun acknowledgedPendingOfferDetailClosesThroughTheRealAccountSessionChange() = runTest(dispatcher) {
+    fun offeredDraftSheetClosesThroughTheRealAccountSessionChange() = runTest(dispatcher) {
         store.preload(key, Draft("offered body", pendingInlineQuoteRequest = pending()))
         val editor = open()
         runCurrent()
         val events = editor.chromeEvents
         val opening = events.state.session
-        val notice = events.visibleEvent!!
-        assertTrue(events.isPendingQuoteEvent(notice.key))
         val adapter = PostEditorChromeAdapter({ editor.state.value }, editor.bodyFieldState, events,
             editor::submit, {}, {}, editor.chromeMemory)
-        adapter.barActions.onEvent(notice.key, EditorEventAction.Details)
-        adapter.gesture(EditorBarGesture.ToggleFormat)
-        assertNull(events.visibleEvent)
-        assertEquals(notice.key, adapter.draftOfferDetailKey)
+        adapter.openDraftOffer()
         assertTrue(adapter.draftOfferOpen)
 
         store.activeOwner = null
@@ -640,11 +635,9 @@ class PostEditorRestorationTest {
 
         assertFalse(opening == events.state.session)
         assertNull(events.state.session.owner)
-        assertNull(adapter.draftOfferDetailKey)
         assertNull(adapter.detail)
         assertNull(adapter.surface)
         assertFalse(adapter.draftOfferOpen)
-        assertFalse(events.isPendingQuoteEvent(notice.key))
         assertTrue(events.state.events.isEmpty())
     }
 

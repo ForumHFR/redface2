@@ -48,6 +48,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorBackState
 import fr.forumhfr.redface2.core.ui.editor.EditorPreview
 import fr.forumhfr.redface2.core.ui.editor.EditorScaffold
 import fr.forumhfr.redface2.core.ui.editor.EditorTooltipHost
+import fr.forumhfr.redface2.core.ui.editor.EditorUnsavedCloseDialog
 import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
 import fr.forumhfr.redface2.core.ui.editor.LocalEditorTooltipHost
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
@@ -132,6 +133,13 @@ fun TopicFormScreen(
                 TopicFormEffect.CloseCommitted -> currentOnClose?.invoke()
             }
         }
+    }
+    // Above every branch of the content: loading, form failure and an open header panel included.
+    if (state.showUnsavedCloseDialog) {
+        EditorUnsavedCloseDialog(
+            onStay = { viewModel.submit(TopicFormIntent.UnsavedCloseDismissed) },
+            onLeave = { viewModel.submit(TopicFormIntent.UnsavedCloseConfirmed) },
+        )
     }
 
     CompositionLocalProvider(LocalEditorPreviewState provides viewModel.previewLayout) {

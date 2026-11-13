@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.editor
 
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import android.view.View
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
@@ -253,6 +254,7 @@ class EditorBaselineRoborazziTest {
                 remember(scenario) { host.apply { state = state.copy(bodyText = draft.text,
                     preview = PostContent(listOf(PostBlock.Paragraph(listOf(PostInline.Text("Aperçu du message."))))),
                     restorableDraft = if (scenario.scene == PostScene.Restore) "Brouillon conservé" else null,
+                    draftOffers = if (scenario.scene == PostScene.Restore) baselineOffers() else emptyList(),
                     quotes = if (scenario.scene in setOf(PostScene.Cards, PostScene.Panel)) quotes else emptyList(),
                     submission = if (scenario.scene == PostScene.Armed) EditorSubmissionState.Armed(
                         ArmToken(1, host.session, Long.MAX_VALUE / 4, 60_000L)) // Far-future arm: frozen countdown.
@@ -281,6 +283,7 @@ class EditorBaselineRoborazziTest {
             bodyText = draft,
             preview = PostContent(listOf(PostBlock.Paragraph(listOf(PostInline.Text("Aperçu du sujet."))))),
             restorableDraft = "Brouillon conservé".takeIf { scene in setOf(TopicScene.Restore, TopicScene.States) },
+            draftOffers = if (scene in setOf(TopicScene.Restore, TopicScene.States)) baselineOffers() else emptyList(),
             pollPresent = scene in setOf(TopicScene.Poll, TopicScene.States),
             firstPostSubcategoryRefused = scene == TopicScene.Unsupported,
             subcat = if (scene == TopicScene.MissingRoute) null else 1,
@@ -292,6 +295,10 @@ class EditorBaselineRoborazziTest {
         if (scene == TopicScene.Event) host.error(EditorErrors.formNetwork)
         return host
     }
+
+    // A relative date (« il y a 5 min ») keeps the capture independent of the host time zone and day.
+    private fun baselineOffers() = listOf(EditorDraftStore.DraftOffer("baseline", 1,
+        EditorDraftStore.Draft("[b]Brouillon conservé[/b]", updatedAt = System.currentTimeMillis() - 301_000L)))
 
     private enum class PostScene { Normal, Format, Armed, Event, Restore, Cards, Panel, Preview }
     private enum class TopicScene {

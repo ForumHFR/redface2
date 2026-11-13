@@ -5,6 +5,7 @@ internal val PostEditorIntent.mutatesEditor: Boolean
     get() = when (this) {
         is PostEditorIntent.SubmitClicked, is PostEditorIntent.SubmitConfirmed,
         PostEditorIntent.SubmitConfirmationDismissed, PostEditorIntent.CloseRequested,
+        PostEditorIntent.UnsavedCloseDismissed, PostEditorIntent.UnsavedCloseConfirmed,
         PostEditorIntent.ErrorDismissed, PostEditorIntent.ReloadRequested, PostEditorIntent.PendingQuoteIgnored,
         PostEditorIntent.PendingQuoteResumed, PostEditorIntent.LegacyQuoteNoticeDismissed,
         PostEditorIntent.UploadErrorDismissed, PostEditorIntent.DraftWriteFailureDismissed,
@@ -17,7 +18,8 @@ internal val PostEditorIntent.mutatesBody: Boolean
     get() = when (this) {
         is PostEditorIntent.ToolbarActionClicked, is PostEditorIntent.SmileySelected,
         is PostEditorIntent.ImageUrlInserted, is PostEditorIntent.ImagePicked,
-        is PostEditorIntent.ImagesPicked, PostEditorIntent.DraftRestoreRequested -> true
+        is PostEditorIntent.ImagesPicked, PostEditorIntent.DraftRestoreRequested,
+        is PostEditorIntent.DraftOfferRestored -> true
         else -> false
     }
 
@@ -26,6 +28,7 @@ internal val TopicFormIntent.mutatesEditor: Boolean
         TopicFormIntent.Started, TopicFormIntent.Stopped -> false
         is TopicFormIntent.SubmitClicked, is TopicFormIntent.SubmitConfirmed,
         TopicFormIntent.SubmitConfirmationDismissed, TopicFormIntent.CloseRequested,
+        TopicFormIntent.UnsavedCloseDismissed, TopicFormIntent.UnsavedCloseConfirmed,
         TopicFormIntent.ErrorDismissed, TopicFormIntent.ReloadRequested, TopicFormIntent.UploadErrorDismissed,
         TopicFormIntent.DraftWriteFailureDismissed, TopicFormIntent.TogglePreview -> false
         else -> true

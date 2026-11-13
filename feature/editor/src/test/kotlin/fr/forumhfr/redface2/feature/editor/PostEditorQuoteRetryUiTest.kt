@@ -93,8 +93,9 @@ class PostEditorQuoteRetryUiTest {
         assertTrue(intents.none { it is PostEditorIntent.SubmitClicked || it == PostEditorIntent.ErrorDismissed })
     }
 
+    // v0.7.8 ED-40/132: the offer sheet no longer mentions a waiting quote; Q does not depend on D.
     @Test
-    fun `restore offer explains the pending quote without offering a load action`() {
+    fun `restore offer stays decidable beside a failed quote without mention or load action`() {
         val intents = mutableListOf<PostEditorIntent>()
         compose.setContent {
             RedfaceTheme(darkTheme = false) {
@@ -113,7 +114,7 @@ class PostEditorQuoteRetryUiTest {
             }
         }
         openRestore()
-        compose.onNodeWithText("Citation en attente").assertIsDisplayed()
+        compose.onNodeWithText("Citation en attente").assertDoesNotExist()
         compose.onNodeWithText("Recharger").assertDoesNotExist()
         compose.onNodeWithText("Restaurer").assertIsEnabled().performClick()
         openRestore()

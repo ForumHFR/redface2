@@ -283,6 +283,10 @@
     <string name="editor_draft_offer_message">Un brouillon non envoyé a été retrouvé pour ce message.</string>
     <string name="editor_draft_offer_restore">Restaurer</string>
     <string name="editor_draft_offer_discard">Ignorer</string>
+    <string name="editor_unsaved_close_title">Brouillon non enregistré</string>
+    <string name="editor_unsaved_close_message">Le brouillon n’a pas pu être enregistré. Si vous quittez, les dernières modifications seront perdues.</string>
+    <string name="editor_unsaved_close_stay">Rester</string>
+    <string name="editor_unsaved_close_leave">Quitter sans enregistrer</string>
     <string name="editor_draft_offer_close">Fermer l’offre de brouillon</string>
     <string name="editor_error_quote_unreadable">La demande de citation enregistrée est illisible. Vous pouvez la recharger ou ignorer la citation. Le texte et la tentative d’envoi sont conservés.</string>
     <string name="editor_summary_recipient_incomplete">Pseudo à valider</string>
@@ -292,4 +296,16 @@
     <string name="editor_preview_close_keyboard">Fermer le clavier</string>
     <string name="editor_preview_release_keyboard">Relâcher pour fermer le clavier</string>
     <string name="editor_preview_hidden_while_typing">Aperçu ouvert, masqué pendant la frappe</string>
+    <string name="editor_status_draft_pending">Brouillon à traiter</string>
+    <string name="editor_draft_date_now">à l’instant</string>
+    <string name="editor_draft_date_minutes">il y a %1$d min</string>
+    <string name="editor_draft_date_hours">il y a %1$d h</string>
+    <string name="editor_draft_date_yesterday">hier à %1$s</string>
+    <string name="editor_draft_date_days">il y a %1$d j</string>
+    <string name="editor_draft_date_absolute">le %1$s à %2$s</string>
+    <string name="editor_draft_quote">Citation</string>
+    <string name="editor_draft_quote_author">Citation de %1$s</string>
+    <string name="editor_action_resume_quote">Après vérification, reprendre la citation</string>
+    <string name="editor_draft_restore_description">Restaurer ce brouillon, %1$s</string>
+    <string name="editor_draft_discard_description">Ignorer ce brouillon, %1$s</string>
 </resources>

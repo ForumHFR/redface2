@@ -246,6 +246,48 @@ class EditorSubmissionBinding<E, F>(
         return persist(snapshot())
     }
 
+    /**
+     * ED-10: the awaited last save of a close. False when the editor holds content that is not
+     * durable, so the caller asks before abandoning it:
+     * - a conflict always asks: another writer replaced the row, this session's last view of it
+     *   proves nothing;
+     * - a failure asks unless the row already holds this exact content;
+     * - fields changed while the write was suspended ask too, whatever the write returned.
+     * Nothing to write is not a failure: no snapshot, or an invalidated owner, whose editor is
+     * retired and can never write again.
+     *
+     * [snapshot] is what may be saved and can be null (an undecided offer, a sealed delivery);
+     * [live] is always the raw fields (body, subject, recipients), read before and after the
+     * write. Eligibility may change across a successful write; only the fields prove typing.
+     * [recipients] gives stored and live recipients one form. [snapshot] comes last on purpose:
+     * a trailing lambda can only be the content to save.
+     */
+    suspend fun flushForClose(
+        live: () -> EditorDraftStore.Draft,
+        recipients: (String) -> Any = { it },
+        snapshot: () -> EditorDraftStore.Draft?,
+    ): Boolean {
+        autosave?.cancelAndJoin()
+        val before = live()
+        val draft = snapshot()
+        val result = persist(draft)
+        if (drafts.invalidated) return true
+        val durable = when (result) {
+            null, is StoreWriteResult.Written -> true
+            StoreWriteResult.Conflict -> false
+            else -> draft != null && drafts.holds(draft, recipients)
+        }
+        return durable && sameContent(before, live(), recipients)
+    }
+
+    /** Same content rule as [EditorDraftSession.holds]: body, subject and recipients only. */
+    private fun sameContent(
+        before: EditorDraftStore.Draft,
+        after: EditorDraftStore.Draft,
+        recipients: (String) -> Any,
+    ): Boolean = before.body == after.body && before.subject.orEmpty() == after.subject.orEmpty() &&
+        recipients(before.recipients.orEmpty()) == recipients(after.recipients.orEmpty())
+
     fun launch(
         permit: SubmissionRequest.Accepted,
         draft: EditorDraftStore.Draft,

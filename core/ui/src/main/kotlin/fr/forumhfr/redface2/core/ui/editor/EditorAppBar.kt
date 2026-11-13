@@ -40,8 +40,8 @@ data class EditorAppBarStatus(
     val onClick: () -> Unit,
     val badgeCount: Int? = null,
     val enabled: Boolean = true,
-    /** Opt-in exception to ED-44 for this status and this exact information delivery. */
-    val opensOnInformation: (EventKey) -> Boolean = { false },
+    /** ED-40: undecided draft offer under ↺; a state distinct from [badgeCount], announced by the node. */
+    val showDot: Boolean = false,
 )
 
 /**
@@ -96,7 +96,7 @@ fun EditorAppBar(
 @Composable
 private fun EditorAppBarStatusSlot(status: EditorAppBarStatus?) {
     EditorStatusIcon(status?.iconRes ?: R.drawable.ic_ms_restore_page, status?.label.orEmpty(),
-        { status?.onClick?.invoke() }, badgeCount = status?.badgeCount,
+        { status?.onClick?.invoke() }, badgeCount = status?.badgeCount, showDot = status?.showDot == true,
         enabled = status?.enabled ?: false, visible = status != null)
 }
 

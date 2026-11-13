@@ -91,6 +91,7 @@ import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import fr.forumhfr.redface2.core.model.postContentExcerpt
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.model.write.PrivateMessageQuote
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
@@ -104,7 +105,6 @@ import fr.forumhfr.redface2.core.ui.pager.pageSwipeEdgeHint
 import fr.forumhfr.redface2.core.ui.post.AuthorRolePill
 import fr.forumhfr.redface2.core.ui.post.CreatorPseudoText
 import fr.forumhfr.redface2.core.ui.post.HiddenPostCard
-import fr.forumhfr.redface2.core.ui.post.PostCardShellFlatBottomEdge
 import fr.forumhfr.redface2.core.ui.post.PostIdentityBand
 import fr.forumhfr.redface2.core.ui.post.PostIdentityHeader
 import fr.forumhfr.redface2.core.ui.post.PostImageActions
@@ -199,6 +199,7 @@ fun PrivateMessageThreadScreen(
     // page on screen and surfaces a Toast inviting a retry (pull again / tap the pager again).
     val context = LocalContext.current
     val refreshFailedMsg = stringResource(R.string.messages_thread_refresh_failed)
+    val quotePreparationFailedMsg = stringResource(R.string.messages_quote_preparation_failed)
     val imageShareFailedMsg = stringResource(
         fr.forumhfr.redface2.core.ui.R.string.post_image_menu_share_failed,
     )
@@ -209,6 +210,13 @@ fun PrivateMessageThreadScreen(
                     android.widget.Toast.makeText(
                         context,
                         refreshFailedMsg,
+                        android.widget.Toast.LENGTH_LONG,
+                    ).show()
+                }
+                PrivateMessageThreadEffect.QuotePreparationFailed -> {
+                    android.widget.Toast.makeText(
+                        context,
+                        quotePreparationFailedMsg,
                         android.widget.Toast.LENGTH_LONG,
                     ).show()
                 }
@@ -255,15 +263,22 @@ fun PrivateMessageThreadScreen(
             onReply = { onReply(request.threadId, state.page) },
             onQuote = { message ->
                 message.quoteRef?.let { ref ->
-                    onQuote(
-                        request.threadId,
-                        state.page,
-                        PrivateMessageQuote(numreponse = message.numreponse, ref = ref),
-                    )
+                    val page = state.page
+                    viewModel.enqueueQuotes(listOf(PendingInlineQuoteRequest.Quote(message.numreponse, page, ref))) {
+                        onQuote(request.threadId, page, PrivateMessageQuote(message.numreponse, ref))
+                    }
                 }
             },
             onToggleMultiQuote = onToggleMultiQuote,
-            onMultiQuote = { onMultiQuote(request.threadId, state.page) },
+            onMultiQuote = {
+                val page = state.page
+                val quotes = multiQuoteSelections.map { selection ->
+                    val locator = selection.locator
+                    PendingInlineQuoteRequest.Quote(locator.numreponse, locator.page,
+                        requireNotNull(locator.ref), selection.truncate)
+                }
+                viewModel.enqueueQuotes(quotes) { onMultiQuote(request.threadId, page) }
+            },
             onClearMultiQuote = onClearMultiQuote,
             onRemoveMultiQuotes = onRemoveMultiQuotes,
             onRetry = viewModel::retry,

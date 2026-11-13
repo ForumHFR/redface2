@@ -1,5 +1,9 @@
 package fr.forumhfr.redface2.feature.messages
 
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
+import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
 import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.author.AuthorRoleRepository
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
@@ -89,6 +93,7 @@ class PrivateMessageThreadViewModelTest {
         mpStorageRepository: MpStorageRepository = FakeMpStorageRepository(),
         writeRepository: PrivateMessageWriteRepository = mockk(relaxed = true),
         postImageSaver: PostImageSaver = mockk(relaxed = true),
+        draftStore: EditorDraftStore = VersionedEditorDraftStore(),
     ) = PrivateMessageThreadViewModel(
         request = threadRequest,
         repository = repository,
@@ -100,6 +105,7 @@ class PrivateMessageThreadViewModelTest {
         mpStorageRepository = mpStorageRepository,
         writeRepository = writeRepository,
         postImageSaver = postImageSaver,
+        draftStore = draftStore,
     )
 
     @Suppress("LongParameterList") // test helper: every param is an optional, defaulted preference flow.
@@ -117,6 +123,39 @@ class PrivateMessageThreadViewModelTest {
         every { observeTopicEgoQuoteEnabled() } returns egoQuoteEnabled
         every { observeTopicEgoPostEnabled() } returns egoPostEnabled
         every { observeTopicPageFabs() } returns showPageFabs
+    }
+
+    @Test
+    fun `MP quote navigation waits for a durable private request with ordered page and ref coordinates`() = runTest {
+        val drafts = VersionedEditorDraftStore()
+        val vm = threadViewModel(loadedRepository(), draftStore = drafts)
+        val returned = kotlinx.coroutines.CompletableDeferred<Unit>()
+        drafts.saveReturnGate = returned
+        var navigated = false
+        val quotes = listOf(PendingInlineQuoteRequest.Quote(202, 4, 8),
+            PendingInlineQuoteRequest.Quote(101, 2, 7))
+        vm.enqueueQuotes(quotes) { navigated = true }
+        val stored = checkNotNull(drafts.saved[EditorDraftKey.mpReply(42)])
+        assertTrue(stored.isPrivate)
+        assertEquals(quotes, stored.pendingInlineQuoteRequest?.quotes)
+        assertFalse(navigated)
+        returned.complete(Unit)
+        testScheduler.runCurrent()
+        assertTrue(navigated)
+    }
+
+    @Test
+    fun `MP quote storage failure keeps the reader on the thread and reports it - ED132`() = runTest {
+        val drafts = VersionedEditorDraftStore()
+        val vm = threadViewModel(loadedRepository(), draftStore = drafts)
+        drafts.saveFailure = IOException("disk")
+        var navigated = false
+
+        vm.enqueueQuotes(listOf(PendingInlineQuoteRequest.Quote(101, 2, 7))) { navigated = true }
+
+        assertFalse(navigated)
+        assertNull(drafts.saved[EditorDraftKey.mpReply(42)])
+        assertEquals(PrivateMessageThreadEffect.QuotePreparationFailed, vm.effects.first())
     }
 
     @Test
@@ -246,6 +285,7 @@ class PrivateMessageThreadViewModelTest {
             mpStorageRepository = FakeMpStorageRepository(),
             writeRepository = mockk(relaxed = true),
             postImageSaver = mockk(relaxed = true),
+            draftStore = VersionedEditorDraftStore(),
         )
 
         assertEquals(PrivateMessageThreadUiState.Mode.RequiresLogin, viewModel.state.value.mode)
@@ -1436,6 +1476,7 @@ class PrivateMessageThreadViewModelTest {
         val viewModel = threadViewModel(
             loadedRepository(),
             postImageSaver = FakePostImageSaver { throw ImageSaveException.Fetch() },
+            draftStore = VersionedEditorDraftStore(),
         )
 
         viewModel.effects.test {
@@ -1449,6 +1490,7 @@ class PrivateMessageThreadViewModelTest {
         val viewModel = threadViewModel(
             loadedRepository(),
             postImageSaver = FakePostImageSaver { throw ImageSaveException.Storage() },
+            draftStore = VersionedEditorDraftStore(),
         )
 
         viewModel.effects.test {
@@ -1546,6 +1588,7 @@ class PrivateMessageThreadViewModelTest {
             mpStorageRepository = FakeMpStorageRepository(),
             writeRepository = mockk(relaxed = true),
             postImageSaver = mockk(relaxed = true),
+            draftStore = VersionedEditorDraftStore(),
         )
 
         coVerify(exactly = 1) {
@@ -1573,6 +1616,7 @@ class PrivateMessageThreadViewModelTest {
             mpStorageRepository = FakeMpStorageRepository(),
             writeRepository = mockk(relaxed = true),
             postImageSaver = mockk(relaxed = true),
+            draftStore = VersionedEditorDraftStore(),
         )
 
         coVerify(exactly = 1) {
@@ -1603,6 +1647,7 @@ class PrivateMessageThreadViewModelTest {
                 mpStorageRepository = FakeMpStorageRepository(),
                 writeRepository = mockk(relaxed = true),
                 postImageSaver = mockk(relaxed = true),
+            draftStore = VersionedEditorDraftStore(),
             )
         assertEquals(1, store.saved[42])
 

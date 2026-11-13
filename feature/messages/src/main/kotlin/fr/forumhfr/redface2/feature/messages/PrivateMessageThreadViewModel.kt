@@ -10,6 +10,9 @@ import fr.forumhfr.redface2.core.domain.author.AuthorRoleRepository
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.blacklist.BlacklistRepository
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.domain.error.HfrErrorKind
 import fr.forumhfr.redface2.core.domain.error.classifyHfrError
 import fr.forumhfr.redface2.core.domain.media.ImageSaveException
@@ -67,7 +70,43 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     private val mpStorageRepository: MpStorageRepository,
     private val writeRepository: PrivateMessageWriteRepository,
     private val postImageSaver: PostImageSaver,
+    private val draftStore: EditorDraftStore,
 ) : ViewModel() {
+
+    /**
+     * ED-132 — persist Q before navigation; opening or recreating the reply never enqueues a route
+     * snapshot. A failed write keeps the reader on the thread and says so, like the topic handoff.
+     */
+    fun enqueueQuotes(quotes: List<PendingInlineQuoteRequest.Quote>, onReady: () -> Unit) {
+        if (quotes.isEmpty()) return
+        viewModelScope.launch {
+            val written = try {
+                persistQuoteRequest(PendingInlineQuoteRequest.privateMessage(request.threadId, quotes))
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: IllegalArgumentException) {
+                false
+            } catch (_: java.io.IOException) {
+                false
+            }
+            if (written) onReady() else _effects.send(PrivateMessageThreadEffect.QuotePreparationFailed)
+        }
+    }
+
+    private suspend fun persistQuoteRequest(pending: PendingInlineQuoteRequest): Boolean {
+        val drafts = EditorDraftSession(draftStore, pending.key)
+        drafts.load()
+        val owner = drafts.owner
+        var result = drafts.enqueueInlineQuoteRequest(pending)
+        // The reply autosave may have flushed between load and enqueue. Retry once on a fresh row.
+        if (result is EditorDraftStore.StoreWriteResult.Conflict) {
+            drafts.load()
+            result = if (drafts.owner == owner) drafts.enqueueInlineQuoteRequest(pending) else {
+                EditorDraftStore.StoreWriteResult.OwnerChanged
+            }
+        }
+        return result is EditorDraftStore.StoreWriteResult.Written && drafts.ownsCurrentAccount()
+    }
 
     private val _state = MutableStateFlow(PrivateMessageThreadUiState.initial(request))
     val state: StateFlow<PrivateMessageThreadUiState> = _state.asStateFlow()

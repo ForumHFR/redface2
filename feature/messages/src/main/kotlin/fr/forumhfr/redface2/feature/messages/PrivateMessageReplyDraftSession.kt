@@ -9,7 +9,12 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.text.TextRange
 import androidx.lifecycle.SavedStateHandle
-import fr.forumhfr.redface2.core.domain.editor.EditorBodyProvenance
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
+import fr.forumhfr.redface2.core.domain.editor.filterEditorQuotes
+import fr.forumhfr.redface2.core.domain.editor.insertEditorQuotes
+import fr.forumhfr.redface2.core.domain.editor.narrowDraftOffers
+import fr.forumhfr.redface2.core.domain.editor.visibleOver
+import fr.forumhfr.redface2.core.domain.editor.mergeEditorBody
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionBinding
 import fr.forumhfr.redface2.core.ui.editor.BbcodeFormatResult
@@ -20,9 +25,12 @@ import fr.forumhfr.redface2.core.ui.editor.EditorSessionRestoration
 import fr.forumhfr.redface2.core.ui.editor.EditorSessionRestore
 import fr.forumhfr.redface2.core.ui.editor.EditorSessionSurface
 import fr.forumhfr.redface2.core.ui.editor.editBbcode
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * ED-81/170: the reply's live buffer, owner-bound resume, restore offer and draft checkpoints.
@@ -56,6 +64,95 @@ internal class PrivateMessageReplyDraftSession(
     private var restoredOfferAwaitingWrite: String? = null
     private var mergedDraftOffer: String? = null
     private var resolvingOffer = false
+    private var decisionCompleted: CompletableDeferred<Unit>? = null
+
+    suspend fun awaitOfferDecision() { decisionCompleted?.await() }
+    private var selectedOffer: EditorDraftStore.DraftOffer? = null
+    private var deliveryPending = false
+    private var stagedDelivery: String? = null
+    private val quoteCommit = Mutex()
+    private var storageConflict = false
+
+    /** A conflicting quote write means this session's version, Q or offers are stale. */
+    private fun recordQuoteWrite(result: EditorDraftStore.StoreWriteResult?) {
+        if (result is EditorDraftStore.StoreWriteResult.Conflict) storageConflict = true
+    }
+
+    /**
+     * ED-132: after a storage conflict, Reload and Ignore first reread the row's version, Q and offers.
+     * The field (C) is never replaced: a different stored body comes back as an offer (ED-121).
+     */
+    suspend fun reconcileAfterConflict() {
+        if (!storageConflict || submission.drafts.invalidated) return
+        val live = bodyFieldState.text.toString()
+        val entry = submission.restore(draftKey)
+        if (!submission.isInitialized) return
+        storageConflict = false
+        if (entry?.draft?.body == live) submission.drafts.resumeContent()
+        if (submission.drafts.pendingInlineQuoteRequest == null) {
+            // Q was consumed elsewhere: nothing is left to commit, the autosave owns the field again.
+            deliveryPending = false
+            stagedDelivery = null
+            updateState { it.copy(quoteCommitPending = false) }
+        }
+        refreshOffers()
+    }
+
+    fun refreshOffers() {
+        // ED-121: an offer identical to the field is hidden from the list, not deleted (see visibleOver).
+        val offers = submission.drafts.availableOffers.takeUnless { submission.drafts.invalidated }.orEmpty()
+            .visibleOver(bodyFieldState.text.toString())
+        updateState { it.copy(draftOffers = offers, restorableDraft = offers.firstOrNull()?.draft?.body) }
+        if (selectedOffer != null && offers.none { it.id == selectedOffer?.id }) {
+            selectedOffer = null
+            mergedDraftOffer = null
+        }
+    }
+
+    /** At form hydration: hide the offers equal to the field, keeping the others reachable (ED-121). */
+    fun hideOffersEqualToField() {
+        val live = bodyFieldState.text.toString()
+        updateState {
+            val (visible, first) = narrowDraftOffers(it.draftOffers, it.restorableDraft, live)
+            it.copy(draftOffers = visible, restorableDraft = first)
+        }
+    }
+
+    /** ED-132: stage once; only the body + request CAS below can make this delivery durable. */
+    fun insertQuote(body: String) {
+        deliveryPending = true
+        stagedDelivery = body
+        val live = bodyFieldState.text.toString()
+        val quote = filterEditorQuotes(body.trimEnd(), live).body
+        val merge = insertEditorQuotes(live, quote.trimEnd(), submission.drafts.provenanceFor(live))
+        val result = if (live.isBlank() && merge.body.isNotBlank()) merge.copy(body = merge.body + "\n") else merge
+        if (result.body != live) replaceBody(result.body)
+        if (live.isBlank()) resetUndoBaseline()
+        previousBody = bodyFieldState.text.toString()
+        submission.drafts.stageBodyMerge(result)
+        updateState { it.copy(draftHydratedFromForm = true, quoteCommitPending = true) }
+    }
+
+    suspend fun commitQuote(
+        request: PendingInlineQuoteRequest,
+        deliveredBody: String,
+    ): EditorDraftStore.StoreWriteResult = quoteCommit.withLock { commitQuoteLocked(request, deliveredBody) }
+
+    private suspend fun commitQuoteLocked(
+        request: PendingInlineQuoteRequest,
+        deliveredBody: String,
+    ): EditorDraftStore.StoreWriteResult {
+        val snapshot = EditorDraftStore.Draft(bodyFieldState.text.toString(), isPrivate = true,
+            bodyProvenance = submission.drafts.provenanceFor(bodyFieldState.text.toString()),
+            offerToResolve = pendingOfferResolution())
+        val result = submission.drafts.consumeInlineQuoteRequest(request, snapshot, deliveredBody)
+        if (result is EditorDraftStore.StoreWriteResult.Written) deliveryPending = false
+        recordQuoteWrite(result)
+        updateState { it.copy(quoteCommitPending = deliveryPending) }
+        submission.resolveDraftWrite(result)
+        if (!deliveryPending) scheduleAutosave()
+        return result
+    }
 
     init {
         submission.drafts.checkpointObserver = { draft, version, result ->
@@ -70,6 +167,7 @@ internal class PrivateMessageReplyDraftSession(
         restoreDraftIfAny()
         draftRestored = true
         updateState { it.copy(isInitializing = false) }
+        refreshOffers()
         if (bodyEditedBeforeHydration && !restoredContent) scheduleAutosave()
     }
 
@@ -156,7 +254,7 @@ internal class PrivateMessageReplyDraftSession(
         if (!bodyEditedBeforeHydration) bodyFieldState.undoState.clearHistory()
     }
 
-    /** Consume the opening quote once; a resumed body, including an explicit blank, wins. */
+    /** Ordinary form hydration only; durable Q is an insertion through insertQuote, never a seed. */
     fun hydrateBody(initial: String) {
         if (readState().draftHydratedFromForm) return
         val existing = bodyFieldState.text.toString()
@@ -186,24 +284,25 @@ internal class PrivateMessageReplyDraftSession(
         if (initial.isNotBlank() && existing.isNotBlank()) scheduleAutosave()
     }
 
-    /** Replace the untouched seed, retain its typed suffix, or append after other live text. */
-    fun restoreOfferedDraft() {
+    private fun selectOffer(offerId: String?): String? {
         val snapshot = readState()
-        if (resolvingOffer) return
-        val offeredBody = snapshot.restorableDraft ?: return
+        selectedOffer = if (offerId == null) snapshot.draftOffers.firstOrNull()
+            else snapshot.draftOffers.firstOrNull { it.id == offerId }
+        val legacy = snapshot.restorableDraft.takeIf { offerId == null && snapshot.draftOffers.isEmpty() }
+        return selectedOffer?.draft?.body ?: legacy
+    }
+
+    /** ED-89: D, retained delivered quotes, then live typing; apply one undoable mutation. */
+    fun restoreOfferedDraft(offerId: String? = null) {
+        if (resolvingOffer || deliveryPending) return
+        val offeredBody = selectOffer(offerId) ?: return
         val liveBody = bodyFieldState.text.toString()
-        val seed = snapshot.draftHydratedContent
-        val typedAfterSeed = liveBody.takeIf { seed.isNotEmpty() && it.startsWith(seed) }?.substring(seed.length)
-        val body = when {
-            liveBody.isBlank() || liveBody == offeredBody || liveBody == seed -> offeredBody
-            typedAfterSeed != null && typedAfterSeed.isBlank() -> offeredBody
-            typedAfterSeed != null -> offeredBody + "\n\n" + typedAfterSeed.trimStart()
-            else -> liveBody.trimEnd() + "\n\n" + offeredBody
-        }
+        val merge = mergeEditorBody(offeredBody, liveBody, provenance = submission.drafts.provenanceFor(liveBody))
         val needsMerge = mergedDraftOffer != offeredBody
         mergedDraftOffer = offeredBody
         restoredOfferAwaitingWrite = offeredBody
-        if (needsMerge) replaceBody(body)
+        if (needsMerge) replaceBody(merge.body)
+        if (needsMerge) submission.drafts.stageBodyMerge(merge)
         restoration.decide(EditorSessionField.Body)
         updateState { it.copy(restorableDraft = null, draftHydratedFromForm = true) }
         resolveOffer(offeredBody, restoring = true)
@@ -212,15 +311,13 @@ internal class PrivateMessageReplyDraftSession(
     private fun resolveOffer(body: String, restoring: Boolean = false) {
         if (resolvingOffer) return
         resolvingOffer = true
+        decisionCompleted = CompletableDeferred()
         scope.launch {
             try {
                 submission.flush(null)
-                val offer = submission.drafts.offered(body)
+                val offer = selectedOffer ?: submission.drafts.offered(body)
                 val live = bodyFieldState.text.toString()
-                val provenance = if (restoring && live.startsWith(body)) {
-                    (submission.drafts.bodyProvenance ?: EditorBodyProvenance())
-                        .copy(draftEnd = body.length, quotesEnd = body.length)
-                } else null
+                val provenance = submission.drafts.provenanceFor(live)
                 val draft = EditorDraftStore.Draft(body = live, isPrivate = true, bodyProvenance = provenance,
                     offerToResolve = offer.takeIf { restoring })
                 val result = if (offer != null && !restoring) submission.drafts.resolveOffer(offer, draft)
@@ -233,19 +330,22 @@ internal class PrivateMessageReplyDraftSession(
                         EditorDraftStore.Draft(body = body, isPrivate = true).restoreOfferFingerprint()
                     restoredOfferAwaitingWrite = null
                     mergedDraftOffer = null
+                    refreshOffers()
                 }
             } finally {
                 restoredOfferAwaitingWrite = null
                 resolvingOffer = false
+                decisionCompleted?.complete(Unit)
+                decisionCompleted = null
                 scheduleAutosave()
             }
         }
     }
 
     /** ED-121: consume only this offer, preserving live input and any pending request. */
-    fun discardOfferedDraft() {
-        if (resolvingOffer) return
-        val body = readState().restorableDraft ?: return
+    fun discardOfferedDraft(offerId: String? = null) {
+        if (resolvingOffer || deliveryPending) return
+        val body = selectOffer(offerId) ?: return
         updateState { it.copy(restorableDraft = null) }
         resolveOffer(body)
     }
@@ -257,15 +357,69 @@ internal class PrivateMessageReplyDraftSession(
         val bodyKnown = snapshot.draftHydratedFromForm || bodyEditedBeforeHydration
         val undecidedOffer = snapshot.restorableDraft != null &&
             (liveBody.isBlank() || liveBody == snapshot.draftHydratedContent)
-        if (!restoration.canCheckpoint(bodyKnown, undecidedOffer)) return null
-        val restoring = restoredOfferAwaitingWrite ?: mergedDraftOffer
-        val offer = restoring?.let(submission.drafts::offered)
-        val provenance = if (restoring != null && liveBody.startsWith(restoring)) {
-            (submission.drafts.bodyProvenance ?: EditorBodyProvenance())
-                .copy(draftEnd = restoring.length, quotesEnd = restoring.length)
-        } else null
+        if (deliveryPending || !restoration.canCheckpoint(bodyKnown, undecidedOffer)) return null
+        val provenance = submission.drafts.provenanceFor(liveBody)
         return EditorDraftStore.Draft(body = liveBody, isPrivate = true, bodyProvenance = provenance,
-            offerToResolve = offer)
+            offerToResolve = pendingOfferResolution())
+    }
+
+    /**
+     * ED-121: the D merged into the field by a Restore whose write has not succeeded yet. Every later
+     * write of C (autosave, quote delivery, send) carries it, so a merged D never stays offered.
+     */
+    fun pendingOfferResolution(): EditorDraftStore.DraftOffer? {
+        val restoring = restoredOfferAwaitingWrite ?: mergedDraftOffer
+        return selectedOffer?.takeIf { restoring != null } ?: restoring?.let(submission.drafts::offered)
+    }
+
+    /**
+     * ED-132: a delivered quote whose C/Q transaction is pending or failed seals [draftSnapshot].
+     * A close settles it first, then saves the field as it is now, typing made since included.
+     * When that transaction still fails, nothing typed since the delivery can be saved without
+     * risking a duplicate quote: false. False as well when the last write of the field is refused
+     * by the store (failure or conflict) while the field holds content the row does not. The caller
+     * then asks before abandoning that typing. Nothing to write is not a failure.
+     */
+    suspend fun flushForClose(): Boolean {
+        quoteCommit.withLock {
+            val pending = submission.drafts.pendingInlineQuoteRequest
+            val delivered = stagedDelivery
+            if (deliveryPending && pending != null && delivered != null) commitQuoteLocked(pending, delivered)
+        }
+        return !deliveryPending && submission.flushForClose(
+            live = { EditorDraftStore.Draft(body = bodyFieldState.text.toString(), isPrivate = true) },
+            snapshot = ::draftSnapshot,
+        )
+    }
+
+    /**
+     * ED-132: release the reply from its quote request. A request that is no longer there after a
+     * conflict (consumed elsewhere) is as good as ignored. True when the reply can load its form.
+     */
+    suspend fun ignoreQuote(): Boolean {
+        reconcileAfterConflict()
+        var result = writeIgnoredQuote()
+        if (result is EditorDraftStore.StoreWriteResult.Conflict) {
+            // Stale version or request: reread the row once and decide again on what is really there.
+            recordQuoteWrite(result)
+            reconcileAfterConflict()
+            result = writeIgnoredQuote()
+        }
+        recordQuoteWrite(result)
+        submission.resolveDraftWrite(result)
+        return result is EditorDraftStore.StoreWriteResult.Written || (result == null && submission.isInitialized)
+    }
+
+    private suspend fun writeIgnoredQuote(): EditorDraftStore.StoreWriteResult? {
+        val pending = submission.drafts.pendingInlineQuoteRequest
+        val delivered = stagedDelivery
+        return when {
+            submission.drafts.hasUnreadableInlineQuoteRequest ->
+                submission.drafts.discardUnreadableInlineQuoteRequest()
+            pending == null -> null
+            deliveryPending && delivered != null -> commitQuote(pending, delivered)
+            else -> submission.drafts.consumeInlineQuoteRequest(pending)
+        }
     }
 
     /** Debounced while visible, immediate while stopped; a stale owner never writes private content. */
@@ -308,7 +462,7 @@ internal class PrivateMessageReplyDraftSession(
 
     private fun captureCheckpoint(draft: EditorDraftStore.Draft, version: Long) {
         if (version >= lastCheckpointVersion &&
-            draft.restoreOfferFingerprint() == draftSnapshot()?.restoreOfferFingerprint()
+            draft.body == bodyFieldState.text.toString()
         ) captureSessionCheckpoint(draft, version)
     }
 

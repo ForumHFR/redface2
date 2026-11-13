@@ -15,33 +15,15 @@ data class EditorBodyProvenance(
 
     fun delivered(scope: QuoteScope, body: String, currentBody: String = body): EditorBodyProvenance =
         if (body.isBlank()) this else InlineQuoteDelivery(scope, body).let { latest ->
-            copy(deliveries = retainedDeliveries(currentBody, latest) + latest)
+            copy(deliveries = deliveries.filterNot { it == latest }.distinct() + latest).retainFor(currentBody)
         }
 
-    /** Keep the last whole request for ED-121; older evidence is bounded by quotes still in C. */
-    fun retainFor(body: String): EditorBodyProvenance = deliveries.lastOrNull()?.let { latest ->
-        copy(deliveries = copy(deliveries = deliveries.dropLast(1)).retainedDeliveries(body, latest) + latest)
-    } ?: this
-
-    private fun retainedDeliveries(body: String, latest: InlineQuoteDelivery): List<InlineQuoteDelivery> {
-        val present = editorQuoteBlocks(body, outerOnly = true).map { it.identity }.toSet()
-        val numbers = present.map { it.first }.toSet()
-        val covered = editorQuoteBlocks(latest.body, outerOnly = true).map { latest.scope to it.identity }.toSet()
-        val blocks = deliveries.flatMap { delivery ->
-            editorQuoteBlocks(delivery.body, outerOnly = true).filter { it.identity.first in numbers }.map {
-                (delivery.scope to it.identity) to InlineQuoteDelivery(delivery.scope,
-                    delivery.body.substring(it.range))
-            }
-        }
-        val exact = blocks.filter { it.first.second in present && it.first !in covered }.map { it.first }.toSet()
-        val exactPosts = (exact + covered).map { it.first to it.second.first }.toSet()
-        // Intact variants of one post need separate content identities. A modified block needs
-        // only one original scoped identity to be recognized; deleted blocks need no replay proof.
-        val modified = blocks.asReversed().distinctBy { it.first.first to it.first.second.first }
-            .filter { (it.first.first to it.first.second.first) !in exactPosts }.map { it.first }
-        val retained = exact + modified
-        return blocks.filter { it.first in retained }.distinctBy { it.first }.map { it.second }
-    }
+    /** Deleted blocks can be reinserted after autosave/death; retain their scoped proof too (ED-89). */
+    fun retainFor(body: String): EditorBodyProvenance = copy(
+        deliveries = deliveries.distinct(),
+        draftEnd = draftEnd.coerceAtMost(body.length),
+        quotesEnd = quotesEnd.coerceAtMost(body.length),
+    )
 
     /** Move the durable insertion boundaries with a live edit, including an edit before autosave. */
     fun rebase(previous: String, current: String): EditorBodyProvenance {
@@ -58,6 +40,9 @@ data class EditorBodyProvenance(
             return when {
                 offset == 0 -> 0
                 offset < prefix -> offset
+                // ED-89, one rule whatever follows: text inserted exactly at a boundary is new typing, so
+                // the boundary stays and a later quote lands before that text.
+                offset == prefix && oldEnd == prefix -> offset
                 anchor >= 0 -> anchor
                 offset >= oldEnd -> offset + newEnd - oldEnd
                 else -> prefix
@@ -76,7 +61,6 @@ data class EditorBodyMerge(val body: String, val provenance: EditorBodyProvenanc
 /**
  * ED-89: D | retained deliveries | live typing. This computes one replacement; the surface applies
  * it in one undoable edit, preserving selection/history. Server edit seeds keep their old rule.
- * Activation of this ordering in the full editors belongs to #1450 PR 2.
  */
 // ED-89 ordered seed cases and retained/modified/deleted quote handling.
 @Suppress("CyclomaticComplexMethod", "LongParameterList") // Explicit merge inputs retain dependent scope defaults.
@@ -106,7 +90,7 @@ fun mergeEditorBody(
             editorQuoteBlocks(delivery.body, outerOnly = true).map { delivery.scope to it.identity }
         }
         val present = editorQuoteBlocks(offered).map { it.identity }.toSet()
-        val retained = mutableListOf<Pair<Int, String>>()
+        val retained = mutableListOf<String>()
         var cursor = 0
         var followsQuote = false
         val typing = buildString {
@@ -114,16 +98,15 @@ fun mergeEditorBody(
                 val exact = delivered.indexOfFirst { (deliveredScope, identity) ->
                     deliveredScope == currentScope && identity == block.identity
                 }
-                val sourceIndex = if (exact >= 0) exact else delivered.indexOfFirst { (deliveredScope, identity) ->
+                val source = delivered.getOrNull(exact) ?: delivered.firstOrNull { (deliveredScope, identity) ->
                     deliveredScope == currentScope && identity.first == block.identity.first
                 }
-                val source = delivered.getOrNull(sourceIndex)
                 if (source != null) {
                     val between = current.substring(cursor, block.range.first)
                     if (between.isNotBlank()) append(if (followsQuote) removeEditorSeparator(between) else between)
                     val intact = source.second == block.identity
                     if (!intact || scope != currentScope || block.identity !in present) {
-                        retained += sourceIndex to current.substring(block.range)
+                        retained += current.substring(block.range)
                     }
                     cursor = block.range.last + 1
                     followsQuote = true
@@ -132,7 +115,9 @@ fun mergeEditorBody(
             val tail = current.substring(cursor)
             append(if (followsQuote) removeEditorSeparator(tail) else tail)
         }.takeUnless { it.isBlank() }.orEmpty()
-        val quotes = retained.sortedBy { it.first }.joinToString("\n\n") { it.second }
+        // ED-89: the field already holds the deliveries in request order. Older evidence of the same
+        // post (kept for reinsertion) must not reorder them.
+        val quotes = retained.joinToString("\n\n")
         val prefix = joinEditorParts(offered, quotes)
         val body = joinEditorParts(prefix, typing)
         EditorBodyMerge(body, provenance.copy(draftEnd = offered.length, quotesEnd = prefix.length))
@@ -162,6 +147,24 @@ private fun joinEditorParts(first: String, second: String): String = when {
     else -> first + "\n\n" + second
 }
 
+/** ED-52: compare intact blocks by number and content inside an already validated owning scope. */
+data class FilteredEditorQuotes(val body: String, val duplicates: Int)
+
+fun filterEditorQuotes(delivered: String, current: String): FilteredEditorQuotes {
+    val present = editorQuoteBlocks(current).map { it.identity }.toMutableSet()
+    var duplicates = 0
+    var cursor = 0
+    val filtered = buildString {
+        editorQuoteBlocks(delivered, outerOnly = true).forEach { block ->
+            append(delivered.substring(cursor, block.range.first))
+            if (present.add(block.identity)) append(delivered.substring(block.range)) else duplicates++
+            cursor = block.range.last + 1
+        }
+        append(delivered.substring(cursor))
+    }
+    return FilteredEditorQuotes(if (duplicates == 0) delivered else filtered.trim(), duplicates)
+}
+
 /** Same content comparison as inline delivery: number AND content, within a known scope. */
 data class EditorQuoteBlock(val range: IntRange, val identity: Pair<Int, String>)
 private val quoteTag = Regex("""\[quotemsg=\s*(\d+)\s*(?:,[^\]]*)?]|\[/quotemsg]""", RegexOption.IGNORE_CASE)
@@ -179,4 +182,28 @@ fun editorQuoteBlocks(text: String, outerOnly: Boolean = false): List<EditorQuot
             }
         }
     }
+}
+
+/**
+ * ED-121: the offers still worth a decision over [liveBody]. An offer identical to the field has
+ * nothing to restore: it is hidden from this projection only, never deleted, and a later refresh
+ * shows it again once the field differs. Other offers stay reachable.
+ */
+fun List<EditorDraftStore.DraftOffer>.visibleOver(liveBody: String): List<EditorDraftStore.DraftOffer> =
+    filterNot { it.draft.body == liveBody }
+
+/**
+ * Narrow an already shown offer state at form hydration, without ever showing an offer again:
+ * a null [shown] stays null (a decision is in flight). Returns the visible list and its first body.
+ */
+fun narrowDraftOffers(
+    offers: List<EditorDraftStore.DraftOffer>, shown: String?, liveBody: String,
+): Pair<List<EditorDraftStore.DraftOffer>, String?> {
+    val visible = offers.visibleOver(liveBody)
+    val first = when {
+        shown == null -> null
+        offers.isEmpty() -> shown.takeIf { it != liveBody }
+        else -> visible.firstOrNull()?.draft?.body
+    }
+    return visible to first
 }

@@ -13,6 +13,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
+import fr.forumhfr.redface2.core.domain.editor.EditorBodyProvenance
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
@@ -90,7 +91,6 @@ import fr.forumhfr.redface2.core.ui.editor.EditorEventCollector
 import fr.forumhfr.redface2.core.ui.editor.EditorEventContent
 import fr.forumhfr.redface2.core.ui.editor.EditorEventInput
 import fr.forumhfr.redface2.core.ui.editor.EditorEventProjection
-import fr.forumhfr.redface2.core.ui.editor.EditorLocalOperation
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorText
 import fr.forumhfr.redface2.core.ui.editor.OperationRef
@@ -207,6 +207,87 @@ class PostEditorViewModelTest {
             get(this@forgetInitialBody) as MutableStateFlow<PostEditorState>
         }
         state.value = state.value.copy(draftHydratedFromForm = false)
+    }
+
+    @Test
+    fun `multiple offered versions resolve only the selected identity and stale callbacks are inert`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.preload(key, EditorDraftStore.Draft("old D", updatedAt = 1000))
+        val writer = fr.forumhfr.redface2.core.domain.editor.EditorDraftSession(draftStore, key)
+        writer.load()
+        writer.save(EditorDraftStore.Draft("new D", updatedAt = 2000))
+        val vm = newReplyViewModel(quoteAction = false)
+        settleBody()
+        assertEquals(listOf("new D", "old D"), vm.state.value.draftOffers.map { it.draft.body })
+        val oldId = vm.state.value.draftOffers.last().id
+        vm.editBody(TextFieldValue("typed"))
+        vm.dispatch(PostEditorIntent.DraftOfferRestored(oldId))
+        settleBody()
+        assertEquals("old D\n\ntyped", vm.bodyFieldState.text.toString())
+        assertEquals(listOf("new D"), vm.state.value.draftOffers.map { it.draft.body })
+        vm.dispatch(PostEditorIntent.DraftOfferRestored(oldId))
+        settleBody()
+        assertEquals("old D\n\ntyped", vm.bodyFieldState.text.toString())
+        vm.dispatch(PostEditorIntent.DraftOfferDiscarded(vm.state.value.draftOffers.single().id))
+        settleBody()
+        assertNull(vm.state.value.restorableDraft)
+        assertTrue(vm.state.value.draftOffers.isEmpty())
+        assertEquals("old D\n\ntyped", vm.bodyFieldState.text.toString())
+    }
+
+    @Test
+    fun `card mode shows Q while D awaits and sends the card before restored D`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.preload(key, EditorDraftStore.Draft("D"))
+        val quote = "[quotemsg=101]card[/quotemsg]"
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.success(authenticatedForm(quote)))
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = true))
+        settleBody()
+        assertEquals(listOf(101), vm.state.value.quotes.map { it.numreponse })
+        assertEquals("D", vm.state.value.restorableDraft)
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        vm.dispatch(PostEditorIntent.DraftRestoreRequested)
+        settleBody()
+        vm.dispatch(PostEditorIntent.SubmitClicked())
+        settleBody()
+        assertEquals("$quote\n\nD", replyRepository.lastSubmittedBbcode)
+    }
+
+    // v0.7.8 ED-89/121/132 replaces the decision-before-GET contract of #1450 PR B.
+    @Test
+    fun `activation delivers Q before choosing D and restoring is one ordered undoable mutation`() = runTest {
+        val quote = "[quotemsg=101]requested quote[/quotemsg]"
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.success(authenticatedForm(quote)))
+        val vm = newPendingQuoteOfferViewModel()
+        settleBody()
+        assertEquals("$quote\n", vm.bodyFieldState.text.toString())
+        assertEquals(listOf(101), replyRepository.fetchedContexts.mapNotNull { it.quotedNumreponse })
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        assertEquals("offered D", vm.state.value.restorableDraft)
+        assertTrue(vm.state.value.canSubmit)
+        vm.dispatch(PostEditorIntent.DraftRestoreRequested)
+        settleBody()
+        assertEquals("offered D\n\n$quote", vm.bodyFieldState.text.toString())
+        assertNull(vm.state.value.restorableDraft)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `activation restore during quote GET inserts the delivery between D and live typing`() = runTest {
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.success(
+            authenticatedForm("[quotemsg=101]requested quote[/quotemsg]")))
+        val vm = newPendingQuoteOfferViewModel()
+        vm.editBody(TextFieldValue("typed"))
+        vm.dispatch(PostEditorIntent.DraftRestoreRequested)
+        testScheduler.runCurrent()
+        assertEquals("offered D\n\ntyped", vm.bodyFieldState.text.toString())
+        get.complete(Unit)
+        settleBody()
+        assertEquals("offered D\n\n[quotemsg=101]requested quote[/quotemsg]\n\ntyped",
+            vm.bodyFieldState.text.toString())
     }
 
     @Test
@@ -377,16 +458,19 @@ class PostEditorViewModelTest {
         settleBody()
         first.viewModelScope.cancel()
 
+        // v0.7.8 ED-52/89/132: the replayed quote is delivered at once into the empty field; Restore
+        // then keeps a single copy, silently (was: « Déjà citée » on a delivery made after the decision).
         val replay = deliver(truncate = true)
         assertEquals(existing, replay.bodyFieldState.text.toString())
-        assertEquals(1, replay.chromeEvents.state.events.count { it.content == notice })
+        assertEquals(0, replay.chromeEvents.state.events.count { it.content == notice })
         replay.viewModelScope.cancel()
 
+        // ED-89: D first, then the other portion delivered by this request. No ordinary GET under the offer.
         val second = deliver(truncate = false)
-        val expected = "$fullQuote\n\n$existing"
+        val expected = "$existing\n\n$fullQuote"
         assertEquals(expected, second.bodyFieldState.text.toString())
         assertEquals(0, second.chromeEvents.state.events.count { it.content == notice })
-        assertEquals(listOf(101, null, 101, null, 101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
+        assertEquals(listOf(101, 101, 101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
         val persisted = checkNotNull(draftStore.saved[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)])
         assertEquals(expected, persisted.body)
         assertNull(persisted.pendingInlineQuoteRequest)
@@ -842,9 +926,9 @@ class PostEditorViewModelTest {
         adapter.reload(error.key)
         syncBody()
         assertEquals("concurrent body", vm.state.value.restorableDraft)
-        assertEquals(listOf(101, null), replyRepository.fetchedContexts.map { it.quotedNumreponse })
-        assertEquals(1, replyRepository.fetchedContexts.count { it.isQuote })
-        assertEquals(1, replyRepository.fetchedContexts.count { !it.isQuote })
+        // v0.7.8 ED-132: no ordinary GET under the offer; the delivery CAS is retried without waiting for D.
+        assertEquals(listOf(101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
         vm.dispatch(PostEditorIntent.DraftRestoreRequested)
         settleBody()
         val persisted = checkNotNull(draftStore.saved[key])
@@ -853,7 +937,7 @@ class PostEditorViewModelTest {
         assertNull(persisted.pendingInlineQuoteRequest)
         assertTrue(vm.state.value.pendingQuotes.isEmpty())
         // Reconciliation kept the exact request's delivery marker: only its CAS is retried.
-        assertEquals(listOf(101, null), replyRepository.fetchedContexts.map { it.quotedNumreponse })
+        assertEquals(listOf(101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
         assertEquals(0, replyRepository.submitCalls)
     }
 
@@ -1060,11 +1144,15 @@ class PostEditorViewModelTest {
         assertEquals(EditorErrors.uncertain, vm.state.value.submitError)
     }
 
+    // v0.7.8 ED-89/121/132 replaces « D in memory, Q after the decision »: D stays offered and durable
+    // while C is autosaved, the quote GET runs at once, and Restore orders D, the quote, then the typing.
     @Test
-    fun `405 post autosaves C in the main row and keeps D in memory until Restore`() = runTest {
+    fun `405 post autosaves C while D stays offered and Restore orders D quote then typing`() = runTest {
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
         draftStore.preload(key, EditorDraftStore.Draft("offered D"))
         replyRepository.formResult = Result.success(authenticatedForm("[quotemsg=101]quote[/quotemsg]"))
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
         val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
             userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
         vm.editBody(TextFieldValue("current C"))
@@ -1074,23 +1162,27 @@ class PostEditorViewModelTest {
         assertEquals(setOf(key), draftStore.entries.keys)
         assertEquals("offered D", vm.state.value.restorableDraft)
         assertNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
-        assertEquals(1, replyRepository.formFetches)
-        assertEquals(0, replyRepository.fetchedContexts.count { it.isQuote })
         vm.dispatch(PostEditorIntent.DraftRestoreRequested)
+        syncBody()
+        assertEquals("offered D\n\ncurrent C", vm.bodyFieldState.text.toString())
+        get.complete(Unit)
         settleBody()
-        assertEquals("[quotemsg=101]quote[/quotemsg]\n\ncurrent C\n\noffered D", draftStore.saved[key]?.body)
+        assertEquals("offered D\n\n[quotemsg=101]quote[/quotemsg]\n\ncurrent C", draftStore.saved[key]?.body)
         assertNull(vm.state.value.restorableDraft)
         assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
-        assertEquals(2, replyRepository.formFetches)
+        assertEquals(1, replyRepository.formFetches)
         assertEquals(1, replyRepository.fetchedContexts.count { it.isQuote })
         assertEquals(0, replyRepository.submitCalls)
     }
 
+    // v0.7.8 ED-121/132: Ignore removes the chosen offer only; the quote GET never waited for it.
     @Test
-    fun `405 post autosaves C in the main row and keeps D in memory until Ignore`() = runTest {
+    fun `405 post autosaves C while D stays offered and Ignore keeps C and the quote request`() = runTest {
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
         draftStore.preload(key, EditorDraftStore.Draft("offered D"))
         replyRepository.formResult = Result.success(authenticatedForm("[quotemsg=101]quote[/quotemsg]"))
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
         val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
             userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
         vm.editBody(TextFieldValue("current C"))
@@ -1100,10 +1192,6 @@ class PostEditorViewModelTest {
         assertEquals(setOf(key), draftStore.entries.keys)
         assertEquals("offered D", vm.state.value.restorableDraft)
         assertNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
-        assertEquals(1, replyRepository.formFetches)
-        assertEquals(0, replyRepository.fetchedContexts.count { it.isQuote })
-        val get = CompletableDeferred<Unit>()
-        replyRepository.formGate = get
         vm.dispatch(PostEditorIntent.DraftDiscardRequested)
         syncBody()
         assertEquals("current C", draftStore.saved[key]?.body)
@@ -1113,6 +1201,8 @@ class PostEditorViewModelTest {
         assertEquals("[quotemsg=101]quote[/quotemsg]\n\ncurrent C", draftStore.saved[key]?.body)
         assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
         assertNull(vm.state.value.restorableDraft)
+        assertTrue(vm.state.value.draftOffers.isEmpty())
+        assertEquals(1, replyRepository.fetchedContexts.count { it.isQuote })
         assertEquals(0, replyRepository.submitCalls)
     }
 
@@ -4513,12 +4603,12 @@ class PostEditorViewModelTest {
         recreated.dispatch(PostEditorIntent.DraftRestoreRequested)
         settleBody()
         assertNull(savedStateHandle.get<String>("draft_restore_offer_fingerprint"))
-        assertEquals("new live text\n\nrescued text", draftStore.saved[key]?.body)
+        assertEquals("rescued text\n\nnew live text", draftStore.saved[key]?.body)
 
         val afterRestore = newReplyViewModel(savedStateHandle = savedStateHandle)
         settleBody()
         assertNull(afterRestore.state.value.restorableDraft)
-        assertEquals("new live text\n\nrescued text", afterRestore.bodyFieldState.text.toString())
+        assertEquals("rescued text\n\nnew live text", afterRestore.bodyFieldState.text.toString())
     }
 
     @Test
@@ -4614,7 +4704,7 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `restoring appends the offered body after text typed since the offer`() = runTest {
+    fun `v078 ED89 restoring puts D before text typed since the offer`() = runTest {
         draftStore.preload(
             EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID),
             EditorDraftStore.Draft(body = "rescued text"),
@@ -4626,151 +4716,339 @@ class PostEditorViewModelTest {
         viewModel.editBody(TextFieldValue("fresh text"))
         viewModel.dispatch(PostEditorIntent.DraftRestoreRequested)
 
-        assertEquals("fresh text\n\nrescued text", viewModel.bodyFieldState.text.toString())
+        assertEquals("rescued text\n\nfresh text", viewModel.bodyFieldState.text.toString())
         assertNull(viewModel.state.value.restorableDraft)
     }
 
+    // v0.7.8 ED-35/40/44/89/132 removes the ordinary-GET-under-offer detour and timed notice.
     @Test
-    fun `1450 ordinary form hydrates metadata under a persisted quote offer with picker closed`() = runTest {
-        assertPendingQuoteOfferMetadata(openPickerDuringGet = false)
-    }
-
-    @Test
-    fun `1450 ordinary form refreshes HFR favorites in an already open picker`() = runTest {
-        assertPendingQuoteOfferMetadata(openPickerDuringGet = true)
-    }
-
-    private fun assertPendingQuoteOfferMetadata(openPickerDuringGet: Boolean) {
-        val get = CompletableDeferred<Unit>()
-        replyRepository.formGate = get
-        val favorite = EditorSmiley("[:a chile:10]", "https://example.invalid/favorite.gif",
-            EditorSmileySource.HFR_FAVORITE)
-        replyRepository.formResult = Result.success(authenticatedForm("must not hydrate C").copy(
-            favoriteSmileys = listOf(favorite), msgIcon = "16",
-            options = ReplyFormOptions(signatureEnabled = true, smileyDisabled = true,
-                emailNotificationEnabled = true),
-        ))
+    fun `Q failure keeps D independent and Reload only retries the quote GET`() = runTest {
+        replyRepository.formException = IOException("offline")
         val vm = newPendingQuoteOfferViewModel()
-        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
-        val original = draftStore.entries[key]
-        assertEquals(listOf<Int?>(null), replyRepository.fetchedContexts.map { it.quotedNumreponse })
-        assertTrue(vm.state.value.isLoadingForm)
-        assertPendingQuoteNotice(vm, expected = true)
-        if (openPickerDuringGet) vm.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
-        get.complete(Unit)
         settleBody()
-        if (!openPickerDuringGet) vm.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
-        assertEquals(listOf(favorite), (vm.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys)
-        val state = vm.state.value
-        assertEquals("Fake Topic", state.topicTitle)
-        assertTrue(state.hasLoadedForm)
-        assertTrue(state.hasAuthenticatedForm)
-        assertTrue(state.signatureEnabled)
-        assertTrue(state.smileyDisabled)
-        assertTrue(state.emailNotificationEnabled)
-        assertEquals(16, state.msgIcon)
-        assertEquals("", vm.bodyFieldState.text.toString())
-        assertEquals("offered D", state.restorableDraft)
-        assertEquals(original, draftStore.entries[key])
-        assertEquals(0, draftStore.writes)
-        assertFalse(state.canSubmit)
-        assertFalse(PostEditorChromeState(state).sendActivatable)
-        assertEquals(listOf<Int?>(null), replyRepository.fetchedContexts.map { it.quotedNumreponse })
-        assertPendingQuoteNotice(vm, expected = true)
-    }
-
-    @Test
-    fun `1450 ordinary form does not change typing or remove an equal draft offer`() = runTest {
-        val get = CompletableDeferred<Unit>()
-        replyRepository.formGate = get
-        replyRepository.formResult = Result.success(authenticatedForm("unexpected prefill"))
-        val vm = newPendingQuoteOfferViewModel()
-        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
-        val original = draftStore.entries[key]
-        vm.editBody(TextFieldValue("offered D", TextRange(3)))
-        get.complete(Unit)
-        syncBody()
-        assertEquals("offered D", vm.bodyFieldState.text.toString())
-        assertEquals(TextRange(3), vm.bodyFieldState.selection)
         assertEquals("offered D", vm.state.value.restorableDraft)
-        assertEquals(original, draftStore.entries[key])
+        assertEquals(listOf(101), replyRepository.fetchedContexts.mapNotNull { it.quotedNumreponse })
+        // ED-35/132 (kept): a failed request still blocks « Envoyer », whatever the offer's state.
+        assertTrue(vm.state.value.pendingQuotes.isNotEmpty())
         assertFalse(vm.state.value.canSubmit)
-        assertFalse(PostEditorChromeState(vm.state.value).sendActivatable)
-    }
-
-    @Test
-    fun `1450 Reply with persisted Q then Restore prefixes and durably delivers it exactly once`() = runTest {
-        assertPendingQuoteOfferDecision(PostEditorIntent.DraftRestoreRequested, "offered D")
-    }
-
-    @Test
-    fun `1450 Reply with persisted Q then Ignore discards D and durably delivers Q exactly once`() = runTest {
-        assertPendingQuoteOfferDecision(PostEditorIntent.DraftDiscardRequested, "")
-    }
-
-    @Test
-    fun `1450 pending event offer sheet Restore delivers persisted Q exactly once`() = runTest {
-        assertPendingQuoteOfferDecision(PostEditorIntent.DraftRestoreRequested, "offered D", throughEvent = true)
-    }
-
-    @Test
-    fun `1450 pending event offer sheet Ignore delivers persisted Q exactly once`() = runTest {
-        assertPendingQuoteOfferDecision(PostEditorIntent.DraftDiscardRequested, "", throughEvent = true)
-    }
-
-    private fun assertPendingQuoteOfferDecision(
-        decision: PostEditorIntent,
-        suffix: String,
-        throughEvent: Boolean = false,
-    ) {
-        val quote = "[quotemsg=101]requested quote[/quotemsg]"
-        replyRepository.formResultsByNumrep = mapOf(101 to Result.success(authenticatedForm(quote)))
-        val vm = newPendingQuoteOfferViewModel()
+        vm.dispatch(PostEditorIntent.ReloadRequested)
         settleBody()
-        assertPendingQuoteNotice(vm, expected = true)
-        val adapter = PostEditorChromeAdapter({ vm.state.value }, vm.bodyFieldState, vm.chromeEvents,
-            { vm.dispatch(it) }, {}, {}, vm.chromeMemory)
-        if (throughEvent) {
-            val event = vm.chromeEvents.visibleEvent!!
-            adapter.barActions.onEvent(event.key, EditorEventAction.Details)
-            assertEquals(event.key, adapter.draftOfferDetailKey)
-            // A gesture/timeout can retire the notice while its sheet still awaits the decision.
-            vm.chromeEvents.dispatch(EditorEventInput.Acknowledge(event.key))
-            assertNull(vm.chromeEvents.visibleEvent)
-            assertEquals(event.key, adapter.draftOfferDetailKey)
-        } else adapter.open(PostEditorChromeSurface.Restore)
-        assertTrue(adapter.draftOfferOpen)
-        if (decision == PostEditorIntent.DraftRestoreRequested) adapter.restoreDraft() else adapter.discardDraft()
-        assertFalse(adapter.draftOfferOpen)
-        assertNull(adapter.detail)
-        assertTrue(adapter.consumeReturn())
-        assertFalse(adapter.consumeReturn())
-        vm.dispatch(decision) // A retained callback must not deliver a second copy.
+        assertEquals(listOf(101, 101), replyRepository.fetchedContexts.mapNotNull { it.quotedNumreponse })
+        assertEquals(2, vm.state.value.quoteFetchFailures)
+        assertFalse(vm.state.value.canSubmit)
+        assertTrue(vm.state.value.canIgnorePendingQuote)
+        vm.editBody(TextFieldValue("new C"))
+        vm.dispatch(PostEditorIntent.PendingQuoteIgnored)
         settleBody()
-        val expected = if (suffix.isEmpty()) "$quote\n" else "$quote\n\n$suffix"
-        assertEquals(expected, vm.bodyFieldState.text.toString())
-        assertNull(vm.state.value.restorableDraft)
+        assertEquals("new C", vm.bodyFieldState.text.toString())
+        assertEquals("offered D", vm.state.value.restorableDraft)
         assertTrue(vm.state.value.pendingQuotes.isEmpty())
-        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
-        assertEquals(expected, draftStore.saved[key]?.body)
-        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
-        assertEquals(listOf(null, 101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
-        assertPendingQuoteNotice(vm, expected = false)
         assertEquals(0, replyRepository.submitCalls)
     }
 
     @Test
-    fun `1450 failed delivery CAS retries from save details without reinserting the edited quote`() = runTest {
-        assertFailedQuoteDeliveryRecovery(afterAutosave = false)
+    fun `failed quote consumption retries the live edited body without reinsertion or a new GET`() = runTest {
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.success(
+            authenticatedForm("[quotemsg=101]requested quote[/quotemsg]")))
+        val vm = newPendingQuoteOfferViewModel()
+        draftStore.saveFailure = IOException("disk full")
+        get.complete(Unit)
+        settleBody()
+        assertTrue(vm.state.value.pendingQuotes.isNotEmpty())
+        assertEquals("offered D", vm.state.value.restorableDraft)
+        // ED-35/132 (kept): no POST can leave while the delivered quote lacks its durable consumption.
+        assertFalse(vm.state.value.canSubmit)
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        assertNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        vm.editBody(TextFieldValue("[quotemsg=101]edited quote[/quotemsg]\n\nnew text"))
+        draftStore.saveFailure = null
+        vm.dispatch(PostEditorIntent.ReloadRequested)
+        settleBody()
+        assertEquals("[quotemsg=101]edited quote[/quotemsg]\n\nnew text", vm.bodyFieldState.text.toString())
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        assertEquals("[quotemsg=101]edited quote[/quotemsg]\n\nnew text", draftStore.saved[key]?.body)
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        assertEquals(1, replyRepository.formFetches)
+        assertEquals("offered D", vm.state.value.restorableDraft)
+        assertEquals(0, replyRepository.submitCalls)
     }
 
     @Test
-    fun `1450 successful autosave retires save information but leaves quote recovery reachable`() = runTest {
-        assertFailedQuoteDeliveryRecovery(afterAutosave = true)
+    fun `close after a failed quote consumption settles it and saves the typing made since - ED132`() = runTest {
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.success(
+            authenticatedForm("[quotemsg=101]requested quote[/quotemsg]")))
+        val vm = newPendingQuoteOfferViewModel()
+        draftStore.saveFailure = IOException("disk full")
+        get.complete(Unit)
+        settleBody()
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        assertNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        val typed = "[quotemsg=101]requested quote[/quotemsg]\n\ntyped after the delivery"
+        vm.editBody(TextFieldValue(typed))
+        draftStore.saveFailure = null
+        vm.dispatch(PostEditorIntent.CloseRequested)
+        settleBody()
+        // The pop is only allowed once C and Q are settled and the live field is durable.
+        assertEquals(typed, draftStore.saved[key]?.body)
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        assertEquals(1, replyRepository.formFetches)
+        assertEquals(0, replyRepository.submitCalls)
     }
 
     @Test
-    fun `1450 account change after failed quote CAS disables recovery and keeps Q for its original owner`() = runTest {
+    fun `close that cannot save the delivered field asks before abandoning it - ED10 ED132`() = runTest {
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.success(
+            authenticatedForm("[quotemsg=101]requested quote[/quotemsg]")))
+        val vm = newPendingQuoteOfferViewModel()
+        val effects = mutableListOf<PostEditorEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        draftStore.saveFailure = IOException("disk full")
+        get.complete(Unit)
+        settleBody()
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val typed = "[quotemsg=101]requested quote[/quotemsg]\n\ntyped after the delivery"
+        vm.editBody(TextFieldValue(typed))
+        vm.dispatch(PostEditorIntent.CloseRequested)
+        settleBody()
+        // The typing cannot be saved: the dialog opens, the editor stays and nothing is half-written.
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        assertFalse(PostEditorEffect.CloseCommitted in effects)
+        assertEquals("offered D", draftStore.saved[key]?.body)
+        assertNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        // "Rester": the editor stays open with C intact; a later Back asks again, it never pops alone.
+        vm.dispatch(PostEditorIntent.UnsavedCloseDismissed)
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(typed, vm.bodyFieldState.text.toString())
+        vm.dispatch(PostEditorIntent.CloseRequested)
+        settleBody()
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        assertFalse(PostEditorEffect.CloseCommitted in effects)
+        // "Quitter sans enregistrer" is the only abandonment, and it pops exactly once.
+        vm.dispatch(PostEditorIntent.UnsavedCloseConfirmed)
+        vm.dispatch(PostEditorIntent.UnsavedCloseConfirmed)
+        settleBody()
+        assertEquals(1, effects.count { it == PostEditorEffect.CloseCommitted })
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+    }
+
+    @Test
+    fun `close whose final save fails asks before abandoning the field - ED10`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val vm = newReplyViewModel()
+        val effects = mutableListOf<PostEditorEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        settleBody()
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.saveFailure = IOException("disk full")
+        vm.editBody(TextFieldValue("typed, never saved"))
+        vm.dispatch(PostEditorIntent.CloseRequested)
+        settleBody()
+        // The last write of the field failed: the dialog opens and the editor stays, field intact.
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        assertFalse(PostEditorEffect.CloseCommitted in effects)
+        assertTrue(draftStore.saved[key]?.body.isNullOrEmpty())
+        assertEquals("typed, never saved", vm.bodyFieldState.text.toString())
+        // "Quitter sans enregistrer" is the only abandonment: one pop, no write.
+        val writes = draftStore.writes
+        vm.dispatch(PostEditorIntent.UnsavedCloseConfirmed)
+        vm.dispatch(PostEditorIntent.UnsavedCloseConfirmed)
+        vm.dispatch(PostEditorIntent.CloseRequested)
+        settleBody()
+        assertEquals(1, effects.count { it == PostEditorEffect.CloseCommitted })
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(writes, draftStore.writes)
+        assertTrue(draftStore.saved[key]?.body.isNullOrEmpty())
+    }
+
+    @Test
+    fun `Rester then a close that can save writes the field and closes once - ED10`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val vm = newReplyViewModel()
+        val effects = mutableListOf<PostEditorEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        settleBody()
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.saveFailure = IOException("disk full")
+        vm.editBody(TextFieldValue("typed while the disk was full"))
+        vm.dispatch(PostEditorIntent.CloseRequested)
+        settleBody()
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        // "Rester" keeps the editor; while storage still fails, a new Back asks again.
+        vm.dispatch(PostEditorIntent.UnsavedCloseDismissed)
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        vm.dispatch(PostEditorIntent.CloseRequested)
+        settleBody()
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        vm.dispatch(PostEditorIntent.UnsavedCloseDismissed)
+        assertFalse(PostEditorEffect.CloseCommitted in effects)
+        // Storage recovers: the next Back retries the write, then closes normally.
+        draftStore.saveFailure = null
+        vm.dispatch(PostEditorIntent.CloseRequested)
+        settleBody()
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals("typed while the disk was full", draftStore.saved[key]?.body)
+        assertEquals(1, effects.count { it == PostEditorEffect.CloseCommitted })
+    }
+
+    @Test
+    fun `clearing a field that hid its offer then closing saves and never asks - ED10 ED121`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.preload(key, EditorDraftStore.Draft("offered D"))
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val vm = newReplyViewModel()
+        val effects = mutableListOf<PostEditorEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        settleBody()
+        assertEquals("offered D", vm.state.value.restorableDraft)
+        // The field now equals D: the offer is kept in the store but hidden from the list.
+        vm.editBody(TextFieldValue("offered D"))
+        testScheduler.advanceTimeBy(751)
+        settleBody()
+        assertNull(vm.state.value.restorableDraft)
+        // Clear and close before the autosave: the write succeeds and shows D again, which makes
+        // the cleared field ineligible for a second snapshot. The field itself did not move.
+        vm.editBody(TextFieldValue(""))
+        vm.dispatch(PostEditorIntent.CloseRequested)
+        settleBody()
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(1, effects.count { it == PostEditorEffect.CloseCommitted })
+        assertEquals("", draftStore.saved[key]?.body)
+        assertEquals("offered D", vm.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `close with nothing to write never asks even when storage fails - ED10`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val vm = newReplyViewModel()
+        val effects = mutableListOf<PostEditorEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        settleBody()
+        // An empty field over an absent row: the refused write would not have saved anything.
+        draftStore.saveFailure = IOException("disk full")
+        vm.dispatch(PostEditorIntent.CloseRequested)
+        settleBody()
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(1, effects.count { it == PostEditorEffect.CloseCommitted })
+    }
+
+    @Test
+    fun `close over a body the row already holds never asks when storage fails - ED10`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val vm = newReplyViewModel()
+        val effects = mutableListOf<PostEditorEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        settleBody()
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        vm.editBody(TextFieldValue("already saved"))
+        testScheduler.advanceTimeBy(751)
+        settleBody()
+        assertEquals("already saved", draftStore.saved[key]?.body)
+        draftStore.saveFailure = IOException("disk full")
+        vm.dispatch(PostEditorIntent.CloseRequested)
+        settleBody()
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(1, effects.count { it == PostEditorEffect.CloseCommitted })
+        assertEquals("already saved", draftStore.saved[key]?.body)
+    }
+
+    @Test
+    fun `quote delivered after a failed Restore write consumes the merged D with C - ED121`() = runTest {
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.success(
+            authenticatedForm("[quotemsg=101]requested quote[/quotemsg]")))
+        val vm = newPendingQuoteOfferViewModel()
+        draftStore.saveFailure = IOException("disk full")
+        vm.dispatch(PostEditorIntent.DraftRestoreRequested)
+        testScheduler.runCurrent()
+        assertEquals("offered D", vm.bodyFieldState.text.toString())
+        draftStore.saveFailure = null
+        get.complete(Unit)
+        settleBody()
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        assertEquals("offered D\n\n[quotemsg=101]requested quote[/quotemsg]", vm.bodyFieldState.text.toString())
+        assertEquals(vm.bodyFieldState.text.toString(), draftStore.saved[key]?.body)
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        // A recreation must not find D offered again: restoring it would duplicate it in C.
+        assertTrue(draftStore.loadOffers("tester", key).none { it.draft.body == "offered D" })
+        assertNull(vm.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `send after a failed Restore write consumes the merged D it publishes - ED121`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.preload(key, EditorDraftStore.Draft("offered D"))
+        replyRepository.submitResult = ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        val vm = newReplyViewModel(quoteAction = false)
+        settleBody()
+        assertEquals("offered D", vm.state.value.restorableDraft)
+        draftStore.saveFailure = IOException("disk full")
+        vm.dispatch(PostEditorIntent.DraftRestoreRequested)
+        testScheduler.runCurrent()
+        assertEquals("offered D", vm.bodyFieldState.text.toString())
+        draftStore.saveFailure = null
+        // Send before the autosave debounce: the attempt itself must carry the pending resolution.
+        vm.dispatch(PostEditorIntent.SubmitClicked())
+        settleBody()
+        assertEquals(1, replyRepository.submitCalls)
+        assertEquals(EditorDraftStore.AttemptStatus.PUBLISHED, draftStore.entries[key]?.attempt?.status)
+        assertTrue(draftStore.loadOffers("tester", key).none { it.draft.body == "offered D" })
+    }
+
+    @Test
+    fun `failed Restore then autosave consumes D and clears its status before recreation`() = runTest {
+        val vm = newPendingQuoteOfferViewModel()
+        settleBody()
+        draftStore.saveFailure = IOException("disk full")
+        vm.dispatch(PostEditorIntent.DraftRestoreRequested)
+        testScheduler.runCurrent()
+        assertEquals("offered D", vm.state.value.restorableDraft)
+        val body = vm.bodyFieldState.text.toString()
+        draftStore.saveFailure = null
+        testScheduler.advanceTimeBy(800)
+        syncBody()
+        assertNull(vm.state.value.restorableDraft)
+        assertTrue(vm.state.value.draftOffers.isEmpty())
+        assertEquals(body, draftStore.saved[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)]?.body)
+    }
+
+    @Test
+    fun `a quote GET finishing after account change cannot insert or consume the old request`() = runTest {
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.success(
+            authenticatedForm("[quotemsg=101]private to opening[/quotemsg]")))
+        val auth = FakeAuthRepository(AuthState.Authenticated(checkNotNull(draftStore.activeOwner)))
+        val vm = newPendingQuoteOfferViewModel(authRepository = auth)
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val originalEntries = draftStore.entries
+        val original = checkNotNull(originalEntries[key])
+        assertNotNull(original.draft.pendingInlineQuoteRequest)
+        draftStore.activeOwner = "bob"
+        auth.states.value = AuthState.Authenticated("bob")
+        syncBody()
+        get.complete(Unit)
+        settleBody()
+        assertEquals("", vm.bodyFieldState.text.toString())
+        assertFalse(vm.state.value.canSubmit)
+        assertNull(vm.state.value.restorableDraft)
+        assertTrue(vm.state.value.draftOffers.isEmpty())
+        // The opening account keeps its row, its request and its offered D untouched.
+        assertEquals(original, originalEntries[key])
+        assertNull(draftStore.entries[key])
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    // ED-83/132 (owner and generation control, kept by v0.7.8): adapted from the PR B test, the
+    // failed CAS now follows an immediate delivery instead of a Restore.
+    @Test
+    fun `account change after failed quote CAS disables recovery and keeps Q for its original owner`() = runTest {
         var deliveryCalls = 0
         draftStore = object : VersionedEditorDraftStore() {
             @Suppress("LongParameterList") // Mirrors the store's request CAS and independent offer protection.
@@ -4788,29 +5066,20 @@ class PostEditorViewModelTest {
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
         val quote = "[quotemsg=101]requested quote[/quotemsg]"
         replyRepository.formResultsByNumrep = mapOf(101 to Result.success(authenticatedForm(quote)))
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
         val vm = newPendingQuoteOfferViewModel(authRepository = auth)
-        settleBody()
         val pending = checkNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
         val calls = mutableListOf<PostEditorIntent>()
         val adapter = PostEditorChromeAdapter({ vm.state.value }, vm.bodyFieldState, vm.chromeEvents,
             { calls += it; vm.dispatch(it) }, {}, {}, vm.chromeMemory)
-        val get = CompletableDeferred<Unit>()
-        replyRepository.formGate = get
-        vm.dispatch(PostEditorIntent.DraftRestoreRequested)
-        syncBody()
         draftStore.saveFailure = IOException("delivery CAS failed")
         get.complete(Unit)
         settleBody()
         assertEquals(1, deliveryCalls)
         assertEquals(EditorErrors.draftSaveFailed, vm.state.value.submitError)
+        assertFalse(vm.state.value.canSubmit)
         assertTrue(adapter.hasPendingQuoteRecovery)
-        val failure = vm.chromeEvents.visibleEvent!!
-        adapter.barActions.onEvent(failure.key, EditorEventAction.Details)
-        assertTrue(adapter.canReload(failure.key))
-        // ED-44 may consume the first gesture under the save information.
-        adapter.open(PostEditorChromeSurface.PendingQuote)
-        adapter.open(PostEditorChromeSurface.PendingQuote)
-        assertEquals(PostEditorChromeSurface.PendingQuote, adapter.surface)
         val originalEntries = draftStore.entries
         val original = checkNotNull(originalEntries[key])
         assertEquals(pending, original.draft.pendingInlineQuoteRequest)
@@ -4824,268 +5093,60 @@ class PostEditorViewModelTest {
         syncBody()
         assertNull(vm.chromeEvents.state.session.owner)
         assertEquals(EditorSubmissionState.Ready, vm.state.value.submission)
-        assertTrue(adapter.state.scaffold.controlsEnabled)
         assertFalse(vm.state.value.isLoadingForm)
         assertTrue(vm.state.value.blocksFormReload)
         assertFalse(adapter.hasPendingQuoteRecovery)
         assertNull(adapter.detail)
         assertNull(adapter.surface)
-        // Reopen after the session reset so recovery is rejected by eligibility, not a stale panel.
-        adapter.open(PostEditorChromeSurface.PendingQuote)
-        assertEquals(PostEditorChromeSurface.PendingQuote, adapter.surface)
-        adapter.reload(failure.key)
+        assertNull(vm.state.value.restorableDraft)
         adapter.reloadPendingQuote()
         vm.dispatch(PostEditorIntent.ReloadRequested)
+        vm.dispatch(PostEditorIntent.DraftRestoreRequested)
         settleBody()
         assertTrue(calls.isEmpty())
         assertEquals(body, vm.bodyValue())
-        assertTrue(vm.state.value.pendingQuotes.isNotEmpty())
         assertEquals(original, originalEntries[key])
         assertNull(draftStore.entries[key])
         assertEquals(writes, draftStore.writes)
         assertEquals(loads, draftStore.loadCalls)
         assertEquals(1, deliveryCalls)
-        assertEquals(listOf(null, 101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
+        assertEquals(listOf(101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
         assertEquals(0, replyRepository.submitCalls)
     }
 
-    private fun assertFailedQuoteDeliveryRecovery(afterAutosave: Boolean) {
-        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
-        val quote = "[quotemsg=101]requested quote[/quotemsg]"
-        replyRepository.formResultsByNumrep = mapOf(101 to Result.success(authenticatedForm(quote)))
-        val vm = newPendingQuoteOfferViewModel()
-        settleBody()
-        val pending = checkNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
-        val adapter = PostEditorChromeAdapter({ vm.state.value }, vm.bodyFieldState, vm.chromeEvents,
-            { vm.dispatch(it) }, {}, {})
-        val notice = vm.chromeEvents.visibleEvent!!
-        adapter.barActions.onEvent(notice.key, EditorEventAction.Details)
-        val get = CompletableDeferred<Unit>()
-        replyRepository.formGate = get
-        adapter.restoreDraft()
-        syncBody()
-        assertNull(vm.state.value.restorableDraft)
-        assertEquals("offered D", draftStore.saved[key]?.body) // Restore is durable before the quote GET ends.
-        assertEquals(pending, draftStore.saved[key]?.pendingInlineQuoteRequest)
-        draftStore.saveFailure = IOException("delivery CAS failed")
-        get.complete(Unit)
-        settleBody()
-        assertEquals("$quote\n\noffered D", vm.bodyFieldState.text.toString())
-        assertEquals(EditorErrors.draftSaveFailed, vm.state.value.submitError)
-        assertEquals(pending, draftStore.saved[key]?.pendingInlineQuoteRequest)
-        assertPendingQuoteNotice(vm, expected = false)
-        assertFalse(vm.state.value.canSubmit)
-        assertFalse(adapter.state.sendActivatable)
-        assertFalse(vm.state.value.blocksFormReload)
-        assertTrue(adapter.hasPendingQuoteRecovery)
-        val failure = vm.chromeEvents.visibleEvent!!
-
-        // Strip even the quote markup: retry must save this exact field, never reinsert the prefill.
-        draftStore.saveFailure = null
-        val edited = TextFieldValue("edited excerpt\n\noffered D", TextRange(4, 1))
-        vm.editBody(edited)
-        if (afterAutosave) {
-            settleBody()
-            assertNull(vm.state.value.submitError)
-            assertNull(vm.chromeEvents.visibleEvent)
-            assertEquals(edited.text, draftStore.saved[key]?.body)
-            assertEquals(pending, draftStore.saved[key]?.pendingInlineQuoteRequest)
-            assertTrue(vm.state.value.pendingQuotes.isNotEmpty())
-            assertFalse(adapter.state.sendActivatable)
-            assertEquals(listOf(null, 101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
-            adapter.open(PostEditorChromeSurface.PendingQuote)
-            assertEquals(PostEditorChromeSurface.PendingQuote, adapter.surface)
-            adapter.reloadPendingQuote()
-            adapter.reloadPendingQuote() // A retained panel callback is inert after closing.
-        } else {
-            adapter.barActions.onEvent(failure.key, EditorEventAction.Details)
-            assertTrue(adapter.canReload(failure.key))
-            adapter.reload(failure.key)
-            adapter.reload(failure.key) // A retained detail callback cannot retry a resolved delivery.
-        }
-        settleBody()
-        assertEquals(edited, vm.bodyValue())
-        assertEquals(edited.text, draftStore.saved[key]?.body)
-        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
-        assertTrue(vm.state.value.pendingQuotes.isEmpty())
-        assertFalse(adapter.hasPendingQuoteRecovery)
-        assertTrue(adapter.state.sendActivatable)
-        assertEquals(listOf(null, 101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
-        assertEquals(0, vm.state.value.quoteFetchFailures)
-        assertEquals(0, replyRepository.submitCalls)
-    }
-
+    // v0.7.8 ED-89/132: Restore is allowed during the quote GET. The delivery waits for the durable
+    // decision, then lands after D (until v0.7.7 the quote GET itself waited for the decision).
     @Test
-    fun `1450 failed ordinary form under offer remains a form error and Reload retries only that GET`() = runTest {
-        replyRepository.formResult = Result.failure(IOException("offline"))
-        val vm = newPendingQuoteOfferViewModel()
-        settleBody()
-        assertEquals(EditorErrors.formNetwork, vm.state.value.submitError)
-        assertEquals(0, vm.state.value.quoteFetchFailures)
-        val error = vm.chromeEvents.visibleEvent!!
-        assertEquals(EditorEventContent.Problem(EditorErrors.formNetwork), error.content)
-        assertEquals(EditorLocalOperation.FormLoad, (error.key.operation as OperationRef.Local).kind)
-        val adapter = PostEditorChromeAdapter({ vm.state.value }, vm.bodyFieldState, vm.chromeEvents,
-            { vm.dispatch(it) }, {}, {})
-        adapter.barActions.onEvent(error.key, EditorEventAction.Details)
-        replyRepository.formResult = Result.success(authenticatedForm())
-        adapter.reload(error.key)
-        settleBody()
-        assertEquals(listOf<Int?>(null, null), replyRepository.fetchedContexts.map { it.quotedNumreponse })
-        assertNull(vm.state.value.submitError)
-        assertEquals(0, vm.state.value.quoteFetchFailures)
-        assertEquals("offered D", vm.state.value.restorableDraft)
-        assertTrue(vm.state.value.pendingQuotes.isNotEmpty())
-        assertEquals("", vm.bodyFieldState.text.toString())
-        assertPendingQuoteNotice(vm, expected = true)
-        assertFalse(vm.chromeEvents.state.events.any { it.content is EditorEventContent.Problem })
-    }
-
-    @Test
-    fun `1450 Restore during successful ordinary GET delivers Q once when both operations finish`() = runTest {
-        assertDecisionDuringOrdinaryGet(PostEditorIntent.DraftRestoreRequested, ordinaryFails = false)
-    }
-
-    @Test
-    fun `1450 Ignore during successful ordinary GET delivers Q once when both operations finish`() = runTest {
-        assertDecisionDuringOrdinaryGet(PostEditorIntent.DraftDiscardRequested, ordinaryFails = false)
-    }
-
-    @Test
-    fun `1450 Restore during failed ordinary GET still delivers Q once`() = runTest {
-        assertDecisionDuringOrdinaryGet(PostEditorIntent.DraftRestoreRequested, ordinaryFails = true)
-    }
-
-    @Test
-    fun `1450 Ignore during failed ordinary GET still delivers Q once`() = runTest {
-        assertDecisionDuringOrdinaryGet(PostEditorIntent.DraftDiscardRequested, ordinaryFails = true)
-    }
-
-    private fun assertDecisionDuringOrdinaryGet(decision: PostEditorIntent, ordinaryFails: Boolean) {
-        val get = CompletableDeferred<Unit>()
-        replyRepository.formGate = get
-        if (ordinaryFails) replyRepository.formResult = Result.failure(IOException("ordinary GET failed"))
-        val quote = "[quotemsg=101]requested quote[/quotemsg]"
-        replyRepository.formResultsByNumrep = mapOf(101 to Result.success(authenticatedForm(quote)))
-        val vm = newPendingQuoteOfferViewModel()
-        assertTrue(vm.state.value.isLoadingForm)
-        vm.dispatch(decision)
-        assertTrue(vm.state.value.isLoadingForm)
-        assertEquals(listOf<Int?>(null), replyRepository.fetchedContexts.map { it.quotedNumreponse })
-        get.complete(Unit)
-        settleBody()
-        val expected = if (decision == PostEditorIntent.DraftRestoreRequested) "$quote\n\noffered D" else "$quote\n"
-        assertEquals(expected, vm.bodyFieldState.text.toString())
-        assertEquals(listOf(null, 101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
-        assertNull(vm.state.value.submitError)
-        assertFalse(vm.chromeEvents.state.events.any { it.content is EditorEventContent.Problem })
-        assertFalse(vm.state.value.isLoadingForm)
-        assertTrue(vm.state.value.pendingQuotes.isEmpty())
-        assertNull(draftStore.saved[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)]?.pendingInlineQuoteRequest)
-        assertPendingQuoteNotice(vm, expected = false)
-        assertEquals(0, replyRepository.submitCalls)
-    }
-
-    @Test
-    fun `1450 a failed quote after a decision during ordinary GET has Reload and no automatic retry`() = runTest {
-        val get = CompletableDeferred<Unit>()
-        replyRepository.formGate = get
-        replyRepository.formResult = Result.failure(IOException("offline"))
-        val vm = newPendingQuoteOfferViewModel()
-        vm.dispatch(PostEditorIntent.DraftRestoreRequested)
-        get.complete(Unit)
-        settleBody()
-        assertEquals(listOf(null, 101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
-        assertEquals(EditorErrors.quoteFetchFailed(inline = true), vm.state.value.submitError)
-        assertEquals(EditorErrorAction.Reload, vm.state.value.submitError?.action)
-        assertEquals(1, vm.state.value.quoteFetchFailures)
-        assertNull(vm.state.value.restorableDraft)
-        assertFalse(vm.state.value.canSubmit)
-        // An unrelated upload completion must not silently retry the failed quote GET.
-        vm.dispatch(PostEditorIntent.ImagesPicked(listOf("content://pick/1")))
-        settleBody()
-        assertEquals(listOf(null, 101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
-        replyRepository.formResultsByNumrep = mapOf(
-            101 to Result.success(authenticatedForm("[quotemsg=101]requested quote[/quotemsg]")),
-        )
-        vm.dispatch(PostEditorIntent.ReloadRequested)
-        settleBody()
-        assertEquals(listOf(null, 101, 101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
-        assertTrue(vm.state.value.pendingQuotes.isEmpty())
-    }
-
-    @Test
-    fun `1450 Restore waits for durable flush even when the ordinary GET finishes first`() = runTest {
+    fun `quote arriving during a pending Restore write lands after D once the write returns`() = runTest {
         val get = CompletableDeferred<Unit>()
         val write = CompletableDeferred<Unit>()
+        val quote = "[quotemsg=101]requested quote[/quotemsg]"
         replyRepository.formGate = get
-        replyRepository.formResultsByNumrep = mapOf(
-            101 to Result.success(authenticatedForm("[quotemsg=101]requested quote[/quotemsg]")),
-        )
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.success(authenticatedForm(quote)))
         val vm = newPendingQuoteOfferViewModel()
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
         draftStore.saveReturnGate = write
         vm.dispatch(PostEditorIntent.DraftRestoreRequested)
         assertNull(vm.state.value.restorableDraft)
         assertEquals("offered D", vm.bodyFieldState.text.toString())
         get.complete(Unit)
         syncBody()
-        assertFalse(vm.state.value.isLoadingForm)
-        assertEquals(listOf<Int?>(null), replyRepository.fetchedContexts.map { it.quotedNumreponse })
-        assertNotNull(draftStore.saved[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)]?.pendingInlineQuoteRequest)
+        assertEquals("offered D", vm.bodyFieldState.text.toString())
+        assertNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
         assertFalse(vm.state.value.canSubmit)
         write.complete(Unit)
         settleBody()
-        assertEquals("[quotemsg=101]requested quote[/quotemsg]\n\noffered D", vm.bodyFieldState.text.toString())
-        assertEquals(listOf(null, 101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
+        assertEquals("offered D\n\n$quote", vm.bodyFieldState.text.toString())
+        assertEquals("offered D\n\n$quote", draftStore.saved[key]?.body)
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
         assertTrue(vm.state.value.pendingQuotes.isEmpty())
+        assertNull(vm.state.value.restorableDraft)
+        assertEquals(listOf(101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
+        assertEquals(0, replyRepository.submitCalls)
     }
 
-    @Test
-    fun `1450 Ignore waits for its durable flush before serving Q`() = runTest {
-        val get = CompletableDeferred<Unit>()
-        val write = CompletableDeferred<Unit>()
-        replyRepository.formGate = get
-        replyRepository.formResultsByNumrep = mapOf(
-            101 to Result.success(authenticatedForm("[quotemsg=101]requested quote[/quotemsg]")),
-        )
-        val vm = newPendingQuoteOfferViewModel()
-        draftStore.saveReturnGate = write
-        vm.dispatch(PostEditorIntent.DraftDiscardRequested)
-        get.complete(Unit)
-        syncBody()
-        assertEquals(listOf<Int?>(null), replyRepository.fetchedContexts.map { it.quotedNumreponse })
-        assertEquals("", vm.bodyFieldState.text.toString())
-        assertFalse(vm.state.value.canSubmit)
-        write.complete(Unit)
-        settleBody()
-        assertEquals("[quotemsg=101]requested quote[/quotemsg]\n", vm.bodyFieldState.text.toString())
-        assertEquals(listOf(null, 101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
-        assertTrue(vm.state.value.pendingQuotes.isEmpty())
-    }
-
-    @Test
-    fun `1450 failed Restore write keeps the offer and Q until an explicit decision succeeds`() = runTest {
-        val vm = newPendingQuoteOfferViewModel()
-        vm.editBody(TextFieldValue("current C"))
-        draftStore.saveFailure = IOException("disk full")
-        vm.dispatch(PostEditorIntent.DraftRestoreRequested)
-        settleBody()
-        assertEquals("offered D", vm.state.value.restorableDraft)
-        assertEquals("current C\n\noffered D", vm.bodyFieldState.text.toString())
-        assertTrue(vm.state.value.pendingQuotes.isNotEmpty())
-        assertEquals(listOf<Int?>(null), replyRepository.fetchedContexts.map { it.quotedNumreponse })
-        assertPendingQuoteNotice(vm, expected = true)
-        draftStore.saveFailure = null
-        replyRepository.formResultsByNumrep = mapOf(
-            101 to Result.success(authenticatedForm("[quotemsg=101]requested quote[/quotemsg]")),
-        )
-        vm.dispatch(PostEditorIntent.DraftRestoreRequested)
-        settleBody()
-        assertEquals("[quotemsg=101]requested quote[/quotemsg]\n\ncurrent C\n\noffered D",
-            vm.bodyFieldState.text.toString())
-        assertTrue(vm.state.value.pendingQuotes.isEmpty())
-    }
-
+    // ED-121 (kept from PR 1, order per v0.7.8 ED-89): a D merged by a failed Restore is consumed by the
+    // next durable write and is neither reoffered nor merged twice after a process death.
     @Test
     fun `failed Restore then autosave consumes merged D before process recreation`() = runTest {
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
@@ -5099,68 +5160,79 @@ class PostEditorViewModelTest {
         vm.dispatch(PostEditorIntent.DraftRestoreRequested)
         settleBody()
         assertEquals("D", vm.state.value.restorableDraft)
-        assertEquals("C\n\nD", vm.bodyFieldState.text.toString())
+        assertEquals("D\n\nC", vm.bodyFieldState.text.toString())
+        vm.dispatch(PostEditorIntent.DraftRestoreRequested)
+        settleBody()
+        assertEquals("D\n\nC", vm.bodyFieldState.text.toString())
         draftStore.saveFailure = null
-        vm.editBody(TextFieldValue("C\n\nD continued"))
+        vm.editBody(TextFieldValue("D\n\nC continued"))
         settleBody() // The debounce retries the already merged decision without another Restore.
-        assertEquals("C\n\nD continued", draftStore.saved[key]?.body)
+        assertEquals("D\n\nC continued", draftStore.saved[key]?.body)
         assertTrue(draftStore.loadOffers("tester", key).isEmpty())
+        assertNull(vm.state.value.restorableDraft)
         vm.dispatch(PostEditorIntent.Stopped)
         vm.viewModelScope.cancel()
         val recreated = newReplyViewModel(savedStateHandle = saved)
         settleBody()
-        assertEquals("C\n\nD continued", recreated.bodyFieldState.text.toString())
+        assertEquals("D\n\nC continued", recreated.bodyFieldState.text.toString())
         assertNull(recreated.state.value.restorableDraft)
         assertTrue(draftStore.loadOffers("tester", key).isEmpty())
     }
 
     @Test
-    fun `1450 an account change during ordinary GET retires the notice and rejects the old form`() = runTest {
-        val auth = FakeAuthRepository()
-        val get = CompletableDeferred<Unit>()
-        replyRepository.formGate = get
-        replyRepository.formResult = Result.success(authenticatedForm().copy(
-            favoriteSmileys = listOf(BUILTIN_HFR_SMILEYS.first()),
-        ))
-        val vm = newPendingQuoteOfferViewModel(authRepository = auth)
-        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
-        val original = draftStore.entries[key]
-        assertPendingQuoteNotice(vm, expected = true)
-        auth.states.value = AuthState.Authenticated("bob")
-        syncBody()
-        assertPendingQuoteNotice(vm, expected = false)
-        get.complete(Unit)
+    fun `restore keeps a delivered batch in request order despite older evidence - ED89`() = runTest {
+        val one = "[quotemsg=101,1,9]a[/quotemsg]"
+        val two = "[quotemsg=202,2,9]b[/quotemsg]"
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm(initialContent = "$one\n\n")),
+            202 to Result.success(authenticatedForm(initialContent = "$two\n\n")),
+        )
+        val pending = PendingInlineQuoteRequest(SAMPLE_CAT, SAMPLE_TOPIC_ID, listOf(
+            PendingInlineQuoteRequest.Quote(101, SAMPLE_PAGE), PendingInlineQuoteRequest.Quote(202, SAMPLE_PAGE)))
+        // Post 202 was already quoted alone in this composition: its evidence precedes the batch.
+        draftStore.preload(EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID), EditorDraftStore.Draft(
+            "offered D", pendingInlineQuoteRequest = pending,
+            bodyProvenance = EditorBodyProvenance().delivered(pending.scope, two, "offered D")))
+        val vm = newReplyViewModel(quoteAction = false,
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
         settleBody()
-        assertFalse(vm.state.value.hasLoadedForm)
-        assertEquals("", vm.state.value.topicTitle)
-        assertFalse(vm.state.value.optionsHydratedFromForm)
-        assertEquals("", vm.bodyFieldState.text.toString())
-        assertEquals(original, draftStore.entries[key])
-        assertEquals(listOf<Int?>(null), replyRepository.fetchedContexts.map { it.quotedNumreponse })
-        vm.smileyPicker.open(SmileyPickerOpenIntent.CONSULTATION)
-        assertTrue((vm.smileyPicker.state.value as SmileyPickerState.Open).favoriteSmileys.isEmpty())
-        assertPendingQuoteNotice(vm, expected = false)
+        val delivered = vm.bodyFieldState.text.toString()
+        assertTrue(delivered, delivered.indexOf(one) in 0 until delivered.indexOf(two))
+        vm.dispatch(PostEditorIntent.DraftRestoreRequested)
+        settleBody()
+        val restored = vm.bodyFieldState.text.toString()
+        assertTrue(restored, restored.startsWith("offered D"))
+        assertTrue(restored, restored.indexOf(one) in 0 until restored.indexOf(two))
+        assertEquals(restored, restored.indexOf(one), restored.lastIndexOf(one))
+        assertEquals(restored, restored.indexOf(two), restored.lastIndexOf(two))
     }
 
     @Test
-    fun `1450 ignoring Q under the offer retires its notice and preserves D`() = runTest {
-        val vm = newPendingQuoteOfferViewModel(savedStateHandle = SavedStateHandle(
-            mapOf("postEditor.quoteFailures" to 2),
-        ))
-        settleBody()
+    fun `a lone quote delivered again after other evidence is never offered as a draft - ED121`() = runTest {
+        val quote = "[quotemsg=101]requested quote[/quotemsg]"
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.success(authenticatedForm(quote)))
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
-        assertTrue(vm.state.value.canIgnorePendingQuote)
-        assertPendingQuoteNotice(vm, expected = true)
-        vm.dispatch(PostEditorIntent.PendingQuoteIgnored)
+        val pending = PendingInlineQuoteRequest(SAMPLE_CAT, SAMPLE_TOPIC_ID,
+            listOf(PendingInlineQuoteRequest.Quote(101, SAMPLE_PAGE)))
+        // A cleared composition keeps its evidence: this post first, then another one.
+        val history = EditorBodyProvenance().delivered(pending.scope, quote, "")
+            .delivered(pending.scope, "[quotemsg=202]other[/quotemsg]", "")
+        draftStore.preload(key, EditorDraftStore.Draft("", pendingInlineQuoteRequest = pending,
+            bodyProvenance = history))
+        val vm = newReplyViewModel(quoteAction = false,
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
         settleBody()
-        assertPendingQuoteNotice(vm, expected = false)
-        assertTrue(vm.state.value.pendingQuotes.isEmpty())
-        assertEquals("offered D", vm.state.value.restorableDraft)
-        assertEquals("offered D", draftStore.saved[key]?.body)
-        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
-        assertEquals("", vm.bodyFieldState.text.toString())
-        assertEquals(listOf<Int?>(null), replyRepository.fetchedContexts.map { it.quotedNumreponse })
-        assertEquals(0, replyRepository.submitCalls)
+        assertEquals(quote, vm.bodyFieldState.text.toString().trimEnd())
+        vm.dispatch(PostEditorIntent.CloseRequested)
+        settleBody()
+        val saved = checkNotNull(draftStore.entries[key]).draft
+        assertTrue(saved.bodyProvenance?.isQuoteOnly(saved.body) == true)
+        val reopened = newReplyViewModel(quoteAction = false,
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        settleBody()
+        assertEquals("", reopened.bodyFieldState.text.toString())
+        assertTrue(reopened.state.value.draftOffers.isEmpty())
+        assertNull(reopened.state.value.restorableDraft)
     }
 
     /** Simulate Reply opening an existing Room row, without the Citer producer enqueuing another Q. */
@@ -5175,12 +5247,6 @@ class PostEditorViewModelTest {
         return newReplyViewModel(quoteAction = false, authRepository = authRepository,
             savedStateHandle = savedStateHandle,
             userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
-    }
-
-    private fun assertPendingQuoteNotice(vm: PostEditorViewModel, expected: Boolean) {
-        assertEquals(expected, vm.chromeEvents.state.events.any {
-            it.summary == EditorText(R.string.editor_quote_pending_event)
-        })
     }
 
     @Test
@@ -5199,21 +5265,19 @@ class PostEditorViewModelTest {
         settleBody()
         assertEquals(body, vm.state.value.restorableDraft)
         assertEquals(1, replyRepository.formFetches)
-        assertEquals(0, replyRepository.fetchedContexts.count { it.isQuote })
-        assertFalse(vm.state.value.canSubmit)
-        assertPendingQuoteNotice(vm, expected = true)
-        assertEquals(listOf(101), vm.state.value.pendingQuotes.map { it.numreponse })
+        assertEquals(1, replyRepository.fetchedContexts.count { it.isQuote })
+        assertTrue(vm.state.value.canSubmit)
+        assertTrue(vm.state.value.pendingQuotes.isEmpty())
         vm.dispatch(PostEditorIntent.DraftRestoreRequested)
         settleBody()
         assertEquals(body, vm.bodyFieldState.text.toString())
         assertEquals(TextRange(body.length), vm.bodyFieldState.selection)
         assertEquals("", vm.state.value.draftRestoreSeed)
         assertTrue(vm.state.value.pendingQuotes.isEmpty())
-        assertPendingQuoteNotice(vm, expected = false)
-        assertEquals(listOf(null, 101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
+        assertEquals(listOf(101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
         assertEquals(body, draftStore.saved[key]?.body)
         assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
-        assertEquals(1, vm.chromeEvents.state.events.count {
+        assertEquals(0, vm.chromeEvents.state.events.count {
             it.content == EditorEventContent.Information(EditorText(R.string.editor_quote_already_delivered))
         })
         assertEquals(0, replyRepository.submitCalls)
@@ -5232,7 +5296,7 @@ class PostEditorViewModelTest {
             userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
         assertEquals(body, vm.state.value.restorableDraft)
         assertEquals(1, replyRepository.formFetches)
-        assertEquals(0, replyRepository.fetchedContexts.count { it.isQuote })
+        assertEquals(1, replyRepository.fetchedContexts.count { it.isQuote })
         vm.dispatch(PostEditorIntent.DraftRestoreRequested)
         assertEquals(body, vm.bodyFieldState.text.toString())
         assertEquals(EditorErrors.quoteFetchFailed(inline = true), vm.state.value.submitError)
@@ -5248,13 +5312,13 @@ class PostEditorViewModelTest {
         assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
         assertTrue(vm.state.value.pendingQuotes.isEmpty())
         assertFalse(vm.state.value.canIgnorePendingQuote)
-        assertEquals(listOf(null, 101, 101, null), replyRepository.fetchedContexts.map { it.quotedNumreponse })
+        assertEquals(listOf(101, 101, null), replyRepository.fetchedContexts.map { it.quotedNumreponse })
         assertFalse(vm.chromeEvents.state.events.any { it.content is EditorEventContent.Information })
         assertEquals(0, replyRepository.submitCalls)
     }
 
     @Test
-    fun `ignoring the restore offer keeps the inline request and serves it after the decision`() = runTest {
+    fun `ignoring the restore offer keeps the inline request and preserves its already delivered quote`() = runTest {
         draftStore.preload(EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID), EditorDraftStore.Draft("rescued reply"))
         replyRepository.formResultsByNumrep = mapOf(
             101 to Result.success(authenticatedForm("[quotemsg=101]requested quote[/quotemsg]")),
@@ -5265,14 +5329,14 @@ class PostEditorViewModelTest {
         )
         settleBody()
         assertEquals(1, replyRepository.formFetches)
-        assertEquals(0, replyRepository.fetchedContexts.count { it.isQuote })
+        assertEquals(1, replyRepository.fetchedContexts.count { it.isQuote })
         vm.dispatch(PostEditorIntent.DraftDiscardRequested)
         settleBody()
         assertNull(vm.state.value.restorableDraft)
         assertEquals("[quotemsg=101]requested quote[/quotemsg]\n", vm.bodyFieldState.text.toString())
         assertEquals("", vm.state.value.draftRestoreSeed)
         assertTrue(vm.state.value.pendingQuotes.isEmpty())
-        assertEquals(listOf(null, 101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
+        assertEquals(listOf(101), replyRepository.fetchedContexts.map { it.quotedNumreponse })
         assertEquals(0, replyRepository.submitCalls)
     }
 

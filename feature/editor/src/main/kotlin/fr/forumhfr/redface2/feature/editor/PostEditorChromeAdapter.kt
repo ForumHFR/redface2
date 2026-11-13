@@ -42,7 +42,7 @@ internal class PostEditorChromeAdapter(
     EditorHostSurfaces(PostEditorChromeSurface.Smileys, PostEditorChromeSurface.Options,
         PostEditorChromeSurface.Picker, imageUrl = PostEditorChromeSurface.Url, canWrapSelection = true,
         returnsToBody = { it !in setOf(PostEditorChromeSurface.Quotes, PostEditorChromeSurface.PendingQuote) },
-        draftOffer = PostEditorChromeSurface.Restore, isDraftOfferDetail = events::isPendingQuoteEvent),
+        draftOffer = PostEditorChromeSurface.Restore),
     launchPicker, openSmileys, memory, openSmileySearch,
 ) {
     val state: PostEditorChromeState get() = PostEditorChromeState(source())
@@ -59,14 +59,11 @@ internal class PostEditorChromeAdapter(
         secondStatus = if (source().restorableDraft == null) null else EditorAppBarStatus(
             UiR.drawable.ic_ms_restore_page, stringResource(UiR.string.editor_status_restore),
             ::openDraftOffer, enabled = state.scaffold.controlsEnabled,
-            opensOnInformation = events::isPendingQuoteEvent,
+            showDot = true,
         ),
     )
 
-    fun openDraftOffer() = open(PostEditorChromeSurface.Restore) {
-        // Opening through ↺ acknowledges the pending notice even when an error masks it.
-        events.acknowledgePendingQuote()
-    }
+    fun openDraftOffer() = open(PostEditorChromeSurface.Restore)
 
     // The save information may be acknowledged or retired by autosave while Q still needs its CAS.
     // Keep a recovery panel reachable from the quote status independently of that event's lifetime.
@@ -74,7 +71,7 @@ internal class PostEditorChromeAdapter(
         get() {
             val current = source()
             if (current.blocksFormReload) return false
-            return current.pendingQuotes.isNotEmpty() && current.restorableDraft == null && !current.hasDormantQuote
+            return current.pendingQuotes.isNotEmpty() && !current.hasDormantQuote
         }
     private val showPendingQuote get() = source().hasDormantQuote || hasPendingQuoteRecovery
     private val quoteCount get() = source().quotes.size + source().pendingQuotes.size
@@ -101,6 +98,18 @@ internal class PostEditorChromeAdapter(
         onIntent(PostEditorIntent.ImagePickerEventReceived(event))
     }
     fun pickerCancelled() = closeSurface()
+    fun restoreOffer(id: String) {
+        if (source().canRestoreDraft && state.scaffold.controlsEnabled && !source().isUploading) {
+            onIntent(PostEditorIntent.DraftOfferRestored(id))
+            closeDraftOffer()
+        }
+    }
+    fun discardOffer(id: String) {
+        if (state.scaffold.controlsEnabled) {
+            onIntent(PostEditorIntent.DraftOfferDiscarded(id))
+            closeDraftOffer()
+        }
+    }
     fun restoreDraft() {
         // A non-blank restore can resolve an unknown edit body after the initial GET failed (#1574).
         if (source().canRestoreDraft && state.scaffold.controlsEnabled && !source().isUploading) {

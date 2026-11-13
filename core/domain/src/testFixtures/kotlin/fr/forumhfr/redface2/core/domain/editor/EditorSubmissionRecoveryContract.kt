@@ -178,6 +178,7 @@ abstract class EditorSubmissionRecoveryContract {
         assertOnlyIndependentOffers(adapter)
         val gate = CompletableDeferred<Unit>()
         submissionScenario.store.saveReturnGate = gate
+        val offered = checkNotNull(adapter.snapshot().offeredBody)
         adapter.resolveOfferedDraft(restoring = true)
         runCurrent()
         val continued = adapter.snapshot().body + " typed while resolving"
@@ -187,7 +188,7 @@ abstract class EditorSubmissionRecoveryContract {
         advanceTimeBy(751)
         runCurrent()
         assertEquals(continued, submissionScenario.store.entries.getValue(key).draft.body)
-        assertFalse(adapter.snapshot().restoreOffered)
+        assertOfferDecided(adapter, key, offered)
         assertEquals(1, adapter.postCalls)
     }
 
@@ -221,11 +222,15 @@ abstract class EditorSubmissionRecoveryContract {
                 advanceTimeBy(751)
                 runCurrent()
                 assertEquals(adapter.snapshot().body, scenario.store.entries.getValue(key).draft.body)
-                adapter.resolveOfferedDraft(restoring)
-                runCurrent()
+                // ED-121: the autosave of the merged field may already have consumed D. A retry exists
+                // only while that same draft is still offered, and it must not merge it twice.
+                if (adapter.snapshot().offeredBody == offered) {
+                    adapter.resolveOfferedDraft(restoring)
+                    runCurrent()
+                }
                 assertEquals(resolvedBody + " more typing", adapter.snapshot().body)
             }
-            assertFalse(adapter.snapshot().restoreOffered)
+            assertOfferDecided(adapter, key, offered)
             if (restoring) assertTrue(adapter.snapshot().body.contains(offered))
             else assertEquals(before, adapter.snapshot().body)
             assertEquals(adapter.snapshot().body, scenario.store.entries.getValue(key).draft.body)
@@ -577,6 +582,18 @@ abstract class EditorSubmissionRecoveryContract {
      * the real visible offer with that set: neither publication nor uncertainty may invent D.
      * All attempt-status, body, acknowledgement and POST-count assertions remain mandatory.
      */
+    /**
+     * v0.7.8, "Plusieurs brouillons offerts" (ED-41, ED-121): the decided draft leaves the offer, and
+     * the editor keeps offering exactly while another durable draft still awaits a choice.
+     */
+    private suspend fun assertOfferDecided(adapter: EditorSubmissionAdapter, key: String, decided: String) {
+        val store = submissionScenario.store
+        val remaining = store.loadOffers(store.currentOwner(), key)
+        assertTrue(remaining.none { it.draft.body == decided })
+        assertFalse(decided == adapter.snapshot().offeredBody)
+        assertEquals(remaining.isNotEmpty(), adapter.snapshot().restoreOffered)
+    }
+
     protected suspend fun assertOnlyIndependentOffers(adapter: EditorSubmissionAdapter) {
         val (key, entry) = submissionScenario.store.entries.entries.single()
         val expected = independentOffers[key].orEmpty()

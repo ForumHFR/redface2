@@ -34,6 +34,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorBackState
 import fr.forumhfr.redface2.core.ui.editor.EditorHostMemory
 import fr.forumhfr.redface2.core.ui.editor.EditorScaffold
 import fr.forumhfr.redface2.core.ui.editor.EditorTooltipHost
+import fr.forumhfr.redface2.core.ui.editor.EditorUnsavedCloseDialog
 import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
 import fr.forumhfr.redface2.core.ui.editor.LocalEditorTooltipHost
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
@@ -96,6 +97,12 @@ fun PostEditorScreen(
                 PostEditorEffect.CloseCommitted -> currentOnClose?.invoke()
             }
         }
+    }
+    if (state.showUnsavedCloseDialog) {
+        EditorUnsavedCloseDialog(
+            onStay = { viewModel.submit(PostEditorIntent.UnsavedCloseDismissed) },
+            onLeave = { viewModel.submit(PostEditorIntent.UnsavedCloseConfirmed) },
+        )
     }
     CompositionLocalProvider(LocalEditorPreviewState provides viewModel.previewLayout) {
         PostEditorContent(

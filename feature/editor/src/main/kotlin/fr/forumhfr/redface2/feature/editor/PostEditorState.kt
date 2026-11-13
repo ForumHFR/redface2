@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.editor
 
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.DraftOffer
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
@@ -54,8 +55,10 @@ data class PostEditorState(
     val isLoadingForm: Boolean = false,
     /** Binding mutation guard shared by reload and its chrome affordances, including owner invalidation. */
     val blocksFormReload: Boolean = false,
-    /** Read identity is independent of a pending request: ordinary metadata may load under its offer. */
+    /** Read identity of the quote GET; ED-132 starts it without waiting for a decision on the offer. */
     val isFetchingQuote: Boolean = false,
+    /** The quote is in the field but its body + request CAS is not durable yet: no offer decision meanwhile. */
+    val quoteCommitPending: Boolean = false,
     /** Availability is evidence from the private loadedForm, never inferred from a finished GET. */
     val hasLoadedForm: Boolean = false,
     val hasAuthenticatedForm: Boolean = false,
@@ -114,13 +117,16 @@ data class PostEditorState(
     /** ED-164: UI projection of submission.Armed; the token carries identity and deadline. */
     val showSubmitConfirmation: Boolean = false,
     /**
-     * #405 — the body of a previously-cached draft for this editor's key, surfaced on init when a
-     * non-empty draft was found. Non-null means « propose a restore » : the UI shows a banner with
-     * « Restaurer » ([PostEditorIntent.DraftRestoreRequested]) and « Ignorer »
-     * ([PostEditorIntent.DraftDiscardRequested]). A matching interrupted session resumes silently;
-     * an unrelated revision remains an explicit offer.
+     * #405 — the body of the most recent offered draft for this editor's key. Non-null means
+     * « propose a restore » : ↺ carries its dot and opens the offer sheet (ED-40), with « Restaurer »
+     * and « Ignorer ». A matching interrupted session resumes silently; an unrelated revision
+     * remains an explicit offer. ED-132: it never defers a quote request nor blocks « Envoyer ».
      */
     val restorableDraft: String? = null,
+    /** ED-40/121: every offered version, most recent first; a reply decides one by its identity. */
+    val draftOffers: List<DraftOffer> = emptyList(),
+    /** ED-10/85: a close could not save the field; the dialog asks before anything is abandoned. */
+    val showUnsavedCloseDialog: Boolean = false,
     /**
      * #459 PR2 — `true` while an image picked from the photo picker is being read + uploaded to the
      * selected host. The toolbar's image-upload affordance shows a progress indicator and is
@@ -174,16 +180,14 @@ data class PostEditorState(
             !isLoadingForm && !quoteStorageUnavailable && pendingQuotes.isEmpty() &&
             !isUploading
 
-    /** ED-132: a readable inline request waits for this offer's explicit decision. */
-    val isQuoteAwaitingDraftDecision: Boolean
-        get() = mode == PostEditorMode.Reply && restorableDraft != null && pendingQuotes.isNotEmpty() &&
-            !hasDormantQuote && !unreadableQuoteRequest && !quoteStorageUnavailable
-
     val hasDormantQuote: Boolean
         get() = pendingQuotes.isNotEmpty() && submission is EditorSubmissionState.Uncertain
 
     val canRestoreDraft: Boolean
-        get() = !isInitializing && draftRestoreSeed != null && (mode != PostEditorMode.Edit || !isLoadingForm)
+        get() = !isInitializing && !quoteCommitPending && restoreSeedAvailable
+
+    private val restoreSeedAvailable: Boolean
+        get() = draftRestoreSeed != null && (mode != PostEditorMode.Edit || !isLoadingForm)
 
     @Suppress("ComplexCondition") // Explicit recovery, or an eligible readable request, plus busy-state guards.
     val canIgnorePendingQuote: Boolean

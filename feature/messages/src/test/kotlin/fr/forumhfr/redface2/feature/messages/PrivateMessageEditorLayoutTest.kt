@@ -147,17 +147,20 @@ class PrivateMessageEditorLayoutTest {
         assertDraftActionsFullyVisible()
     }
 
-    @Test fun replyRestoreDisabledWhileSeedFormLoadsAndEnabledAfterFailure() {
+    // v0.7.8 ED-89/132: a reply has no blocking seed, so Restore stays enabled while its form or quote
+    // loads (was disabled until v0.7.7). The failure screen's GET remedy is « Recharger » (was « Réessayer »).
+    @Test fun replyRestoreStaysEnabledWhileFormLoadsAndAfterFailure() {
         val state = mutableStateOf(PrivateMessageReplyUiState(restorableDraft = "Brouillon à restaurer"))
         setReplyContent { state.value }
         openRestore()
-        compose.onNodeWithText("Restaurer").assertIsNotEnabled()
+        compose.onNodeWithText("Restaurer").assertIsEnabled()
         compose.onNodeWithText("Ignorer").assertIsEnabled()
         assertDraftActionsFullyVisible()
         compose.runOnIdle { state.value = state.value.copy(isLoadingForm = false, formError = true) }
         compose.onNodeWithText("Restaurer").assertIsEnabled()
         compose.onNodeWithText("Ignorer").assertIsEnabled()
-        compose.onNodeWithText("Réessayer").assertIsEnabled()
+        compose.onNodeWithText("Recharger").assertIsEnabled()
+        compose.onNodeWithText("Réessayer").assertDoesNotExist()
         assertDraftActionsFullyVisible()
         compose.runOnIdle { state.value = state.value.copy(formAvailable = true, formError = false) }
         // The full-screen failure closed the sheet: the retry returns to the bare editor, whose ↺ reopens it.
@@ -165,7 +168,7 @@ class PrivateMessageEditorLayoutTest {
         openRestore()
         compose.onNodeWithText("Restaurer").assertIsEnabled()
         compose.runOnIdle { state.value = state.value.copy(isLoadingForm = true) }
-        compose.onNodeWithText("Restaurer").assertIsNotEnabled()
+        compose.onNodeWithText("Restaurer").assertIsEnabled()
         compose.onNodeWithText("Ignorer").assertIsEnabled()
     }
 

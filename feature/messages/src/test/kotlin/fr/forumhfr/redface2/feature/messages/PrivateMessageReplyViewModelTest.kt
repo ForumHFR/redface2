@@ -12,6 +12,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
+import fr.forumhfr.redface2.core.domain.editor.EditorBodyProvenance
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
@@ -122,6 +123,16 @@ class PrivateMessageReplyViewModelTest {
         quote = quote,
     )
 
+    private suspend fun enqueueQuoteLaunch(source: PrivateMessageReplyRequest) {
+        val quotes = source.quote?.let { listOf(PendingInlineQuoteRequest.Quote(it.numreponse, source.page, it.ref)) }
+            ?: source.initialQuotes.map { PendingInlineQuoteRequest.Quote(it.numreponse, it.locator.page,
+                requireNotNull(it.locator.ref), it.truncate) }
+        val pending = PendingInlineQuoteRequest.privateMessage(source.threadId, quotes)
+        val drafts = fr.forumhfr.redface2.core.domain.editor.EditorDraftSession(draftStore, pending.key)
+        drafts.load()
+        assertTrue(drafts.enqueueInlineQuoteRequest(pending) is EditorDraftStore.StoreWriteResult.Written)
+    }
+
     private val previewParser = BbcodePreviewParser { PostContent(blocks = emptyList()) }
 
     /**
@@ -224,6 +235,429 @@ class PrivateMessageReplyViewModelTest {
         }
         Snapshot.sendApplyNotifications()
         if (advanceMirror) mainDispatcher.scheduler.runCurrent()
+    }
+
+    // v0.7.8 ED-89/132: Room owns Q; restoring during its GET must not replace the quote.
+    @Test
+    fun `legacy MP quote coordinates without Room Q never authorize a quote GET`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val vm = PrivateMessageReplyViewModel(
+            quoteRequest, repository, previewParser, mainDispatcher, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            submissionClock, smileyRepository(), favoriteRepository, localCollections,
+        ).also(::trackViewModel)
+        assertEquals("", vm.bodyFieldState.text.toString())
+        coVerify(exactly = 1) { repository.fetchReplyForm(match { it.quote == null }, any()) }
+        coVerify(exactly = 0) { repository.fetchReplyForm(match { it.quote != null }, any()) }
+    }
+
+    @Test
+    fun `MP Reload retries GET alone and ignoring after two failures preserves C and D`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } coAnswers {
+            if (firstArg<PrivateMessageReplyContext>().quote != null) throw IOException("offline")
+            form()
+        }
+        val pending = PendingInlineQuoteRequest.privateMessage(request.threadId,
+            listOf(PendingInlineQuoteRequest.Quote(101, 2, 7)))
+        draftStore.preload(pending.key, EditorDraftStore.Draft("D", isPrivate = true,
+            pendingInlineQuoteRequest = pending))
+        val vm = viewModel(repository)
+        assertFalse(vm.state.value.canIgnorePendingQuote)
+        vm.editBody(TextFieldValue("typed C"))
+        vm.retryFormLoad()
+        runCurrent()
+        assertTrue(vm.state.value.canIgnorePendingQuote)
+        vm.onPendingQuoteIgnored()
+        runCurrent()
+        assertEquals("typed C", vm.bodyFieldState.text.toString())
+        assertEquals("D", vm.state.value.restorableDraft)
+        assertNull(draftStore.saved[pending.key]?.pendingInlineQuoteRequest)
+        coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any(), any()) }
+    }
+
+    @OptIn(ExperimentalFoundationApi::class)
+    @Test
+    fun `MP Restore retains a modified delivered block and is one Undo Redo step`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val quote = "[quotemsg=101]original[/quotemsg]"
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form(initialContent = quote)
+        val pending = PendingInlineQuoteRequest.privateMessage(request.threadId,
+            listOf(PendingInlineQuoteRequest.Quote(101, 2, 7)))
+        draftStore.preload(pending.key, EditorDraftStore.Draft(quote, isPrivate = true,
+            pendingInlineQuoteRequest = pending))
+        val vm = viewModel(repository)
+        val modified = quote.replace("original", "edited")
+        vm.editBody(TextFieldValue("$modified\n\ntyped", TextRange(2, 6)))
+        val before = vm.bodyFieldState.text.toString()
+        vm.onDraftRestoreRequested()
+        val merged = "$quote\n\n$modified\n\ntyped"
+        assertEquals(merged, vm.bodyFieldState.text.toString())
+        vm.bodyFieldState.undoState.undo()
+        assertEquals(before, vm.bodyFieldState.text.toString())
+        assertEquals(TextRange(2, 6), vm.bodyFieldState.selection)
+        vm.bodyFieldState.undoState.redo()
+        assertEquals(merged, vm.bodyFieldState.text.toString())
+    }
+
+    @Test
+    fun `durable MP request delivers after restored D and preserves typing during GET`() = runTest {
+        val key = EditorDraftKey.mpReply(request.threadId)
+        val pending = PendingInlineQuoteRequest.privateMessage(request.threadId,
+            listOf(PendingInlineQuoteRequest.Quote(101, 2, 7)))
+        draftStore.preload(key, EditorDraftStore.Draft("D", isPrivate = true, pendingInlineQuoteRequest = pending))
+        val gate = CompletableDeferred<ReplyForm>()
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } coAnswers { gate.await() }
+        val vm = viewModel(repository)
+        vm.editBody(TextFieldValue("typed"))
+        vm.onDraftRestoreRequested()
+        runCurrent()
+        assertEquals("D\n\ntyped", vm.bodyFieldState.text.toString())
+        val quote = "[quotemsg=101]hello[/quotemsg]"
+        gate.complete(form(initialContent = quote))
+        runCurrent()
+        assertEquals("D\n\n$quote\n\ntyped", vm.bodyFieldState.text.toString())
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        assertTrue(checkNotNull(draftStore.saved[key]).isPrivate)
+        coVerify(exactly = 1) { repository.fetchReplyForm(match {
+            it.page == 2 && it.quote == PrivateMessageQuote(101, 7)
+        }, any()) }
+    }
+
+    @Test
+    fun `MP close after a failed quote consumption settles it and saves the typing made since - ED132`() = runTest {
+        val key = EditorDraftKey.mpReply(request.threadId)
+        val pending = PendingInlineQuoteRequest.privateMessage(request.threadId,
+            listOf(PendingInlineQuoteRequest.Quote(101, 2, 7)))
+        draftStore.preload(key, EditorDraftStore.Draft("D", isPrivate = true, pendingInlineQuoteRequest = pending))
+        val gate = CompletableDeferred<ReplyForm>()
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } coAnswers { gate.await() }
+        val vm = viewModel(repository)
+        val quote = "[quotemsg=101]hello[/quotemsg]"
+        draftStore.saveFailure = IOException("disk full")
+        gate.complete(form(initialContent = quote))
+        runCurrent()
+        assertEquals(pending, draftStore.saved[key]?.pendingInlineQuoteRequest)
+        val typed = "$quote\n\ntyped after the delivery"
+        vm.editBody(TextFieldValue(typed))
+        draftStore.saveFailure = null
+        vm.onCloseRequested()
+        runCurrent()
+        // The pop is only allowed once C and Q are settled and the live field is durable.
+        assertEquals(typed, draftStore.saved[key]?.body)
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `MP close that cannot save the delivered field asks before abandoning it - ED10 ED132`() = runTest {
+        val key = EditorDraftKey.mpReply(request.threadId)
+        val pending = PendingInlineQuoteRequest.privateMessage(request.threadId,
+            listOf(PendingInlineQuoteRequest.Quote(101, 2, 7)))
+        draftStore.preload(key, EditorDraftStore.Draft("D", isPrivate = true, pendingInlineQuoteRequest = pending))
+        val gate = CompletableDeferred<ReplyForm>()
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } coAnswers { gate.await() }
+        val vm = viewModel(repository)
+        val effects = mutableListOf<PrivateMessageReplyEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        val quote = "[quotemsg=101]hello[/quotemsg]"
+        draftStore.saveFailure = IOException("disk full")
+        gate.complete(form(initialContent = quote))
+        runCurrent()
+        val typed = "$quote\n\ntyped after the delivery"
+        vm.editBody(TextFieldValue(typed))
+        vm.onCloseRequested()
+        runCurrent()
+        // The typing cannot be saved: the dialog opens even though the load-failure screen replaces
+        // the editor, and nothing is half-written.
+        assertTrue(vm.state.value.formError)
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        assertFalse(PrivateMessageReplyEffect.CloseCommitted in effects)
+        assertEquals("D", draftStore.saved[key]?.body)
+        assertEquals(pending, draftStore.saved[key]?.pendingInlineQuoteRequest)
+        // "Rester": the editor stays open with C intact; a later Back asks again, it never pops alone.
+        vm.onUnsavedCloseDecided(leave = false)
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(typed, vm.bodyFieldState.text.toString())
+        vm.onCloseRequested()
+        runCurrent()
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        assertFalse(PrivateMessageReplyEffect.CloseCommitted in effects)
+        // "Quitter sans enregistrer" is the only abandonment, and it pops exactly once.
+        vm.onUnsavedCloseDecided(leave = true)
+        vm.onUnsavedCloseDecided(leave = true)
+        runCurrent()
+        assertEquals(1, effects.count { it == PrivateMessageReplyEffect.CloseCommitted })
+    }
+
+    @Test
+    fun `MP close whose final save fails asks before abandoning the field - ED10`() = runTest {
+        val key = EditorDraftKey.mpReply(request.threadId)
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val vm = viewModel(repository)
+        val effects = mutableListOf<PrivateMessageReplyEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        runCurrent()
+        draftStore.saveFailure = IOException("disk full")
+        vm.editBody(TextFieldValue("typed, never saved"))
+        vm.onCloseRequested()
+        runCurrent()
+        // The last write of the field failed: the dialog opens and the reply stays, field intact.
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        assertFalse(PrivateMessageReplyEffect.CloseCommitted in effects)
+        assertTrue(draftStore.saved[key]?.body.isNullOrEmpty())
+        assertEquals("typed, never saved", vm.bodyFieldState.text.toString())
+        // "Quitter sans enregistrer" is the only abandonment: one pop, no write.
+        val writes = draftStore.writes
+        vm.onUnsavedCloseDecided(leave = true)
+        vm.onUnsavedCloseDecided(leave = true)
+        vm.onCloseRequested()
+        runCurrent()
+        assertEquals(1, effects.count { it == PrivateMessageReplyEffect.CloseCommitted })
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(writes, draftStore.writes)
+        assertTrue(draftStore.saved[key]?.body.isNullOrEmpty())
+    }
+
+    @Test
+    fun `MP Rester then a close that can save writes the field and closes once - ED10`() = runTest {
+        val key = EditorDraftKey.mpReply(request.threadId)
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val vm = viewModel(repository)
+        val effects = mutableListOf<PrivateMessageReplyEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        runCurrent()
+        draftStore.saveFailure = IOException("disk full")
+        vm.editBody(TextFieldValue("typed while the disk was full"))
+        vm.onCloseRequested()
+        runCurrent()
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        // "Rester" keeps the reply; while storage still fails, a new close asks again.
+        vm.onUnsavedCloseDecided(leave = false)
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        vm.onCloseRequested()
+        runCurrent()
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        vm.onUnsavedCloseDecided(leave = false)
+        assertFalse(PrivateMessageReplyEffect.CloseCommitted in effects)
+        // Storage recovers: the next close retries the write, then closes normally.
+        draftStore.saveFailure = null
+        vm.onCloseRequested()
+        runCurrent()
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals("typed while the disk was full", draftStore.saved[key]?.body)
+        assertTrue(draftStore.saved[key]?.isPrivate == true)
+        assertEquals(1, effects.count { it == PrivateMessageReplyEffect.CloseCommitted })
+    }
+
+    @Test
+    fun `MP clearing a field that hid its offer then closing saves and never asks - ED10 ED121`() = runTest {
+        val key = EditorDraftKey.mpReply(request.threadId)
+        val repository = mockk<PrivateMessageWriteRepository>()
+        // The form hydrates the field with the offered body: the offer is kept but hidden.
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form(initialContent = "offered D")
+        draftStore.preload(key, EditorDraftStore.Draft(body = "offered D", isPrivate = true))
+        val vm = viewModel(repository)
+        val effects = mutableListOf<PrivateMessageReplyEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        runCurrent()
+        assertEquals("offered D", vm.bodyFieldState.text.toString())
+        assertNull(vm.state.value.restorableDraft)
+        // Clear and close before the autosave: the write succeeds and shows D again, which makes
+        // the cleared field ineligible for a second snapshot. The field itself did not move.
+        vm.editBody(TextFieldValue(""))
+        vm.onCloseRequested()
+        runCurrent()
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(1, effects.count { it == PrivateMessageReplyEffect.CloseCommitted })
+        assertEquals("", draftStore.saved[key]?.body)
+        assertEquals("offered D", vm.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `MP close with nothing to write never asks even when storage fails - ED10`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val vm = viewModel(repository)
+        val effects = mutableListOf<PrivateMessageReplyEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        runCurrent()
+        // An empty field over an absent row: the refused write would not have saved anything.
+        draftStore.saveFailure = IOException("disk full")
+        vm.onCloseRequested()
+        runCurrent()
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(1, effects.count { it == PrivateMessageReplyEffect.CloseCommitted })
+    }
+
+    @Test
+    fun `MP close over a body the row already holds never asks when storage fails - ED10`() = runTest {
+        val key = EditorDraftKey.mpReply(request.threadId)
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val vm = viewModel(repository)
+        val effects = mutableListOf<PrivateMessageReplyEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        runCurrent()
+        vm.editBody(TextFieldValue("already saved"))
+        advanceTimeBy(800L)
+        runCurrent()
+        assertEquals("already saved", draftStore.saved[key]?.body)
+        draftStore.saveFailure = IOException("disk full")
+        vm.onCloseRequested()
+        runCurrent()
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(1, effects.count { it == PrivateMessageReplyEffect.CloseCommitted })
+        assertEquals("already saved", draftStore.saved[key]?.body)
+    }
+
+    @Test
+    fun `MP Ignore after a conflict releases the reply when the request was consumed elsewhere - ED132`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } coAnswers {
+            if (firstArg<PrivateMessageReplyContext>().quote != null) throw IOException("offline")
+            form()
+        }
+        val pending = PendingInlineQuoteRequest.privateMessage(request.threadId,
+            listOf(PendingInlineQuoteRequest.Quote(101, 2, 7)))
+        draftStore.preload(pending.key, EditorDraftStore.Draft("D", isPrivate = true,
+            pendingInlineQuoteRequest = pending))
+        val vm = viewModel(repository)
+        vm.editBody(TextFieldValue("typed C"))
+        vm.retryFormLoad()
+        runCurrent()
+        assertTrue(vm.state.value.canIgnorePendingQuote)
+        // Another editor consumes the request and moves the row on.
+        val entry = checkNotNull(draftStore.entries[pending.key])
+        draftStore.entries[pending.key] = entry.copy(
+            draft = entry.draft.copy(pendingInlineQuoteRequest = null), version = entry.version + 1,
+        )
+        vm.onPendingQuoteIgnored()
+        runCurrent()
+        // Nothing is left to ignore: the reply is released, loads its form and keeps the field.
+        assertFalse(vm.state.value.quotePending)
+        assertFalse(vm.state.value.canIgnorePendingQuote)
+        assertFalse(vm.state.value.formError)
+        assertEquals("typed C", vm.bodyFieldState.text.toString())
+        assertNull(draftStore.saved[pending.key]?.pendingInlineQuoteRequest)
+        coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any(), any()) }
+    }
+
+    @Test
+    fun `MP quote delivered after a failed Restore write consumes the merged D with C - ED121`() = runTest {
+        val key = EditorDraftKey.mpReply(request.threadId)
+        val pending = PendingInlineQuoteRequest.privateMessage(request.threadId,
+            listOf(PendingInlineQuoteRequest.Quote(101, 2, 7)))
+        draftStore.preload(key, EditorDraftStore.Draft("D", isPrivate = true, pendingInlineQuoteRequest = pending))
+        val gate = CompletableDeferred<ReplyForm>()
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } coAnswers { gate.await() }
+        val vm = viewModel(repository)
+        draftStore.saveFailure = IOException("disk full")
+        vm.onDraftRestoreRequested()
+        runCurrent()
+        assertEquals("D", vm.bodyFieldState.text.toString())
+        draftStore.saveFailure = null
+        val quote = "[quotemsg=101]hello[/quotemsg]"
+        gate.complete(form(initialContent = quote))
+        runCurrent()
+        assertEquals("D\n\n$quote", vm.bodyFieldState.text.toString())
+        assertEquals("D\n\n$quote", draftStore.saved[key]?.body)
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        // A recreation must not find D offered again: restoring it would duplicate it in C.
+        assertTrue(draftStore.loadOffers("tester", key).none { it.draft.body == "D" })
+        assertNull(vm.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `MP restore keeps a delivered batch in request order despite older evidence - ED89`() = runTest {
+        val key = EditorDraftKey.mpReply(request.threadId)
+        val one = "[quotemsg=101]one[/quotemsg]"
+        val two = "[quotemsg=202]two[/quotemsg]"
+        val pending = PendingInlineQuoteRequest.privateMessage(request.threadId,
+            listOf(PendingInlineQuoteRequest.Quote(101, 2, 7), PendingInlineQuoteRequest.Quote(202, 2, 8)))
+        // Message 202 was already quoted alone in this composition: its evidence precedes the batch.
+        draftStore.preload(key, EditorDraftStore.Draft("D", isPrivate = true, pendingInlineQuoteRequest = pending,
+            bodyProvenance = EditorBodyProvenance().delivered(pending.scope, two, "D")))
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } coAnswers {
+            when (firstArg<PrivateMessageReplyContext>().quote?.numreponse) {
+                101 -> form(initialContent = one)
+                202 -> form(initialContent = two)
+                else -> form()
+            }
+        }
+        val vm = viewModel(repository)
+        runCurrent()
+        val delivered = vm.bodyFieldState.text.toString()
+        assertTrue(delivered, delivered.indexOf(one) in 0 until delivered.indexOf(two))
+        vm.onDraftRestoreRequested()
+        runCurrent()
+        val restored = vm.bodyFieldState.text.toString()
+        assertTrue(restored, restored.startsWith("D"))
+        assertTrue(restored, restored.indexOf(one) in 0 until restored.indexOf(two))
+        assertEquals(restored, restored.indexOf(one), restored.lastIndexOf(one))
+        assertEquals(restored, restored.indexOf(two), restored.lastIndexOf(two))
+    }
+
+    @Test
+    fun `MP send after a failed Restore write consumes the merged D it publishes - ED121`() = runTest {
+        val key = EditorDraftKey.mpReply(request.threadId)
+        draftStore.preload(key, EditorDraftStore.Draft("D", isPrivate = true))
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
+            ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        val vm = viewModel(repository)
+        runCurrent()
+        draftStore.saveFailure = IOException("disk full")
+        vm.onDraftRestoreRequested()
+        runCurrent()
+        assertEquals("D", vm.bodyFieldState.text.toString())
+        draftStore.saveFailure = null
+        // Send before the autosave debounce: the attempt itself must carry the pending resolution.
+        Snapshot.sendApplyNotifications()
+        runCurrent()
+        vm.onSubmit()
+        runCurrent()
+        coVerify(exactly = 1) { repository.submitReply(any(), any(), any(), any(), any()) }
+        assertEquals(EditorDraftStore.AttemptStatus.PUBLISHED, draftStore.entries[key]?.attempt?.status)
+        assertTrue(draftStore.loadOffers("tester", key).none { it.draft.body == "D" })
+    }
+
+    @Test
+    fun `MP Reload after a storage conflict rereads the row and delivers the quote keeping C - ED132`() = runTest {
+        val key = EditorDraftKey.mpReply(request.threadId)
+        val pending = PendingInlineQuoteRequest.privateMessage(request.threadId,
+            listOf(PendingInlineQuoteRequest.Quote(101, 2, 7)))
+        draftStore.preload(key, EditorDraftStore.Draft("", isPrivate = true, pendingInlineQuoteRequest = pending))
+        val gate = CompletableDeferred<ReplyForm>()
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } coAnswers { gate.await() }
+        val vm = viewModel(repository)
+        runCurrent()
+        // Another writer moves the row on while the GET is in flight: the delivery CAS conflicts.
+        val entry = checkNotNull(draftStore.entries[key])
+        draftStore.entries[key] = entry.copy(version = entry.version + 1)
+        val quote = "[quotemsg=101]hello[/quotemsg]"
+        gate.complete(form(initialContent = quote))
+        runCurrent()
+        assertEquals(pending, draftStore.saved[key]?.pendingInlineQuoteRequest)
+        val delivered = vm.bodyFieldState.text.toString()
+        assertTrue(delivered.startsWith(quote))
+        vm.retryFormLoad()
+        runCurrent()
+        // The reread version lets the same delivery commit; the field was never replaced.
+        assertEquals(delivered, vm.bodyFieldState.text.toString())
+        assertEquals(delivered, draftStore.saved[key]?.body)
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        assertFalse(vm.state.value.formError)
     }
 
     @Test
@@ -612,6 +1046,7 @@ class PrivateMessageReplyViewModelTest {
         coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
 
+        enqueueQuoteLaunch(quoteRequest)
         val viewModel = PrivateMessageReplyViewModel(
             quoteRequest, repository, previewParser, mainDispatcher, userPreferences(), draftStore,
             FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
@@ -664,6 +1099,7 @@ class PrivateMessageReplyViewModelTest {
         coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
 
+        enqueueQuoteLaunch(multiQuoteRequest)
         val viewModel = PrivateMessageReplyViewModel(
             multiQuoteRequest, repository, previewParser, mainDispatcher, userPreferences(), draftStore,
             FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
@@ -695,6 +1131,7 @@ class PrivateMessageReplyViewModelTest {
         val formGate = CompletableDeferred<ReplyForm>()
         val prefill = "[quotemsg=1980000004,4,990001]Citation serveur[/quotemsg]\n"
         coEvery { repository.fetchReplyForm(any(), any()) } coAnswers { formGate.await() }
+        enqueueQuoteLaunch(quoteRequest)
         val viewModel = PrivateMessageReplyViewModel(
             quoteRequest, repository, previewParser, mainDispatcher, userPreferences(), draftStore,
             FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
@@ -732,6 +1169,7 @@ class PrivateMessageReplyViewModelTest {
             EditorDraftStore.Draft(body = "Ancien brouillon", isPrivate = true),
         )
 
+        enqueueQuoteLaunch(quoteRequest)
         val viewModel = PrivateMessageReplyViewModel(
             quoteRequest, repository, previewParser, mainDispatcher, userPreferences(), draftStore,
             FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
@@ -751,6 +1189,7 @@ class PrivateMessageReplyViewModelTest {
         coEvery { repository.fetchReplyForm(any(), any()) } returns form(initialContent = prefill)
         coEvery { repository.submitReply(any(), any(), any(), any(), any()) } returns
             ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
+        enqueueQuoteLaunch(quoteRequest)
         val viewModel = PrivateMessageReplyViewModel(
             quoteRequest, repository, previewParser, mainDispatcher, userPreferences(), draftStore,
             FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
@@ -1361,7 +1800,7 @@ class PrivateMessageReplyViewModelTest {
         recreated.onDraftRestoreRequested()
         advanceUntilIdle()
         assertNull(savedStateHandle.get<String>("draft_restore_offer_fingerprint"))
-        assertEquals("new live MP\n\nrescued MP", draftStore.saved[key]?.body)
+        assertEquals("rescued MP\n\nnew live MP", draftStore.saved[key]?.body)
 
         val afterRestore = PrivateMessageReplyViewModel(
             request, repository, previewParser, mainDispatcher, userPreferences(), draftStore,
@@ -1370,7 +1809,7 @@ class PrivateMessageReplyViewModelTest {
             smileyRepository(), favoriteRepository, localCollections, savedStateHandle,
         ).also(::trackViewModel)
         assertNull(afterRestore.state.value.restorableDraft)
-        assertEquals("new live MP\n\nrescued MP", afterRestore.bodyFieldState.text.toString())
+        assertEquals("rescued MP\n\nnew live MP", afterRestore.bodyFieldState.text.toString())
     }
 
     @Test
@@ -1400,7 +1839,7 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
-    fun `private reply hydration removes an identical cached draft offer`() = runTest {
+    fun `v078 ED121 hydration does not decide an identical offered draft`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         val body = "server body"
         coEvery { repository.fetchReplyForm(any(), any()) } returns form(initialContent = body)
@@ -1417,11 +1856,22 @@ class PrivateMessageReplyViewModelTest {
         ).also(::trackViewModel)
 
         assertEquals(body, viewModel.bodyFieldState.text.toString())
+        // ED-121, projection rule of the list (gate r2, point 5): an offer identical to the field has
+        // nothing to restore, so it is hidden; hydration still decides nothing, the draft stays durable
+        // and is offered again as soon as the field differs.
+        val key = EditorDraftKey.mpReply(request.threadId)
         assertNull(viewModel.state.value.restorableDraft)
+        assertTrue(viewModel.state.value.draftOffers.isEmpty())
+        assertEquals(body, draftStore.saved[key]?.body)
+        viewModel.editBody(TextFieldValue("$body, edited"))
+        Snapshot.sendApplyNotifications()
+        advanceUntilIdle()
+        assertEquals(body, viewModel.state.value.restorableDraft)
+        assertEquals(listOf(body), draftStore.loadOffers("tester", key).map { it.draft.body })
     }
 
     @Test
-    fun `restoring appends the offered private reply after live text`() = runTest {
+    fun `restoring puts the offered private reply before live text - ED89`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } returns form()
         draftStore.preload(
@@ -1438,7 +1888,8 @@ class PrivateMessageReplyViewModelTest {
         viewModel.editBody(TextFieldValue("fresh MP"))
         viewModel.onDraftRestoreRequested()
 
-        assertEquals("fresh MP\n\nrescued MP", viewModel.bodyFieldState.text.toString())
+        // ED-89 case 4 (v0.7.8): empty seed and typed text give the draft, then the typing.
+        assertEquals("rescued MP\n\nfresh MP", viewModel.bodyFieldState.text.toString())
         assertNull(viewModel.state.value.restorableDraft)
     }
 
@@ -1938,6 +2389,7 @@ class PrivateMessageReplyViewModelTest {
         assertEquals(TextRange(expected.length), vm.bodyFieldState.selection)
         assertEquals(seed, vm.state.value.draftHydratedContent)
         assertNull(vm.state.value.restorableDraft)
+        if (expected == before.text) return restored
         assertTrue(vm.bodyFieldState.undoState.canUndo)
         vm.bodyFieldState.undoState.undo()
         assertEquals(before.text, vm.bodyFieldState.text.toString())
@@ -1951,14 +2403,15 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
-    fun restoreReplacesUntouchedSeed() = runTest {
-        assertRestoreAndSingleUndo(replyWithRestoreOffer(), TextFieldValue("seed", TextRange(1, 3)), "draft")
+    fun v078RestoreKeepsUntouchedReplyContent() = runTest {
+        assertRestoreAndSingleUndo(replyWithRestoreOffer(), TextFieldValue("seed", TextRange(1, 3)), "draft\n\nseed")
     }
 
     @Test
     fun restoreKeepsTextTypedAfterSeed() = runTest {
         assertRestoreAndSingleUndo(
-            replyWithRestoreOffer(), TextFieldValue("seed \n\n suffix  \n", TextRange(2, 6)), "draft\n\nsuffix  \n",
+            replyWithRestoreOffer(), TextFieldValue("seed \n\n suffix  \n", TextRange(2, 6)),
+            "draft\n\nseed \n\n suffix  \n",
         )
     }
 
@@ -1967,25 +2420,26 @@ class PrivateMessageReplyViewModelTest {
         assertRestoreAndSingleUndo(
             replyWithRestoreOffer(seed = ""),
             TextFieldValue("typed", TextRange(1, 3)),
-            "typed\n\ndraft",
+            "draft\n\ntyped",
         )
     }
 
     @Test
     fun restoreAppendsWhenSeedEditedInside() = runTest {
-        assertRestoreAndSingleUndo(replyWithRestoreOffer(), TextFieldValue("seXd", TextRange(2)), "seXd\n\ndraft")
+        assertRestoreAndSingleUndo(replyWithRestoreOffer(), TextFieldValue("seXd", TextRange(2)), "draft\n\nseXd")
     }
 
     @Test
-    fun restoreTrimsTrailingWhitespaceBeforeSeparator() = runTest {
+    fun v078RestorePreservesTrailingReplyWhitespace() = runTest {
         assertRestoreAndSingleUndo(
-            replyWithRestoreOffer(seed = ""), TextFieldValue("typed \n\n", TextRange(2)), "typed\n\ndraft",
+            replyWithRestoreOffer(seed = ""), TextFieldValue("typed \n\n", TextRange(2)), "draft\n\ntyped \n\n",
         )
     }
 
     @Test
-    fun restoreTreatsBlankSuffixAsUntouchedSeed() = runTest {
-        assertRestoreAndSingleUndo(replyWithRestoreOffer(), TextFieldValue("seed \n\t", TextRange(2, 5)), "draft")
+    fun v078RestorePreservesBlankSuffixOfReplyContent() = runTest {
+        assertRestoreAndSingleUndo(replyWithRestoreOffer(), TextFieldValue("seed \n\t", TextRange(2, 5)),
+            "draft\n\nseed \n\t")
     }
 
     @Test
@@ -1996,44 +2450,49 @@ class PrivateMessageReplyViewModelTest {
     @Test
     fun restorePreservesDraftWhitespaceVerbatim() = runTest {
         assertRestoreAndSingleUndo(
-            replyWithRestoreOffer(draft = "  draft  \n"), TextFieldValue("seed", TextRange(1, 3)), "  draft  \n",
+            replyWithRestoreOffer(draft = "  draft  \n"), TextFieldValue("seed", TextRange(1, 3)),
+            "  draft  \n\n\nseed",
         )
     }
 
     @Test
     fun editReopenRestoreYieldsSingleCopy() = runTest {
-        val seed = "[quote=alice]hello[/quote]\n"
+        val seed = "[quotemsg=101][b]alice a écrit :[/b]hello[/quotemsg]\n"
         val draft = seed + "Ma réponse"
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } returns form(initialContent = seed)
+        enqueueQuoteLaunch(request.copy(quote = PrivateMessageQuote(101, 1)))
         val original = viewModel(repository)
         original.editBody(TextFieldValue(draft))
         original.onCloseRequested()
         assertEquals(PrivateMessageReplyEffect.CloseCommitted, original.effects.first())
         original.viewModelScope.cancel()
+        enqueueQuoteLaunch(request.copy(quote = PrivateMessageQuote(101, 1)))
         val reopened = viewModel(repository)
         assertEquals(draft, reopened.state.value.restorableDraft)
         val restored = assertRestoreAndSingleUndo(reopened, TextFieldValue(seed, TextRange(1, 3)), draft)
-        assertEquals(1, restored.split("[quote=").size - 1)
+        assertEquals(1, restored.split("[quotemsg=").size - 1)
     }
 
     @Test
     fun editReopenRestoreKeepsNewTextAfterQuote() = runTest {
-        val seed = "[quote=alice]hello[/quote]\n"
+        val seed = "[quotemsg=101][b]alice a écrit :[/b]hello[/quotemsg]\n"
         val draft = seed + "Ma réponse"
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } returns form(initialContent = seed)
+        enqueueQuoteLaunch(request.copy(quote = PrivateMessageQuote(101, 1)))
         val original = viewModel(repository)
         original.editBody(TextFieldValue(draft))
         original.onCloseRequested()
         assertEquals(PrivateMessageReplyEffect.CloseCommitted, original.effects.first())
         original.viewModelScope.cancel()
+        enqueueQuoteLaunch(request.copy(quote = PrivateMessageQuote(101, 1)))
         val reopened = viewModel(repository)
         assertEquals(draft, reopened.state.value.restorableDraft)
         val restored = assertRestoreAndSingleUndo(
             reopened, TextFieldValue(seed + "nouveau", TextRange(seed.length)), draft + "\n\nnouveau",
         )
-        assertEquals(1, restored.split("[quote=").size - 1)
+        assertEquals(1, restored.split("[quotemsg=").size - 1)
     }
 
     @Test
@@ -2050,7 +2509,7 @@ class PrivateMessageReplyViewModelTest {
         vm.retryFormLoad()
         runCurrent()
         assertEquals("seed", vm.state.value.draftHydratedContent)
-        assertRestoreAndSingleUndo(vm, TextFieldValue("seed", TextRange(2)), "draft")
+        assertRestoreAndSingleUndo(vm, TextFieldValue("seed", TextRange(2)), "draft\n\nseed")
         assertEquals("seed", vm.state.value.draftHydratedContent)
     }
 
@@ -2137,35 +2596,22 @@ class PrivateMessageReplyViewModelTest {
         assertEquals("typed", vm.bodyFieldState.text.toString())
     }
 
+    // v0.7.8 ED-89: a reply has no server edit seed; Restore is allowed while its GET loads.
     @Test
-    fun restoreDisabledWhileSeedFormLoads() = runTest {
+    fun restoreAllowedWhileReplyFormLoads() = runTest {
         val gate = CompletableDeferred<ReplyForm>()
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } coAnswers { gate.await() }
-        draftStore.preload(
-            EditorDraftKey.mpReply(request.threadId),
-            EditorDraftStore.Draft(body = "draft", isPrivate = true),
-        )
+        draftStore.preload(EditorDraftKey.mpReply(request.threadId),
+            EditorDraftStore.Draft(body = "draft", isPrivate = true))
         val vm = viewModel(repository)
-        val before = vm.state.value
-        assertTrue(before.isLoadingForm)
-        assertEquals("draft", before.restorableDraft)
+        assertTrue(vm.state.value.isLoadingForm)
         vm.onDraftRestoreRequested()
-        assertEquals(before, vm.state.value)
-        assertFalse(vm.state.value.draftHydratedFromForm)
-        assertEquals("", vm.bodyFieldState.text.toString())
-        assertEquals(TextRange.Zero, vm.bodyFieldState.selection)
-        assertEquals(0, draftStore.saveCount)
-
-        val seed = "[quote=alice]hello[/quote]\n"
-        gate.complete(form(initialContent = seed))
+        assertEquals("draft", vm.bodyFieldState.text.toString())
+        gate.complete(form())
         runCurrent()
-        assertFalse(vm.state.value.isLoadingForm)
-        assertTrue(vm.state.value.draftHydratedFromForm)
-        assertEquals(seed, vm.state.value.draftHydratedContent)
-        assertEquals(seed, vm.bodyFieldState.text.toString())
-        assertEquals("draft", vm.state.value.restorableDraft)
-        assertRestoreAndSingleUndo(vm, TextFieldValue(seed, TextRange(1, 3)), "draft")
+        assertEquals("draft", vm.bodyFieldState.text.toString())
+        assertNull(vm.state.value.restorableDraft)
     }
 
     @Test
@@ -2192,15 +2638,19 @@ class PrivateMessageReplyViewModelTest {
 
     @Test
     fun restoreAfterFormFailureIsKeptWhenRetriedFormCarriesQuote() = runTest {
+        // ED-89/132 v0.7.8: a restored body cannot suppress an explicitly pending Q.
+        val pending = PendingInlineQuoteRequest.privateMessage(request.threadId,
+            listOf(PendingInlineQuoteRequest.Quote(101, 1, 1)))
+        val quote = "[quotemsg=101][b]alice a écrit :[/b]hello[/quotemsg]"
         var fetches = 0
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } coAnswers {
             if (fetches++ == 0) throw IOException("network down")
-            form(initialContent = "[quote=alice]hello[/quote]\n")
+            form(initialContent = quote)
         }
         draftStore.preload(
             EditorDraftKey.mpReply(request.threadId),
-            EditorDraftStore.Draft(body = "draft", isPrivate = true),
+            EditorDraftStore.Draft(body = "draft", isPrivate = true, pendingInlineQuoteRequest = pending),
         )
         val vm = viewModel(repository)
         runCurrent()
@@ -2208,12 +2658,12 @@ class PrivateMessageReplyViewModelTest {
         vm.onDraftRestoreRequested()
         assertEquals("draft", vm.bodyFieldState.text.toString())
 
-        // Restoring after a failure is a decision: the retried form no longer hydrates the body.
+        // Restore decides D, while the explicit pending citation still arrives after D.
         vm.retryFormLoad()
         runCurrent()
         assertTrue(vm.state.value.formAvailable)
         assertFalse(vm.state.value.formError)
-        assertEquals("draft", vm.bodyFieldState.text.toString())
+        assertEquals("draft\n\n$quote", vm.bodyFieldState.text.toString())
         assertEquals("", vm.state.value.draftHydratedContent)
         assertNull(vm.state.value.restorableDraft)
     }
@@ -2350,7 +2800,9 @@ class PrivateMessageReplyViewModelTest {
         val uploaded = vm.bodyFieldState.text.toString()
         assertTrue(uploaded.startsWith("seed[url="))
         assertRestoreAndSingleUndo(
-            vm, TextFieldValue(uploaded, TextRange(1, 3)), "draft\n\n" + uploaded.removePrefix("seed"),
+            // ED-89 (v0.7.8): an MP reply no longer has a seed that the draft replaces; whatever the
+            // form put in the field stays after the restored draft.
+            vm, TextFieldValue(uploaded, TextRange(1, 3)), "draft\n\n" + uploaded,
         )
     }
 
@@ -2516,6 +2968,29 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
+    fun `an offer equal to the field is hidden while the other offered draft stays reachable - ED121`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val formGate = CompletableDeferred<ReplyForm>()
+        coEvery { repository.fetchReplyForm(any(), any()) } coAnswers { formGate.await() }
+        val key = EditorDraftKey.mpReply(request.threadId)
+        draftStore.preload(key, EditorDraftStore.Draft(body = "same", isPrivate = true))
+        draftStore.preloadOffer(key, EditorDraftStore.DraftOffer("older", 0,
+            EditorDraftStore.Draft(body = "other", isPrivate = true)))
+        val vm = viewModel(repository)
+        assertEquals(setOf("same", "other"), vm.state.value.draftOffers.map { it.draft.body }.toSet())
+        vm.bodyFieldState.edit { append("same") }
+        formGate.complete(form())
+        runCurrent()
+        // The whole projection is filtered, not only its first line; nothing is deleted from the store.
+        assertEquals(listOf("other"), vm.state.value.draftOffers.map { it.draft.body })
+        assertEquals("other", vm.state.value.restorableDraft)
+        assertEquals(listOf("other"), draftStore.loadOffers("tester", key).map { it.draft.body })
+        assertEquals("same", draftStore.saved[key]?.body)
+        vm.onDraftRestoreRequested()
+        assertEquals("other\n\nsame", vm.bodyFieldState.text.toString())
+    }
+
+    @Test
     fun restoreOfferUsesLiveBody() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         val formGate = CompletableDeferred<ReplyForm>()
@@ -2543,12 +3018,13 @@ class PrivateMessageReplyViewModelTest {
         vm.bodyFieldState.edit { append("typed") }
         assertEquals("", vm.state.value.bodyText)
         vm.onDraftRestoreRequested()
-        assertEquals("typed\n\nstored", vm.bodyFieldState.text.toString())
+        // ED-89 case 4 (v0.7.8): the offered draft comes first, the live typing after it.
+        assertEquals("stored\n\ntyped", vm.bodyFieldState.text.toString())
         assertEquals(TextRange(13), vm.bodyFieldState.selection)
         assertNull(vm.state.value.restorableDraft)
         Snapshot.sendApplyNotifications()
         advanceUntilIdle()
-        assertEquals("typed\n\nstored", draftStore.saved[key]?.body)
+        assertEquals("stored\n\ntyped", draftStore.saved[key]?.body)
     }
 
     @Test
@@ -2566,7 +3042,9 @@ class PrivateMessageReplyViewModelTest {
         assertEquals("", vm.state.value.bodyText)
         loadGate.complete(Unit)
         runCurrent()
-        assertNull(vm.state.value.restorableDraft)
+        // ED-121 (v0.7.8): the stored draft is durable and stays offered under the status icon instead
+        // of being silently overwritten by the next autosave; the live typing is left untouched.
+        assertEquals("stored", vm.state.value.restorableDraft)
         assertEquals("typed before load", vm.bodyFieldState.text.toString())
     }
 

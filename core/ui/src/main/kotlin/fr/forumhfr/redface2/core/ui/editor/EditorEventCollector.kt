@@ -34,8 +34,8 @@ class EditorEventCollector(private val errors: EditorErrorMappers) : EditorHostE
     }
     /** Direct picker failures and notices are occurrences; submit refusals use the projection exclusively. */
     fun problem(error: EditorError) = problem(error, null)
-    fun information(summary: EditorText, detail: EditorText? = null, timeoutMillis: Long? = null) =
-        deliver(local(EditorLocalOperation.Notice), EditorEventContent.Information(summary, detail, timeoutMillis))
+    fun information(summary: EditorText, detail: EditorText? = null) =
+        deliver(local(EditorLocalOperation.Notice), EditorEventContent.Information(summary, detail))
     override fun dispatch(input: EditorEventInput) = reduceEditorEvents(state, input).also { state = it.state }
     /** The surface resets its [EditorHostMemory] before opening a new owner/session, then observes its baseline. */
     fun open(session: EditorSession) {

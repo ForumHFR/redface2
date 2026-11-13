@@ -170,7 +170,8 @@ class PrivateMessageReplyRestorationTest {
         settle()
         assertEquals("newer", store.saved[key]?.body)
         newer.onDraftRestoreRequested()
-        assertResumed(newer, "newer")
+        // v0.7.8 ED-89: a reply has no replaceable seed; D comes first and the field content follows.
+        assertResumed(newer, "newer\n\n" + served.initialContent)
     }
 
     @Test fun twoDeathsBeforeSuccessfulGetKeepResumedTextOrDeliberateBlankAndScroll() = runTest(dispatcher) {
@@ -235,22 +236,23 @@ class PrivateMessageReplyRestorationTest {
         editor.onDraftRestoreRequested()
         settle()
         assertEquals("D", editor.state.value.restorableDraft)
-        assertEquals("C\n\nD", editor.bodyFieldState.text.toString())
+        // v0.7.8 ED-89 case 4, empty seed: D, then the typing.
+        assertEquals("D\n\nC", editor.bodyFieldState.text.toString())
         store.saveFailure = null
-        type(editor, "C\n\nD continued")
+        type(editor, "D\n\nC continued")
         settle()
         dispatcher.scheduler.advanceTimeBy(751)
         settle()
-        assertEquals("C\n\nD continued", store.saved[key]?.body)
+        assertEquals("D\n\nC continued", store.saved[key]?.body)
         assertTrue(store.loadOffers("tester", key).isEmpty())
         editor.onStopped()
         settle()
         val frozen = freeze(saved)
-        assertPrivateMessageReplySavedState(frozen, listOf("C\n\nD continued"))
+        assertPrivateMessageReplySavedState(frozen, listOf("D\n\nC continued"))
         editor.viewModelScope.cancel()
         val recreated = open(frozen)
         settle()
-        assertResumed(recreated, "C\n\nD continued")
+        assertResumed(recreated, "D\n\nC continued")
         assertTrue(store.loadOffers("tester", key).isEmpty())
     }
 

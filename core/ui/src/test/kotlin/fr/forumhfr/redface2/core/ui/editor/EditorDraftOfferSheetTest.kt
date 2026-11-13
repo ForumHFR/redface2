@@ -6,13 +6,16 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
-import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.assertIsDisplayed
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -24,10 +27,8 @@ import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeDown
 import androidx.compose.ui.text.TextRange
-import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -45,29 +46,46 @@ class EditorDraftOfferSheetTest {
     @get:Rule val compose = createComposeRule()
     private val fixture = EditorDraftOfferFixture()
 
-    @Test fun `no automatic opening and the optional notice and heading are readable`() {
+    @Test fun `multiple versions are ordered by date and decisions identify the selected offer`() {
+        val old = EditorDraftStore.DraftOffer("old", 1, EditorDraftStore.Draft("[b]Ancien[/b]", updatedAt = 1000))
+        val recent = EditorDraftStore.DraftOffer("new", 2,
+            EditorDraftStore.Draft("[quotemsg=101][b]Alice a écrit :[/b]secret[/quotemsg]", updatedAt = 2000))
+        fixture.offers = listOf(old, recent)
+        compose.setContent { fixture.Content() }
+        status().performClick()
+        compose.onNodeWithText("Citation de Alice").assertIsDisplayed()
+        compose.onNodeWithText("Ancien").assertIsDisplayed()
+        val first = compose.onAllNodes(hasText("Restaurer")).onFirst()
+        first.performClick()
+        compose.runOnIdle { assertEquals(listOf("restore:new"), fixture.calls) }
+        status().performClick()
+        compose.onAllNodes(hasText("Ignorer")).onFirst().performClick()
+        compose.runOnIdle { assertEquals(listOf("restore:new", "discard:new"), fixture.calls) }
+    }
+
+    @Test fun `offer never opens automatically and its heading is readable`() {
         compose.setContent { fixture.Content() }
         compose.onNode(isDialog()).assertDoesNotExist()
-        open(throughEvent = false)
-        compose.onNodeWithText("Brouillon retrouvé").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading))
-        compose.onNodeWithText("Un brouillon non envoyé a été retrouvé pour ce message.").assertIsDisplayed()
-        compose.onNodeWithText("Citation en attente").assertIsDisplayed()
-        compose.runOnIdle { fixture.pendingQuote = null }
+        status().performClick()
+        compose.onNodeWithText("Brouillon retrouvé")
+            .assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.Heading))
         compose.onNodeWithText("Citation en attente").assertDoesNotExist()
         compose.runOnIdle { assertTrue(fixture.calls.isEmpty()) }
     }
 
-    @Test fun `both entries return body focus exactly once for every close and decision`() {
+    @Test fun `status returns body focus once for every dismissal and decision in normal and compact height`() {
         compose.setContent { fixture.Content() }
         var expectedReturns = 0
-        listOf(false, true).forEach { throughEvent ->
+        listOf(false, true).forEach { compact ->
+            compose.runOnIdle { fixture.compact = compact }
+            status().assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Brouillon à traiter"))
             listOf("close", "back", "swipe", "outside", "restore", "discard").forEach { closing ->
                 compose.runOnIdle {
                     fixture.bodyFocus.requestFocus()
                     fixture.body.edit { selection = TextRange(6, 1) }
                 }
-                val callsBefore = fixture.calls.toList()
-                open(throughEvent)
+                val before = fixture.calls.toList()
+                status().performClick()
                 when (closing) {
                     "close" -> compose.onNodeWithContentDescription("Fermer l’offre de brouillon").performClick()
                     "back" -> compose.runOnIdle {
@@ -82,116 +100,51 @@ class EditorDraftOfferSheetTest {
                 compose.onNode(hasSetTextAction()).assertIsFocused()
                 expectedReturns++
                 compose.runOnIdle {
-                    assertEquals("$throughEvent / $closing", expectedReturns, fixture.returns)
-                    assertEquals("Bonjour", fixture.body.text.toString())
+                    assertEquals(expectedReturns, fixture.returns)
                     assertEquals(TextRange(6, 1), fixture.body.selection)
                     assertTrue(fixture.available)
-                    assertNull(fixture.events.state.visibleEvent)
-                    assertNull(fixture.events.state.detailKey)
-                    val decision = listOf(closing).filter { it == "restore" || it == "discard" }
-                    assertEquals(callsBefore + decision, fixture.calls)
-                    fixture.host.closeDraftOffer() // Late/duplicate dismissal must not schedule a second return.
+                    val decisions = listOf(closing).filter { it == "restore" || it == "discard" }
+                    assertEquals(before + decisions, fixture.calls)
+                    fixture.host.closeDraftOffer()
+                    assertFalse(fixture.host.consumeReturn())
                 }
-                compose.waitForIdle()
-                compose.runOnIdle { assertEquals(expectedReturns, fixture.returns) }
             }
         }
     }
 
-    @Test fun `losing the offer closes either entry even after the detail delivery disappears`() {
+    @Test fun `losing an offer closes its sheet without a decision`() {
         compose.setContent { fixture.Content() }
-        listOf(false, true).forEachIndexed { index, throughEvent ->
-            compose.runOnIdle { fixture.available = true }
-            open(throughEvent)
-            compose.runOnIdle {
-                fixture.host.detail?.key?.let { fixture.events.dispatch(EditorEventInput.Acknowledge(it)) }
-                fixture.available = false
-            }
-            compose.onNode(isDialog()).assertDoesNotExist()
-            compose.onNode(hasSetTextAction()).assertIsFocused()
-            compose.runOnIdle {
-                assertFalse(fixture.host.draftOfferOpen)
-                assertNull(fixture.host.detail)
-                assertNull(fixture.events.state.detailKey)
-                assertEquals(index + 1, fixture.returns)
-                assertTrue(fixture.calls.isEmpty())
-            }
-        }
-    }
-
-    @Test fun `closing without a decision preserves the pending send guard and allows reopening`() {
-        fixture.state = fixture.state.copy(sendActivatable = false, postAllowed = false)
-        compose.setContent { fixture.Content() }
-        open(throughEvent = true)
-        compose.onNodeWithContentDescription("Fermer l’offre de brouillon").performClick()
+        status().performClick()
+        compose.runOnIdle { fixture.available = false }
+        compose.onNode(isDialog()).assertDoesNotExist()
         compose.runOnIdle {
-            assertFalse(fixture.host.submitState.enabled)
-            assertEquals(EditorSubmissionState.Ready, fixture.state.submission)
-            assertTrue(fixture.available)
             assertTrue(fixture.calls.isEmpty())
+            assertEquals(1, fixture.returns)
         }
-        open(throughEvent = false)
-        compose.onNodeWithText("Brouillon retrouvé").assertIsDisplayed()
     }
 
-    @Test fun `restore and discard retain their separate enabled states`() {
-        fixture.restoreEnabled = false
-        compose.setContent { fixture.Content() }
-        open(throughEvent = false)
-        compose.onNodeWithText("Restaurer").assertIsNotEnabled()
-        compose.onNodeWithText("Ignorer").performClick()
-        compose.runOnIdle {
-            assertEquals(listOf("discard"), fixture.calls)
-            fixture.restoreEnabled = true
-            fixture.discardEnabled = false
-        }
-        open(throughEvent = false)
-        compose.onNodeWithText("Ignorer").assertIsNotEnabled()
-        compose.onNodeWithText("Restaurer").performClick()
-        compose.runOnIdle { assertEquals(listOf("discard", "restore"), fixture.calls) }
-    }
-
+    // The compact action bar only keeps ↺ beside a visible information when it is wide enough.
     @Test
     @Config(qualifiers = "fr-rFR-w760dp-h400dp-xxhdpi")
-    fun `first offer tap opens under its information in app bar and compact action bar only when enabled`() {
+    fun `ordinary information consumes the first offer tap in both bars`() {
         compose.setContent { fixture.Content() }
         listOf(false, true).forEach { compact ->
-            listOf(false, true).forEach { enabled ->
-                compose.runOnIdle {
-                    fixture.compact = compact
-                    fixture.offerEventEnabled = enabled
-                    fixture.notice()
-                }
-                status().performClick()
-                if (enabled) {
-                    compose.onNode(isDialog()).assertExists()
-                    compose.runOnIdle { assertNull(fixture.events.state.visibleEvent) }
-                    compose.onNodeWithContentDescription("Fermer l’offre de brouillon").performClick()
-                } else {
-                    compose.onNode(isDialog()).assertDoesNotExist()
-                    compose.runOnIdle { assertNull(fixture.events.state.visibleEvent) }
-                    status().performClick() // Ordinary ED-44 still needs the second tap.
-                    compose.onNode(isDialog()).assertExists()
-                    compose.onNodeWithContentDescription("Fermer l’offre de brouillon").performClick()
-                }
-            }
+            compose.runOnIdle { fixture.compact = compact; fixture.notice() }
+            status().performClick()
+            compose.onNode(isDialog()).assertDoesNotExist()
+            status().performClick()
+            compose.onNode(isDialog()).assertExists()
+            compose.onNodeWithContentDescription("Fermer l’offre de brouillon").performClick()
         }
     }
 
-    @Test fun `unrelated information still consumes the first offer tap when the exception is enabled`() {
+    @Test fun `restore and discard retain their independent guards`() {
         compose.setContent { fixture.Content() }
-        compose.runOnIdle { fixture.notice(offer = false) }
+        compose.runOnIdle { fixture.restoreEnabled = false }
         status().performClick()
-        compose.onNode(isDialog()).assertDoesNotExist()
-        compose.runOnIdle { assertNull(fixture.events.state.visibleEvent) }
-    }
-
-    private fun open(throughEvent: Boolean) {
-        if (throughEvent) {
-            compose.runOnIdle { fixture.notice() }
-            compose.onNodeWithContentDescription("Brouillon retrouvé, Afficher les détails").performClick()
-        } else status().performClick()
-        compose.onNode(isDialog()).assertExists()
+        compose.onNodeWithText("Restaurer").assertIsNotEnabled()
+        compose.onNodeWithText("Ignorer").performClick()
+        compose.runOnIdle { assertEquals(listOf("discard"), fixture.calls) }
     }
 
     private fun status() = compose.onNode(hasContentDescription("Offre de brouillon") and

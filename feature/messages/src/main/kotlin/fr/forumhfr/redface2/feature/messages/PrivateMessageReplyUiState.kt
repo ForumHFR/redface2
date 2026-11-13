@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.messages
 
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.DraftOffer
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.PostContent
@@ -28,6 +29,16 @@ data class PrivateMessageReplyUiState(
     val conversationTitle: String = "",
     /** True when the form GET failed (network / session / parse / anonymous) → show retry. */
     val formError: Boolean = false,
+    /** ED-132 — a durable quote request (Q) is still owed to this reply; Send stays off until it lands. */
+    val quotePending: Boolean = false,
+    /** The served quote is being written to the draft row; Restore waits for that write (ED-89). */
+    val quoteCommitPending: Boolean = false,
+    /** Q exists but cannot be decoded: only "ignore the quote" can release the reply. */
+    val unreadableQuoteRequest: Boolean = false,
+    /** Consecutive failed form reloads with Q pending, capped at 2: the second one offers Ignore. */
+    val quoteFetchFailures: Int = 0,
+    /** Draft storage is not restored or was invalidated: Q's presence is unknown, Send stays off. */
+    val quoteStorageUnavailable: Boolean = false,
     /** Text-only mirror; selection and undo history stay in the ViewModel. */
     val bodyText: String = "",
     /**
@@ -35,7 +46,7 @@ data class PrivateMessageReplyUiState(
      * including a blank edit, prevents a GET from duplicating the server-provided inline quote.
      */
     val draftHydratedFromForm: Boolean = false,
-    /** Exact server quote applied once, unchanged by restore or refetch; empty before hydration. */
+    /** Ordinary form hydration only; a delivered Q is never a replaceable restore seed. */
     val draftHydratedContent: String = "",
     val isPreviewVisible: Boolean = false,
     val preview: PostContent = PostContent(blocks = emptyList()),
@@ -64,6 +75,9 @@ data class PrivateMessageReplyUiState(
      * « Ignorer » clears the cached content. A matching ED-81 checkpoint resumes silently instead.
      */
     val restorableDraft: String? = null,
+    val draftOffers: List<DraftOffer> = emptyList(),
+    /** ED-10/85: a close could not save the field; the dialog asks before anything is abandoned. */
+    val showUnsavedCloseDialog: Boolean = false,
     /**
      * #606 — true only when the loaded form is the OWNER's DT/MultiMP (HFR served the `newdest`
      * field). Gates the member editor in the UI ; a simple participant / one-to-one MP keeps it
@@ -97,9 +111,13 @@ data class PrivateMessageReplyUiState(
     val imagePickerMode: ImagePickerMode = ImagePickerMode.DEFAULT,
     val editorShortcut: EditorShortcut = EditorShortcut.NONE,
 ) {
+    val hasDormantQuote: Boolean get() = quotePending && submission is EditorSubmissionState.Uncertain
+    val canIgnorePendingQuote: Boolean
+        get() = (unreadableQuoteRequest || quoteRecoveryAllowed) && !isLoadingForm
+    private val quoteRecoveryAllowed: Boolean get() = hasDormantQuote || quotePending && quoteFetchFailures >= 2
     val armToken: ArmToken? get() = (submission as? EditorSubmissionState.Armed)?.token
 
     val canSubmit: Boolean
         get() = !isInitializing && formAvailable && !isLoadingForm && !isSubmitting && !isUploading &&
-            !submission.blocksBodyMutation && bodyText.isNotBlank()
+            !submission.blocksBodyMutation && bodyText.isNotBlank() && !quotePending && !quoteStorageUnavailable
 }

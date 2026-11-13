@@ -26,8 +26,12 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
     private var offersLoaded = false
     private val resolvedOffers = mutableSetOf<String>()
     private var lastBody = ""
+    /** ED-10: the headers last read or written durably with [lastBody], in their editor form. */
+    private var lastSubject = ""
+    private var lastRecipients = ""
     /** Text Undo/Redo can return to the last restore after an intervening autosave lost its offsets. */
     private var restoredBody: EditorBodyMerge? = null
+    private var stagedBody: EditorBodyMerge? = null
     var bodyProvenance: EditorBodyProvenance? = null
         private set
     private var writingVersion: Long? = null
@@ -35,6 +39,30 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
     val nextContentVersion: Long get() = (writingVersion ?: version) + 1
     /** Optional surface checkpoint; null result announces the revision before the first suspension. */
     var checkpointObserver: ((Draft, Long, StoreWriteResult?) -> Unit)? = null
+    /** Includes the source D before its first transactional copy. Identities survive equal bodies. */
+    val availableOffers: List<DraftOffer>
+        get() = (offers + listOfNotNull(protectedOffer)).distinctBy { it.id }
+            .filterNot { it.id in resolvedOffers }
+            .sortedWith(compareByDescending<DraftOffer> { it.draft.updatedAt }.thenByDescending { it.sourceVersion })
+    private var expectedAttemptStatus: AttemptStatus? = null
+
+    /** Reconcile offsets with input that has not reached the autosave/mirror yet. */
+    fun provenanceFor(body: String): EditorBodyProvenance {
+        val live = stagedBody ?: restoredBody?.takeIf { it.body == body }
+        val proof = bodyProvenance ?: EditorBodyProvenance()
+        // The durable proof owns the delivery order: a staged merge predating the last delivery must
+        // not move an older proof of the same quote behind it (ED-121 compares the last one).
+        return if (live == null) proof.rebase(lastBody, body) else live.provenance.copy(
+            deliveries = (live.provenance.deliveries - proof.deliveries.toSet() + proof.deliveries).distinct(),
+        ).rebase(live.body, body)
+    }
+
+    /** A committing older autosave must not adopt away these newer live boundaries. */
+    fun stageBodyMerge(merge: EditorBodyMerge) {
+        stagedBody = merge
+        restoredBody = merge
+    }
+
     private var published = false
     private var readable = false
     private var unresolved: AttemptToken? = null
@@ -52,6 +80,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         offersLoaded = false
         resolvedOffers.clear()
         restoredBody = null
+        stagedBody = null
         protectedOffer = null
         offers = emptyList()
         hasUnreadableInlineQuoteRequest = false
@@ -72,8 +101,11 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         }
         val composition = entry?.takeUnless { it.attempt?.status == AttemptStatus.PUBLISHED }
         lastBody = composition?.draft?.body.orEmpty()
+        lastSubject = composition?.draft?.subject.orEmpty()
+        lastRecipients = composition?.draft?.recipients.orEmpty()
         bodyProvenance = composition?.draft?.bodyProvenance
         version = entry?.version ?: 0L
+        expectedAttemptStatus = entry?.attempt?.status
         published = entry?.attempt?.status == AttemptStatus.PUBLISHED
         unresolved = entry?.attempt?.token?.takeUnless { published }
         pendingInlineQuoteRequest = entry?.draft?.pendingInlineQuoteRequest.takeUnless { published }
@@ -95,7 +127,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         return entry
     }
 
-    fun invalidate() { invalidated = true }
+    fun invalidate() { invalidated = true; stagedBody = null }
 
     suspend fun ownsCurrentAccount(): Boolean {
         val current = store.currentOwner()
@@ -114,6 +146,17 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         }
     }
 
+    /**
+     * ED-10: the user content of [draft] (body, subject, recipients) is what this session last read
+     * or wrote durably, so a failed rewrite loses nothing. Absent headers compare as empty ones.
+     * Timestamps, provenance, offers, quote requests and the constant privacy flag are not content.
+     * [recipients] maps both sides to one comparable form: a row may hold a historical encoding of
+     * the same list. This is the session's own last view; after a conflict it proves nothing.
+     */
+    fun holds(draft: Draft, recipients: (String) -> Any = { it }): Boolean = draft.body == lastBody &&
+        draft.subject.orEmpty() == lastSubject &&
+        recipients(draft.recipients.orEmpty()) == recipients(lastRecipients)
+
     /** A certified resume is C, not a new offered D. Existing durable offers remain untouched. */
     fun resumeContent() { protectedOffer = null }
 
@@ -126,6 +169,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
                 bodyProvenance = null
                 protectedOffer = null
                 restoredBody = null
+                stagedBody = null
             }
             adopt(result)
             result
@@ -141,9 +185,11 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         withContext(NonCancellable) {
             val snapshot = ownedDraft(draft)
             val result = checkpointWrite(snapshot) {
-                mutation { store.resolveOffer(owner, checkNotNull(key), offer, version, protected(snapshot)) }
+                mutation { store.resolveOffer(owner, checkNotNull(key), offer,
+                    EditorDraftStore.Revision(version, expectedAttemptStatus), protected(snapshot)) }
             }
             if (result is StoreWriteResult.Written) {
+                expectedAttemptStatus = unresolved?.let { AttemptStatus.UNCERTAIN }
                 adoptResolvedOffer(offer, snapshot)
                 adoptBody(snapshot)
             }
@@ -164,6 +210,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
                     lastBody = ""
                     bodyProvenance = null
                     restoredBody = null
+                    stagedBody = null
                 }
                 pendingInlineQuoteRequest = pendingInlineQuoteRequest?.merge(request) ?: request
             }
@@ -184,24 +231,26 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
                 if (deliveredBody == null) it else it.copy(bodyProvenance =
                     (it.bodyProvenance ?: EditorBodyProvenance()).delivered(request.scope, deliveredBody, it.body))
             }
-            val unresolvedOffer = snapshot?.offerToResolve?.id?.let { it !in resolvedOffers } == true
-            val deliveryBlocked = draft != null && unresolved != null
-            val result = if (pendingInlineQuoteRequest != request || deliveryBlocked || unresolvedOffer) {
-                StoreWriteResult.Conflict
-            } else {
-                checkpointWrite(snapshot) {
-                    mutation { store.consumeInlineQuoteRequest(owner, checkNotNull(key), request, version,
-                        snapshot?.let(::protected), offerToPreserve = protectedOffer, protectCurrent = !offersLoaded) }
-                }
+            val blocked = pendingInlineQuoteRequest != request || (draft != null && unresolved != null)
+            // ED-121/132: a D already merged into C by a Restore whose own write failed is resolved in
+            // the same store transaction as C and Q, never in a separate write.
+            val delivered = snapshot?.let { it.copy(offerToResolve = it.offerToResolve?.takeUnless(::isResolved)) }
+            val result = if (blocked) StoreWriteResult.Conflict else checkpointWrite(delivered) {
+                mutation { store.consumeInlineQuoteRequest(owner, checkNotNull(key), request, version,
+                    delivered?.let(::protected), offerToPreserve = protectedOffer,
+                    protectCurrent = !offersLoaded) }
             }
             if (result is StoreWriteResult.Written) {
                 pendingInlineQuoteRequest = null
-                if (snapshot != null) adoptBody(snapshot)
+                delivered?.offerToResolve?.let { adoptResolvedOffer(it, delivered) }
+                if (delivered != null) adoptBody(delivered)
             }
             adopt(result)
             result
         }
     }
+
+    private fun isResolved(offer: DraftOffer): Boolean = offer.id in resolvedOffers
 
     /** The raw row stays sealed until this explicit abandonment succeeds and the binding reloads. */
     @Suppress("ComplexCondition") // One guard: sealed flag, live binding, key, and the version found unreadable.
@@ -233,6 +282,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
             if (result is BeginAttemptResult.Started) {
                 version = result.token.version
                 unresolved = result.token
+                expectedAttemptStatus = AttemptStatus.IN_PROGRESS
                 adoptBody(snapshot)
             }
         }
@@ -242,14 +292,22 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         store.finishAttempt(token, outcome).also { result ->
             adopt(result)
             if (result is StoreWriteResult.Written) {
+                expectedAttemptStatus = when (outcome) {
+                    AttemptOutcome.PUBLISHED -> AttemptStatus.PUBLISHED
+                    AttemptOutcome.UNCERTAIN -> AttemptStatus.UNCERTAIN
+                    AttemptOutcome.CERTAIN_FAILURE -> null
+                }
                 published = outcome == AttemptOutcome.PUBLISHED
                 unresolved = token.takeIf { outcome == AttemptOutcome.UNCERTAIN }
                 if (published) {
                     pendingInlineQuoteRequest = null
                     bodyProvenance = null
                     lastBody = ""
+                    lastSubject = ""
+                    lastRecipients = ""
                     protectedOffer = null
                     restoredBody = null
+                    stagedBody = null
                 }
             }
         }
@@ -290,7 +348,14 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
 
     private fun adoptBody(draft: Draft) {
         lastBody = draft.body
+        lastSubject = draft.subject.orEmpty()
+        lastRecipients = draft.recipients.orEmpty()
         bodyProvenance = draft.bodyProvenance
+        val staged = stagedBody
+        val matches = staged != null && staged.body == draft.body &&
+            staged.provenance.draftEnd == draft.bodyProvenance?.draftEnd &&
+            staged.provenance.quotesEnd == draft.bodyProvenance?.quotesEnd
+        if (matches) stagedBody = null
     }
 
     private suspend fun mutation(operation: suspend () -> StoreWriteResult): StoreWriteResult = try {
@@ -304,11 +369,17 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         val offer = snapshot.offerToResolve?.takeUnless { it.id in resolvedOffers }
         val attempt = unresolved
         when {
-            offer != null -> store.resolveOffer(owner, checkNotNull(key), offer, version, draft).also {
-                if (it is StoreWriteResult.Written) adoptResolvedOffer(offer, snapshot)
+            offer != null -> store.resolveOffer(owner, checkNotNull(key), offer,
+                EditorDraftStore.Revision(version, expectedAttemptStatus), draft).also {
+                if (it is StoreWriteResult.Written) {
+                    expectedAttemptStatus = unresolved?.let { AttemptStatus.UNCERTAIN }
+                    adoptResolvedOffer(offer, snapshot)
+                }
             }
             published -> store.startNewComposition(owner, checkNotNull(key), draft, version)
-            attempt != null -> store.saveUnresolved(attempt, draft, version)
+            attempt != null -> store.saveUnresolved(attempt, draft, version).also {
+                if (it is StoreWriteResult.Written) expectedAttemptStatus = AttemptStatus.UNCERTAIN
+            }
             else -> store.saveIfVersion(owner, checkNotNull(key), draft, version)
         }
     } catch (error: IOException) {
@@ -327,6 +398,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
     private fun adopt(result: StoreWriteResult) {
         if (result is StoreWriteResult.Written) {
             version = result.version
+            if (published) expectedAttemptStatus = null
             published = false
         }
     }

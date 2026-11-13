@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.editor
 
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.DraftOffer
 import androidx.compose.ui.text.input.TextFieldValue
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
@@ -114,7 +115,10 @@ data class TopicFormState(
      * « Restaurer » and are dropped on « Ignorer ».
      */
     val restorableDraft: String? = null,
+    val draftOffers: List<DraftOffer> = emptyList(),
     val restorableSubject: String? = null,
+    /** ED-10/85: a close could not save the fields; the dialog asks before anything is abandoned. */
+    val showUnsavedCloseDialog: Boolean = false,
     /**
      * #459 — `true` while an image upload (single or batch) is in flight. Drives the toolbar
      * spinner AND locks the body field (`readOnly`) so the caret cannot move between two
@@ -287,6 +291,12 @@ sealed interface TopicFormIntent {
      * the ViewModel). Mirrors [PostEditorIntent.CloseRequested].
      */
     data object CloseRequested : TopicFormIntent
+
+    /** "Rester": the unsaved-close dialog is dismissed, the form stays open with its fields. */
+    data object UnsavedCloseDismissed : TopicFormIntent
+
+    /** "Quitter sans enregistrer": the explicit abandonment of what could not be saved. */
+    data object UnsavedCloseConfirmed : TopicFormIntent
 }
 
 /**

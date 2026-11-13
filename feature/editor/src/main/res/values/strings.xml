@@ -29,9 +29,7 @@
     <!-- Noms d\'hébergeurs d\'images affichés dans les messages d\'erreur (#474). -->
     <string name="editor_legacy_quote_dropped">Une ancienne demande de citation n’a pas été conservée après la mise à jour. Votre brouillon reste disponible. Veuillez sélectionner à nouveau le message à citer.</string>
     <string name="editor_chrome_legacy_quote_summary">Citation non reprise</string>
-    <string name="editor_action_resume_quote">Après vérification, reprendre la citation</string>
     <string name="editor_quote_pending">Citation en attente</string>
-    <string name="editor_quote_pending_event">Brouillon retrouvé, citation en attente</string>
     <string name="editor_quote_already_delivered">Déjà citée</string>
     <string name="editor_quote_panel_title">Citations</string>
     <string name="editor_quotes_cleared">Toutes les citations ont été retirées</string>

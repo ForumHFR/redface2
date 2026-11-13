@@ -933,7 +933,7 @@ class PrivateMessageComposeViewModelTest {
         assertFalse(vm.state.value.isUploading)
         val uploadedBody = vm.bodyFieldState.text.toString()
         vm.onDraftRestoreRequested()
-        assertEquals("$uploadedBody\n\nrescued body", vm.bodyFieldState.text.toString())
+        assertEquals("rescued body\n\n$uploadedBody", vm.bodyFieldState.text.toString())
         assertNull(vm.state.value.restorableDraft)
     }
 
@@ -1015,12 +1015,12 @@ class PrivateMessageComposeViewModelTest {
         recreated.onDraftRestoreRequested()
         advanceUntilIdle()
         assertNull(savedStateHandle.get<String>("messageComposeEditor.ignoredOfferFingerprint"))
-        assertEquals("new live MP\n\nrescued MP", draftStore.saved[key]?.body)
+        assertEquals("rescued MP\n\nnew live MP", draftStore.saved[key]?.body)
 
         val afterRestore = viewModel(repository, savedStateHandle = savedStateHandle)
         advanceUntilIdle()
         assertNull(afterRestore.state.value.restorableDraft)
-        assertEquals("new live MP\n\nrescued MP", afterRestore.bodyFieldState.text.toString())
+        assertEquals("rescued MP\n\nnew live MP", afterRestore.bodyFieldState.text.toString())
     }
 
     @Test
@@ -1095,7 +1095,7 @@ class PrivateMessageComposeViewModelTest {
         viewModel.editBody(TextFieldValue("fresh body"))
         viewModel.onDraftRestoreRequested()
 
-        assertEquals("fresh body\n\nrescued body", viewModel.bodyFieldState.text.toString())
+        assertEquals("rescued body\n\nfresh body", viewModel.bodyFieldState.text.toString())
         assertEquals("fresh subject", viewModel.state.value.subject)
         assertEquals("bob", viewModel.state.value.recipients)
         assertNull(viewModel.state.value.restorableDraft)
@@ -1180,6 +1180,129 @@ class PrivateMessageComposeViewModelTest {
         assertEquals("Salut", saved?.subject)
         assertEquals(EditorRecipientState(listOf("bozoleclown")), EditorRecipientState.decode(saved?.recipients))
         assertTrue("MP drafts must stay flagged private", saved?.isPrivate == true)
+    }
+
+    /** A settled composer whose effects are recorded from the start. */
+    private fun TestScope.closableComposer(): Pair<PrivateMessageComposeViewModel, List<PrivateMessageComposeEffect>> {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val vm = viewModel(repository)
+        val effects = mutableListOf<PrivateMessageComposeEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        runCurrent()
+        return vm to effects
+    }
+
+    @Test
+    fun `compose close whose final save fails asks before abandoning the message - ED10`() = runTest {
+        val (vm, effects) = closableComposer()
+        val key = EditorDraftKey.mpCompose()
+        draftStore.saveFailure = IOException("disk full")
+        vm.onSubjectChanged("Salut")
+        vm.editBody(TextFieldValue("typed, never saved"))
+        vm.onCloseRequested()
+        runCurrent()
+        // The last write failed: the dialog opens and the composer stays, fields intact.
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        assertFalse(PrivateMessageComposeEffect.CloseCommitted in effects)
+        assertTrue(draftStore.saved[key]?.body.isNullOrEmpty())
+        assertEquals("typed, never saved", vm.bodyFieldState.text.toString())
+        assertEquals("Salut", vm.state.value.subject)
+        // "Quitter sans enregistrer" is the only abandonment: one pop, no write.
+        val writes = draftStore.writes
+        vm.onUnsavedCloseDecided(leave = true)
+        vm.onUnsavedCloseDecided(leave = true)
+        vm.onCloseRequested()
+        runCurrent()
+        assertEquals(1, effects.count { it == PrivateMessageComposeEffect.CloseCommitted })
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(writes, draftStore.writes)
+        assertTrue(draftStore.saved[key]?.body.isNullOrEmpty())
+    }
+
+    @Test
+    fun `compose Rester then a close that can save writes the message and closes once - ED10`() = runTest {
+        val (vm, effects) = closableComposer()
+        val key = EditorDraftKey.mpCompose()
+        draftStore.saveFailure = IOException("disk full")
+        vm.onSubjectChanged("Salut")
+        vm.editBody(TextFieldValue("typed while the disk was full"))
+        vm.onCloseRequested()
+        runCurrent()
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        // "Rester" keeps the composer; while storage still fails, a new close asks again.
+        vm.onUnsavedCloseDecided(leave = false)
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        vm.onCloseRequested()
+        runCurrent()
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        vm.onUnsavedCloseDecided(leave = false)
+        assertFalse(PrivateMessageComposeEffect.CloseCommitted in effects)
+        // Storage recovers: the next close retries the write, then closes normally.
+        draftStore.saveFailure = null
+        vm.onCloseRequested()
+        runCurrent()
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals("typed while the disk was full", draftStore.saved[key]?.body)
+        assertEquals("Salut", draftStore.saved[key]?.subject)
+        assertEquals(1, effects.count { it == PrivateMessageComposeEffect.CloseCommitted })
+    }
+
+    @Test
+    fun `compose close with nothing to write never asks even when storage fails - ED10`() = runTest {
+        val (vm, effects) = closableComposer()
+        // Empty recipients, subject and body over an absent row: nothing would have been saved.
+        draftStore.saveFailure = IOException("disk full")
+        vm.onCloseRequested()
+        runCurrent()
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(1, effects.count { it == PrivateMessageComposeEffect.CloseCommitted })
+    }
+
+    @Test
+    fun `compose close after a recipients-only change fails to save asks - ED10`() = runTest {
+        val (vm, effects) = closableComposer()
+        val key = EditorDraftKey.mpCompose()
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("alice")))
+        vm.onSubjectChanged("Salut")
+        vm.editBody(TextFieldValue("corps inchangé"))
+        advanceTimeBy(800L)
+        runCurrent()
+        assertEquals(EditorRecipientState(listOf("alice")),
+            EditorRecipientState.decode(draftStore.saved[key]?.recipients))
+        draftStore.saveFailure = IOException("disk full")
+        // Only the recipients change: the row still holds the old list, the close must ask.
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("alice", "bob")))
+        vm.onCloseRequested()
+        runCurrent()
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        assertFalse(PrivateMessageComposeEffect.CloseCommitted in effects)
+        assertEquals(EditorRecipientState(listOf("alice")),
+            EditorRecipientState.decode(draftStore.saved[key]?.recipients))
+        assertEquals(EditorRecipientState(listOf("alice", "bob")), vm.state.value.recipientState)
+        vm.onUnsavedCloseDecided(leave = true)
+        runCurrent()
+        assertEquals(1, effects.count { it == PrivateMessageComposeEffect.CloseCommitted })
+    }
+
+    @Test
+    fun `compose close over restored historical recipients never asks when storage fails - ED10`() = runTest {
+        val key = EditorDraftKey.mpCompose()
+        // A row written before the recipients envelope: plain CSV.
+        draftStore.preload(key, EditorDraftStore.Draft(
+            body = "old text", subject = "old subject", recipients = "alice,bob", isPrivate = true))
+        val (vm, effects) = closableComposer()
+        draftStore.saveFailure = IOException("disk full")
+        vm.onDraftRestoreRequested()
+        runCurrent()
+        assertEquals("old text", vm.bodyFieldState.text.toString())
+        assertEquals(EditorRecipientState(listOf("alice", "bob")), vm.state.value.recipientState)
+        // The fields are exactly what the row holds; only the recipients encoding differs.
+        vm.onCloseRequested()
+        runCurrent()
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(1, effects.count { it == PrivateMessageComposeEffect.CloseCommitted })
+        assertEquals("alice,bob", draftStore.saved[key]?.recipients)
     }
 
     @Test
@@ -1454,12 +1577,12 @@ class PrivateMessageComposeViewModelTest {
         vm.bodyFieldState.edit { append("typed") }
         assertEquals("", vm.state.value.bodyText)
         vm.onDraftRestoreRequested()
-        assertEquals("typed\n\nstored", vm.bodyFieldState.text.toString())
+        assertEquals("stored\n\ntyped", vm.bodyFieldState.text.toString())
         assertEquals(TextRange(13), vm.bodyFieldState.selection)
         assertNull(vm.state.value.restorableDraft)
         Snapshot.sendApplyNotifications()
         advanceUntilIdle()
-        assertEquals("typed\n\nstored", draftStore.saved[key]?.body)
+        assertEquals("stored\n\ntyped", draftStore.saved[key]?.body)
     }
 
     @Test

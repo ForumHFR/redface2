@@ -7,8 +7,6 @@ import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import androidx.compose.animation.ContentTransform
-import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -95,7 +93,6 @@ import fr.forumhfr.redface2.R
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.ui.R as CoreUiR
 import fr.forumhfr.redface2.core.model.AuthState
-import fr.forumhfr.redface2.core.model.write.PrivateMessageQuote
 import fr.forumhfr.redface2.core.model.write.QuoteScope
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageSummary
@@ -223,10 +220,16 @@ data class PrivateMessageReplyRoute(
      * no custom NavType.
      */
     val openRecipientManager: Boolean = false,
-    /** #1074 — cited message id; null together with [quoteRef] for a simple reply. */
+    /**
+     * #1074 — legacy quote coordinates, kept so an older serialised back stack still decodes. Since
+     * #1450 (ED-132 v0.7.8) they are never written nor read: the quote request is durable in the
+     * owner's draft row, enqueued before this route is pushed.
+     */
     val quotedNumreponse: Int? = null,
-    /** #1074 — server-provided 1-based rank in the source page; never guessed or omitted. */
+    /** Legacy, see [quotedNumreponse]; present together with it or not at all. */
     val quoteRef: Int? = null,
+    /** #868-#870 — true for a « Citer N » launch: its successful submit empties the hoisted basket. */
+    val consumesQuoteBasket: Boolean = false,
 ) : RedfaceNavKey {
     init {
         require((quotedNumreponse == null) == (quoteRef == null)) {
@@ -1994,9 +1997,10 @@ private data class PrivateMessageSubmitNavState(
  * hoisted-state bundles ([TopicScrollNavState], `TopicTitleNavState`).
  *
  * #604 lot 3 — also carries the editor quote HANDOFF : [pendingEditorQuotes] is set (via
- * [onEditorQuotesHandoff]) right before a topic or MP editor is pushed with citations (« Citer N »
- * or a sheet escalation), read once by that editor entry into its assisted request, then cleared
- * (null). Never serialised into the route — the selections are transient by decision.
+ * [onEditorQuotesHandoff]) right before a topic editor is pushed with citations (« Citer N » or a
+ * sheet escalation), read once by that editor entry into its assisted request, then cleared (null).
+ * Never serialised into the route — the selections are transient by decision. The MP reply no
+ * longer uses it (#1450): its request is durable and its route only carries `consumesQuoteBasket`.
  *
  * #868/#869/#870 — the handoff also says whether the editor session CONSUMED the hoisted basket
  * ([EditorQuotesHandoff.consumesBasket]): only a « Citer N » launch (or a sheet escalation of one)
@@ -2552,13 +2556,11 @@ private fun RedfaceNavHost(
                     onReply = { threadId, page ->
                         backStack.add(PrivateMessageReplyRoute(threadId = threadId, page = page))
                     },
-                    onQuote = { threadId, page, quote ->
+                    onQuote = { threadId, page, _ ->
                         backStack.add(
                             PrivateMessageReplyRoute(
                                 threadId = threadId,
                                 page = page,
-                                quotedNumreponse = quote.numreponse,
-                                quoteRef = quote.ref,
                             ),
                         )
                     },
@@ -2570,20 +2572,8 @@ private fun RedfaceNavHost(
                         multiQuoteNavState.onToggle(privateMessageQuoteScope, selection)
                     },
                     onMultiQuote = { threadId, page ->
-                        val selections = multiQuoteNavState.basket
-                            ?.takeIf { it.matches(privateMessageQuoteScope) }
-                            ?.selections
-                            .orEmpty()
-                        if (selections.isNotEmpty()) {
-                            multiQuoteNavState.onEditorQuotesHandoff(
-                                EditorQuotesHandoff(
-                                    scope = privateMessageQuoteScope,
-                                    quotes = selections,
-                                    consumesBasket = true,
-                                ),
-                            )
-                            backStack.add(PrivateMessageReplyRoute(threadId = threadId, page = page))
-                        }
+                        backStack.add(PrivateMessageReplyRoute(threadId = threadId, page = page,
+                            consumesQuoteBasket = true))
                     },
                     onClearMultiQuote = multiQuoteNavState.onClear,
                     onRemoveMultiQuotes = { numreponses ->
@@ -2609,22 +2599,11 @@ private fun RedfaceNavHost(
             }
             entry<PrivateMessageReplyRoute> { route ->
                 val privateMessageQuoteScope = QuoteScope.PrivateMessage(route.threadId)
-                val editorQuotesHandoff = remember(route) {
-                    multiQuoteNavState.pendingEditorQuotes.forScope(privateMessageQuoteScope)
-                }
-                LaunchedEffect(Unit) { multiQuoteNavState.onEditorQuotesHandoff(null) }
                 PrivateMessageReplyScreen(
                     request = PrivateMessageReplyRequest(
                         threadId = route.threadId,
                         page = route.page,
                         openRecipientManager = route.openRecipientManager,
-                        quote = route.quotedNumreponse?.let { numreponse ->
-                            PrivateMessageQuote(
-                                numreponse = numreponse,
-                                ref = requireNotNull(route.quoteRef),
-                            )
-                        },
-                        initialQuotes = editorQuotesHandoff?.quotes.orEmpty(),
                     ),
                     onSubmitSucceeded = { threadId, page ->
                         // #1040 lot 6 — arm the opaque result BEFORE popping, and only when the
@@ -2634,7 +2613,7 @@ private fun RedfaceNavHost(
                         if (isPrivateMessageThreadEntryFor(below, threadId)) {
                             privateMessageSubmitNavState.onPublish(threadId, page)
                         }
-                        if (editorQuotesHandoff?.consumesBasket == true &&
+                        if (route.consumesQuoteBasket &&
                             multiQuoteNavState.basket?.matches(privateMessageQuoteScope) == true
                         ) {
                             multiQuoteNavState.onClear()

@@ -74,6 +74,8 @@ interface EditorDraftStore {
      * and remove the request; unresolved attempts reject delivery. Without [draft], ignore only the
      * request, retaining all fields and attempt metadata. Failures leave the entire row unchanged.
      * Ignore uses the session's [offerToPreserve]; raw callers can still [protectCurrent] by default.
+     * A delivered [draft] carrying `offerToResolve` also removes that offer in the same transaction
+     * (ED-121/132); an offer that is no longer available rejects the whole write.
      */
     @Suppress("LongParameterList") // Request CAS plus the session's independent offer protection on Ignore.
     suspend fun consumeInlineQuoteRequest(
@@ -96,7 +98,7 @@ interface EditorDraftStore {
      * published row starts a new composition; unresolved attempts keep their identity as UNCERTAIN.
      */
     suspend fun resolveOffer(
-        owner: String?, key: String, offer: DraftOffer, expectedVersion: Long, draft: Draft,
+        owner: String?, key: String, offer: DraftOffer, expected: Revision, draft: Draft,
     ): StoreWriteResult
 
     /** Clear only the request of the revision observed by the unreadable load; otherwise reload. */
@@ -141,6 +143,9 @@ interface EditorDraftStore {
             )
         }
     }
+
+    /** The session's last owning read/write, including state changes that do not increment contentVersion. */
+    data class Revision(val contentVersion: Long, val attemptStatus: AttemptStatus?)
 
     /** ED-170: identity bound to an account, context and initial revision; later edits keep this version. */
     data class AttemptToken(val owner: String, val key: String, val id: String, val version: Long)
