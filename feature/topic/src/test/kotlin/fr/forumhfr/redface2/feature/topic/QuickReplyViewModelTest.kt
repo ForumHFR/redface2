@@ -606,6 +606,23 @@ class QuickReplyViewModelTest {
     }
 
     @Test
+    fun `staying after a refused save relaunches the autosave without a keystroke - ED10 QR3`() = runTest {
+        val store = FakeQuickReplyDraftStore().apply { saveFailure = IOException("disk full") }
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.onTextChanged(TextFieldValue("texte à garder"))
+        viewModel.onDismissed()
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.unsavedCloseVisible)
+        assertNull(store.storedBody)
+
+        store.saveFailure = null
+        viewModel.onUnsavedCloseDecided(leave = false)
+        advanceUntilIdle() // No keystroke : staying alone schedules a new save.
+        assertEquals("texte à garder", store.storedBody)
+        assertFalse(viewModel.state.value.unsavedCloseVisible)
+    }
+
+    @Test
     fun `leaving after a refused save commits the close once without a write - ED10`() = runTest {
         val store = FakeQuickReplyDraftStore().apply { saveFailure = IOException("disk full") }
         val viewModel = quickReplyViewModel(draftStore = store)

@@ -872,9 +872,8 @@ class QuickReplyViewModel @AssistedInject constructor(
             missingInlineQuotes().isEmpty()
 
     /**
-     * UX switch point (#1450, pending XaTriX) — what a refused final save does. Current choice
-     * (option A) : keep the hidden sheet mounted and ask with the editors' dialog. Option B
-     * (immediate close + Topic snackbar) would commit the close here and emit a dedicated effect.
+     * What a refused final save does (#1450, option A chosen by XaTriX on 13/11) : keep the hidden
+     * sheet mounted and ask with the editors' dialog.
      */
     private fun onFinalSaveRefused() {
         _state.update { it.copy(unsavedCloseVisible = true) }
@@ -883,7 +882,8 @@ class QuickReplyViewModel @AssistedInject constructor(
     /**
      * The informed choice of « Brouillon non enregistré ». Leaving commits the close exactly once,
      * without a write. Staying re-opens THIS session with its field intact — never a reload from
-     * the row, which does not hold the text — and a later dismiss retries the save.
+     * the row, which does not hold the text — relaunches the autosave the close had cancelled
+     * (#1450 QR3, XaTriX 13/11), and a later dismiss retries the save.
      */
     fun onUnsavedCloseDecided(leave: Boolean) {
         if (!_state.value.unsavedCloseVisible) return
@@ -895,6 +895,7 @@ class QuickReplyViewModel @AssistedInject constructor(
             sheetOpen = true
             // The close cancelled a quote GET in flight ; its durable request is still pending.
             resumePendingInlineQuotes()
+            scheduleAutosave()
         }
     }
 

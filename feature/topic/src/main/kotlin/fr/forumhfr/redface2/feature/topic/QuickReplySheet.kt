@@ -277,9 +277,9 @@ internal fun QuickReplySheet(
 }
 
 /**
- * ED-10 on the sheet (#1450) — UX switch point, pending XaTriX. Option A : the editors' own
+ * ED-10 on the sheet (#1450, option A chosen by XaTriX on 13/11) : the editors' own
  * « Brouillon non enregistré » dialog, shown over the topic while the refused sheet is hidden ;
- * « Rester » brings the sheet back, « Quitter sans enregistrer » lets it go.
+ * « Rester » brings the sheet back and saves again, « Quitter sans enregistrer » lets it go.
  */
 @Composable
 internal fun QuickReplyUnsavedCloseDialog(visible: Boolean, onStay: () -> Unit, onLeave: () -> Unit) {

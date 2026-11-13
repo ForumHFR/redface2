@@ -1111,12 +1111,15 @@ class QuickReplyDurableQuoteTest {
         runCurrent() // Q is erased ; the autosave of C has not fired yet.
         assertNull(scenario.pending)
         assertFalse(sheet.state.value.isPreparingQuotes)
-        sheet.effects.test {
-            sheet.onDismissed()
-            advanceUntilIdle()
-            assertFalse(sheet.state.value.unsavedCloseVisible) // Storage works : nothing to refuse.
-            assertTrue(awaitItem() is QuickReplyEffect.CloseCommitted)
-            expectNoEvents()
+        sheet.quotesDelivered.test delivery@ {
+            sheet.effects.test {
+                sheet.onDismissed()
+                advanceUntilIdle()
+                assertFalse(sheet.state.value.unsavedCloseVisible) // Storage works : nothing to refuse.
+                assertTrue(awaitItem() is QuickReplyEffect.CloseCommitted)
+                expectNoEvents()
+            }
+            expectNoEvents() // An ignored quote is never announced as delivered, before or at close.
         }
         assertEquals(inserted, scenario.body)
         assertNull(scenario.pending)
@@ -1173,6 +1176,36 @@ class QuickReplyDurableQuoteTest {
         assertTrue(sheet.state.value.canSubmit)
         assertTrue(scenario.body.orEmpty().startsWith("unsaved text"))
         assertTrue(scenario.body.orEmpty().contains("[quotemsg=101]"))
+    }
+
+    @Test
+    fun `ED88 a quote deleted after a refused C-Q keeps Q at close without a delivery`() = runTest {
+        val scenario = Scenario()
+        scenario.enqueue()
+        val fetch = CompletableDeferred<Unit>().also { scenario.quoteGate = it }
+        val sheet = scenario.open()
+        runCurrent()
+        scenario.store.saveFailure = IOException("disk")
+        fetch.complete(Unit)
+        runCurrent() // The quote is inserted, its C/Q transaction is refused.
+        assertTrue(sheet.state.value.text.text.contains("[quotemsg=101]"))
+        assertEquals(scenario.request, scenario.pending)
+
+        scenario.store.saveFailure = null
+        val edited = "my text without the quote"
+        sheet.onTextChanged(TextFieldValue(edited)) // The user deletes the inserted quote.
+        sheet.quotesDelivered.test delivery@ {
+            sheet.effects.test {
+                sheet.onDismissed()
+                advanceUntilIdle()
+                assertTrue(awaitItem() is QuickReplyEffect.CloseCommitted)
+                expectNoEvents() // A single close.
+            }
+            expectNoEvents() // Nothing was delivered : the basket must not be consumed.
+        }
+        assertFalse(sheet.state.value.unsavedCloseVisible)
+        assertEquals(edited, scenario.body) // C is saved...
+        assertEquals(scenario.request, scenario.pending) // ...and Q is still owed.
     }
 
     @Test
