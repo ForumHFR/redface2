@@ -20,6 +20,7 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
@@ -251,10 +252,13 @@ class PostEditorChromeComposeTest {
         compose.onNode(hasSetTextAction()).assertIsFocused()
         val selection = host.body.selection
         compose.runOnIdle { assertEquals("onjou", host.body.text.substring(selection.min, selection.max)) }
-        // Return to Normal, then exercise the real options sheet and its expanded 16-tone grid.
+        // Return to Normal, then exercise the real options sheet and its named 16-tone grid.
         compose.onNodeWithContentDescription("Mise en forme").performClick()
         compose.onNodeWithContentDescription("Options").performClick()
         compose.onNodeWithTag("${MSG_ICON_OPTION_TAG_PREFIX}16").assertExists()
+        compose.onNodeWithContentDescription("Aucun").assertIsSelected()
+        compose.onNodeWithContentDescription("Clin d'œil").performScrollTo().performClick()
+        compose.runOnIdle { assertTrue(host.calls.contains(PostEditorIntent.MsgIconSelected(12))) }
         compose.runOnIdle { host.adapter.closeSurface() }
         compose.onNode(hasSetTextAction()).assertIsFocused()
         compose.runOnIdle { assertEquals(selection, host.body.selection) }

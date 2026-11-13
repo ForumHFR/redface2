@@ -27,6 +27,7 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
@@ -313,6 +314,9 @@ class TopicFormScreenLayoutTest {
         compose.onNodeWithContentDescription("Options").performClick()
         compose.onNodeWithText("Ton du message").assertExists()
         compose.onNodeWithTag("${MSG_ICON_OPTION_TAG_PREFIX}16").assertExists()
+        compose.onNodeWithContentDescription("Aucun").assertIsSelected()
+        compose.onNodeWithContentDescription("Blasé").performScrollTo().performClick()
+        optionRow("Activer votre signature").performScrollTo()
         optionRow("Activer votre signature").assertIsDisplayed().assertIsEnabled().assertIsOff().performClick()
         compose.runOnIdle { fixture.adapter.host.closeSurface() }
         compose.onNode(hasSetTextAction()).assertIsFocused()
@@ -324,7 +328,8 @@ class TopicFormScreenLayoutTest {
         assertEquals(source, compose.onNode(hasSetTextAction()).fetchSemanticsNode().id)
         compose.runOnIdle {
             assertEquals(selection, fixture.body.selection)
-            assertEquals(listOf(TopicFormIntent.ToggleSignature(true)), fixture.calls)
+            assertEquals(listOf(TopicFormIntent.MsgIconSelected(16), TopicFormIntent.ToggleSignature(true)),
+                fixture.calls)
         }
         compose.onNodeWithContentDescription("Smileys").performScrollTo().performClick()
         compose.onNodeWithTag("smiley_picker_sheet").assertExists()

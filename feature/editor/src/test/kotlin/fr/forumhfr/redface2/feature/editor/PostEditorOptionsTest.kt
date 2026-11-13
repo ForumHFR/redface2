@@ -19,6 +19,7 @@ import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.test.FakeImageLoaderEngine
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Rule
@@ -42,6 +43,10 @@ class PostEditorOptionsTest {
         SingletonImageLoader.setUnsafe(ImageLoader.Builder(context).components { add(engine) }.build())
     }
 
+    @OptIn(coil3.annotation.DelicateCoilApi::class)
+    @After
+    fun resetImageLoader() = SingletonImageLoader.reset()
+
     @Test
     fun `ED71 real post options expose 16 tones immediately and emit intent`() {
         var emitted: PostEditorIntent? = null
@@ -54,11 +59,11 @@ class PostEditorOptionsTest {
 
         composeTestRule.onNodeWithContentDescription("Options").performClick()
         composeTestRule.onNodeWithText("Ton du message").assertIsDisplayed()
-        composeTestRule.onNodeWithTag(MSG_ICON_PICKER_TOGGLE_TAG).assertDoesNotExist()
+        composeTestRule.onNodeWithTag("message_icon_picker_toggle").assertDoesNotExist()
         EDITOR_MSG_ICONS.forEach { icon ->
             composeTestRule.onNodeWithTag("$MSG_ICON_OPTION_TAG_PREFIX$icon").assertExists()
         }
-        composeTestRule.onNodeWithContentDescription("Aucun ton").assertIsSelected()
+        composeTestRule.onNodeWithContentDescription("Aucun").assertIsSelected()
         composeTestRule.onNodeWithTag("${MSG_ICON_OPTION_TAG_PREFIX}6").performClick()
 
         assertEquals(PostEditorIntent.MsgIconSelected(6), emitted)

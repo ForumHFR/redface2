@@ -30,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import coil3.SingletonImageLoader
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.preferences.FontScalePreference
@@ -44,6 +45,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.theme.ReadingDisplaySettings
 import fr.forumhfr.redface2.testing.captureRoboImage
 import org.junit.After
+import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -67,11 +69,18 @@ import org.robolectric.annotation.GraphicsMode
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "fr-rFR-w360dp-h760dp-port-xxhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@OptIn(ExperimentalTestApi::class)
+@OptIn(ExperimentalTestApi::class, coil3.annotation.DelicateCoilApi::class)
 class EditorBaselineRoborazziTest {
 
     @get:Rule
     val compose = createComposeRule()
+
+    // Install before composing any scene, including the Options sheet's tone grid.
+    @Before
+    fun installImages() = installMessageIconPickerTestImages()
+
+    @After
+    fun resetImageLoader() = SingletonImageLoader.reset()
 
     // A ModalBottomSheet composes in its own dialog window: its density follows the system configuration,
     // as in production, never the host LocalDensity. Tests at a font scale set both, then reset the system.
