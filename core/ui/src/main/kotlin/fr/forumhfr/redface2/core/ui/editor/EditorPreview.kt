@@ -66,6 +66,8 @@ import fr.forumhfr.redface2.core.model.editor.EditorPreviewKey
 import fr.forumhfr.redface2.core.model.editor.EditorPreviewWidthClass
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.post.PostMediaDiskCachePolicy
+import fr.forumhfr.redface2.core.ui.post.collectPostMediaUrls
+import fr.forumhfr.redface2.core.ui.post.retryFailedPostMedia
 
 /**
  * ED-60/62: one stable source slot, with two split directions and a covering fallback. No keyboard
@@ -100,6 +102,10 @@ fun EditorPreview(
     val focusMemory = LocalEditorPreviewFocusMemory.current ?: remember(bodyState) { EditorPreviewFocusMemory() }
     val focusManager = LocalFocusManager.current
     val previewScroll = rememberScrollState()
+    val currentContent by rememberUpdatedState(content)
+    LaunchedEffect(visible) {
+        if (visible) retryFailedPostMedia(collectPostMediaUrls(currentContent))
+    }
     var minimumPx by remember(bodyState) { mutableStateOf<Int?>(null) }
     var fieldHeightPx by remember(bodyState) { mutableStateOf<Int?>(null) }
     var sourceExtraPx by remember(bodyState) { mutableStateOf(0) }

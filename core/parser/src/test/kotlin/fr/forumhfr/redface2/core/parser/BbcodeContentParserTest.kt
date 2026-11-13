@@ -158,6 +158,128 @@ class BbcodeContentParserTest {
     }
 
     @Test
+    fun `linked img becomes an inline image inside the link`() {
+        val ast = parser.parse("[url=https://h/f.jpg][img]https://h/r.jpg[/img][/url]")
+        assertEquals(
+            PostContent(listOf(PostBlock.Paragraph(listOf(
+                PostInline.Link("https://h/f.jpg", listOf(PostInline.InlineImage("https://h/r.jpg", null))),
+            )))),
+            ast,
+        )
+    }
+
+    @Test
+    fun `img inside inline formatting stays inside its container`() {
+        val image = PostInline.InlineImage("https://h/a.jpg", null)
+        val wrappers = mapOf(
+            "b" to PostInline.Strong(listOf(image)),
+            "i" to PostInline.Emphasis(listOf(image)),
+            "u" to PostInline.Underline(listOf(image)),
+            "strike" to PostInline.Strike(listOf(image)),
+        )
+        wrappers.forEach { (tag, expected) ->
+            val ast = parser.parse("[$tag][img]https://h/a.jpg[/img][/$tag]")
+            assertEquals(PostContent(listOf(PostBlock.Paragraph(listOf(expected)))), ast)
+        }
+    }
+
+    @Test
+    fun `img inside a color stays inside the color container`() {
+        val ast = parser.parse("[#FF0000][img]https://h/a.jpg[/img][/#FF0000]")
+        assertEquals(
+            PostContent(listOf(PostBlock.Paragraph(listOf(
+                PostInline.Color("#FF0000", listOf(PostInline.InlineImage("https://h/a.jpg", null))),
+            )))),
+            ast,
+        )
+    }
+
+    @Test
+    fun `linked img in prose preserves the surrounding text in one paragraph`() {
+        val ast = parser.parse("before [url=https://h/f.jpg][img]https://h/r.jpg[/img][/url] after")
+        assertEquals(
+            PostContent(listOf(PostBlock.Paragraph(listOf(
+                PostInline.Text("before "),
+                PostInline.Link("https://h/f.jpg", listOf(PostInline.InlineImage("https://h/r.jpg", null))),
+                PostInline.Text(" after"),
+            )))),
+            ast,
+        )
+    }
+
+    @Test
+    fun `url without target uses its inline image URL as target`() {
+        val ast = parser.parse("[url][img]https://h/a.jpg[/img][/url]")
+        assertEquals(
+            PostContent(listOf(PostBlock.Paragraph(listOf(
+                PostInline.Link("https://h/a.jpg", listOf(PostInline.InlineImage("https://h/a.jpg", null))),
+            )))),
+            ast,
+        )
+    }
+
+    @Test
+    fun `unsafe inline img keeps raw bbcode inside its link`() {
+        val ast = parser.parse("[url=https://h/f.jpg][img]javascript:alert(1)[/img][/url]")
+        assertEquals(
+            PostContent(listOf(PostBlock.Paragraph(listOf(
+                PostInline.Link("https://h/f.jpg", listOf(PostInline.Text("[img]javascript:alert(1)[/img]"))),
+            )))),
+            ast,
+        )
+    }
+
+    @Test
+    fun `unclosed inline img keeps its open tag and URL as text`() {
+        val ast = parser.parse("[url=https://h/f.jpg][img]https://h/r.jpg[/url]")
+        assertEquals(
+            PostContent(listOf(PostBlock.Paragraph(listOf(
+                PostInline.Link("https://h/f.jpg", listOf(PostInline.Text("[img]https://h/r.jpg"))),
+            )))),
+            ast,
+        )
+    }
+
+    @Test
+    fun `img beyond the inline nesting limit degrades to text without crashing`() {
+        val image = "[img]https://h/a.jpg[/img]"
+        val nested = "[b]".repeat(256) + image + "[/b]".repeat(256)
+        val ast = parser.parse(nested)
+        val paragraph = ast.blocks.single() as PostBlock.Paragraph
+        val deepest = generateSequence(paragraph.inlines) { inlines ->
+            (inlines.singleOrNull() as? PostInline.Strong)?.children
+        }.last()
+        val text = deepest.single() as PostInline.Text
+        assertTrue(text.value.contains(image))
+    }
+
+    @Test
+    fun `inline img URL is not split into smileys`() {
+        listOf("https://h/a:D.gif", "https://h/a:jap:.gif").forEach { url ->
+            val ast = parser.parse("[url=https://h/f.jpg][img]$url[/img][/url]")
+            assertEquals(
+                PostContent(listOf(PostBlock.Paragraph(listOf(
+                    PostInline.Link("https://h/f.jpg", listOf(PostInline.InlineImage(url, null))),
+                )))),
+                ast,
+            )
+        }
+    }
+
+    @Test
+    fun `inline img trims its URL and normalises absolute HFR paths`() {
+        val ast = parser.parse("[b][img] /images/forum/icon.gif [/img][/b]")
+        assertEquals(
+            PostContent(listOf(PostBlock.Paragraph(listOf(
+                PostInline.Strong(listOf(
+                    PostInline.InlineImage("https://forum.hardware.fr/images/forum/icon.gif", null),
+                )),
+            )))),
+            ast,
+        )
+    }
+
+    @Test
     fun `quote becomes a Quote block with null metadata`() {
         val ast = parser.parse("[quote]anonyme[/quote]")
         val block = ast.blocks.single() as PostBlock.Quote
