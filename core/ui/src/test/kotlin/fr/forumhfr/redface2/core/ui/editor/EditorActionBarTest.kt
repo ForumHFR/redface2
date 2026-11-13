@@ -74,12 +74,37 @@ class EditorActionBarTest {
             assertEquals("Un [b]texte[/b] choisi", host.body.text.toString())
             assertEquals(TextRange(6, 11), host.body.selection); assertEquals(EditorBarMode.Format, host.bar.value.mode)
         }
-        listOf("Gras", "Italique", "Souligné", "Barré", "Citation", "Code", "Bloc fixé", "Spoiler", "Lien")
+        listOf("Gras", "Italique", "Souligné", "Barré", "Lien", "Spoiler", "Puce", "Citation", "Code",
+            "Bloc fixé", "E-mail")
             .forEach { name ->
                 val node = compose.onNodeWithContentDescription(name).performScrollTo()
                 node.assert(SemanticsMatcher.keyNotDefined(SemanticsProperties.Selected)).performClick()
             }
-        assertEquals(10, host.calls.count { it == "bbcode" })
+        assertEquals(12, host.calls.count { it == "bbcode" })
+    }
+
+    @Test
+    fun `bullet and email use the same insertion in the format row and the normal shortcut`() {
+        compose.setContent { host.Content() }
+        listOf(EditorShortcut.BULLET to "Un [*]texte choisi", EditorShortcut.EMAIL to "Un [email]texte[/email] choisi")
+            .forEach { (choice, expected) ->
+                val label = if (choice == EditorShortcut.BULLET) "Puce" else "E-mail"
+                listOf(EditorBarMode.Format, EditorBarMode.Normal).forEach { mode ->
+                    compose.runOnIdle {
+                        host.body.edit { replace(0, length, "Un texte choisi"); selection = TextRange(3, 8) }
+                        host.bar.value = EditorBarState(mode)
+                        host.shortcut.value = EditorBarShortcut(choice, EditorShortcutSurface.POST)
+                    }
+                    click(label)
+                    compose.runOnIdle {
+                        assertEquals(expected, host.body.text.toString())
+                        assertEquals(if (choice == EditorShortcut.BULLET) TextRange(6, 11) else TextRange(10, 15),
+                            host.body.selection)
+                        assertEquals(mode, host.bar.value.mode)
+                    }
+                }
+            }
+        assertEquals(listOf("bbcode", "bbcode", "bbcode", "bbcode"), host.calls)
     }
 
     @Test

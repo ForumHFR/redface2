@@ -34,6 +34,8 @@ internal fun editorShortcutRows(state: SettingsState, onIntent: (SettingsIntent)
             EditorShortcut.NONE -> R.string.settings_editor_shortcut_none
             EditorShortcut.IMAGE_URL -> R.string.settings_editor_shortcut_post_topic
             EditorShortcut.IMAGE_SELECTION -> R.string.settings_editor_shortcut_messages
+            EditorShortcut.BULLET -> R.string.settings_editor_shortcut_bullet
+            EditorShortcut.EMAIL -> R.string.settings_editor_shortcut_email
             else -> null
         }?.let { stringResource(it) }
         val selected = state.editorShortcut == entry.choice

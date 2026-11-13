@@ -50,7 +50,7 @@ class EditorShortcutRoborazziTest {
         EditorShortcut.LINK, EditorShortcut.RED, EditorShortcut.BLUE, EditorShortcut.GREEN,
         EditorShortcut.ORANGE, EditorShortcut.GREY, EditorShortcut.UPLOAD_IMAGE,
         EditorShortcut.IMAGE_URL, EditorShortcut.IMAGE_SELECTION, EditorShortcut.SEARCH_SMILEYS,
-        EditorShortcut.PERSONAL_SMILEY)
+        EditorShortcut.PERSONAL_SMILEY, EditorShortcut.BULLET, EditorShortcut.EMAIL)
 
     @Test fun `shortcut glyphs in both themes scales narrow portrait and compact heights`() {
         compose.setContent { key(host) { host.Content(showBody = false) } }

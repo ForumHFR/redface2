@@ -119,6 +119,8 @@ class EditorShortcutScaffoldTest {
         compose.runOnIdle { assertTrue(host.inputMode.requestInputMode(InputMode.Keyboard)) }
         listOf(
             Triple(EditorShortcut.BOLD, "Gras", "[b]nom[/b]"),
+            Triple(EditorShortcut.BULLET, "Puce", "[*]nom"),
+            Triple(EditorShortcut.EMAIL, "E-mail", "[email]nom[/email]"),
             Triple(EditorShortcut.RED, "Rouge", "[#FF0000]nom[/#FF0000]"),
             Triple(EditorShortcut.PERSONAL_SMILEY, "Smiley perso", "[:nom]"),
         ).forEach { (choice, label, expected) ->
@@ -135,6 +137,8 @@ class EditorShortcutScaffoldTest {
                 val expectedSelection = when (choice) {
                     EditorShortcut.PERSONAL_SMILEY -> TextRange(6)
                     EditorShortcut.BOLD -> TextRange(3, 6)
+                    EditorShortcut.BULLET -> TextRange(3, 6)
+                    EditorShortcut.EMAIL -> TextRange(7, 10)
                     else -> TextRange(9, 12)
                 }
                 assertEquals(expectedSelection, host.body.selection)

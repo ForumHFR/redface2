@@ -19,13 +19,18 @@ internal fun EditorFormatRow(
     colorModifier: Modifier = Modifier,
     compactHeight: Boolean = false,
 ) {
-    editorShortcutFormats.forEach { entry ->
+    editorShortcutFormatsBeforeColor.forEach { entry ->
         EditorBarIcon(checkNotNull(entry.iconRes), stringResource(entry.labelRes),
             { onAction(checkNotNull(entry.bbcode)) },
             enabled = enabled, compactHeight = compactHeight)
     }
     EditorBarIcon(R.drawable.ic_editor_color, stringResource(R.string.bbcode_action_color), onColor, colorModifier,
         enabled = enabled, compactHeight = compactHeight)
+    editorShortcutFormatsAfterColor.forEach { entry ->
+        EditorBarIcon(checkNotNull(entry.iconRes), stringResource(entry.labelRes),
+            { onAction(checkNotNull(entry.bbcode)) },
+            enabled = enabled, compactHeight = compactHeight)
+    }
 }
 
 @Composable

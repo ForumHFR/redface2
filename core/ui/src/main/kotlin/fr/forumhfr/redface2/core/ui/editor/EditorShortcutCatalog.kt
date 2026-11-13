@@ -17,7 +17,7 @@ data class EditorShortcutEntry(
     val bbcode: BbcodeAction? = null,
 )
 
-internal val editorShortcutFormats = listOf(
+internal val editorShortcutFormatsBeforeColor = listOf(
     EditorShortcutEntry(EditorShortcut.BOLD, R.string.bbcode_action_bold, R.drawable.ic_editor_bold, BbcodeAction.Bold),
     EditorShortcutEntry(EditorShortcut.ITALIC, R.string.bbcode_action_italic,
         R.drawable.ic_editor_italic, BbcodeAction.Italic),
@@ -25,15 +25,24 @@ internal val editorShortcutFormats = listOf(
         R.drawable.ic_editor_underline, BbcodeAction.Underline),
     EditorShortcutEntry(EditorShortcut.STRIKE, R.string.bbcode_action_strike,
         R.drawable.ic_editor_strike, BbcodeAction.Strike),
+    EditorShortcutEntry(EditorShortcut.LINK, R.string.bbcode_action_url, R.drawable.ic_editor_link, BbcodeAction.Url),
+    EditorShortcutEntry(EditorShortcut.SPOILER, R.string.bbcode_action_spoiler,
+        R.drawable.ic_editor_spoiler, BbcodeAction.Spoiler),
+)
+
+internal val editorShortcutFormatsAfterColor = listOf(
+    EditorShortcutEntry(EditorShortcut.BULLET, R.string.bbcode_action_bullet,
+        R.drawable.ic_editor_bullet, BbcodeAction.Bullet),
     EditorShortcutEntry(EditorShortcut.QUOTE, R.string.bbcode_action_quote,
         R.drawable.ic_editor_quote_text, BbcodeAction.Quote),
     EditorShortcutEntry(EditorShortcut.CODE, R.string.bbcode_action_cpp, R.drawable.ic_editor_code, BbcodeAction.Cpp),
     EditorShortcutEntry(EditorShortcut.FIXED, R.string.bbcode_action_fixed,
         R.drawable.ic_editor_fixed, BbcodeAction.Fixed),
-    EditorShortcutEntry(EditorShortcut.SPOILER, R.string.bbcode_action_spoiler,
-        R.drawable.ic_editor_spoiler, BbcodeAction.Spoiler),
-    EditorShortcutEntry(EditorShortcut.LINK, R.string.bbcode_action_url, R.drawable.ic_editor_link, BbcodeAction.Url),
+    EditorShortcutEntry(EditorShortcut.EMAIL, R.string.bbcode_action_email,
+        R.drawable.ic_editor_email, BbcodeAction.Email),
 )
+
+internal val editorShortcutFormats = editorShortcutFormatsBeforeColor + editorShortcutFormatsAfterColor
 
 internal val editorShortcutColors = listOf(
     EditorShortcutEntry(EditorShortcut.RED, R.string.bbcode_color_red, bbcode = BbcodeAction.Color("#FF0000")),

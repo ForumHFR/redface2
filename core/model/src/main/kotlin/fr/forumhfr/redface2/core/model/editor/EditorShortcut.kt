@@ -12,6 +12,7 @@ enum class EditorShortcut(val id: String) {
     /** Retained when S2 replaces the Wiki tab with a single search field. */
     SEARCH_SMILEYS("search_smileys"),
     PERSONAL_SMILEY("personal_smiley"),
+    BULLET("bullet"), EMAIL("email"),
     ;
 
     /** Explicit surface policy; existing image capabilities alone do not implement ED-36. */

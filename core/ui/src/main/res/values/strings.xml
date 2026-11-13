@@ -85,6 +85,8 @@
     <string name="bbcode_action_fixed">Bloc fixé</string>
     <string name="bbcode_action_spoiler">Spoiler</string>
     <string name="bbcode_action_url">Lien</string>
+    <string name="bbcode_action_bullet">Puce</string>
+    <string name="bbcode_action_email">E-mail</string>
     <string name="bbcode_action_image">Image</string>
     <!-- #459 PR2 — chip ouvrant le sélecteur de photos pour uploader puis insérer une image. -->
     <string name="bbcode_action_image_upload">Uploader</string>

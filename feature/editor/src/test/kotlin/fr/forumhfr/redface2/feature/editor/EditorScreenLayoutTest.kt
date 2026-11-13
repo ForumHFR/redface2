@@ -329,7 +329,7 @@ class EditorScreenLayoutTest {
             val control = compose.onNodeWithContentDescription(label)
             if (toolsVisible) control.assertIsNotEnabled() else control.assertDoesNotExist()
         }
-        for (label in listOf("Gras", "Citation", "Insérer par URL", "Uploader une image")) {
+        for (label in listOf("Gras", "Lien", "Puce", "Citation", "E-mail", "Insérer par URL", "Uploader une image")) {
             compose.onNodeWithContentDescription(label).assertDoesNotExist()
         }
     }
@@ -339,7 +339,7 @@ class EditorScreenLayoutTest {
             compose.onNodeWithContentDescription(label).assertIsEnabled()
         }
         compose.onNodeWithContentDescription("Mise en forme").performScrollTo().performClick()
-        for (label in listOf("Gras", "Citation")) {
+        for (label in listOf("Gras", "Lien", "Puce", "Citation", "E-mail")) {
             compose.onNodeWithContentDescription(label).assertIsEnabled()
         }
         compose.onNodeWithContentDescription("Mise en forme").performClick()

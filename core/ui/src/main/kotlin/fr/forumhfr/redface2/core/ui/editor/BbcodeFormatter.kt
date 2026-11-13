@@ -63,6 +63,15 @@ sealed interface BbcodeAction {
         override val openTag: String = "[url]"
         override val closeTag: String = "[/url]"
     }
+    data object Email : BbcodeAction {
+        override val openTag: String = "[email]"
+        override val closeTag: String = "[/email]"
+    }
+    /** HFR uses TAinsert('[*]', ''): prefix the selection at the caret, without a closing tag. */
+    data object Bullet : BbcodeAction {
+        override val openTag: String = "[*]"
+        override val closeTag: String = ""
+    }
     data object Image : BbcodeAction {
         override val openTag: String = "[img]"
         override val closeTag: String = "[/img]"
@@ -168,9 +177,8 @@ fun applyBbcodeAction(
  * Phase 2F-B (#11 partial) — inserts a raw BBCode [token] at the editor caret.
  *
  * Distinct from [applyBbcodeAction] because smileys do **not** wrap a selection : they are
- * point-insertions of an opaque token like `:jap:` or `[:haha jap]`. Modelling them as a
- * [BbcodeAction] would force a degenerate empty `closeTag` — instead we expose a dedicated
- * pure helper.
+ * point-insertions of an opaque token like `:jap:` or `[:haha jap]`. Unlike
+ * [BbcodeAction.Bullet], they replace the selected text instead of prefixing it.
  *
  * Mirrors HFR's `putSmiley(tt, src)` JS, which inserts ` $token ` (with surrounding spaces)
  * — see `/compressed/message.js`. Without the surrounding spaces, two adjacent smileys would

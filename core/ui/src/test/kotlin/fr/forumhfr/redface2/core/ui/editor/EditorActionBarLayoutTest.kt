@@ -91,13 +91,13 @@ class EditorActionBarLayoutTest {
             val viewport = bounds("editor-bar-scroll")
             assertEquals(48.dp, submit.width)
             assertEquals(283.dp, viewport.width)
-            listOf("Gras", "Italique", "Souligné", "Barré", "Citation").forEach { label ->
+            listOf("Gras", "Italique", "Souligné", "Barré", "Lien").forEach { label ->
                 val target = compose.onNodeWithContentDescription(label).getUnclippedBoundsInRoot()
                 assertEquals(48.dp, target.width)
                 assertTrue(target.left >= viewport.left && target.right <= viewport.right)
                 assertTrue(target.right <= submit.left)
             }
-            val sixth = compose.onNodeWithContentDescription("Code").getUnclippedBoundsInRoot()
+            val sixth = compose.onNodeWithContentDescription("Spoiler").getUnclippedBoundsInRoot()
             assertTrue(sixth.right > viewport.right)
         }
     }

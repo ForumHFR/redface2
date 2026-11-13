@@ -37,6 +37,29 @@ class EditorActionBarFocusTest {
     private val host = EditorActionBarFixture()
 
     @Test
+    fun `format tab order follows styles common insertions color then blocks and email`() {
+        host.bar.value = EditorBarState(EditorBarMode.Format)
+        compose.setContent { host.Content() }
+        compose.runOnIdle { assertTrue(host.inputMode.requestInputMode(InputMode.Keyboard)) }
+        val labels = listOf("Gras", "Italique", "Souligné", "Barré", "Lien", "Spoiler", "Couleur",
+            "Puce", "Citation", "Code", "Bloc fixé", "E-mail")
+        compose.onNodeWithContentDescription("Mise en forme").requestFocus()
+            .performKeyInput { pressKey(Key.Tab) }
+        labels.forEach { label ->
+            compose.onNodeWithContentDescription(label).assertIsFocused().performKeyInput { pressKey(Key.Tab) }
+        }
+        compose.onNodeWithContentDescription("Envoyer").assertIsFocused()
+            .performKeyInput { keyDown(Key.ShiftLeft); pressKey(Key.Tab); keyUp(Key.ShiftLeft) }
+        labels.asReversed().forEach { label ->
+            compose.onNodeWithContentDescription(label).assertIsFocused().performKeyInput {
+                keyDown(Key.ShiftLeft); pressKey(Key.Tab); keyUp(Key.ShiftLeft)
+            }
+        }
+        compose.onNodeWithContentDescription("Mise en forme").assertIsFocused()
+        assertTrue(host.calls.isEmpty())
+    }
+
+    @Test
     fun `keyboard color and image open on Return and restore their trigger on return`() {
         compose.setContent { host.Content() }
         compose.runOnIdle { assertTrue(host.inputMode.requestInputMode(InputMode.Keyboard)) }

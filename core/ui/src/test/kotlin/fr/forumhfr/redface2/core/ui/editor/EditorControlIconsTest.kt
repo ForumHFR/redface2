@@ -75,6 +75,8 @@ class EditorControlIconsTest {
             R.drawable.ic_editor_header to R.string.editor_header_topic,
             R.drawable.ic_editor_preview to R.string.editor_preview_show,
             R.drawable.ic_arrow_back to R.string.editor_return,
+            R.drawable.ic_editor_bullet to R.string.bbcode_action_bullet,
+            R.drawable.ic_editor_email to R.string.bbcode_action_email,
         )
         val index = mutableStateOf(0)
         compose.setContent { RedfaceTheme { Surface {

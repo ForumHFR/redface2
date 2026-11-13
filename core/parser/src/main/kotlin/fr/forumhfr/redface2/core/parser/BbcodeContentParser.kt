@@ -203,6 +203,14 @@ class BbcodeContentParser {
         token: Token.Open,
         paragraph: MutableList<PostInline>,
     ): Int {
+        // HFR's standalone [*] opens a list item, without a closing tag (quote-form fixture).
+        if (token.raw == "[*]") {
+            if (paragraph.isNotEmpty() && paragraph.last() !is PostInline.LineBreak) {
+                paragraph += PostInline.LineBreak
+            }
+            paragraph += PostInline.Text("• ")
+            return i + 1
+        }
         val inline = parseInline(tokens, i, to, depth)
         return if (inline.consumed == 0) {
             paragraph += PostInline.Text(token.raw)
@@ -346,14 +354,7 @@ class BbcodeContentParser {
                 }
 
                 is Token.Open -> {
-                    val inline = parseInline(tokens, i, to, depth)
-                    if (inline.consumed == 0) {
-                        out += PostInline.Text(token.raw)
-                        i += 1
-                    } else {
-                        out += inline.node
-                        i += inline.consumed
-                    }
+                    i = handleInlineOpen(tokens, i, to, depth, token, out)
                 }
 
                 is Token.Close -> {
