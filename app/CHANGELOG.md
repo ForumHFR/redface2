@@ -16,6 +16,10 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.69.16` — `internal` (dev) — 2026-11-13
+
+Citation visible partout, brouillon sous ↺ ([#1450](https://github.com/ForumHFR/redface2/issues/1450), PR [#1614](https://github.com/ForumHFR/redface2/pull/1614) et [#1615](https://github.com/ForumHFR/redface2/pull/1615)) : « Citer » insère la citation tout de suite, en réponse à un sujet comme en MP, même quand un brouillon non envoyé existe ; ce brouillon reste sous ↺, signalé par un point, jamais restauré d'office, et « Envoyer » n'est plus bloqué par lui. La feuille de ↺ liste les brouillons avec leur date et un extrait de deux lignes. « Restaurer » remet le brouillon, puis les citations dans l'ordre, puis la saisie. Une citation seule, non modifiée, ne devient pas un brouillon. Les brouillons offerts sont désormais durables (gardés après un envoi fait sans ouvrir ↺). Fermeture des quatre éditeurs plein écran : si le brouillon ne peut pas être enregistré (stockage en échec, conflit, saisie pendant l'écriture), l'éditeur reste ouvert et demande « Rester » ou « Quitter sans enregistrer » au lieu de perdre la saisie en silence.
+
 ## `0.69.15` — `internal` (dev) — 2026-11-12
 
 Bouton d'envoi de l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417), PR [#1612](https://github.com/ForumHFR/redface2/pull/1612)) : la pilule « Envoyer » devient un avion en papier dans un rond de 48 dp (40 dp en paysage avec le clavier), dans les éditeurs plein écran (réponse, nouveau sujet, MP, modification). La barre gagne de la place pour les formats ; armé par « Confirmation avant publication », le bouton passe à une coche ; un appui long affiche « Envoyer » ou « Confirmer l'envoi ». La réponse rapide garde son bouton texte.
