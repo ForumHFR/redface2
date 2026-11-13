@@ -59,7 +59,9 @@ class EditorOptionsFormats(
  * One resting anchor (`skipPartiallyExpanded`): the sheet opens at its content height, capped by the
  * window, and the system Back closes it in one gesture from either tab (ED-85). The body scrolls under
  * the switch (landscape, large fonts: ED-71) and keeps the height of the options tab on the formats
- * tab, so the sheet does not jump between tabs. Rows are full-bleed: [content] applies the gutter.
+ * tab, so the sheet does not jump between tabs. With tabs, that height never drops below
+ * [TabbedBodyMinHeight] (#1417 Q-MP, XaTriX 2026-11-13): short options (MP) would otherwise leave
+ * three formats visible. Rows are full-bleed: [content] applies the gutter.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -107,7 +109,9 @@ private fun EditorOptionsBody(
             }
         }
     }) { measurables, constraints ->
-        val options = measurables.first().measure(constraints.copy(minHeight = 0))
+        // The floor is a minimum of the options pane itself: both tabs keep one height, blank below.
+        val floor = if (formats == null) 0 else TabbedBodyMinHeight.roundToPx().coerceAtMost(constraints.maxHeight)
+        val options = measurables.first().measure(constraints.copy(minHeight = floor))
         val active = if (showingFormats) {
             measurables[1].measure(constraints.copy(minHeight = options.height, maxHeight = options.height))
         } else options
@@ -162,6 +166,12 @@ private fun EditorOptionsTabs(selected: EditorOptionsTab, onSelect: (EditorOptio
         }
     }
 }
+
+/**
+ * Floor of a tabbed body: the formats intro and about five 64 dp format rows at font scale 1. Taller
+ * options (post, topic form) keep their own height; the window still caps it.
+ */
+internal val TabbedBodyMinHeight = 384.dp
 
 internal const val EDITOR_OPTIONS_SHEET_TAG = "editor-options-sheet"
 internal const val EDITOR_OPTIONS_SHEET_SCROLL_TAG = "editor-options-sheet-scroll"

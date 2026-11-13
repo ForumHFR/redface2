@@ -2018,7 +2018,7 @@ internal fun TopicTopBar(
     // first/last; the Error path keeps adjacent recovery navigation inline and outside the sheet.
     if (pagePickerOpen && loaded != null) {
         val sheetState = rememberModalBottomSheetState(
-            skipPartiallyExpanded = false,
+            skipPartiallyExpanded = true,
             confirmValueChange = { true },
         )
         ModalBottomSheet(onDismissRequest = { pagePickerOpen = false }, sheetState = sheetState) {

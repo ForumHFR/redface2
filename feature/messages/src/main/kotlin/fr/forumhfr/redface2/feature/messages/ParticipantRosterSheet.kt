@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.messages
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -51,7 +52,7 @@ internal fun ParticipantRosterSheet(
     // Hidden = the sheet is closed; render nothing.
     if (roster is PrivateMessageThreadUiState.Roster.Hidden) return
 
-    val sheetState = rememberModalBottomSheetState()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
             modifier = Modifier
@@ -96,7 +97,7 @@ private fun RosterLoading() {
 }
 
 @Composable
-private fun RosterList(
+private fun ColumnScope.RosterList(
     members: List<String>,
     canManageRecipients: Boolean,
     onManageRecipients: () -> Unit,
@@ -106,9 +107,10 @@ private fun RosterList(
         style = MaterialTheme.typography.labelLarge,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    // Height-capped + scrollable: a DT can hold 40+ members, never inline them all.
+    // Height-capped + scrollable: a DT can hold 40+ members, never inline them all. Weighted so the
+    // owner's button below is measured first and stays on screen in a short window (#1630, Astra).
     LazyColumn(
-        modifier = Modifier.fillMaxWidth().heightIn(max = 420.dp),
+        modifier = Modifier.weight(1f, fill = false).fillMaxWidth().heightIn(max = 420.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(members, key = { it }) { pseudo ->
