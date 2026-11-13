@@ -101,7 +101,7 @@ private fun PostEditorOptionsSurface(
     source: PostEditorState,
     onOpenEditorSettings: () -> Unit,
 ) {
-    EditorOptionsSheet(adapter::closeSurface) {
+    EditorOptionsSheet(adapter::closeSurface, adapter.optionsFormats) {
         val enabled = adapter.state.scaffold.controlsEnabled && !source.isLoadingForm
         EditorOptions(source.signatureEnabled, source.smileyDisabled, source.emailNotificationEnabled, enabled,
             adapter::signature, adapter::smileyDisabled, adapter::notification,

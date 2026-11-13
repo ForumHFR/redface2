@@ -70,7 +70,8 @@ internal fun PrivateMessageReplyChromeSheets(
             source.recipients, adapter.state.recipientsEnabled,
             adapter::addRecipient, adapter::removeRecipient, adapter::closeSurface,
         )
-        PrivateMessageReplyChromeSurface.Options -> EditorOptionsSheet(adapter::closeSurface) {
+        PrivateMessageReplyChromeSurface.Options -> EditorOptionsSheet(adapter::closeSurface,
+            adapter.optionsFormats) {
             EditorOptions(source.signatureEnabled, source.smileyDisabled, source.emailNotificationEnabled,
                 adapter.state.optionsEnabled, adapter::signature, adapter::smileyDisabled, adapter::notification,
                 EditorOptionsLabels(stringResource(R.string.messages_reply_options_title),

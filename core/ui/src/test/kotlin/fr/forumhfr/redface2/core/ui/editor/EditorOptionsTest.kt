@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.core.ui.editor
 
+import androidx.compose.material3.Text
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -14,6 +15,7 @@ import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isToggleable
@@ -114,6 +116,35 @@ class EditorOptionsTest {
             .assert(hasText("Raccourci de la barre, confirmation avant envoi"))
     }
 
+    // Decision of 2026-11-13: settings first, then the tone picker, then the three HFR toggles.
+    @Test fun settingsComeFirstThenTheToneThenTheThreeToggles() {
+        setContent(tone = true, onOpenSettings = {})
+        val order = listOf(
+            compose.onNodeWithText("Réglages de l’éditeur"), compose.onNodeWithText("Ton du message"),
+            compose.onNode(isToggleable() and hasText(labels.signature)),
+            compose.onNode(isToggleable() and hasText(labels.smileyDisabled)),
+            compose.onNode(isToggleable() and hasText(labels.emailNotification)),
+        ).map { it.getUnclippedBoundsInRoot() }
+        order.zipWithNext().forEach { (above, below) -> assertTrue(above.bottom <= below.top) }
+        assertEquals(0.dp, order.first().top)
+    }
+
+    @Test fun withoutAToneTheTogglesFollowTheSettings() {
+        setContent(onOpenSettings = {})
+        compose.onNodeWithText("Ton du message").assertDoesNotExist()
+        val settings = compose.onNodeWithText("Réglages de l’éditeur").assertHeightIsAtLeast(64.dp)
+            .getUnclippedBoundsInRoot()
+        val signature = compose.onNode(isToggleable() and hasText(labels.signature)).getUnclippedBoundsInRoot()
+        assertTrue(settings.bottom <= signature.top)
+    }
+
+    // The switch of the sheet names the tab: the surface title is the accessible pane title only.
+    @Test fun surfaceTitleIsThePaneTitleAndIsNotDrawn() {
+        setContent()
+        compose.onNodeWithText("Options").assertDoesNotExist()
+        compose.onNode(SemanticsMatcher.expectValue(SemanticsProperties.PaneTitle, "Options")).assertExists()
+    }
+
     @Test fun disabledSettingsRejectTaps() {
         var opens = 0
         setContent { opens++ }
@@ -122,7 +153,11 @@ class EditorOptionsTest {
         compose.runOnIdle { assertEquals(0, opens) }
     }
 
-    private fun setContent(shortcut: () -> EditorShortcut? = { null }, onOpenSettings: (() -> Unit)? = null) {
+    private fun setContent(
+        shortcut: () -> EditorShortcut? = { null },
+        tone: Boolean = false,
+        onOpenSettings: (() -> Unit)? = null,
+    ) {
         compose.setContent {
             RedfaceTheme(darkTheme = false, dynamicColor = false) {
                 EditorOptions(
@@ -136,6 +171,7 @@ class EditorOptionsTest {
                     labels = labels,
                     onOpenSettings = onOpenSettings,
                     settingsShortcut = shortcut(),
+                    tone = if (tone) ({ Text("Ton du message") }) else null,
                 )
             }
         }

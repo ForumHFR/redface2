@@ -56,7 +56,8 @@ internal fun PrivateMessageComposeChromeSurfaces(
         restoreEnabled = adapter.state.restoreEnabled, discardEnabled = adapter.state.scaffold.controlsEnabled,
         message = stringResource(R.string.messages_draft_restore_message))
     when (adapter.surface) {
-        PrivateMessageComposeChromeSurface.Options -> EditorOptionsSheet(adapter::closeSurface) {
+        PrivateMessageComposeChromeSurface.Options -> EditorOptionsSheet(adapter::closeSurface,
+            adapter.optionsFormats) {
             EditorOptions(source.signatureEnabled, source.smileyDisabled, source.emailNotificationEnabled,
                 adapter.state.optionsEnabled, adapter::signature, adapter::smileyDisabled, adapter::notification,
                 EditorOptionsLabels(stringResource(R.string.messages_reply_options_title),

@@ -137,6 +137,71 @@ class PostEditorChromeComposeTest {
         compose.runOnIdle { assertEquals(0, settingsOpens) }
     }
 
+    // #1417 point 5, ED-22/80: the formats tab applies to the selection captured when Options opened.
+    @Test fun `1417 formats tab wraps the captured selection closes the sheet and refocuses the body`() {
+        compose.setContent { Content() }
+        compose.runOnIdle { focus.requestFocus() }
+        compose.onNode(hasSetTextAction()).performTextInputSelection(TextRange(6, 1))
+        compose.onNodeWithContentDescription("Options").performClick()
+        compose.onNodeWithTag("editor-options-tab-Options").assertIsSelected()
+        compose.onNodeWithTag("editor-options-tab-Formats").performClick()
+        compose.onNodeWithTag("editor-options-sheet").assertExists()
+        compose.onNodeWithText("Réglages de l’éditeur").assertDoesNotExist()
+        compose.onNodeWithText("Gras").performScrollTo().performClick()
+        compose.onNode(isDialog()).assertDoesNotExist()
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            assertEquals("B[b]onjou[/b]r", host.body.text.toString())
+            val selection = host.body.selection
+            assertEquals("onjou", host.body.text.substring(selection.min, selection.max))
+            assertEquals(1, host.calls.count { it is PostEditorIntent.ToolbarActionClicked })
+            assertNull(host.adapter.surface)
+            assertEquals(1, returns)
+        }
+        // The sheet always reopens on the options tab.
+        compose.onNodeWithContentDescription("Options").performClick()
+        compose.onNodeWithTag("editor-options-tab-Options").assertIsSelected()
+        compose.onNodeWithText("Réglages de l’éditeur").assertExists()
+    }
+
+    @Test fun `1417 formats are disabled during an upload and Back closes the sheet from the formats tab`() {
+        compose.setContent { Content() }
+        compose.runOnIdle { focus.requestFocus() }
+        compose.onNodeWithContentDescription("Options").performClick()
+        compose.onNodeWithTag("editor-options-tab-Formats").performClick()
+        compose.runOnIdle { host.state = host.state.copy(isUploading = true) }
+        compose.onNodeWithText("Gras").performScrollTo().assertIsNotEnabled().performTouchInput { click() }
+        compose.onNodeWithContentDescription("Rouge").performScrollTo().assertIsNotEnabled()
+        compose.runOnIdle {
+            assertTrue(host.calls.none { it is PostEditorIntent.ToolbarActionClicked })
+            assertEquals(PostEditorChromeSurface.Options, host.adapter.surface)
+            sheetBack()
+        }
+        compose.onNode(isDialog()).assertDoesNotExist()
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle {
+            assertNull(host.adapter.surface)
+            assertEquals("Bonjour", host.body.text.toString())
+            assertEquals(1, returns)
+        }
+    }
+
+    // Decision of 2026-11-13: settings first, then the tone grid, then the three HFR toggles.
+    @Test fun `1417 options tab lists the settings then the tone then the three toggles`() {
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Options").performClick()
+        val order = listOf(
+            compose.onNodeWithTag("editor-options-tab-Options"),
+            compose.onNodeWithText("Réglages de l’éditeur"),
+            compose.onNodeWithTag("${MSG_ICON_OPTION_TAG_PREFIX}1"),
+            compose.onNodeWithTag("${MSG_ICON_OPTION_TAG_PREFIX}16"),
+            compose.onNodeWithText("Activer votre signature"),
+            compose.onNodeWithText("Désactiver les smilies"),
+            compose.onNodeWithText("Activer la notification par email du sujet"),
+        ).map { it.getUnclippedBoundsInRoot() }
+        order.zipWithNext().forEach { (above, below) -> assertTrue(above.bottom <= below.top) }
+    }
+
     @Test fun `offered draft has a persistent accessible dot without changing field geometry`() {
         compose.setContent { Content() }
         val field = compose.onNode(hasSetTextAction()).getUnclippedBoundsInRoot()

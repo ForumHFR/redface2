@@ -9,37 +9,44 @@ import androidx.compose.ui.res.stringResource
 import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.ui.R
 
-/** One presentation catalogue for the toolbar and the settings picker (ED-36). */
+/**
+ * One presentation catalogue for the toolbar, the formats page and the settings picker (ED-36).
+ * [descriptionRes] is the one-line effect shown by the « Formats » tab of the Options sheet (#1417); formats only.
+ */
 data class EditorShortcutEntry(
     val choice: EditorShortcut,
     @param:StringRes val labelRes: Int,
     @param:DrawableRes val iconRes: Int? = null,
     val bbcode: BbcodeAction? = null,
+    @param:StringRes val descriptionRes: Int? = null,
 )
 
 internal val editorShortcutFormatsBeforeColor = listOf(
-    EditorShortcutEntry(EditorShortcut.BOLD, R.string.bbcode_action_bold, R.drawable.ic_editor_bold, BbcodeAction.Bold),
+    EditorShortcutEntry(EditorShortcut.BOLD, R.string.bbcode_action_bold, R.drawable.ic_editor_bold,
+        BbcodeAction.Bold, R.string.editor_format_desc_bold),
     EditorShortcutEntry(EditorShortcut.ITALIC, R.string.bbcode_action_italic,
-        R.drawable.ic_editor_italic, BbcodeAction.Italic),
+        R.drawable.ic_editor_italic, BbcodeAction.Italic, R.string.editor_format_desc_italic),
     EditorShortcutEntry(EditorShortcut.UNDERLINE, R.string.bbcode_action_underline,
-        R.drawable.ic_editor_underline, BbcodeAction.Underline),
+        R.drawable.ic_editor_underline, BbcodeAction.Underline, R.string.editor_format_desc_underline),
     EditorShortcutEntry(EditorShortcut.STRIKE, R.string.bbcode_action_strike,
-        R.drawable.ic_editor_strike, BbcodeAction.Strike),
-    EditorShortcutEntry(EditorShortcut.LINK, R.string.bbcode_action_url, R.drawable.ic_editor_link, BbcodeAction.Url),
+        R.drawable.ic_editor_strike, BbcodeAction.Strike, R.string.editor_format_desc_strike),
+    EditorShortcutEntry(EditorShortcut.LINK, R.string.bbcode_action_url, R.drawable.ic_editor_link,
+        BbcodeAction.Url, R.string.editor_format_desc_url),
     EditorShortcutEntry(EditorShortcut.SPOILER, R.string.bbcode_action_spoiler,
-        R.drawable.ic_editor_spoiler, BbcodeAction.Spoiler),
+        R.drawable.ic_editor_spoiler, BbcodeAction.Spoiler, R.string.editor_format_desc_spoiler),
 )
 
 internal val editorShortcutFormatsAfterColor = listOf(
     EditorShortcutEntry(EditorShortcut.BULLET, R.string.bbcode_action_bullet,
-        R.drawable.ic_editor_bullet, BbcodeAction.Bullet),
+        R.drawable.ic_editor_bullet, BbcodeAction.Bullet, R.string.editor_format_desc_bullet),
     EditorShortcutEntry(EditorShortcut.QUOTE, R.string.bbcode_action_quote,
-        R.drawable.ic_editor_quote_text, BbcodeAction.Quote),
-    EditorShortcutEntry(EditorShortcut.CODE, R.string.bbcode_action_cpp, R.drawable.ic_editor_code, BbcodeAction.Cpp),
+        R.drawable.ic_editor_quote_text, BbcodeAction.Quote, R.string.editor_format_desc_quote),
+    EditorShortcutEntry(EditorShortcut.CODE, R.string.bbcode_action_cpp, R.drawable.ic_editor_code,
+        BbcodeAction.Cpp, R.string.editor_format_desc_cpp),
     EditorShortcutEntry(EditorShortcut.FIXED, R.string.bbcode_action_fixed,
-        R.drawable.ic_editor_fixed, BbcodeAction.Fixed),
+        R.drawable.ic_editor_fixed, BbcodeAction.Fixed, R.string.editor_format_desc_fixed),
     EditorShortcutEntry(EditorShortcut.EMAIL, R.string.bbcode_action_email,
-        R.drawable.ic_editor_email, BbcodeAction.Email),
+        R.drawable.ic_editor_email, BbcodeAction.Email, R.string.editor_format_desc_email),
 )
 
 internal val editorShortcutFormats = editorShortcutFormatsBeforeColor + editorShortcutFormatsAfterColor

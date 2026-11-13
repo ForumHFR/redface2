@@ -52,7 +52,7 @@ internal fun TopicFormChromeSurfaces(
 @Composable
 private fun TopicFormOptionsSurface(adapter: TopicFormChromeAdapter, onOpenEditorSettings: () -> Unit) {
     val source = adapter.state.source
-    EditorOptionsSheet(adapter.host::closeSurface) {
+    EditorOptionsSheet(adapter.host::closeSurface, adapter.host.optionsFormats) {
         val enabled = adapter.state.scaffold.controlsEnabled && !source.isLoadingForm
         EditorOptions(source.signatureEnabled, source.smileyDisabled, source.emailNotificationEnabled, enabled,
             { adapter.option(TopicFormIntent.ToggleSignature(it)) },

@@ -74,6 +74,7 @@ open class EditorHost<S : Any>(
         if (insertion && !source().canInsert) return
         captureBody()
         memory.surface = name
+        memory.optionsTab = EditorOptionsTab.Options
         action()
     }
     private fun captureBody() {
@@ -91,7 +92,37 @@ open class EditorHost<S : Any>(
     fun closeSurface() {
         val closed = surface ?: return
         memory.surface = null
+        memory.optionsTab = EditorOptionsTab.Options
         if (closed == surfaces.draftOffer || surfaces.returnsToBody(closed)) memory.returnGeneration++
+    }
+
+    /** #1417: « Formats » is a tab of the live Options sheet, never another surface nor a Back level. */
+    val optionsFormats: EditorOptionsFormats
+        get() = EditorOptionsFormats(memory.optionsTab, formatsEnabled, ::selectOptionsTab, ::formatFromOptions)
+    private val formatsTabOpen
+        get() = surface == surfaces.options && memory.optionsTab == EditorOptionsTab.Formats
+    /** Same lock as the bar's insertions, plus the armed send whose mask hides the bar's tools (ED-34). */
+    private val formatsEnabled: Boolean
+        get() {
+            val current = source()
+            return current.scaffold.controlsEnabled && current.canInsert && currentBar().arm == null
+        }
+    /** Reading the formats is harmless while insertions are locked: only their rows are disabled then. */
+    fun selectOptionsTab(tab: EditorOptionsTab) {
+        if (surface == surfaces.options) memory.optionsTab = tab
+    }
+    /**
+     * A format tapped on the formats tab. Only the live tab may insert, once: the sheet closes with
+     * the tap, so a stale or repeated tap finds no tab. The selection captured at opening is put back
+     * first when the text is unchanged, because the field may have collapsed it while the sheet held
+     * the focus (ED-22). Closing defers focus, selection and keyboard to the body's return (ED-80).
+     */
+    fun formatFromOptions(action: BbcodeAction) {
+        if (!formatsTabOpen || !formatsEnabled) return
+        val unchanged = body.text.toString() == memory.textBeforeSurface
+        if (unchanged && body.selection != memory.selection) body.edit { selection = memory.selection }
+        closeSurface()
+        actions.onFormat(action)
     }
     /** Only the live Options surface may leave for settings; stale taps cannot navigate twice. */
     fun openSettings(onOpenSettings: () -> Unit) {

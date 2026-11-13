@@ -33,6 +33,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsNotFocused
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasSetTextAction
@@ -48,6 +49,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.requestFocus
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.height
@@ -72,6 +74,7 @@ import fr.forumhfr.redface2.core.model.SmileyKind
 import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.persoSmileyUrl
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.EditorBarMode
 import fr.forumhfr.redface2.core.ui.editor.EditorErrorSurface
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
@@ -86,6 +89,8 @@ import fr.forumhfr.redface2.core.ui.editor.EventKey
 import fr.forumhfr.redface2.core.ui.editor.OperationRef
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerOpenIntent
+import fr.forumhfr.redface2.core.ui.editor.applyBbcodeAction
+import fr.forumhfr.redface2.core.ui.editor.editBbcode
 import java.util.concurrent.CopyOnWriteArrayList
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -111,6 +116,9 @@ class PrivateMessageComposeChromeComposeTest {
     }
     @get:Rule val compose = createComposeRule()
     private val f = PrivateMessageComposeChromeFixture()
+    // The fixture's format port is inert; the formats-tab test binds it to the live body, as the VM does.
+    private var actions = f.actions
+    private val formats = mutableListOf<BbcodeAction>()
     private val uncertain = EditorErrors.uncertain(EditorErrorSurface.MessageCompose)
     private val scroll = ScrollState(0)
     private lateinit var back: OnBackPressedDispatcher
@@ -154,7 +162,7 @@ class PrivateMessageComposeChromeComposeTest {
             InterceptPlatformTextInput(input) {
                 RedfaceTheme {
                     PrivateMessageComposeContent(f.state, f.body, InputTransformation {}, f.recipients, f.subject,
-                        f.actions, smileys, modifier, bodyScrollState = scroll, chromeEvents = f.events,
+                        actions, smileys, modifier, bodyScrollState = scroll, chromeEvents = f.events,
                         chromeMemory = f.memory, windowMetrics = window, onOpenEditorSettings = openSettings)
                 }
             }
@@ -185,6 +193,40 @@ class PrivateMessageComposeChromeComposeTest {
             assertEquals(1, settingsOpens)
             assertNull(f.adapter.surface)
         }
+    }
+
+    // #1417 point 5, ED-22/80: the formats tab applies to the selection captured when Options opened.
+    @Test fun `1417 formats tab wraps the captured selection closes the sheet and refocuses the body`() {
+        prefill()
+        actions = f.actions.copy(host = f.actions.host.copy(onFormat = { action ->
+            formats += action
+            f.body.editBbcode { text, start, end -> applyBbcodeAction(action, text, start, end) }
+        }))
+        compose.setContent { Content() }
+        bodyField().requestFocus()
+        compose.runOnIdle { f.body.edit { selection = TextRange(6, 1) } }
+        compose.onNodeWithContentDescription("Options").performClick()
+        // A new MP has no tone grid: the options tab is the settings row, then the three toggles.
+        val settings = compose.onNodeWithText("Réglages de l’éditeur").getUnclippedBoundsInRoot()
+        val toggles = compose.onAllNodes(isToggleable() and hasAnyAncestor(hasTestTag("editor-options-sheet")))
+            .assertCountEquals(3)
+        assertTrue(settings.bottom <= toggles[0].getUnclippedBoundsInRoot().top)
+        compose.onNodeWithTag("editor-options-tab-Formats").performClick()
+        compose.onNodeWithTag("editor-options-sheet").assertExists()
+        compose.onNodeWithText("Réglages de l’éditeur").assertDoesNotExist()
+        compose.onNodeWithText("Gras").performScrollTo().performClick()
+        compose.onNode(isDialog()).assertDoesNotExist()
+        bodyField().assertIsFocused()
+        compose.runOnIdle {
+            assertEquals("B[b]onjou[/b]r", f.body.text.toString())
+            assertEquals(listOf<BbcodeAction>(BbcodeAction.Bold), formats)
+            assertNull(f.adapter.surface)
+            assertEquals(EditorBarMode.Normal, f.memory.host.bar.mode)
+        }
+        // The sheet always reopens on the options tab.
+        compose.onNodeWithContentDescription("Options").performClick()
+        compose.onNodeWithTag("editor-options-tab-Options").assertIsSelected()
+        compose.onNodeWithText("Réglages de l’éditeur").assertExists()
     }
 
     @Test fun settingsAreDisabledDuringUploadAndSubmission() {
