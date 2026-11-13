@@ -41,6 +41,8 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerOpenIntent
 import fr.forumhfr.redface2.core.ui.editor.rememberEditorImagePicker
 import fr.forumhfr.redface2.core.ui.editor.rememberEditorWindowMetrics
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.launch
 
 /**
  * Post-level editor screen. Phase 2C (#145) adds a Submit button that posts the
@@ -68,7 +70,6 @@ fun PostEditorScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val currentOnQuotesDelivered by rememberUpdatedState(onQuotesDelivered)
-    LaunchedEffect(viewModel) { viewModel.quotesDelivered.collect { currentOnQuotesDelivered() } }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, viewModel) {
         val observer = LifecycleEventObserver { _, event ->
@@ -94,6 +95,11 @@ fun PostEditorScreen(
     val currentOnClose by rememberUpdatedState(onClose)
     val currentOnSubmitSucceeded by rememberUpdatedState(onSubmitSucceeded)
     LaunchedEffect(viewModel) {
+        // Drain a buffered C/Q delivery before a buffered CloseCommitted can remove this screen.
+        // Both collectors then share this main context; the VM signals delivery before navigation.
+        launch(start = CoroutineStart.UNDISPATCHED) {
+            viewModel.quotesDelivered.collect { currentOnQuotesDelivered() }
+        }
         viewModel.effects.collect { effect ->
             when (effect) {
                 is PostEditorEffect.SubmitSucceeded ->

@@ -669,6 +669,37 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `ED88 ignoring an inserted quote seals its delivery when C-Q finally succeeds`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        replyRepository.formResult = Result.failure(IOException("offline"))
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        settleBody()
+        vm.dispatch(PostEditorIntent.ReloadRequested)
+        settleBody()
+        assertTrue(vm.state.value.canIgnorePendingQuote)
+        replyRepository.formResult = Result.success(authenticatedForm("[quotemsg=101]quote[/quotemsg]"))
+        draftStore.saveFailure = IOException("disk")
+        vm.quotesDelivered.test {
+            vm.dispatch(PostEditorIntent.ReloadRequested)
+            settleBody()
+            val body = vm.bodyFieldState.text.toString()
+            assertEquals("[quotemsg=101]quote[/quotemsg]\n", body)
+            assertTrue(vm.state.value.canIgnorePendingQuote)
+            assertNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+            expectNoEvents()
+
+            draftStore.saveFailure = null
+            vm.dispatch(PostEditorIntent.PendingQuoteIgnored)
+            settleBody()
+            awaitItem()
+            assertEquals(body, draftStore.saved[key]?.body)
+            assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+            expectNoEvents()
+        }
+    }
+
+    @Test
     fun `ED52 Room reconciliation does not replay an already consumed card handoff`() = runTest {
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
         val pending = PendingInlineQuoteRequest(SAMPLE_CAT, SAMPLE_TOPIC_ID,
@@ -4864,6 +4895,12 @@ class PostEditorViewModelTest {
         vm.dispatch(PostEditorIntent.CloseRequested)
         settleBody()
         // The pop is only allowed once C and Q are settled and the live field is durable.
+        // Recreation can leave both channels buffered: the screen drains delivery before close.
+        vm.quotesDelivered.test {
+            awaitItem()
+            vm.effects.test { assertEquals(PostEditorEffect.CloseCommitted, awaitItem()) }
+            expectNoEvents()
+        }
         assertEquals(typed, draftStore.saved[key]?.body)
         assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
         assertEquals(1, replyRepository.formFetches)

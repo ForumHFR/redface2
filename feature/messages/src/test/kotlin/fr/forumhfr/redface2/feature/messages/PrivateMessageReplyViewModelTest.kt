@@ -348,6 +348,11 @@ class PrivateMessageReplyViewModelTest {
         vm.onCloseRequested()
         runCurrent()
         // The pop is only allowed once C and Q are settled and the live field is durable.
+        vm.quotesDelivered.test {
+            awaitItem()
+            vm.effects.test { assertEquals(PrivateMessageReplyEffect.CloseCommitted, awaitItem()) }
+            expectNoEvents()
+        }
         assertEquals(typed, draftStore.saved[key]?.body)
         assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
         coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any(), any()) }

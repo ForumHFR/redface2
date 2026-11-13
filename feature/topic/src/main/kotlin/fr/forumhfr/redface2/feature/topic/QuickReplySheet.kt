@@ -34,6 +34,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -41,6 +42,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalAccessibilityManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -60,6 +63,8 @@ import fr.forumhfr.redface2.core.ui.editor.QuoteCardsColumn
 import fr.forumhfr.redface2.core.ui.editor.bannerText
 import fr.forumhfr.redface2.core.ui.editor.hasSubmissionSummary
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 /**
@@ -99,6 +104,7 @@ internal fun QuickReplySheet(
     // modal's scrim, so a new launch can only happen after a dismiss nulled the previous one
     // (gate Codex, finding 2). Re-assigning the launch over an OPEN sheet would break delivery.
     var openingDelivered by rememberSaveable { mutableStateOf(false) }
+    val currentOnQuotesDelivered by rememberUpdatedState(onQuotesDelivered)
     LaunchedEffect(viewModel) {
         // Re-seed the field from the #405 row at EACH opening — the VM outlives the sheet and
         // its cached text can be stale after a full-screen edit of the same draft (gate #788).
@@ -108,6 +114,11 @@ internal fun QuickReplySheet(
             legacyQuoteRequestDropped = legacyQuoteRequestDropped,
         )
         openingDelivered = true
+        // Attachment purges only a genuinely new opening. Start delivery collection synchronously
+        // before navigation: buffered deliveries survive recreation and precede a buffered close.
+        launch(start = CoroutineStart.UNDISPATCHED) {
+            viewModel.quotesDelivered.collect { currentOnQuotesDelivered() }
+        }
         viewModel.effects.collect { effect ->
             when (effect) {
                 is QuickReplyEffect.SubmitSucceeded ->
@@ -118,8 +129,6 @@ internal fun QuickReplySheet(
             }
         }
     }
-    val currentOnQuotesDelivered by rememberUpdatedState(onQuotesDelivered)
-    LaunchedEffect(viewModel) { viewModel.quotesDelivered.collect { currentOnQuotesDelivered() } }
     val timeoutMillis = LocalAccessibilityManager.current?.calculateRecommendedTimeoutMillis(
         4_000L, containsIcons = false, containsText = true, containsControls = true,
     ) ?: 4_000L
@@ -131,13 +140,17 @@ internal fun QuickReplySheet(
     // `submitting` is read through
     // rememberUpdatedState because both guards below are remembered once.
     val submitting = rememberUpdatedState(state.submission.blocksBodyMutation || state.isDiscardingDraft)
+    val closing = rememberUpdatedState(state.isClosing)
     // #854 — no half-height stop : this is a TYPING surface (autofocused field, IME quasi
     // permanent), the M3 PartiallyExpanded state only ever appears when a short display makes
     // the content taller than half the screen — and then a back/swipe must dismiss in ONE step,
     // not park the sheet at mid-height (thibw : « 3× retour pour revenir au topic »).
     val sheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = true,
-        confirmValueChange = { target -> target != SheetValue.Hidden || !submitting.value },
+        // M3 also calls show() on recreation: a pending close stays hidden until « Rester ».
+        confirmValueChange = { target ->
+            if (target == SheetValue.Hidden) !submitting.value else !closing.value
+        },
     )
     val sheetScope = rememberCoroutineScope()
     val density = LocalDensity.current
@@ -165,6 +178,22 @@ internal fun QuickReplySheet(
             if (submitting.value) sheetScope.launch { sheetState.show() } else viewModel.onDismissed()
         },
     ) {
+        // These owners belong to the sheet's dialog window, not the topic behind it.
+        val focusManager = LocalFocusManager.current
+        val keyboardController = LocalSoftwareKeyboardController.current
+        LaunchedEffect(state.isClosing) {
+            if (state.isClosing) {
+                focusManager.clearFocus(force = true)
+                keyboardController?.hide()
+                sheetState.hide()
+            } else {
+                // M3 can also start show() after measuring its anchors. Either animation may
+                // cancel the other; observe the resulting expansion before focusing the field.
+                launch { sheetState.show() }
+                snapshotFlow { sheetState.currentValue }.first { it == SheetValue.Expanded }
+                focusRequester.requestFocus()
+            }
+        }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -209,7 +238,7 @@ internal fun QuickReplySheet(
                 OutlinedTextField(
                     value = state.text,
                     onValueChange = viewModel::onTextChanged,
-                    readOnly = state.submission.blocksBodyMutation || state.isDiscardingDraft,
+                    readOnly = state.submission.blocksBodyMutation || state.isDiscardingDraft || state.isClosing,
                     // #807 — same #237 contract as BbcodeTextField : Compose capitalises NOTHING by
                     // default, the IME needs the explicit autoCap hint (surface regression, v220).
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
@@ -235,8 +264,6 @@ internal fun QuickReplySheet(
             QuickReplyActions(state, onSubmit = { viewModel.onSubmitClicked(timeoutMillis) })
         }
     }
-    // The field grabs the focus once per sheet opening — the IME rises with the sheet.
-    LaunchedEffect(Unit) { focusRequester.requestFocus() }
     QuickReplyConfirmationDialog(
         visible = state.confirmVisible,
         onConfirm = { viewModel.onSubmitConfirmed(armToken) },
@@ -244,14 +271,7 @@ internal fun QuickReplySheet(
     )
     QuickReplyUnsavedCloseDialog(
         visible = state.unsavedCloseVisible,
-        onStay = {
-            viewModel.onUnsavedCloseDecided(leave = false)
-            // The sheet was only hidden : same session, same field, the keyboard comes back with it.
-            sheetScope.launch {
-                sheetState.show()
-                focusRequester.requestFocus()
-            }
-        },
+        onStay = { viewModel.onUnsavedCloseDecided(leave = false) },
         onLeave = { viewModel.onUnsavedCloseDecided(leave = true) },
     )
 }

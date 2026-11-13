@@ -547,11 +547,19 @@ class QuickReplyViewModelTest {
         val gate = CompletableDeferred<Unit>()
         val store = FakeQuickReplyDraftStore().apply { saveReturnGate = gate }
         val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.openForTest()
+        runCurrent()
         viewModel.onTextChanged(TextFieldValue("dernière frappe"))
         viewModel.effects.test {
             viewModel.onDismissed()
             runCurrent()
             expectNoEvents() // The sheet stays mounted while the write is in flight.
+            assertTrue(viewModel.state.value.isClosing)
+            assertFalse(viewModel.state.value.canSubmit)
+            viewModel.onTextChanged(TextFieldValue("input from the hidden IME"))
+            assertEquals("dernière frappe", viewModel.state.value.text.text)
+            viewModel.onSheetAttached(1, emptyList(), restored = true)
+            assertTrue(viewModel.state.value.isClosing)
             gate.complete(Unit)
             assertEquals(QuickReplyEffect.CloseCommitted, awaitItem())
         }
@@ -570,6 +578,7 @@ class QuickReplyViewModelTest {
             expectNoEvents() // Never a silent unmount over an unsaved field.
         }
         assertTrue(viewModel.state.value.unsavedCloseVisible)
+        assertTrue(viewModel.state.value.isClosing)
         assertEquals("texte non enregistré", viewModel.state.value.text.text)
         assertNull(store.storedBody)
     }
@@ -586,6 +595,7 @@ class QuickReplyViewModelTest {
             advanceUntilIdle()
             expectNoEvents()
             assertFalse(viewModel.state.value.unsavedCloseVisible)
+            assertFalse(viewModel.state.value.isClosing)
             assertEquals("texte à garder", viewModel.state.value.text.text)
 
             store.saveFailure = null
@@ -641,6 +651,7 @@ class QuickReplyViewModelTest {
         elsewhere.load()
         val written = elsewhere.save(EditorDraftStore.Draft(body = "écrit ailleurs"))
         assertTrue(written is EditorDraftStore.StoreWriteResult.Written)
+        val readsBeforeClose = store.loadCalls
         viewModel.onTextChanged(TextFieldValue("A et la suite"))
         viewModel.effects.test {
             viewModel.onDismissed()
@@ -649,6 +660,7 @@ class QuickReplyViewModelTest {
         }
         assertTrue(viewModel.state.value.unsavedCloseVisible)
         assertEquals("écrit ailleurs", store.storedBody)
+        assertEquals("a save conflict must not silently reload the session", readsBeforeClose, store.loadCalls)
     }
 
     @Test

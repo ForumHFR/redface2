@@ -94,6 +94,8 @@ data class QuickReplyUiState(
     val submitError: EditorError? = null,
     /** #312 — « Confirmation avant publication » : the pending-confirmation dialog is showing. */
     val confirmVisible: Boolean = false,
+    /** The hidden sheet must retain neither field focus nor input while its close is settling. */
+    val isClosing: Boolean = false,
     /**
      * ED-10 on the sheet (#1450) — the awaited last save of a close was refused : the sheet is
      * hidden but still mounted, and « Brouillon non enregistré » asks before the text is abandoned.
@@ -104,7 +106,7 @@ data class QuickReplyUiState(
     val canSubmit: Boolean
         get() = (text.text.isNotBlank() || quotes.isNotEmpty()) && !isSubmitting && !isPreparingQuotes &&
             !submission.blocksBodyMutation && pendingQuotes.isEmpty() && !quoteStorageUnavailable &&
-            restorableDraft == null && !isDiscardingDraft
+            restorableDraft == null && !isDiscardingDraft && !isClosing
 
     val hasDormantQuote: Boolean
         get() = pendingQuotes.isNotEmpty() && submission is EditorSubmissionState.Uncertain
@@ -350,7 +352,8 @@ class QuickReplyViewModel @AssistedInject constructor(
         hasOpened = true
         sheetOpen = true
         closeStarted = false
-        // ED-88 — the VM outlives the sheet : a delivery nobody collected belongs to a past opening.
+        // ED-88 — attachment runs BEFORE either sheet collector starts (QuickReplySheet).
+        // A restored attachment skips openSheet, retaining a delivery sealed during its close.
         _quotesDelivered.tryReceive()
         materializeJob?.cancel()
         autosaveJob?.cancel()
@@ -494,15 +497,16 @@ class QuickReplyViewModel @AssistedInject constructor(
         autosaveJob?.cancel()
         val result = opening.drafts.consumeInlineQuoteRequest(pending, EditorDraftStore.Draft(_state.value.text.text),
             deliveredBody = deliveredQuoteBody)
-        if (!canCompleteQuotePreparation(opening)) return
+        // A cancelled GET may already be committing its non-cancellable C/Q transaction. Its
+        // delivery belongs to THIS opening even when the sheet is now hidden awaiting that write.
+        if (submission !== opening || opening.drafts.invalidated) return
         if (result is EditorDraftStore.StoreWriteResult.Written) {
             opening.resolveDraftWrite(result)
             finishInlineQuoteDelivery()
             deliveredQuoteBody = null
-            // ED-88 — only here : « Ignorer la citation » erases Q without delivering anything.
             _quotesDelivered.trySend(Unit)
-            scheduleAutosave() // Preserve keystrokes made while the CAS returned.
-        } else {
+            if (sheetOpen) scheduleAutosave() // A close owns its final snapshot instead.
+        } else if (canCompleteQuotePreparation(opening)) {
             quoteStorageFailed(result)
         }
     }
@@ -685,7 +689,7 @@ class QuickReplyViewModel @AssistedInject constructor(
     }
 
     fun onTextChanged(value: TextFieldValue) {
-        if (submission.blocksMutation || _state.value.isDiscardingDraft) return
+        if (closeStarted || submission.blocksMutation || _state.value.isDiscardingDraft) return
         submission.disarm()
         _state.update {
             it.copy(
@@ -717,7 +721,8 @@ class QuickReplyViewModel @AssistedInject constructor(
     fun onEscalateRequested() {
         // #805 cards OFF — inert while the [quotemsg] insert is in flight : escalating now would
         // hand over a row without the citation the user just asked for.
-        if (submission.blocksClose || _state.value.isPreparingQuotes || _state.value.isDiscardingDraft) return
+        val busy = _state.value.isPreparingQuotes || _state.value.isDiscardingDraft
+        if (closeStarted || submission.blocksClose || busy) return
         // D is memory-only under an offer: the user must decide before handing over the row.
         if (_state.value.quoteStorageUnavailable || _state.value.restorableDraft != null) return
         submission.disarm()
@@ -750,6 +755,7 @@ class QuickReplyViewModel @AssistedInject constructor(
         closeStarted = true
         sheetOpen = false
         submission.disarm()
+        _state.update { it.copy(isClosing = true) }
         // Cancel the GET, retain its request: closing is not an explicit quote abandonment.
         materializeJob?.cancel()
         autosaveJob?.cancel()
@@ -758,7 +764,7 @@ class QuickReplyViewModel @AssistedInject constructor(
         // re-snapshots or masks before this write lands. If that re-opening seals this session
         // before its owner ever resolved, the await is cancelled and nothing is written : a write
         // with an unknown owner never happens (gate Sol).
-        val closing = ClosingSheet(submission, sessionReady, draftSnapshot(), shownDraft())
+        val closing = ClosingSheet(submission, sessionReady, draftSnapshot(), shownDraft(), materializeJob)
         viewModelScope.launch {
             val saved = saveForClose(closing)
             // A re-opening superseded this close : its outcome belongs to no mounted sheet.
@@ -773,6 +779,7 @@ class QuickReplyViewModel @AssistedInject constructor(
         val ready: CompletableDeferred<Unit>,
         val draft: EditorDraftStore.Draft?,
         val shown: EditorDraftStore.Draft,
+        val quoteWork: Job?,
     )
 
     private fun shownDraft() = EditorDraftStore.Draft(body = _state.value.text.text)
@@ -784,6 +791,9 @@ class QuickReplyViewModel @AssistedInject constructor(
      * goes through. Only this coroutine's own cancellation propagates.
      */
     private suspend fun saveForClose(closing: ClosingSheet): Boolean {
+        // A cancelled quote task may still be adopting a non-cancellable C/Q write. Await its
+        // delivery signal as well as its write before CloseCommitted can retire the collector.
+        closing.quoteWork?.join()
         try {
             closing.ready.await()
         } catch (_: CancellationException) {
@@ -817,7 +827,7 @@ class QuickReplyViewModel @AssistedInject constructor(
      */
     fun onUnsavedCloseDecided(leave: Boolean) {
         if (!_state.value.unsavedCloseVisible) return
-        _state.update { it.copy(unsavedCloseVisible = false) }
+        _state.update { it.copy(unsavedCloseVisible = false, isClosing = leave) }
         if (leave) {
             _effects.trySend(QuickReplyEffect.CloseCommitted)
         } else {
@@ -829,7 +839,7 @@ class QuickReplyViewModel @AssistedInject constructor(
     }
 
     private fun scheduleAutosave() {
-        if (submission.blocksMutation || _state.value.isDiscardingDraft) return
+        if (closeStarted || submission.blocksMutation || _state.value.isDiscardingDraft) return
         autosaveJob?.cancel()
         // #953 F2 — same capture-at-scheduling rule as [onDismissed] : session and body belong
         // to the keystroke that scheduled this debounce, whatever happens before it fires.

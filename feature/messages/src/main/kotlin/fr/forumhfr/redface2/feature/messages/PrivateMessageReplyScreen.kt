@@ -54,6 +54,8 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerOpenIntent
 import fr.forumhfr.redface2.core.ui.editor.rememberEditorImagePicker
 import fr.forumhfr.redface2.core.ui.editor.rememberEditorWindowMetrics
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.launch
 
 /**
  * Reply editor for a private-message conversation, hosted by the shared editor chrome.
@@ -80,7 +82,6 @@ fun PrivateMessageReplyScreen(
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val currentOnQuotesDelivered by rememberUpdatedState(onQuotesDelivered)
-    LaunchedEffect(viewModel) { viewModel.quotesDelivered.collect { currentOnQuotesDelivered() } }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, viewModel) {
         val observer = LifecycleEventObserver { _, event ->
@@ -104,6 +105,10 @@ fun PrivateMessageReplyScreen(
     val currentOnBack by rememberUpdatedState(onBack)
     val currentOnSuccess by rememberUpdatedState(onSubmitSucceeded)
     LaunchedEffect(viewModel) {
+        // Delivery collection starts before navigation, including when both survived recreation.
+        launch(start = CoroutineStart.UNDISPATCHED) {
+            viewModel.quotesDelivered.collect { currentOnQuotesDelivered() }
+        }
         viewModel.effects.collect { effect ->
             when (effect) {
                 is PrivateMessageReplyEffect.SubmitSucceeded ->

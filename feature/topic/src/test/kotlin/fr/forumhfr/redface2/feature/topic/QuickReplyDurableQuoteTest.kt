@@ -928,9 +928,58 @@ class QuickReplyDurableQuoteTest {
         assertNull(scenario.pending)
         sheet.onDismissed()
         advanceUntilIdle()
+        // Same order as QuickReplySheet: attach this opening before starting either collector.
+        sheet.onSheetAttached(1, emptyList(), restored = false)
         sheet.quotesDelivered.test {
-            sheet.onSheetOpened() // e.g. the reply FAB: this opening shipped no basket.
             advanceUntilIdle()
+            expectNoEvents()
+        }
+    }
+
+    @Test
+    fun `ED88 a restored closing sheet retains its buffered delivery before CloseCommitted`() = runTest {
+        val scenario = Scenario()
+        scenario.enqueue()
+        val sheet = scenario.open()
+        advanceUntilIdle()
+        sheet.onDismissed()
+        advanceUntilIdle()
+
+        // Rotation remounts the SAME opening, so attachment must not purge its delivery.
+        sheet.onSheetAttached(1, emptyList(), restored = true)
+        sheet.quotesDelivered.test {
+            awaitItem()
+            sheet.effects.test {
+                assertEquals(QuickReplyEffect.CloseCommitted, awaitItem())
+                expectNoEvents()
+            }
+            expectNoEvents()
+        }
+    }
+
+    @Test
+    fun `ED88 a C-Q transaction finishing during close still delivers before CloseCommitted`() = runTest {
+        val scenario = Scenario()
+        scenario.enqueue()
+        val fetch = CompletableDeferred<Unit>().also { scenario.quoteGate = it }
+        val sheet = scenario.open()
+        runCurrent()
+        val commit = CompletableDeferred<Unit>().also { scenario.store.saveReturnGate = it }
+        sheet.quotesDelivered.test delivery@ {
+            fetch.complete(Unit)
+            runCurrent()
+            assertNull(scenario.pending) // The store committed C/Q, its result is still suspended.
+            expectNoEvents()
+            sheet.effects.test {
+                sheet.onDismissed() // Cancels the fetch coroutine, not its committing transaction.
+                runCurrent()
+                expectNoEvents()
+                commit.complete(Unit)
+                this@delivery.awaitItem()
+                assertEquals(QuickReplyEffect.CloseCommitted, awaitItem())
+                advanceUntilIdle()
+                expectNoEvents()
+            }
             expectNoEvents()
         }
     }
