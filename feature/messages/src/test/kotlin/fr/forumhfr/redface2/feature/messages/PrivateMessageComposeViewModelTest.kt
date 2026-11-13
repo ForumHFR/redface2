@@ -1042,36 +1042,139 @@ class PrivateMessageComposeViewModelTest {
     }
 
     @Test
-    fun `typing recipients and subject leaves the pending MP row untouched`() = runTest {
+    fun `recipients and subject typed under an undecided MP offer are saved and the offer is kept - ED121`() =
+        runTest {
+            val repository = mockk<PrivateMessageWriteRepository>()
+            val key = EditorDraftKey.mpCompose()
+            coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+            draftStore.preload(
+                key,
+                EditorDraftStore.Draft(
+                    body = "rescued body",
+                    subject = "old subject",
+                    recipients = "old recipient",
+                    isPrivate = true,
+                ),
+            )
+            val viewModel = viewModel(repository)
+            advanceUntilIdle()
+
+            viewModel.onRecipientStateChanged(EditorRecipientState(listOf("new recipient")))
+            viewModel.onSubjectChanged("new subject")
+            advanceTimeBy(800L)
+            runCurrent()
+
+            // C holds the typed headers; D left the row for its own durable copy, still under the offer.
+            assertEquals("", draftStore.saved[key]?.body)
+            assertEquals("new subject", draftStore.saved[key]?.subject)
+            assertEquals(
+                EditorRecipientState(listOf("new recipient")),
+                EditorRecipientState.decode(draftStore.saved[key]?.recipients),
+            )
+            val kept = draftStore.loadOffers("tester", key).single().draft
+            assertEquals(listOf("rescued body", "old subject", "old recipient"),
+                listOf(kept.body, kept.subject, kept.recipients))
+            assertEquals("rescued body", viewModel.state.value.restorableDraft)
+            assertEquals("the offer keeps its own subject", "old subject", viewModel.state.value.restorableSubject)
+            assertEquals("old recipient", viewModel.state.value.restorableRecipients)
+
+            viewModel.onDraftRestoreRequested()
+            advanceUntilIdle()
+            assertEquals("rescued body", viewModel.bodyFieldState.text.toString())
+            assertEquals("new subject", viewModel.state.value.subject)
+            assertEquals("new recipient", viewModel.state.value.recipients)
+            assertNull(viewModel.state.value.restorableDraft)
+            // Restore wrote C and consumed D together: nothing is offered again at the next opening.
+            assertEquals("rescued body", draftStore.saved[key]?.body)
+            assertEquals("new subject", draftStore.saved[key]?.subject)
+            assertTrue(draftStore.loadOffers("tester", key).isEmpty())
+        }
+
+    @Test
+    fun `closing a new MP with only typed headers under an offer saves them - R11`() = runTest {
+        val key = EditorDraftKey.mpCompose()
+        draftStore.preload(
+            key, EditorDraftStore.Draft(body = "rescued body", subject = "old subject", isPrivate = true),
+        )
+        val (vm, effects) = closableComposer()
+        assertEquals("rescued body", vm.state.value.restorableDraft)
+
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("alice")))
+        vm.onSubjectChanged("typed subject")
+        vm.onCloseRequested()
+        runCurrent()
+
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(1, effects.count { it == PrivateMessageComposeEffect.CloseCommitted })
+        assertEquals("typed subject", draftStore.saved[key]?.subject)
+        assertEquals(
+            EditorRecipientState(listOf("alice")), EditorRecipientState.decode(draftStore.saved[key]?.recipients),
+        )
+        assertEquals(listOf("rescued body"), draftStore.loadOffers("tester", key).map { it.draft.body })
+    }
+
+    @Test
+    fun `closing a new MP whose typed headers cannot be saved under an offer asks - R11`() = runTest {
+        val key = EditorDraftKey.mpCompose()
+        draftStore.preload(
+            key, EditorDraftStore.Draft(body = "rescued body", subject = "old subject", isPrivate = true),
+        )
+        val (vm, effects) = closableComposer()
+        draftStore.saveFailure = IOException("disk full")
+
+        vm.onRecipientStateChanged(EditorRecipientState(listOf("alice")))
+        vm.onCloseRequested()
+        runCurrent()
+
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        assertFalse(PrivateMessageComposeEffect.CloseCommitted in effects)
+        assertEquals("alice", vm.state.value.recipients)
+        // The refused write changed nothing: the offered draft is still the row.
+        assertEquals("rescued body", draftStore.saved[key]?.body)
+        assertEquals("old subject", draftStore.saved[key]?.subject)
+    }
+
+    @Test
+    fun `ignoring a new MP offer keeps the typed headers and consumes that offer only - ED121`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val key = EditorDraftKey.mpCompose()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        draftStore.preload(
+            key, EditorDraftStore.Draft(body = "rescued body", subject = "old subject", isPrivate = true),
+        )
+        val viewModel = viewModel(repository)
+        advanceUntilIdle()
+        viewModel.onSubjectChanged("typed subject")
+
+        viewModel.onDraftDiscardRequested()
+        advanceUntilIdle()
+
+        assertNull(viewModel.state.value.restorableDraft)
+        assertEquals("typed subject", viewModel.state.value.subject)
+        assertEquals("typed subject", draftStore.saved[key]?.subject)
+        assertEquals("", draftStore.saved[key]?.body)
+        assertTrue(draftStore.loadOffers("tester", key).isEmpty())
+    }
+
+    @Test
+    fun `an untouched new MP is never offered for its empty recipients envelope - ED121`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         val key = EditorDraftKey.mpCompose()
         coEvery { repository.fetchComposeForm(any()) } returns composeForm()
         draftStore.preload(
             key,
-            EditorDraftStore.Draft(
-                body = "rescued body",
-                subject = "old subject",
-                recipients = "old recipient",
-                isPrivate = true,
-            ),
+            EditorDraftStore.Draft(body = "", recipients = EditorRecipientState().encode(), isPrivate = true),
         )
         val viewModel = viewModel(repository)
-
-        viewModel.onRecipientStateChanged(EditorRecipientState(listOf("new recipient")))
-        viewModel.onSubjectChanged("new subject")
-        advanceTimeBy(800L)
-
-        assertNull("no hybrid row may be written while the visible body is blank", draftStore.lastSavedOwner)
-        assertEquals("rescued body", draftStore.saved[key]?.body)
-        assertEquals("old subject", draftStore.saved[key]?.subject)
-        assertEquals("old recipient", draftStore.saved[key]?.recipients)
-        assertEquals("rescued body", viewModel.state.value.restorableDraft)
-
-        viewModel.onDraftRestoreRequested()
         advanceUntilIdle()
-        assertEquals("rescued body", viewModel.bodyFieldState.text.toString())
-        assertEquals("new subject", viewModel.state.value.subject)
-        assertEquals("new recipient", viewModel.state.value.recipients)
+        assertNull(viewModel.state.value.restorableDraft)
+
+        viewModel.editBody(TextFieldValue("first words"))
+        advanceTimeBy(800L)
+        runCurrent()
+
+        assertEquals("first words", draftStore.saved[key]?.body)
+        assertTrue(draftStore.loadOffers("tester", key).isEmpty())
     }
 
     @Test
@@ -1618,7 +1721,8 @@ class PrivateMessageComposeViewModelTest {
         assertEquals("", vm.state.value.bodyText)
         loadGate.complete(Unit)
         runCurrent()
-        assertNull(vm.state.value.restorableDraft)
+        // ED-121: the stored draft stays offered; it never replaces what was typed meanwhile.
+        assertEquals("stored", vm.state.value.restorableDraft)
         assertEquals("typed before load", vm.bodyFieldState.text.toString())
     }
 
@@ -2344,7 +2448,8 @@ class PrivateMessageComposeViewModelTest {
         }
         val arms = mutableMapOf<Long, ArmToken>()
         return object : EditorSubmissionAdapter {
-            override val supportsIndependentDraftOffers = false
+            // ED-121: a new private message keeps its offered drafts, like the replies.
+            override val supportsIndependentDraftOffers = true
             override val unsupportedMutations = mapOf(
                 SubmissionBodyMutation.IMAGE_URL to "aucune entrée URL d'image dans cet éditeur MP",
                 SubmissionBodyMutation.SHARED_RESTORE to "aucune entrée resumeSharedDraft pour les MP",
@@ -2379,6 +2484,9 @@ class PrivateMessageComposeViewModelTest {
                 insert.invoke(viewModel, "[img]https://example.test/late.png[/img]", false)
             }
             override fun dispose() = viewModel.viewModelScope.cancel()
+            override fun resolveOfferedDraft(restoring: Boolean) {
+                if (restoring) viewModel.onDraftRestoreRequested() else viewModel.onDraftDiscardRequested()
+            }
             override fun startUpload() = viewModel.onImagesPicked(listOf("content://pick/1"))
 
             override fun snapshot(): SubmissionProbe = viewModel.state.value.let {

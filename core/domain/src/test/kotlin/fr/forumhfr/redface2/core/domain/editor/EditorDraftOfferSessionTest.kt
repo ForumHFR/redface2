@@ -396,4 +396,134 @@ class EditorDraftOfferSessionTest {
         assertTrue(store.saveIfVersion("tester", key, Draft("C"), 0) is StoreWriteResult.Written)
         assertEquals(listOf("D"), store.loadOffers("tester", key).map { it.draft.body })
     }
+
+    @Test fun `a title typed over a blank body keeps the offered new topic draft aside - ED121`() = runBlocking {
+        val topic = EditorDraftKey.newTopic(23)
+        val store = VersionedEditorDraftStore()
+        store.preload(topic, Draft("D body", subject = "D title", updatedAt = 1234))
+        val editor = EditorDraftSession(store, topic)
+        editor.load()
+        val offered = editor.availableOffers.single()
+        assertEquals(Draft("D body", subject = "D title", updatedAt = 1234), offered.draft)
+
+        assertTrue(editor.save(Draft("", subject = "typed title")) is StoreWriteResult.Written)
+
+        assertEquals("typed title", store.saved[topic]?.subject)
+        assertEquals("", store.saved[topic]?.body)
+        assertEquals(listOf(offered), store.loadOffers(store.activeOwner, topic))
+        assertEquals(listOf(offered), editor.availableOffers)
+        // A new opening lists the title-only C and the older D; neither replaced the other.
+        val reopened = EditorDraftSession(store, topic)
+        reopened.load()
+        assertEquals(setOf("typed title", "D title"), reopened.availableOffers.map { it.draft.subject }.toSet())
+    }
+
+    @Test fun `a body typed on a new topic no longer overwrites the offered draft - ED121`() = runBlocking {
+        val topic = EditorDraftKey.newTopic(23)
+        val store = VersionedEditorDraftStore()
+        store.preload(topic, Draft("D body", subject = "D title"))
+        val editor = EditorDraftSession(store, topic)
+        editor.load()
+
+        assertTrue(editor.save(Draft("C body")) is StoreWriteResult.Written)
+        assertTrue(editor.save(Draft("C body, continued")) is StoreWriteResult.Written)
+
+        assertEquals("C body, continued", store.saved[topic]?.body)
+        assertEquals(listOf("D body"), store.loadOffers(store.activeOwner, topic).map { it.draft.body })
+    }
+
+    @Test fun `restoring a new topic offer consumes it with the write of C - ED121`() = runBlocking {
+        val topic = EditorDraftKey.newTopic(23)
+        val store = VersionedEditorDraftStore()
+        store.preload(topic, Draft("D body", subject = "D title"))
+        val editor = EditorDraftSession(store, topic)
+        editor.load()
+        val offered = editor.availableOffers.single()
+        editor.save(Draft("", subject = "typed title"))
+
+        val merged = Draft("D body", subject = "typed title", offerToResolve = editor.available(offered))
+        assertTrue(editor.save(merged) is StoreWriteResult.Written)
+
+        assertTrue(store.loadOffers(store.activeOwner, topic).isEmpty())
+        assertTrue(editor.availableOffers.isEmpty())
+        assertNull(editor.available(offered))
+        assertEquals("D body", store.saved[topic]?.body)
+        assertEquals("typed title", store.saved[topic]?.subject)
+    }
+
+    @Test fun `ignoring a new topic offer keeps the typed title - ED121`() = runBlocking {
+        val topic = EditorDraftKey.newTopic(23)
+        val store = VersionedEditorDraftStore()
+        store.preload(topic, Draft("D body", subject = "D title"))
+        val editor = EditorDraftSession(store, topic)
+        editor.load()
+        val offered = editor.availableOffers.single()
+
+        assertTrue(editor.resolveOffer(offered, Draft("", subject = "typed title")) is StoreWriteResult.Written)
+
+        assertEquals("typed title", store.saved[topic]?.subject)
+        assertTrue(store.loadOffers(store.activeOwner, topic).isEmpty())
+        assertTrue(editor.availableOffers.isEmpty())
+    }
+
+    @Test fun `a title alone is offered on a new topic and a blank row never is - ED121`() = runBlocking {
+        val topic = EditorDraftKey.newTopic(23)
+        val store = VersionedEditorDraftStore()
+        store.preload(topic, Draft("  ", subject = "title only"))
+        val titled = EditorDraftSession(store, topic)
+        titled.load()
+        assertEquals(listOf("title only"), titled.availableOffers.map { it.draft.subject })
+
+        store.preload(topic, Draft("  ", subject = " "))
+        val blank = EditorDraftSession(store, topic)
+        blank.load()
+        assertTrue(blank.availableOffers.isEmpty())
+        assertTrue(blank.save(Draft("C")) is StoreWriteResult.Written)
+        assertTrue(store.loadOffers(store.activeOwner, topic).isEmpty())
+    }
+
+    @Test fun `a new private message reads its recipients through the surface - ED121`() = runBlocking {
+        val compose = EditorDraftKey.mpCompose()
+        val emptyEnvelope = "\u0000redface-recipients-v1:0:"
+        val store = VersionedEditorDraftStore()
+        store.preload(compose, Draft("", recipients = emptyEnvelope, isPrivate = true))
+        // The raw value is not blank: only the surface that owns the encoding knows it names nobody.
+        val untouched = EditorDraftSession(store, compose) { false }
+        untouched.load()
+        assertTrue(untouched.availableOffers.isEmpty())
+
+        store.preload(compose, Draft("", recipients = "alice", isPrivate = true))
+        val routed = EditorDraftSession(store, compose) { it.recipients == "alice" }
+        routed.load()
+        val offered = routed.availableOffers.single()
+        assertTrue(routed.save(Draft("", subject = "typed subject", recipients = "bob", isPrivate = true))
+            is StoreWriteResult.Written)
+        assertEquals(listOf(offered), store.loadOffers(store.activeOwner, compose))
+        assertEquals("bob", store.saved[compose]?.recipients)
+    }
+
+    @Test fun `a certified resume of a new topic is C and is not copied aside - ED121`() = runBlocking {
+        val topic = EditorDraftKey.newTopic(23)
+        val store = VersionedEditorDraftStore()
+        store.preload(topic, Draft("C body", subject = "C title"))
+        val editor = EditorDraftSession(store, topic)
+        editor.load()
+        editor.resumeContent()
+
+        assertTrue(editor.availableOffers.isEmpty())
+        assertTrue(editor.save(Draft("C body, continued", subject = "C title")) is StoreWriteResult.Written)
+        assertTrue(store.loadOffers(store.activeOwner, topic).isEmpty())
+    }
+
+    @Test fun `editing a message keeps its single row outside the offered drafts - ED121 scope`() = runBlocking {
+        val store = VersionedEditorDraftStore()
+        for (edit in listOf(EditorDraftKey.editFirstPost(23, 100), EditorDraftKey.editPost(23, 100))) {
+            store.preload(edit, Draft("D body", subject = "D title"))
+            val editor = EditorDraftSession(store, edit)
+            editor.load()
+            assertTrue(editor.availableOffers.isEmpty())
+            assertTrue(editor.save(Draft("C body")) is StoreWriteResult.Written)
+            assertTrue(store.loadOffers(store.activeOwner, edit).isEmpty())
+        }
+    }
 }

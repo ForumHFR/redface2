@@ -180,7 +180,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
     /** #405 — debounced autosave coroutine ; relaunched (cancelling the previous) on each edit. */
     private val submission = EditorSubmissionBinding(
         environment = EditorSubmissionEnvironment(viewModelScope, clock, diagnostics),
-        drafts = EditorDraftSession(draftStore, draftKey),
+        drafts = EditorDraftSession(draftStore, draftKey, ::composeDraftHoldsHeaders),
         callbacks = EditorSubmissionCallbacks<PrivateMessageComposeEffect, EditorError>(
             state = { value ->
                 updateState {
@@ -195,7 +195,10 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
             error = { value -> updateState { it.copy(submitError = value) } },
             success = { value -> _effects.trySend(value) },
             clearError = { error -> updateState { it.copy(submitError = it.submitError.takeUnless { it == error }) } },
-            durableWriteSucceeded = { editorEvents.durableWriteSucceeded() },
+            durableWriteSucceeded = {
+                editorEvents.durableWriteSucceeded()
+                draftSession.refreshOffers()
+            },
         ),
         errors = EditorSubmissionErrors(
             uncertain = EditorErrors.uncertain(EditorErrorSurface.MessageCompose),
@@ -392,14 +395,15 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         }
     }
 
-    fun onDraftRestoreRequested() {
+    /** ED-40/121: [offerId] is the version chosen in the sheet's list; the first one by default. */
+    fun onDraftRestoreRequested(offerId: String? = null) {
         if (!acceptMutation(blockDuringUpload = true)) return
-        draftSession.restoreOfferedDraft()
+        draftSession.restoreOfferedDraft(offerId)
     }
 
-    fun onDraftDiscardRequested() {
+    fun onDraftDiscardRequested(offerId: String? = null) {
         if (!acceptMutation()) return
-        draftSession.discardOfferedDraft()
+        draftSession.discardOfferedDraft(offerId)
     }
 
     private fun loadForm() {
@@ -418,9 +422,9 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
                 }
                 loadedForm = form
                 smileyPicker.refreshFavorites(favoriteStamp)
+                // The session hides an offer identical to the hydrated fields (ED-121, refreshOffers).
                 draftSession.hydrate(form)
-                val liveBody = bodyFieldState.text.toString()
-                updateState { it.withLoadedForm(form, liveBody) }
+                updateState { it.withLoadedForm(form) }
             } catch (cancellation: CancellationException) {
                 throw cancellation
             } catch (_: IOException) {
@@ -433,17 +437,13 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         }
     }
 
-    private fun PrivateMessageComposeUiState.withLoadedForm(
-        form: ReplyForm,
-        liveBody: String,
-    ): PrivateMessageComposeUiState {
+    private fun PrivateMessageComposeUiState.withLoadedForm(form: ReplyForm): PrivateMessageComposeUiState {
         // Hydrate ONLY on the first successful load — a silent refetch after an expired
         // hash_check must not clobber toggles (or a recipient edit) the user changed in between.
         // Mirror of the reply editor's guard.
         if (this@PrivateMessageComposeViewModel.submission.blocksMutation) return copy(isLoadingForm = false)
         val hydrate = !optionsHydratedFromForm
         val nextRecipients = recipients
-        val keepRestoreOffer = restoreOfferDiffersFrom(liveBody)
         return copy(
             isLoadingForm = false,
             formAvailable = true,
@@ -452,9 +452,6 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
             // The composer's `dest` text input comes back through hiddenFields ; a
             // server-side prefill (dest= in the GET) seeds the local field once.
             recipients = nextRecipients,
-            restorableDraft = restorableDraft.takeIf { keepRestoreOffer },
-            restorableSubject = restorableSubject.takeIf { keepRestoreOffer },
-            restorableRecipients = restorableRecipients.takeIf { keepRestoreOffer },
             signatureEnabled = if (hydrate) {
                 form.options.signatureEnabled || form.hiddenFields["signature"] == "1"
             } else {
@@ -473,16 +470,6 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
             optionsHydratedFromForm = true,
         )
     }
-
-    private fun PrivateMessageComposeUiState.restoreOfferDiffersFrom(
-        liveBody: String,
-    ): Boolean =
-        restorableDraft != null &&
-            (
-                restorableDraft != liveBody ||
-                    restorableSubject.orEmpty() != subject ||
-                    EditorRecipientState.decode(restorableRecipients) != recipientState
-                )
 
     fun onRecipientStateChanged(value: EditorRecipientState) {
         if (!acceptMutation()) return
@@ -584,6 +571,7 @@ class PrivateMessageComposeViewModel @AssistedInject constructor(
         submission.launch(permit, EditorDraftStore.Draft(
             body = snapshot.bodyText, subject = snapshot.subject,
             recipients = snapshot.recipientState.encode(), isPrivate = true,
+            offerToResolve = draftSession.pendingOfferResolution(),
         )) {
             val options = ReplyFormOptions(
                 signatureEnabled = snapshot.signatureEnabled, smileyDisabled = snapshot.smileyDisabled,

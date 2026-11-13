@@ -18,6 +18,20 @@ class EditorDraftKeyTest {
     }
 
     @Test
+    fun `offered drafts are kept for replies and new compositions, never for edits - ED121`() {
+        val replies = listOf(EditorDraftKey.reply(29, 123456), EditorDraftKey.mpReply(42))
+        val compositions = listOf(EditorDraftKey.newTopic(29), EditorDraftKey.mpCompose())
+        val others = listOf(
+            EditorDraftKey.editPost(29, 7), EditorDraftKey.editFirstPost(29, 7), EditorDraftKey.report(),
+        )
+        assertEquals(replies, (replies + compositions + others).filter(EditorDraftKey::isReply))
+        assertEquals(compositions, (replies + compositions + others).filter(EditorDraftKey::composesHeaders))
+        assertEquals(
+            replies + compositions, (replies + compositions + others).filter(EditorDraftKey::keepsOfferedDrafts),
+        )
+    }
+
+    @Test
     fun `reply key carries cat and topic id`() {
         assertEquals("reply:29:123456", EditorDraftKey.reply(cat = 29, topicId = 123456))
     }

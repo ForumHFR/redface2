@@ -37,6 +37,7 @@ internal fun TopicFormChromeSurfaces(
     val source = adapter.state.source
     EditorDraftOfferSheet(host.draftOfferOpen, source.restorableDraft != null || source.restorableSubject != null,
         host::closeDraftOffer, adapter::restoreDraft, adapter::discardDraft, offers = source.draftOffers,
+        onRestoreOffer = adapter::restoreOffer, onDiscardOffer = adapter::discardOffer,
         restoreEnabled = adapter.state.scaffold.controlsEnabled && !source.isLoadingForm && !source.isUploading,
         discardEnabled = adapter.state.scaffold.controlsEnabled)
     when (host.surface) {

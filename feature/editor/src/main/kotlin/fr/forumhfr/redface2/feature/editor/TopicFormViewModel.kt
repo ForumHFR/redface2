@@ -288,9 +288,18 @@ class TopicFormViewModel @AssistedInject constructor(
             error = { value -> updateState { it.copy(submitError = value) } },
             success = { value -> _effects.trySend(value) },
             clearError = { error -> updateState { it.copy(submitError = it.submitError.takeUnless { it == error }) } },
-            durableWriteSucceeded = { editorEvents.durableWriteSucceeded() },
+            durableWriteSucceeded = {
+                editorEvents.durableWriteSucceeded()
+                refreshDraftOffers()
+            },
         ),
     )
+
+    /** ED-121: the offered draft a Restore merged into the fields, until a write of C has consumed it. */
+    private var mergedOffer: EditorDraftStore.DraftOffer? = null
+
+    /** ED-121: the offer whose decision is being written. Hidden meanwhile; one decision at a time. */
+    private var decidingOffer: EditorDraftStore.DraftOffer? = null
 
     /**
      * #459 — lowercased pseudo of the authenticated session, or null when anonymous. The upload
@@ -365,6 +374,8 @@ class TopicFormViewModel @AssistedInject constructor(
                 if (authObserved && newUserId != activeUserId) {
                     uploadJob?.cancel()
                     submission.accountChanged()
+                    mergedOffer = null
+                    refreshDraftOffers()
                     loadedForm = null
                     restoration.invalidate()
                     chromeMemory.reset()
@@ -376,10 +387,12 @@ class TopicFormViewModel @AssistedInject constructor(
         }
         viewModelScope.launch {
             val contentRestored = restoreDraftIfAny()
+            refreshDraftOffers()
             draftRestored = true
-            if (!contentRestored && bodyEditedBeforeHydration && _state.value.restorableDraft == null) {
-                scheduleAutosave()
-            }
+            // ED-121: a new topic copies its offered draft aside before writing; an edit must not
+            // write its seed over the only copy of the offer.
+            val offerBlocksWrite = request.mode != TopicFormMode.New && _state.value.restorableDraft != null
+            if (!contentRestored && bodyEditedBeforeHydration && !offerBlocksWrite) scheduleAutosave()
             updateState { it.copy(isInitializing = false, isRestoringSession = false) }
             if (submission.isInitialized) {
                 when (request.mode) {
@@ -436,13 +449,16 @@ class TopicFormViewModel @AssistedInject constructor(
         if (entry == null || submission.blocksMutation) return false
         return when (resolution) {
             EditorSessionRestore.Resume, EditorSessionRestore.Uncertain -> {
+                // ED-121: a certified resume is this composition's own C, never an offered D.
+                if (resolution == EditorSessionRestore.Resume) submission.drafts.resumeContent()
                 val matching = restoration.matches(entry, owner, draftKey)
                 restoreSessionContent(entry.draft, resolution == EditorSessionRestore.Resume || matching)
                 if (matching) bodyFieldState.edit { selection = restoration.selection(length) }
                 true
             }
             EditorSessionRestore.Offer -> {
-                offerOrdinaryDraft(entry.draft)
+                // A new topic reads its offers from the session (refreshDraftOffers), durable ones included.
+                if (request.mode != TopicFormMode.New) offerOrdinaryDraft(entry.draft)
                 false
             }
             EditorSessionRestore.None -> false
@@ -456,6 +472,28 @@ class TopicFormViewModel @AssistedInject constructor(
         if (hasContent && !ignored && _state.value.canOfferDraftRestore(draft)) {
             updateState { it.copy(restorableDraft = draft.body, restorableSubject = draft.subject,
                 draftOffers = listOf(EditorDraftStore.DraftOffer.from(EditorDraftStore.DraftEntry(draft, 0L)))) }
+        }
+    }
+
+    /**
+     * ED-121, new topic: the drafts still offered for this category, most recent first. The row found
+     * at opening and the versions already copied aside are listed together; the first one feeds the
+     * single-offer fields. An offer identical to the fields is hidden, never deleted, and comes back
+     * once they differ. The offer being decided is hidden until its write returns: a refused write
+     * shows it again. Editing a first post keeps its single in-memory offer (#1415).
+     */
+    private fun refreshDraftOffers() {
+        if (request.mode != TopicFormMode.New) return
+        val available = submission.drafts.availableOffers.takeUnless { submission.drafts.invalidated }.orEmpty()
+        if (available.none { it.id == mergedOffer?.id }) mergedOffer = null
+        val deciding = decidingOffer?.id
+        val merged = mergedOffer?.id
+        updateState { current ->
+            val offers = available.filterNot { offer ->
+                offer.id == deciding || (offer.id != merged && current.matches(offer.draft))
+            }
+            val first = offers.firstOrNull()?.draft
+            current.copy(draftOffers = offers, restorableDraft = first?.body, restorableSubject = first?.subject)
         }
     }
 
@@ -544,15 +582,34 @@ class TopicFormViewModel @AssistedInject constructor(
     private fun draftSnapshot(): EditorDraftStore.Draft? {
         val snapshot = _state.value
         val liveBody = bodyFieldState.text.toString()
-        // A title debounce can already be pending when the server seed lands. Preserve the
-        // offered row until an actual body edit or an explicit restore, including on close.
-        val undecidedOffer = snapshot.restorableDraft != null &&
-            (liveBody.isBlank() || liveBody == snapshot.draftHydratedContent)
+        // A title debounce can already be pending when the server seed lands. Fields that hold
+        // nothing of the user's never replace an undecided offer, including on close.
+        val untouchedBody = liveBody.isBlank() || liveBody == snapshot.draftHydratedContent
+        val undecidedOffer = snapshot.restorableDraft != null && untouchedBody && !snapshot.holdsTypedTitle()
         // #1574: a failed GET cannot certify or overwrite the unknown first-post body.
         return if (restoration.canCheckpoint(!snapshot.isAwaitingInitialBody, undecidedOffer)) {
-            EditorDraftStore.Draft(body = liveBody, subject = snapshot.subject.text.ifBlank { null })
+            EditorDraftStore.Draft(body = liveBody, subject = snapshot.subject.text.ifBlank { null },
+                offerToResolve = pendingOfferResolution())
         } else null
     }
+
+    /**
+     * ED-121: on a new topic, a typed title is content of C even over a blank body. It is written
+     * like a body: the store first copies the offered draft aside, so the offer is not overwritten.
+     * The first post of an existing topic is not covered: its only offer lives in the row itself.
+     */
+    private fun TopicFormState.holdsTypedTitle(): Boolean = mode == TopicFormMode.New &&
+        subject.text.isNotBlank() && subject.text != subjectHydratedContent
+
+    /** ED-121: a merged offer that is still offered; every write of C carries it until it is consumed. */
+    private fun pendingOfferResolution(): EditorDraftStore.DraftOffer? = submission.drafts.available(mergedOffer)
+
+    /** The fields as they are: an explicit decision on an offer writes C, whatever was typed. */
+    private fun liveDraft(): EditorDraftStore.Draft = EditorDraftStore.Draft(
+        body = bodyFieldState.text.toString(),
+        subject = _state.value.subject.text.ifBlank { null },
+        offerToResolve = pendingOfferResolution(),
+    )
 
     /** #803 pattern — one-shot latch : a committed close is never re-emitted. */
     private var closeRequested = false
@@ -618,6 +675,7 @@ class TopicFormViewModel @AssistedInject constructor(
             is TopicFormIntent.SmileySelected,
             is TopicFormIntent.ImageUrlInserted,
             is TopicFormIntent.ImagesPicked,
+            is TopicFormIntent.DraftOfferRestored,
             TopicFormIntent.DraftRestoreRequested -> true
             else -> false
         }
@@ -625,7 +683,9 @@ class TopicFormViewModel @AssistedInject constructor(
     @Suppress("CyclomaticComplexMethod") // MVI when-dispatch over the TopicFormIntent variants ; flat by design.
     fun submit(intent: TopicFormIntent) {
         // Unknown seed: refuse the restore before any guard side effect (same order as the PM reply).
-        if (intent == TopicFormIntent.DraftRestoreRequested && _state.value.isLoadingForm) return
+        val restoring = intent == TopicFormIntent.DraftRestoreRequested ||
+            intent is TopicFormIntent.DraftOfferRestored
+        if (restoring && _state.value.isLoadingForm) return
         if (intent.mutatesEditor && !acceptMutation(blockDuringUpload = intent.mutatesBody)) return
         when (intent) {
             TopicFormIntent.Started -> { screenStopped = false }
@@ -663,7 +723,9 @@ class TopicFormViewModel @AssistedInject constructor(
             is TopicFormIntent.ImagePickerEventReceived -> onImagePickerEvent(intent.event)
             TopicFormIntent.UploadErrorDismissed -> updateState { it.copy(uploadError = null) }
             TopicFormIntent.DraftRestoreRequested -> onDraftRestoreRequested()
+            is TopicFormIntent.DraftOfferRestored -> onDraftRestoreRequested(intent.id)
             TopicFormIntent.DraftDiscardRequested -> onDraftDiscardRequested()
+            is TopicFormIntent.DraftOfferDiscarded -> onDraftDiscardRequested(intent.id)
             TopicFormIntent.CloseRequested -> onCloseRequested()
             TopicFormIntent.UnsavedCloseDismissed -> onUnsavedCloseDecided(leave = false)
             TopicFormIntent.UnsavedCloseConfirmed -> onUnsavedCloseDecided(leave = true)
@@ -675,17 +737,31 @@ class TopicFormViewModel @AssistedInject constructor(
      * (a blank suffix counts as untouched), keep text typed after the seed after the draft, or append the
      * draft after the trimmed field otherwise.
      * Same rule as the post editor and the private message editors (R0c, #1512 / #1553).
+     * A new topic restores the offer chosen in the sheet's list ([offerId]), the first one by default.
      */
-    private fun onDraftRestoreRequested() {
+    private fun onDraftRestoreRequested(offerId: String? = null) {
         val snapshot = _state.value
         if (snapshot.isLoadingForm) return
-        val offeredBody = snapshot.restorableDraft ?: return
-        val body = restoredBody(bodyFieldState.text.toString(), offeredBody, snapshot.draftHydratedContent)
+        if (request.mode == TopicFormMode.New) {
+            snapshot.draftOffer(offerId)?.let(::restoreOffer)
+        } else {
+            val offeredBody = snapshot.restorableDraft ?: return
+            applyOfferedDraft(offeredBody, snapshot.restorableSubject)
+            scheduleAutosave()
+        }
+    }
+
+    private fun TopicFormState.draftOffer(id: String?): EditorDraftStore.DraftOffer? =
+        if (id == null) draftOffers.firstOrNull() else draftOffers.firstOrNull { it.id == id }
+
+    /** ED-89: one undoable body edit, caret at the end; a live title always wins over the offered one. */
+    private fun applyOfferedDraft(offeredBody: String, offeredSubject: String?) {
+        val body = restoredBody(bodyFieldState.text.toString(), offeredBody, _state.value.draftHydratedContent)
         // A title-only offer leaves the body (and its caret) alone; any other restore is one edit, caret at the end.
         if (offeredBody.isNotBlank()) replaceBody(body)
         updateState { current ->
             // A live subject wins, including for a title-only offer.
-            val subject = current.subject.text.ifBlank { current.restorableSubject.orEmpty() }
+            val subject = current.subject.text.ifBlank { offeredSubject.orEmpty() }
             current.copy(
                 subject = TextFieldValue(text = subject, selection = TextRange(subject.length)),
                 restorableDraft = null,
@@ -697,7 +773,47 @@ class TopicFormViewModel @AssistedInject constructor(
         }
         if (body.isNotBlank()) restoration.decide(EditorSessionField.Body)
         if (_state.value.subject.text.isNotBlank()) restoration.decide(EditorSessionField.Subject)
-        scheduleAutosave()
+    }
+
+    /**
+     * ED-121: merge D into the fields once (ED-89), then write C and consume D in one transaction.
+     * A refused write leaves D offered; deciding it again persists the fields without a second merge,
+     * and any later write of C consumes it too ([pendingOfferResolution]).
+     */
+    private fun restoreOffer(offer: EditorDraftStore.DraftOffer) {
+        if (decidingOffer != null) return
+        if (mergedOffer?.id != offer.id) applyOfferedDraft(offer.draft.body, offer.draft.subject)
+        mergedOffer = offer
+        decideOffer(offer) { submission.persist(liveDraft()) }
+    }
+
+    /** ED-121: « Ignorer » consumes this offer only; the fields are written as they are, never blanked. */
+    private fun discardOffer(offer: EditorDraftStore.DraftOffer) {
+        if (decidingOffer != null) return
+        decideOffer(offer) {
+            submission.drafts.resolveOffer(offer, liveDraft().copy(offerToResolve = null))
+                .also(submission::resolveDraftWrite)
+        }
+    }
+
+    private fun decideOffer(
+        offer: EditorDraftStore.DraftOffer,
+        write: suspend () -> EditorDraftStore.StoreWriteResult?,
+    ) {
+        decidingOffer = offer
+        refreshDraftOffers()
+        viewModelScope.launch {
+            var written = false
+            try {
+                submission.flush(null)
+                written = write() is EditorDraftStore.StoreWriteResult.Written
+            } finally {
+                decidingOffer = null
+                refreshDraftOffers()
+                // A refused decision keeps the fields; the next autosave retries their write.
+                if (!written) scheduleAutosave()
+            }
+        }
     }
 
     /** ED-89 body rule, extracted from [onDraftRestoreRequested] to keep it under the detekt complexity threshold. */
@@ -724,8 +840,18 @@ class TopicFormViewModel @AssistedInject constructor(
         if (!bodyEditedBeforeHydration) bodyFieldState.undoState.clearHistory()
     }
 
-    /** #405 — discard the cached draft : delete the row and clear the banner. */
-    private fun onDraftDiscardRequested() {
+    /**
+     * #405 — discard the cached draft and clear the banner. A new topic consumes the chosen offer
+     * only (ED-121); the first post of an existing topic still blanks its single row.
+     */
+    private fun onDraftDiscardRequested(offerId: String? = null) {
+        if (request.mode == TopicFormMode.New) {
+            _state.value.draftOffer(offerId)?.let { offer ->
+                markDraftRestoreOfferIgnored(offer.draft)
+                discardOffer(offer)
+            }
+            return
+        }
         val offered = _state.value.restorableDraft ?: return
         markDraftRestoreOfferIgnored(
             EditorDraftStore.Draft(body = offered, subject = _state.value.restorableSubject),
@@ -882,7 +1008,8 @@ class TopicFormViewModel @AssistedInject constructor(
         updateState { current ->
             current.copy(
                 subject = value,
-                restorableSubject = if (current.restorableDraft != null) {
+                // ED-121: on a new topic an offer is an immutable version; typing never rewrites it.
+                restorableSubject = if (current.restorableDraft != null && current.mode != TopicFormMode.New) {
                     value.text.ifBlank { null }
                 } else {
                     current.restorableSubject
@@ -1009,7 +1136,8 @@ class TopicFormViewModel @AssistedInject constructor(
         snapshot: TopicFormState,
         form: TopicForm,
     ) {
-        val draft = EditorDraftStore.Draft(body = snapshot.bodyText, subject = snapshot.subject.text)
+        val draft = EditorDraftStore.Draft(body = snapshot.bodyText, subject = snapshot.subject.text,
+            offerToResolve = pendingOfferResolution())
         submission.launch(permit, draft) { sendSnapshot(snapshot, form) }
     }
 
@@ -1187,6 +1315,7 @@ class TopicFormViewModel @AssistedInject constructor(
         }
         val selectedSubcat = snapshot.subcategoryForForm(form)
         updateState { it.withFormHydration(form, hydrateBody, selectedSubcat) }
+        refreshDraftOffers()
     }
 
     /** D3: decide once before StateFlow.update, whose transform may be retried. */
@@ -1209,7 +1338,8 @@ class TopicFormViewModel @AssistedInject constructor(
         val nextSubject = subject.hydratedWith(form.subject, hydrateSubject)
         val nextBody = bodyFieldState.text.toString()
         val hydrateOptions = !optionsHydratedFromForm
-        val keepRestoreOffer = restoreOfferDiffersFrom(nextSubject, nextBody)
+        // A new topic derives its offers from the session right after this reduction (ED-121).
+        val keepRestoreOffer = mode == TopicFormMode.New || restoreOfferDiffersFrom(nextSubject, nextBody)
         return copy(
             isLoadingForm = false,
             subject = nextSubject,

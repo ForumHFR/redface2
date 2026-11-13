@@ -14,8 +14,19 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
-/** ED-161/170: serialize autosaves and attempts; a stale writer never replaces a durable attempt. */
-class EditorDraftSession(private val store: EditorDraftStore, private val key: String?) {
+/**
+ * ED-161/170: serialize autosaves and attempts; a stale writer never replaces a durable attempt.
+ *
+ * ED-121: [offerableHeaders] tells whether the headers of a loaded row are content worth offering
+ * when its body is blank. It is only asked for compositions with headers of their own
+ * ([EditorDraftKey.composesHeaders]). Recipients have a surface encoding whose empty form is not a
+ * blank string, so the surface that owns that encoding supplies the reading.
+ */
+class EditorDraftSession(
+    private val store: EditorDraftStore,
+    private val key: String?,
+    private val offerableHeaders: (Draft) -> Boolean = { !it.subject.isNullOrBlank() },
+) {
     private val writes = Mutex()
     var owner: String? = null
         private set
@@ -74,7 +85,6 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
     var invalidated = false
         private set
 
-    @Suppress("ComplexCondition") // Eligibility requires reply scope, ordinary content and absence of quote-only proof.
     suspend fun load(): DraftEntry? {
         readable = false
         offersLoaded = false
@@ -115,9 +125,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         offers = key?.let { store.loadOffers(owner, it) }.orEmpty()
         offersLoaded = true
         val eligible = entry?.takeIf {
-            it.attempt == null && it.draft.body.isNotBlank() &&
-                bodyProvenance?.isQuoteOnly(it.draft.body) != true &&
-                (key?.startsWith("reply:") == true || key?.startsWith("mpreply:") == true)
+            it.attempt == null && isOfferable(it.draft) && bodyProvenance?.isQuoteOnly(it.draft.body) != true
         }
         protectedOffer = eligible?.let { candidate ->
             offers.firstOrNull { it.draft.restoreOfferFingerprint() == candidate.draft.restoreOfferFingerprint() &&
@@ -125,6 +133,16 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
             } ?: DraftOffer.from(candidate)
         }
         return entry
+    }
+
+    /**
+     * ED-121: ordinary content that a later write of C must copy aside before replacing it. A new
+     * topic or a new private message is also offered for its headers alone.
+     */
+    private fun isOfferable(draft: Draft): Boolean {
+        val context = key?.takeIf(EditorDraftKey::keepsOfferedDrafts)
+        return context != null && (draft.body.isNotBlank() ||
+            (EditorDraftKey.composesHeaders(context) && offerableHeaders(draft)))
     }
 
     fun invalidate() { invalidated = true; stagedBody = null }
@@ -176,6 +194,9 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         }
     }
 
+    /** A still undecided offer by its identity, including the not-yet-copied source; null once resolved. */
+    fun available(offer: DraftOffer?): DraftOffer? = availableOffers.firstOrNull { it.id == offer?.id }
+
     /** Resolve the legacy single-offer UI to a stable version, including the not-yet-copied source. */
     fun offered(body: String): DraftOffer? =
         (listOfNotNull(protectedOffer) + offers).firstOrNull { it.draft.body == body }
@@ -205,7 +226,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
                 store.enqueueInlineQuoteRequest(owner, checkNotNull(key), request, version)
             }
             if (result is StoreWriteResult.Written) {
-                val reply = key?.startsWith("reply:") == true || key?.startsWith("mpreply:") == true
+                val reply = key?.let(EditorDraftKey::isReply) == true
                 if (reply && unresolved == null && bodyProvenance?.isQuoteOnly(lastBody) == true) {
                     lastBody = ""
                     bodyProvenance = null

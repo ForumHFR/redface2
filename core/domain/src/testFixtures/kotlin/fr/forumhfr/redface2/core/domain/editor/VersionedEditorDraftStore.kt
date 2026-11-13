@@ -106,7 +106,7 @@ open class VersionedEditorDraftStore : EditorDraftStore {
     }
 
     private fun DraftEntry.isQuoteOnly(key: String): Boolean =
-        attempt == null && (key.startsWith("reply:") || key.startsWith("mpreply:")) &&
+        attempt == null && EditorDraftKey.isReply(key) &&
             draft.bodyProvenance?.isQuoteOnly(draft.body) == true
 
     override suspend fun resolveOffer(
@@ -158,13 +158,19 @@ open class VersionedEditorDraftStore : EditorDraftStore {
         )))
     }
 
-    @Suppress("ComplexCondition") // Mirrors raw reply writer eligibility.
+    @Suppress("ComplexCondition") // Mirrors raw writer eligibility (ED-121 scope, ordinary content).
     private fun protection(key: String, entry: DraftEntry?, draft: Draft): DraftOffer? =
         draft.offerToPreserve ?: entry?.takeIf {
-            draft.protectCurrent && it.attempt == null && it.draft.body.isNotBlank() &&
-                it.draft.bodyProvenance?.isQuoteOnly(it.draft.body) != true &&
-                (key.startsWith("reply:") || key.startsWith("mpreply:"))
+            draft.protectCurrent && it.attempt == null && it.draft.holdsOfferableContent(key) &&
+                it.draft.bodyProvenance?.isQuoteOnly(it.draft.body) != true
         }?.let(DraftOffer::from)
+
+    /** Mirrors Room: headers alone are content on a new topic or a new private message, read raw. */
+    private fun Draft.holdsOfferableContent(key: String): Boolean {
+        val headers = !subject.isNullOrBlank() || !recipients.isNullOrBlank()
+        return EditorDraftKey.keepsOfferedDrafts(key) &&
+            (body.isNotBlank() || (EditorDraftKey.composesHeaders(key) && headers))
+    }
 
     private fun offerCandidate(owner: String?, key: String, entry: DraftEntry?): DraftOffer? {
         val source = entry?.let { protection(key, it, it.draft.copy(offerToPreserve = null, protectCurrent = true)) }

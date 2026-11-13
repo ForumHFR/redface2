@@ -76,6 +76,13 @@ internal class PrivateMessageComposeChromeAdapter(
     fun discardDraft() {
         if (state.scaffold.controlsEnabled) { actions.discard(); closeDraftOffer() }
     }
+    /** ED-40/121: one decision per listed version, under the same guards as the single offer. */
+    fun restoreOffer(id: String) {
+        if (state.restoreEnabled) { actions.restoreOffer(id); closeDraftOffer() }
+    }
+    fun discardOffer(id: String) {
+        if (state.scaffold.controlsEnabled) { actions.discardOffer(id); closeDraftOffer() }
+    }
     fun retryFormLoad() = actions.reload()
     /** ED-130 replaces the whole editor: no header, sheet or detail comes back after « Réessayer ». */
     fun closeLayersForFormFailure(dismissSmileys: () -> Unit) {

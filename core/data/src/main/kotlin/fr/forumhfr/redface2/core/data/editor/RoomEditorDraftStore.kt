@@ -6,6 +6,7 @@ import fr.forumhfr.redface2.core.database.entities.EditorDraftEntity
 import fr.forumhfr.redface2.core.database.entities.EditorDraftOfferEntity
 import fr.forumhfr.redface2.core.domain.auth.AuthRepository
 import fr.forumhfr.redface2.core.domain.coroutines.IoDispatcher
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.Attempt
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptOutcome
@@ -346,7 +347,7 @@ class RoomEditorDraftStore @Inject constructor(
     )
 
     private fun EditorDraftEntity.isQuoteOnly(key: String): Boolean =
-        attemptState == null && (key.startsWith("reply:") || key.startsWith("mpreply:")) &&
+        attemptState == null && EditorDraftKey.isReply(key) &&
             bodyProvenance?.let { EditorBodyProvenanceCodec.decode(it)?.isQuoteOnly(body) } == true
 
     private suspend fun Draft.protection(owner: String, key: String): EditorDraftOfferEntity? =
@@ -363,12 +364,14 @@ class RoomEditorDraftStore @Inject constructor(
         offerId, sourceVersion, Draft(body, subject, recipients, isPrivate, updatedAt),
     )
 
-    /** Q's first write protects the pre-existing D without changing its date or offer identity. */
-    @Suppress("ComplexCondition") // One eligibility guard: existing, ordinary, nonblank reply content.
+    /**
+     * Q's first write protects the pre-existing D without changing its date or offer identity.
+     * This is also the fallback of a writer that could not read the offers (protectCurrent). It
+     * reads headers raw: an empty recipients envelope is not blank, so it may keep a row whose
+     * headers show nothing. Surfaces hide such an offer; nothing typed is lost either way.
+     */
     private suspend fun offerCandidate(previous: EditorDraftEntity?, key: String): EditorDraftOfferEntity? {
-        if (previous == null || previous.attemptState != null || previous.body.isBlank() ||
-            !(key.startsWith("reply:") || key.startsWith("mpreply:"))
-        ) return null
+        if (previous == null || previous.attemptState != null || !previous.holdsOfferableContent(key)) return null
         val draft = previous.toDraft(key)
         return if (draft.bodyProvenance?.isQuoteOnly(draft.body) == true) {
             null
@@ -379,6 +382,14 @@ class RoomEditorDraftStore @Inject constructor(
             } ?: DraftOffer.from(DraftEntry(draft, previous.contentVersion)).toEntity(previous.ownerId, key)
         }
     }
+
+    /** ED-121: a body anywhere it is kept; a title or recipients alone on a new topic or a new MP. */
+    private fun EditorDraftEntity.holdsOfferableContent(key: String): Boolean {
+        val headers = !subject.isNullOrBlank() || !recipients.isNullOrBlank()
+        return EditorDraftKey.keepsOfferedDrafts(key) &&
+            (body.isNotBlank() || (EditorDraftKey.composesHeaders(key) && headers))
+    }
+
     private fun rowKey(owner: String, key: String): String = "$owner|$key"
     private suspend fun activeOwnerId(): String? =
         (authRepository.observeAuthState().first() as? AuthState.Authenticated)?.pseudo?.lowercase()

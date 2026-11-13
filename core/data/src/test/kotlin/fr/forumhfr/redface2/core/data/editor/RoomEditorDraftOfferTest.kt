@@ -105,6 +105,47 @@ class RoomEditorDraftOfferTest {
         }
     }
 
+    @Test fun `a typed header keeps the offered new topic and new MP drafts in their own rows - ED121`() = runTest {
+        for (context in listOf("newtopic:23", "mpnew")) {
+            val store = store()
+            val recipients = "alice".takeIf { context == "mpnew" }
+            store.saveIfVersion("alice", context, Draft("D body", "D title", recipients, protectCurrent = false), 0)
+            now = 5000
+            val editor = EditorDraftSession(store(), context) { true }
+            editor.load()
+            val offered = editor.availableOffers.single()
+
+            assertTrue(editor.save(Draft("", "typed title", recipients)) is StoreWriteResult.Written)
+
+            val stored = store.loadOffers("alice", context).single()
+            assertEquals(offered, stored)
+            assertEquals(Draft("D body", "D title", recipients, context == "mpnew", 1234L), stored.draft)
+            assertEquals("typed title", store.load("alice", context)?.subject)
+            assertEquals("", store.load("alice", context)?.body)
+            // Restore: C and the consumption of D commit together.
+            val merged = Draft("D body", "typed title", recipients, offerToResolve = editor.available(offered))
+            assertTrue(editor.save(merged) is StoreWriteResult.Written)
+            assertTrue(store.loadOffers("alice", context).isEmpty())
+            assertEquals("D body", store.load("alice", context)?.body)
+            now = 1234
+        }
+    }
+
+    @Test fun `private offers of a new MP leave with the account and edits are never copied - ED121`() = runTest {
+        val store = store()
+        store.saveIfVersion("alice", "mpnew", Draft("D body", "D subject", "bob", protectCurrent = false), 0)
+        assertTrue(store.saveIfVersion("alice", "mpnew", Draft("", "typed subject", "bob"), 1)
+            is StoreWriteResult.Written)
+        assertEquals(listOf("D body"), store.loadOffers("alice", "mpnew").map { it.draft.body })
+        store.purgePrivateForUser("alice")
+        assertTrue(store.loadOffers("alice", "mpnew").isEmpty())
+
+        store.saveIfVersion("alice", "editfp:23:100", Draft("D body", "D title"), 0)
+        assertTrue(store.saveIfVersion("alice", "editfp:23:100", Draft("C body", "C title"), 1)
+            is StoreWriteResult.Written)
+        assertTrue(store.loadOffers("alice", "editfp:23:100").isEmpty())
+    }
+
     @Test fun `failed C write rolls back the offer copy and concurrent CAS cannot copy the loser`() = runTest {
         val store = store()
         store.saveIfVersion("alice", key, Draft("D"), 0)
