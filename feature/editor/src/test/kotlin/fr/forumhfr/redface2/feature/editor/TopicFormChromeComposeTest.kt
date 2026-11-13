@@ -60,6 +60,11 @@ import org.robolectric.shadows.ShadowDialog
 @Config(sdk = [34], qualifiers = "fr-rFR-w800dp-h800dp-xxhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class TopicFormChromeComposeTest {
+    private var settingsOpens = 0
+    private val openSettings: () -> Unit = {
+        assertNull(fixture.adapter.host.surface)
+        settingsOpens++
+    }
     @get:Rule val compose = createComposeRule()
     private var fixture = TopicFormChromeFixture()
     private lateinit var chrome: EditorScaffoldChrome
@@ -83,7 +88,8 @@ class TopicFormChromeComposeTest {
                 bodyFocusRestoreAllowed = a.host.surface == null && a.host.detail == null,
                 onSystemBack = { a.back() },
                 overlay = { restore, body ->
-                    TopicFormChromeSurfaces(a, fixture.body, smileys, { returns++; restore() }, compact, body)
+                    TopicFormChromeSurfaces(a, fixture.body, smileys, { returns++; restore() }, compact, body,
+                        onOpenEditorSettings = openSettings)
                     BackHandler { a.back() }
                 })
         }
@@ -93,6 +99,27 @@ class TopicFormChromeComposeTest {
         val event = fixture.events.visibleEvent!!
         fixture.adapter.host.barActions.onEvent(event.key, EditorEventAction.Complete)
     }
+    @Test fun settingsTapClosesOptionsBeforeCallingNavigationOnce() {
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Options").performClick()
+        compose.onNodeWithText("Réglages de l’éditeur").performScrollTo().performClick()
+        compose.onNodeWithTag("editor-options-sheet").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(1, settingsOpens)
+            assertNull(fixture.adapter.host.surface)
+        }
+    }
+
+    @Test fun settingsAreDisabledDuringUploadAndSubmission() {
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Options").performClick()
+        compose.runOnIdle { fixture.state = fixture.state.copy(isUploading = true) }
+        compose.onNodeWithText("Réglages de l’éditeur").performScrollTo().assertIsNotEnabled()
+        compose.runOnIdle { fixture.state = fixture.state.copy(isUploading = false, isSubmitting = true) }
+        compose.onNodeWithText("Réglages de l’éditeur").assertIsNotEnabled()
+        compose.runOnIdle { assertEquals(0, settingsOpens) }
+    }
+
     @Test fun `ED101 empty creation focuses title and completion returns focus and selection to body`() {
         fixture.state = fixture.state.copy(subject = TextFieldValue())
         compose.setContent { Content() }

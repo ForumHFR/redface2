@@ -79,6 +79,7 @@ fun TopicFormScreen(
     viewModel: TopicFormViewModel = hiltViewModel<TopicFormViewModel, TopicFormViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },
     ),
+    onOpenEditorSettings: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -154,6 +155,11 @@ fun TopicFormScreen(
             chromeEvents = viewModel.editorEvents,
             chromeMemory = viewModel.chromeMemory,
             bodyCaretRevealResetKey = remember(viewModel) { { viewModel.bodyCaretRevealResetKey } },
+            onOpenEditorSettings = {
+                // Capture the live draft even if Nav3 removes this composition before delivering ON_STOP.
+                viewModel.submit(TopicFormIntent.Stopped)
+                onOpenEditorSettings()
+            },
         )
     }
 }
@@ -172,6 +178,7 @@ internal fun TopicFormContent(
     chromeMemory: TopicFormChromeMemory = remember { TopicFormChromeMemory() },
     windowMetrics: EditorWindowMetrics? = null,
     bodyCaretRevealResetKey: () -> Int = { 0 },
+    onOpenEditorSettings: () -> Unit = {},
 ) {
     val source = rememberUpdatedState(state)
     val dispatch = rememberUpdatedState(onIntent)
@@ -197,7 +204,7 @@ internal fun TopicFormContent(
     }
     CompositionLocalProvider(LocalEditorTooltipHost provides remember { EditorTooltipHost() }) {
         TopicFormChrome(host, bodyFieldState, bodyInputTransformation, bodyScrollState, smileyPicker, window,
-            modifier, bodyCaretRevealResetKey)
+            modifier, bodyCaretRevealResetKey, onOpenEditorSettings)
     }
 }
 
@@ -212,6 +219,7 @@ private fun TopicFormChrome(
     window: EditorWindowMetrics,
     modifier: Modifier,
     bodyCaretRevealResetKey: () -> Int,
+    onOpenEditorSettings: () -> Unit,
 ) {
     val host = adapter.host
     val state = adapter.state.source
@@ -233,7 +241,8 @@ private fun TopicFormChrome(
             EditorPreview(state.isPreviewVisible, state.preview, body, focus, PostMediaDiskCachePolicy.ENABLED,
                 stringResource(R.string.editor_preview_title), Modifier.testTag("topic-form-preview"), draft)
         }, overlay = { restore, content ->
-            TopicFormChromeSurfaces(adapter, body, smileys, restore, window.compactHeight, content)
+            TopicFormChromeSurfaces(adapter, body, smileys, restore, window.compactHeight, content,
+                onOpenEditorSettings)
             // Register after bar/panels so activity Back uses the same ED-85 resolver on every level.
             BackHandler(onBack = back)
         })

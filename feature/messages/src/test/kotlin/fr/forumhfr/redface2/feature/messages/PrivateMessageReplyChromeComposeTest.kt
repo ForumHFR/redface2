@@ -68,6 +68,11 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [34], qualifiers = "fr-rFR-w800dp-h800dp-xxhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class PrivateMessageReplyChromeComposeTest {
+    private var settingsOpens = 0
+    private val openSettings: () -> Unit = {
+        assertNull(f.adapter.surface)
+        settingsOpens++
+    }
     @get:Rule val compose = createComposeRule()
     private val f = PrivateMessageReplyChromeFixture()
     private val uncertain = EditorErrors.uncertain(EditorErrorSurface.MessageReply)
@@ -101,11 +106,33 @@ class PrivateMessageReplyChromeComposeTest {
         CompositionLocalProvider(LocalSoftwareKeyboardController provides keyboard) {
             InterceptPlatformTextInput(input) {
                 RedfaceTheme {
-                    PrivateMessageReplyTestContent(f.state, f.body, f.actions, f.events, f.memory, autoOpen)
+                    PrivateMessageReplyTestContent(f.state, f.body, f.actions, f.events, f.memory, autoOpen,
+                        onOpenEditorSettings = openSettings)
                 }
             }
         }
     }
+    @Test fun settingsTapClosesOptionsBeforeCallingNavigationOnce() {
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Options").performClick()
+        compose.onNodeWithText("Réglages de l’éditeur").performScrollTo().performClick()
+        compose.onNodeWithTag("editor-options-sheet").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(1, settingsOpens)
+            assertNull(f.adapter.surface)
+        }
+    }
+
+    @Test fun settingsAreDisabledDuringUploadAndSubmission() {
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Options").performClick()
+        compose.runOnIdle { f.state = f.state.copy(isUploading = true) }
+        compose.onNodeWithText("Réglages de l’éditeur").performScrollTo().assertIsNotEnabled()
+        compose.runOnIdle { f.state = f.state.copy(isUploading = false, isSubmitting = true) }
+        compose.onNodeWithText("Réglages de l’éditeur").assertIsNotEnabled()
+        compose.runOnIdle { assertEquals(0, settingsOpens) }
+    }
+
     @Test fun `ED10 ED40 form title restore and owner recipients project into distinct slots`() {
         compose.setContent { Content() }
         compose.onNodeWithText("Répondre").assertExists()

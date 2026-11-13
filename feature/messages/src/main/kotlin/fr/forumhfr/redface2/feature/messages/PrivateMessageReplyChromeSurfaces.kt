@@ -26,6 +26,7 @@ internal fun PrivateMessageReplyChromeSurfaces(
     autoOpenRecipients: Boolean,
     onReturnToBody: () -> Unit,
     body: @Composable () -> Unit,
+    onOpenEditorSettings: () -> Unit = {},
 ) {
     // ED-45/170: only the detail's Masquer may acknowledge; its closing, Back and reload stay visual.
     EditorEventDetails(adapter.detail, bodyState, adapter::closeDetails, adapter::reload,
@@ -36,7 +37,7 @@ internal fun PrivateMessageReplyChromeSurfaces(
         onRestoreOffer = adapter::restoreOffer, onDiscardOffer = adapter::discardOffer,
         restoreEnabled = adapter.state.restoreEnabled, discardEnabled = adapter.state.scaffold.controlsEnabled,
         message = stringResource(R.string.messages_draft_restore_message))
-    PrivateMessageReplyChromeSheets(adapter, autoOpenRecipients, onReturnToBody)
+    PrivateMessageReplyChromeSheets(adapter, autoOpenRecipients, onReturnToBody, onOpenEditorSettings)
     if (adapter.surface == PrivateMessageReplyChromeSurface.Smileys && adapter.state.canInsert) {
         val picker = smileys.state.collectAsStateWithLifecycle().value as? SmileyPickerState.Open
         if (picker != null) SmileyPickerSheet(picker, { smileys.dismiss(); adapter.closeSurface() },
@@ -49,6 +50,7 @@ internal fun PrivateMessageReplyChromeSheets(
     adapter: PrivateMessageReplyChromeAdapter,
     autoOpenRecipients: Boolean,
     onReturnToBody: () -> Unit,
+    onOpenEditorSettings: () -> Unit = {},
 ) {
     val source = adapter.state.source
     LaunchedEffect(adapter, autoOpenRecipients, adapter.state.recipientsEnabled, adapter.scaffoldChrome().event?.key) {
@@ -74,7 +76,9 @@ internal fun PrivateMessageReplyChromeSheets(
                 EditorOptionsLabels(stringResource(R.string.messages_reply_options_title),
                     stringResource(R.string.messages_reply_option_signature),
                     stringResource(R.string.messages_reply_option_smiley_disabled),
-                    stringResource(R.string.messages_reply_option_email_notification)))
+                    stringResource(R.string.messages_reply_option_email_notification)),
+                onOpenSettings = { adapter.openSettings(onOpenEditorSettings) },
+                settingsEnabled = !source.isUploading)
         }
         else -> Unit
     }

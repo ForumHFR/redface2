@@ -61,6 +61,7 @@ fun PostEditorScreen(
     viewModel: PostEditorViewModel = hiltViewModel<PostEditorViewModel, PostEditorViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },
     ),
+    onOpenEditorSettings: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -118,6 +119,11 @@ fun PostEditorScreen(
             chromeEvents = viewModel.chromeEvents,
             chromeMemory = viewModel.chromeMemory,
             bodyCaretRevealResetKey = remember(viewModel) { { viewModel.bodyCaretRevealResetKey } },
+            onOpenEditorSettings = {
+                // Capture the live draft even if Nav3 removes this composition before delivering ON_STOP.
+                viewModel.submit(PostEditorIntent.Stopped)
+                onOpenEditorSettings()
+            },
         )
     }
 }
@@ -136,6 +142,7 @@ internal fun PostEditorContent(
     chromeMemory: EditorHostMemory<PostEditorChromeSurface> = remember { EditorHostMemory() },
     windowMetrics: EditorWindowMetrics? = null,
     bodyCaretRevealResetKey: () -> Int = { 0 },
+    onOpenEditorSettings: () -> Unit = {},
 ) {
     val source = rememberUpdatedState(state)
     val dispatch = rememberUpdatedState(onIntent)
@@ -161,7 +168,7 @@ internal fun PostEditorContent(
     }
     CompositionLocalProvider(LocalEditorTooltipHost provides remember { EditorTooltipHost() }) {
         PostEditorChrome(host, bodyFieldState, bodyInputTransformation, bodyScrollState, smileyPicker, window,
-            modifier, bodyCaretRevealResetKey)
+            modifier, bodyCaretRevealResetKey, onOpenEditorSettings)
     }
 }
 
@@ -176,6 +183,7 @@ private fun PostEditorChrome(
     window: EditorWindowMetrics,
     modifier: Modifier,
     bodyCaretRevealResetKey: () -> Int,
+    onOpenEditorSettings: () -> Unit,
 ) {
     val state = host.state.source
     val tooltips = requireNotNull(LocalEditorTooltipHost.current)
@@ -198,7 +206,7 @@ private fun PostEditorChrome(
                 draft()
             }
         }, overlay = { restore, content ->
-            PostEditorChromeSurfaces(host, body, smileys, restore, content)
+            PostEditorChromeSurfaces(host, body, smileys, restore, content, onOpenEditorSettings)
             // Registered after the bar and panels: all activity layers use the same ED-85 resolver.
             // Native sheet/detail/dialog dispatchers still consume their own levels first.
             // Reducing a sublevel or Format here still returns keyboard focus to its bar trigger.

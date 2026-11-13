@@ -37,6 +37,7 @@ internal fun PrivateMessageComposeChromeSurfaces(
     smileys: SmileyPickerController,
     onReturnToBody: () -> Unit,
     body: @Composable () -> Unit,
+    onOpenEditorSettings: () -> Unit = {},
 ) {
     val source = adapter.state.source
     LaunchedEffect(source.isInitializing, source.isLoadingForm, adapter.state.scaffold.controlsEnabled,
@@ -61,7 +62,9 @@ internal fun PrivateMessageComposeChromeSurfaces(
                 EditorOptionsLabels(stringResource(R.string.messages_reply_options_title),
                     stringResource(R.string.messages_reply_option_signature),
                     stringResource(R.string.messages_reply_option_smiley_disabled),
-                    stringResource(R.string.messages_reply_option_email_notification)))
+                    stringResource(R.string.messages_reply_option_email_notification)),
+                onOpenSettings = { adapter.openSettings(onOpenEditorSettings) },
+                settingsEnabled = !source.isUploading)
         }
         PrivateMessageComposeChromeSurface.Smileys -> {
             val picker = smileys.state.collectAsStateWithLifecycle().value as? SmileyPickerState.Open

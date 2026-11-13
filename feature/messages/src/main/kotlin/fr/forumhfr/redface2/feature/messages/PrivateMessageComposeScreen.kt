@@ -54,6 +54,7 @@ fun PrivateMessageComposeScreen(
     viewModel: PrivateMessageComposeViewModel = hiltViewModel<
         PrivateMessageComposeViewModel, PrivateMessageComposeViewModel.Factory
     >(creationCallback = { factory -> factory.create(initialRecipient) }),
+    onOpenEditorSettings: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -99,6 +100,11 @@ fun PrivateMessageComposeScreen(
             viewModel.recipientInput, viewModel.subjectInput, remember(viewModel) { viewModel.chromeActions() },
             viewModel.smileyPicker, modifier, viewModel.bodyScrollState, viewModel.editorEvents, viewModel.chromeMemory,
             bodyCaretRevealResetKey = remember(viewModel) { { viewModel.bodyCaretRevealResetKey } },
+            onOpenEditorSettings = {
+                // Capture the live draft even if Nav3 removes this composition before delivering ON_STOP.
+                viewModel.onStopped()
+                onOpenEditorSettings()
+            },
         )
     }
 }
@@ -121,6 +127,7 @@ internal fun PrivateMessageComposeContent(
     },
     windowMetrics: EditorWindowMetrics? = null,
     bodyCaretRevealResetKey: () -> Int = { 0 },
+    onOpenEditorSettings: () -> Unit = {},
 ) {
     val source = rememberUpdatedState(state)
     // Register before loading/errors, outside transient surfaces: rotation never relaunches the picker.
@@ -145,7 +152,7 @@ internal fun PrivateMessageComposeContent(
         }
         else -> CompositionLocalProvider(LocalEditorTooltipHost provides remember { EditorTooltipHost() }) {
             ComposeChrome(host, bodyFieldState, bodyInputTransformation, bodyScrollState, recipients, subject,
-                smileyPicker, window, modifier, bodyCaretRevealResetKey)
+                smileyPicker, window, modifier, bodyCaretRevealResetKey, onOpenEditorSettings)
         }
     }
 }
@@ -163,6 +170,7 @@ private fun ComposeChrome(
     window: EditorWindowMetrics,
     modifier: Modifier,
     bodyCaretRevealResetKey: () -> Int,
+    onOpenEditorSettings: () -> Unit,
 ) {
     val tooltips = requireNotNull(LocalEditorTooltipHost.current)
     val back = {
@@ -185,7 +193,8 @@ private fun ComposeChrome(
         onSystemBack = back,
         fieldArea = { field -> PrivateMessageComposeChromePreview(host, body, focus, field) },
         overlay = { restore, content ->
-            PrivateMessageComposeChromeSurfaces(host, body, recipients, subject, smileys, restore, content)
+            PrivateMessageComposeChromeSurfaces(host, body, recipients, subject, smileys, restore, content,
+                onOpenEditorSettings)
             // Last handler: use the common ED-85 resolver after bar, details, sheets and panels.
             BackHandler(onBack = back)
         })

@@ -258,7 +258,7 @@ data class PrivateMessageComposeRoute(
  * window bottom (and to avoid dropping the draft on a tab switch). Extracted from `RedfaceApp` to
  * keep its cyclomatic complexity in check.
  */
-private fun NavKey?.hidesNavigationSuite(): Boolean =
+internal fun NavKey?.hidesNavigationSuite(): Boolean =
     this is PostEditorRoute || this is TopicFormRoute || this is PrivateMessageReplyRoute ||
         this is PrivateMessageComposeRoute || this is ImageViewerRoute || this is ReportContentRoute
 
@@ -2509,6 +2509,7 @@ private fun RedfaceNavHost(
             }
             entry<PrivateMessageComposeRoute> { route ->
                 PrivateMessageComposeScreen(
+                    onOpenEditorSettings = { openEditorSettings(backStack) },
                     initialRecipient = route.prefilledRecipient,
                     onSubmitSucceeded = {
                         // Pop the composer, then bump the sent signal so the MP list refreshes —
@@ -2600,6 +2601,7 @@ private fun RedfaceNavHost(
             entry<PrivateMessageReplyRoute> { route ->
                 val privateMessageQuoteScope = QuoteScope.PrivateMessage(route.threadId)
                 PrivateMessageReplyScreen(
+                    onOpenEditorSettings = { openEditorSettings(backStack) },
                     request = PrivateMessageReplyRequest(
                         threadId = route.threadId,
                         page = route.page,
@@ -3101,6 +3103,7 @@ private fun RedfaceNavHost(
                 }
                 LaunchedEffect(Unit) { multiQuoteNavState.onEditorQuotesHandoff(null) }
                 PostEditorScreen(
+                    onOpenEditorSettings = { openEditorSettings(backStack) },
                     request = PostEditorRequest(
                         mode = route.mode,
                         cat = route.cat,
@@ -3177,6 +3180,7 @@ private fun RedfaceNavHost(
             entry<TopicFormRoute> { route ->
                 val submitAccount = rememberSubmitAccount(topicSubmitNavState.account)
                 TopicFormScreen(
+                    onOpenEditorSettings = { openEditorSettings(backStack) },
                     request = TopicFormRequest(
                         mode = route.mode,
                         cat = route.cat,

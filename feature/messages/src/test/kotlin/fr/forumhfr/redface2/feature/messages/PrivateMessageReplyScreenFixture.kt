@@ -35,6 +35,7 @@ internal fun PrivateMessageReplyTestContent(
     smileys: SmileyPickerController? = null,
     transformation: InputTransformation = InputTransformation {},
     bodyCaretRevealResetKey: () -> Int = { 0 },
+    onOpenEditorSettings: () -> Unit = {},
 ) {
     val scope = rememberCoroutineScope()
     val picker = smileys ?: remember { SmileyPickerController(scope, searchWiki = { _, _ -> emptyList() }) }
@@ -51,7 +52,7 @@ internal fun PrivateMessageReplyTestContent(
         PrivateMessageReplyContent(state, autoOpen, body, transformation, actions, picker,
             bodyScrollState = scroll, chromeEvents = localEvents, chromeMemory = memory,
             windowMetrics = EditorWindowMetrics(height.dp, 0.dp, 0.dp),
-            bodyCaretRevealResetKey = bodyCaretRevealResetKey)
+            bodyCaretRevealResetKey = bodyCaretRevealResetKey, onOpenEditorSettings = onOpenEditorSettings)
     }
 }
 
