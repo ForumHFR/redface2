@@ -76,6 +76,22 @@ class EditorBodyMergeTest {
     }
 
     @Test
+    fun `typing appended after a restore into an empty field stays behind a later quote - ED89`() {
+        val restored = mergeEditorBody("D", "")
+        assertEquals("D", restored.body)
+        val typed = "D\n\ntexte"
+        val rebased = restored.provenance.rebase(restored.body, typed)
+        assertEquals("D".length, rebased.draftEnd)
+        assertEquals("D".length, rebased.quotesEnd)
+        assertEquals("D\n\n$q1\n\ntexte", insertEditorQuotes(typed, q1, rebased).body)
+        // Same boundary rule after a delivered quote: later typing never moves the next quote behind it.
+        val delivered = insertEditorQuotes(typed, q1, rebased)
+        val more = delivered.body + " encore"
+        assertEquals("D\n\n$q1\n\n$q2\n\ntexte encore",
+            insertEditorQuotes(more, q2, delivered.provenance.rebase(delivered.body, more)).body)
+    }
+
+    @Test
     fun `editing the middle of restored D moves both boundaries before the next quote`() {
         val restored = mergeEditorBody("draft old text", "$q1\n\ntyped",
             provenance = EditorBodyProvenance().delivered(scope, q1))

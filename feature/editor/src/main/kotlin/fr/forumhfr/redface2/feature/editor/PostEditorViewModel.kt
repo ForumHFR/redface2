@@ -111,6 +111,8 @@ import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
@@ -528,9 +530,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 submission.drafts.discardUnreadableInlineQuoteRequest()
             } else {
                 if (pending == deliveredInlineQuoteRequest) {
-                    submission.drafts.consumeInlineQuoteRequest(checkNotNull(pending),
-                        EditorDraftStore.Draft(bodyFieldState.text.toString(),
-                            bodyProvenance = submission.drafts.provenanceFor(bodyFieldState.text.toString())),
+                    submission.drafts.consumeInlineQuoteRequest(checkNotNull(pending), deliveredDraft(),
                         deliveredBody = deliveredQuoteBody)
                 } else submission.drafts.consumeInlineQuoteRequest(checkNotNull(pending))
             }
@@ -658,6 +658,7 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     private var deliveredQuoteBody: String? = null
+    private val quoteCommit = Mutex()
 
     private suspend fun deliverInlineQuoteForm(form: ReplyForm) {
         // ED-52: compare content in the live field, including keystrokes made during GET.
@@ -693,13 +694,12 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     /** Deliver the current body and remove exactly this request in one awaited CAS. */
-    private suspend fun commitInlineQuoteDelivery() {
-        val pending = submission.drafts.pendingInlineQuoteRequest ?: return
+    private suspend fun commitInlineQuoteDelivery(): Unit = quoteCommit.withLock {
+        // A close settling this delivery may queue behind the first CAS: it then finds Q consumed.
+        val pending = submission.drafts.pendingInlineQuoteRequest ?: return@withLock
         submission.flush(null)
         val result = submission.drafts.consumeInlineQuoteRequest(
-            pending, EditorDraftStore.Draft(bodyFieldState.text.toString(),
-                bodyProvenance = submission.drafts.provenanceFor(bodyFieldState.text.toString())),
-            deliveredBody = deliveredQuoteBody,
+            pending, deliveredDraft(), deliveredBody = deliveredQuoteBody,
         )
         if (result is EditorDraftStore.StoreWriteResult.Written && !submission.drafts.invalidated) {
             submission.resolveDraftWrite(result)
@@ -946,12 +946,26 @@ class PostEditorViewModel @AssistedInject constructor(
         val undecidedBlank = liveBody.isBlank() && snapshot.restorableDraft != null
         // #1574: only a known body can resume ED-81, including an intentional user clearing.
         return if (restoration.canCheckpoint(!snapshot.isAwaitingInitialBody, undecidedBlank)) {
-            val restoring = restoredOfferAwaitingWrite ?: mergedDraftOffer
-            val offer = selectedDraftOffer?.takeIf { restoring != null }
-                ?: restoring?.let(submission.drafts::offered)
             val provenance = submission.drafts.provenanceFor(liveBody)
-            EditorDraftStore.Draft(body = liveBody, bodyProvenance = provenance, offerToResolve = offer)
+            EditorDraftStore.Draft(body = liveBody, bodyProvenance = provenance,
+                offerToResolve = pendingOfferResolution())
         } else null
+    }
+
+    /**
+     * ED-121: the D merged into the field by a Restore whose write has not succeeded yet. Every later
+     * write of C (autosave, quote delivery, send) carries it, so a merged D never stays offered.
+     */
+    private fun pendingOfferResolution(): EditorDraftStore.DraftOffer? {
+        val restoring = restoredOfferAwaitingWrite ?: mergedDraftOffer
+        return selectedDraftOffer?.takeIf { restoring != null } ?: restoring?.let(submission.drafts::offered)
+    }
+
+    /** The field as delivered with its quote: C, its provenance and any pending Restore (ED-121/132). */
+    private fun deliveredDraft(): EditorDraftStore.Draft {
+        val body = bodyFieldState.text.toString()
+        return EditorDraftStore.Draft(body, bodyProvenance = submission.drafts.provenanceFor(body),
+            offerToResolve = pendingOfferResolution())
     }
 
     /** #604 lot 4a — one-shot latch : a committed close is never re-emitted (gate #803). */
@@ -985,6 +999,9 @@ class PostEditorViewModel @AssistedInject constructor(
             // autosave already persisted the rest) while a rethrow would leave the screen
             // unclosable. CancellationException still propagates (scope teardown is not an error).
             try {
+                // ED-132: a delivered quote whose C/Q transaction is pending or failed seals the autosave.
+                // Settle it first, then save the field as it is now, typing made since included.
+                if (deliveredInlineQuoteRequest != null) commitInlineQuoteDelivery()
                 submission.flush(draftSnapshot())
             } catch (e: CancellationException) {
                 throw e
@@ -1557,7 +1574,8 @@ class PostEditorViewModel @AssistedInject constructor(
         snapshot: PostEditorState,
         form: ReplyForm,
     ) {
-        submission.launch(permit, EditorDraftStore.Draft(body = snapshot.bodyText)) {
+        val draft = EditorDraftStore.Draft(body = snapshot.bodyText, offerToResolve = pendingOfferResolution())
+        submission.launch(permit, draft) {
             val options = ReplyFormOptions(
                 signatureEnabled = snapshot.signatureEnabled,
                 smileyDisabled = snapshot.smileyDisabled,

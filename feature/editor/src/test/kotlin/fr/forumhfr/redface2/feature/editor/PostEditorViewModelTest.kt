@@ -4775,6 +4775,74 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `close after a failed quote consumption settles it and saves the typing made since - ED132`() = runTest {
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.success(
+            authenticatedForm("[quotemsg=101]requested quote[/quotemsg]")))
+        val vm = newPendingQuoteOfferViewModel()
+        draftStore.saveFailure = IOException("disk full")
+        get.complete(Unit)
+        settleBody()
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        assertNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        val typed = "[quotemsg=101]requested quote[/quotemsg]\n\ntyped after the delivery"
+        vm.editBody(TextFieldValue(typed))
+        draftStore.saveFailure = null
+        vm.dispatch(PostEditorIntent.CloseRequested)
+        settleBody()
+        // The pop is only allowed once C and Q are settled and the live field is durable.
+        assertEquals(typed, draftStore.saved[key]?.body)
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        assertEquals(1, replyRepository.formFetches)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    @Test
+    fun `quote delivered after a failed Restore write consumes the merged D with C - ED121`() = runTest {
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.success(
+            authenticatedForm("[quotemsg=101]requested quote[/quotemsg]")))
+        val vm = newPendingQuoteOfferViewModel()
+        draftStore.saveFailure = IOException("disk full")
+        vm.dispatch(PostEditorIntent.DraftRestoreRequested)
+        testScheduler.runCurrent()
+        assertEquals("offered D", vm.bodyFieldState.text.toString())
+        draftStore.saveFailure = null
+        get.complete(Unit)
+        settleBody()
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        assertEquals("offered D\n\n[quotemsg=101]requested quote[/quotemsg]", vm.bodyFieldState.text.toString())
+        assertEquals(vm.bodyFieldState.text.toString(), draftStore.saved[key]?.body)
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        // A recreation must not find D offered again: restoring it would duplicate it in C.
+        assertTrue(draftStore.loadOffers("tester", key).none { it.draft.body == "offered D" })
+        assertNull(vm.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `send after a failed Restore write consumes the merged D it publishes - ED121`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.preload(key, EditorDraftStore.Draft("offered D"))
+        replyRepository.submitResult = ReplySubmitResult.Success(refreshUrl = null, targetPage = null)
+        val vm = newReplyViewModel(quoteAction = false)
+        settleBody()
+        assertEquals("offered D", vm.state.value.restorableDraft)
+        draftStore.saveFailure = IOException("disk full")
+        vm.dispatch(PostEditorIntent.DraftRestoreRequested)
+        testScheduler.runCurrent()
+        assertEquals("offered D", vm.bodyFieldState.text.toString())
+        draftStore.saveFailure = null
+        // Send before the autosave debounce: the attempt itself must carry the pending resolution.
+        vm.dispatch(PostEditorIntent.SubmitClicked())
+        settleBody()
+        assertEquals(1, replyRepository.submitCalls)
+        assertEquals(EditorDraftStore.AttemptStatus.PUBLISHED, draftStore.entries[key]?.attempt?.status)
+        assertTrue(draftStore.loadOffers("tester", key).none { it.draft.body == "offered D" })
+    }
+
+    @Test
     fun `failed Restore then autosave consumes D and clears its status before recreation`() = runTest {
         val vm = newPendingQuoteOfferViewModel()
         settleBody()

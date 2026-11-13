@@ -41,6 +41,8 @@ data class EditorBodyProvenance(
                 offset == 0 -> 0
                 offset < prefix -> offset
                 anchor >= 0 -> anchor
+                // ED-89: text inserted exactly at a boundary is typing; a later quote stays before it.
+                offset == prefix && oldEnd == prefix -> offset
                 offset >= oldEnd -> offset + newEnd - oldEnd
                 else -> prefix
             }.coerceIn(0, current.length)

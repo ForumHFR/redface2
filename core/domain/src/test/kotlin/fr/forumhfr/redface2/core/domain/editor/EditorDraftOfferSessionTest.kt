@@ -264,6 +264,37 @@ class EditorDraftOfferSessionTest {
         assertNull(store.saved[key]?.offerToResolve)
     }
 
+    @Test fun `delivery after a failed Restore write consumes merged D with C and never reoffers it`() = runBlocking {
+        val store = VersionedEditorDraftStore()
+        store.preload(key, Draft("D"))
+        val session = EditorDraftSession(store, key)
+        session.load()
+        session.enqueueInlineQuoteRequest(request)
+        val offer = checkNotNull(session.offered("D"))
+        val restored = mergeEditorBody("D", "")
+        store.saveFailure = IOException("disk full")
+        assertTrue(session.resolveOffer(offer, Draft(restored.body, bodyProvenance = restored.provenance))
+            is StoreWriteResult.Failed)
+        // The failing store refuses the whole delivery: neither D nor Q is consumed by half.
+        val delivered = insertEditorQuotes(restored.body, quote, restored.provenance)
+        val snapshot = Draft(delivered.body, bodyProvenance = delivered.provenance, offerToResolve = offer)
+        assertTrue(session.consumeInlineQuoteRequest(request, snapshot, deliveredBody = quote)
+            is StoreWriteResult.Failed)
+        assertEquals(request, session.pendingInlineQuoteRequest)
+        assertEquals("D", store.saved[key]?.body)
+        store.saveFailure = null
+        assertTrue(session.consumeInlineQuoteRequest(request, snapshot, deliveredBody = quote)
+            is StoreWriteResult.Written)
+        assertEquals("D\n\n$quote", store.saved[key]?.body)
+        assertNull(store.saved[key]?.pendingInlineQuoteRequest)
+        assertTrue(session.availableOffers.isEmpty())
+        // ED-121: after a process death, D merged into C is not offered again (no duplicate Restore).
+        val reopened = EditorDraftSession(store, key)
+        reopened.load()
+        assertTrue(store.loadOffers("tester", key).none { it.draft.body == "D" })
+        assertNull(reopened.offered("D"))
+    }
+
     @Test fun `send captures the restore decision even before its explicit flush`() = runBlocking {
         val store = VersionedEditorDraftStore()
         store.preload(key, Draft("D"))

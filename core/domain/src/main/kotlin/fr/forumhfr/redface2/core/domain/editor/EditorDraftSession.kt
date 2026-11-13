@@ -213,22 +213,38 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
                 if (deliveredBody == null) it else it.copy(bodyProvenance =
                     (it.bodyProvenance ?: EditorBodyProvenance()).delivered(request.scope, deliveredBody, it.body))
             }
-            val unresolvedOffer = snapshot?.offerToResolve?.id?.let { it !in resolvedOffers } == true
-            val deliveryBlocked = draft != null && unresolved != null
-            val result = if (pendingInlineQuoteRequest != request || deliveryBlocked || unresolvedOffer) {
-                StoreWriteResult.Conflict
-            } else {
-                checkpointWrite(snapshot) {
+            val blocked = pendingInlineQuoteRequest != request || (draft != null && unresolved != null)
+            val settled = if (blocked) null else settlePendingOffer(snapshot)
+            val delivered = snapshot?.copy(offerToResolve = null)
+            val result = when {
+                blocked -> StoreWriteResult.Conflict
+                settled != null && settled !is StoreWriteResult.Written -> settled
+                else -> checkpointWrite(delivered) {
                     mutation { store.consumeInlineQuoteRequest(owner, checkNotNull(key), request, version,
-                        snapshot?.let(::protected), offerToPreserve = protectedOffer, protectCurrent = !offersLoaded) }
+                        delivered?.let(::protected), offerToPreserve = protectedOffer,
+                        protectCurrent = !offersLoaded) }
                 }
             }
             if (result is StoreWriteResult.Written) {
                 pendingInlineQuoteRequest = null
-                if (snapshot != null) adoptBody(snapshot)
+                if (delivered != null) adoptBody(delivered)
             }
             adopt(result)
             result
+        }
+    }
+
+    /**
+     * ED-121: a Restore whose own write failed is settled first, in its CAS with C. A delivery can then
+     * never persist D merged into C while leaving D offered. Null when [snapshot] resolves nothing.
+     */
+    private suspend fun settlePendingOffer(snapshot: Draft?): StoreWriteResult? {
+        val pending = snapshot?.takeIf { it.offerToResolve?.id?.let { id -> id !in resolvedOffers } == true }
+        return pending?.let { draft ->
+            mutation { writeComposition(draft) }.also { result ->
+                adopt(result)
+                if (result is StoreWriteResult.Written) adoptBody(draft.copy(offerToResolve = null))
+            }
         }
     }
 

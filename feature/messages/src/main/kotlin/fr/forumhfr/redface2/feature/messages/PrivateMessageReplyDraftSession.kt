@@ -27,6 +27,8 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 /**
  * ED-81/170: the reply's live buffer, owner-bound resume, restore offer and draft checkpoints.
@@ -66,6 +68,34 @@ internal class PrivateMessageReplyDraftSession(
     private var selectedOffer: EditorDraftStore.DraftOffer? = null
     var deliveryPending = false
         private set
+    private var stagedDelivery: String? = null
+    private val quoteCommit = Mutex()
+    private var storageConflict = false
+
+    /** A conflicting quote write means this session's version, Q or offers are stale. */
+    fun recordQuoteWrite(result: EditorDraftStore.StoreWriteResult?) {
+        if (result is EditorDraftStore.StoreWriteResult.Conflict) storageConflict = true
+    }
+
+    /**
+     * ED-132: after a storage conflict, Reload and Ignore first reread the row's version, Q and offers.
+     * The field (C) is never replaced: a different stored body comes back as an offer (ED-121).
+     */
+    suspend fun reconcileAfterConflict() {
+        if (!storageConflict || submission.drafts.invalidated) return
+        val live = bodyFieldState.text.toString()
+        val entry = submission.restore(draftKey)
+        if (!submission.isInitialized) return
+        storageConflict = false
+        if (entry?.draft?.body == live) submission.drafts.resumeContent()
+        if (submission.drafts.pendingInlineQuoteRequest == null) {
+            // Q was consumed elsewhere: nothing is left to commit, the autosave owns the field again.
+            deliveryPending = false
+            stagedDelivery = null
+            updateState { it.copy(quoteCommitPending = false) }
+        }
+        refreshOffers()
+    }
 
     fun refreshOffers() {
         val offers = submission.drafts.availableOffers.takeUnless { submission.drafts.invalidated }.orEmpty()
@@ -79,6 +109,7 @@ internal class PrivateMessageReplyDraftSession(
     /** ED-132: stage once; only the body + request CAS below can make this delivery durable. */
     fun insertQuote(body: String) {
         deliveryPending = true
+        stagedDelivery = body
         val live = bodyFieldState.text.toString()
         val quote = filterEditorQuotes(body.trimEnd(), live).body
         val merge = insertEditorQuotes(live, quote.trimEnd(), submission.drafts.provenanceFor(live))
@@ -93,11 +124,18 @@ internal class PrivateMessageReplyDraftSession(
     suspend fun commitQuote(
         request: PendingInlineQuoteRequest,
         deliveredBody: String,
+    ): EditorDraftStore.StoreWriteResult = quoteCommit.withLock { commitQuoteLocked(request, deliveredBody) }
+
+    private suspend fun commitQuoteLocked(
+        request: PendingInlineQuoteRequest,
+        deliveredBody: String,
     ): EditorDraftStore.StoreWriteResult {
         val snapshot = EditorDraftStore.Draft(bodyFieldState.text.toString(), isPrivate = true,
-            bodyProvenance = submission.drafts.provenanceFor(bodyFieldState.text.toString()))
+            bodyProvenance = submission.drafts.provenanceFor(bodyFieldState.text.toString()),
+            offerToResolve = pendingOfferResolution())
         val result = submission.drafts.consumeInlineQuoteRequest(request, snapshot, deliveredBody)
         if (result is EditorDraftStore.StoreWriteResult.Written) deliveryPending = false
+        recordQuoteWrite(result)
         updateState { it.copy(quoteCommitPending = deliveryPending) }
         submission.resolveDraftWrite(result)
         if (!deliveryPending) scheduleAutosave()
@@ -308,11 +346,31 @@ internal class PrivateMessageReplyDraftSession(
         val undecidedOffer = snapshot.restorableDraft != null &&
             (liveBody.isBlank() || liveBody == snapshot.draftHydratedContent)
         if (deliveryPending || !restoration.canCheckpoint(bodyKnown, undecidedOffer)) return null
-        val restoring = restoredOfferAwaitingWrite ?: mergedDraftOffer
-        val offer = selectedOffer?.takeIf { restoring != null } ?: restoring?.let(submission.drafts::offered)
         val provenance = submission.drafts.provenanceFor(liveBody)
         return EditorDraftStore.Draft(body = liveBody, isPrivate = true, bodyProvenance = provenance,
-            offerToResolve = offer)
+            offerToResolve = pendingOfferResolution())
+    }
+
+    /**
+     * ED-121: the D merged into the field by a Restore whose write has not succeeded yet. Every later
+     * write of C (autosave, quote delivery, send) carries it, so a merged D never stays offered.
+     */
+    fun pendingOfferResolution(): EditorDraftStore.DraftOffer? {
+        val restoring = restoredOfferAwaitingWrite ?: mergedDraftOffer
+        return selectedOffer?.takeIf { restoring != null } ?: restoring?.let(submission.drafts::offered)
+    }
+
+    /**
+     * ED-132: a delivered quote whose C/Q transaction is pending or failed seals [draftSnapshot].
+     * A close settles it first, then saves the field as it is now, typing made since included.
+     */
+    suspend fun flushForClose() {
+        quoteCommit.withLock {
+            val pending = submission.drafts.pendingInlineQuoteRequest
+            val delivered = stagedDelivery
+            if (deliveryPending && pending != null && delivered != null) commitQuoteLocked(pending, delivered)
+        }
+        submission.flush(::draftSnapshot)
     }
 
     /** Debounced while visible, immediate while stopped; a stale owner never writes private content. */

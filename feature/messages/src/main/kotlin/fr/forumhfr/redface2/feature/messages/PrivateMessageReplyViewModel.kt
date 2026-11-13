@@ -353,6 +353,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     fun retryFormLoad() {
         viewModelScope.launch {
             if (!submission.isInitialized && !submission.drafts.invalidated) draftSession.restore()
+            draftSession.reconcileAfterConflict()
             refreshQuoteState()
             loadForm()
         }
@@ -397,7 +398,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             // autosave already persisted the rest) while a rethrow would leave the screen
             // unclosable. CancellationException still propagates (scope teardown is not an error).
             try {
-                submission.flush(draftSession::draftSnapshot)
+                draftSession.flushForClose()
             } catch (e: CancellationException) {
                 throw e
             } catch (_: IOException) {
@@ -424,10 +425,6 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     private var deliveredRequest: PendingInlineQuoteRequest? = null
     private var deliveredBody = ""
 
-    private fun pendingSelections(request: PendingInlineQuoteRequest): List<QuoteSelection> = request.quotes.map {
-        QuoteSelection(QuoteLocator(it.page, it.numreponse, it.ref), "", "", it.truncate)
-    }
-
     fun onPendingQuoteResumed() {
         if (!_state.value.hasDormantQuote || !acceptMutation()) return
         submission.acknowledge { loadForm() }
@@ -436,12 +433,14 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     fun onPendingQuoteIgnored() {
         if (!_state.value.canIgnorePendingQuote || !acceptMutation()) return
         viewModelScope.launch {
+            draftSession.reconcileAfterConflict()
             val pending = submission.drafts.pendingInlineQuoteRequest
             val result = if (submission.drafts.hasUnreadableInlineQuoteRequest) {
                 submission.drafts.discardUnreadableInlineQuoteRequest()
             } else if (pending != null && draftSession.deliveryPending) {
                 draftSession.commitQuote(pending, deliveredBody)
             } else pending?.let { submission.drafts.consumeInlineQuoteRequest(it) }
+            draftSession.recordQuoteWrite(result)
             submission.resolveDraftWrite(result)
             if (result is EditorDraftStore.StoreWriteResult.Written) {
                 savedStateHandle.remove<Int>(QUOTE_FAILURES_KEY)
@@ -653,7 +652,9 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         form: ReplyForm,
     ) {
         val submitContext = checkNotNull(loadedSubmitContext)
-        submission.launch(permit, EditorDraftStore.Draft(body = snapshot.bodyText, isPrivate = true)) {
+        val draft = EditorDraftStore.Draft(body = snapshot.bodyText, isPrivate = true,
+            offerToResolve = draftSession.pendingOfferResolution())
+        submission.launch(permit, draft) {
             val options = ReplyFormOptions(
                 signatureEnabled = snapshot.signatureEnabled, smileyDisabled = snapshot.smileyDisabled,
                 emailNotificationEnabled = snapshot.emailNotificationEnabled,
@@ -951,4 +952,8 @@ private fun PrivateMessageReplyUiState.withLoadedForm(
             hydrated.recipients
         },
     )
+}
+
+private fun pendingSelections(request: PendingInlineQuoteRequest): List<QuoteSelection> = request.quotes.map {
+    QuoteSelection(QuoteLocator(it.page, it.numreponse, it.ref), "", "", it.truncate)
 }
