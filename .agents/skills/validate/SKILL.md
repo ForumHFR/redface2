@@ -38,7 +38,7 @@ Itératif (modules touchés seulement, plus rapide) :
 
 ## Règles
 
-- **Jamais `:app:testDevDebugUnitTest` seul** : il COMPILE mais n'EXÉCUTE PAS les tests des modules `feature`/`core` (la CI lance `testDebugUnitTest` global). Vécu sur #588.
+- **Jamais `:app:testProdDebugUnitTest` seul** : il COMPILE mais n'EXÉCUTE PAS les tests des modules `feature`/`core` (la CI lance `testDebugUnitTest` global). Vécu sur #588.
 - `detektAll` est une tâche **racine** (pas `:core:ui:detektAll`) ; `lintDebug` peut être ciblé par module.
 - `--rerun-tasks` dès qu'on touche un test ou sa source : le cache Docker peut renvoyer un faux-vert.
 - `verifyRoborazziDebug` est une tâche **racine du dépôt** : elle agrège les tests des six modules

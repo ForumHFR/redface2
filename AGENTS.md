@@ -71,7 +71,7 @@ Kotlin, Jetpack Compose, MVI, Compose Navigation 3, Hilt (KSP), OkHttp 5, Jsoup,
 ## Tests
 
 Tests bootstrappes en Phase 0 et consommes des Phase 1 :
-- **Konsist** (`app/src/test/.../ArchitectureKonsistTest.kt`) — frontières architecture, scope non vide. Vit dans `:app` : après un fix hors `:app`, relancer `:app:testProdDebugUnitTest --tests '*ArchitectureKonsistTest*' --rerun` (le task est sinon UP-TO-DATE). La règle « material tokens » interdit d'importer les types `androidx.compose.material3.ColorScheme`/`Typography`/`Shapes` hors `core/ui`, **tests des features compris** : lire `MaterialTheme.colorScheme` en place.
+- **Konsist** (`app/src/test/.../ArchitectureKonsistTest.kt`) — frontières architecture, scope non vide. Vit dans `:app` : les sources de tous les modules sont des entrées déclarées des tests de `:app` (#1619), donc un fix hors `:app` relance de lui-même `:app:testProdDebugUnitTest --tests '*ArchitectureKonsistTest*'` ; `--rerun` reste un forçage volontaire. La règle « material tokens » interdit d'importer les types `androidx.compose.material3.ColorScheme`/`Typography`/`Shapes` hors `core/ui`, **tests des features compris** : lire `MaterialTheme.colorScheme` en place.
 - **JUnit 4** + **Turbine** sur le parser (`core/parser/src/test/.../PostContentParserTest.kt`, `TopicPageParserTest.kt`) et les ViewModel slice (`feature/topic/src/test/.../TopicViewModelTest.kt`).
 - **MockK** et **Robolectric** consommés dans tout le repo (tests ViewModel/écrans, Compose Testing JVM, captures Roborazzi comparées aux références versionnées de six modules, `verifyRoborazziDebug`).
 
@@ -117,7 +117,7 @@ Codex n'a pas de runner CI : c'est une **discipline**, signalée (pas imposée) 
 Le pipeline canonique (`choix techno → … → review`, `[advisory]`) est défini dans
 **`docs/specs/methodology.md` § Pipeline de développement** (source canonique) — `AGENTS.md` ne le
 redéfinit pas. Conséquences opérationnelles pour les agents :
-- **Validation** = reproduire la CI via le skill **`/validate`** ; **jamais `:app:testDevDebugUnitTest`
+- **Validation** = reproduire la CI via le skill **`/validate`** ; **jamais `:app:testProdDebugUnitTest`
   seul** (il compile mais n'exécute pas les tests des modules `feature`/`core`).
 - **Review** = Codex (cf. § Cadence Codex ci-dessus) + `/code-review`.
 

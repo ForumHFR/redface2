@@ -84,7 +84,7 @@ C'est `[advisory]` (une discipline, pas un gate dur — aucun runner CI ne l'imp
   [contributing.md]({{ site.baseurl }}/guides/contributing#tests) ; décision dans
   [ADR-016, évolution #1571]({{ site.baseurl }}/adr/016-roborazzi-screenshot-testing).
 - **Choix techno** : sur une API au statut incertain, consulter la doc officielle actuelle (Context7/Docfork, mot-clé *stable release*) ; ADR seulement pour une décision structurante.
-- **Validation** : reproduire la CI canonique en local via le skill **`/validate`** — la commande exacte et ses garde-fous (env Docker, `--rerun-tasks`, et « jamais `:app:testDevDebugUnitTest` seul ») y sont définis comme **source unique**, pour éviter deux formulations divergentes.
+- **Validation** : reproduire la CI canonique en local via le skill **`/validate`** — la commande exacte et ses garde-fous (env Docker, `--rerun-tasks`, et « jamais `:app:testProdDebugUnitTest` seul ») y sont définis comme **source unique**, pour éviter deux formulations divergentes.
 - **Review** : un agent distinct du producteur (cf. § Rôle du LLM) — en pratique Codex (cadrage avant un chantier non-trivial + relecture du diff + gate avant merge) puis `/code-review`. Les conséquences opérationnelles pour les agents (cadence Codex, méta-règle `[enforced]`/`[advisory]`) vivent dans [`AGENTS.md`](https://github.com/ForumHFR/redface2/blob/main/AGENTS.md) § Cadence de validation, qui pointe vers cette page comme source canonique.
 
 Exception au caractère `[advisory]` du pipeline : la **règle d'entretien de la matrice de parité de

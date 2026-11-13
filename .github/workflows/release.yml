@@ -333,7 +333,8 @@ jobs:
           set -euo pipefail
           # Both channels now carry a ledger-allocated versionCode → always inject the override (into
           # the F-Droid flavor AND the Play prod-flavor build, which share GRADLE_ARGS).
-          GRADLE_ARGS=(--no-daemon --stacktrace "-PversionCodeOverride=${EFFECTIVE_VERSION_CODE}")
+          # --no-build-cache: never reuse a cached task output (e.g. an incomplete KSP/Hilt output) in a release.
+          GRADLE_ARGS=(--no-daemon --stacktrace --no-build-cache "-PversionCodeOverride=${EFFECTIVE_VERSION_CODE}")
           [[ -n "${APP_LABEL:-}" ]] && GRADLE_ARGS+=("-PappLabel=${APP_LABEL}")
           # F-Droid artefact: the channel flavor (suffixed appId .beta/.dev).
           ./gradlew ":app:assemble${FDROID_FLAVOR}Release" "${GRADLE_ARGS[@]}"
