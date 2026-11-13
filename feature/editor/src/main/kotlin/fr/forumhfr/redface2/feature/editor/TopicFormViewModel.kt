@@ -781,7 +781,7 @@ class TopicFormViewModel @AssistedInject constructor(
      * and any later write of C consumes it too ([pendingOfferResolution]).
      */
     private fun restoreOffer(offer: EditorDraftStore.DraftOffer) {
-        if (decidingOffer != null) return
+        if (decidingOffer != null || !submission.drafts.canDecideOffer(offer, pendingOfferResolution())) return
         if (mergedOffer?.id != offer.id) applyOfferedDraft(offer.draft.body, offer.draft.subject)
         mergedOffer = offer
         decideOffer(offer) { submission.persist(liveDraft()) }
@@ -789,7 +789,8 @@ class TopicFormViewModel @AssistedInject constructor(
 
     /** ED-121: « Ignorer » consumes this offer only; the fields are written as they are, never blanked. */
     private fun discardOffer(offer: EditorDraftStore.DraftOffer) {
-        if (decidingOffer != null) return
+        if (decidingOffer != null || !submission.drafts.canDecideOffer(offer, pendingOfferResolution())) return
+        markDraftRestoreOfferIgnored(offer.draft)
         decideOffer(offer) {
             submission.drafts.resolveOffer(offer, liveDraft().copy(offerToResolve = null))
                 .also(submission::resolveDraftWrite)
@@ -847,7 +848,6 @@ class TopicFormViewModel @AssistedInject constructor(
     private fun onDraftDiscardRequested(offerId: String? = null) {
         if (request.mode == TopicFormMode.New) {
             _state.value.draftOffer(offerId)?.let { offer ->
-                markDraftRestoreOfferIgnored(offer.draft)
                 discardOffer(offer)
             }
             return

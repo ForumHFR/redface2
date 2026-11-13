@@ -831,7 +831,7 @@ class PostEditorViewModel @AssistedInject constructor(
         val offers = submission.drafts.availableOffers.takeUnless { submission.drafts.invalidated }.orEmpty()
             .visibleOver(bodyFieldState.text.toString())
         updateChromeState { it.copy(draftOffers = offers, restorableDraft = offers.firstOrNull()?.draft?.body) }
-        if (selectedDraftOffer != null && offers.none { it.id == selectedDraftOffer?.id }) {
+        if (selectedDraftOffer != null && submission.drafts.available(selectedDraftOffer) == null) {
             selectedDraftOffer = null
             mergedDraftOffer = null
         }
@@ -1142,7 +1142,9 @@ class PostEditorViewModel @AssistedInject constructor(
         val selected = if (offerId == null) snapshot.draftOffers.firstOrNull()
             else snapshot.draftOffers.firstOrNull { it.id == offerId }
         val legacy = snapshot.restorableDraft.takeIf { offerId == null && snapshot.draftOffers.isEmpty() }
-        val offeredBody = (selected?.draft?.body ?: legacy)?.takeIf { it.isNotBlank() } ?: return
+        val offeredBody = (selected?.draft?.body ?: legacy)?.takeIf {
+            it.isNotBlank() && submission.drafts.canDecideOffer(selected, pendingOfferResolution())
+        } ?: return
         selectedDraftOffer = selected.takeIf { request.mode == PostEditorMode.Reply }
         val seed = snapshot.draftRestoreSeed.orEmpty()
         val liveBody = bodyFieldState.text.toString()
@@ -1194,7 +1196,9 @@ class PostEditorViewModel @AssistedInject constructor(
         val selected = if (offerId == null) snapshot.draftOffers.firstOrNull()
             else snapshot.draftOffers.firstOrNull { it.id == offerId }
         val legacy = snapshot.restorableDraft.takeIf { offerId == null && snapshot.draftOffers.isEmpty() }
-        val body = selected?.draft?.body ?: legacy ?: return
+        val body = (selected?.draft?.body ?: legacy)?.takeIf {
+            submission.drafts.canDecideOffer(selected, pendingOfferResolution())
+        } ?: return
         draftRestoreDeciding = true
         draftDecisionCompleted = CompletableDeferred()
         updateChromeState { it.copy(restorableDraft = null) }

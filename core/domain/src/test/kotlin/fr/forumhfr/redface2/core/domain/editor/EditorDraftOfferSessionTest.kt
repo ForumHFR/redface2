@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -20,6 +21,34 @@ class EditorDraftOfferSessionTest {
     private val request = PendingInlineQuoteRequest(23, 42, listOf(PendingInlineQuoteRequest.Quote(101, 1)))
     private val key = request.key
     private val quote = "[quotemsg=101]one[/quotemsg]"
+
+    @Test fun `a failed merged offer blocks other decisions until C consumes it on every surface`() = runBlocking {
+        val keys = listOf(key, EditorDraftKey.mpReply(42), EditorDraftKey.newTopic(23), EditorDraftKey.mpCompose())
+        for (context in keys) {
+            val store = VersionedEditorDraftStore()
+            store.preload(context, Draft("second D", updatedAt = 2000))
+            val first = EditorDraftStore.DraftOffer.from(EditorDraftStore.DraftEntry(Draft("first D"), 0))
+            store.preloadOffer(context, first)
+            val session = EditorDraftSession(store, context)
+            session.load()
+            val second = session.availableOffers.first { it.draft.body == "second D" }
+            val merged = Draft("first D\n\ntyped", offerToResolve = first)
+            store.saveFailure = IOException("disk full")
+            assertTrue(session.save(merged) is StoreWriteResult.Failed)
+            assertTrue(session.canDecideOffer(first, first))
+            assertFalse(session.canDecideOffer(second, first))
+
+            store.saveFailure = null
+            assertTrue(session.save(merged) is StoreWriteResult.Written)
+            assertTrue(session.canDecideOffer(second, first))
+            assertTrue(session.save(Draft("second D\n\nfirst D\n\ntyped", offerToResolve = second))
+                is StoreWriteResult.Written)
+            val recreated = EditorDraftSession(store, context)
+            assertEquals("second D\n\nfirst D\n\ntyped", recreated.load()?.draft?.body)
+            recreated.resumeContent()
+            assertTrue(recreated.availableOffers.isEmpty())
+        }
+    }
 
     @Test
     fun `an older autosave returning after a live restore does not lose its insertion boundary`() = runBlocking {

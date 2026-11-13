@@ -13,6 +13,7 @@ import androidx.lifecycle.SavedStateHandle
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionBinding
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
+import fr.forumhfr.redface2.core.model.editor.EditorRecipientCodec
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
@@ -32,7 +33,7 @@ import kotlinx.coroutines.launch
  * at least one named recipient. An empty envelope names nobody, and neither does an unreadable one.
  */
 internal fun composeDraftHoldsHeaders(draft: EditorDraftStore.Draft): Boolean =
-    !draft.subject.isNullOrBlank() || readableRecipients(draft.recipients)?.isBlank == false
+    !draft.subject.isNullOrBlank() || EditorRecipientCodec.hasRecipients(draft.recipients)
 
 /** Null when the stored value cannot be decoded; the stored format is never rewritten here. */
 private fun readableRecipients(stored: String?): EditorRecipientState? = try {
@@ -40,8 +41,6 @@ private fun readableRecipients(stored: String?): EditorRecipientState? = try {
 } catch (_: IOException) {
     null
 }
-
-private val EditorRecipientState.isBlank: Boolean get() = chips.isEmpty() && buffer.isEmpty()
 
 /** ED-81/170: private content stays in the owner-bound store; the Bundle holds metadata only. */
 internal class PrivateMessageComposeDraftSession(
@@ -68,7 +67,7 @@ internal class PrivateMessageComposeDraftSession(
     private var lastCheckpointVersion = 0L
     private var previousBody = ""
     private var unreadableRecipients = false
-    /** ED-121: the user changed the subject or the recipients. A prefilled recipient is not typing. */
+    /** ED-121: changed or explicitly restored headers belong to C; navigation defaults do not. */
     private var headersEdited = false
     /** ED-121: the offered draft a Restore merged into the fields, until a write of C has consumed it. */
     private var mergedOffer: EditorDraftStore.DraftOffer? = null
@@ -125,6 +124,7 @@ internal class PrivateMessageComposeDraftSession(
     private fun restoreSessionContent(entry: EditorDraftStore.DraftEntry) {
         val draft = entry.draft
         val recipients = EditorRecipientState.decode(draft.recipients)
+        headersEdited = true
         val certified = restoration.matches(entry, submission.drafts.owner, draftKey)
         replaceBody(draft.body)
         if (certified) bodyFieldState.edit { selection = restoration.selection(length) }
@@ -237,6 +237,7 @@ internal class PrivateMessageComposeDraftSession(
     fun restoreOfferedDraft(offerId: String? = null) {
         val offer = readState().draftOffer(offerId)
         if (offer == null || decidingOffer != null) return
+        if (!submission.drafts.canDecideOffer(offer, pendingOfferResolution())) return
         if (mergedOffer?.id != offer.id) applyOffer(offer.draft)
         mergedOffer = offer
         decideOffer(offer) { submission.persist(liveDraft()) }
@@ -244,6 +245,7 @@ internal class PrivateMessageComposeDraftSession(
 
     /** ED-89: D then the live body, as one edit; live recipients and a live subject always win. */
     private fun applyOffer(offered: EditorDraftStore.Draft) {
+        headersEdited = true
         val live = bodyFieldState.text.toString()
         if (offered.body.isNotBlank()) {
             replaceBody(mergeEditorBody(offered.body, live).body)
@@ -264,6 +266,7 @@ internal class PrivateMessageComposeDraftSession(
     fun discardOfferedDraft(offerId: String? = null) {
         val offer = readState().draftOffer(offerId)
         if (offer == null || decidingOffer != null) return
+        if (!submission.drafts.canDecideOffer(offer, pendingOfferResolution())) return
         saved[IGNORED_OFFER] = offer.draft.restoreOfferFingerprint()
         decideOffer(offer) {
             submission.drafts.resolveOffer(offer, liveDraft().copy(offerToResolve = null))
@@ -294,11 +297,14 @@ internal class PrivateMessageComposeDraftSession(
     /** ED-121: a merged offer that is still offered; every write of C carries it until it is consumed. */
     fun pendingOfferResolution(): EditorDraftStore.DraftOffer? = submission.drafts.available(mergedOffer)
 
-    /** The fields as they are: an explicit decision on an offer writes C, whatever was typed. */
+    /** A navigation recipient alone is not C, including after Ignore and on subsequent checkpoints. */
     private fun liveDraft(): EditorDraftStore.Draft {
         val fields = readState()
-        return EditorDraftStore.Draft(bodyFieldState.text.toString(), fields.subject.ifBlank { null },
-            fields.recipientState.encode(), isPrivate = true, offerToResolve = pendingOfferResolution())
+        val body = bodyFieldState.text.toString()
+        val routingOnly = body.isBlank() && fields.subject.isBlank() && !headersEdited
+        return EditorDraftStore.Draft(body, fields.subject.ifBlank { null },
+            fields.recipientState.encode().takeUnless { routingOnly }, isPrivate = true,
+            offerToResolve = pendingOfferResolution())
     }
 
     /**
@@ -311,8 +317,7 @@ internal class PrivateMessageComposeDraftSession(
         val body = bodyFieldState.text.toString()
         val undecided = snapshot.restorableDraft != null && body.isBlank() && !headersEdited
         if (unreadableRecipients || !restoration.canCheckpoint(snapshot.bodyKnown, undecided)) return null
-        return EditorDraftStore.Draft(body, snapshot.subject.ifBlank { null }, snapshot.recipientState.encode(),
-            isPrivate = true, offerToResolve = pendingOfferResolution())
+        return liveDraft()
     }
 
     /**

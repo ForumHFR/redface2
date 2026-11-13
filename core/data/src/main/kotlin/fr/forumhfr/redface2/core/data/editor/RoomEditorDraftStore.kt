@@ -20,6 +20,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.StoreWriteResult
 import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.domain.editor.UnreadableInlineQuoteRequestException
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.editor.EditorRecipientCodec
 import java.io.IOException
 import java.time.Clock
 import javax.inject.Inject
@@ -367,8 +368,7 @@ class RoomEditorDraftStore @Inject constructor(
     /**
      * Q's first write protects the pre-existing D without changing its date or offer identity.
      * This is also the fallback of a writer that could not read the offers (protectCurrent). It
-     * reads headers raw: an empty recipients envelope is not blank, so it may keep a row whose
-     * headers show nothing. Surfaces hide such an offer; nothing typed is lost either way.
+     * uses the same recipient decoding as the editor: an empty envelope is not user content.
      */
     private suspend fun offerCandidate(previous: EditorDraftEntity?, key: String): EditorDraftOfferEntity? {
         if (previous == null || previous.attemptState != null || !previous.holdsOfferableContent(key)) return null
@@ -385,7 +385,7 @@ class RoomEditorDraftStore @Inject constructor(
 
     /** ED-121: a body anywhere it is kept; a title or recipients alone on a new topic or a new MP. */
     private fun EditorDraftEntity.holdsOfferableContent(key: String): Boolean {
-        val headers = !subject.isNullOrBlank() || !recipients.isNullOrBlank()
+        val headers = !subject.isNullOrBlank() || EditorRecipientCodec.hasRecipients(recipients)
         return EditorDraftKey.keepsOfferedDrafts(key) &&
             (body.isNotBlank() || (EditorDraftKey.composesHeaders(key) && headers))
     }

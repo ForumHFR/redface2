@@ -3159,6 +3159,47 @@ class TopicFormViewModelTest {
     }
 
     @Test
+    fun `a refused new topic restore blocks other decisions until saved then resumes without offers`() = runTest {
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        draftStore.preload(key, EditorDraftStore.Draft("second D", updatedAt = 20))
+        val first = EditorDraftStore.DraftOffer.from(EditorDraftStore.DraftEntry(
+            EditorDraftStore.Draft("first D", updatedAt = 10), 0,
+        ))
+        draftStore.preloadOffer(key, first)
+        val saved = SavedStateHandle()
+        val vm = newTopicViewModel(SAMPLE_SUBCAT, savedStateHandle = saved)
+        syncBody()
+        vm.editBody(TextFieldValue("typed"))
+        val second = vm.state.value.draftOffers.first { it.draft.body == "second D" }
+        draftStore.saveFailure = IOException("disk full")
+        vm.submit(TopicFormIntent.DraftOfferRestored(first.id))
+        syncBody()
+        assertEquals("first D\n\ntyped", vm.bodyFieldState.text.toString())
+        assertEquals("second D", draftStore.saved[key]?.body)
+
+        draftStore.saveFailure = null
+        val writes = draftStore.saveCount
+        vm.submit(TopicFormIntent.DraftOfferRestored(second.id))
+        vm.submit(TopicFormIntent.DraftOfferDiscarded(second.id))
+        syncBody()
+        assertEquals(writes, draftStore.saveCount)
+        assertEquals("first D\n\ntyped", vm.bodyFieldState.text.toString())
+        vm.submit(TopicFormIntent.DraftOfferRestored(first.id))
+        syncBody()
+        vm.submit(TopicFormIntent.DraftOfferRestored(second.id))
+        syncBody()
+        vm.submit(TopicFormIntent.Stopped)
+        syncBody()
+        val frozen = SavedStateHandle(saved.keys().associateWith { saved.get<Any?>(it) })
+        vm.viewModelScope.cancel()
+        val recreated = newTopicViewModel(SAMPLE_SUBCAT, savedStateHandle = frozen)
+        syncBody()
+        assertEquals("second D\n\nfirst D\n\ntyped", recreated.bodyFieldState.text.toString())
+        assertTrue(recreated.state.value.draftOffers.isEmpty())
+        assertTrue(draftStore.loadOffers("tester", key).isEmpty())
+    }
+
+    @Test
     fun `a title typed on a first post under an offer still leaves its single row - ED121 scope`() = runTest {
         val key = EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE)
         draftStore.preload(key, EditorDraftStore.Draft(body = "draft", subject = "draft title"))

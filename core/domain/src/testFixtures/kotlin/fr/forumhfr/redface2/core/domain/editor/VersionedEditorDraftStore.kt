@@ -9,6 +9,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.Draft
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.DraftEntry
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.DraftOffer
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.StoreWriteResult
+import fr.forumhfr.redface2.core.model.editor.EditorRecipientCodec
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 
@@ -165,9 +166,9 @@ open class VersionedEditorDraftStore : EditorDraftStore {
                 it.draft.bodyProvenance?.isQuoteOnly(it.draft.body) != true
         }?.let(DraftOffer::from)
 
-    /** Mirrors Room: headers alone are content on a new topic or a new private message, read raw. */
+    /** Mirrors Room: headers alone count on new compositions, with recipients decoded semantically. */
     private fun Draft.holdsOfferableContent(key: String): Boolean {
-        val headers = !subject.isNullOrBlank() || !recipients.isNullOrBlank()
+        val headers = !subject.isNullOrBlank() || EditorRecipientCodec.hasRecipients(recipients)
         return EditorDraftKey.keepsOfferedDrafts(key) &&
             (body.isNotBlank() || (EditorDraftKey.composesHeaders(key) && headers))
     }

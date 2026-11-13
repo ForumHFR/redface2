@@ -15,6 +15,8 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.Attempt
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptStatus
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptToken
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.Draft
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.DraftEntry
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.DraftOffer
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.VersionedEditorDraftStore
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
@@ -131,6 +133,100 @@ class PrivateMessageComposeRestorationTest {
         assertFalse(restored.state.value.isPreviewVisible)
         assertNull(restored.state.value.armToken)
         assertEquals(privateMessageComposeCheckpointKeys, frozen.keys())
+    }
+
+    @Test fun failedRestoreMustBeSavedBeforeAnotherOfferCanBeRestoredOrIgnored() = runTest(dispatcher) {
+        store.preload(key, Draft("second D", updatedAt = 20))
+        val first = DraftOffer.from(DraftEntry(Draft("first D", updatedAt = 10), 0))
+        store.preloadOffer(key, first)
+        val saved = SavedStateHandle()
+        val editor = open(saved)
+        settle()
+        type(editor, "typed")
+        settle()
+        val second = editor.state.value.draftOffers.first { it.draft.body == "second D" }
+        store.saveFailure = IOException("disk full")
+        editor.onDraftRestoreRequested(first.id)
+        settle()
+        assertEquals("first D\n\ntyped", editor.bodyFieldState.text.toString())
+        assertEquals("second D", store.saved[key]?.body)
+
+        store.saveFailure = null
+        val writes = store.saveCount
+        editor.onDraftRestoreRequested(second.id)
+        editor.onDraftDiscardRequested(second.id)
+        settle()
+        assertEquals(writes, store.saveCount)
+        assertEquals("first D\n\ntyped", editor.bodyFieldState.text.toString())
+
+        editor.onDraftRestoreRequested(first.id)
+        settle()
+        editor.onDraftRestoreRequested(second.id)
+        settle()
+        editor.onStopped()
+        settle()
+        val frozen = freeze(saved)
+        editor.viewModelScope.cancel()
+        val recreated = open(frozen)
+        settle()
+        assertEquals("second D\n\nfirst D\n\ntyped", recreated.bodyFieldState.text.toString())
+        assertTrue(recreated.state.value.draftOffers.isEmpty())
+        assertTrue(store.loadOffers("tester", key).isEmpty())
+    }
+
+    @Test fun subjectOnlyRestoreIsCheckpointedDespiteAnotherOfferAndSurvivesTwoDeaths() = runTest(dispatcher) {
+        assertHeaderOfferResumes(Draft("", subject = "private subject", isPrivate = true))
+    }
+
+    @Test fun recipientsOnlyRestoreIsCheckpointedDespiteAnotherOfferAndSurvivesTwoDeaths() = runTest(dispatcher) {
+        assertHeaderOfferResumes(Draft("", recipients = recipients.encode(), isPrivate = true))
+    }
+
+    private suspend fun assertHeaderOfferResumes(draft: Draft) {
+        store.preload(key, Draft("other D", isPrivate = true, updatedAt = 20))
+        val offer = DraftOffer.from(DraftEntry(draft, 0))
+        store.preloadOffer(key, offer)
+        val saved = SavedStateHandle()
+        var editor = open(saved)
+        settle()
+        editor.onDraftRestoreRequested(offer.id)
+        settle()
+        assertEquals(draft.subject.orEmpty(), store.saved[key]?.subject.orEmpty())
+        assertEquals(EditorRecipientState.decode(draft.recipients),
+            EditorRecipientState.decode(store.saved[key]?.recipients))
+        assertTrue(saved.keys().any { it.endsWith("resumeVersion") })
+        var checkpoint = freeze(saved)
+        repeat(2) {
+            editor.viewModelScope.cancel()
+            editor = open(checkpoint)
+            settle()
+            assertEquals("", editor.bodyFieldState.text.toString())
+            assertEquals(draft.subject.orEmpty(), editor.state.value.subject)
+            assertEquals(EditorRecipientState.decode(draft.recipients), editor.state.value.recipientState)
+            assertEquals(listOf("other D"), editor.state.value.draftOffers.map { it.draft.body })
+            editor.onStopped()
+            settle()
+            checkpoint = freeze(checkpoint)
+        }
+    }
+
+    @Test fun ignoreNeverTurnsNavigationRoutingIntoADraftEvenAfterStopAndFreshOpening() = runTest(dispatcher) {
+        store.preload(key, Draft("offered D", isPrivate = true))
+        val editor = open(initial = "Bob")
+        settle()
+        editor.onDraftDiscardRequested()
+        settle()
+        assertEquals("Bob", editor.state.value.recipients)
+        assertFalse(composeDraftHoldsHeaders(checkNotNull(store.saved[key])))
+        editor.onStopped()
+        settle()
+        assertFalse(composeDraftHoldsHeaders(checkNotNull(store.saved[key])))
+        editor.viewModelScope.cancel()
+        val fresh = open()
+        settle()
+        assertEquals("", fresh.state.value.recipients)
+        assertTrue(fresh.state.value.draftOffers.isEmpty())
+        assertTrue(store.loadOffers("tester", key).isEmpty())
     }
 
     @Test fun automaticHeaderLatchSurvivesParcelAndDoesNotReopenEvenWithoutARecipient() = runTest(dispatcher) {

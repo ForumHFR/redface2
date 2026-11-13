@@ -19,6 +19,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.Draft
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.StoreWriteResult
 import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.editor.EditorRecipientCodec
 import io.mockk.every
 import io.mockk.mockk
 import java.io.IOException
@@ -55,6 +56,46 @@ class RoomEditorDraftOfferTest {
             RedfaceDatabase::class.java).allowMainThreadQueries().build()
     }
     @After fun tearDown() { database.close() }
+
+    @Test fun `failed offer read never protects an empty recipient envelope but keeps real headers`() = runTest {
+        val empty = EditorRecipientCodec.encode(emptyList(), "")
+        val named = EditorRecipientCodec.encode(listOf("Bob"), "")
+        val buffer = EditorRecipientCodec.encode(emptyList(), "bo")
+        val cases = listOf(Draft("", recipients = empty), Draft("", recipients = named),
+            Draft("", recipients = buffer), Draft("", subject = "title", recipients = empty))
+        for (original in cases) {
+            database.editorDraftDao().deletePrivateForUser("alice")
+            val store = store()
+            store.saveIfVersion("alice", "mpnew", original, 0)
+            val delegate = database.editorDraftDao()
+            var failRead = true
+            val flaky = object : EditorDraftDao by delegate {
+                override suspend fun offers(ownerId: String, key: String): List<EditorDraftOfferEntity> {
+                    if (failRead) throw IOException("disk read")
+                    return delegate.offers(ownerId, key)
+                }
+            }
+            val editor = EditorDraftSession(store(flaky), "mpnew")
+            var failed = false
+            try {
+                editor.load()
+            } catch (_: IOException) {
+                failed = true
+            }
+            assertTrue(failed)
+            failRead = false
+            assertTrue(editor.save(Draft("typed C", recipients = empty)) is StoreWriteResult.Written)
+            val offers = store.loadOffers("alice", "mpnew")
+            if (original.recipients == empty && original.subject == null) {
+                assertTrue(offers.isEmpty())
+            } else {
+                assertEquals(original.recipients, offers.single().draft.recipients)
+                assertEquals(original.subject, offers.single().draft.subject)
+                assertTrue(offers.single().draft.isPrivate)
+            }
+            assertEquals("typed C", store.load("alice", "mpnew")?.body)
+        }
+    }
 
     @Test fun `resolution uses the attempt state from the session read before concurrent publication`() = runTest {
         val store = store()

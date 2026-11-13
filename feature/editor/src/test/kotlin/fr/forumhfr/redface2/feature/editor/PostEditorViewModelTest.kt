@@ -236,6 +236,42 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `a refused reply restore blocks another offer until persisted and resumes with neither offered`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.preload(key, EditorDraftStore.Draft("second D", updatedAt = 20))
+        val first = EditorDraftStore.DraftOffer.from(EditorDraftStore.DraftEntry(
+            EditorDraftStore.Draft("first D", updatedAt = 10), 0,
+        ))
+        draftStore.preloadOffer(key, first)
+        val saved = SavedStateHandle()
+        val vm = newReplyViewModel(quoteAction = false, savedStateHandle = saved)
+        syncBody()
+        vm.editBody(TextFieldValue("typed"))
+        val second = vm.state.value.draftOffers.first { it.draft.body == "second D" }
+        draftStore.saveFailure = IOException("disk full")
+        vm.dispatch(PostEditorIntent.DraftOfferRestored(first.id))
+        assertEquals("first D\n\ntyped", vm.bodyFieldState.text.toString())
+        assertEquals("second D", draftStore.saved[key]?.body)
+
+        draftStore.saveFailure = null
+        val writes = draftStore.saveCount
+        vm.dispatch(PostEditorIntent.DraftOfferRestored(second.id))
+        vm.dispatch(PostEditorIntent.DraftOfferDiscarded(second.id))
+        assertEquals(writes, draftStore.saveCount)
+        assertEquals("first D\n\ntyped", vm.bodyFieldState.text.toString())
+        vm.dispatch(PostEditorIntent.DraftOfferRestored(first.id))
+        vm.dispatch(PostEditorIntent.DraftOfferRestored(second.id))
+        vm.dispatch(PostEditorIntent.Stopped)
+        val frozen = SavedStateHandle(saved.keys().associateWith { saved.get<Any?>(it) })
+        vm.viewModelScope.cancel()
+        val recreated = newReplyViewModel(quoteAction = false, savedStateHandle = frozen)
+        syncBody()
+        assertEquals("second D\n\nfirst D\n\ntyped", recreated.bodyFieldState.text.toString())
+        assertTrue(recreated.state.value.draftOffers.isEmpty())
+        assertTrue(draftStore.loadOffers("tester", key).isEmpty())
+    }
+
+    @Test
     fun `card mode shows Q while D awaits and sends the card before restored D`() = runTest {
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
         draftStore.preload(key, EditorDraftStore.Draft("D"))

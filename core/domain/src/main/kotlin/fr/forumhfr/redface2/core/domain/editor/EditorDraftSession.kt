@@ -197,6 +197,12 @@ class EditorDraftSession(
     /** A still undecided offer by its identity, including the not-yet-copied source; null once resolved. */
     fun available(offer: DraftOffer?): DraftOffer? = availableOffers.firstOrNull { it.id == offer?.id }
 
+    /** ED-121: settle the D already merged into C before deciding another D, including Ignore. */
+    fun canDecideOffer(offer: DraftOffer?, merged: DraftOffer?): Boolean {
+        val pending = available(merged)
+        return pending == null || pending.id == offer?.id
+    }
+
     /** Resolve the legacy single-offer UI to a stable version, including the not-yet-copied source. */
     fun offered(body: String): DraftOffer? =
         (listOfNotNull(protectedOffer) + offers).firstOrNull { it.draft.body == body }
