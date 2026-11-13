@@ -99,8 +99,8 @@ fun EditorStatusIcon(
                 if (visible) Box(Modifier.size(maxOf(24.dp, badgeWidth), height)) {
                     RedfaceVectorIcon(iconRes, Modifier.align(Alignment.TopCenter).testTag(EDITOR_STATUS_GLYPH_TAG))
                     val badgeAlpha = if (enabled) 1f else DISABLED_BADGE_ALPHA
-                    // ED-40: decorative offer dot, tonal like a badge and below the glyph; the state is
-                    // announced by this status node (stateDescription above), never by the dot.
+                    // ED-40: offer dot below the glyph, tonal (never error); the state is announced by this
+                    // status node (stateDescription above), never by the dot.
                     if (showDot && badgeCount == null) EditorStatusDot(badgeAlpha,
                         Modifier.align(Alignment.BottomCenter))
                     if (badgeCount != null) Badge(
@@ -126,7 +126,8 @@ private fun editorStatusMarkHeight(badgeCount: Int?, badgeHeight: Dp, showDot: B
 @Composable
 private fun EditorStatusDot(alpha: Float, modifier: Modifier = Modifier) {
     Box(modifier.size(EDITOR_STATUS_DOT_SIZE)
-        .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = alpha), CircleShape)
+        // A contentless mark: secondaryContainer sits at 1.1:1 on the bar; secondary keeps it >= 3:1 (WCAG 1.4.11).
+        .background(MaterialTheme.colorScheme.secondary.copy(alpha = alpha), CircleShape)
         .testTag(EDITOR_STATUS_DOT_TAG).clearAndSetSemantics {})
 }
 

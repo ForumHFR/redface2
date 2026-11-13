@@ -52,7 +52,7 @@
     <string name="messages_reply_option_signature">Activer la signature</string>
     <string name="messages_reply_option_smiley_disabled">Désactiver les smileys</string>
     <string name="messages_reply_option_email_notification">Notification par e-mail</string>
-    <string name="messages_reply_form_error">Impossible d\'ouvrir le formulaire de réponse. Réessayez.</string>
+    <string name="messages_reply_form_error">Impossible d\'ouvrir le formulaire de réponse.</string>
     <!-- #405 — offre de restauration de brouillon (réponse MP et nouveau message). -->
     <string name="messages_draft_restore_message">Un brouillon non envoyé a été retrouvé.</string>
     <string name="messages_draft_restore">Restaurer</string>
