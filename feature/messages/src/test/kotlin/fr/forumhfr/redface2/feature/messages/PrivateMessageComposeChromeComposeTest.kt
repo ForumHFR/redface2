@@ -102,6 +102,11 @@ import org.robolectric.annotation.GraphicsMode
 @Config(sdk = [34], qualifiers = "fr-rFR-w800dp-h800dp-xxhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class PrivateMessageComposeChromeComposeTest {
+    private var settingsOpens = 0
+    private val openSettings: () -> Unit = {
+        assertNull(f.adapter.surface)
+        settingsOpens++
+    }
     @get:Rule val compose = createComposeRule()
     private val f = PrivateMessageComposeChromeFixture()
     private val uncertain = EditorErrors.uncertain(EditorErrorSurface.MessageCompose)
@@ -148,7 +153,7 @@ class PrivateMessageComposeChromeComposeTest {
                 RedfaceTheme {
                     PrivateMessageComposeContent(f.state, f.body, InputTransformation {}, f.recipients, f.subject,
                         f.actions, smileys, modifier, bodyScrollState = scroll, chromeEvents = f.events,
-                        chromeMemory = f.memory, windowMetrics = window)
+                        chromeMemory = f.memory, windowMetrics = window, onOpenEditorSettings = openSettings)
                 }
             }
         }
@@ -166,6 +171,29 @@ class PrivateMessageComposeChromeComposeTest {
                 .setVisible(WindowInsetsCompat.Type.ime(), true).build())
         }
     }
+    @Test fun settingsTapClosesOptionsBeforeCallingNavigationOnce() {
+        prefill()
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Options").performClick()
+        compose.onNodeWithText("Réglages de l’éditeur").performScrollTo().performClick()
+        compose.onNodeWithTag("editor-options-sheet").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(1, settingsOpens)
+            assertNull(f.adapter.surface)
+        }
+    }
+
+    @Test fun settingsAreDisabledDuringUploadAndSubmission() {
+        prefill()
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Options").performClick()
+        compose.runOnIdle { f.state = f.state.copy(isUploading = true) }
+        compose.onNodeWithText("Réglages de l’éditeur").performScrollTo().assertIsNotEnabled()
+        compose.runOnIdle { f.state = f.state.copy(isUploading = false, isSubmitting = true) }
+        compose.onNodeWithText("Réglages de l’éditeur").assertIsNotEnabled()
+        compose.runOnIdle { assertEquals(0, settingsOpens) }
+    }
+
     @Test fun `ED113 empty entry opens chips and Next preserves buffer then returns selection and closed IME`() {
         val generation = mutableStateOf(0)
         compose.setContent { key(generation.value) { Content() } }

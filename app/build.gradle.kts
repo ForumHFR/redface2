@@ -256,6 +256,8 @@ dependencies {
     testImplementation(libs.mockk)
     testImplementation(libs.konsist)
     testImplementation(libs.robolectric)
+    testImplementation(libs.androidx.compose.ui.test.junit4)
+    debugImplementation(libs.androidx.compose.ui.test.manifest)
     testImplementation(libs.turbine)
 }
 

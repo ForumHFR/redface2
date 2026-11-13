@@ -110,6 +110,43 @@ class PostEditorRestorationTest {
     }
 
     @Test
+    fun settingsStopThenLifecycleStopSerializeWritesAndPreserveConfirmationOnReturn() = runTest(dispatcher) {
+        val editor = open()
+        runCurrent()
+        type(editor, "before settings")
+        sync()
+        editor.submit(PostEditorIntent.SubmitClicked(timeoutMillis = 60_000L))
+        val arm = editor.state.value.armToken
+        assertNotNull(arm)
+        val writes = store.saveCount
+        val version = store.entries[key]?.version ?: 0L
+        store.saveReturnGate = CompletableDeferred()
+
+        editor.submit(PostEditorIntent.Stopped) // Explicit stop before opening settings.
+        runCurrent()
+        editor.submit(PostEditorIntent.Stopped) // Activity goes to the background from settings.
+        runCurrent()
+        assertEquals(writes + 1, store.saveCount) // Second write waits for the first result to be adopted.
+        assertEquals(version + 1, store.entries[key]?.version)
+        store.saveReturnGate?.complete(Unit)
+        sync()
+        assertEquals(writes + 2, store.saveCount)
+        assertEquals(version + 2, store.entries[key]?.version)
+        assertEquals("before settings", store.saved[key]?.body)
+        assertNull(editor.state.value.submitError)
+        assertEquals(arm, editor.state.value.armToken)
+
+        editor.submit(PostEditorIntent.Started)
+        assertEquals(arm, editor.state.value.armToken)
+        type(editor, "after returning")
+        sync()
+        advanceTimeBy(751)
+        sync()
+        assertEquals("after returning", store.saved[key]?.body)
+        assertNull(editor.state.value.submitError)
+    }
+
+    @Test
     fun freshQuoteOnlyOpeningDiscardsTheRowBeforeAnotherDeathAndKeepsDOffered() = runTest(dispatcher) {
         store.preload(key, Draft("D", updatedAt = 1234))
         val previous = EditorDraftSession(store, key)

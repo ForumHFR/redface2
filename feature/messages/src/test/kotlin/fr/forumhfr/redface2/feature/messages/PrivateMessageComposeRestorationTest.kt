@@ -519,6 +519,43 @@ class PrivateMessageComposeRestorationTest {
         assertNull(editor.state.value.restorableDraft)
     }
 
+    @Test fun settingsStopThenLifecycleStopSerializeWritesAndPreserveConfirmationOnReturn() = runTest(dispatcher) {
+        val editor = open(initial = "alice")
+        settle()
+        editor.onSubjectChanged("Title")
+        type(editor, "before settings")
+        settle()
+        editor.onSubmit(timeoutMillis = 60_000L)
+        val arm = editor.state.value.armToken
+        assertNotNull(arm)
+        val writes = store.saveCount
+        val version = store.entries[key]?.version ?: 0L
+        store.saveReturnGate = CompletableDeferred()
+
+        editor.onStopped() // Explicit stop before opening settings.
+        mainImmediateTurn()
+        editor.onStopped() // Activity goes to the background from settings.
+        mainImmediateTurn()
+        assertEquals(writes + 1, store.saveCount)
+        assertEquals(version + 1, store.entries[key]?.version)
+        store.saveReturnGate?.complete(Unit)
+        settle()
+        assertEquals(writes + 2, store.saveCount)
+        assertEquals(version + 2, store.entries[key]?.version)
+        assertEquals("before settings", store.saved[key]?.body)
+        assertNull(editor.state.value.submitError)
+        assertEquals(arm, editor.state.value.armToken)
+
+        editor.onStarted()
+        assertEquals(arm, editor.state.value.armToken)
+        type(editor, "after returning")
+        settle()
+        dispatcher.scheduler.advanceTimeBy(751)
+        settle()
+        assertEquals("after returning", store.saved[key]?.body)
+        assertNull(editor.state.value.submitError)
+    }
+
     @Test fun accountChangeRevokesFormLateCallbacksEventsAndResumeMetadata() = runTest(dispatcher) {
         val saved = checkpoint()
         formGate = CompletableDeferred()

@@ -93,6 +93,13 @@ open class EditorHost<S : Any>(
         memory.surface = null
         if (closed == surfaces.draftOffer || surfaces.returnsToBody(closed)) memory.returnGeneration++
     }
+    /** Only the live Options surface may leave for settings; stale taps cannot navigate twice. */
+    fun openSettings(onOpenSettings: () -> Unit) {
+        val scaffold = source().scaffold
+        if (surface != surfaces.options || !scaffold.controlsEnabled || scaffold.uploading) return
+        closeSurface()
+        onOpenSettings()
+    }
     /** Closing is visual acknowledgement only, never a restore/discard or other business intent. */
     fun closeDraftOffer() {
         if (surfaces.draftOffer != null && surface == surfaces.draftOffer) closeSurface()

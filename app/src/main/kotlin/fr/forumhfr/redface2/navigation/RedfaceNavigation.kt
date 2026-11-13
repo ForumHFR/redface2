@@ -258,9 +258,20 @@ data class PrivateMessageComposeRoute(
  * window bottom (and to avoid dropping the draft on a tab switch). Extracted from `RedfaceApp` to
  * keep its cyclomatic complexity in check.
  */
-private fun NavKey?.hidesNavigationSuite(): Boolean =
-    this is PostEditorRoute || this is TopicFormRoute || this is PrivateMessageReplyRoute ||
-        this is PrivateMessageComposeRoute || this is ImageViewerRoute || this is ReportContentRoute
+internal fun NavKey?.hidesNavigationSuite(): Boolean =
+    isEditorRoute() || this is ImageViewerRoute || this is ReportContentRoute
+
+private fun NavKey?.isEditorRoute(): Boolean = when (this) {
+    is PostEditorRoute, is TopicFormRoute, is PrivateMessageReplyRoute, is PrivateMessageComposeRoute -> true
+    else -> false
+}
+
+/** Settings above a live editor keep tab switching unavailable even when another route covers them. */
+internal fun List<NavKey>.hidesNavigationSuite(): Boolean {
+    val editorIndex = indexOfFirst { it.isEditorRoute() }
+    val settingsCoverEditor = editorIndex >= 0 && indexOfLast { it is SettingsCategoryRoute } > editorIndex
+    return lastOrNull().hidesNavigationSuite() || settingsCoverEditor
+}
 
 /**
  * #494 — type de barre de navigation à passer au [NavigationSuiteScaffoldLayout]. Sur téléphone l'adaptatif
@@ -1275,7 +1286,8 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
         // it by the nav bar height (the bar floated mid-screen with a gap). Hiding the navigation for editor
         // routes makes the editor full-screen: its submit bar then sits at the window bottom and the IME
         // inset lands exactly on the keyboard. Bonus UX: no tab switching mid-compose (would drop the draft).
-        val topRoute = backStacks.getValue(currentDestination).lastOrNull()
+        val activeBackStack = backStacks.getValue(currentDestination)
+        val topRoute = activeBackStack.lastOrNull()
         // #518 follow-up — only a topic screen reports scroll facts; clear them whenever the active top
         // route is something else (other tab, editor, profile…) so a stale « at bottom » never keeps the
         // nav bar revealed off-topic. Returning to a topic re-emits its current facts on first frame. The
@@ -1292,7 +1304,7 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
             darkTheme = darkTheme,
         )
         val adaptiveType = NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfo())
-        val navLayoutType = resolveNavLayoutType(topRoute.hidesNavigationSuite(), adaptiveType)
+        val navLayoutType = resolveNavLayoutType(activeBackStack.hidesNavigationSuite(), adaptiveType)
         // #529 — consume the bottom nav-bar inset for the content only under a bottom-bar layout
         // (see navSuiteContentInsetModifier). Read in composable scope, branch lives in the helper.
         val contentInsetModifier = navSuiteContentInsetModifier(navLayoutType, WindowInsets.navigationBars)
@@ -2509,6 +2521,7 @@ private fun RedfaceNavHost(
             }
             entry<PrivateMessageComposeRoute> { route ->
                 PrivateMessageComposeScreen(
+                    onOpenEditorSettings = { openEditorSettings(backStack) },
                     initialRecipient = route.prefilledRecipient,
                     onSubmitSucceeded = {
                         // Pop the composer, then bump the sent signal so the MP list refreshes —
@@ -2600,6 +2613,7 @@ private fun RedfaceNavHost(
             entry<PrivateMessageReplyRoute> { route ->
                 val privateMessageQuoteScope = QuoteScope.PrivateMessage(route.threadId)
                 PrivateMessageReplyScreen(
+                    onOpenEditorSettings = { openEditorSettings(backStack) },
                     request = PrivateMessageReplyRequest(
                         threadId = route.threadId,
                         page = route.page,
@@ -3101,6 +3115,7 @@ private fun RedfaceNavHost(
                 }
                 LaunchedEffect(Unit) { multiQuoteNavState.onEditorQuotesHandoff(null) }
                 PostEditorScreen(
+                    onOpenEditorSettings = { openEditorSettings(backStack) },
                     request = PostEditorRequest(
                         mode = route.mode,
                         cat = route.cat,
@@ -3177,6 +3192,7 @@ private fun RedfaceNavHost(
             entry<TopicFormRoute> { route ->
                 val submitAccount = rememberSubmitAccount(topicSubmitNavState.account)
                 TopicFormScreen(
+                    onOpenEditorSettings = { openEditorSettings(backStack) },
                     request = TopicFormRequest(
                         mode = route.mode,
                         cat = route.cat,

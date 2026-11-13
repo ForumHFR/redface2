@@ -23,6 +23,7 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 
 /** Keep mounted inside EditorScaffold.overlay, including while the field is covered. */
+@Suppress("LongParameterList") // Host ports plus the editor-settings exit.
 @Composable
 internal fun PostEditorChromeSurfaces(
     adapter: PostEditorChromeAdapter,
@@ -30,6 +31,7 @@ internal fun PostEditorChromeSurfaces(
     smileys: SmileyPickerController,
     onReturnToBody: () -> Unit,
     body: @Composable () -> Unit,
+    onOpenEditorSettings: () -> Unit = {},
 ) {
     // Run after the overlay/dialog is removed, when the body can accept focus again. Exactly once.
     LaunchedEffect(adapter.returnGeneration) {
@@ -46,7 +48,7 @@ internal fun PostEditorChromeSurfaces(
         }) { event -> PostEditorEventRemedies(adapter, event) }
     PostEditorDraftOffer(adapter)
     when (adapter.surface) {
-        PostEditorChromeSurface.Options -> PostEditorOptionsSurface(adapter, source)
+        PostEditorChromeSurface.Options -> PostEditorOptionsSurface(adapter, source, onOpenEditorSettings)
         PostEditorChromeSurface.Url -> if (adapter.state.canInsert) {
             ImageUrlDialog(adapter::closeSurface, adapter::imageUrl)
         }
@@ -94,7 +96,11 @@ private fun PostEditorHeaderSurface(
 }
 
 @Composable
-private fun PostEditorOptionsSurface(adapter: PostEditorChromeAdapter, source: PostEditorState) {
+private fun PostEditorOptionsSurface(
+    adapter: PostEditorChromeAdapter,
+    source: PostEditorState,
+    onOpenEditorSettings: () -> Unit,
+) {
     EditorOptionsSheet(adapter::closeSurface) {
         val enabled = adapter.state.scaffold.controlsEnabled && !source.isLoadingForm
         EditorOptions(source.signatureEnabled, source.smileyDisabled, source.emailNotificationEnabled, enabled,
@@ -102,7 +108,9 @@ private fun PostEditorOptionsSurface(adapter: PostEditorChromeAdapter, source: P
             EditorOptionsLabels(stringResource(R.string.editor_options_title),
                 stringResource(R.string.editor_option_signature),
                 stringResource(R.string.editor_option_smiley_disabled),
-                stringResource(R.string.editor_option_email_notification))) {
+                stringResource(R.string.editor_option_email_notification)),
+            onOpenSettings = { adapter.openSettings(onOpenEditorSettings) },
+            settingsEnabled = !source.isUploading) {
             MessageIconPicker(source.msgIcon, enabled, adapter::tone, alwaysExpanded = true)
         }
     }

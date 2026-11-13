@@ -58,6 +58,43 @@ class EditorHostTest {
         return event
     }
 
+    @Test fun settingsCloseOptionsBeforeNavigatingOnceAndNeverLaunchImages() {
+        val host = host()
+        host.barActions.onOptions()
+        host.openSettings {
+            assertNull(host.surface)
+            assertTrue(host.consumeReturn())
+            calls.add("settings")
+        }
+        host.openSettings { calls.add("duplicate") }
+        assertEquals(listOf("settings"), calls)
+        host.returnToBody { body.edit { selection = TextRange.Zero } }
+        assertEquals(TextRange(6, 1), body.selection)
+        assertEquals("Bonjour", body.text.toString())
+    }
+
+    @Test fun settingsRejectUploadAndDisabledControlsWithoutClosingOptions() {
+        val host = host()
+        host.barActions.onOptions()
+        listOf(EditorScaffoldChrome(uploading = true), EditorScaffoldChrome(controlsEnabled = false)).forEach {
+            state = state.copy(scaffold = it)
+            host.openSettings { calls.add("settings") }
+            assertEquals(Surface.Options, host.surface)
+        }
+        assertTrue(calls.isEmpty())
+    }
+
+    @Test fun settingsRejectAStaleOptionsTapWhileTheImagePickerIsOpen() {
+        val host = host()
+        host.barActions.onOptions()
+        val staleTap = { host.openSettings { calls.add("settings") } }
+        host.closeSurface()
+        host.imageActions.onUpload()
+        staleTap()
+        assertEquals(Surface.Picker, host.surface)
+        assertEquals(listOf("picker"), calls)
+    }
+
     // v0.7.8 ED-40/44: the offer has one entry, with no information exception.
     @Test fun `offer status closes at sheet rank before disarming and returns selection once`() {
         val initial = host(draftOffer = DraftOfferConfig())

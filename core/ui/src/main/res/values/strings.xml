@@ -310,4 +310,6 @@
     <string name="editor_action_resume_quote">Après vérification, reprendre la citation</string>
     <string name="editor_draft_restore_description">Restaurer ce brouillon, %1$s</string>
     <string name="editor_draft_discard_description">Ignorer ce brouillon, %1$s</string>
+    <string name="editor_settings_title">Réglages de l’éditeur</string>
+    <string name="editor_settings_description">Raccourci de la barre, confirmation avant envoi</string>
 </resources>

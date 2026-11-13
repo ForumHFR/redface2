@@ -25,6 +25,7 @@ internal fun TopicFormChromeSurfaces(
     onReturnToBody: () -> Unit,
     @Suppress("UNUSED_PARAMETER") compactHeight: Boolean, // Retain the host's overlay call contract.
     body: @Composable () -> Unit,
+    onOpenEditorSettings: () -> Unit = {},
 ) {
     val host = adapter.host
     LaunchedEffect(host.returnGeneration) {
@@ -39,7 +40,7 @@ internal fun TopicFormChromeSurfaces(
         restoreEnabled = adapter.state.scaffold.controlsEnabled && !source.isLoadingForm && !source.isUploading,
         discardEnabled = adapter.state.scaffold.controlsEnabled)
     when (host.surface) {
-        TopicFormChromeSurface.Options -> TopicFormOptionsSurface(adapter)
+        TopicFormChromeSurface.Options -> TopicFormOptionsSurface(adapter, onOpenEditorSettings)
         TopicFormChromeSurface.Url -> if (adapter.state.host.canInsert) {
             ImageUrlDialog(host::closeSurface, adapter::imageUrl)
         }
@@ -49,7 +50,7 @@ internal fun TopicFormChromeSurfaces(
 }
 
 @Composable
-private fun TopicFormOptionsSurface(adapter: TopicFormChromeAdapter) {
+private fun TopicFormOptionsSurface(adapter: TopicFormChromeAdapter, onOpenEditorSettings: () -> Unit) {
     val source = adapter.state.source
     EditorOptionsSheet(adapter.host::closeSurface) {
         val enabled = adapter.state.scaffold.controlsEnabled && !source.isLoadingForm
@@ -60,7 +61,9 @@ private fun TopicFormOptionsSurface(adapter: TopicFormChromeAdapter) {
             EditorOptionsLabels(stringResource(R.string.editor_options_title),
                 stringResource(R.string.editor_option_signature),
                 stringResource(R.string.editor_option_smiley_disabled),
-                stringResource(R.string.editor_option_email_notification))) {
+                stringResource(R.string.editor_option_email_notification)),
+            onOpenSettings = { adapter.host.openSettings(onOpenEditorSettings) },
+            settingsEnabled = !source.isUploading) {
             MessageIconPicker(source.msgIcon, enabled, { adapter.option(TopicFormIntent.MsgIconSelected(it)) },
                 alwaysExpanded = true)
         }

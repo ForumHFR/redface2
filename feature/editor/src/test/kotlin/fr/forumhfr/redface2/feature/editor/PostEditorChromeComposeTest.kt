@@ -45,6 +45,7 @@ import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
+import fr.forumhfr.redface2.core.domain.editor.SubmissionToken
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
@@ -69,6 +70,11 @@ import org.robolectric.shadows.ShadowDialog
 @Config(sdk = [34], qualifiers = "fr-rFR-w800dp-h800dp-xxhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 class PostEditorChromeComposeTest {
+    private var settingsOpens = 0
+    private val openSettings: () -> Unit = {
+        assertNull(host.adapter.surface)
+        settingsOpens++
+    }
     @get:Rule val compose = createComposeRule()
     private val host = PostEditorChromeFixture()
     private val focus = FocusRequester()
@@ -95,12 +101,37 @@ class PostEditorChromeComposeTest {
                 bodyFocusRestoreAllowed = host.adapter.surface == null && host.adapter.detail == null &&
                     !host.state.isPreviewVisible,
                 bodyScrollState = scroll, surfaceFocus = host.adapter.focusMemory, overlay = { restore, body ->
-                    PostEditorChromeSurfaces(host.adapter, host.body, smileys, { returns++; restore() }, body)
+                    PostEditorChromeSurfaces(host.adapter, host.body, smileys, { returns++; restore() }, body,
+                        onOpenEditorSettings = openSettings)
                 })
         }
     }
 
     // ED-40/41/95 v0.7.8 replaces the timed information and its second entry.
+    @Test fun settingsTapClosesOptionsBeforeCallingNavigationOnce() {
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Options").performClick()
+        compose.onNodeWithText("Réglages de l’éditeur").performScrollTo().performClick()
+        compose.onNodeWithTag("editor-options-sheet").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(1, settingsOpens)
+            assertNull(host.adapter.surface)
+        }
+    }
+
+    @Test fun settingsAreDisabledDuringUploadAndSubmission() {
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Options").performClick()
+        compose.runOnIdle { host.state = host.state.copy(isUploading = true) }
+        compose.onNodeWithText("Réglages de l’éditeur").performScrollTo().assertIsNotEnabled()
+        compose.runOnIdle {
+            host.state = host.state.copy(isUploading = false, isSubmitting = true,
+                submission = EditorSubmissionState.PersistingAttempt(SubmissionToken(1, host.session)))
+        }
+        compose.onNodeWithText("Réglages de l’éditeur").assertIsNotEnabled()
+        compose.runOnIdle { assertEquals(0, settingsOpens) }
+    }
+
     @Test fun `offered draft has a persistent accessible dot without changing field geometry`() {
         compose.setContent { Content() }
         val field = compose.onNode(hasSetTextAction()).getUnclippedBoundsInRoot()

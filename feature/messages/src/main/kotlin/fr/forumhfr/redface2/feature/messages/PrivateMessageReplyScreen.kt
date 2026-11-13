@@ -61,6 +61,7 @@ import fr.forumhfr.redface2.core.ui.editor.rememberEditorWindowMetrics
  * [PrivateMessageReplyViewModel]; a successful send raises [PrivateMessageReplyEffect.SubmitSucceeded]
  * which the navigation host turns into a back navigation + a forced conversation reload.
  */
+@Suppress("LongParameterList") // Navigation callbacks, including the editor-settings exit.
 @Composable
 fun PrivateMessageReplyScreen(
     request: PrivateMessageReplyRequest,
@@ -73,6 +74,7 @@ fun PrivateMessageReplyScreen(
     viewModel: PrivateMessageReplyViewModel = hiltViewModel<
         PrivateMessageReplyViewModel, PrivateMessageReplyViewModel.Factory
     >(creationCallback = { factory -> factory.create(request) }),
+    onOpenEditorSettings: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -121,6 +123,11 @@ fun PrivateMessageReplyScreen(
             viewModel.bodyScrollState,
             viewModel.editorEvents, viewModel.chromeMemory,
             bodyCaretRevealResetKey = remember(viewModel) { { viewModel.bodyCaretRevealResetKey } },
+            onOpenEditorSettings = {
+                // Capture the live draft even if Nav3 removes this composition before delivering ON_STOP.
+                viewModel.onStopped()
+                onOpenEditorSettings()
+            },
         )
     }
 }
@@ -140,6 +147,7 @@ internal fun PrivateMessageReplyContent(
     chromeMemory: PrivateMessageReplyChromeMemory = remember { PrivateMessageReplyChromeMemory() },
     windowMetrics: EditorWindowMetrics? = null,
     bodyCaretRevealResetKey: () -> Int = { 0 },
+    onOpenEditorSettings: () -> Unit = {},
 ) {
     val source = rememberUpdatedState(state)
     // Register the launcher before loading/errors and outside every transient surface, like the post.
@@ -168,7 +176,8 @@ internal fun PrivateMessageReplyContent(
         else -> CompositionLocalProvider(LocalEditorTooltipHost provides remember { EditorTooltipHost() }) {
             PrivateMessageReplyChrome(host, bodyFieldState, bodyInputTransformation, bodyScrollState,
                 smileyPicker, autoOpenRecipientManager && !recipientEntryHandled, window, modifier,
-                bodyCaretRevealResetKey, autoFocusBody = !autoOpenRecipientManager)
+                bodyCaretRevealResetKey, autoFocusBody = !autoOpenRecipientManager,
+                onOpenEditorSettings = onOpenEditorSettings)
         }
     }
 }
@@ -186,6 +195,7 @@ private fun PrivateMessageReplyChrome(
     modifier: Modifier,
     bodyCaretRevealResetKey: () -> Int,
     autoFocusBody: Boolean,
+    onOpenEditorSettings: () -> Unit,
 ) {
     val tooltips = requireNotNull(LocalEditorTooltipHost.current)
     val back = {
@@ -205,7 +215,8 @@ private fun PrivateMessageReplyChrome(
         onSystemBack = back,
         fieldArea = { field -> PrivateMessageReplyChromePreview(host, body, focus, field) },
         overlay = { restore, content ->
-            PrivateMessageReplyChromeSurfaces(host, body, smileys, autoOpenRecipients, restore, content)
+            PrivateMessageReplyChromeSurfaces(host, body, smileys, autoOpenRecipients, restore, content,
+                onOpenEditorSettings)
             // Last activity handler: the host resolves every ED-85 level, including bar focus return.
             BackHandler(onBack = back)
         })

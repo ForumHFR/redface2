@@ -56,9 +56,9 @@ import org.robolectric.annotation.GraphicsMode
  * #1509 / #1450 — record-only baseline of the integrated post chrome and new-topic form.
  * Uses the real content and routing fixtures from [EditorScreenLayoutTest], without a ViewModel.
  * Reply represents the shared reply/edit post chrome; transient states use the production adapter.
- * Post: portrait/compact × light/dark × scale 1/1.3 × normal/format/arm/event/restore/cards/panel/preview.
- * Topic: both modes, header, poll, restore, preview, event, arm and app bar states (poll + restore, no tap);
- * the post and topic Restore scenes open the ↺ offer sheet by its tap and capture its dialog window;
+ * Post: portrait/compact × light/dark × scale 1/1.3 × normal/format/arm/event/restore/cards/panel/preview/options.
+ * Topic: both modes, header, poll, restore, preview, options, event, arm and app bar states (poll + restore, no tap);
+ * the post and topic Restore/Options scenes open their sheet by its tap and capture its dialog window;
  * refused/missing FP context; historical names kept, each byte-identical capture recorded under one name only.
  *
  * Output: `feature/editor/build/outputs/roborazzi/<surface>_<orientation>_fs<scale>_<state>.png`.
@@ -140,6 +140,7 @@ class EditorBaselineRoborazziTest {
                 }
                 compose.waitForIdle()
                 when (scene) {
+                    PostScene.Options -> compose.onNodeWithContentDescription("Options").performClick()
                     PostScene.Format -> compose.onNodeWithContentDescription("Mise en forme").performClick()
                     PostScene.Restore -> compose.onNodeWithContentDescription(
                         "Brouillon retrouvé, restaurer ou ignorer").performClick()
@@ -151,7 +152,7 @@ class EditorBaselineRoborazziTest {
                 }
                 if (scene == PostScene.Preview) assertSharedPreview()
                 record("post_${scene.name}_${orientation}_fs${fontScale}_dark$isDark", orientation, focusManager,
-                    sheet = scene == PostScene.Restore)
+                    sheet = scene in setOf(PostScene.Restore, PostScene.Options))
             }
         }
     }
@@ -192,6 +193,7 @@ class EditorBaselineRoborazziTest {
                         compose.onNodeWithContentDescription("Modifier le titre", substring = true).performClick()
                     TopicScene.Poll -> compose.onNodeWithContentDescription("Sondage présent, consulter")
                         .performClick()
+                    TopicScene.Options -> compose.onNodeWithContentDescription("Options").performClick()
                     TopicScene.Restore -> compose.onNodeWithContentDescription(
                         "Brouillon retrouvé, restaurer ou ignorer").performClick()
                     TopicScene.Preview -> compose.onNodeWithContentDescription(previewLabel).performClick()
@@ -199,7 +201,7 @@ class EditorBaselineRoborazziTest {
                 }
                 if (scene == TopicScene.Preview) assertSharedPreview()
                 val name = "${surface.fileName}_${scene.name}_${orientation}_fs${fontScale}_dark$isDark"
-                record(name, orientation, focus, sheet = scene == TopicScene.Restore)
+                record(name, orientation, focus, sheet = scene in setOf(TopicScene.Restore, TopicScene.Options))
             }
         }
     }
@@ -218,7 +220,7 @@ class EditorBaselineRoborazziTest {
         return when (this) {
             TopicScene.Normal -> if (newTopic) isDark else orientation == "portrait"
             TopicScene.EmptyTitle, TopicScene.Preview -> newTopic || orientation == "portrait"
-            TopicScene.Header, TopicScene.Restore, TopicScene.Event, TopicScene.Armed -> newTopic
+            TopicScene.Header, TopicScene.Restore, TopicScene.Options, TopicScene.Event, TopicScene.Armed -> newTopic
             TopicScene.Poll, TopicScene.States, TopicScene.Unsupported, TopicScene.MissingRoute -> !newTopic
         }
     }
@@ -300,9 +302,9 @@ class EditorBaselineRoborazziTest {
     private fun baselineOffers() = listOf(EditorDraftStore.DraftOffer("baseline", 1,
         EditorDraftStore.Draft("[b]Brouillon conservé[/b]", updatedAt = System.currentTimeMillis() - 301_000L)))
 
-    private enum class PostScene { Normal, Format, Armed, Event, Restore, Cards, Panel, Preview }
+    private enum class PostScene { Normal, Format, Armed, Event, Restore, Cards, Panel, Preview, Options }
     private enum class TopicScene {
-        Normal, EmptyTitle, Header, Poll, Restore, Preview, Unsupported, MissingRoute, Event, Armed, States,
+        Normal, EmptyTitle, Header, Poll, Restore, Preview, Unsupported, MissingRoute, Event, Armed, States, Options,
     }
     private data class Scenario(
         val surface: Surface, val filled: Boolean, val scene: PostScene = PostScene.Normal,

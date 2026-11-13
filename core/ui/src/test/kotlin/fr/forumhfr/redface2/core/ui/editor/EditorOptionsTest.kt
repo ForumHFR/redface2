@@ -14,10 +14,12 @@ import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertWidthIsAtLeast
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isToggleable
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
@@ -82,7 +84,31 @@ class EditorOptionsTest {
         compose.runOnIdle { assertTrue(changes.isEmpty()) }
     }
 
-    private fun setContent() {
+    @Test fun settingsAreAbsentWithoutNavigationCallback() {
+        setContent()
+        compose.onNodeWithText("Réglages de l’éditeur").assertDoesNotExist()
+    }
+
+    @Test fun settingsExposeOneButtonWithItsDescriptionAndMinimumHeight() {
+        var opens = 0
+        setContent { opens++ }
+        compose.onAllNodes(hasClickAction() and hasText("Réglages de l’éditeur")).assertCountEquals(1)
+        compose.onNodeWithText("Réglages de l’éditeur")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Button))
+            .assert(hasText("Raccourci de la barre, confirmation avant envoi"))
+            .assertHeightIsAtLeast(56.dp).assertWidthIsAtLeast(48.dp).performClick()
+        compose.runOnIdle { assertEquals(1, opens) }
+    }
+
+    @Test fun disabledSettingsRejectTaps() {
+        var opens = 0
+        setContent { opens++ }
+        compose.runOnIdle { enabled.value = false }
+        compose.onNodeWithText("Réglages de l’éditeur").assertIsNotEnabled().performTouchInput { click() }
+        compose.runOnIdle { assertEquals(0, opens) }
+    }
+
+    private fun setContent(onOpenSettings: (() -> Unit)? = null) {
         compose.setContent {
             RedfaceTheme(darkTheme = false, dynamicColor = false) {
                 EditorOptions(
@@ -94,6 +120,7 @@ class EditorOptionsTest {
                     onSmileyDisabledChanged = { changed(1, it) },
                     onEmailNotificationChanged = { changed(2, it) },
                     labels = labels,
+                    onOpenSettings = onOpenSettings,
                 )
             }
         }
