@@ -13,6 +13,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.BbcodeValidation
+import fr.forumhfr.redface2.core.domain.editor.EditorBodyProvenance
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
@@ -5056,6 +5057,62 @@ class PostEditorViewModelTest {
         assertEquals("D\n\nC continued", recreated.bodyFieldState.text.toString())
         assertNull(recreated.state.value.restorableDraft)
         assertTrue(draftStore.loadOffers("tester", key).isEmpty())
+    }
+
+    @Test
+    fun `restore keeps a delivered batch in request order despite older evidence - ED89`() = runTest {
+        val one = "[quotemsg=101,1,9]a[/quotemsg]"
+        val two = "[quotemsg=202,2,9]b[/quotemsg]"
+        replyRepository.formResultsByNumrep = mapOf(
+            101 to Result.success(authenticatedForm(initialContent = "$one\n\n")),
+            202 to Result.success(authenticatedForm(initialContent = "$two\n\n")),
+        )
+        val pending = PendingInlineQuoteRequest(SAMPLE_CAT, SAMPLE_TOPIC_ID, listOf(
+            PendingInlineQuoteRequest.Quote(101, SAMPLE_PAGE), PendingInlineQuoteRequest.Quote(202, SAMPLE_PAGE)))
+        // Post 202 was already quoted alone in this composition: its evidence precedes the batch.
+        draftStore.preload(EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID), EditorDraftStore.Draft(
+            "offered D", pendingInlineQuoteRequest = pending,
+            bodyProvenance = EditorBodyProvenance().delivered(pending.scope, two, "offered D")))
+        val vm = newReplyViewModel(quoteAction = false,
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        settleBody()
+        val delivered = vm.bodyFieldState.text.toString()
+        assertTrue(delivered, delivered.indexOf(one) in 0 until delivered.indexOf(two))
+        vm.dispatch(PostEditorIntent.DraftRestoreRequested)
+        settleBody()
+        val restored = vm.bodyFieldState.text.toString()
+        assertTrue(restored, restored.startsWith("offered D"))
+        assertTrue(restored, restored.indexOf(one) in 0 until restored.indexOf(two))
+        assertEquals(restored, restored.indexOf(one), restored.lastIndexOf(one))
+        assertEquals(restored, restored.indexOf(two), restored.lastIndexOf(two))
+    }
+
+    @Test
+    fun `a lone quote delivered again after other evidence is never offered as a draft - ED121`() = runTest {
+        val quote = "[quotemsg=101]requested quote[/quotemsg]"
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.success(authenticatedForm(quote)))
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val pending = PendingInlineQuoteRequest(SAMPLE_CAT, SAMPLE_TOPIC_ID,
+            listOf(PendingInlineQuoteRequest.Quote(101, SAMPLE_PAGE)))
+        // A cleared composition keeps its evidence: this post first, then another one.
+        val history = EditorBodyProvenance().delivered(pending.scope, quote, "")
+            .delivered(pending.scope, "[quotemsg=202]other[/quotemsg]", "")
+        draftStore.preload(key, EditorDraftStore.Draft("", pendingInlineQuoteRequest = pending,
+            bodyProvenance = history))
+        val vm = newReplyViewModel(quoteAction = false,
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        settleBody()
+        assertEquals(quote, vm.bodyFieldState.text.toString().trimEnd())
+        vm.dispatch(PostEditorIntent.CloseRequested)
+        settleBody()
+        val saved = checkNotNull(draftStore.entries[key]).draft
+        assertTrue(saved.bodyProvenance?.isQuoteOnly(saved.body) == true)
+        val reopened = newReplyViewModel(quoteAction = false,
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        settleBody()
+        assertEquals("", reopened.bodyFieldState.text.toString())
+        assertTrue(reopened.state.value.draftOffers.isEmpty())
+        assertNull(reopened.state.value.restorableDraft)
     }
 
     /** Simulate Reply opening an existing Room row, without the Citer producer enqueuing another Q. */

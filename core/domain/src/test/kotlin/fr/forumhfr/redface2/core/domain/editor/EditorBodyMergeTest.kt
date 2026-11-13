@@ -45,6 +45,18 @@ class EditorBodyMergeTest {
     }
 
     @Test
+    fun `restore keeps the delivered order whatever older evidence of the same posts says - ED89`() {
+        val batch = "$q1\n\n$q2"
+        // Post 2 was quoted alone earlier, or the same posts in the other order: evidence is never dropped.
+        listOf(q2, "$q2\n\n$q1").forEach { older ->
+            val proof = EditorBodyProvenance().delivered(scope, older).delivered(scope, batch, batch)
+            assertEquals(older, "D\n\n$batch", mergeEditorBody("D", batch, provenance = proof).body)
+            assertEquals(older, "D\n\n$batch\n\ntyped",
+                mergeEditorBody("D", "$batch\n\ntyped", provenance = proof).body)
+        }
+    }
+
+    @Test
     fun `MP uses the same merge and a modified block is retained even when D contains it`() {
         val mp = QuoteScope.PrivateMessage(42)
         val state = EditorBodyProvenance().delivered(mp, q1)

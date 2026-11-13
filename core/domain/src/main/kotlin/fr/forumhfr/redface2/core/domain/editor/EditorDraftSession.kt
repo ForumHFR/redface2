@@ -47,8 +47,10 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
     fun provenanceFor(body: String): EditorBodyProvenance {
         val live = stagedBody ?: restoredBody?.takeIf { it.body == body }
         val proof = bodyProvenance ?: EditorBodyProvenance()
+        // The durable proof owns the delivery order: a staged merge predating the last delivery must
+        // not move an older proof of the same quote behind it (ED-121 compares the last one).
         return if (live == null) proof.rebase(lastBody, body) else live.provenance.copy(
-            deliveries = (live.provenance.deliveries + proof.deliveries).distinct(),
+            deliveries = (live.provenance.deliveries - proof.deliveries.toSet() + proof.deliveries).distinct(),
         ).rebase(live.body, body)
     }
 

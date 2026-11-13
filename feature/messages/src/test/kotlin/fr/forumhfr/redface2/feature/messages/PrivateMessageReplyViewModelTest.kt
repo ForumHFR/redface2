@@ -12,6 +12,7 @@ import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
+import fr.forumhfr.redface2.core.domain.editor.EditorBodyProvenance
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
@@ -449,6 +450,37 @@ class PrivateMessageReplyViewModelTest {
         // A recreation must not find D offered again: restoring it would duplicate it in C.
         assertTrue(draftStore.loadOffers("tester", key).none { it.draft.body == "D" })
         assertNull(vm.state.value.restorableDraft)
+    }
+
+    @Test
+    fun `MP restore keeps a delivered batch in request order despite older evidence - ED89`() = runTest {
+        val key = EditorDraftKey.mpReply(request.threadId)
+        val one = "[quotemsg=101]one[/quotemsg]"
+        val two = "[quotemsg=202]two[/quotemsg]"
+        val pending = PendingInlineQuoteRequest.privateMessage(request.threadId,
+            listOf(PendingInlineQuoteRequest.Quote(101, 2, 7), PendingInlineQuoteRequest.Quote(202, 2, 8)))
+        // Message 202 was already quoted alone in this composition: its evidence precedes the batch.
+        draftStore.preload(key, EditorDraftStore.Draft("D", isPrivate = true, pendingInlineQuoteRequest = pending,
+            bodyProvenance = EditorBodyProvenance().delivered(pending.scope, two, "D")))
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } coAnswers {
+            when (firstArg<PrivateMessageReplyContext>().quote?.numreponse) {
+                101 -> form(initialContent = one)
+                202 -> form(initialContent = two)
+                else -> form()
+            }
+        }
+        val vm = viewModel(repository)
+        runCurrent()
+        val delivered = vm.bodyFieldState.text.toString()
+        assertTrue(delivered, delivered.indexOf(one) in 0 until delivered.indexOf(two))
+        vm.onDraftRestoreRequested()
+        runCurrent()
+        val restored = vm.bodyFieldState.text.toString()
+        assertTrue(restored, restored.startsWith("D"))
+        assertTrue(restored, restored.indexOf(one) in 0 until restored.indexOf(two))
+        assertEquals(restored, restored.indexOf(one), restored.lastIndexOf(one))
+        assertEquals(restored, restored.indexOf(two), restored.lastIndexOf(two))
     }
 
     @Test

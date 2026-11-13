@@ -34,6 +34,31 @@ class EditorDraftQuoteSessionTest {
     }
 
     @Test
+    fun `a quote delivered again after other evidence stays quote-only on the next save - ED121`() = runTest {
+        val quote = "[quotemsg=101]one[/quotemsg]"
+        // A cleared composition keeps its evidence: this post first, then another one.
+        val history = EditorBodyProvenance().delivered(request.scope, quote, "")
+            .delivered(request.scope, "[quotemsg=202]two[/quotemsg]", "")
+        val store = VersionedEditorDraftStore()
+        store.preload(key, Draft("", pendingInlineQuoteRequest = request, bodyProvenance = history))
+        val session = EditorDraftSession(store, key)
+        session.load()
+        val inserted = insertEditorQuotes("", quote, session.provenanceFor(""))
+        val body = inserted.body + "\n"
+        session.stageBodyMerge(inserted.copy(body = body))
+        val delivered = Draft(body, bodyProvenance = session.provenanceFor(body))
+        assertEquals(StoreWriteResult.Written(1), session.consumeInlineQuoteRequest(request, delivered, quote))
+        assertTrue(store.entries[key]?.draft?.bodyProvenance?.isQuoteOnly(body) == true)
+        // The autosave or the close flush that follows must not reorder the evidence.
+        assertTrue(session.provenanceFor(body).isQuoteOnly(body))
+        session.save(Draft(body, bodyProvenance = session.provenanceFor(body)))
+        assertTrue(store.entries[key]?.draft?.bodyProvenance?.isQuoteOnly(body) == true)
+        val reopened = EditorDraftSession(store, key)
+        reopened.load()
+        assertTrue(reopened.availableOffers.isEmpty())
+    }
+
+    @Test
     fun `entry preserves the offered draft and ignoring that draft keeps the request`() = runTest {
         val store = VersionedEditorDraftStore()
         val offered = Draft("offered", "subject", "recipient")

@@ -90,7 +90,7 @@ fun mergeEditorBody(
             editorQuoteBlocks(delivery.body, outerOnly = true).map { delivery.scope to it.identity }
         }
         val present = editorQuoteBlocks(offered).map { it.identity }.toSet()
-        val retained = mutableListOf<Pair<Int, String>>()
+        val retained = mutableListOf<String>()
         var cursor = 0
         var followsQuote = false
         val typing = buildString {
@@ -98,16 +98,15 @@ fun mergeEditorBody(
                 val exact = delivered.indexOfFirst { (deliveredScope, identity) ->
                     deliveredScope == currentScope && identity == block.identity
                 }
-                val sourceIndex = if (exact >= 0) exact else delivered.indexOfFirst { (deliveredScope, identity) ->
+                val source = delivered.getOrNull(exact) ?: delivered.firstOrNull { (deliveredScope, identity) ->
                     deliveredScope == currentScope && identity.first == block.identity.first
                 }
-                val source = delivered.getOrNull(sourceIndex)
                 if (source != null) {
                     val between = current.substring(cursor, block.range.first)
                     if (between.isNotBlank()) append(if (followsQuote) removeEditorSeparator(between) else between)
                     val intact = source.second == block.identity
                     if (!intact || scope != currentScope || block.identity !in present) {
-                        retained += sourceIndex to current.substring(block.range)
+                        retained += current.substring(block.range)
                     }
                     cursor = block.range.last + 1
                     followsQuote = true
@@ -116,7 +115,9 @@ fun mergeEditorBody(
             val tail = current.substring(cursor)
             append(if (followsQuote) removeEditorSeparator(tail) else tail)
         }.takeUnless { it.isBlank() }.orEmpty()
-        val quotes = retained.sortedBy { it.first }.joinToString("\n\n") { it.second }
+        // ED-89: the field already holds the deliveries in request order. Older evidence of the same
+        // post (kept for reinsertion) must not reorder them.
+        val quotes = retained.joinToString("\n\n")
         val prefix = joinEditorParts(offered, quotes)
         val body = joinEditorParts(prefix, typing)
         EditorBodyMerge(body, provenance.copy(draftEnd = offered.length, quotesEnd = prefix.length))
