@@ -384,36 +384,33 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
      * after typing (system back or the header's back arrow) cancelled the debounce with the
      * ViewModel and silently dropped the tail of the PRIVATE draft.
      *
-     * Two guards (gate #803) :
+     * Three guards (gate #803 ; ED-10) :
      * - INERT while a POST is in flight — popping would cancel the submit with the viewModelScope
      *   and leave the server state unknown ; on failure `isSubmitting` drops and the back works
      *   again, on success SubmitSucceeded pops anyway ;
      * - ONE-SHOT — a second close racing the first CloseCommitted must not emit a second effect
-     *   (the pop is blind : a second one would remove the screen BELOW).
+     *   (the pop is blind : a second one would remove the screen BELOW) ;
+     * - NEVER SILENT — when the field cannot be saved (delivered quote not durable, or last write
+     *   refused) the reply stays open and asks. The latch is released so a later close retries the
+     *   save ; only "Quitter sans enregistrer" abandons. A storage failure therefore never leaves
+     *   the screen unclosable. CancellationException propagates (scope teardown is not an error).
      */
     fun onCloseRequested() {
         if (submission.blocksClose || closeRequested) return
         submission.disarm()
         closeRequested = true
         viewModelScope.launch {
-            // The close must NEVER stay blocked on a failing flush (Room is not contractually
-            // non-throwing — disk full, corrupted store) : the one-shot latch is already set, so
-            // a swallowed failure here only costs the last <750 ms of typing (the debounced
-            // autosave already persisted the rest) while a rethrow would leave the screen
-            // unclosable. CancellationException still propagates (scope teardown is not an error).
-            try {
-                if (!draftSession.flushForClose()) {
-                    // The delivered quote is still not durable: stay open and ask (ED-10/85).
-                    closeRequested = false
-                    updateState { it.copy(showUnsavedCloseDialog = true) }
-                    return@launch
-                }
-            } catch (e: CancellationException) {
-                throw e
+            val saved = try {
+                draftSession.flushForClose()
             } catch (_: IOException) {
-                // Best effort — the previous debounced write is what remains.
+                false
             }
-            _effects.send(PrivateMessageReplyEffect.CloseCommitted)
+            if (saved) {
+                _effects.send(PrivateMessageReplyEffect.CloseCommitted)
+            } else {
+                closeRequested = false
+                updateState { it.copy(showUnsavedCloseDialog = true) }
+            }
         }
     }
 

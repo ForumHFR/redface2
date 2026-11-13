@@ -25,7 +25,8 @@ fun EditorUnsavedCloseDialog(
     AlertDialog(
         modifier = modifier,
         onDismissRequest = onStay,
-        // The title is the dialog's accessible name: a heading, read first when the dialog opens.
+        // The title carries heading semantics. That alone proves neither the dialog's accessible name
+        // nor the order in which a screen reader announces it.
         title = { Text(stringResource(R.string.editor_unsaved_close_title), Modifier.semantics { heading() }) },
         text = { Text(stringResource(R.string.editor_unsaved_close_message)) },
         confirmButton = {

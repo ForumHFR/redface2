@@ -395,6 +395,105 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
+    fun `MP close whose final save fails asks before abandoning the field - ED10`() = runTest {
+        val key = EditorDraftKey.mpReply(request.threadId)
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val vm = viewModel(repository)
+        val effects = mutableListOf<PrivateMessageReplyEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        runCurrent()
+        draftStore.saveFailure = IOException("disk full")
+        vm.editBody(TextFieldValue("typed, never saved"))
+        vm.onCloseRequested()
+        runCurrent()
+        // The last write of the field failed: the dialog opens and the reply stays, field intact.
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        assertFalse(PrivateMessageReplyEffect.CloseCommitted in effects)
+        assertTrue(draftStore.saved[key]?.body.isNullOrEmpty())
+        assertEquals("typed, never saved", vm.bodyFieldState.text.toString())
+        // "Quitter sans enregistrer" is the only abandonment: one pop, no write.
+        val writes = draftStore.writes
+        vm.onUnsavedCloseDecided(leave = true)
+        vm.onUnsavedCloseDecided(leave = true)
+        vm.onCloseRequested()
+        runCurrent()
+        assertEquals(1, effects.count { it == PrivateMessageReplyEffect.CloseCommitted })
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(writes, draftStore.writes)
+        assertTrue(draftStore.saved[key]?.body.isNullOrEmpty())
+    }
+
+    @Test
+    fun `MP Rester then a close that can save writes the field and closes once - ED10`() = runTest {
+        val key = EditorDraftKey.mpReply(request.threadId)
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val vm = viewModel(repository)
+        val effects = mutableListOf<PrivateMessageReplyEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        runCurrent()
+        draftStore.saveFailure = IOException("disk full")
+        vm.editBody(TextFieldValue("typed while the disk was full"))
+        vm.onCloseRequested()
+        runCurrent()
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        // "Rester" keeps the reply; while storage still fails, a new close asks again.
+        vm.onUnsavedCloseDecided(leave = false)
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        vm.onCloseRequested()
+        runCurrent()
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        vm.onUnsavedCloseDecided(leave = false)
+        assertFalse(PrivateMessageReplyEffect.CloseCommitted in effects)
+        // Storage recovers: the next close retries the write, then closes normally.
+        draftStore.saveFailure = null
+        vm.onCloseRequested()
+        runCurrent()
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals("typed while the disk was full", draftStore.saved[key]?.body)
+        assertTrue(draftStore.saved[key]?.isPrivate == true)
+        assertEquals(1, effects.count { it == PrivateMessageReplyEffect.CloseCommitted })
+    }
+
+    @Test
+    fun `MP close with nothing to write never asks even when storage fails - ED10`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val vm = viewModel(repository)
+        val effects = mutableListOf<PrivateMessageReplyEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        runCurrent()
+        // An empty field over an absent row: the refused write would not have saved anything.
+        draftStore.saveFailure = IOException("disk full")
+        vm.onCloseRequested()
+        runCurrent()
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(1, effects.count { it == PrivateMessageReplyEffect.CloseCommitted })
+    }
+
+    @Test
+    fun `MP close over a body the row already holds never asks when storage fails - ED10`() = runTest {
+        val key = EditorDraftKey.mpReply(request.threadId)
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val vm = viewModel(repository)
+        val effects = mutableListOf<PrivateMessageReplyEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        runCurrent()
+        vm.editBody(TextFieldValue("already saved"))
+        advanceTimeBy(800L)
+        runCurrent()
+        assertEquals("already saved", draftStore.saved[key]?.body)
+        draftStore.saveFailure = IOException("disk full")
+        vm.onCloseRequested()
+        runCurrent()
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(1, effects.count { it == PrivateMessageReplyEffect.CloseCommitted })
+        assertEquals("already saved", draftStore.saved[key]?.body)
+    }
+
+    @Test
     fun `MP Ignore after a conflict releases the reply when the request was consumed elsewhere - ED132`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } coAnswers {

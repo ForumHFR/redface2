@@ -35,6 +35,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorRecipientInput
 import fr.forumhfr.redface2.core.ui.editor.EditorScaffold
 import fr.forumhfr.redface2.core.ui.editor.EditorSubjectInput
 import fr.forumhfr.redface2.core.ui.editor.EditorTooltipHost
+import fr.forumhfr.redface2.core.ui.editor.EditorUnsavedCloseDialog
 import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
 import fr.forumhfr.redface2.core.ui.editor.LocalEditorTooltipHost
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
@@ -84,6 +85,13 @@ fun PrivateMessageComposeScreen(
                 PrivateMessageComposeEffect.CloseCommitted -> currentOnBack()
             }
         }
+    }
+    // Above every branch of the content: loading, form failure and an open header panel included.
+    if (state.showUnsavedCloseDialog) {
+        EditorUnsavedCloseDialog(
+            onStay = { viewModel.onUnsavedCloseDecided(leave = false) },
+            onLeave = { viewModel.onUnsavedCloseDecided(leave = true) },
+        )
     }
     CompositionLocalProvider(LocalEditorPreviewState provides viewModel.previewLayout) {
         PrivateMessageComposeContent(

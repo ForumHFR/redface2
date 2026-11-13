@@ -3173,6 +3173,106 @@ class TopicFormViewModelTest {
         assertEquals("Mon titre", draftStore.saved[key]?.subject)
     }
 
+    /** A settled new-topic form whose effects are recorded from the start. */
+    private fun TestScope.closableNewTopic(): Pair<TopicFormViewModel, List<TopicFormEffect>> {
+        val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        val effects = mutableListOf<TopicFormEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        syncBody()
+        testScheduler.advanceUntilIdle()
+        return vm to effects
+    }
+
+    private fun TestScope.requestClose(vm: TopicFormViewModel) {
+        vm.submit(TopicFormIntent.CloseRequested)
+        syncBody()
+        testScheduler.advanceUntilIdle()
+    }
+
+    @Test
+    fun `close whose final save fails asks before abandoning the form - ED10`() = runTest {
+        val (vm, effects) = closableNewTopic()
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        draftStore.saveFailure = java.io.IOException("disk full")
+        vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Mon titre")))
+        vm.editBody(TextFieldValue("typed, never saved"))
+        requestClose(vm)
+        // The last write failed: the dialog opens and the form stays, fields intact.
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        assertFalse(TopicFormEffect.CloseCommitted in effects)
+        assertTrue(draftStore.saved[key]?.body.isNullOrEmpty())
+        assertEquals("typed, never saved", vm.bodyFieldState.text.toString())
+        assertEquals("Mon titre", vm.state.value.subject.text)
+        // "Quitter sans enregistrer" is the only abandonment: one pop, no write.
+        val writes = draftStore.writes
+        vm.submit(TopicFormIntent.UnsavedCloseConfirmed)
+        vm.submit(TopicFormIntent.UnsavedCloseConfirmed)
+        requestClose(vm)
+        assertEquals(1, effects.count { it == TopicFormEffect.CloseCommitted })
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(writes, draftStore.writes)
+        assertTrue(draftStore.saved[key]?.body.isNullOrEmpty())
+    }
+
+    @Test
+    fun `Rester then a close that can save writes the form and closes once - ED10`() = runTest {
+        val (vm, effects) = closableNewTopic()
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        draftStore.saveFailure = java.io.IOException("disk full")
+        vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Mon titre")))
+        vm.editBody(TextFieldValue("typed while the disk was full"))
+        requestClose(vm)
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        // "Rester" keeps the form; while storage still fails, a new Back asks again.
+        vm.submit(TopicFormIntent.UnsavedCloseDismissed)
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        requestClose(vm)
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        vm.submit(TopicFormIntent.UnsavedCloseDismissed)
+        assertFalse(TopicFormEffect.CloseCommitted in effects)
+        // Storage recovers: the next Back retries the write, then closes normally.
+        draftStore.saveFailure = null
+        requestClose(vm)
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals("typed while the disk was full", draftStore.saved[key]?.body)
+        assertEquals("Mon titre", draftStore.saved[key]?.subject)
+        assertEquals(1, effects.count { it == TopicFormEffect.CloseCommitted })
+    }
+
+    @Test
+    fun `close with nothing to write never asks even when storage fails - ED10`() = runTest {
+        val (vm, effects) = closableNewTopic()
+        // Empty title and body over an absent row: the refused write would not have saved anything.
+        draftStore.saveFailure = java.io.IOException("disk full")
+        requestClose(vm)
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(1, effects.count { it == TopicFormEffect.CloseCommitted })
+    }
+
+    @Test
+    fun `close after a title-only change fails to save asks - ED10`() = runTest {
+        val (vm, effects) = closableNewTopic()
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Premier titre")))
+        vm.editBody(TextFieldValue("corps inchangé"))
+        testScheduler.advanceTimeBy(751)
+        syncBody()
+        testScheduler.advanceUntilIdle()
+        assertEquals("Premier titre", draftStore.saved[key]?.subject)
+        assertEquals("corps inchangé", draftStore.saved[key]?.body)
+        draftStore.saveFailure = java.io.IOException("disk full")
+        // Only the title changes: the row still holds the old one, the close must ask.
+        vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Second titre")))
+        requestClose(vm)
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        assertFalse(TopicFormEffect.CloseCommitted in effects)
+        assertEquals("Premier titre", draftStore.saved[key]?.subject)
+        assertEquals("Second titre", vm.state.value.subject.text)
+        vm.submit(TopicFormIntent.UnsavedCloseConfirmed)
+        testScheduler.advanceUntilIdle()
+        assertEquals(1, effects.count { it == TopicFormEffect.CloseCommitted })
+    }
+
     @Test
     fun `CloseRequested with blank live fields preserves a pending restore offer`() = runTest {
         val key = EditorDraftKey.newTopic(SAMPLE_CAT)

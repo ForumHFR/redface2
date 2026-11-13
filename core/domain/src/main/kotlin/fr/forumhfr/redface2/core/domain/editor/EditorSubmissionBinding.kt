@@ -246,6 +246,20 @@ class EditorSubmissionBinding<E, F>(
         return persist(snapshot())
     }
 
+    /**
+     * ED-10: the awaited last save of a close. False when the field holds content the store refused
+     * (failure or conflict), so the caller asks before abandoning it. Nothing to write is not a
+     * failure: no snapshot, unchanged content already held by the row, or an invalidated owner,
+     * whose editor is retired and can never write again.
+     */
+    suspend fun flushForClose(snapshot: () -> EditorDraftStore.Draft?): Boolean {
+        autosave?.cancelAndJoin()
+        val draft = snapshot()
+        val result = persist(draft)
+        return result == null || result is StoreWriteResult.Written || drafts.invalidated ||
+            draft == null || drafts.holds(draft)
+    }
+
     fun launch(
         permit: SubmissionRequest.Accepted,
         draft: EditorDraftStore.Draft,

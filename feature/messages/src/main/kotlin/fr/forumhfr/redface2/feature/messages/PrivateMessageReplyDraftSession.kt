@@ -376,7 +376,9 @@ internal class PrivateMessageReplyDraftSession(
      * ED-132: a delivered quote whose C/Q transaction is pending or failed seals [draftSnapshot].
      * A close settles it first, then saves the field as it is now, typing made since included.
      * When that transaction still fails, nothing typed since the delivery can be saved without
-     * risking a duplicate quote: false, and the caller asks before abandoning that typing.
+     * risking a duplicate quote: false. False as well when the last write of the field is refused
+     * by the store (failure or conflict) while the field holds content the row does not. The caller
+     * then asks before abandoning that typing. Nothing to write is not a failure.
      */
     suspend fun flushForClose(): Boolean {
         quoteCommit.withLock {
@@ -384,8 +386,7 @@ internal class PrivateMessageReplyDraftSession(
             val delivered = stagedDelivery
             if (deliveryPending && pending != null && delivered != null) commitQuoteLocked(pending, delivered)
         }
-        if (!deliveryPending) submission.flush(::draftSnapshot)
-        return !deliveryPending
+        return !deliveryPending && submission.flushForClose(::draftSnapshot)
     }
 
     /**

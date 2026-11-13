@@ -26,6 +26,9 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
     private var offersLoaded = false
     private val resolvedOffers = mutableSetOf<String>()
     private var lastBody = ""
+    /** ED-10: the headers last read or written durably with [lastBody], in their editor form. */
+    private var lastSubject = ""
+    private var lastRecipients = ""
     /** Text Undo/Redo can return to the last restore after an intervening autosave lost its offsets. */
     private var restoredBody: EditorBodyMerge? = null
     private var stagedBody: EditorBodyMerge? = null
@@ -98,6 +101,8 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         }
         val composition = entry?.takeUnless { it.attempt?.status == AttemptStatus.PUBLISHED }
         lastBody = composition?.draft?.body.orEmpty()
+        lastSubject = composition?.draft?.subject.orEmpty()
+        lastRecipients = composition?.draft?.recipients.orEmpty()
         bodyProvenance = composition?.draft?.bodyProvenance
         version = entry?.version ?: 0L
         expectedAttemptStatus = entry?.attempt?.status
@@ -140,6 +145,14 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
             result
         }
     }
+
+    /**
+     * ED-10: the user content of [draft] (body, subject, recipients) is what this session last read
+     * or wrote durably, so a failed rewrite loses nothing. Absent headers compare as empty ones.
+     * Timestamps, provenance, offers, quote requests and the constant privacy flag are not content.
+     */
+    fun holds(draft: Draft): Boolean = draft.body == lastBody &&
+        draft.subject.orEmpty() == lastSubject && draft.recipients.orEmpty() == lastRecipients
 
     /** A certified resume is C, not a new offered D. Existing durable offers remain untouched. */
     fun resumeContent() { protectedOffer = null }
@@ -287,6 +300,8 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
                     pendingInlineQuoteRequest = null
                     bodyProvenance = null
                     lastBody = ""
+                    lastSubject = ""
+                    lastRecipients = ""
                     protectedOffer = null
                     restoredBody = null
                     stagedBody = null
@@ -330,6 +345,8 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
 
     private fun adoptBody(draft: Draft) {
         lastBody = draft.body
+        lastSubject = draft.subject.orEmpty()
+        lastRecipients = draft.recipients.orEmpty()
         bodyProvenance = draft.bodyProvenance
         val staged = stagedBody
         val matches = staged != null && staged.body == draft.body &&

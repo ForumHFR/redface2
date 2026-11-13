@@ -226,6 +226,18 @@ internal class PrivateMessageComposeDraftSession(
             isPrivate = true)
     }
 
+    /**
+     * ED-10: the awaited last save of a close. False when recipients, subject or body hold content
+     * the store refused, so the caller asks before abandoning it. An entirely empty composer has
+     * nothing to abandon: its recipients envelope is never the empty value of an absent row.
+     */
+    suspend fun flushForClose(): Boolean {
+        if (submission.flushForClose(::draftSnapshot)) return true
+        val snapshot = readState()
+        return bodyFieldState.text.isEmpty() && snapshot.subject.isBlank() &&
+            snapshot.recipientState == EditorRecipientState()
+    }
+
     private fun replaceBody(body: String) {
         clearToolSelection()
         Snapshot.withMutableSnapshot {

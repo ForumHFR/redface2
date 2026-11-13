@@ -563,12 +563,16 @@ class TopicFormViewModel @AssistedInject constructor(
      * #405 row, THEN let the UI pop (CloseCommitted). Without this, a system back < 750 ms after
      * typing cancelled the debounce with the ViewModel and silently dropped the tail of the draft.
      *
-     * Two guards (gate #803) :
+     * Three guards (gate #803 ; ED-10) :
      * - INERT while a POST is in flight — popping would cancel the submit with the viewModelScope
      *   and leave the server state unknown with a repostable draft ; on failure `isSubmitting`
      *   drops and the back works again, on success SubmitSucceeded / NewTopicCreated pops anyway ;
      * - ONE-SHOT — a second back racing the first CloseCommitted must not emit a second effect
-     *   (each `onClose` pops blindly : the second pop would remove the screen BELOW).
+     *   (each `onClose` pops blindly : the second pop would remove the screen BELOW) ;
+     * - NEVER SILENT — when the title or the body cannot be saved the form stays open and asks.
+     *   The latch is released so a later back retries the save ; only "Quitter sans enregistrer"
+     *   abandons. A storage failure therefore never leaves the screen unclosable.
+     *   CancellationException propagates (scope teardown is not an error).
      */
     private fun onCloseRequested() {
         if (submission.blocksClose || closeRequested) return
@@ -578,19 +582,27 @@ class TopicFormViewModel @AssistedInject constructor(
         }
         closeRequested = true
         viewModelScope.launch {
-            // The close must NEVER stay blocked on a failing flush (Room is not contractually
-            // non-throwing — disk full, corrupted store) : the one-shot latch is already set, so
-            // a swallowed failure here only costs the last <750 ms of typing (the debounced
-            // autosave already persisted the rest) while a rethrow would leave the screen
-            // unclosable. CancellationException still propagates (scope teardown is not an error).
-            try {
-                submission.flush(draftSnapshot())
-            } catch (e: CancellationException) {
-                throw e
+            val saved = try {
+                submission.flushForClose(::draftSnapshot)
             } catch (_: IOException) {
-                // Best effort — the previous debounced write is what remains.
+                false
             }
-            _effects.send(TopicFormEffect.CloseCommitted)
+            if (saved) {
+                _effects.send(TopicFormEffect.CloseCommitted)
+            } else {
+                closeRequested = false
+                updateState { it.copy(showUnsavedCloseDialog = true) }
+            }
+        }
+    }
+
+    /** The informed choice of the unsaved-close dialog; leaving pops exactly once, without a write. */
+    private fun onUnsavedCloseDecided(leave: Boolean) {
+        if (!_state.value.showUnsavedCloseDialog) return
+        updateState { it.copy(showUnsavedCloseDialog = false) }
+        if (leave && !closeRequested) {
+            closeRequested = true
+            viewModelScope.launch { _effects.send(TopicFormEffect.CloseCommitted) }
         }
     }
 
@@ -648,6 +660,8 @@ class TopicFormViewModel @AssistedInject constructor(
             TopicFormIntent.DraftRestoreRequested -> onDraftRestoreRequested()
             TopicFormIntent.DraftDiscardRequested -> onDraftDiscardRequested()
             TopicFormIntent.CloseRequested -> onCloseRequested()
+            TopicFormIntent.UnsavedCloseDismissed -> onUnsavedCloseDecided(leave = false)
+            TopicFormIntent.UnsavedCloseConfirmed -> onUnsavedCloseDecided(leave = true)
         }
     }
 

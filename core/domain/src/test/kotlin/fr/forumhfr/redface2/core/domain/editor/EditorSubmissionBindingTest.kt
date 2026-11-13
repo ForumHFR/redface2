@@ -312,6 +312,48 @@ class EditorSubmissionBindingTest {
     }
 
     @Test
+    fun `close after a title-only change fails to save asks - ED10`() = runTest {
+        val store = VersionedEditorDraftStore()
+        val binding = binding(store)
+        binding.restore("key")
+        assertTrue(binding.flushForClose { Draft("body", subject = "first title") })
+        store.saveFailure = IOException("disk full")
+        // Unchanged content: the refused rewrite loses nothing, whatever the null/empty header form.
+        assertTrue(binding.flushForClose { Draft("body", subject = "first title", recipients = "") })
+        // Only the title changed: it is durable nowhere, the close must ask.
+        assertFalse(binding.flushForClose { Draft("body", subject = "second title") })
+        assertFalse(binding.flushForClose { Draft("body") })
+        assertEquals("first title", store.saved["key"]?.subject)
+        store.saveFailure = null
+        assertTrue(binding.flushForClose { Draft("body", subject = "second title") })
+        assertEquals("second title", store.saved["key"]?.subject)
+    }
+
+    @Test
+    fun `close after a recipients-only change fails to save asks - ED10`() = runTest {
+        val store = VersionedEditorDraftStore()
+        val binding = binding(store)
+        binding.restore("key")
+        assertTrue(binding.flushForClose { Draft("body", recipients = "alice", isPrivate = true) })
+        store.saveFailure = IOException("disk full")
+        assertTrue(binding.flushForClose { Draft("body", recipients = "alice", isPrivate = true) })
+        assertFalse(binding.flushForClose { Draft("body", recipients = "alice;bob", isPrivate = true) })
+        assertEquals("alice", store.saved["key"]?.recipients)
+    }
+
+    @Test
+    fun `close over content loaded from the row never asks when storage fails - ED10`() = runTest {
+        val store = VersionedEditorDraftStore()
+        store.preload("key", Draft("body", subject = "loaded title"))
+        val binding = binding(store)
+        binding.restore("key")
+        store.saveFailure = IOException("disk full")
+        assertTrue(binding.flushForClose { Draft("body", subject = "loaded title") })
+        assertFalse(binding.flushForClose { Draft("body", subject = "edited title") })
+        assertTrue(binding.flushForClose { null })
+    }
+
+    @Test
     fun `successful autosave clears visible draft information`() = runTest {
         val store = VersionedEditorDraftStore()
         val failures = mutableListOf<String?>()

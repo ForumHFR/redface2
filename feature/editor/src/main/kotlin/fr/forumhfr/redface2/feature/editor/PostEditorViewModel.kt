@@ -992,13 +992,15 @@ class PostEditorViewModel @AssistedInject constructor(
      * after typing cancelled the debounce with the ViewModel and silently dropped the tail of
      * the draft. Mirrors the quick-reply escalation (save awaited before the effect).
      *
-     * Two guards (gate #803, NO-GO findings) :
+     * Three guards (gate #803, NO-GO findings ; ED-10) :
      * - INERT while a POST is in flight — popping would cancel the submit with the
      *   viewModelScope and leave the server state unknown with a repostable draft (the sheet
      *   blocks its dismiss the same way, gate #788) ; on failure `isSubmitting` drops and the
      *   back works again, on success SubmitSucceeded pops anyway ;
      * - ONE-SHOT — a second back racing the first CloseCommitted must not emit a second
-     *   effect (each `onClose` pops blindly : the second pop would remove the screen BELOW).
+     *   effect (each `onClose` pops blindly : the second pop would remove the screen BELOW) ;
+     * - NEVER SILENT — when the field cannot be saved the editor stays open and asks. The latch
+     *   is released so a later back retries the save ; only "Quitter sans enregistrer" abandons.
      */
     private fun onCloseRequested() {
         if (submission.blocksClose || closeRequested) return
@@ -1008,30 +1010,28 @@ class PostEditorViewModel @AssistedInject constructor(
         }
         closeRequested = true
         viewModelScope.launch {
-            // The close must NEVER stay blocked on a failing flush (Room is not contractually
-            // non-throwing — disk full, corrupted store) : the one-shot latch is already set, so
-            // a swallowed failure here only costs the last <750 ms of typing (the debounced
-            // autosave already persisted the rest) while a rethrow would leave the screen
-            // unclosable. CancellationException still propagates (scope teardown is not an error).
-            try {
-                // ED-132: a delivered quote whose C/Q transaction is pending or failed seals the autosave.
-                // Settle it first, then save the field as it is now, typing made since included.
-                if (deliveredInlineQuoteRequest != null) commitInlineQuoteDelivery()
-                // Still not durable: nothing typed since the delivery can be saved without risking a
-                // duplicate quote. Stay open and ask; only "Quitter sans enregistrer" abandons it.
-                if (deliveredInlineQuoteRequest != null) {
-                    closeRequested = false
-                    _state.update { it.copy(showUnsavedCloseDialog = true) }
-                    return@launch
-                }
-                submission.flush(draftSnapshot())
-            } catch (e: CancellationException) {
-                throw e
-            } catch (_: IOException) {
-                // Best effort — the previous debounced write is what remains.
+            if (saveForClose()) {
+                _effects.send(PostEditorEffect.CloseCommitted)
+            } else {
+                closeRequested = false
+                _state.update { it.copy(showUnsavedCloseDialog = true) }
             }
-            _effects.send(PostEditorEffect.CloseCommitted)
         }
+    }
+
+    /**
+     * True when closing abandons nothing. A storage failure never leaves the screen unclosable (the
+     * dialog offers the way out) and never closes it silently either. Cancellation propagates.
+     */
+    private suspend fun saveForClose(): Boolean = try {
+        // ED-132: a delivered quote whose C/Q transaction is pending or failed seals the autosave.
+        // Settle it first, then save the field as it is now, typing made since included.
+        if (deliveredInlineQuoteRequest != null) commitInlineQuoteDelivery()
+        // Still not durable: nothing typed since the delivery can be saved without risking a
+        // duplicate quote. Otherwise the last write of the field must itself succeed.
+        deliveredInlineQuoteRequest == null && submission.flushForClose(::draftSnapshot)
+    } catch (_: IOException) {
+        false
     }
 
     @Suppress("CyclomaticComplexMethod") // MVI when-dispatch over the PostEditorIntent variants ; flat by design.

@@ -4838,6 +4838,100 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `close whose final save fails asks before abandoning the field - ED10`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val vm = newReplyViewModel()
+        val effects = mutableListOf<PostEditorEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        settleBody()
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.saveFailure = IOException("disk full")
+        vm.editBody(TextFieldValue("typed, never saved"))
+        vm.dispatch(PostEditorIntent.CloseRequested)
+        settleBody()
+        // The last write of the field failed: the dialog opens and the editor stays, field intact.
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        assertFalse(PostEditorEffect.CloseCommitted in effects)
+        assertTrue(draftStore.saved[key]?.body.isNullOrEmpty())
+        assertEquals("typed, never saved", vm.bodyFieldState.text.toString())
+        // "Quitter sans enregistrer" is the only abandonment: one pop, no write.
+        val writes = draftStore.writes
+        vm.dispatch(PostEditorIntent.UnsavedCloseConfirmed)
+        vm.dispatch(PostEditorIntent.UnsavedCloseConfirmed)
+        vm.dispatch(PostEditorIntent.CloseRequested)
+        settleBody()
+        assertEquals(1, effects.count { it == PostEditorEffect.CloseCommitted })
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(writes, draftStore.writes)
+        assertTrue(draftStore.saved[key]?.body.isNullOrEmpty())
+    }
+
+    @Test
+    fun `Rester then a close that can save writes the field and closes once - ED10`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val vm = newReplyViewModel()
+        val effects = mutableListOf<PostEditorEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        settleBody()
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.saveFailure = IOException("disk full")
+        vm.editBody(TextFieldValue("typed while the disk was full"))
+        vm.dispatch(PostEditorIntent.CloseRequested)
+        settleBody()
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        // "Rester" keeps the editor; while storage still fails, a new Back asks again.
+        vm.dispatch(PostEditorIntent.UnsavedCloseDismissed)
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        vm.dispatch(PostEditorIntent.CloseRequested)
+        settleBody()
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        vm.dispatch(PostEditorIntent.UnsavedCloseDismissed)
+        assertFalse(PostEditorEffect.CloseCommitted in effects)
+        // Storage recovers: the next Back retries the write, then closes normally.
+        draftStore.saveFailure = null
+        vm.dispatch(PostEditorIntent.CloseRequested)
+        settleBody()
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals("typed while the disk was full", draftStore.saved[key]?.body)
+        assertEquals(1, effects.count { it == PostEditorEffect.CloseCommitted })
+    }
+
+    @Test
+    fun `close with nothing to write never asks even when storage fails - ED10`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val vm = newReplyViewModel()
+        val effects = mutableListOf<PostEditorEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        settleBody()
+        // An empty field over an absent row: the refused write would not have saved anything.
+        draftStore.saveFailure = IOException("disk full")
+        vm.dispatch(PostEditorIntent.CloseRequested)
+        settleBody()
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(1, effects.count { it == PostEditorEffect.CloseCommitted })
+    }
+
+    @Test
+    fun `close over a body the row already holds never asks when storage fails - ED10`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm())
+        val vm = newReplyViewModel()
+        val effects = mutableListOf<PostEditorEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        settleBody()
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        vm.editBody(TextFieldValue("already saved"))
+        testScheduler.advanceTimeBy(751)
+        settleBody()
+        assertEquals("already saved", draftStore.saved[key]?.body)
+        draftStore.saveFailure = IOException("disk full")
+        vm.dispatch(PostEditorIntent.CloseRequested)
+        settleBody()
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(1, effects.count { it == PostEditorEffect.CloseCommitted })
+        assertEquals("already saved", draftStore.saved[key]?.body)
+    }
+
+    @Test
     fun `quote delivered after a failed Restore write consumes the merged D with C - ED121`() = runTest {
         val get = CompletableDeferred<Unit>()
         replyRepository.formGate = get
