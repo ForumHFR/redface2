@@ -14,6 +14,9 @@ internal data class PrivateMessageComposeChromeActions(
     val restore: () -> Unit,
     val discard: () -> Unit,
     val reload: () -> Unit,
+    /** ED-40/121: one decision per listed version; a host with a single offer keeps the defaults. */
+    val restoreOffer: (String) -> Unit = { restore() },
+    val discardOffer: (String) -> Unit = { discard() },
 )
 
 internal fun PrivateMessageComposeViewModel.chromeActions() = PrivateMessageComposeChromeActions(
@@ -22,5 +25,6 @@ internal fun PrivateMessageComposeViewModel.chromeActions() = PrivateMessageComp
         onAcknowledgeLocal = ::onDraftWriteFailureDismissed),
     signature = ::onToggleSignature, smileyDisabled = ::onToggleSmileyDisabled,
     notification = ::onToggleEmailNotification, smiley = ::onSmileySelected, picker = ::onImagePickerEvent,
-    restore = ::onDraftRestoreRequested, discard = ::onDraftDiscardRequested, reload = ::retryFormLoad,
+    restore = { onDraftRestoreRequested() }, discard = { onDraftDiscardRequested() }, reload = ::retryFormLoad,
+    restoreOffer = { id -> onDraftRestoreRequested(id) }, discardOffer = { id -> onDraftDiscardRequested(id) },
 )

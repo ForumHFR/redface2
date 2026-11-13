@@ -12,6 +12,7 @@ package fr.forumhfr.redface2.core.domain.editor
  */
 object EditorDraftKey {
     private const val REPORT_KEY = "report"
+    private const val MP_COMPOSE_KEY = "mpnew"
 
     fun reply(cat: Int, topicId: Int): String = "reply:$cat:$topicId"
     fun newTopic(cat: Int): String = "newtopic:$cat"
@@ -24,5 +25,20 @@ object EditorDraftKey {
     // A function (not a const) for API symmetry with the sibling key builders above: there is a
     // single MP-compose draft at a time, so the key is fixed.
     @Suppress("FunctionOnlyReturningConstant")
-    fun mpCompose(): String = "mpnew"
+    fun mpCompose(): String = MP_COMPOSE_KEY
+
+    /** Replies to a topic or to a private conversation: the contexts that receive quotes. */
+    fun isReply(key: String): Boolean = key.startsWith("reply:") || key.startsWith("mpreply:")
+
+    /**
+     * ED-121: compositions with headers of their own (title, recipients). A header typed there is
+     * content worth keeping and offering, even over a blank body.
+     */
+    fun composesHeaders(key: String): Boolean = key.startsWith("newtopic:") || key == MP_COMPOSE_KEY
+
+    /**
+     * ED-121: contexts whose replaced draft D stays offered instead of being overwritten by C.
+     * Editing an existing message is not covered: its row competes with a server seed.
+     */
+    fun keepsOfferedDrafts(key: String): Boolean = isReply(key) || composesHeaders(key)
 }

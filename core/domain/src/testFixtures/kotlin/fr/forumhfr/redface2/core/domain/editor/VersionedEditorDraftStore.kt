@@ -9,6 +9,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.Draft
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.DraftEntry
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.DraftOffer
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.StoreWriteResult
+import fr.forumhfr.redface2.core.model.editor.EditorRecipientCodec
 import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 
@@ -106,7 +107,7 @@ open class VersionedEditorDraftStore : EditorDraftStore {
     }
 
     private fun DraftEntry.isQuoteOnly(key: String): Boolean =
-        attempt == null && (key.startsWith("reply:") || key.startsWith("mpreply:")) &&
+        attempt == null && EditorDraftKey.isReply(key) &&
             draft.bodyProvenance?.isQuoteOnly(draft.body) == true
 
     override suspend fun resolveOffer(
@@ -158,13 +159,19 @@ open class VersionedEditorDraftStore : EditorDraftStore {
         )))
     }
 
-    @Suppress("ComplexCondition") // Mirrors raw reply writer eligibility.
+    @Suppress("ComplexCondition") // Mirrors raw writer eligibility (ED-121 scope, ordinary content).
     private fun protection(key: String, entry: DraftEntry?, draft: Draft): DraftOffer? =
         draft.offerToPreserve ?: entry?.takeIf {
-            draft.protectCurrent && it.attempt == null && it.draft.body.isNotBlank() &&
-                it.draft.bodyProvenance?.isQuoteOnly(it.draft.body) != true &&
-                (key.startsWith("reply:") || key.startsWith("mpreply:"))
+            draft.protectCurrent && it.attempt == null && it.draft.holdsOfferableContent(key) &&
+                it.draft.bodyProvenance?.isQuoteOnly(it.draft.body) != true
         }?.let(DraftOffer::from)
+
+    /** Mirrors Room: headers alone count on new compositions, with recipients decoded semantically. */
+    private fun Draft.holdsOfferableContent(key: String): Boolean {
+        val headers = !subject.isNullOrBlank() || EditorRecipientCodec.hasRecipients(recipients)
+        return EditorDraftKey.keepsOfferedDrafts(key) &&
+            (body.isNotBlank() || (EditorDraftKey.composesHeaders(key) && headers))
+    }
 
     private fun offerCandidate(owner: String?, key: String, entry: DraftEntry?): DraftOffer? {
         val source = entry?.let { protection(key, it, it.draft.copy(offerToPreserve = null, protectCurrent = true)) }

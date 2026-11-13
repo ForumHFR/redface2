@@ -3065,6 +3065,49 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
+    fun failedReplyRestoreBlocksOtherDecisionsUntilPersistedAndResumesWithoutEitherOffer() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val key = EditorDraftKey.mpReply(request.threadId)
+        draftStore.preload(key, EditorDraftStore.Draft("second D", isPrivate = true, updatedAt = 20))
+        val first = EditorDraftStore.DraftOffer.from(EditorDraftStore.DraftEntry(
+            EditorDraftStore.Draft("first D", isPrivate = true, updatedAt = 10), 0,
+        ))
+        draftStore.preloadOffer(key, first)
+        val saved = SavedStateHandle()
+        val vm = viewModel(repository, savedStateHandle = saved)
+        runCurrent()
+        vm.editBody(TextFieldValue("typed"))
+        val second = vm.state.value.draftOffers.first { it.draft.body == "second D" }
+        draftStore.saveFailure = IOException("disk full")
+        vm.onDraftRestoreRequested(first.id)
+        runCurrent()
+        assertEquals("first D\n\ntyped", vm.bodyFieldState.text.toString())
+        assertEquals("second D", draftStore.saved[key]?.body)
+
+        draftStore.saveFailure = null
+        val writes = draftStore.saveCount
+        vm.onDraftRestoreRequested(second.id)
+        vm.onDraftDiscardRequested(second.id)
+        runCurrent()
+        assertEquals(writes, draftStore.saveCount)
+        assertEquals("first D\n\ntyped", vm.bodyFieldState.text.toString())
+        vm.onDraftRestoreRequested(first.id)
+        runCurrent()
+        vm.onDraftRestoreRequested(second.id)
+        runCurrent()
+        vm.onStopped()
+        runCurrent()
+        val frozen = SavedStateHandle(saved.keys().associateWith { saved.get<Any?>(it) })
+        vm.viewModelScope.cancel()
+        val recreated = viewModel(repository, savedStateHandle = frozen)
+        runCurrent()
+        assertEquals("second D\n\nfirst D\n\ntyped", recreated.bodyFieldState.text.toString())
+        assertTrue(recreated.state.value.draftOffers.isEmpty())
+        assertTrue(draftStore.loadOffers("tester", key).isEmpty())
+    }
+
+    @Test
     fun restoreOfferUsesLiveBody() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         val formGate = CompletableDeferred<ReplyForm>()

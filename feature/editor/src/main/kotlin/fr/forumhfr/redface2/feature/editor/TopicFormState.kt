@@ -283,6 +283,12 @@ sealed interface TopicFormIntent {
     /** #405 — discard the cached draft : delete the row and clear the banner. */
     data object DraftDiscardRequested : TopicFormIntent
 
+    /** ED-40/121 — « Restaurer » on the offered version chosen in the sheet's list, by its identity. */
+    data class DraftOfferRestored(val id: String) : TopicFormIntent
+
+    /** ED-121 — « Ignorer » removes only the chosen offered version ; the fields are untouched. */
+    data class DraftOfferDiscarded(val id: String) : TopicFormIntent
+
     /**
      * #803 pattern (state-hygiene audit 2026-07-05) — the user is leaving the form (system
      * back). The ViewModel flushes the pending debounced autosave FIRST, then emits

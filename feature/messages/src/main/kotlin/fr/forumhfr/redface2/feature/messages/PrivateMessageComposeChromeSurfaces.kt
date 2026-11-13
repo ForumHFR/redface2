@@ -53,6 +53,7 @@ internal fun PrivateMessageComposeChromeSurfaces(
         })
     EditorDraftOfferSheet(adapter.draftOfferOpen, source.restorableDraft != null, adapter::closeDraftOffer,
         adapter::restoreDraft, adapter::discardDraft, offers = source.draftOffers,
+        onRestoreOffer = adapter::restoreOffer, onDiscardOffer = adapter::discardOffer,
         restoreEnabled = adapter.state.restoreEnabled, discardEnabled = adapter.state.scaffold.controlsEnabled,
         message = stringResource(R.string.messages_draft_restore_message))
     when (adapter.surface) {

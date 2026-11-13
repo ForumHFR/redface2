@@ -105,6 +105,7 @@ import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.resetMain
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
+import java.io.IOException
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -2462,7 +2463,8 @@ class TopicFormViewModelTest {
             assertEquals(if (mirrored) "typed before load" else "", vm.state.value.bodyText)
             gate.complete(Unit)
             testScheduler.runCurrent()
-            assertNull(vm.state.value.restorableDraft)
+            // ED-121: the stored draft stays offered; it never replaces what was typed meanwhile.
+            assertEquals("stored body", vm.state.value.restorableDraft)
             assertEquals("typed before load", vm.bodyFieldState.text.toString())
             assertEquals("", vm.state.value.draftHydratedContent)
         }
@@ -2496,7 +2498,8 @@ class TopicFormViewModelTest {
             syncBody()
             val seed = if (creating) "" else topicFormRepository.formResult.initialContent
             val liveBody = if (creating) acceptedBody else seed
-            assertEquals(if (creating) null else "stored body", vm.state.value.restorableDraft)
+            // ED-121: a new topic keeps the stored draft offered while the early typing is saved as C.
+            assertEquals("stored body", vm.state.value.restorableDraft)
             assertEquals(liveBody, vm.bodyFieldState.text.toString())
             assertEquals(seed, vm.state.value.draftHydratedContent)
             assertFalse(vm.state.value.isAwaitingInitialBody)
@@ -2505,6 +2508,8 @@ class TopicFormViewModelTest {
             assertEquals(if (creating) acceptedBody else "stored body", draftStore.saved[key]?.body)
             assertEquals(if (creating) 1 else 0, draftStore.saveCount)
             assertEquals(if (creating) 1 else 0, draftStore.writes)
+            val kept = draftStore.loadOffers("tester", key).map { it.draft.body }
+            assertEquals(if (creating) listOf("stored body") else emptyList<String>(), kept)
             vm.viewModelScope.cancel()
         }
     }
@@ -3029,7 +3034,7 @@ class TopicFormViewModelTest {
     }
 
     @Test
-    fun `typing a new topic subject leaves the pending offer row untouched`() = runTest {
+    fun `a title typed under an undecided new topic offer is saved and the offer is kept - ED121`() = runTest {
         val key = EditorDraftKey.newTopic(SAMPLE_CAT)
         draftStore.preload(
             key,
@@ -3043,15 +3048,174 @@ class TopicFormViewModelTest {
         testScheduler.advanceTimeBy(800L)
         testScheduler.runCurrent()
 
-        assertEquals("no hybrid row may be written while the visible body is blank", 0, draftStore.saveCount)
-        assertEquals("rescued body", draftStore.saved[key]?.body)
-        assertEquals("old title", draftStore.saved[key]?.subject)
+        // C holds the typed title; D left the row for its own durable copy, still under the offer.
+        assertEquals("", draftStore.saved[key]?.body)
+        assertEquals("new title", draftStore.saved[key]?.subject)
+        val kept = draftStore.loadOffers("tester", key).map { it.draft }
+        assertEquals(listOf("rescued body" to "old title"), kept.map { it.body to it.subject })
         assertEquals("rescued body", viewModel.state.value.restorableDraft)
+        assertEquals("the offer keeps its own title", "old title", viewModel.state.value.restorableSubject)
+        assertEquals("new title", viewModel.state.value.subject.text)
+
         viewModel.submit(TopicFormIntent.DraftRestoreRequested)
         syncBody()
         testScheduler.advanceUntilIdle()
         assertEquals("rescued body", viewModel.state.value.bodyText)
         assertEquals("new title", viewModel.state.value.subject.text)
+        assertNull(viewModel.state.value.restorableDraft)
+        // Restore wrote C and consumed D together: nothing is offered again at the next opening.
+        assertEquals("rescued body", draftStore.saved[key]?.body)
+        assertEquals("new title", draftStore.saved[key]?.subject)
+        assertTrue(draftStore.loadOffers("tester", key).isEmpty())
+    }
+
+    @Test
+    fun `closing a new topic with only a typed title under an offer saves the title - R11`() = runTest {
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        draftStore.preload(key, EditorDraftStore.Draft(body = "rescued body", subject = "old title"))
+        val (vm, effects) = closableNewTopic()
+        assertEquals("rescued body", vm.state.value.restorableDraft)
+
+        vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("typed title")))
+        requestClose(vm)
+
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(1, effects.count { it == TopicFormEffect.CloseCommitted })
+        assertEquals("typed title", draftStore.saved[key]?.subject)
+        assertEquals("", draftStore.saved[key]?.body)
+        assertEquals(listOf("rescued body"), draftStore.loadOffers("tester", key).map { it.draft.body })
+    }
+
+    @Test
+    fun `closing a new topic whose typed title cannot be saved under an offer asks - R11`() = runTest {
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        draftStore.preload(key, EditorDraftStore.Draft(body = "rescued body", subject = "old title"))
+        val (vm, effects) = closableNewTopic()
+        draftStore.saveFailure = java.io.IOException("disk full")
+
+        vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("typed title")))
+        requestClose(vm)
+
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        assertFalse(TopicFormEffect.CloseCommitted in effects)
+        assertEquals("typed title", vm.state.value.subject.text)
+        // The refused write changed nothing: the offered draft is still the row.
+        assertEquals("rescued body", draftStore.saved[key]?.body)
+        assertEquals("old title", draftStore.saved[key]?.subject)
+    }
+
+    @Test
+    fun `ignoring a new topic offer keeps the typed title and consumes that offer only - ED121`() = runTest {
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        draftStore.preload(key, EditorDraftStore.Draft(body = "rescued body", subject = "old title"))
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        syncBody()
+        testScheduler.advanceUntilIdle()
+        viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("typed title")))
+
+        viewModel.submit(TopicFormIntent.DraftDiscardRequested)
+        syncBody()
+        testScheduler.advanceUntilIdle()
+
+        assertNull(viewModel.state.value.restorableDraft)
+        assertEquals("typed title", viewModel.state.value.subject.text)
+        assertEquals("typed title", draftStore.saved[key]?.subject)
+        assertEquals("", draftStore.saved[key]?.body)
+        assertTrue(draftStore.loadOffers("tester", key).isEmpty())
+    }
+
+    @Test
+    fun `a new topic lists every offered version and decides the chosen one - ED121`() = runTest {
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        val older = EditorDraftStore.DraftOffer.from(EditorDraftStore.DraftEntry(
+            EditorDraftStore.Draft(body = "older body", subject = "older title", updatedAt = 10L), 0L,
+        ))
+        draftStore.preload(key, EditorDraftStore.Draft(body = "latest body", subject = "latest title", updatedAt = 20L))
+        draftStore.preloadOffer(key, older)
+        val viewModel = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        syncBody()
+        testScheduler.advanceUntilIdle()
+        assertEquals(listOf("latest body", "older body"), viewModel.state.value.draftOffers.map { it.draft.body })
+        assertEquals("latest body", viewModel.state.value.restorableDraft)
+
+        viewModel.submit(TopicFormIntent.DraftOfferRestored(older.id))
+        syncBody()
+        testScheduler.advanceUntilIdle()
+
+        assertEquals("older body", viewModel.bodyFieldState.text.toString())
+        assertEquals("older title", viewModel.state.value.subject.text)
+        assertEquals("older body", draftStore.saved[key]?.body)
+        // The version that was not chosen left the row for its own copy and is still offered.
+        assertEquals(listOf("latest body"), viewModel.state.value.draftOffers.map { it.draft.body })
+        assertEquals(listOf("latest body"), draftStore.loadOffers("tester", key).map { it.draft.body })
+
+        val latest = viewModel.state.value.draftOffers.single()
+        viewModel.submit(TopicFormIntent.DraftOfferDiscarded(latest.id))
+        syncBody()
+        testScheduler.advanceUntilIdle()
+        assertTrue(viewModel.state.value.draftOffers.isEmpty())
+        assertNull(viewModel.state.value.restorableDraft)
+        assertEquals("older body", draftStore.saved[key]?.body)
+        assertTrue(draftStore.loadOffers("tester", key).isEmpty())
+    }
+
+    @Test
+    fun `a refused new topic restore blocks other decisions until saved then resumes without offers`() = runTest {
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        draftStore.preload(key, EditorDraftStore.Draft("second D", updatedAt = 20))
+        val first = EditorDraftStore.DraftOffer.from(EditorDraftStore.DraftEntry(
+            EditorDraftStore.Draft("first D", updatedAt = 10), 0,
+        ))
+        draftStore.preloadOffer(key, first)
+        val saved = SavedStateHandle()
+        val vm = newTopicViewModel(SAMPLE_SUBCAT, savedStateHandle = saved)
+        syncBody()
+        vm.editBody(TextFieldValue("typed"))
+        val second = vm.state.value.draftOffers.first { it.draft.body == "second D" }
+        draftStore.saveFailure = IOException("disk full")
+        vm.submit(TopicFormIntent.DraftOfferRestored(first.id))
+        syncBody()
+        assertEquals("first D\n\ntyped", vm.bodyFieldState.text.toString())
+        assertEquals("second D", draftStore.saved[key]?.body)
+
+        draftStore.saveFailure = null
+        val writes = draftStore.saveCount
+        vm.submit(TopicFormIntent.DraftOfferRestored(second.id))
+        vm.submit(TopicFormIntent.DraftOfferDiscarded(second.id))
+        syncBody()
+        assertEquals(writes, draftStore.saveCount)
+        assertEquals("first D\n\ntyped", vm.bodyFieldState.text.toString())
+        vm.submit(TopicFormIntent.DraftOfferRestored(first.id))
+        syncBody()
+        vm.submit(TopicFormIntent.DraftOfferRestored(second.id))
+        syncBody()
+        vm.submit(TopicFormIntent.Stopped)
+        syncBody()
+        val frozen = SavedStateHandle(saved.keys().associateWith { saved.get<Any?>(it) })
+        vm.viewModelScope.cancel()
+        val recreated = newTopicViewModel(SAMPLE_SUBCAT, savedStateHandle = frozen)
+        syncBody()
+        assertEquals("second D\n\nfirst D\n\ntyped", recreated.bodyFieldState.text.toString())
+        assertTrue(recreated.state.value.draftOffers.isEmpty())
+        assertTrue(draftStore.loadOffers("tester", key).isEmpty())
+    }
+
+    @Test
+    fun `a title typed on a first post under an offer still leaves its single row - ED121 scope`() = runTest {
+        val key = EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE)
+        draftStore.preload(key, EditorDraftStore.Draft(body = "draft", subject = "draft title"))
+        val viewModel = newViewModel()
+        syncBody()
+        testScheduler.advanceUntilIdle()
+
+        viewModel.submit(TopicFormIntent.SubjectChanged(TextFieldValue("typed title")))
+        testScheduler.advanceTimeBy(800L)
+        testScheduler.runCurrent()
+
+        assertEquals(0, draftStore.saveCount)
+        assertEquals("draft", draftStore.saved[key]?.body)
+        assertEquals("draft title", draftStore.saved[key]?.subject)
+        assertTrue(draftStore.loadOffers("tester", key).isEmpty())
     }
 
     @Test
@@ -3805,7 +3969,8 @@ class TopicFormViewModelTest {
         }
         val arms = mutableMapOf<Long, ArmToken>()
         return object : EditorSubmissionAdapter {
-            override val supportsIndependentDraftOffers = false
+            // ED-121: a new topic keeps its offered drafts; the first post of a topic has a single row.
+            override val supportsIndependentDraftOffers = creating
             override val unsupportedMutations = mapOf(
                 SubmissionBodyMutation.SHARED_RESTORE to "aucune entrée resumeSharedDraft pour un sujet",
             )
@@ -3843,6 +4008,9 @@ class TopicFormViewModelTest {
             }
 
             override fun dispose() = viewModel.viewModelScope.cancel()
+            override fun resolveOfferedDraft(restoring: Boolean) = viewModel.submit(
+                if (restoring) TopicFormIntent.DraftRestoreRequested else TopicFormIntent.DraftDiscardRequested,
+            )
             override fun startUpload() = viewModel.submit(TopicFormIntent.ImagesPicked(listOf("content://pick/1")))
 
             override fun snapshot(): SubmissionProbe = viewModel.state.value.let {

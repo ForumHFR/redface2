@@ -19,6 +19,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.Draft
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.StoreWriteResult
 import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.model.AuthState
+import fr.forumhfr.redface2.core.model.editor.EditorRecipientCodec
 import io.mockk.every
 import io.mockk.mockk
 import java.io.IOException
@@ -55,6 +56,46 @@ class RoomEditorDraftOfferTest {
             RedfaceDatabase::class.java).allowMainThreadQueries().build()
     }
     @After fun tearDown() { database.close() }
+
+    @Test fun `failed offer read never protects an empty recipient envelope but keeps real headers`() = runTest {
+        val empty = EditorRecipientCodec.encode(emptyList(), "")
+        val named = EditorRecipientCodec.encode(listOf("Bob"), "")
+        val buffer = EditorRecipientCodec.encode(emptyList(), "bo")
+        val cases = listOf(Draft("", recipients = empty), Draft("", recipients = named),
+            Draft("", recipients = buffer), Draft("", subject = "title", recipients = empty))
+        for (original in cases) {
+            database.editorDraftDao().deletePrivateForUser("alice")
+            val store = store()
+            store.saveIfVersion("alice", "mpnew", original, 0)
+            val delegate = database.editorDraftDao()
+            var failRead = true
+            val flaky = object : EditorDraftDao by delegate {
+                override suspend fun offers(ownerId: String, key: String): List<EditorDraftOfferEntity> {
+                    if (failRead) throw IOException("disk read")
+                    return delegate.offers(ownerId, key)
+                }
+            }
+            val editor = EditorDraftSession(store(flaky), "mpnew")
+            var failed = false
+            try {
+                editor.load()
+            } catch (_: IOException) {
+                failed = true
+            }
+            assertTrue(failed)
+            failRead = false
+            assertTrue(editor.save(Draft("typed C", recipients = empty)) is StoreWriteResult.Written)
+            val offers = store.loadOffers("alice", "mpnew")
+            if (original.recipients == empty && original.subject == null) {
+                assertTrue(offers.isEmpty())
+            } else {
+                assertEquals(original.recipients, offers.single().draft.recipients)
+                assertEquals(original.subject, offers.single().draft.subject)
+                assertTrue(offers.single().draft.isPrivate)
+            }
+            assertEquals("typed C", store.load("alice", "mpnew")?.body)
+        }
+    }
 
     @Test fun `resolution uses the attempt state from the session read before concurrent publication`() = runTest {
         val store = store()
@@ -103,6 +144,47 @@ class RoomEditorDraftOfferTest {
             assertEquals(listOf("D"), store.loadOffers("alice", rawKey).map { it.draft.body })
             assertEquals("C", store.load("alice", rawKey)?.body)
         }
+    }
+
+    @Test fun `a typed header keeps the offered new topic and new MP drafts in their own rows - ED121`() = runTest {
+        for (context in listOf("newtopic:23", "mpnew")) {
+            val store = store()
+            val recipients = "alice".takeIf { context == "mpnew" }
+            store.saveIfVersion("alice", context, Draft("D body", "D title", recipients, protectCurrent = false), 0)
+            now = 5000
+            val editor = EditorDraftSession(store(), context) { true }
+            editor.load()
+            val offered = editor.availableOffers.single()
+
+            assertTrue(editor.save(Draft("", "typed title", recipients)) is StoreWriteResult.Written)
+
+            val stored = store.loadOffers("alice", context).single()
+            assertEquals(offered, stored)
+            assertEquals(Draft("D body", "D title", recipients, context == "mpnew", 1234L), stored.draft)
+            assertEquals("typed title", store.load("alice", context)?.subject)
+            assertEquals("", store.load("alice", context)?.body)
+            // Restore: C and the consumption of D commit together.
+            val merged = Draft("D body", "typed title", recipients, offerToResolve = editor.available(offered))
+            assertTrue(editor.save(merged) is StoreWriteResult.Written)
+            assertTrue(store.loadOffers("alice", context).isEmpty())
+            assertEquals("D body", store.load("alice", context)?.body)
+            now = 1234
+        }
+    }
+
+    @Test fun `private offers of a new MP leave with the account and edits are never copied - ED121`() = runTest {
+        val store = store()
+        store.saveIfVersion("alice", "mpnew", Draft("D body", "D subject", "bob", protectCurrent = false), 0)
+        assertTrue(store.saveIfVersion("alice", "mpnew", Draft("", "typed subject", "bob"), 1)
+            is StoreWriteResult.Written)
+        assertEquals(listOf("D body"), store.loadOffers("alice", "mpnew").map { it.draft.body })
+        store.purgePrivateForUser("alice")
+        assertTrue(store.loadOffers("alice", "mpnew").isEmpty())
+
+        store.saveIfVersion("alice", "editfp:23:100", Draft("D body", "D title"), 0)
+        assertTrue(store.saveIfVersion("alice", "editfp:23:100", Draft("C body", "C title"), 1)
+            is StoreWriteResult.Written)
+        assertTrue(store.loadOffers("alice", "editfp:23:100").isEmpty())
     }
 
     @Test fun `failed C write rolls back the offer copy and concurrent CAS cannot copy the loser`() = runTest {

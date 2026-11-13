@@ -103,7 +103,7 @@ internal class PrivateMessageReplyDraftSession(
         val offers = submission.drafts.availableOffers.takeUnless { submission.drafts.invalidated }.orEmpty()
             .visibleOver(bodyFieldState.text.toString())
         updateState { it.copy(draftOffers = offers, restorableDraft = offers.firstOrNull()?.draft?.body) }
-        if (selectedOffer != null && offers.none { it.id == selectedOffer?.id }) {
+        if (selectedOffer != null && submission.drafts.available(selectedOffer) == null) {
             selectedOffer = null
             mergedDraftOffer = null
         }
@@ -295,8 +295,10 @@ internal class PrivateMessageReplyDraftSession(
 
     private fun selectOffer(offerId: String?): String? {
         val snapshot = readState()
-        selectedOffer = if (offerId == null) snapshot.draftOffers.firstOrNull()
+        val selected = if (offerId == null) snapshot.draftOffers.firstOrNull()
             else snapshot.draftOffers.firstOrNull { it.id == offerId }
+        if (!submission.drafts.canDecideOffer(selected, pendingOfferResolution())) return null
+        selectedOffer = selected
         val legacy = snapshot.restorableDraft.takeIf { offerId == null && snapshot.draftOffers.isEmpty() }
         return selectedOffer?.draft?.body ?: legacy
     }

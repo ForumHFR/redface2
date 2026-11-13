@@ -169,7 +169,7 @@ abstract class EditorSubmissionRecoveryContract {
         preloadIndependentDraft = true,
     ) { adapter ->
         val key = submissionScenario.store.entries.keys.single()
-        assertTrue("ED-121 applies to reply surfaces", isReply(key))
+        assertTrue("ED-121 keeps offered drafts on this surface", keepsOfferedDrafts(key))
         startSending(adapter)
         adapter.completePost()
         runCurrent()
@@ -192,14 +192,14 @@ abstract class EditorSubmissionRecoveryContract {
         assertEquals(1, adapter.postCalls)
     }
 
-    /** ED-121 applies to topic replies, the sheet and MP replies; other editors keep their contract. */
+    /** ED-121 applies to replies, the sheet, new topics and new MPs; edits and reports keep their contract. */
     private fun resolveIndependentDraft(uncertain: Boolean, restoring: Boolean, failResolution: Boolean = false) {
         val scenario = EditorSubmissionScenario().apply {
             if (uncertain) postFailure = IOException("response lost")
         }
         withReadyAdapter(scenario = scenario, preloadIndependentDraft = true) { adapter ->
             val key = scenario.store.entries.keys.single()
-            assertTrue("ED-121 applies to reply surfaces", isReply(key))
+            assertTrue("ED-121 keeps offered drafts on this surface", keepsOfferedDrafts(key))
             startSending(adapter)
             adapter.completePost()
             runCurrent()
@@ -615,21 +615,22 @@ abstract class EditorSubmissionRecoveryContract {
         val adapter = createAdapter(this, preferences, delayedSharedRestore)
         try {
             if (preloadIndependentDraft) {
-                assumeTrue("ED-121 requires independent reply draft offers", adapter.supportsIndependentDraftOffers)
+                assumeTrue("ED-121 requires independent draft offers", adapter.supportsIndependentDraftOffers)
             }
             runCurrent()
             if (preloadIndependentDraft) {
-                scenario.store.entries.keys.filter(::isReply).forEach { key ->
-                    val draft = EditorDraftStore.Draft("independent D", isPrivate = key.startsWith("mpreply:"),
-                        updatedAt = 1234)
+                scenario.store.entries.keys.filter(::keepsOfferedDrafts).forEach { key ->
+                    val private = key.startsWith("mpreply:") || key == EditorDraftKey.mpCompose()
+                    val draft = EditorDraftStore.Draft("independent D", isPrivate = private, updatedAt = 1234)
                     scenario.store.preloadOffer(key,
                         EditorDraftStore.DraftOffer.from(EditorDraftStore.DraftEntry(draft, 0)))
                 }
             }
-            // Only an actually offered, ordinary reply draft is D. The sheet's auto-resumed
-            // body is C; the other surfaces keep their existing non-ED-121 restoration contract.
+            // Only an actually offered, ordinary draft of a reply, a new topic or a new MP is D.
+            // The sheet's auto-resumed body is C; edits and reports keep their non-ED-121 contract.
             independentOffers = scenario.store.entries.mapValues { (key, entry) ->
-                val source = if (adapter.snapshot().restoreOffered && entry.attempt == null && isReply(key)) {
+                val offered = adapter.snapshot().restoreOffered && entry.attempt == null
+                val source = if (offered && keepsOfferedDrafts(key)) {
                     listOf(EditorDraftStore.DraftOffer.from(entry))
                 } else emptyList()
                 (scenario.store.loadOffers(scenario.store.currentOwner(), key) + source)
@@ -647,5 +648,5 @@ abstract class EditorSubmissionRecoveryContract {
         }
     }
 
-    private fun isReply(key: String): Boolean = key.startsWith("reply:") || key.startsWith("mpreply:")
+    private fun keepsOfferedDrafts(key: String): Boolean = EditorDraftKey.keepsOfferedDrafts(key)
 }
