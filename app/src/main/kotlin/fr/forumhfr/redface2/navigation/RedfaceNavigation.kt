@@ -259,8 +259,18 @@ data class PrivateMessageComposeRoute(
  * keep its cyclomatic complexity in check.
  */
 internal fun NavKey?.hidesNavigationSuite(): Boolean =
-    this is PostEditorRoute || this is TopicFormRoute || this is PrivateMessageReplyRoute ||
-        this is PrivateMessageComposeRoute || this is ImageViewerRoute || this is ReportContentRoute
+    isEditorRoute() || this is ImageViewerRoute || this is ReportContentRoute
+
+private fun NavKey?.isEditorRoute(): Boolean = when (this) {
+    is PostEditorRoute, is TopicFormRoute, is PrivateMessageReplyRoute, is PrivateMessageComposeRoute -> true
+    else -> false
+}
+
+/** Settings covering a live editor must keep tab switching unavailable until the editor is uncovered. */
+internal fun List<NavKey>.hidesNavigationSuite(): Boolean {
+    val settingsCoverEditor = lastOrNull() is SettingsCategoryRoute && dropLast(1).any { it.isEditorRoute() }
+    return lastOrNull().hidesNavigationSuite() || settingsCoverEditor
+}
 
 /**
  * #494 — type de barre de navigation à passer au [NavigationSuiteScaffoldLayout]. Sur téléphone l'adaptatif
@@ -1275,7 +1285,8 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
         // it by the nav bar height (the bar floated mid-screen with a gap). Hiding the navigation for editor
         // routes makes the editor full-screen: its submit bar then sits at the window bottom and the IME
         // inset lands exactly on the keyboard. Bonus UX: no tab switching mid-compose (would drop the draft).
-        val topRoute = backStacks.getValue(currentDestination).lastOrNull()
+        val activeBackStack = backStacks.getValue(currentDestination)
+        val topRoute = activeBackStack.lastOrNull()
         // #518 follow-up — only a topic screen reports scroll facts; clear them whenever the active top
         // route is something else (other tab, editor, profile…) so a stale « at bottom » never keeps the
         // nav bar revealed off-topic. Returning to a topic re-emits its current facts on first frame. The
@@ -1292,7 +1303,7 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
             darkTheme = darkTheme,
         )
         val adaptiveType = NavigationSuiteScaffoldDefaults.calculateFromAdaptiveInfo(currentWindowAdaptiveInfo())
-        val navLayoutType = resolveNavLayoutType(topRoute.hidesNavigationSuite(), adaptiveType)
+        val navLayoutType = resolveNavLayoutType(activeBackStack.hidesNavigationSuite(), adaptiveType)
         // #529 — consume the bottom nav-bar inset for the content only under a bottom-bar layout
         // (see navSuiteContentInsetModifier). Read in composable scope, branch lives in the helper.
         val contentInsetModifier = navSuiteContentInsetModifier(navLayoutType, WindowInsets.navigationBars)

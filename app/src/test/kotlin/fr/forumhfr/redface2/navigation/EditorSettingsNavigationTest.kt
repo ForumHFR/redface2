@@ -19,13 +19,31 @@ class EditorSettingsNavigationTest {
         )
         editors.forEach { (root, editor) ->
             val active = mutableListOf<NavKey>(root, editor)
-            assertTrue(active.last().hidesNavigationSuite())
+            assertTrue(active.hidesNavigationSuite())
             openEditorSettings(active)
             assertEquals(listOf(root, editor, SettingsCategoryRoute("editing")), active)
-            assertFalse(active.last().hidesNavigationSuite())
+            assertTrue("Settings must not allow switching away from $editor", active.hidesNavigationSuite())
             active.removeAt(active.lastIndex)
             assertSame(editor, active.last())
-            assertTrue(active.last().hidesNavigationSuite())
+            assertTrue(active.hidesNavigationSuite())
         }
+    }
+
+    @Test fun settingsTabKeepsNavigationVisibleAtItsRootAndInEditing() {
+        val active = mutableListOf<NavKey>(SettingsRoute)
+        assertFalse(active.hidesNavigationSuite())
+        active.add(SettingsCategoryRoute("editing"))
+        assertFalse(active.hidesNavigationSuite())
+    }
+
+    @Test fun settingsKeepNavigationHiddenWithAnEditorDeeperInTheStack() {
+        val active = listOf<NavKey>(ForumRoute, TopicFormRoute(TopicFormMode.New, cat = 23),
+            SettingsCategoryRoute("editing"), SettingsCategoryRoute("appearance"))
+        assertTrue(active.hidesNavigationSuite())
+    }
+
+    @Test fun settingsAboveANonEditorDoNotHideNavigation() {
+        val active = listOf<NavKey>(ForumRoute, SettingsCategoryRoute("editing"))
+        assertFalse(active.hidesNavigationSuite())
     }
 }
