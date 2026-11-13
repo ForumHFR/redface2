@@ -234,8 +234,7 @@ open class VersionedEditorDraftStore : EditorDraftStore {
         val deliveryBlocked = draft != null && entry?.attempt != null
         // ED-121/132: a D merged into the delivered C is resolved in this same write, or nothing is.
         val resolved = draft?.offerToResolve
-        val unavailable = resolved != null && owner != null &&
-            !canResolveOffer(owner, key, entry, resolved, expectedVersion)
+        val unavailable = resolvedOfferUnavailable(owner, key, entry, resolved, expectedVersion)
         return when {
             entry == null || unavailable -> StoreWriteResult.Conflict
             entry.draft.pendingInlineQuoteRequest != request || entry.attempt?.status == AttemptStatus.PUBLISHED ||
@@ -244,8 +243,7 @@ open class VersionedEditorDraftStore : EditorDraftStore {
                 val candidate = if (draft != null) protection(key, entry, draft) else {
                     offerToPreserve ?: if (protectCurrent) offerCandidate(owner, key, entry) else null
                 }
-                if (candidate?.id != resolved?.id) protect(owner, key, entry, candidate)
-                if (resolved != null) offers(owner, key).removeAll { it.id == resolved.id }
+                settleConsumedOffers(owner, key, entry, candidate, resolved)
                 entries[key] = entry.copy(
                     draft = (draft ?: entry.draft).copy(
                         pendingInlineQuoteRequest = null, offerToPreserve = null,
@@ -258,6 +256,18 @@ open class VersionedEditorDraftStore : EditorDraftStore {
                 StoreWriteResult.Written(expectedVersion + 1)
             }
         }
+    }
+
+    private fun resolvedOfferUnavailable(
+        owner: String?, key: String, entry: DraftEntry?, resolved: DraftOffer?, expectedVersion: Long,
+    ): Boolean = resolved != null && owner != null && !canResolveOffer(owner, key, entry, resolved, expectedVersion)
+
+    /** Protect the replaced row unless it is the offer being resolved, then remove that offer. */
+    private fun settleConsumedOffers(
+        owner: String?, key: String, entry: DraftEntry, candidate: DraftOffer?, resolved: DraftOffer?,
+    ) {
+        if (candidate?.id != resolved?.id) protect(owner, key, entry, candidate)
+        if (resolved != null) offers(owner, key).removeAll { it.id == resolved.id }
     }
 
     private fun quoteMutationRejection(
