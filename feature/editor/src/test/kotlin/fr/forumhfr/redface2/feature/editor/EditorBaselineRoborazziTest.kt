@@ -13,6 +13,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.assertIsDisplayed
@@ -24,6 +25,7 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
@@ -154,8 +156,8 @@ class EditorBaselineRoborazziTest {
             }
             captureTopics(orientation, fontScale, scenario, dark, focusManager, previewLabel)
         }
-        val scenes = if (formatsOnly) listOf(PostScene.OptionsFormats)
-        else PostScene.entries.filter { it != PostScene.OptionsFormats }
+        val formatsScenes = listOf(PostScene.OptionsFormats, PostScene.OptionsFormatsEnd)
+        val scenes = if (formatsOnly) formatsScenes else PostScene.entries.filter { it !in formatsScenes }
         listOf(false, true).forEach { isDark ->
             scenes.forEach { scene ->
                 compose.runOnIdle {
@@ -169,14 +171,15 @@ class EditorBaselineRoborazziTest {
                 compose.waitForIdle()
                 openPostScene(scene, previewLabel)
                 record("post_${scene.name}_${orientation}_fs${fontScale}_dark$isDark", orientation, focusManager,
-                    sheet = scene in setOf(PostScene.Restore, PostScene.Options, PostScene.OptionsFormats))
+                    sheet = scene in setOf(PostScene.Restore, PostScene.Options, PostScene.OptionsFormats,
+                        PostScene.OptionsFormatsEnd))
             }
         }
     }
 
     private fun openPostScene(scene: PostScene, previewLabel: String) {
         when (scene) {
-            PostScene.Options, PostScene.OptionsFormats -> openPostOptions(scene)
+            PostScene.Options, PostScene.OptionsFormats, PostScene.OptionsFormatsEnd -> openPostOptions(scene)
             PostScene.Format -> compose.onNodeWithContentDescription("Mise en forme").performClick()
             PostScene.Restore -> compose.onNodeWithContentDescription(
                 "Brouillon retrouvé, restaurer ou ignorer").performClick()
@@ -190,8 +193,14 @@ class EditorBaselineRoborazziTest {
 
     private fun openPostOptions(scene: PostScene) {
         compose.onNodeWithContentDescription("Options").performClick()
-        if (scene == PostScene.OptionsFormats) {
+        if (scene == PostScene.OptionsFormats || scene == PostScene.OptionsFormatsEnd) {
             compose.onNodeWithTag("editor-options-tab-Formats").performClick()
+        }
+        if (scene == PostScene.OptionsFormatsEnd) {
+            // The end of the formats list (colour swatches, last rows); scrollBy clamps to the maximum.
+            compose.onNodeWithTag("editor-options-sheet-scroll")
+                .performSemanticsAction(SemanticsActions.ScrollBy) { it(0f, FORMATS_END_SCROLL_PX) }
+            compose.waitForIdle()
         }
     }
 
@@ -341,7 +350,7 @@ class EditorBaselineRoborazziTest {
         EditorDraftStore.Draft("[b]Brouillon conservé[/b]", updatedAt = System.currentTimeMillis() - 301_000L)))
 
     private enum class PostScene {
-        Normal, Format, Armed, Event, Restore, Cards, Panel, Preview, Options, OptionsFormats,
+        Normal, Format, Armed, Event, Restore, Cards, Panel, Preview, Options, OptionsFormats, OptionsFormatsEnd,
     }
     private enum class TopicScene {
         Normal, EmptyTitle, Header, Poll, Restore, Preview, Unsupported, MissingRoute, Event, Armed, States, Options,
@@ -364,3 +373,5 @@ class EditorBaselineRoborazziTest {
         }
     }
 }
+
+private const val FORMATS_END_SCROLL_PX = 10_000f
