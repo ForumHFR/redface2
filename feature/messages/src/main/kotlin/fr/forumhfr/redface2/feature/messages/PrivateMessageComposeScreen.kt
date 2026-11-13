@@ -44,6 +44,7 @@ import fr.forumhfr.redface2.core.ui.editor.rememberEditorImagePicker
 import fr.forumhfr.redface2.core.ui.editor.rememberEditorWindowMetrics
 
 /** New MP on the shared chrome; private content and transient surface memory belong to the ViewModel. */
+@Suppress("LongParameterList") // Navigation callbacks, including the editor-settings exit.
 @Composable
 fun PrivateMessageComposeScreen(
     onSubmitSucceeded: () -> Unit,

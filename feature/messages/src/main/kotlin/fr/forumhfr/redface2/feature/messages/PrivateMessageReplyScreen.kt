@@ -61,6 +61,7 @@ import fr.forumhfr.redface2.core.ui.editor.rememberEditorWindowMetrics
  * [PrivateMessageReplyViewModel]; a successful send raises [PrivateMessageReplyEffect.SubmitSucceeded]
  * which the navigation host turns into a back navigation + a forced conversation reload.
  */
+@Suppress("LongParameterList") // Navigation callbacks, including the editor-settings exit.
 @Composable
 fun PrivateMessageReplyScreen(
     request: PrivateMessageReplyRequest,

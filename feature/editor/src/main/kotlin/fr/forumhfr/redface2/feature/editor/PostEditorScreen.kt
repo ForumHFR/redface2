@@ -48,6 +48,7 @@ import fr.forumhfr.redface2.core.ui.editor.rememberEditorWindowMetrics
  * [PostEditorEffect.SubmitSucceeded] which the navigation host translates into a
  * back navigation + topic refresh.
  */
+@Suppress("LongParameterList") // Navigation callbacks, including the editor-settings exit.
 @Composable
 fun PostEditorScreen(
     request: PostEditorRequest,

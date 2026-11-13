@@ -23,6 +23,7 @@ import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 
 /** Keep mounted inside EditorScaffold.overlay, including while the field is covered. */
+@Suppress("LongParameterList") // Host ports plus the editor-settings exit.
 @Composable
 internal fun PostEditorChromeSurfaces(
     adapter: PostEditorChromeAdapter,
