@@ -30,9 +30,11 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -40,6 +42,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.LocalAccessibilityManager
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
@@ -53,11 +57,15 @@ import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummary
+import fr.forumhfr.redface2.core.ui.editor.EditorUnsavedCloseDialog
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsCallbacks
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsColumn
 import fr.forumhfr.redface2.core.ui.editor.bannerText
 import fr.forumhfr.redface2.core.ui.editor.hasSubmissionSummary
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 
 /**
  * Vague 4 (#604) lot 1 — the quick-reply bottom sheet: a plain text field, Send, and a
@@ -66,7 +74,7 @@ import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
  * route ; the ViewModel is scoped to the topic's nav entry, so the field survives an
  * accidental dismiss, and the #405 draft row survives everything else.
  */
-@Suppress("LongParameterList") // Request, three outcome callbacks and the two opening seeds of the topic surface.
+@Suppress("LongParameterList") // Request, four outcome callbacks and the two opening seeds of the topic surface.
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 internal fun QuickReplySheet(
@@ -81,6 +89,8 @@ internal fun QuickReplySheet(
     // for « Citer N » under the full-screen threshold (empty from the reply FAB).
     initialQuotes: List<QuoteSelection> = emptyList(),
     legacyQuoteRequestDropped: Boolean = false,
+    // ED-88 (#1616) — the inline citations of this opening are durable in the draft row.
+    onQuotesDelivered: () -> Unit = {},
 ) {
     val viewModel = hiltViewModel<QuickReplyViewModel, QuickReplyViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },
@@ -94,6 +104,7 @@ internal fun QuickReplySheet(
     // modal's scrim, so a new launch can only happen after a dismiss nulled the previous one
     // (gate Codex, finding 2). Re-assigning the launch over an OPEN sheet would break delivery.
     var openingDelivered by rememberSaveable { mutableStateOf(false) }
+    val currentOnQuotesDelivered by rememberUpdatedState(onQuotesDelivered)
     LaunchedEffect(viewModel) {
         // Re-seed the field from the #405 row at EACH opening — the VM outlives the sheet and
         // its cached text can be stale after a full-screen edit of the same draft (gate #788).
@@ -103,11 +114,18 @@ internal fun QuickReplySheet(
             legacyQuoteRequestDropped = legacyQuoteRequestDropped,
         )
         openingDelivered = true
+        // Attachment advances the opening id only for a new sheet; both flows filter stale signals.
+        // Collect delivery before navigation: restoration retains its delivery before its close.
+        launch(start = CoroutineStart.UNDISPATCHED) {
+            viewModel.quotesDelivered.collect { currentOnQuotesDelivered() }
+        }
         viewModel.effects.collect { effect ->
             when (effect) {
                 is QuickReplyEffect.SubmitSucceeded ->
                     onSubmitted(effect.targetPage, effect.scrollTo, effect.quotedNumreponses)
                 is QuickReplyEffect.EscalateToFullEditor -> onEscalate(effect.quotes)
+                // ED-10 (#1450) — the ONLY place a plain close unmounts the sheet.
+                is QuickReplyEffect.CloseCommitted -> onDismiss()
             }
         }
     }
@@ -122,14 +140,19 @@ internal fun QuickReplySheet(
     // `submitting` is read through
     // rememberUpdatedState because both guards below are remembered once.
     val submitting = rememberUpdatedState(state.submission.blocksBodyMutation || state.isDiscardingDraft)
+    val closing = rememberUpdatedState(state.isClosing)
     // #854 — no half-height stop : this is a TYPING surface (autofocused field, IME quasi
     // permanent), the M3 PartiallyExpanded state only ever appears when a short display makes
     // the content taller than half the screen — and then a back/swipe must dismiss in ONE step,
     // not park the sheet at mid-height (thibw : « 3× retour pour revenir au topic »).
     val sheetState = rememberModalBottomSheetState(
         skipPartiallyExpanded = true,
-        confirmValueChange = { target -> target != SheetValue.Hidden || !submitting.value },
+        // M3 also calls show() on recreation: a pending close stays hidden until « Rester ».
+        confirmValueChange = { target ->
+            if (target == SheetValue.Hidden) !submitting.value else !closing.value
+        },
     )
+    val sheetScope = rememberCoroutineScope()
     val density = LocalDensity.current
     val screenHeightDp = LocalConfiguration.current.screenHeightDp.toFloat()
     val imeHeightDp = with(density) { WindowInsets.ime.getBottom(density).toDp().value }
@@ -147,12 +170,30 @@ internal fun QuickReplySheet(
     ModalBottomSheet(
         sheetState = sheetState,
         onDismissRequest = {
-            if (!submitting.value) {
-                viewModel.onDismissed()
-                onDismiss()
-            }
+            // ED-10 (#1450) — closing is a REQUEST. material3 calls this once the sheet has slid
+            // away ; it stays composed (hidden) while the ViewModel awaits the last draft write,
+            // and only CloseCommitted unmounts it. material3 also calls this after a vetoed back
+            // (settleToDismiss ignores the veto's outcome) : bring the sheet back rather than
+            // leave an invisible modal over the topic.
+            if (submitting.value) sheetScope.launch { sheetState.show() } else viewModel.onDismissed()
         },
     ) {
+        // These owners belong to the sheet's dialog window, not the topic behind it.
+        val focusManager = LocalFocusManager.current
+        val keyboardController = LocalSoftwareKeyboardController.current
+        LaunchedEffect(state.isClosing) {
+            if (state.isClosing) {
+                focusManager.clearFocus(force = true)
+                keyboardController?.hide()
+                sheetState.hide()
+            } else {
+                // M3 can also start show() after measuring its anchors. Either animation may
+                // cancel the other; observe the resulting expansion before focusing the field.
+                launch { sheetState.show() }
+                snapshotFlow { sheetState.currentValue }.first { it == SheetValue.Expanded }
+                focusRequester.requestFocus()
+            }
+        }
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -197,7 +238,7 @@ internal fun QuickReplySheet(
                 OutlinedTextField(
                     value = state.text,
                     onValueChange = viewModel::onTextChanged,
-                    readOnly = state.submission.blocksBodyMutation || state.isDiscardingDraft,
+                    readOnly = state.submission.blocksBodyMutation || state.isDiscardingDraft || state.isClosing,
                     // #807 — same #237 contract as BbcodeTextField : Compose capitalises NOTHING by
                     // default, the IME needs the explicit autoCap hint (surface regression, v220).
                     keyboardOptions = KeyboardOptions(capitalization = KeyboardCapitalization.Sentences),
@@ -223,13 +264,26 @@ internal fun QuickReplySheet(
             QuickReplyActions(state, onSubmit = { viewModel.onSubmitClicked(timeoutMillis) })
         }
     }
-    // The field grabs the focus once per sheet opening — the IME rises with the sheet.
-    LaunchedEffect(Unit) { focusRequester.requestFocus() }
     QuickReplyConfirmationDialog(
         visible = state.confirmVisible,
         onConfirm = { viewModel.onSubmitConfirmed(armToken) },
         onDismiss = viewModel::onSubmitConfirmDismissed,
     )
+    QuickReplyUnsavedCloseDialog(
+        visible = state.unsavedCloseVisible,
+        onStay = { viewModel.onUnsavedCloseDecided(leave = false) },
+        onLeave = { viewModel.onUnsavedCloseDecided(leave = true) },
+    )
+}
+
+/**
+ * ED-10 on the sheet (#1450, option A chosen by XaTriX on 13/11) : the editors' own
+ * « Brouillon non enregistré » dialog, shown over the topic while the refused sheet is hidden ;
+ * « Rester » brings the sheet back and saves again, « Quitter sans enregistrer » lets it go.
+ */
+@Composable
+internal fun QuickReplyUnsavedCloseDialog(visible: Boolean, onStay: () -> Unit, onLeave: () -> Unit) {
+    if (visible) EditorUnsavedCloseDialog(onStay = onStay, onLeave = onLeave)
 }
 
 @Composable

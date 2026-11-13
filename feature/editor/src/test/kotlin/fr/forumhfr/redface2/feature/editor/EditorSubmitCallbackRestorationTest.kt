@@ -21,6 +21,7 @@ import io.mockk.every
 import io.mockk.mockk
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import org.junit.Assert.assertEquals
 import org.junit.Rule
@@ -47,6 +48,7 @@ class EditorSubmitCallbackRestorationTest {
             PostEditorState(PostEditorMode.Reply, 23, 35421, null, 2, 401),
         )
         every { model.effects } returns effects.receiveAsFlow()
+        every { model.quotesDelivered } returns emptyFlow()
         every { model.bodyFieldState } returns TextFieldState()
         every { model.bodyScrollState } returns ScrollState(0)
         every { model.bodyCaretRevealResetKey } returns 0

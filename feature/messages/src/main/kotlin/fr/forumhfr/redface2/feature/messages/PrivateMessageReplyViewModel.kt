@@ -143,6 +143,10 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     private val _effects: Channel<PrivateMessageReplyEffect> = Channel(capacity = Channel.BUFFERED)
     val effects: Flow<PrivateMessageReplyEffect> = _effects.receiveAsFlow()
 
+    /** ED-88 (#1616): one signal per sealed C/Q transaction; a conflated channel, never a navigation effect. */
+    private val quotesDeliveredSignal: Channel<Unit> = Channel(capacity = Channel.CONFLATED)
+    val quotesDelivered: Flow<Unit> = quotesDeliveredSignal.receiveAsFlow()
+
     private val context = PrivateMessageReplyContext(
         threadId = request.threadId,
         page = request.page.coerceAtLeast(1),
@@ -229,7 +233,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         saved = savedStateHandle, submission = submission, scope = viewModelScope, draftKey = draftKey,
         state = PrivateMessageDraftState(read = { _state.value }, update = ::updateState),
         clearToolSelection = { chromeMemory.host.focus.clearToolSelection() },
-    )
+    ).also { it.quoteDeliveryObserver = { quotesDeliveredSignal.trySend(Unit) } }
 
     /**
      * #459 — lowercased pseudo of the authenticated session, or null when anonymous. The upload

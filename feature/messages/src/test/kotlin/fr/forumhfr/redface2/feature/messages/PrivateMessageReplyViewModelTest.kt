@@ -90,6 +90,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -347,6 +348,11 @@ class PrivateMessageReplyViewModelTest {
         vm.onCloseRequested()
         runCurrent()
         // The pop is only allowed once C and Q are settled and the live field is durable.
+        vm.quotesDelivered.test {
+            awaitItem()
+            vm.effects.test { assertEquals(PrivateMessageReplyEffect.CloseCommitted, awaitItem()) }
+            expectNoEvents()
+        }
         assertEquals(typed, draftStore.saved[key]?.body)
         assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
         coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any(), any()) }
@@ -1123,6 +1129,74 @@ class PrivateMessageReplyViewModelTest {
                 recipientsOverride = null,
             )
         }
+    }
+
+    @Test
+    fun `ED88 a sealed quote delivery signals the basket once`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val formGate = CompletableDeferred<ReplyForm>()
+        val prefill = "[quotemsg=1980000004,4,990001]Citation serveur[/quotemsg]\n"
+        coEvery { repository.fetchReplyForm(any(), any()) } coAnswers { formGate.await() }
+        enqueueQuoteLaunch(quoteRequest)
+        val viewModel = PrivateMessageReplyViewModel(
+            quoteRequest, repository, previewParser, mainDispatcher, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            submissionClock,
+            smileyRepository(), favoriteRepository, localCollections,
+        ).also(::trackViewModel)
+        val key = EditorDraftKey.mpReply(quoteRequest.threadId)
+        viewModel.quotesDelivered.test {
+            runCurrent()
+            expectNoEvents() // Requested, not delivered: the basket stays armed.
+            formGate.complete(form(initialContent = prefill))
+            awaitItem()
+            assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+            assertEquals(prefill, draftStore.saved[key]?.body)
+            advanceUntilIdle()
+            expectNoEvents()
+        }
+    }
+
+    @Test
+    fun `ED88 a failed quote form keeps the basket armed`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } throws IOException("offline")
+        enqueueQuoteLaunch(quoteRequest)
+        val viewModel = PrivateMessageReplyViewModel(
+            quoteRequest, repository, previewParser, mainDispatcher, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            submissionClock,
+            smileyRepository(), favoriteRepository, localCollections,
+        ).also(::trackViewModel)
+        viewModel.quotesDelivered.test {
+            advanceUntilIdle()
+            expectNoEvents()
+        }
+        assertNotNull(draftStore.saved[EditorDraftKey.mpReply(quoteRequest.threadId)]?.pendingInlineQuoteRequest)
+    }
+
+    @Test
+    fun `ED88 a refused C-Q transaction keeps the basket armed`() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        val formGate = CompletableDeferred<ReplyForm>()
+        val prefill = "[quotemsg=1980000004,4,990001]Citation serveur[/quotemsg]\n"
+        coEvery { repository.fetchReplyForm(any(), any()) } coAnswers { formGate.await() }
+        enqueueQuoteLaunch(quoteRequest)
+        val viewModel = PrivateMessageReplyViewModel(
+            quoteRequest, repository, previewParser, mainDispatcher, userPreferences(), draftStore,
+            FakeAuthRepository(), FakeUploadRepository(), FakeImageUploadReader(), DiagnosticsLog(),
+            submissionClock,
+            smileyRepository(), favoriteRepository, localCollections,
+        ).also(::trackViewModel)
+        viewModel.quotesDelivered.test {
+            runCurrent()
+            draftStore.saveFailure = IOException("disk")
+            formGate.complete(form(initialContent = prefill))
+            advanceUntilIdle()
+            expectNoEvents() // The quote sits in the field, not in the row.
+        }
+        assertNotNull(draftStore.saved[EditorDraftKey.mpReply(quoteRequest.threadId)]?.pendingInlineQuoteRequest)
+        assertEquals(prefill, viewModel.bodyFieldState.text.toString())
     }
 
     @Test

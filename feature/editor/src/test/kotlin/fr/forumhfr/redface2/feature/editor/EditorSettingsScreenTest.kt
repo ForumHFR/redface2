@@ -40,6 +40,7 @@ class EditorSettingsScreenTest {
         val model = mockk<PostEditorViewModel>(relaxUnitFun = true)
         every { model.state } returns MutableStateFlow(fixture.state)
         every { model.effects } returns emptyFlow()
+        every { model.quotesDelivered } returns emptyFlow()
         every { model.bodyFieldState } returns fixture.body
         every { model.bodyScrollState } returns ScrollState(0)
         every { model.bodyInputTransformation } returns InputTransformation {}

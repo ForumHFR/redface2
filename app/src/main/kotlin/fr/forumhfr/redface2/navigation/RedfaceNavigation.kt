@@ -228,7 +228,7 @@ data class PrivateMessageReplyRoute(
     val quotedNumreponse: Int? = null,
     /** Legacy, see [quotedNumreponse]; present together with it or not at all. */
     val quoteRef: Int? = null,
-    /** #868-#870 — true for a « Citer N » launch: its successful submit empties the hoisted basket. */
+    /** #868-#870, ED-88 — true for a « Citer N » launch: its durable quote delivery empties the basket. */
     val consumesQuoteBasket: Boolean = false,
 ) : RedfaceNavKey {
     init {
@@ -1571,6 +1571,7 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                                     multiQuoteBasket = multiQuoteBasket.withoutSelections(scope, numreponses)
                                 },
                                 onClear = { multiQuoteBasket = null },
+                                onConsume = { scope -> multiQuoteBasket = multiQuoteBasket.consumedBy(scope) },
                                 pendingEditorQuotes = pendingEditorQuotes,
                                 onEditorQuotesHandoff = { pendingEditorQuotes = it },
                             ),
@@ -2017,14 +2018,17 @@ private data class PrivateMessageSubmitNavState(
  * #868/#869/#870 — the handoff also says whether the editor session CONSUMED the hoisted basket
  * ([EditorQuotesHandoff.consumesBasket]): only a « Citer N » launch (or a sheet escalation of one)
  * does. The basket is no longer cleared at editor OPEN — it survives a back/cancel so the
- * selection re-arms the « Citer N » FAB — and is cleared on SUBMIT SUCCESS of a basket-consuming
- * session only (a « Citer » simple / plain reply never empties a selection it never shipped).
+ * selection re-arms the « Citer N » FAB. ED-88 (#1616) — a basket-consuming session empties it as
+ * soon as its citations are DURABLE in the draft (sealed C/Q transaction), and at the latest on its
+ * SUBMIT SUCCESS ; a failed or dormant delivery leaves it armed (a « Citer » simple / plain reply
+ * never empties a selection it never shipped).
  */
 private data class MultiQuoteNavState(
     val basket: MultiQuoteBasket?,
     val onToggle: (scope: QuoteScope, selection: QuoteSelection) -> Unit,
     val onRemove: (scope: QuoteScope, numreponses: Set<Int>) -> Unit,
     val onClear: () -> Unit,
+    val onConsume: (scope: QuoteScope) -> Unit,
     val pendingEditorQuotes: EditorQuotesHandoff? = null,
     val onEditorQuotesHandoff: (EditorQuotesHandoff?) -> Unit = {},
 )
@@ -2154,6 +2158,19 @@ internal fun MultiQuoteBasket?.toggled(scope: QuoteScope, selection: QuoteSelect
     }
     return if (next.isEmpty()) null else current.copy(selections = next)
 }
+
+/**
+ * ED-88 (#1616) — true when this basket was shipped by the writing session of [scope] : that session
+ * was opened by « Citer N » or escalated from one ([consumesBasket], decided by the open path), and
+ * the basket is still that target's. The caller empties it on the durable delivery of the citations
+ * and, as a safety net, on the successful submit. A basket re-armed elsewhere is never touched.
+ */
+internal fun MultiQuoteBasket?.isConsumedBy(scope: QuoteScope?, consumesBasket: Boolean): Boolean =
+    consumesBasket && scope != null && this?.matches(scope) == true
+
+/** Apply a possibly buffered delivery to the basket at collection time, scoped to its sender. */
+internal fun MultiQuoteBasket?.consumedBy(scope: QuoteScope): MultiQuoteBasket? =
+    takeUnless { it.isConsumedBy(scope, consumesBasket = true) }
 
 /** Removes selected ids from one exact scope; a different active basket is left untouched. */
 internal fun MultiQuoteBasket?.withoutSelections(
@@ -2627,14 +2644,24 @@ private fun RedfaceNavHost(
                         if (isPrivateMessageThreadEntryFor(below, threadId)) {
                             privateMessageSubmitNavState.onPublish(threadId, page)
                         }
-                        if (route.consumesQuoteBasket &&
-                            multiQuoteNavState.basket?.matches(privateMessageQuoteScope) == true
+                        // ED-88 — safety net : the durable delivery below normally emptied it.
+                        if (multiQuoteNavState.basket
+                                .isConsumedBy(privateMessageQuoteScope, route.consumesQuoteBasket)
                         ) {
                             multiQuoteNavState.onClear()
                         }
                         // One guarded pop only: the conversation route/key and its ViewModel stay.
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                    // ED-88 (#1616) — « Citer N » emptied its basket once the citations are durable
+                    // in the reply draft ; a failed or dormant delivery never signals.
+                    onQuotesDelivered = {
+                        if (multiQuoteNavState.basket
+                                .isConsumedBy(privateMessageQuoteScope, route.consumesQuoteBasket)
+                        ) {
+                            multiQuoteNavState.onClear()
                         }
                     },
                     // #803 pattern (state-hygiene audit 2026-07-05) — invoked only on
@@ -2992,7 +3019,7 @@ private fun RedfaceNavHost(
                     // #291 / #604 lot 3 — selection of THIS topic's basket as full previews
                     // (another topic's selection must never leak into the menu checkmarks or
                     // the « Citer N » FAB) ; under the full-screen threshold the screen pre-arms
-                    // the sheet's cards from them and consumes the basket via onClearMultiQuote.
+                    // the sheet's cards from them and consumes only that target's current basket.
                     multiQuoteSelections = multiQuoteNavState.basket
                         ?.takeIf { it.matches(topicQuoteScope) }
                         ?.selections
@@ -3003,6 +3030,9 @@ private fun RedfaceNavHost(
                     // #436 — « Tout vider » : a long press on the « Citer N » FAB empties the
                     // whole hoisted basket (same reset path as the post-editor launch / logout).
                     onClearMultiQuote = multiQuoteNavState.onClear,
+                    onQuickReplyBasketConsumed = { cat, topicId ->
+                        multiQuoteNavState.onConsume(QuoteScope.Topic(cat, topicId))
+                    },
                     // #465/#1170 — the topic's saved manual poll choice (null = follow the
                     // automatic poll policy), and the callback recording a tap on the card. Hoisted to
                     // :app so it survives leaving and reopening the topic (pre-#895 étape 4:
@@ -3016,10 +3046,10 @@ private fun RedfaceNavHost(
                     onMultiQuote = { subcat, page, selection ->
                         // #291 / #604 lot 3 — quote flavour of reply : the basket's previews are
                         // handed to the editor (cards, mockup P3) through the in-memory handoff.
-                        // #868/#869 — the basket is NO LONGER cleared on launch : backing out of
-                        // the editor keeps the selection armed (« Citer N » survives a cancel) ;
-                        // the clear moved to the SUBMIT SUCCESS of this basket-consuming session
-                        // (consumesBasket = true below). « Tout vider » (#436) stays the manual
+                        // #868/#869 — the basket is NOT cleared on launch : the selection stays
+                        // armed until this basket-consuming session (consumesBasket = true below)
+                        // proves it took it — the durable delivery of its citations (ED-88, #1616),
+                        // its SUBMIT SUCCESS at the latest. « Tout vider » (#436) stays the manual
                         // reset.
                         // #843 — « Citer N » (3+) is a COLD full-editor open, not a sheet escalation:
                         // resumeSharedDraft = false, so an existing text draft is offered via the
@@ -3169,15 +3199,16 @@ private fun RedfaceNavHost(
                             )
                             SubmitHandoff.None -> Unit
                         }
-                        // #868/#869 — the selection's intent is consumed by the SUCCESSFUL submit
-                        // of a basket-consuming session (« Citer N » / its escalation), and only
-                        // then : a failure, a back or a « Citer » simple never empty the basket.
+                        // #868/#869 — safety net of ED-88 : the SUCCESSFUL submit of a
+                        // basket-consuming session (« Citer N » / its escalation) empties whatever
+                        // the durable delivery below left armed (cards) ; a failure, a back or a
+                        // « Citer » simple never empty the basket.
                         // Guarded on the basket still being THIS topic's (gate Sol r1) : the one
                         // basket is keyed (cat, post), so if it was re-armed on another topic
                         // while this editor lived, the submit must not wipe that newer selection.
-                        if (editorQuotesHandoff?.consumesBasket == true &&
-                            editorQuoteScope != null &&
-                            multiQuoteNavState.basket?.matches(editorQuoteScope) == true
+                        if (multiQuoteNavState.basket.isConsumedBy(
+                                editorQuoteScope, editorQuotesHandoff?.consumesBasket == true,
+                            )
                         ) {
                             multiQuoteNavState.onClear()
                         }
@@ -3185,6 +3216,17 @@ private fun RedfaceNavHost(
                         // tab root.
                         if (backStack.size > 1) {
                             backStack.removeAt(backStack.lastIndex)
+                        }
+                    },
+                    // ED-88 (#1616) — the basket is emptied as soon as its citations are durable
+                    // in the draft (sealed C/Q transaction), same guards as the submit above. A
+                    // failed or dormant delivery never signals : the basket stays armed.
+                    onQuotesDelivered = {
+                        if (multiQuoteNavState.basket.isConsumedBy(
+                                editorQuoteScope, editorQuotesHandoff?.consumesBasket == true,
+                            )
+                        ) {
+                            multiQuoteNavState.onClear()
                         }
                     },
                 )

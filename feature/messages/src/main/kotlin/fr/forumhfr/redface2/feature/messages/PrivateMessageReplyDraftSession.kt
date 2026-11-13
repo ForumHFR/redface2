@@ -133,6 +133,12 @@ internal class PrivateMessageReplyDraftSession(
         updateState { it.copy(draftHydratedFromForm = true, quoteCommitPending = true) }
     }
 
+    /**
+     * ED-88 (#1616) — called once per SEALED delivery : the quoted body and the erased request were
+     * written together. Erasing a request without a staged body (« Ignorer ») never calls it.
+     */
+    var quoteDeliveryObserver: () -> Unit = {}
+
     suspend fun commitQuote(
         request: PendingInlineQuoteRequest,
         deliveredBody: String,
@@ -146,7 +152,10 @@ internal class PrivateMessageReplyDraftSession(
             bodyProvenance = submission.drafts.provenanceFor(bodyFieldState.text.toString()),
             offerToResolve = pendingOfferResolution())
         val result = submission.drafts.consumeInlineQuoteRequest(request, snapshot, deliveredBody)
-        if (result is EditorDraftStore.StoreWriteResult.Written) deliveryPending = false
+        if (result is EditorDraftStore.StoreWriteResult.Written) {
+            deliveryPending = false
+            quoteDeliveryObserver()
+        }
         recordQuoteWrite(result)
         updateState { it.copy(quoteCommitPending = deliveryPending) }
         submission.resolveDraftWrite(result)

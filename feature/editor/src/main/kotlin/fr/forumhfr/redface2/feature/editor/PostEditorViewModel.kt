@@ -202,6 +202,14 @@ class PostEditorViewModel @AssistedInject constructor(
     val effects: Flow<PostEditorEffect> = _effects.receiveAsFlow()
 
     /**
+     * ED-88 (#1616) — one signal per SEALED C/Q transaction (quoted body written, request erased,
+     * together) : `:app` empties the multi-quote basket on it. Its own conflated channel, not an
+     * effect : a delivery is not a navigation outcome and must never precede one in that queue.
+     */
+    private val _quotesDelivered: Channel<Unit> = Channel(capacity = Channel.CONFLATED)
+    val quotesDelivered: Flow<Unit> = _quotesDelivered.receiveAsFlow()
+
+    /**
      * Cached form pulled lazily on [PostEditorMode.Reply]. Keeping it on the
      * ViewModel rather than the [PostEditorState] avoids leaking `hash_check`
      * through Compose snapshot tooling / state restoration.
@@ -531,6 +539,9 @@ class PostEditorViewModel @AssistedInject constructor(
         submission.disarm()
         updateChromeState { it.copy(isLoadingForm = true) }
         viewModelScope.launch {
+            // ED-88 — ignoring a quote already inserted in the field still seals ITS delivery.
+            val sealsDelivery = pending != null && pending == deliveredInlineQuoteRequest &&
+                !_state.value.unreadableQuoteRequest
             val result = if (_state.value.unreadableQuoteRequest) {
                 submission.drafts.discardUnreadableInlineQuoteRequest()
             } else {
@@ -546,6 +557,7 @@ class PostEditorViewModel @AssistedInject constructor(
                     resolveQuoteRenderingThenLoad()
                 } else {
                     finishInlineQuoteDelivery()
+                    if (sealsDelivery) _quotesDelivered.trySend(Unit)
                     if (loadedForm == null) {
                         loadReplyFormIfPossible(preserveDraft = true)
                     }
@@ -708,6 +720,7 @@ class PostEditorViewModel @AssistedInject constructor(
             submission.resolveDraftWrite(result)
             finishInlineQuoteDelivery()
             deliveredQuoteBody = null
+            _quotesDelivered.trySend(Unit) // ED-88: the citations are durable, the basket may go.
             if (duplicateQuoteDelivery) chromeEvents.quoteAlreadyDelivered()
             duplicateQuoteDelivery = false
             // Preserve keystrokes made while the CAS was suspended.

@@ -543,6 +543,189 @@ class QuickReplyViewModelTest {
     }
 
     @Test
+    fun `dismiss commits the close only after the awaited final save - ED10`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val store = FakeQuickReplyDraftStore().apply { saveReturnGate = gate }
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.openForTest()
+        runCurrent()
+        viewModel.onTextChanged(TextFieldValue("dernière frappe"))
+        viewModel.effects.test {
+            viewModel.onDismissed()
+            runCurrent()
+            expectNoEvents() // The sheet stays mounted while the write is in flight.
+            assertTrue(viewModel.state.value.isClosing)
+            assertFalse(viewModel.state.value.canSubmit)
+            viewModel.onTextChanged(TextFieldValue("input from the hidden IME"))
+            assertEquals("dernière frappe", viewModel.state.value.text.text)
+            viewModel.onSheetAttached(1, emptyList(), restored = true)
+            assertTrue(viewModel.state.value.isClosing)
+            gate.complete(Unit)
+            assertTrue(awaitItem() is QuickReplyEffect.CloseCommitted)
+        }
+        assertEquals("dernière frappe", store.storedBody)
+        assertFalse(viewModel.state.value.unsavedCloseVisible)
+    }
+
+    @Test
+    fun `a refused final save keeps the sheet mounted and asks - ED10`() = runTest {
+        val store = FakeQuickReplyDraftStore().apply { saveFailure = IOException("disk full") }
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.onTextChanged(TextFieldValue("texte non enregistré"))
+        viewModel.effects.test {
+            viewModel.onDismissed()
+            advanceUntilIdle()
+            expectNoEvents() // Never a silent unmount over an unsaved field.
+        }
+        assertTrue(viewModel.state.value.unsavedCloseVisible)
+        assertTrue(viewModel.state.value.isClosing)
+        assertEquals("texte non enregistré", viewModel.state.value.text.text)
+        assertNull(store.storedBody)
+    }
+
+    @Test
+    fun `staying after a refused save keeps the field and a later dismiss retries - ED10`() = runTest {
+        val store = FakeQuickReplyDraftStore().apply { saveFailure = IOException("disk full") }
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.onTextChanged(TextFieldValue("texte à garder"))
+        viewModel.effects.test {
+            viewModel.onDismissed()
+            advanceUntilIdle()
+            viewModel.onUnsavedCloseDecided(leave = false)
+            advanceUntilIdle()
+            expectNoEvents()
+            assertFalse(viewModel.state.value.unsavedCloseVisible)
+            assertFalse(viewModel.state.value.isClosing)
+            assertEquals("texte à garder", viewModel.state.value.text.text)
+
+            store.saveFailure = null
+            viewModel.onDismissed() // The latch was released: this close saves again.
+            assertTrue(awaitItem() is QuickReplyEffect.CloseCommitted)
+        }
+        assertEquals("texte à garder", store.storedBody)
+    }
+
+    @Test
+    fun `staying after a refused save relaunches the autosave without a keystroke - ED10 QR3`() = runTest {
+        val store = FakeQuickReplyDraftStore().apply { saveFailure = IOException("disk full") }
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.onTextChanged(TextFieldValue("texte à garder"))
+        viewModel.onDismissed()
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.unsavedCloseVisible)
+        assertNull(store.storedBody)
+
+        store.saveFailure = null
+        viewModel.onUnsavedCloseDecided(leave = false)
+        advanceUntilIdle() // No keystroke : staying alone schedules a new save.
+        assertEquals("texte à garder", store.storedBody)
+        assertFalse(viewModel.state.value.unsavedCloseVisible)
+    }
+
+    @Test
+    fun `leaving after a refused save commits the close once without a write - ED10`() = runTest {
+        val store = FakeQuickReplyDraftStore().apply { saveFailure = IOException("disk full") }
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.onTextChanged(TextFieldValue("texte abandonné"))
+        viewModel.effects.test {
+            viewModel.onDismissed()
+            advanceUntilIdle()
+            viewModel.onUnsavedCloseDecided(leave = true)
+            assertTrue(awaitItem() is QuickReplyEffect.CloseCommitted)
+            viewModel.onUnsavedCloseDecided(leave = true) // A second tap on the fading dialog.
+            viewModel.onDismissed()
+            advanceUntilIdle()
+            expectNoEvents()
+        }
+        assertFalse(viewModel.state.value.unsavedCloseVisible)
+        assertNull(store.storedBody)
+        assertTrue(store.savedBodies.isEmpty())
+    }
+
+    @Test
+    fun `a refused save over content the row already holds closes without asking - ED10`() = runTest {
+        val store = FakeQuickReplyDraftStore(initialBody = "déjà enregistré")
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.openForTest()
+        advanceUntilIdle()
+        store.saveFailure = IOException("disk full")
+        viewModel.effects.test {
+            viewModel.onDismissed()
+            assertTrue(awaitItem() is QuickReplyEffect.CloseCommitted)
+        }
+        assertFalse(viewModel.state.value.unsavedCloseVisible)
+        assertEquals("déjà enregistré", store.storedBody)
+    }
+
+    @Test
+    fun `a final save that loses a conflict asks instead of closing - ED10`() = runTest {
+        val store = FakeQuickReplyDraftStore(initialBody = "A")
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.openForTest()
+        advanceUntilIdle()
+        // Another writer replaces the row behind this opening (M9 of #1553: a new request, an editor).
+        val elsewhere = EditorDraftSession(store, EditorDraftKey.reply(23, 35421))
+        elsewhere.load()
+        val written = elsewhere.save(EditorDraftStore.Draft(body = "écrit ailleurs"))
+        assertTrue(written is EditorDraftStore.StoreWriteResult.Written)
+        val readsBeforeClose = store.loadCalls
+        viewModel.onTextChanged(TextFieldValue("A et la suite"))
+        viewModel.effects.test {
+            viewModel.onDismissed()
+            advanceUntilIdle()
+            expectNoEvents()
+        }
+        assertTrue(viewModel.state.value.unsavedCloseVisible)
+        assertEquals("écrit ailleurs", store.storedBody)
+        assertEquals("a save conflict must not silently reload the session", readsBeforeClose, store.loadCalls)
+    }
+
+    @Test
+    fun `a dismiss superseded by a reopening never closes the new sheet - ED10`() = runTest {
+        // Unreachable behind the modal scrim, pinned anyway: the VM outlives the sheet, and a
+        // stale CloseCommitted buffered in the channel would unmount the NEXT opening.
+        val gate = CompletableDeferred<Unit>()
+        val store = FakeQuickReplyDraftStore()
+        val viewModel = quickReplyViewModel(draftStore = store)
+        viewModel.onTextChanged(TextFieldValue("fermeture en vol"))
+        store.saveReturnGate = gate
+        viewModel.effects.test {
+            viewModel.onDismissed()
+            runCurrent()
+            viewModel.onSheetOpened(currentPage = 3)
+            gate.complete(Unit)
+            advanceUntilIdle()
+            expectNoEvents()
+        }
+        assertFalse(viewModel.state.value.unsavedCloseVisible)
+    }
+
+    @Test
+    fun `staying resumes the quote fetch that the close request cancelled - ED10`() = runTest {
+        val repository = GatedQuoteFormRepository()
+        val store = FakeQuickReplyDraftStore()
+        val viewModel = quickReplyViewModel(
+            replyRepository = repository, draftStore = store, quoteCardsEnabled = false,
+        )
+        viewModel.openForTest(listOf(preview(101, "alice")))
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.isPreparingQuotes)
+        viewModel.onTextChanged(TextFieldValue("tapé pendant le chargement"))
+        store.saveFailure = IOException("disk full")
+
+        viewModel.onDismissed()
+        advanceUntilIdle()
+        assertTrue(viewModel.state.value.unsavedCloseVisible)
+        assertFalse(viewModel.state.value.isPreparingQuotes)
+
+        viewModel.onUnsavedCloseDecided(leave = false)
+        runCurrent()
+        assertTrue("the durable request is fetched again", viewModel.state.value.isPreparingQuotes)
+        assertEquals(listOf(101), viewModel.state.value.pendingQuotes.map { it.numreponse })
+        assertEquals("tapé pendant le chargement", viewModel.state.value.text.text)
+    }
+
+    @Test
     fun `confirm-before-posting gates the POST behind the dialog`() = runTest {
         val repository = FakeQuickReplyRepository(
             results = mutableListOf(ReplySubmitResult.Success(refreshUrl = null, targetPage = null)),
@@ -1118,7 +1301,7 @@ class QuickReplyViewModelTest {
             override val draftSaves get() = store.saveCount
             override val draftWrites get() = store.writes
             override val successEffects get() = effects.count { it is QuickReplyEffect.SubmitSucceeded }
-            override val closeEffects: Int = 0 // onDismissed n'émet pas d'effet de navigation.
+            override val closeEffects get() = effects.count { it is QuickReplyEffect.CloseCommitted }
 
             override fun editBody(body: String) = viewModel.onTextChanged(TextFieldValue(body))
             override fun clickSubmit() = viewModel.onSubmitClicked()
