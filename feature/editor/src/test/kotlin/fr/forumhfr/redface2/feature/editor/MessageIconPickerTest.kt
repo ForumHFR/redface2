@@ -78,23 +78,30 @@ class MessageIconPickerTest {
     fun resetImageLoader() = SingletonImageLoader.reset()
 
     @Test
-    fun sixColumnsAt360Dp() = assertGrid(360.dp, columns = 6)
+    fun twoRowsOfEightAt360Dp() = assertGrid(360.dp)
 
     @Test
     @Config(qualifiers = "fr-rFR-w411dp-h780dp-xxhdpi")
-    fun sixColumnsAt411Dp() = assertGrid(411.dp, columns = 6)
+    fun twoRowsOfEightAt411Dp() = assertGrid(411.dp)
 
     @Test
     @Config(qualifiers = "fr-rFR-w640dp-h780dp-xxhdpi")
-    fun eightColumnsAt640Dp() = assertGrid(640.dp, columns = 8)
+    fun twoRowsOfEightAt640Dp() = assertGrid(640.dp)
+
+    /** 440 dpi (density 2.75) is the non-integer case that made 30 dp sprites uneven: ×4 = 60 px there too. */
+    @Test
+    fun spriteStaysAnIntegerMultipleAt440Dpi() = assertGrid(360.dp, screenDensity = 2.75f, spritePx = 60)
 
     @Test
-    @Config(qualifiers = "fr-rFR-w640dp-h780dp-xxhdpi")
-    fun sixColumnsBelow384UsefulDp() = assertGrid(415.dp, columns = 6)
-
-    @Test
-    @Config(qualifiers = "fr-rFR-w640dp-h780dp-xxhdpi")
-    fun eightColumnsFrom384UsefulDp() = assertGrid(416.dp, columns = 8)
+    fun spriteScaleIsAnIntegerPerDensityAndFitsItsCell() {
+        // density -> expected multiple of the 15 px source for the 22 dp target, in a roomy cell.
+        mapOf(1f to 1, 1.5f to 2, 2f to 3, 2.625f to 4, 2.75f to 4, 3f to 4, 3.5f to 5, 4f to 6)
+            .forEach { (density, scale) ->
+                assertEquals("density $density", 15 * scale, messageIconSpritePx(22 * density, roomPx = 1_000))
+            }
+        assertEquals("lowered to the room", 45, messageIconSpritePx(66f, roomPx = 59))
+        assertEquals("never below the source size", 15, messageIconSpritePx(66f, roomPx = 4))
+    }
 
     @Test
     fun namedRadiosSelectOneToneAndUpdateTheNonClickableHeader() {
@@ -199,7 +206,8 @@ class MessageIconPickerTest {
                     Column {
                         MessageIconPicker(1, true, calls::add)
                         // Independent reference: the fallback must draw the number, not an empty painter.
-                        Box(Modifier.size(30.dp).testTag("expected-number"), contentAlignment = Alignment.Center) {
+                        // 20 dp = the 60 px sprite box (15 px × 4) at xxhdpi.
+                        Box(Modifier.size(20.dp).testTag("expected-number"), contentAlignment = Alignment.Center) {
                             Text("16", style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
@@ -225,11 +233,11 @@ class MessageIconPickerTest {
         assertTrue("Tone 16 must show its number during loading and after failure", expected.sameAs(actual))
     }
 
-    private fun assertGrid(width: Dp, columns: Int) {
+    private fun assertGrid(width: Dp, screenDensity: Float? = null, spritePx: Int = 60) {
         val fontScale = mutableStateOf(1f)
         lateinit var density: Density
         compose.setContent {
-            density = Density(LocalDensity.current.density, fontScale.value)
+            density = Density(screenDensity ?: LocalDensity.current.density, fontScale.value)
             CompositionLocalProvider(LocalDensity provides density) {
                 RedfaceTheme(darkTheme = false, dynamicColor = false) {
                     Box(Modifier.width(width).padding(horizontal = 16.dp)) {
@@ -241,39 +249,39 @@ class MessageIconPickerTest {
         listOf(1f, 1.3f).forEach { scale ->
             compose.runOnIdle { fontScale.value = scale }
             compose.waitForIdle()
-            assertGridDimensions(width, columns, density)
+            assertGridDimensions(width, density, spritePx)
         }
     }
 
-    private fun assertGridDimensions(width: Dp, columns: Int, density: Density) {
-        val rows = (1..16).map { pixelBounds("$MSG_ICON_OPTION_TAG_PREFIX$it") }.chunked(columns)
+    private fun assertGridDimensions(width: Dp, density: Density, spritePx: Int) {
+        val rows = (1..16).map { pixelBounds("$MSG_ICON_OPTION_TAG_PREFIX$it") }.chunked(COLUMNS)
         val firstRow = rows.first()
         val padding = with(density) { 16.dp.roundToPx() }
         val usefulWidth = with(density) { (width - 32.dp).roundToPx() }
         val targetHeight = with(density) { 48.dp.roundToPx() }
-        val spriteSize = with(density) { 30.dp.roundToPx() }
-        assertTrue("Column widths may differ by one rounding pixel",
-            firstRow.maxOf { it.width } - firstRow.minOf { it.width } <= 1)
+        assertEquals("16 tones in two rows", 2, rows.size)
+        assertEquals("Sprite must be an integer multiple of the 15 px source", 0, spritePx % 15)
         rows.forEachIndexed { rowIndex, row ->
+            assertEquals("Row $rowIndex is full", COLUMNS, row.size)
             assertEquals("Row $rowIndex left edge", padding, row.first().left)
             row.zipWithNext().forEach { (left, right) ->
                 assertEquals("Row $rowIndex cells must be contiguous", left.right, right.left)
             }
-            if (row.size == columns) {
-                assertEquals("Row $rowIndex useful width", usefulWidth, row.sumOf { it.width })
-                assertEquals("Row $rowIndex right edge", padding + usefulWidth, row.last().right)
-            }
-            // The incomplete last row must use the same columns as the full first row.
+            assertEquals("Row $rowIndex useful width", usefulWidth, row.sumOf { it.width })
+            assertEquals("Row $rowIndex right edge", padding + usefulWidth, row.last().right)
             row.forEachIndexed { column, cell ->
-                val icon = rowIndex * columns + column + 1
-                assertTrue("Tone $icon width", cell.width >= targetHeight)
+                val icon = rowIndex * COLUMNS + column + 1
+                // One eighth of the useful width, within one rounding pixel: below 48 dp on narrow screens.
+                assertTrue("Tone $icon width", cell.width - usefulWidth / COLUMNS in 0..1)
                 assertEquals("Tone $icon height", targetHeight, cell.height)
                 assertEquals("Tone $icon column left", firstRow[column].left, cell.left)
                 assertEquals("Tone $icon column right", firstRow[column].right, cell.right)
                 assertEquals("Tone $icon row top", firstRow.first().top + rowIndex * targetHeight, cell.top)
                 val sprite = pixelBounds("$MSG_ICON_SPRITE_TAG_PREFIX$icon")
-                assertEquals("Tone $icon sprite width", spriteSize, sprite.width)
-                assertEquals("Tone $icon sprite height", spriteSize, sprite.height)
+                assertEquals("Tone $icon sprite width", spritePx, sprite.width)
+                assertEquals("Tone $icon sprite height", spritePx, sprite.height)
+                assertTrue("Tone $icon sprite stays inside its cell", sprite.left >= cell.left &&
+                    sprite.right <= cell.right && sprite.top >= cell.top && sprite.bottom <= cell.bottom)
             }
         }
         compose.onAllNodes(hasClickAction()).assertCountEquals(16)
@@ -297,6 +305,7 @@ class MessageIconPickerTest {
     private fun expectedSpriteColor(icon: Int) = 0xFF000000.toInt() or (icon * 0x000B0B0B)
 
     private companion object {
+        const val COLUMNS = 8
         val TONE_NAMES = listOf(
             "Aucun", "Flèche", "Idée", "Attention", "Question", "Cool", "Sourire", "En colère",
             "Triste", "Rire", "Choqué", "Clin d'œil", "Pouce bas", "Pouce haut", "Étonné", "Blasé",
