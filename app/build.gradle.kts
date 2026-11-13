@@ -195,12 +195,15 @@ android {
 // beta and dev have no source set of their own (app/src = main, debug, test): their unit tests
 // replayed prod's. Only prod keeps unit-test components; the unqualified `test` stays on prod
 // across build types. The beta/dev variants are still built by release.yml.
-// Typed lookup: the generated `androidComponents` accessor only exposes the generic
-// AndroidComponentsExtension, whose builder has no `enableUnitTest`.
+// AGP 9.5: `enableUnitTest` is hidden on the application variant builder (deprecated in
+// VariantBuilder), so the unit-test component is switched off through `hostTests`. Typed lookup:
+// the generated `androidComponents` accessor only exposes the generic VariantBuilder.
 extensions.configure<com.android.build.api.variant.ApplicationAndroidComponentsExtension> {
     beforeVariants { variantBuilder ->
         val channel = variantBuilder.productFlavors.firstOrNull { it.first == "channel" }?.second
-        if (channel != null && channel != "prod") variantBuilder.enableUnitTest = false
+        if (channel != null && channel != "prod") {
+            variantBuilder.hostTests[com.android.build.api.variant.HostTestBuilder.UNIT_TEST_TYPE]?.enable = false
+        }
     }
 }
 
