@@ -1688,7 +1688,18 @@ class PrivateMessageReplyViewModelTest {
         ).also(::trackViewModel)
 
         assertEquals(body, viewModel.bodyFieldState.text.toString())
+        // ED-121, projection rule of the list (gate r2, point 5): an offer identical to the field has
+        // nothing to restore, so it is hidden; hydration still decides nothing, the draft stays durable
+        // and is offered again as soon as the field differs.
+        val key = EditorDraftKey.mpReply(request.threadId)
+        assertNull(viewModel.state.value.restorableDraft)
+        assertTrue(viewModel.state.value.draftOffers.isEmpty())
+        assertEquals(body, draftStore.saved[key]?.body)
+        viewModel.editBody(TextFieldValue("$body, edited"))
+        Snapshot.sendApplyNotifications()
+        advanceUntilIdle()
         assertEquals(body, viewModel.state.value.restorableDraft)
+        assertEquals(listOf(body), draftStore.loadOffers("tester", key).map { it.draft.body })
     }
 
     @Test

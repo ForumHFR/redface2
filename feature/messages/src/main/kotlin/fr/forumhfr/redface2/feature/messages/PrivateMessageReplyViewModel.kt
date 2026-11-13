@@ -268,6 +268,10 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         return submission.tryDisarm()
     }
 
+    // Declared before `init`: a delivery can run synchronously during construction.
+    private var deliveredRequest: PendingInlineQuoteRequest? = null
+    private var deliveredBody = ""
+
     init {
         observeBody()
         observePreview()
@@ -426,8 +430,6 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
         draftSession.discardOfferedDraft(offerId)
     }
 
-    private var deliveredRequest: PendingInlineQuoteRequest? = null
-    private var deliveredBody = ""
 
     fun onPendingQuoteResumed() {
         if (!_state.value.hasDormantQuote || !acceptMutation()) return

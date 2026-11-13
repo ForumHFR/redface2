@@ -338,6 +338,9 @@ class PostEditorViewModel @AssistedInject constructor(
     private var inlineQuoteDeliveryRequested = false
     private var duplicateQuoteDelivery = false
     private var deliveredInlineQuoteRequest: PendingInlineQuoteRequest? = null
+    // Declared before `init`: the first delivery can run synchronously during construction.
+    private val quoteCommit = Mutex()
+    private var deliveredQuoteBody: String? = null
     private var quoteCardsDelivered = false
     private var screenStopped = false
     private var stoppedBody: String? = null
@@ -659,8 +662,6 @@ class PostEditorViewModel @AssistedInject constructor(
         }
     }
 
-    private var deliveredQuoteBody: String? = null
-    private val quoteCommit = Mutex()
 
     private suspend fun deliverInlineQuoteForm(form: ReplyForm) {
         // ED-52: compare content in the live field, including keystrokes made during GET.
