@@ -195,7 +195,9 @@ android {
 // beta and dev have no source set of their own (app/src = main, debug, test): their unit tests
 // replayed prod's. Only prod keeps unit-test components; the unqualified `test` stays on prod
 // across build types. The beta/dev variants are still built by release.yml.
-androidComponents {
+// Typed lookup: the generated `androidComponents` accessor only exposes the generic
+// AndroidComponentsExtension, whose builder has no `enableUnitTest`.
+extensions.configure<com.android.build.api.variant.ApplicationAndroidComponentsExtension> {
     beforeVariants { variantBuilder ->
         val channel = variantBuilder.productFlavors.firstOrNull { it.first == "channel" }?.second
         if (channel != null && channel != "prod") variantBuilder.enableUnitTest = false
