@@ -214,19 +214,17 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
                     (it.bodyProvenance ?: EditorBodyProvenance()).delivered(request.scope, deliveredBody, it.body))
             }
             val blocked = pendingInlineQuoteRequest != request || (draft != null && unresolved != null)
-            val settled = if (blocked) null else settlePendingOffer(snapshot)
-            val delivered = snapshot?.copy(offerToResolve = null)
-            val result = when {
-                blocked -> StoreWriteResult.Conflict
-                settled != null && settled !is StoreWriteResult.Written -> settled
-                else -> checkpointWrite(delivered) {
-                    mutation { store.consumeInlineQuoteRequest(owner, checkNotNull(key), request, version,
-                        delivered?.let(::protected), offerToPreserve = protectedOffer,
-                        protectCurrent = !offersLoaded) }
-                }
+            // ED-121/132: a D already merged into C by a Restore whose own write failed is resolved in
+            // the same store transaction as C and Q, never in a separate write.
+            val delivered = snapshot?.let { it.copy(offerToResolve = it.offerToResolve?.takeUnless(::isResolved)) }
+            val result = if (blocked) StoreWriteResult.Conflict else checkpointWrite(delivered) {
+                mutation { store.consumeInlineQuoteRequest(owner, checkNotNull(key), request, version,
+                    delivered?.let(::protected), offerToPreserve = protectedOffer,
+                    protectCurrent = !offersLoaded) }
             }
             if (result is StoreWriteResult.Written) {
                 pendingInlineQuoteRequest = null
+                delivered?.offerToResolve?.let { adoptResolvedOffer(it, delivered) }
                 if (delivered != null) adoptBody(delivered)
             }
             adopt(result)
@@ -234,19 +232,7 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
         }
     }
 
-    /**
-     * ED-121: a Restore whose own write failed is settled first, in its CAS with C. A delivery can then
-     * never persist D merged into C while leaving D offered. Null when [snapshot] resolves nothing.
-     */
-    private suspend fun settlePendingOffer(snapshot: Draft?): StoreWriteResult? {
-        val pending = snapshot?.takeIf { it.offerToResolve?.id?.let { id -> id !in resolvedOffers } == true }
-        return pending?.let { draft ->
-            mutation { writeComposition(draft) }.also { result ->
-                adopt(result)
-                if (result is StoreWriteResult.Written) adoptBody(draft.copy(offerToResolve = null))
-            }
-        }
-    }
+    private fun isResolved(offer: DraftOffer): Boolean = offer.id in resolvedOffers
 
     /** The raw row stays sealed until this explicit abandonment succeeds and the binding reloads. */
     @Suppress("ComplexCondition") // One guard: sealed flag, live binding, key, and the version found unreadable.

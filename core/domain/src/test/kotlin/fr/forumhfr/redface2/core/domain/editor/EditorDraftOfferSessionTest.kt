@@ -275,16 +275,20 @@ class EditorDraftOfferSessionTest {
         store.saveFailure = IOException("disk full")
         assertTrue(session.resolveOffer(offer, Draft(restored.body, bodyProvenance = restored.provenance))
             is StoreWriteResult.Failed)
-        // The failing store refuses the whole delivery: neither D nor Q is consumed by half.
+        val writesBefore = store.writes
+        // One store transaction: a failure consumes neither D nor Q and leaves no quote in the row.
         val delivered = insertEditorQuotes(restored.body, quote, restored.provenance)
         val snapshot = Draft(delivered.body, bodyProvenance = delivered.provenance, offerToResolve = offer)
         assertTrue(session.consumeInlineQuoteRequest(request, snapshot, deliveredBody = quote)
             is StoreWriteResult.Failed)
         assertEquals(request, session.pendingInlineQuoteRequest)
         assertEquals("D", store.saved[key]?.body)
+        assertEquals(request, store.saved[key]?.pendingInlineQuoteRequest)
+        assertEquals(0, store.writes - writesBefore)
         store.saveFailure = null
         assertTrue(session.consumeInlineQuoteRequest(request, snapshot, deliveredBody = quote)
             is StoreWriteResult.Written)
+        assertEquals("exactly one write carries C, Q and D", 1, store.writes - writesBefore)
         assertEquals("D\n\n$quote", store.saved[key]?.body)
         assertNull(store.saved[key]?.pendingInlineQuoteRequest)
         assertTrue(session.availableOffers.isEmpty())

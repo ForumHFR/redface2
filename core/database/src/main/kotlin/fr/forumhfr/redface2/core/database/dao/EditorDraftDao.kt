@@ -105,6 +105,31 @@ interface EditorDraftDao {
         return matches
     }
 
+    /**
+     * ED-121/132: the delivered C, the consumption of Q and the resolution of a D already merged into
+     * C commit together. No partial state (quote durable with Q pending, or D still offered) survives
+     * a failure or a process death inside this transaction.
+     */
+    @Transaction
+    suspend fun consumeInlineQuoteRequestResolvingOffer(
+        draft: EditorDraftEntity, expected: EditorDraftEntity?, resolved: EditorDraftOfferEntity,
+        protection: EditorDraftOfferEntity? = null,
+    ): Boolean {
+        val previous = get(draft.draftKey)
+        val stored = offers(resolved.ownerId, resolved.contextKey).any { it == resolved }
+        val source = previous?.contentVersion == resolved.sourceVersion && previous.body == resolved.body &&
+            previous.subject == resolved.subject && previous.recipients == resolved.recipients
+        val available = stored || (source && previous?.attemptState == null)
+        val current = previous == expected && draft.contentVersion == (previous?.contentVersion ?: 0L) + 1
+        val matches = current && available
+        if (matches) {
+            if (protection?.offerId != resolved.offerId) preserveOffer(previous, protection)
+            upsert(draft)
+            deleteOffer(resolved.ownerId, resolved.contextKey, resolved.offerId)
+        }
+        return matches
+    }
+
     /** ED-170: only the current unresolved attempt may record its outcome. */
     @Query(
         """

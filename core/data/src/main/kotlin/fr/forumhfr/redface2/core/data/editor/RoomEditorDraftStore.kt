@@ -192,8 +192,11 @@ class RoomEditorDraftStore @Inject constructor(
         )
         val protection = (draft ?: Draft("", offerToPreserve = offerToPreserve, protectCurrent = protectCurrent))
             .protection(owner, key)
-        editorDraftDao.mutateInlineQuoteRequest(next, previous, protection)
-            .result(next.contentVersion)
+        // ED-121/132: a D merged into the delivered C is resolved in this same transaction.
+        val resolved = draft?.offerToResolve?.toEntity(owner, key)
+        val written = if (resolved == null) editorDraftDao.mutateInlineQuoteRequest(next, previous, protection)
+            else editorDraftDao.consumeInlineQuoteRequestResolvingOffer(next, previous, resolved, protection)
+        written.result(next.contentVersion)
     }
 
     override suspend fun loadOffers(owner: String?, key: String): List<DraftOffer> = try {

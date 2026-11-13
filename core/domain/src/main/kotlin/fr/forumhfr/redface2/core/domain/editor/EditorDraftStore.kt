@@ -74,6 +74,8 @@ interface EditorDraftStore {
      * and remove the request; unresolved attempts reject delivery. Without [draft], ignore only the
      * request, retaining all fields and attempt metadata. Failures leave the entire row unchanged.
      * Ignore uses the session's [offerToPreserve]; raw callers can still [protectCurrent] by default.
+     * A delivered [draft] carrying `offerToResolve` also removes that offer in the same transaction
+     * (ED-121/132); an offer that is no longer available rejects the whole write.
      */
     @Suppress("LongParameterList") // Request CAS plus the session's independent offer protection on Ignore.
     suspend fun consumeInlineQuoteRequest(

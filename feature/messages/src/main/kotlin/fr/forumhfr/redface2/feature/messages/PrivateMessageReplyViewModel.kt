@@ -398,7 +398,11 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             // autosave already persisted the rest) while a rethrow would leave the screen
             // unclosable. CancellationException still propagates (scope teardown is not an error).
             try {
-                draftSession.flushForClose()
+                if (!draftSession.flushForClose()) {
+                    // The delivered quote is still not durable: stay open, a second close abandons it.
+                    closeRequested = false
+                    return@launch
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (_: IOException) {
@@ -433,16 +437,7 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
     fun onPendingQuoteIgnored() {
         if (!_state.value.canIgnorePendingQuote || !acceptMutation()) return
         viewModelScope.launch {
-            draftSession.reconcileAfterConflict()
-            val pending = submission.drafts.pendingInlineQuoteRequest
-            val result = if (submission.drafts.hasUnreadableInlineQuoteRequest) {
-                submission.drafts.discardUnreadableInlineQuoteRequest()
-            } else if (pending != null && draftSession.deliveryPending) {
-                draftSession.commitQuote(pending, deliveredBody)
-            } else pending?.let { submission.drafts.consumeInlineQuoteRequest(it) }
-            draftSession.recordQuoteWrite(result)
-            submission.resolveDraftWrite(result)
-            if (result is EditorDraftStore.StoreWriteResult.Written) {
+            if (draftSession.ignoreQuote()) {
                 savedStateHandle.remove<Int>(QUOTE_FAILURES_KEY)
                 updateState { it.copy(quotePending = false, quoteFetchFailures = 0, quoteStorageUnavailable = false) }
                 if (!submission.isInitialized) draftSession.restore()
@@ -707,12 +702,8 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             return
         }
         draftSession.hydrateBody(form.initialContent)
-        val liveBody = bodyFieldState.text.toString()
-        // An offer identical to the field has nothing to restore; a later divergence reoffers it (ED-121).
-        updateState { current ->
-            current.withLoadedForm(form, submission.blocksMutation)
-                .copy(restorableDraft = current.restorableDraft.takeIf { it != liveBody })
-        }
+        updateState { current -> current.withLoadedForm(form, submission.blocksMutation) }
+        draftSession.hideOffersEqualToField()
     }
 
     /** #1573 — cancellation only records diagnostics; a successful empty callback retains #1128 feedback. */

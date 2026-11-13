@@ -30,6 +30,8 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
 import fr.forumhfr.redface2.core.domain.editor.mergeEditorBody
 import fr.forumhfr.redface2.core.domain.editor.insertEditorQuotes
+import fr.forumhfr.redface2.core.domain.editor.narrowDraftOffers
+import fr.forumhfr.redface2.core.domain.editor.visibleOver
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorPreparationException
 import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
@@ -811,7 +813,9 @@ class PostEditorViewModel @AssistedInject constructor(
 
     private fun refreshDraftOffers() {
         if (request.mode != PostEditorMode.Reply) return
+        // ED-121: an offer identical to the field is hidden from the list, not deleted (see visibleOver).
         val offers = submission.drafts.availableOffers.takeUnless { submission.drafts.invalidated }.orEmpty()
+            .visibleOver(bodyFieldState.text.toString())
         updateChromeState { it.copy(draftOffers = offers, restorableDraft = offers.firstOrNull()?.draft?.body) }
         if (selectedDraftOffer != null && offers.none { it.id == selectedDraftOffer?.id }) {
             selectedDraftOffer = null
@@ -970,6 +974,7 @@ class PostEditorViewModel @AssistedInject constructor(
 
     /** #604 lot 4a — one-shot latch : a committed close is never re-emitted (gate #803). */
     private var closeRequested = false
+    private var closeRefused = false
 
     /**
      * #604 lot 4a — dirty close : flush the pending debounce so the last keystrokes reach the
@@ -1002,6 +1007,16 @@ class PostEditorViewModel @AssistedInject constructor(
                 // ED-132: a delivered quote whose C/Q transaction is pending or failed seals the autosave.
                 // Settle it first, then save the field as it is now, typing made since included.
                 if (deliveredInlineQuoteRequest != null) commitInlineQuoteDelivery()
+                // Still not durable: nothing typed since the delivery can be saved without risking a
+                // duplicate quote. Refuse this close with the storage error shown; only a second,
+                // explicit close abandons that typing.
+                val unsettled = deliveredInlineQuoteRequest != null
+                val refused = unsettled && !closeRefused
+                closeRefused = unsettled
+                if (refused) {
+                    closeRequested = false
+                    return@launch
+                }
                 submission.flush(draftSnapshot())
             } catch (e: CancellationException) {
                 throw e
@@ -1459,7 +1474,9 @@ class PostEditorViewModel @AssistedInject constructor(
         val liveBody = bodyFieldState.text.toString()
         updateChromeState {
             val hydrated = it.withFormHydration(form, hydrate, liveBody)
-            if (preserveDraft) hydrated.copy(restorableDraft = it.restorableDraft) else hydrated
+            if (!preserveDraft) hydrated else {
+                hydrated.copy(restorableDraft = it.restorableDraft, draftOffers = it.draftOffers)
+            }
         }
     }
 
@@ -1476,9 +1493,11 @@ class PostEditorViewModel @AssistedInject constructor(
     ): PostEditorState {
         if (this@PostEditorViewModel.submission.blocksMutation) return copy(isLoadingForm = false)
         val hydrateOptions = !optionsHydratedFromForm
+        val (visibleOffers, firstOffer) = narrowDraftOffers(draftOffers, restorableDraft, liveBody)
         return copy(
             isLoadingForm = false,
-            restorableDraft = restorableDraft.takeIf { it != liveBody },
+            draftOffers = visibleOffers,
+            restorableDraft = firstOffer,
             draftHydratedFromForm = draftHydratedFromForm || hydrate,
             draftHydratedContent = if (hydrate) liveBody else draftHydratedContent,
             draftRestoreSeed = if (mode == PostEditorMode.Edit && hydrate) liveBody else draftRestoreSeed.orEmpty(),

@@ -138,6 +138,34 @@ class RoomEditorDraftQuoteTransactionTest {
     }
 
     @Test
+    fun `death while a delivery resolves merged D rolls back C, Q and D together - ED121 ED132`() = runTest {
+        store.saveIfVersion("alice", key, Draft("D"), 0)
+        assertEquals(StoreWriteResult.Written(2), store.enqueueInlineQuoteRequest("alice", key, request, 1))
+        val offer = store.loadOffers("alice", key).single()
+        val before = store.loadEntry("alice", key)
+        val delivered = Draft("D\n\n[quotemsg=101]one[/quotemsg]", offerToResolve = offer, offerToPreserve = offer)
+        // The row write succeeds, then the transaction dies before the offer is removed.
+        database.openHelper.writableDatabase.execSQL(
+            """
+            CREATE TRIGGER die_before_offer_removal BEFORE DELETE ON editor_draft_offers
+            BEGIN SELECT RAISE(ABORT, 'process death'); END
+            """.trimIndent(),
+        )
+        assertTrue(store.consumeInlineQuoteRequest("alice", key, request, 2, delivered) is StoreWriteResult.Failed)
+        // Neither a durable quote with Q still pending, nor D lost: the whole write is undone.
+        assertEquals(before, newStore().loadEntry("alice", key))
+        assertEquals(listOf(offer), newStore().loadOffers("alice", key))
+        database.openHelper.writableDatabase.execSQL("DROP TRIGGER die_before_offer_removal")
+        assertEquals(StoreWriteResult.Written(3), store.consumeInlineQuoteRequest("alice", key, request, 2, delivered))
+        val after = checkNotNull(newStore().loadEntry("alice", key))
+        assertEquals(delivered.body, after.draft.body)
+        assertNull(after.draft.pendingInlineQuoteRequest)
+        assertTrue(newStore().loadOffers("alice", key).isEmpty())
+        // The same D can never be consumed twice.
+        assertEquals(StoreWriteResult.Conflict, store.consumeInlineQuoteRequest("alice", key, request, 3, delivered))
+    }
+
+    @Test
     fun `failed entry leaves the original draft untouched`() = runTest {
         store.saveIfVersion("alice", key, Draft("offered", "subject"), 0)
         val before = store.loadEntry("alice", key)

@@ -4799,6 +4799,32 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `close is refused once while a delivered quote cannot be made durable then abandons - ED132`() = runTest {
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
+        replyRepository.formResultsByNumrep = mapOf(101 to Result.success(
+            authenticatedForm("[quotemsg=101]requested quote[/quotemsg]")))
+        val vm = newPendingQuoteOfferViewModel()
+        val effects = mutableListOf<PostEditorEffect>()
+        backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { vm.effects.collect { effects += it } }
+        draftStore.saveFailure = IOException("disk full")
+        get.complete(Unit)
+        settleBody()
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        vm.editBody(TextFieldValue("[quotemsg=101]requested quote[/quotemsg]\n\ntyped after the delivery"))
+        vm.dispatch(PostEditorIntent.CloseRequested)
+        settleBody()
+        // The typing cannot be saved: the editor stays open and nothing is half-written.
+        assertFalse(PostEditorEffect.CloseCommitted in effects)
+        assertEquals("offered D", draftStore.saved[key]?.body)
+        assertNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        // A second close is the explicit abandonment.
+        vm.dispatch(PostEditorIntent.CloseRequested)
+        settleBody()
+        assertTrue(PostEditorEffect.CloseCommitted in effects)
+    }
+
+    @Test
     fun `quote delivered after a failed Restore write consumes the merged D with C - ED121`() = runTest {
         val get = CompletableDeferred<Unit>()
         replyRepository.formGate = get

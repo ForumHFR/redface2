@@ -232,15 +232,20 @@ open class VersionedEditorDraftStore : EditorDraftStore {
         if (rejection != null) return rejection
         val entry = entries[key]
         val deliveryBlocked = draft != null && entry?.attempt != null
+        // ED-121/132: a D merged into the delivered C is resolved in this same write, or nothing is.
+        val resolved = draft?.offerToResolve
+        val unavailable = resolved != null && owner != null &&
+            !canResolveOffer(owner, key, entry, resolved, expectedVersion)
         return when {
-            entry == null -> StoreWriteResult.Conflict
+            entry == null || unavailable -> StoreWriteResult.Conflict
             entry.draft.pendingInlineQuoteRequest != request || entry.attempt?.status == AttemptStatus.PUBLISHED ||
                 deliveryBlocked -> StoreWriteResult.Conflict
             else -> {
                 val candidate = if (draft != null) protection(key, entry, draft) else {
                     offerToPreserve ?: if (protectCurrent) offerCandidate(owner, key, entry) else null
                 }
-                protect(owner, key, entry, candidate)
+                if (candidate?.id != resolved?.id) protect(owner, key, entry, candidate)
+                if (resolved != null) offers(owner, key).removeAll { it.id == resolved.id }
                 entries[key] = entry.copy(
                     draft = (draft ?: entry.draft).copy(
                         pendingInlineQuoteRequest = null, offerToPreserve = null,

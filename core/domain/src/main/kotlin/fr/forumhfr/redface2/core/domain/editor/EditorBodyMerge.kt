@@ -40,9 +40,10 @@ data class EditorBodyProvenance(
             return when {
                 offset == 0 -> 0
                 offset < prefix -> offset
-                anchor >= 0 -> anchor
-                // ED-89: text inserted exactly at a boundary is typing; a later quote stays before it.
+                // ED-89, one rule whatever follows: text inserted exactly at a boundary is new typing, so
+                // the boundary stays and a later quote lands before that text.
                 offset == prefix && oldEnd == prefix -> offset
+                anchor >= 0 -> anchor
                 offset >= oldEnd -> offset + newEnd - oldEnd
                 else -> prefix
             }.coerceIn(0, current.length)
@@ -180,4 +181,28 @@ fun editorQuoteBlocks(text: String, outerOnly: Boolean = false): List<EditorQuot
             }
         }
     }
+}
+
+/**
+ * ED-121: the offers still worth a decision over [liveBody]. An offer identical to the field has
+ * nothing to restore: it is hidden from this projection only, never deleted, and a later refresh
+ * shows it again once the field differs. Other offers stay reachable.
+ */
+fun List<EditorDraftStore.DraftOffer>.visibleOver(liveBody: String): List<EditorDraftStore.DraftOffer> =
+    filterNot { it.draft.body == liveBody }
+
+/**
+ * Narrow an already shown offer state at form hydration, without ever showing an offer again:
+ * a null [shown] stays null (a decision is in flight). Returns the visible list and its first body.
+ */
+fun narrowDraftOffers(
+    offers: List<EditorDraftStore.DraftOffer>, shown: String?, liveBody: String,
+): Pair<List<EditorDraftStore.DraftOffer>, String?> {
+    val visible = offers.visibleOver(liveBody)
+    val first = when {
+        shown == null -> null
+        offers.isEmpty() -> shown.takeIf { it != liveBody }
+        else -> visible.firstOrNull()?.draft?.body
+    }
+    return visible to first
 }

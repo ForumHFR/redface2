@@ -12,6 +12,8 @@ import androidx.lifecycle.SavedStateHandle
 import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.domain.editor.filterEditorQuotes
 import fr.forumhfr.redface2.core.domain.editor.insertEditorQuotes
+import fr.forumhfr.redface2.core.domain.editor.narrowDraftOffers
+import fr.forumhfr.redface2.core.domain.editor.visibleOver
 import fr.forumhfr.redface2.core.domain.editor.mergeEditorBody
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionBinding
@@ -66,14 +68,14 @@ internal class PrivateMessageReplyDraftSession(
 
     suspend fun awaitOfferDecision() { decisionCompleted?.await() }
     private var selectedOffer: EditorDraftStore.DraftOffer? = null
-    var deliveryPending = false
-        private set
+    private var deliveryPending = false
     private var stagedDelivery: String? = null
     private val quoteCommit = Mutex()
     private var storageConflict = false
+    private var closeRefused = false
 
     /** A conflicting quote write means this session's version, Q or offers are stale. */
-    fun recordQuoteWrite(result: EditorDraftStore.StoreWriteResult?) {
+    private fun recordQuoteWrite(result: EditorDraftStore.StoreWriteResult?) {
         if (result is EditorDraftStore.StoreWriteResult.Conflict) storageConflict = true
     }
 
@@ -98,11 +100,22 @@ internal class PrivateMessageReplyDraftSession(
     }
 
     fun refreshOffers() {
+        // ED-121: an offer identical to the field is hidden from the list, not deleted (see visibleOver).
         val offers = submission.drafts.availableOffers.takeUnless { submission.drafts.invalidated }.orEmpty()
+            .visibleOver(bodyFieldState.text.toString())
         updateState { it.copy(draftOffers = offers, restorableDraft = offers.firstOrNull()?.draft?.body) }
         if (selectedOffer != null && offers.none { it.id == selectedOffer?.id }) {
             selectedOffer = null
             mergedDraftOffer = null
+        }
+    }
+
+    /** At form hydration: hide the offers equal to the field, keeping the others reachable (ED-121). */
+    fun hideOffersEqualToField() {
+        val live = bodyFieldState.text.toString()
+        updateState {
+            val (visible, first) = narrowDraftOffers(it.draftOffers, it.restorableDraft, live)
+            it.copy(draftOffers = visible, restorableDraft = first)
         }
     }
 
@@ -363,14 +376,50 @@ internal class PrivateMessageReplyDraftSession(
     /**
      * ED-132: a delivered quote whose C/Q transaction is pending or failed seals [draftSnapshot].
      * A close settles it first, then saves the field as it is now, typing made since included.
+     * When that transaction still fails, nothing typed since the delivery can be saved without
+     * risking a duplicate quote: the first close is refused (false) with the storage error shown,
+     * and only a second, explicit close abandons that typing.
      */
-    suspend fun flushForClose() {
+    suspend fun flushForClose(): Boolean {
         quoteCommit.withLock {
             val pending = submission.drafts.pendingInlineQuoteRequest
             val delivered = stagedDelivery
             if (deliveryPending && pending != null && delivered != null) commitQuoteLocked(pending, delivered)
         }
-        submission.flush(::draftSnapshot)
+        val refused = deliveryPending && !closeRefused
+        closeRefused = deliveryPending
+        if (!refused) submission.flush(::draftSnapshot)
+        return !refused
+    }
+
+    /**
+     * ED-132: release the reply from its quote request. A request that is no longer there after a
+     * conflict (consumed elsewhere) is as good as ignored. True when the reply can load its form.
+     */
+    suspend fun ignoreQuote(): Boolean {
+        reconcileAfterConflict()
+        var result = writeIgnoredQuote()
+        if (result is EditorDraftStore.StoreWriteResult.Conflict) {
+            // Stale version or request: reread the row once and decide again on what is really there.
+            recordQuoteWrite(result)
+            reconcileAfterConflict()
+            result = writeIgnoredQuote()
+        }
+        recordQuoteWrite(result)
+        submission.resolveDraftWrite(result)
+        return result is EditorDraftStore.StoreWriteResult.Written || (result == null && submission.isInitialized)
+    }
+
+    private suspend fun writeIgnoredQuote(): EditorDraftStore.StoreWriteResult? {
+        val pending = submission.drafts.pendingInlineQuoteRequest
+        val delivered = stagedDelivery
+        return when {
+            submission.drafts.hasUnreadableInlineQuoteRequest ->
+                submission.drafts.discardUnreadableInlineQuoteRequest()
+            pending == null -> null
+            deliveryPending && delivered != null -> commitQuote(pending, delivered)
+            else -> submission.drafts.consumeInlineQuoteRequest(pending)
+        }
     }
 
     /** Debounced while visible, immediate while stopped; a stale owner never writes private content. */

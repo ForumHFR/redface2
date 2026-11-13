@@ -92,6 +92,48 @@ class EditorBodyMergeTest {
     }
 
     @Test
+    fun `an insertion exactly at the boundary is typing with or without text after it - ED89`() {
+        // Without a suffix: appended to a field holding only the restored D.
+        val alone = mergeEditorBody("D", "")
+        val appended = alone.provenance.rebase(alone.body, "D more")
+        assertEquals("D".length, appended.draftEnd)
+        assertEquals("D".length, appended.quotesEnd)
+        // With an intact suffix: the same insertion in front of older typing follows the same rule.
+        val restored = mergeEditorBody("D", "typed")
+        val inserted = "D more\n\ntyped"
+        val rebased = restored.provenance.rebase(restored.body, inserted)
+        assertEquals("D".length, rebased.draftEnd)
+        assertEquals("D".length, rebased.quotesEnd)
+        val delivered = insertEditorQuotes(inserted, q1, rebased).body
+        assertTrue(delivered.startsWith("D\n\n$q1"))
+        assertTrue(delivered.endsWith("typed"))
+        // After delivered quotes too: typing at the end of the quotes stays behind the next quote.
+        val quoted = insertEditorQuotes(restored.body, q1, restored.provenance)
+        val typedAtQuotesEnd = quoted.body.replace("$q1\n\ntyped", "$q1 aside\n\ntyped")
+        val moved = quoted.provenance.rebase(quoted.body, typedAtQuotesEnd)
+        assertEquals("D\n\n$q1".length, moved.quotesEnd)
+        assertTrue(insertEditorQuotes(typedAtQuotesEnd, q2, moved).body.startsWith("D\n\n$q1\n\n$q2"))
+    }
+
+    @Test
+    fun `an offer identical to the field is hidden without hiding or deleting the others - ED121`() {
+        val same = EditorDraftStore.DraftOffer("a", 1, EditorDraftStore.Draft("same", updatedAt = 2))
+        val other = EditorDraftStore.DraftOffer("b", 1, EditorDraftStore.Draft("other", updatedAt = 1))
+        val offers = listOf(same, other)
+        val none = emptyList<EditorDraftStore.DraftOffer>()
+        assertEquals(listOf(other), offers.visibleOver("same"))
+        // The field differs again: the hidden offer is back, it was never removed.
+        assertEquals(offers, offers.visibleOver("same, edited"))
+        assertEquals(listOf(other) to "other", narrowDraftOffers(offers, "same", "same"))
+        assertEquals(none to null, narrowDraftOffers(listOf(same), "same", "same"))
+        // A decision in flight (nothing shown) is never shown again by a hydration.
+        assertEquals(listOf(other) to null, narrowDraftOffers(offers, null, "same"))
+        // Single legacy offer without a list.
+        assertEquals(none to "kept", narrowDraftOffers(emptyList(), "kept", "typed"))
+        assertEquals(none to null, narrowDraftOffers(emptyList(), "kept", "kept"))
+    }
+
+    @Test
     fun `editing the middle of restored D moves both boundaries before the next quote`() {
         val restored = mergeEditorBody("draft old text", "$q1\n\ntyped",
             provenance = EditorBodyProvenance().delivered(scope, q1))
