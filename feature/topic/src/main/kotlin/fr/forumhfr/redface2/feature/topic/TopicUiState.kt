@@ -215,6 +215,14 @@ data class TopicUiState(
             val pollVote: PollVoteUiState? = null,
             /** #1296 — keep results expanded for this page visit; never persisted or snapshotted. */
             val pollJustVoted: Boolean = false,
+            /**
+             * #1437 — provenance of the page ON SCREEN: `true` when [topic] is a `transsearch`
+             * response (a search VIEW with its own pager), `false` for a canonical topic page.
+             * Carried by the displayed content itself, so it outlives the search cursor and the
+             * filtered flag (a later search without result resets both yet keeps this page) and
+             * only falls when a canonical page actually replaces it.
+             */
+            val fromSearch: Boolean = false,
         ) : Mode
 
         data class Error(

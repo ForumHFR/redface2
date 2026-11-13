@@ -4378,6 +4378,131 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `quote from a transsearch page kept by a later empty search never gets the canonical tail`() = runTest {
+        // Astra r2 (A): the empty search resets cursor and filter, the transsearch page stays.
+        repeat(2) { pass ->
+            val refreshedBeforeBound = pass == 1
+            val gate = CompletableDeferred<Unit>()
+            val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+            val results = fakeTopic(
+                1, 1, title = "results", posts = listOf(fakePost(640)),
+                searchForm = form.copy(firstnum = null, currentNum = 640),
+            )
+            val repository = FakeTopicRepository(
+                flowsToReturn = listOf(flowOf(fakeTopic(1, 5, searchForm = form))),
+                refreshTopicsToReturn = listOf(fakeTopic(1, 6, posts = listOf(fakePost(640)), searchForm = form)),
+            ).apply { refreshHook = { _, _, _ -> gate.await() } }
+            val searchRepo = FakeTopicSearchRepository()
+            searchRepo.responder = {
+                if (searchRepo.requests.size == 1) results else throw NoTopicSearchResultsException()
+            }
+            val viewModel = topicViewModel(
+                request = topicRequest(1), topicRepository = repository,
+                authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+                topicSearchRepository = searchRepo,
+            )
+            viewModel.effects.test {
+                viewModel.send(TopicIntent.OpenSearch)
+                viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+                viewModel.send(TopicIntent.SubmitSearch)
+                assertEquals(TopicEffect.ScrollToPost(640), awaitItem())
+                viewModel.send(TopicIntent.SearchWordChanged("nothing"))
+                viewModel.send(TopicIntent.SubmitSearch)
+                runCurrent()
+                val search = viewModel.state.value.search
+                assertEquals(2, searchRepo.requests.size)
+                assertEquals(TopicSearchStatus.NoResults, search.status)
+                assertFalse(search.showingFilteredResults)
+                assertFalse(search.canGoPreviousResult)
+                assertFalse(search.canGoNextResult)
+                val displayed = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+                assertEquals("results", displayed.topic.title)
+                assertTrue("the displayed page keeps its transsearch provenance", displayed.fromSearch)
+                assertEquals((1..5).toList(), viewModel.state.value.availablePages)
+
+                if (refreshedBeforeBound) gate.complete(Unit)
+                viewModel.applySubmitResult(1, 640, listOf(640))
+                runCurrent()
+                advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
+                runCurrent()
+                val confirmation = viewModel.submitAcknowledgements.feedback.value
+                assertNull("a kept transsearch page must not predict the canonical tail", confirmation?.lastPage)
+                if (!refreshedBeforeBound) {
+                    val shown = requireNotNull(confirmation)
+                    viewModel.submitAcknowledgements.presented(shown.id, 4_000, shown.revision)
+                    gate.complete(Unit)
+                    runCurrent()
+                    assertNull(
+                        "the frozen plan must also exclude late enrichment",
+                        viewModel.submitAcknowledgements.feedback.value?.lastPage,
+                    )
+                    assertNull(viewModel.submitAcknowledgements.takeOffer(shown.id, "xaat"))
+                }
+                assertFalse(assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value).fromSearch)
+                assertEquals(1, viewModel.state.value.request.page)
+                assertEquals(listOf(1), repository.refreshCalls.map { it.third })
+                cancelAndIgnoreRemainingEvents()
+            }
+            destroyViewModel(viewModel)
+        }
+    }
+
+    @Test
+    fun `back on a canonical page after two transsearch results the prediction is allowed again`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val form = TopicSearchForm(hashCheck = "tok", topicId = SAMPLE_POST, cat = SAMPLE_CAT, firstnum = 999)
+        val canonical = fakeTopic(1, 5, title = "canonical", posts = listOf(fakePost(640)), searchForm = form)
+        val repository = FakeTopicRepository(
+            flowsToReturn = emptyList(),
+            refreshTopicsToReturn = listOf(fakeTopic(1, 6, posts = listOf(fakePost(640)), searchForm = form)),
+        ).apply {
+            observeResponder = { _, _ -> flowOf(TopicPageEmission(canonical, provisional = false)) }
+            refreshHook = { _, _, _ -> gate.await() }
+        }
+        val searchRepo = FakeTopicSearchRepository()
+        searchRepo.responder = {
+            val hit = if (searchRepo.requests.size == 1) 640 else 700
+            fakeTopic(
+                1, 1, title = "results $hit", posts = listOf(fakePost(hit)),
+                searchForm = form.copy(firstnum = null, currentNum = hit),
+            )
+        }
+        val viewModel = topicViewModel(
+            request = topicRequest(1), topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+            topicSearchRepository = searchRepo,
+        )
+        viewModel.effects.test {
+            viewModel.send(TopicIntent.OpenSearch)
+            viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+            viewModel.send(TopicIntent.SubmitSearch)
+            assertEquals(TopicEffect.ScrollToPost(640), awaitItem())
+            viewModel.send(TopicIntent.SearchWordChanged("other"))
+            viewModel.send(TopicIntent.SubmitSearch)
+            assertEquals(TopicEffect.ScrollToPost(700), awaitItem())
+            val results = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+            assertEquals("results 700", results.topic.title)
+            assertTrue(results.fromSearch)
+
+            viewModel.send(TopicIntent.CloseSearch)
+            runCurrent()
+            val restored = assertMode<TopicUiState.Mode.Loaded>(viewModel.state.value)
+            assertEquals("canonical", restored.topic.title)
+            assertFalse("a canonical page replaced the transsearch one", restored.fromSearch)
+
+            viewModel.applySubmitResult(1, 640, listOf(640))
+            advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
+            runCurrent()
+            val confirmation = requireNotNull(viewModel.submitAcknowledgements.feedback.value)
+            assertEquals("the canonical pager predicts again", 5, confirmation.lastPage)
+            gate.complete(Unit)
+            runCurrent()
+            cancelAndIgnoreRemainingEvents()
+        }
+        destroyViewModel(viewModel)
+    }
+
+    @Test
     fun `slow plain reply from the last page acknowledges once without any offer`() = runTest {
         val gate = CompletableDeferred<Unit>()
         val repository = FakeTopicRepository(
