@@ -54,11 +54,11 @@ class PostEditorOptionsTest {
 
         composeTestRule.onNodeWithContentDescription("Options").performClick()
         composeTestRule.onNodeWithText("Ton du message").assertIsDisplayed()
-        composeTestRule.onNodeWithTag(MSG_ICON_PICKER_TOGGLE_TAG).assertDoesNotExist()
+        composeTestRule.onNodeWithTag("message_icon_picker_toggle").assertDoesNotExist()
         EDITOR_MSG_ICONS.forEach { icon ->
             composeTestRule.onNodeWithTag("$MSG_ICON_OPTION_TAG_PREFIX$icon").assertExists()
         }
-        composeTestRule.onNodeWithContentDescription("Aucun ton").assertIsSelected()
+        composeTestRule.onNodeWithContentDescription("Aucun").assertIsSelected()
         composeTestRule.onNodeWithTag("${MSG_ICON_OPTION_TAG_PREFIX}6").performClick()
 
         assertEquals(PostEditorIntent.MsgIconSelected(6), emitted)

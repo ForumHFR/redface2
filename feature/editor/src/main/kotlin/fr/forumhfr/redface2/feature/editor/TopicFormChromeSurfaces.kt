@@ -64,8 +64,7 @@ private fun TopicFormOptionsSurface(adapter: TopicFormChromeAdapter, onOpenEdito
                 stringResource(R.string.editor_option_email_notification)),
             onOpenSettings = { adapter.host.openSettings(onOpenEditorSettings) },
             settingsEnabled = !source.isUploading) {
-            MessageIconPicker(source.msgIcon, enabled, { adapter.option(TopicFormIntent.MsgIconSelected(it)) },
-                alwaysExpanded = true)
+            MessageIconPicker(source.msgIcon, enabled, { adapter.option(TopicFormIntent.MsgIconSelected(it)) })
         }
     }
 }
