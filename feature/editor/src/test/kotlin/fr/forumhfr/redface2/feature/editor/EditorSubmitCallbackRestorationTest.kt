@@ -97,7 +97,6 @@ class EditorSubmitCallbackRestorationTest {
             TopicFormState(TopicFormMode.EditFirstPost, 23, 401, 35421, 1, 640),
         )
         every { model.effects } returns effects.receiveAsFlow()
-        every { model.quotesDelivered } returns emptyFlow()
         every { model.bodyFieldState } returns TextFieldState()
         every { model.bodyScrollState } returns ScrollState(0)
         every { model.bodyCaretRevealResetKey } returns 0
