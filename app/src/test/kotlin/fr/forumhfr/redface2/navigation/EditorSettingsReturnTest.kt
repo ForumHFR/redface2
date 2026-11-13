@@ -92,7 +92,9 @@ class EditorSettingsReturnTest {
     @Test fun settingsArrowReturnsToRetainedTextSelectionAndNewShortcut() {
         compose.setContent { Content() }
         compose.onNode(hasSetTextAction()).performTextInput("Bonjour")
-            .performTextInputSelection(TextRange(6, 1))
+        compose.onNode(hasSetTextAction()).performTextInputSelection(TextRange(6, 1))
+        // SetSelection normalizes the bounds; restore the reversed range as in the editor restoration tests.
+        compose.runOnIdle { editor.bodyFieldState.edit { selection = TextRange(6, 1) } }
         val original = editor
         compose.onNodeWithContentDescription("Options").performClick()
         compose.onNodeWithText("Réglages de l’éditeur").performScrollTo().performClick()
