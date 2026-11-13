@@ -87,6 +87,7 @@ import fr.forumhfr.redface2.core.model.EditorSmiley
 import fr.forumhfr.redface2.core.model.EditorSmileySource
 import fr.forumhfr.redface2.core.ui.theme.LocalSmileyPickerDecoration
 import fr.forumhfr.redface2.core.ui.sheet.clampSheetTopOverscroll
+import fr.forumhfr.redface2.core.ui.sheet.settledSheetWindowInsets
 import kotlinx.coroutines.launch
 
 /**
@@ -175,6 +176,8 @@ internal fun SmileyPickerSheet(
         sheetState = sheetState,
         // Own the handle's dismissal callback too: M3 otherwise merges it with scrim taps.
         dragHandle = null,
+        // Tagbug DEV #2805926: size by the keyboard's destination, not by its retraction frames.
+        contentWindowInsets = { settledSheetWindowInsets() },
     ) {
         // M3 appends draggableAnchors AFTER its supplied modifier. Observe pointers and measure
         // the visible sheet inside that offset, on a container surviving grid -> detail replacement.
