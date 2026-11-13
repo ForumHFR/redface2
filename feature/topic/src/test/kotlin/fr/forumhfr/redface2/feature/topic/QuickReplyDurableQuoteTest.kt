@@ -12,6 +12,7 @@ import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptOutcome
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptStatus
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.BeginAttemptResult
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.Draft
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.DraftOffer
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.StoreWriteResult
 import fr.forumhfr.redface2.core.domain.editor.EditorSessionResources
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
@@ -920,7 +921,7 @@ class QuickReplyDurableQuoteTest {
     }
 
     @Test
-    fun `ED88 a delivery nobody collected never reaches a later opening`() = runTest {
+    fun `ED88 buffered delivery and close never reach a later opening`() = runTest {
         val scenario = Scenario()
         scenario.enqueue()
         val sheet = scenario.open()
@@ -931,7 +932,14 @@ class QuickReplyDurableQuoteTest {
         // Same order as QuickReplySheet: attach this opening before starting either collector.
         sheet.onSheetAttached(1, emptyList(), restored = false)
         sheet.quotesDelivered.test {
-            advanceUntilIdle()
+            sheet.effects.test {
+                advanceUntilIdle()
+                expectNoEvents() // The previous CloseCommitted must not dismiss this sheet.
+                assertFalse(sheet.state.value.isClosing)
+                sheet.onDismissed()
+                assertTrue(awaitItem() is QuickReplyEffect.CloseCommitted)
+                expectNoEvents()
+            }
             expectNoEvents()
         }
     }
@@ -948,9 +956,9 @@ class QuickReplyDurableQuoteTest {
         // Rotation remounts the SAME opening, so attachment must not purge its delivery.
         sheet.onSheetAttached(1, emptyList(), restored = true)
         sheet.quotesDelivered.test {
-            awaitItem()
+            val delivery = awaitItem()
             sheet.effects.test {
-                assertEquals(QuickReplyEffect.CloseCommitted, awaitItem())
+                assertEquals(QuickReplyEffect.CloseCommitted(delivery.openingId), awaitItem())
                 expectNoEvents()
             }
             expectNoEvents()
@@ -975,8 +983,8 @@ class QuickReplyDurableQuoteTest {
                 runCurrent()
                 expectNoEvents()
                 commit.complete(Unit)
-                this@delivery.awaitItem()
-                assertEquals(QuickReplyEffect.CloseCommitted, awaitItem())
+                val delivery = this@delivery.awaitItem()
+                assertEquals(QuickReplyEffect.CloseCommitted(delivery.openingId), awaitItem())
                 advanceUntilIdle()
                 expectNoEvents()
             }
@@ -984,9 +992,105 @@ class QuickReplyDurableQuoteTest {
         }
     }
 
-    private inner class Scenario {
+    @Test
+    fun `ED10 staying after a cancelled C-Q failure can finish preparing the quote`() = runTest {
+        val commit = CompletableDeferred<Unit>()
+        val store = object : VersionedEditorDraftStore() {
+            override suspend fun consumeInlineQuoteRequest(
+                owner: String?, key: String, request: PendingInlineQuoteRequest, expectedVersion: Long, draft: Draft?,
+                offerToPreserve: DraftOffer?, protectCurrent: Boolean,
+            ): StoreWriteResult {
+                commit.await() // EditorDraftSession wraps this transaction in NonCancellable.
+                return super.consumeInlineQuoteRequest(owner, key, request, expectedVersion, draft,
+                    offerToPreserve, protectCurrent)
+            }
+        }
+        val scenario = Scenario(store)
+        scenario.enqueue()
+        val fetch = CompletableDeferred<Unit>().also { scenario.quoteGate = it }
+        val sheet = scenario.open()
+        runCurrent()
+        sheet.onTextChanged(TextFieldValue("live body"))
+        store.saveFailure = IOException("disk")
+        fetch.complete(Unit)
+        runCurrent()
+        val inserted = sheet.state.value.text
+        assertTrue(sheet.state.value.isPreparingQuotes)
+        sheet.quotesDelivered.test {
+            sheet.effects.test {
+                sheet.onDismissed()
+                runCurrent()
+                assertTrue(sheet.state.value.isClosing)
+                expectNoEvents() // Closing waits for the cancelled transaction's result.
+                commit.complete(Unit)
+                advanceUntilIdle() // C/Q and the final close attempt are both refused.
+                expectNoEvents()
+                assertTrue(sheet.state.value.unsavedCloseVisible)
+                assertFalse(sheet.state.value.isPreparingQuotes)
+                assertEquals(scenario.request, scenario.pending)
+                assertEquals(inserted, sheet.state.value.text)
+
+                sheet.onUnsavedCloseDecided(leave = false)
+                advanceUntilIdle() // Still unavailable: staying must not leave the sheet busy.
+                expectNoEvents()
+                assertFalse(sheet.state.value.isPreparingQuotes)
+                assertFalse(sheet.state.value.isClosing)
+            }
+            expectNoEvents()
+            store.saveFailure = null
+            sheet.onQuoteReloadRequested()
+            awaitItem()
+            advanceUntilIdle()
+            expectNoEvents()
+        }
+        assertTrue(sheet.state.value.canSubmit)
+        assertFalse(sheet.state.value.isPreparingQuotes)
+        assertEquals(inserted, sheet.state.value.text)
+        assertEquals(inserted.text, scenario.body)
+        assertNull(scenario.pending)
+        assertEquals(listOf(101), scenario.fetches) // Retrying the commit never inserts the quote twice.
+    }
+
+    @Test
+    fun `ED88 close seals a previously refused C-Q delivery before committing the close`() = runTest {
+        val scenario = Scenario()
+        scenario.enqueue()
+        val fetch = CompletableDeferred<Unit>().also { scenario.quoteGate = it }
+        val sheet = scenario.open()
+        runCurrent()
+        sheet.onTextChanged(TextFieldValue("typed body"))
+        scenario.store.saveFailure = IOException("disk")
+        fetch.complete(Unit)
+        advanceUntilIdle()
+        assertFalse(sheet.state.value.isPreparingQuotes)
+        assertEquals(scenario.request, scenario.pending)
+        val inserted = sheet.state.value.text.text
+        assertTrue(inserted.contains("[quotemsg=101]"))
+
+        scenario.store.saveFailure = null
+        val commit = CompletableDeferred<Unit>().also { scenario.store.saveReturnGate = it }
+        sheet.quotesDelivered.test delivery@ {
+            sheet.effects.test {
+                sheet.onDismissed()
+                runCurrent()
+                assertNull(scenario.pending) // The retry seals Q, before the final C save returns.
+                assertEquals(inserted, scenario.body)
+                expectNoEvents()
+                commit.complete(Unit)
+                val delivery = this@delivery.awaitItem()
+                assertEquals(QuickReplyEffect.CloseCommitted(delivery.openingId), awaitItem())
+                advanceUntilIdle()
+                expectNoEvents()
+            }
+            expectNoEvents()
+        }
+        assertFalse(sheet.state.value.unsavedCloseVisible)
+        assertEquals(listOf(101), scenario.fetches)
+        assertEquals(inserted, scenario.body)
+    }
+
+    private inner class Scenario(val store: VersionedEditorDraftStore = VersionedEditorDraftStore()) {
         val key = EditorDraftKey.reply(23, 35421)
-        val store = VersionedEditorDraftStore()
         val request = PendingInlineQuoteRequest(23, 35421, listOf(PendingInlineQuoteRequest.Quote(101, 1)))
         val body get() = store.saved[key]?.body
         val pending get() = store.saved[key]?.pendingInlineQuoteRequest

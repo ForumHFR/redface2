@@ -54,6 +54,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -149,8 +150,11 @@ sealed interface QuickReplyEffect {
      * nothing to write), or the user chose « Quitter sans enregistrer ». Only now may the topic
      * surface unmount the sheet ; until then it stays composed, hidden, so its collector lives.
      */
-    data object CloseCommitted : QuickReplyEffect
+    data class CloseCommitted(val openingId: Long) : QuickReplyEffect
 }
+
+/** A sealed C/Q delivery belongs to one sheet opening, including its restored mounts. */
+data class QuickReplyQuotesDelivered(val openingId: Long)
 
 /**
  * Vague 4 (#604) lot 1 — the THIN ViewModel behind [QuickReplySheet]. Deliberately a fraction of
@@ -180,7 +184,9 @@ class QuickReplyViewModel @AssistedInject constructor(
     val state: StateFlow<QuickReplyUiState> = _state.asStateFlow()
 
     private val _effects: Channel<QuickReplyEffect> = Channel(capacity = Channel.BUFFERED)
-    val effects: Flow<QuickReplyEffect> = _effects.receiveAsFlow()
+    val effects: Flow<QuickReplyEffect> = _effects.receiveAsFlow().filter {
+        it !is QuickReplyEffect.CloseCommitted || it.openingId == openingId
+    }
 
     /**
      * ED-88 (#1616) — one signal per SEALED C/Q transaction : the quoted body is in the row and
@@ -188,8 +194,10 @@ class QuickReplyViewModel @AssistedInject constructor(
      * own conflated channel, not an effect : a delivery is not a navigation outcome, and nothing
      * here may reorder or delay the close and submit effects.
      */
-    private val _quotesDelivered: Channel<Unit> = Channel(capacity = Channel.CONFLATED)
-    val quotesDelivered: Flow<Unit> = _quotesDelivered.receiveAsFlow()
+    private val _quotesDelivered = Channel<QuickReplyQuotesDelivered>(capacity = Channel.CONFLATED)
+    val quotesDelivered: Flow<QuickReplyQuotesDelivered> = _quotesDelivered.receiveAsFlow().filter {
+        it.openingId == openingId
+    }
 
     /**
      * The VM is scoped to the topic nav entry, so [request] is the page of the FIRST sheet creation
@@ -224,6 +232,7 @@ class QuickReplyViewModel @AssistedInject constructor(
     private var confirmationPreference: Boolean? = null
     private var submission = newSubmission()
     private var hasOpened = false
+    private var openingId = 0L
     private var sheetOpen = false
     private var closeStarted = false
 
@@ -352,9 +361,8 @@ class QuickReplyViewModel @AssistedInject constructor(
         hasOpened = true
         sheetOpen = true
         closeStarted = false
-        // ED-88 — attachment runs BEFORE either sheet collector starts (QuickReplySheet).
-        // A restored attachment skips openSheet, retaining a delivery sealed during its close.
-        _quotesDelivered.tryReceive()
+        // Both flows reject buffered signals from older openings. A restored mount keeps this id.
+        openingId++
         materializeJob?.cancel()
         autosaveJob?.cancel()
         openJob?.cancel()
@@ -494,6 +502,7 @@ class QuickReplyViewModel @AssistedInject constructor(
 
     private suspend fun commitInlineQuoteDelivery(opening: EditorSubmissionBinding<QuickReplyEffect, EditorError>) {
         val pending = opening.drafts.pendingInlineQuoteRequest ?: return
+        val deliveryOpeningId = openingId
         autosaveJob?.cancel()
         val result = opening.drafts.consumeInlineQuoteRequest(pending, EditorDraftStore.Draft(_state.value.text.text),
             deliveredBody = deliveredQuoteBody)
@@ -504,9 +513,10 @@ class QuickReplyViewModel @AssistedInject constructor(
             opening.resolveDraftWrite(result)
             finishInlineQuoteDelivery()
             deliveredQuoteBody = null
-            _quotesDelivered.trySend(Unit)
+            _quotesDelivered.trySend(QuickReplyQuotesDelivered(deliveryOpeningId))
             if (sheetOpen) scheduleAutosave() // A close owns its final snapshot instead.
-        } else if (canCompleteQuotePreparation(opening)) {
+        } else {
+            // A refused non-cancellable write must release busy state even on the hidden sheet.
             quoteStorageFailed(result)
         }
     }
@@ -765,11 +775,12 @@ class QuickReplyViewModel @AssistedInject constructor(
         // before its owner ever resolved, the await is cancelled and nothing is written : a write
         // with an unknown owner never happens (gate Sol).
         val closing = ClosingSheet(submission, sessionReady, draftSnapshot(), shownDraft(), materializeJob)
+        val closingId = openingId
         viewModelScope.launch {
             val saved = saveForClose(closing)
             // A re-opening superseded this close : its outcome belongs to no mounted sheet.
             if (submission !== closing.session) return@launch
-            if (saved) _effects.send(QuickReplyEffect.CloseCommitted) else onFinalSaveRefused()
+            if (saved) _effects.send(QuickReplyEffect.CloseCommitted(closingId)) else onFinalSaveRefused()
         }
     }
 
@@ -801,7 +812,12 @@ class QuickReplyViewModel @AssistedInject constructor(
             return true
         }
         return try {
-            closing.session.flushForClose(
+            // Like the full editors, seal an inserted quote before the final save of C.
+            if (submission === closing.session && deliveredQuoteBody != null) {
+                commitInlineQuoteDelivery(closing.session)
+            }
+            val deliveryPending = submission === closing.session && deliveredQuoteBody != null
+            !deliveryPending && closing.session.flushForClose(
                 // The hidden sheet takes no input ; a superseding opening must not be read as typing.
                 live = { if (submission === closing.session) shownDraft() else closing.shown },
                 snapshot = { closing.draft },
@@ -829,7 +845,7 @@ class QuickReplyViewModel @AssistedInject constructor(
         if (!_state.value.unsavedCloseVisible) return
         _state.update { it.copy(unsavedCloseVisible = false, isClosing = leave) }
         if (leave) {
-            _effects.trySend(QuickReplyEffect.CloseCommitted)
+            _effects.trySend(QuickReplyEffect.CloseCommitted(openingId))
         } else {
             closeStarted = false
             sheetOpen = true

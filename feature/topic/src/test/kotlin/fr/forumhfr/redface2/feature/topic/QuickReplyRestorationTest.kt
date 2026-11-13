@@ -109,7 +109,7 @@ class QuickReplyRestorationTest {
                                     quickReplyFor = null
                                 }
                                 is QuickReplyEffect.EscalateToFullEditor -> Unit
-                                QuickReplyEffect.CloseCommitted -> quickReplyFor = null
+                                is QuickReplyEffect.CloseCommitted -> quickReplyFor = null
                             }
                         }
                     }

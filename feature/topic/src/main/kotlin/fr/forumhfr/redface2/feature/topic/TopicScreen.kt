@@ -313,14 +313,10 @@ fun TopicScreen(
      * including an inline opening with an empty card handoff.
      */
     onMultiQuote: (subcat: Int, page: Int, quotes: List<QuoteSelection>) -> Unit = { _, _, _ -> },
-    /**
-     * #604 lot 3 — clears the multi-quote basket after the sheet consumed it (« Citer N » below
-     * the threshold) : the cards live on in the sheet's ViewModel, and backing out must not
-     * re-arm a stale « Citer N » — same intent-consumed rule as the full-screen path.
-     * #436 — also « Tout vider » : a long press on the « Citer N » FAB empties the whole basket
-     * in one gesture. Owned by `:app` (the basket lives there); the screen only triggers the reset.
-     */
+    /** #436 — « Tout vider » : a long press on « Citer N » empties the whole basket. */
     onClearMultiQuote: () -> Unit = {},
+    /** ED-88 — consume only the current basket of the quick reply's target, checked by :app. */
+    onQuickReplyBasketConsumed: (cat: Int, topicId: Int) -> Unit = { _, _ -> },
     /**
      * #465 — the user's MANUAL poll-expansion choice for THIS topic, owned by `:app` so it survives
      * leaving and reopening the topic (like the multi-quote basket / scroll anchors ; hoisted when
@@ -848,6 +844,7 @@ fun TopicScreen(
             }
         },
         onClearMultiQuote = onClearMultiQuote,
+        onQuickReplyBasketConsumed = onQuickReplyBasketConsumed,
         pollManualExpanded = pollManualExpanded,
         onPollExpansionChanged = onPollExpansionChanged,
         // #1201 — the owner « Clore ce sondage » tap raises the confirmation dialog above.
@@ -1378,6 +1375,7 @@ internal fun TopicContent(
     onMultiQuote: (subcat: Int, page: Int, quotes: List<QuoteSelection>) -> Unit = { _, _, _ -> },
     // #436 — empties the whole basket (« Tout vider », long-press on the « Citer N » FAB).
     onClearMultiQuote: () -> Unit = {},
+    onQuickReplyBasketConsumed: (cat: Int, topicId: Int) -> Unit = { _, _ -> },
     // #465/#1170 — the topic's manual poll choice (owned by :app, null = follow the automatic poll
     // policy) + the callback recording a tap on the poll card. Threaded to the header card's poll.
     pollManualExpanded: Boolean? = null,
@@ -1762,14 +1760,14 @@ internal fun TopicContent(
             // rendering) are transient and never signal either : they wait for the send below.
             onQuotesDelivered = {
                 if (launch.consumesBasket) {
-                    onClearMultiQuote()
+                    onQuickReplyBasketConsumed(launch.request.cat, launch.request.topicId)
                 }
             },
             onSubmitted = { targetPage, scrollTo, quotedNumreponses ->
                 // #868/#869 — safety net (ED-88) : a SUCCESSFUL send of a basket-consuming session
                 // (« Citer N » ≤ 2) consumes whatever selection the delivery left armed (cards).
                 if (launch.consumesBasket) {
-                    onClearMultiQuote()
+                    onQuickReplyBasketConsumed(launch.request.cat, launch.request.topicId)
                 }
                 quickReplyFor = null
                 onQuickReplySubmitted(targetPage, scrollTo, quotedNumreponses)

@@ -86,6 +86,29 @@ class MultiQuoteBasketTest {
     }
 
     @Test
+    fun `ED88 buffered quick reply delivery applies to the current basket and its exact target`() {
+        var basket = (null as MultiQuoteBasket?).toggled(topicScope, selection(101, "alice"))
+        // Capture the sender, as the sheet does; the receiver reads the current hoisted basket.
+        val bufferedDelivery = { basket = basket.consumedBy(topicScope) }
+        val otherTargets = listOf(
+            QuoteScope.Topic(CAT, POST + 1),
+            QuoteScope.Topic(CAT + 1, POST),
+            QuoteScope.PrivateMessage(POST),
+        )
+        for (target in otherTargets) {
+            basket = basket.toggled(target, selection(555, "dave"))
+            val rearmed = basket
+            bufferedDelivery()
+            assertEquals(rearmed, basket)
+        }
+        basket = basket.toggled(topicScope, selection(101, "alice"))
+        bufferedDelivery()
+        assertNull(basket)
+        bufferedDelivery() // A repeated or late delivery with no basket stays harmless.
+        assertNull(basket)
+    }
+
+    @Test
     fun `selecting in another topic replaces the basket`() {
         val basket = (null as MultiQuoteBasket?)
             .toggled(topicScope, selection(101, "alice"))

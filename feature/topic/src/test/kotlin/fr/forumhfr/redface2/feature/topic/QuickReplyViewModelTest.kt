@@ -561,7 +561,7 @@ class QuickReplyViewModelTest {
             viewModel.onSheetAttached(1, emptyList(), restored = true)
             assertTrue(viewModel.state.value.isClosing)
             gate.complete(Unit)
-            assertEquals(QuickReplyEffect.CloseCommitted, awaitItem())
+            assertTrue(awaitItem() is QuickReplyEffect.CloseCommitted)
         }
         assertEquals("dernière frappe", store.storedBody)
         assertFalse(viewModel.state.value.unsavedCloseVisible)
@@ -600,7 +600,7 @@ class QuickReplyViewModelTest {
 
             store.saveFailure = null
             viewModel.onDismissed() // The latch was released: this close saves again.
-            assertEquals(QuickReplyEffect.CloseCommitted, awaitItem())
+            assertTrue(awaitItem() is QuickReplyEffect.CloseCommitted)
         }
         assertEquals("texte à garder", store.storedBody)
     }
@@ -614,7 +614,7 @@ class QuickReplyViewModelTest {
             viewModel.onDismissed()
             advanceUntilIdle()
             viewModel.onUnsavedCloseDecided(leave = true)
-            assertEquals(QuickReplyEffect.CloseCommitted, awaitItem())
+            assertTrue(awaitItem() is QuickReplyEffect.CloseCommitted)
             viewModel.onUnsavedCloseDecided(leave = true) // A second tap on the fading dialog.
             viewModel.onDismissed()
             advanceUntilIdle()
@@ -634,7 +634,7 @@ class QuickReplyViewModelTest {
         store.saveFailure = IOException("disk full")
         viewModel.effects.test {
             viewModel.onDismissed()
-            assertEquals(QuickReplyEffect.CloseCommitted, awaitItem())
+            assertTrue(awaitItem() is QuickReplyEffect.CloseCommitted)
         }
         assertFalse(viewModel.state.value.unsavedCloseVisible)
         assertEquals("déjà enregistré", store.storedBody)

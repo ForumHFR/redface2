@@ -1571,6 +1571,7 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                                     multiQuoteBasket = multiQuoteBasket.withoutSelections(scope, numreponses)
                                 },
                                 onClear = { multiQuoteBasket = null },
+                                onConsume = { scope -> multiQuoteBasket = multiQuoteBasket.consumedBy(scope) },
                                 pendingEditorQuotes = pendingEditorQuotes,
                                 onEditorQuotesHandoff = { pendingEditorQuotes = it },
                             ),
@@ -2027,6 +2028,7 @@ private data class MultiQuoteNavState(
     val onToggle: (scope: QuoteScope, selection: QuoteSelection) -> Unit,
     val onRemove: (scope: QuoteScope, numreponses: Set<Int>) -> Unit,
     val onClear: () -> Unit,
+    val onConsume: (scope: QuoteScope) -> Unit,
     val pendingEditorQuotes: EditorQuotesHandoff? = null,
     val onEditorQuotesHandoff: (EditorQuotesHandoff?) -> Unit = {},
 )
@@ -2165,6 +2167,10 @@ internal fun MultiQuoteBasket?.toggled(scope: QuoteScope, selection: QuoteSelect
  */
 internal fun MultiQuoteBasket?.isConsumedBy(scope: QuoteScope?, consumesBasket: Boolean): Boolean =
     consumesBasket && scope != null && this?.matches(scope) == true
+
+/** Apply a possibly buffered delivery to the basket at collection time, scoped to its sender. */
+internal fun MultiQuoteBasket?.consumedBy(scope: QuoteScope): MultiQuoteBasket? =
+    takeUnless { it.isConsumedBy(scope, consumesBasket = true) }
 
 /** Removes selected ids from one exact scope; a different active basket is left untouched. */
 internal fun MultiQuoteBasket?.withoutSelections(
@@ -3013,7 +3019,7 @@ private fun RedfaceNavHost(
                     // #291 / #604 lot 3 — selection of THIS topic's basket as full previews
                     // (another topic's selection must never leak into the menu checkmarks or
                     // the « Citer N » FAB) ; under the full-screen threshold the screen pre-arms
-                    // the sheet's cards from them and consumes the basket via onClearMultiQuote.
+                    // the sheet's cards from them and consumes only that target's current basket.
                     multiQuoteSelections = multiQuoteNavState.basket
                         ?.takeIf { it.matches(topicQuoteScope) }
                         ?.selections
@@ -3024,6 +3030,9 @@ private fun RedfaceNavHost(
                     // #436 — « Tout vider » : a long press on the « Citer N » FAB empties the
                     // whole hoisted basket (same reset path as the post-editor launch / logout).
                     onClearMultiQuote = multiQuoteNavState.onClear,
+                    onQuickReplyBasketConsumed = { cat, topicId ->
+                        multiQuoteNavState.onConsume(QuoteScope.Topic(cat, topicId))
+                    },
                     // #465/#1170 — the topic's saved manual poll choice (null = follow the
                     // automatic poll policy), and the callback recording a tap on the card. Hoisted to
                     // :app so it survives leaving and reopening the topic (pre-#895 étape 4:

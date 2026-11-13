@@ -114,8 +114,8 @@ internal fun QuickReplySheet(
             legacyQuoteRequestDropped = legacyQuoteRequestDropped,
         )
         openingDelivered = true
-        // Attachment purges only a genuinely new opening. Start delivery collection synchronously
-        // before navigation: buffered deliveries survive recreation and precede a buffered close.
+        // Attachment advances the opening id only for a new sheet; both flows filter stale signals.
+        // Collect delivery before navigation: restoration retains its delivery before its close.
         launch(start = CoroutineStart.UNDISPATCHED) {
             viewModel.quotesDelivered.collect { currentOnQuotesDelivered() }
         }
@@ -125,7 +125,7 @@ internal fun QuickReplySheet(
                     onSubmitted(effect.targetPage, effect.scrollTo, effect.quotedNumreponses)
                 is QuickReplyEffect.EscalateToFullEditor -> onEscalate(effect.quotes)
                 // ED-10 (#1450) — the ONLY place a plain close unmounts the sheet.
-                QuickReplyEffect.CloseCommitted -> onDismiss()
+                is QuickReplyEffect.CloseCommitted -> onDismiss()
             }
         }
     }
