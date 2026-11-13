@@ -64,16 +64,18 @@ jobs:
 
   # Fan-out by task type (was a single `verify` job running every task in one invocation). Each
   # entry runs on its own runner, so the four task groups parallelise PAST the 4-vCPU cap of a
-  # single runner. `setup-gradle` gives each entry its own incremental build cache (seeded on push
-  # to main/dev, read-only on PRs) so unchanged modules are not recompiled per job; the only
+  # single runner. `setup-gradle` gives each entry its own incremental build cache (written by push
+  # runs on main and dev through `cache-read-only` below, read-only on PRs, which restore the entries
+  # of their base branch) so unchanged modules are not recompiled per job; the only
   # duplication is recompiling the PR's *changed* modules in each entry — the build cache cannot be
   # shared across jobs running concurrently.
   #
   # `:app` is flavored (#233 channels) so its variant tasks are flavored: the unqualified
   # `lintDebug` / `:app:assembleDebug` no longer resolve for `:app`. Use the default `prod` flavor
   # for the `:app` lint + APK; `lintDebug` / `test` / `testDebugUnitTest` still cover the
-  # (flavour-less) core/feature/jvm modules, and the unqualified `test` covers `:app`'s unit tests
-  # across variants (incl. the Konsist architecture test).
+  # (flavour-less) core/feature/jvm modules, and the unqualified `test` runs `:app`'s unit tests
+  # for the prod flavor only (beta/dev unit tests are disabled in app/build.gradle.kts), incl. the
+  # Konsist architecture test.
   verify:
     name: ${{ matrix.task.name }}
     needs: [changes]
@@ -101,6 +103,10 @@ jobs:
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v5
+        with:
+          # Default: only the default branch (main) writes. dev is the integration branch, so
+          # its push runs write too; PR runs (refs/pull/N/merge) stay read-only.
+          cache-read-only: ${{ github.ref != 'refs/heads/main' && github.ref != 'refs/heads/dev' }}
 
       - name: ${{ matrix.task.name }}
         run: ./gradlew ${{ matrix.task.gradle }}
