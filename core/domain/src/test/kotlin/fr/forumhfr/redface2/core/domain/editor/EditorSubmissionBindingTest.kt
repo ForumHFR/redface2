@@ -316,16 +316,16 @@ class EditorSubmissionBindingTest {
         val store = VersionedEditorDraftStore()
         val binding = binding(store)
         binding.restore("key")
-        assertTrue(binding.flushForClose { Draft("body", subject = "first title") })
+        assertTrue(binding.flushForClose({ Draft("body", subject = "first title") }))
         store.saveFailure = IOException("disk full")
         // Unchanged content: the refused rewrite loses nothing, whatever the null/empty header form.
-        assertTrue(binding.flushForClose { Draft("body", subject = "first title", recipients = "") })
+        assertTrue(binding.flushForClose({ Draft("body", subject = "first title", recipients = "") }))
         // Only the title changed: it is durable nowhere, the close must ask.
-        assertFalse(binding.flushForClose { Draft("body", subject = "second title") })
-        assertFalse(binding.flushForClose { Draft("body") })
+        assertFalse(binding.flushForClose({ Draft("body", subject = "second title") }))
+        assertFalse(binding.flushForClose({ Draft("body") }))
         assertEquals("first title", store.saved["key"]?.subject)
         store.saveFailure = null
-        assertTrue(binding.flushForClose { Draft("body", subject = "second title") })
+        assertTrue(binding.flushForClose({ Draft("body", subject = "second title") }))
         assertEquals("second title", store.saved["key"]?.subject)
     }
 
@@ -334,10 +334,10 @@ class EditorSubmissionBindingTest {
         val store = VersionedEditorDraftStore()
         val binding = binding(store)
         binding.restore("key")
-        assertTrue(binding.flushForClose { Draft("body", recipients = "alice", isPrivate = true) })
+        assertTrue(binding.flushForClose({ Draft("body", recipients = "alice", isPrivate = true) }))
         store.saveFailure = IOException("disk full")
-        assertTrue(binding.flushForClose { Draft("body", recipients = "alice", isPrivate = true) })
-        assertFalse(binding.flushForClose { Draft("body", recipients = "alice;bob", isPrivate = true) })
+        assertTrue(binding.flushForClose({ Draft("body", recipients = "alice", isPrivate = true) }))
+        assertFalse(binding.flushForClose({ Draft("body", recipients = "alice;bob", isPrivate = true) }))
         assertEquals("alice", store.saved["key"]?.recipients)
     }
 
@@ -348,9 +348,9 @@ class EditorSubmissionBindingTest {
         val binding = binding(store)
         binding.restore("key")
         store.saveFailure = IOException("disk full")
-        assertTrue(binding.flushForClose { Draft("body", subject = "loaded title") })
-        assertFalse(binding.flushForClose { Draft("body", subject = "edited title") })
-        assertTrue(binding.flushForClose { null })
+        assertTrue(binding.flushForClose({ Draft("body", subject = "loaded title") }))
+        assertFalse(binding.flushForClose({ Draft("body", subject = "edited title") }))
+        assertTrue(binding.flushForClose({ null }))
     }
 
     @Test
@@ -361,9 +361,9 @@ class EditorSubmissionBindingTest {
         val second = binding(store)
         first.restore("key")
         second.restore("key")
-        assertTrue(second.flushForClose { Draft("B") })
+        assertTrue(second.flushForClose({ Draft("B") }))
         // The first session still believes the row holds A; the store answers Conflict: A is gone.
-        assertFalse(first.flushForClose { Draft("A") })
+        assertFalse(first.flushForClose({ Draft("A") }))
         assertEquals("B", store.saved["key"]?.body)
     }
 
@@ -379,14 +379,14 @@ class EditorSubmissionBindingTest {
         assertEquals("A", store.saved["key"]?.body)
         // Same when only a header moved, and when the refused rewrite was of content already held.
         reads = 0
-        assertFalse(binding.flushForClose { Draft("A", subject = if (reads++ == 0) "t" else "u") })
+        assertFalse(binding.flushForClose({ Draft("A", subject = if (reads++ == 0) "t" else "u") }))
         store.saveFailure = IOException("disk full")
         reads = 0
         assertFalse(binding.flushForClose(moving))
-        assertTrue(binding.flushForClose { Draft("A", subject = "t") })
+        assertTrue(binding.flushForClose({ Draft("A", subject = "t") }))
         // "Rester" then a new close writes what is in the field now.
         store.saveFailure = null
-        assertTrue(binding.flushForClose { Draft("B", subject = "t") })
+        assertTrue(binding.flushForClose({ Draft("B", subject = "t") }))
         assertEquals("B", store.saved["key"]?.body)
     }
 
@@ -402,7 +402,7 @@ class EditorSubmissionBindingTest {
         assertTrue(binding.flushForClose({ Draft("body", recipients = "v1:alice,bob", isPrivate = true) }, oneForm))
         assertFalse(binding.flushForClose({ Draft("body", recipients = "v1:alice", isPrivate = true) }, oneForm))
         // Raw strings differ: without the shared form the same list would ask for nothing.
-        assertFalse(binding.flushForClose { Draft("body", recipients = "v1:alice,bob", isPrivate = true) })
+        assertFalse(binding.flushForClose({ Draft("body", recipients = "v1:alice,bob", isPrivate = true) }))
         assertEquals("alice,bob", store.saved["key"]?.recipients)
     }
 
