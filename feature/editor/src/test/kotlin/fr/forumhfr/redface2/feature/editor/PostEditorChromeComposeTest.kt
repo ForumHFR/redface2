@@ -178,6 +178,8 @@ class PostEditorChromeComposeTest {
             sheetBack()
         }
         compose.onNode(isDialog()).assertDoesNotExist()
+        // The body is read-only (no SetText) while the upload runs; the focus it got back shows once it ends.
+        compose.runOnIdle { host.state = host.state.copy(isUploading = false) }
         compose.onNode(hasSetTextAction()).assertIsFocused()
         compose.runOnIdle {
             assertNull(host.adapter.surface)
