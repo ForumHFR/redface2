@@ -76,6 +76,8 @@ data class PrivateMessageReplyUiState(
      */
     val restorableDraft: String? = null,
     val draftOffers: List<DraftOffer> = emptyList(),
+    /** ED-10/85: a close could not save the field; the dialog asks before anything is abandoned. */
+    val showUnsavedCloseDialog: Boolean = false,
     /**
      * #606 — true only when the loaded form is the OWNER's DT/MultiMP (HFR served the `newdest`
      * field). Gates the member editor in the UI ; a simple participant / one-to-one MP keeps it

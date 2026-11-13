@@ -72,7 +72,6 @@ internal class PrivateMessageReplyDraftSession(
     private var stagedDelivery: String? = null
     private val quoteCommit = Mutex()
     private var storageConflict = false
-    private var closeRefused = false
 
     /** A conflicting quote write means this session's version, Q or offers are stale. */
     private fun recordQuoteWrite(result: EditorDraftStore.StoreWriteResult?) {
@@ -377,8 +376,7 @@ internal class PrivateMessageReplyDraftSession(
      * ED-132: a delivered quote whose C/Q transaction is pending or failed seals [draftSnapshot].
      * A close settles it first, then saves the field as it is now, typing made since included.
      * When that transaction still fails, nothing typed since the delivery can be saved without
-     * risking a duplicate quote: the first close is refused (false) with the storage error shown,
-     * and only a second, explicit close abandons that typing.
+     * risking a duplicate quote: false, and the caller asks before abandoning that typing.
      */
     suspend fun flushForClose(): Boolean {
         quoteCommit.withLock {
@@ -386,10 +384,8 @@ internal class PrivateMessageReplyDraftSession(
             val delivered = stagedDelivery
             if (deliveryPending && pending != null && delivered != null) commitQuoteLocked(pending, delivered)
         }
-        val refused = deliveryPending && !closeRefused
-        closeRefused = deliveryPending
-        if (!refused) submission.flush(::draftSnapshot)
-        return !refused
+        if (!deliveryPending) submission.flush(::draftSnapshot)
+        return !deliveryPending
     }
 
     /**

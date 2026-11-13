@@ -125,6 +125,8 @@ data class PostEditorState(
     val restorableDraft: String? = null,
     /** ED-40/121: every offered version, most recent first; a reply decides one by its identity. */
     val draftOffers: List<DraftOffer> = emptyList(),
+    /** ED-10/85: a close could not save the field; the dialog asks before anything is abandoned. */
+    val showUnsavedCloseDialog: Boolean = false,
     /**
      * #459 PR2 — `true` while an image picked from the photo picker is being read + uploaded to the
      * selected host. The toolbar's image-upload affordance shows a progress indicator and is

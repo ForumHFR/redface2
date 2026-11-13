@@ -403,8 +403,9 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
             // unclosable. CancellationException still propagates (scope teardown is not an error).
             try {
                 if (!draftSession.flushForClose()) {
-                    // The delivered quote is still not durable: stay open, a second close abandons it.
+                    // The delivered quote is still not durable: stay open and ask (ED-10/85).
                     closeRequested = false
+                    updateState { it.copy(showUnsavedCloseDialog = true) }
                     return@launch
                 }
             } catch (e: CancellationException) {
@@ -413,6 +414,16 @@ class PrivateMessageReplyViewModel @AssistedInject constructor(
                 // Best effort — the previous debounced write is what remains.
             }
             _effects.send(PrivateMessageReplyEffect.CloseCommitted)
+        }
+    }
+
+    /** The informed choice of the unsaved-close dialog; leaving pops exactly once, without a write. */
+    fun onUnsavedCloseDecided(leave: Boolean) {
+        if (!_state.value.showUnsavedCloseDialog) return
+        updateState { it.copy(showUnsavedCloseDialog = false) }
+        if (leave && !closeRequested) {
+            closeRequested = true
+            _effects.trySend(PrivateMessageReplyEffect.CloseCommitted)
         }
     }
 

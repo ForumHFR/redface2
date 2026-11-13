@@ -47,6 +47,7 @@ import fr.forumhfr.redface2.core.ui.editor.EditorBackAction
 import fr.forumhfr.redface2.core.ui.editor.EditorBackState
 import fr.forumhfr.redface2.core.ui.editor.EditorScaffold
 import fr.forumhfr.redface2.core.ui.editor.EditorTooltipHost
+import fr.forumhfr.redface2.core.ui.editor.EditorUnsavedCloseDialog
 import fr.forumhfr.redface2.core.ui.editor.EditorWindowMetrics
 import fr.forumhfr.redface2.core.ui.editor.LocalEditorTooltipHost
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
@@ -105,6 +106,13 @@ fun PrivateMessageReplyScreen(
                 PrivateMessageReplyEffect.CloseCommitted -> currentOnBack()
             }
         }
+    }
+    // Above every branch of the content, including the load failure that replaces the editor.
+    if (state.showUnsavedCloseDialog) {
+        EditorUnsavedCloseDialog(
+            onStay = { viewModel.onUnsavedCloseDecided(leave = false) },
+            onLeave = { viewModel.onUnsavedCloseDecided(leave = true) },
+        )
     }
     CompositionLocalProvider(LocalEditorPreviewState provides viewModel.previewLayout) {
         PrivateMessageReplyContent(

@@ -4799,7 +4799,7 @@ class PostEditorViewModelTest {
     }
 
     @Test
-    fun `close is refused once while a delivered quote cannot be made durable then abandons - ED132`() = runTest {
+    fun `close that cannot save the delivered field asks before abandoning it - ED10 ED132`() = runTest {
         val get = CompletableDeferred<Unit>()
         replyRepository.formGate = get
         replyRepository.formResultsByNumrep = mapOf(101 to Result.success(
@@ -4811,17 +4811,29 @@ class PostEditorViewModelTest {
         get.complete(Unit)
         settleBody()
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
-        vm.editBody(TextFieldValue("[quotemsg=101]requested quote[/quotemsg]\n\ntyped after the delivery"))
+        val typed = "[quotemsg=101]requested quote[/quotemsg]\n\ntyped after the delivery"
+        vm.editBody(TextFieldValue(typed))
         vm.dispatch(PostEditorIntent.CloseRequested)
         settleBody()
-        // The typing cannot be saved: the editor stays open and nothing is half-written.
+        // The typing cannot be saved: the dialog opens, the editor stays and nothing is half-written.
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
         assertFalse(PostEditorEffect.CloseCommitted in effects)
         assertEquals("offered D", draftStore.saved[key]?.body)
         assertNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
-        // A second close is the explicit abandonment.
+        // "Rester": the editor stays open with C intact; a later Back asks again, it never pops alone.
+        vm.dispatch(PostEditorIntent.UnsavedCloseDismissed)
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(typed, vm.bodyFieldState.text.toString())
         vm.dispatch(PostEditorIntent.CloseRequested)
         settleBody()
-        assertTrue(PostEditorEffect.CloseCommitted in effects)
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        assertFalse(PostEditorEffect.CloseCommitted in effects)
+        // "Quitter sans enregistrer" is the only abandonment, and it pops exactly once.
+        vm.dispatch(PostEditorIntent.UnsavedCloseConfirmed)
+        vm.dispatch(PostEditorIntent.UnsavedCloseConfirmed)
+        settleBody()
+        assertEquals(1, effects.count { it == PostEditorEffect.CloseCommitted })
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
     }
 
     @Test

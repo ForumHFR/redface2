@@ -116,6 +116,12 @@ sealed interface PostEditorIntent {
      * (a plain pop would cancel the debounce with the ViewModel).
      */
     data object CloseRequested : PostEditorIntent
+
+    /** "Rester": the unsaved-close dialog is dismissed, the editor stays open with its field. */
+    data object UnsavedCloseDismissed : PostEditorIntent
+
+    /** "Quitter sans enregistrer": the explicit abandonment of what could not be saved. */
+    data object UnsavedCloseConfirmed : PostEditorIntent
 }
 
 /**

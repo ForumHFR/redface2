@@ -975,7 +975,16 @@ class PostEditorViewModel @AssistedInject constructor(
 
     /** #604 lot 4a — one-shot latch : a committed close is never re-emitted (gate #803). */
     private var closeRequested = false
-    private var closeRefused = false
+
+    /** The informed choice of the unsaved-close dialog; leaving pops exactly once, without a write. */
+    private fun onUnsavedCloseDecided(leave: Boolean) {
+        if (!_state.value.showUnsavedCloseDialog) return
+        _state.update { it.copy(showUnsavedCloseDialog = false) }
+        if (leave && !closeRequested) {
+            closeRequested = true
+            viewModelScope.launch { _effects.send(PostEditorEffect.CloseCommitted) }
+        }
+    }
 
     /**
      * #604 lot 4a — dirty close : flush the pending debounce so the last keystrokes reach the
@@ -1009,13 +1018,10 @@ class PostEditorViewModel @AssistedInject constructor(
                 // Settle it first, then save the field as it is now, typing made since included.
                 if (deliveredInlineQuoteRequest != null) commitInlineQuoteDelivery()
                 // Still not durable: nothing typed since the delivery can be saved without risking a
-                // duplicate quote. Refuse this close with the storage error shown; only a second,
-                // explicit close abandons that typing.
-                val unsettled = deliveredInlineQuoteRequest != null
-                val refused = unsettled && !closeRefused
-                closeRefused = unsettled
-                if (refused) {
+                // duplicate quote. Stay open and ask; only "Quitter sans enregistrer" abandons it.
+                if (deliveredInlineQuoteRequest != null) {
                     closeRequested = false
+                    _state.update { it.copy(showUnsavedCloseDialog = true) }
                     return@launch
                 }
                 submission.flush(draftSnapshot())
@@ -1083,6 +1089,8 @@ class PostEditorViewModel @AssistedInject constructor(
             is PostEditorIntent.QuoteMoved -> onQuoteMoved(intent.numreponse, intent.delta, intent.quote)
             PostEditorIntent.QuotesCleared -> _state.update { it.copy(quotes = emptyList()) }
             PostEditorIntent.CloseRequested -> onCloseRequested()
+            PostEditorIntent.UnsavedCloseDismissed -> onUnsavedCloseDecided(leave = false)
+            PostEditorIntent.UnsavedCloseConfirmed -> onUnsavedCloseDecided(leave = true)
         }
     }
 

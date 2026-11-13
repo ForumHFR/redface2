@@ -352,7 +352,7 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
-    fun `MP close is refused once while a delivered quote cannot be made durable then abandons - ED132`() = runTest {
+    fun `MP close that cannot save the delivered field asks before abandoning it - ED10 ED132`() = runTest {
         val key = EditorDraftKey.mpReply(request.threadId)
         val pending = PendingInlineQuoteRequest.privateMessage(request.threadId,
             listOf(PendingInlineQuoteRequest.Quote(101, 2, 7)))
@@ -367,17 +367,30 @@ class PrivateMessageReplyViewModelTest {
         draftStore.saveFailure = IOException("disk full")
         gate.complete(form(initialContent = quote))
         runCurrent()
-        vm.editBody(TextFieldValue("$quote\n\ntyped after the delivery"))
+        val typed = "$quote\n\ntyped after the delivery"
+        vm.editBody(TextFieldValue(typed))
         vm.onCloseRequested()
         runCurrent()
-        // The typing cannot be saved: the editor stays open and nothing is half-written.
+        // The typing cannot be saved: the dialog opens even though the load-failure screen replaces
+        // the editor, and nothing is half-written.
+        assertTrue(vm.state.value.formError)
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
         assertFalse(PrivateMessageReplyEffect.CloseCommitted in effects)
         assertEquals("D", draftStore.saved[key]?.body)
         assertEquals(pending, draftStore.saved[key]?.pendingInlineQuoteRequest)
-        // A second close is the explicit abandonment.
+        // "Rester": the editor stays open with C intact; a later Back asks again, it never pops alone.
+        vm.onUnsavedCloseDecided(leave = false)
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(typed, vm.bodyFieldState.text.toString())
         vm.onCloseRequested()
         runCurrent()
-        assertTrue(PrivateMessageReplyEffect.CloseCommitted in effects)
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        assertFalse(PrivateMessageReplyEffect.CloseCommitted in effects)
+        // "Quitter sans enregistrer" is the only abandonment, and it pops exactly once.
+        vm.onUnsavedCloseDecided(leave = true)
+        vm.onUnsavedCloseDecided(leave = true)
+        runCurrent()
+        assertEquals(1, effects.count { it == PrivateMessageReplyEffect.CloseCommitted })
     }
 
     @Test

@@ -283,6 +283,10 @@
     <string name="editor_draft_offer_message">Un brouillon non envoyé a été retrouvé pour ce message.</string>
     <string name="editor_draft_offer_restore">Restaurer</string>
     <string name="editor_draft_offer_discard">Ignorer</string>
+    <string name="editor_unsaved_close_title">Brouillon non enregistré</string>
+    <string name="editor_unsaved_close_message">Le brouillon n’a pas pu être enregistré. Si vous quittez, les dernières modifications seront perdues.</string>
+    <string name="editor_unsaved_close_stay">Rester</string>
+    <string name="editor_unsaved_close_leave">Quitter sans enregistrer</string>
     <string name="editor_draft_offer_close">Fermer l’offre de brouillon</string>
     <string name="editor_error_quote_unreadable">La demande de citation enregistrée est illisible. Vous pouvez la recharger ou ignorer la citation. Le texte et la tentative d’envoi sont conservés.</string>
     <string name="editor_summary_recipient_incomplete">Pseudo à valider</string>
