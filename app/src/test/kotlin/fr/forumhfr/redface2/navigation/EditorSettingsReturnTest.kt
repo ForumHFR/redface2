@@ -7,6 +7,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.hasSetTextAction
@@ -40,19 +41,19 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
-import org.robolectric.annotation.GraphicsMode
 
 /** Real Nav3 decorators, editor Screen/ViewModel and settings page; no Hilt or network in this host. */
 @OptIn(ExperimentalTestApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(application = Application::class, sdk = [34], qualifiers = "fr-rFR-w800dp-h800dp-xxhdpi")
-@GraphicsMode(GraphicsMode.Mode.NATIVE)
 class EditorSettingsReturnTest {
+    // Semantics and navigation only: keep the same default graphics mode as the other app tests.
     @get:Rule val compose = createComposeRule()
     private val fixture = EditorSettingsReturnFixture()
     private val route = PostEditorRoute(PostEditorMode.Reply, 23, 42, page = 1, subcat = 0)
@@ -76,6 +77,7 @@ class EditorSettingsReturnTest {
                             onOpenEditorSettings = {
                                 // The live edit must already have crossed the stop/save boundary.
                                 assertEquals(editor.bodyFieldState.text.toString(), fixture.savedBody())
+                                assertNull(editor.state.value.armToken)
                                 settingsOpens++
                                 openEditorSettings(stack)
                             })
@@ -115,7 +117,7 @@ class EditorSettingsReturnTest {
         fixture.noPost()
     }
 
-    @Test fun systemBackKeepsPreviewAndOpeningOptionsDisarmsSubmission() {
+    @Test fun systemBackKeepsPreviewAndOptionsRequireDisarmedSubmission() {
         compose.setContent { Content() }
         compose.onNode(hasSetTextAction()).performTextInput("Bonjour")
         compose.runOnIdle { editor.submit(PostEditorIntent.TogglePreview) }
@@ -123,16 +125,26 @@ class EditorSettingsReturnTest {
             editor.submit(PostEditorIntent.SubmitClicked(timeoutMillis = 60_000L))
             assertNotNull(editor.state.value.armToken)
         }
+        // ED-34 masks secondary tools while armed; ED-85 Back disarms before Options becomes reachable.
+        compose.onNodeWithContentDescription("Options").assertDoesNotExist()
+        compose.runOnIdle { back.onBackPressed() }
+        compose.runOnIdle {
+            assertNull(editor.state.value.armToken)
+            assertTrue(editor.state.value.isPreviewVisible)
+        }
         compose.onNodeWithContentDescription("Options").performClick()
+        // Check before settings navigation: stopping the editor must not be what disarms it.
         compose.runOnIdle { assertNull(editor.state.value.armToken) }
         compose.onNodeWithText("Réglages de l’éditeur").performScrollTo().performClick()
         compose.runOnIdle { back.onBackPressed() }
         compose.runOnIdle {
             assertEquals("Bonjour", editor.bodyFieldState.text.toString())
-            assertEquals(true, editor.state.value.isPreviewVisible)
+            assertTrue(editor.state.value.isPreviewVisible)
             assertNull(editor.state.value.armToken)
             assertEquals(1, settingsOpens)
         }
+        compose.onNodeWithTag("editor-options-sheet").assertDoesNotExist()
+        compose.onNodeWithTag("post-editor-preview").assertIsDisplayed()
         compose.onNodeWithContentDescription("Mise en forme").assertIsNotSelected()
         fixture.noPost()
     }
