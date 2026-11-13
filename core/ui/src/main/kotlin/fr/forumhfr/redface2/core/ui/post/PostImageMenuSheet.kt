@@ -70,7 +70,7 @@ fun PostImageMenuSheet(
     onDismiss: () -> Unit,
     mediaDiskCachePolicy: PostMediaDiskCachePolicy = PostMediaDiskCachePolicy.ENABLED,
 ) {
-    val sheetState = rememberModalBottomSheetState()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val coroutineScope = rememberCoroutineScope()
     val context = LocalContext.current
     val alwaysAskLinkApp = LocalAlwaysAskLinkApp.current

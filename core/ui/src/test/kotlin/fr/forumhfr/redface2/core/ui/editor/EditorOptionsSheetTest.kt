@@ -168,10 +168,22 @@ class EditorOptionsSheetTest {
         compose.onNodeWithText("Dernière option").assertIsDisplayed()
     }
 
+    // #1417 Q-MP: short options (MP) still leave about five formats in view, on both tabs.
     @Test
     @Config(qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
+    fun shortOptionsKeepTheTabbedBodyFloorOnBothTabs() {
+        setSheet(optionsHeight = 0)
+        body().assertHeightIsEqualTo(TabbedBodyMinHeight)
+        compose.onNodeWithText("Dernière option").assertIsDisplayed()
+        tabNode(EditorOptionsTab.Formats).performClick()
+        body().assertHeightIsEqualTo(TabbedBodyMinHeight)
+    }
+
+    // Options taller than the floor keep their own height (post, topic form).
+    @Test
+    @Config(qualifiers = "fr-rFR-w360dp-h900dp-xxhdpi")
     fun formatsRemeasuresOptionsWhenTheirContentChanges() {
-        setSheet(optionsHeight = 70)
+        setSheet(optionsHeight = 400)
         tabNode(EditorOptionsTab.Formats).performClick()
         val initial = body().getUnclippedBoundsInRoot()
         compose.runOnIdle { extraOptionsHeight = 100 }

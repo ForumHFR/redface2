@@ -51,7 +51,7 @@ internal fun ParticipantRosterSheet(
     // Hidden = the sheet is closed; render nothing.
     if (roster is PrivateMessageThreadUiState.Roster.Hidden) return
 
-    val sheetState = rememberModalBottomSheetState()
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {
         Column(
             modifier = Modifier

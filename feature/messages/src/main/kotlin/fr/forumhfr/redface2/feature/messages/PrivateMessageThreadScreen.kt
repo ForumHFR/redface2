@@ -873,7 +873,7 @@ private fun ThreadPagePickerHost(
     if (!open || content == null) return
     val thread = content.thread
     val sheetState = rememberModalBottomSheetState(
-        skipPartiallyExpanded = false,
+        skipPartiallyExpanded = true,
         confirmValueChange = { true },
     )
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState) {

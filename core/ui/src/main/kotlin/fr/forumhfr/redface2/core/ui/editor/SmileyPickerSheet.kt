@@ -327,7 +327,10 @@ internal fun SmileyPickerGridPage(
             )
         }
     }
-    Box {
+    // #1417 Q2 (XaTriX 2026-11-13): one height for the three tabs, the grid budget, so the sheet no
+    // longer resizes when switching tabs; a short window still caps it (size modifiers are coerced).
+    // Wiki fits its search field inside that budget instead of adding it on top.
+    Box(Modifier.height(smileyPickerHeightCap())) {
         tabsState.SaveableStateProvider(tabIndex) {
             when (tabIndex) {
                 0 -> SmileyPickerGrid(
