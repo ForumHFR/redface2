@@ -380,7 +380,7 @@ class QuickReplyViewModel @AssistedInject constructor(
             quoteFetchFailures = savedStateHandle[KEY_QUOTE_FAILURES] ?: 0,
             legacyQuoteRequestDropped = _state.value.legacyQuoteRequestDropped || legacy?.isNotEmpty() == true,
         )
-        deliveredQuoteBody = null
+        quoteSeal = null
         restoredOfferAwaitingWrite = null
         mergedDraftOffer = null
         resolvingDraftOffer = false
@@ -446,8 +446,13 @@ class QuickReplyViewModel @AssistedInject constructor(
         materializeInlineQuotes()
     }
 
-    /** GETs may suspend while the user types; reconcile against the LIVE body before committing. */
-    private var deliveredQuoteBody: String? = null
+    /**
+     * A C/Q transaction this opening attempted and has not sealed yet. [prefill] is the quote
+     * block the GET inserted, null when the expected tags were already in the field. Any resolution
+     * of Q retires it : a sealed delivery, a successful Ignore, a new opening.
+     */
+    private class QuoteSeal(val prefill: String?)
+    private var quoteSeal: QuoteSeal? = null
     private var restoredOfferAwaitingWrite: String? = null
     private var mergedDraftOffer: String? = null
     private var resolvingDraftOffer = false
@@ -456,9 +461,9 @@ class QuickReplyViewModel @AssistedInject constructor(
         submission.disarm()
         val opening = submission
         val baseContext = replyContext()
+        // GETs may suspend while the user types; reconcile against the LIVE body before committing.
         val missing = missingInlineQuotes()
-        _state.update { it.copy(isPreparingQuotes = true) }
-        materializeJob = viewModelScope.launch(start = CoroutineStart.LAZY) {
+        launchQuoteWork(opening) {
             try {
                 if (missing.isNotEmpty()) {
                     val quoteContext = baseContext.copy(quotedNumreponse = missing.first().numreponse, quoteRef = null)
@@ -469,15 +474,15 @@ class QuickReplyViewModel @AssistedInject constructor(
                     )
                     currentCoroutineContext().ensureActive()
                     check(form.initialContent.isNotBlank()) { "empty quote prefill" }
-                    if (!canCompleteQuotePreparation(opening)) return@launch
+                    if (!canCompleteQuotePreparation(opening)) return@launchQuoteWork
                     rememberLoadedForm(form, quoteContext.page)
                     if (missingInlineQuotes() != missing) {
                         _state.update { it.copy(isPreparingQuotes = false) }
                         resumePendingInlineQuotes()
-                        return@launch
+                        return@launchQuoteWork
                     }
                     val prefills = form.initialContent.trimEnd()
-                    deliveredQuoteBody = prefills
+                    quoteSeal = QuoteSeal(prefills)
                     _state.update { current ->
                         val existing = current.text.text
                         val combined =
@@ -485,16 +490,38 @@ class QuickReplyViewModel @AssistedInject constructor(
                         current.copy(text = TextFieldValue(combined, TextRange(combined.length)))
                     }
                 }
+                // Tags already in the field seal the same transaction as an inserted prefill.
+                quoteSeal = quoteSeal ?: QuoteSeal(prefill = null)
                 commitInlineQuoteDelivery(opening)
             } catch (cancelled: CancellationException) {
-                if (submission === opening) _state.update { it.copy(isPreparingQuotes = false) }
-                throw cancelled
+                throw cancelled // An IllegalStateException on the JVM : never a failed preparation.
             } catch (_: SessionExpiredException) {
                 if (canCompleteQuotePreparation(opening)) quotePreparationFailed(EditorErrors.sessionExpired)
             } catch (_: IOException) {
                 if (canCompleteQuotePreparation(opening)) quotePreparationFailed()
             } catch (_: IllegalStateException) {
                 if (canCompleteQuotePreparation(opening)) quotePreparationFailed()
+            }
+        }
+    }
+
+    /**
+     * Every C/Q task (insertion, reload, Ignore) runs here. Whatever ends it — an outcome, an
+     * early exit on the hidden sheet, a cancellation — releases the busy state of ITS session,
+     * unless a later task of that session already took over.
+     */
+    private fun launchQuoteWork(
+        opening: EditorSubmissionBinding<QuickReplyEffect, EditorError>, work: suspend () -> Unit,
+    ) {
+        _state.update { it.copy(isPreparingQuotes = true) }
+        materializeJob = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            val task = currentCoroutineContext()[Job]
+            try {
+                work()
+            } finally {
+                if (submission === opening && materializeJob === task) {
+                    _state.update { it.copy(isPreparingQuotes = false) }
+                }
             }
         }
         materializeJob?.start()
@@ -505,14 +532,14 @@ class QuickReplyViewModel @AssistedInject constructor(
         val deliveryOpeningId = openingId
         autosaveJob?.cancel()
         val result = opening.drafts.consumeInlineQuoteRequest(pending, EditorDraftStore.Draft(_state.value.text.text),
-            deliveredBody = deliveredQuoteBody)
+            deliveredBody = quoteSeal?.prefill)
         // A cancelled GET may already be committing its non-cancellable C/Q transaction. Its
         // delivery belongs to THIS opening even when the sheet is now hidden awaiting that write.
         if (submission !== opening || opening.drafts.invalidated) return
         if (result is EditorDraftStore.StoreWriteResult.Written) {
             opening.resolveDraftWrite(result)
             finishInlineQuoteDelivery()
-            deliveredQuoteBody = null
+            quoteSeal = null
             _quotesDelivered.trySend(QuickReplyQuotesDelivered(deliveryOpeningId))
             if (sheetOpen) scheduleAutosave() // A close owns its final snapshot instead.
         } else {
@@ -574,25 +601,37 @@ class QuickReplyViewModel @AssistedInject constructor(
         val unreadable = _state.value.unreadableQuoteRequest
         submission.disarm()
         autosaveJob?.cancel()
-        _state.update { it.copy(isPreparingQuotes = true) }
-        materializeJob = viewModelScope.launch(start = CoroutineStart.LAZY) {
+        launchQuoteWork(opening) {
             val result = if (unreadable) opening.drafts.discardUnreadableInlineQuoteRequest() else {
                 opening.drafts.consumeInlineQuoteRequest(checkNotNull(pending))
             }
-            if (!canCompleteQuotePreparation(opening)) return@launch
-            if (result is EditorDraftStore.StoreWriteResult.Written) {
-                opening.resolveDraftWrite(result)
-                if (unreadable) {
-                    openSheet(currentPage, _state.value.quotes, retainedText = _state.value.text)
-                } else {
-                    finishInlineQuoteDelivery()
-                    scheduleAutosave()
-                }
-            } else {
-                quoteStorageFailed(result)
-            }
+            settleIgnoredQuote(opening, result, unreadable)
         }
-        materializeJob?.start()
+    }
+
+    /**
+     * The removal is not cancellable : like a delivery, its outcome settles THIS session even
+     * when the sheet is hidden awaiting it. Only the reload of an unreadable row needs the sheet.
+     */
+    private fun settleIgnoredQuote(
+        opening: EditorSubmissionBinding<QuickReplyEffect, EditorError>,
+        result: EditorDraftStore.StoreWriteResult, unreadable: Boolean,
+    ) {
+        if (submission !== opening || opening.drafts.invalidated) return
+        if (result !is EditorDraftStore.StoreWriteResult.Written) {
+            quoteStorageFailed(result)
+            return
+        }
+        opening.resolveDraftWrite(result)
+        when {
+            !unreadable -> {
+                // Q is resolved : nothing is left to seal, a close saves C like any other body.
+                quoteSeal = null
+                finishInlineQuoteDelivery()
+                scheduleAutosave() // Inert once a close started : it owns its final snapshot.
+            }
+            sheetOpen -> openSheet(currentPage, _state.value.quotes, retainedText = _state.value.text)
+        }
     }
 
     fun onDormantQuoteResumed() {
@@ -812,12 +851,9 @@ class QuickReplyViewModel @AssistedInject constructor(
             return true
         }
         return try {
-            // Like the full editors, seal an inserted quote before the final save of C.
-            if (submission === closing.session && deliveredQuoteBody != null) {
-                commitInlineQuoteDelivery(closing.session)
-            }
-            val deliveryPending = submission === closing.session && deliveredQuoteBody != null
-            !deliveryPending && closing.session.flushForClose(
+            // Like the full editors, seal a delivered quote before the final save of C.
+            if (awaitsQuoteSeal(closing.session)) commitInlineQuoteDelivery(closing.session)
+            !awaitsQuoteSeal(closing.session) && closing.session.flushForClose(
                 // The hidden sheet takes no input ; a superseding opening must not be read as typing.
                 live = { if (submission === closing.session) shownDraft() else closing.shown },
                 snapshot = { closing.draft },
@@ -826,6 +862,14 @@ class QuickReplyViewModel @AssistedInject constructor(
             false
         }
     }
+
+    /**
+     * An attempted C/Q transaction is still owed : Q is pending in THIS session and the field
+     * holds every quote it asks for. Anything else closes through the ordinary final save.
+     */
+    private fun awaitsQuoteSeal(session: EditorSubmissionBinding<QuickReplyEffect, EditorError>): Boolean =
+        submission === session && quoteSeal != null && session.drafts.pendingInlineQuoteRequest != null &&
+            missingInlineQuotes().isEmpty()
 
     /**
      * UX switch point (#1450, pending XaTriX) — what a refused final save does. Current choice
