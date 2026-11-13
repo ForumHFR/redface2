@@ -22,20 +22,16 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableIntStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.R
 import fr.forumhfr.redface2.core.ui.sheet.settledSheetWindowInsets
@@ -74,15 +70,6 @@ fun EditorOptionsSheet(
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val tab = formats?.tab ?: EditorOptionsTab.Options
-    // The options tab wraps its content and records that height; the formats tab reuses it.
-    var optionsHeight by remember { mutableIntStateOf(0) }
-    val recordedHeight = with(LocalDensity.current) { optionsHeight.toDp() }
-    val bodyHeight = when {
-        tab == EditorOptionsTab.Options -> Modifier.onSizeChanged { optionsHeight = it.height }
-        // A sheet recreated on the formats tab (rotation) has no record yet.
-        optionsHeight > 0 -> Modifier.height(recordedHeight)
-        else -> Modifier.height(FormatsFallbackHeight)
-    }
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState,
         modifier = Modifier.testTag(EDITOR_OPTIONS_SHEET_TAG),
         // Tagbug DEV #2805926: size by the keyboard's destination, not by its retraction frames.
@@ -90,21 +77,49 @@ fun EditorOptionsSheet(
         Column(Modifier.fillMaxWidth().navigationBarsPadding()) {
             if (formats != null) EditorOptionsTabs(tab, formats.onTab)
             // `weight(fill = false)` caps the body to what the switch leaves in a compact window.
-            Box(Modifier.weight(1f, fill = false).then(bodyHeight)) {
-                // A tab owns its scroll position: changing tab starts at the top.
-                key(tab) {
-                    Column(Modifier.fillMaxWidth().testTag(EDITOR_OPTIONS_SHEET_SCROLL_TAG)
-                        .verticalScroll(rememberScrollState())) {
-                        if (formats != null && tab == EditorOptionsTab.Formats) {
-                            EditorFormatsPage(formats.onFormat, formats.enabled)
-                        } else {
-                            content()
-                        }
-                        Spacer(Modifier.height(8.dp))
-                    }
-                }
+            // A tab owns its scroll position: changing tab starts at the top.
+            key(tab) {
+                EditorOptionsBody(formats, Modifier.weight(1f, fill = false), content)
             }
         }
+    }
+}
+
+/**
+ * Measure Options first in the same pass, including when recreated directly on Formats. Only the
+ * active body is placed; the measuring Options body has no accessible descendants on Formats.
+ * No post-layout state write or fallback height can move the sheet's anchor on the next frame.
+ */
+@Composable
+private fun EditorOptionsBody(
+    formats: EditorOptionsFormats?,
+    modifier: Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    val showingFormats = formats?.tab == EditorOptionsTab.Formats
+    Layout(modifier = modifier.fillMaxWidth(), content = {
+        val optionsSemantics = if (showingFormats) Modifier.clearAndSetSemantics {}
+        else Modifier.testTag(EDITOR_OPTIONS_SHEET_SCROLL_TAG)
+        EditorOptionsScrollBody(optionsSemantics, content)
+        if (formats != null && showingFormats) {
+            EditorOptionsScrollBody(Modifier.testTag(EDITOR_OPTIONS_SHEET_SCROLL_TAG)) {
+                EditorFormatsPage(formats.onFormat, formats.enabled)
+            }
+        }
+    }) { measurables, constraints ->
+        val options = measurables.first().measure(constraints.copy(minHeight = 0))
+        val active = if (showingFormats) {
+            measurables[1].measure(constraints.copy(minHeight = options.height, maxHeight = options.height))
+        } else options
+        layout(options.width, options.height) { active.placeRelative(0, 0) }
+    }
+}
+
+@Composable
+private fun EditorOptionsScrollBody(modifier: Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Column(modifier.fillMaxWidth().verticalScroll(rememberScrollState())) {
+        content()
+        Spacer(Modifier.height(8.dp))
     }
 }
 
@@ -151,4 +166,3 @@ private fun EditorOptionsTabs(selected: EditorOptionsTab, onSelect: (EditorOptio
 internal const val EDITOR_OPTIONS_SHEET_TAG = "editor-options-sheet"
 internal const val EDITOR_OPTIONS_SHEET_SCROLL_TAG = "editor-options-sheet-scroll"
 internal const val EDITOR_OPTIONS_TAB_TAG_PREFIX = "editor-options-tab-"
-private val FormatsFallbackHeight = 344.dp

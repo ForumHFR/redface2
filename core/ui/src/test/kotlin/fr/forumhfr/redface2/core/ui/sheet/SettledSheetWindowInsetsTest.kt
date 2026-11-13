@@ -5,6 +5,7 @@ import android.view.WindowInsetsAnimation
 import android.view.animation.LinearInterpolator
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.ime
+import androidx.compose.material3.Text
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.test.ExperimentalTestApi
@@ -20,6 +21,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.EditorDraftOfferFixture
+import fr.forumhfr.redface2.core.ui.editor.EditorOptionsSheet
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerSheet
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerState
 import fr.forumhfr.redface2.core.ui.editor.revealEditorControl
@@ -103,6 +105,28 @@ class SettledSheetWindowInsetsTest {
         assertSheetIgnoresRetractionFrames("smiley_picker_sheet_layout")
     }
 
+    @Test fun `the options sheet takes its final height when the retraction starts`() {
+        mountOptions()
+        assertSheetIgnoresRetractionFrames("editor-options-sheet")
+    }
+
+    @Test fun `the options sheet consumes navigation bars padding once`() {
+        mountOptions()
+        val ime = compose.runOnIdle { ImeDriver(ShadowDialog.getLatestDialog().window!!.decorView) }
+        compose.runOnIdle { ime.settle(0, navigationPx = 0) }
+        val withoutNavigation = sheetHeight("editor-options-sheet")
+        compose.runOnIdle { ime.settle(0) }
+        assertEquals(withoutNavigation + NAVIGATION_PX, sheetHeight("editor-options-sheet"))
+    }
+
+    private fun mountOptions() {
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, dynamicColor = false) {
+                EditorOptionsSheet({}) { Text("Options HFR") }
+            }
+        }
+    }
+
     private fun assertSheetIgnoresRetractionFrames(tag: String) {
         compose.onNode(isDialog()).assertExists()
         // A ModalBottomSheet owns a separate window: only its own decor view reaches its insets.
@@ -145,8 +169,8 @@ class SettledSheetWindowInsetsTest {
         private val animation =
             WindowInsetsAnimation(android.view.WindowInsets.Type.ime(), LinearInterpolator(), DURATION_MS)
 
-        fun settle(imePx: Int) {
-            ViewCompat.dispatchApplyWindowInsets(view, insets(imePx))
+        fun settle(imePx: Int, navigationPx: Int = NAVIGATION_PX) {
+            ViewCompat.dispatchApplyWindowInsets(view, insets(imePx, navigationPx))
         }
 
         fun start(from: Int, to: Int) {
@@ -163,12 +187,13 @@ class SettledSheetWindowInsetsTest {
 
         fun end() = view.dispatchWindowInsetsAnimationEnd(animation)
 
-        private fun insets(imePx: Int): WindowInsetsCompat = WindowInsetsCompat.Builder()
-            .setInsets(WindowInsetsCompat.Type.navigationBars(), Insets.of(0, 0, 0, NAVIGATION_PX))
-            .setVisible(WindowInsetsCompat.Type.navigationBars(), true)
-            .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, imePx))
-            .setVisible(WindowInsetsCompat.Type.ime(), imePx > 0)
-            .build()
+        private fun insets(imePx: Int, navigationPx: Int = NAVIGATION_PX): WindowInsetsCompat =
+            WindowInsetsCompat.Builder()
+                .setInsets(WindowInsetsCompat.Type.navigationBars(), Insets.of(0, 0, 0, navigationPx))
+                .setVisible(WindowInsetsCompat.Type.navigationBars(), navigationPx > 0)
+                .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, imePx))
+                .setVisible(WindowInsetsCompat.Type.ime(), imePx > 0)
+                .build()
     }
 
     private companion object {

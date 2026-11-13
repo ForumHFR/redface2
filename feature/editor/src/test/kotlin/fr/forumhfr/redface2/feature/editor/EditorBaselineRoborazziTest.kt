@@ -59,6 +59,7 @@ import org.robolectric.annotation.GraphicsMode
  * Uses the real content and routing fixtures from [EditorScreenLayoutTest], without a ViewModel.
  * Reply represents the shared reply/edit post chrome; transient states use the production adapter.
  * Post: portrait/compact × light/dark × scale 1/1.3 × normal/format/arm/event/restore/cards/panel/preview/options.
+ * OptionsFormats uses separate methods per orientation/scale so an older reference failure cannot skip it.
  * Topic: both modes, header, poll, restore, preview, options, event, arm and app bar states (poll + restore, no tap);
  * the post and topic Restore/Options scenes open their sheet by its tap and capture its dialog window;
  * refused/missing FP context; historical names kept, each byte-identical capture recorded under one name only.
@@ -100,7 +101,21 @@ class EditorBaselineRoborazziTest {
     @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
     fun landscapeFontScale1_3() = captureMatrix(orientation = "landscape", fontScale = 1.3f)
 
-    private fun captureMatrix(orientation: String, fontScale: Float) {
+    @Test
+    fun optionsFormatsPortraitFontScale1_0() = captureMatrix("portrait", 1f, formatsOnly = true)
+
+    @Test
+    fun optionsFormatsPortraitFontScale1_3() = captureMatrix("portrait", 1.3f, formatsOnly = true)
+
+    @Test
+    @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
+    fun optionsFormatsLandscapeFontScale1_0() = captureMatrix("landscape", 1f, formatsOnly = true)
+
+    @Test
+    @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
+    fun optionsFormatsLandscapeFontScale1_3() = captureMatrix("landscape", 1.3f, formatsOnly = true)
+
+    private fun captureMatrix(orientation: String, fontScale: Float, formatsOnly: Boolean = false) {
         val scenario = mutableStateOf(Scenario(Surface.NewTopic, filled = false))
         val dark = mutableStateOf(false)
         lateinit var view: View
@@ -131,14 +146,18 @@ class EditorBaselineRoborazziTest {
             }
         }
 
-        listOf(false, true).forEach { filled ->
-            compose.runOnIdle { scenario.value = Scenario(Surface.NewTopic, filled) }
-            record("new_topic_${orientation}_fs${fontScale}_${if (filled) "multiline" else "empty"}",
-                orientation, focusManager)
+        if (!formatsOnly) {
+            listOf(false, true).forEach { filled ->
+                compose.runOnIdle { scenario.value = Scenario(Surface.NewTopic, filled) }
+                record("new_topic_${orientation}_fs${fontScale}_${if (filled) "multiline" else "empty"}",
+                    orientation, focusManager)
+            }
+            captureTopics(orientation, fontScale, scenario, dark, focusManager, previewLabel)
         }
-        captureTopics(orientation, fontScale, scenario, dark, focusManager, previewLabel)
+        val scenes = if (formatsOnly) listOf(PostScene.OptionsFormats)
+        else PostScene.entries.filter { it != PostScene.OptionsFormats }
         listOf(false, true).forEach { isDark ->
-            PostScene.entries.forEach { scene ->
+            scenes.forEach { scene ->
                 compose.runOnIdle {
                     dark.value = isDark
                     scenario.value = Scenario(Surface.Post, filled = true, scene = scene)
@@ -148,21 +167,31 @@ class EditorBaselineRoborazziTest {
                         .setVisible(WindowInsetsCompat.Type.ime(), ime > 0).build())
                 }
                 compose.waitForIdle()
-                when (scene) {
-                    PostScene.Options -> compose.onNodeWithContentDescription("Options").performClick()
-                    PostScene.Format -> compose.onNodeWithContentDescription("Mise en forme").performClick()
-                    PostScene.Restore -> compose.onNodeWithContentDescription(
-                        "Brouillon retrouvé, restaurer ou ignorer").performClick()
-                    PostScene.Panel -> compose.onNodeWithContentDescription(
-                        "3 citations, ouvrir le panneau citations").performClick()
-                    PostScene.Preview -> compose.onNodeWithContentDescription(previewLabel)
-                        .assertIsDisplayed().performClick()
-                    else -> Unit
-                }
-                if (scene == PostScene.Preview) assertSharedPreview()
+                openPostScene(scene, previewLabel)
                 record("post_${scene.name}_${orientation}_fs${fontScale}_dark$isDark", orientation, focusManager,
-                    sheet = scene in setOf(PostScene.Restore, PostScene.Options))
+                    sheet = scene in setOf(PostScene.Restore, PostScene.Options, PostScene.OptionsFormats))
             }
+        }
+    }
+
+    private fun openPostScene(scene: PostScene, previewLabel: String) {
+        when (scene) {
+            PostScene.Options, PostScene.OptionsFormats -> openPostOptions(scene)
+            PostScene.Format -> compose.onNodeWithContentDescription("Mise en forme").performClick()
+            PostScene.Restore -> compose.onNodeWithContentDescription(
+                "Brouillon retrouvé, restaurer ou ignorer").performClick()
+            PostScene.Panel -> compose.onNodeWithContentDescription(
+                "3 citations, ouvrir le panneau citations").performClick()
+            PostScene.Preview -> compose.onNodeWithContentDescription(previewLabel).assertIsDisplayed().performClick()
+            else -> Unit
+        }
+        if (scene == PostScene.Preview) assertSharedPreview()
+    }
+
+    private fun openPostOptions(scene: PostScene) {
+        compose.onNodeWithContentDescription("Options").performClick()
+        if (scene == PostScene.OptionsFormats) {
+            compose.onNodeWithTag("editor-options-tab-Formats").performClick()
         }
     }
 
@@ -311,7 +340,9 @@ class EditorBaselineRoborazziTest {
     private fun baselineOffers() = listOf(EditorDraftStore.DraftOffer("baseline", 1,
         EditorDraftStore.Draft("[b]Brouillon conservé[/b]", updatedAt = System.currentTimeMillis() - 301_000L)))
 
-    private enum class PostScene { Normal, Format, Armed, Event, Restore, Cards, Panel, Preview, Options }
+    private enum class PostScene {
+        Normal, Format, Armed, Event, Restore, Cards, Panel, Preview, Options, OptionsFormats,
+    }
     private enum class TopicScene {
         Normal, EmptyTitle, Header, Poll, Restore, Preview, Unsupported, MissingRoute, Event, Armed, States, Options,
     }

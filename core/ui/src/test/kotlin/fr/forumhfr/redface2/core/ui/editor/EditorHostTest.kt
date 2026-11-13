@@ -132,6 +132,41 @@ class EditorHostTest {
         assertEquals(inserted, body.selection)
     }
 
+    @Test fun `ED44 information consumes a formats tap without changing the selection or closing the sheet`() {
+        val host = host()
+        host.barActions.onOptions()
+        host.selectOptionsTab(EditorOptionsTab.Formats)
+        error(EditorErrors.noImageReceived)
+        body.edit { selection = TextRange(3) }
+        host.formatFromOptions(BbcodeAction.Bold)
+        assertNull(events.visibleEvent)
+        assertTrue(calls.isEmpty())
+        assertEquals("Bonjour", body.text.toString())
+        assertEquals(TextRange(3), body.selection)
+        assertEquals(Surface.Options, host.surface)
+        assertEquals(EditorOptionsTab.Formats, host.optionsFormats.tab)
+        assertFalse(host.consumeReturn())
+        // The next gesture applies the format to the selection captured when Options opened.
+        host.formatFromOptions(BbcodeAction.Bold)
+        assertEquals(listOf<Any?>(BbcodeAction.Bold), calls)
+        assertEquals(TextRange(6, 1), body.selection)
+        assertNull(host.surface)
+    }
+
+    @Test fun `ED44 stale formats callbacks cannot consume information on another surface`() {
+        val host = host()
+        host.barActions.onOptions()
+        host.selectOptionsTab(EditorOptionsTab.Formats)
+        val stale = host.optionsFormats.onFormat
+        host.closeSurface()
+        host.imageActions.onUpload()
+        val information = error(EditorErrors.noImageReceived)
+        stale(BbcodeAction.Bold)
+        assertEquals(information, events.visibleEvent)
+        assertEquals(Surface.Picker, host.surface)
+        assertEquals(listOf<Any?>("picker"), calls)
+    }
+
     @Test fun `formats need the live formats tab and never apply from the options tab or another surface`() {
         val host = host()
         host.formatFromOptions(BbcodeAction.Bold)

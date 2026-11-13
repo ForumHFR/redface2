@@ -123,7 +123,7 @@ class EditorBaselineRoborazziTest {
     private fun captureMatrix(orientation: String, fontScale: Float, dark: Boolean) {
         val scenario = mutableStateOf(Scenario(EditorSurface.Reply, filled = false))
         lateinit var focusManager: FocusManager
-        // Options and the recipient manager still render at the system font scale: prior gap, outside PR B.
+        // Dialog windows read the activity resources rather than this host LocalDensity.
         compose.setContent {
             focusManager = LocalFocusManager.current
             activityResources = LocalContext.current.resources
@@ -152,7 +152,7 @@ class EditorBaselineRoborazziTest {
             compose.runOnIdle { scenario.value = current }
             compose.waitForIdle()
             // The ↺ sheet window takes the scale when it opens, after the body has revealed its caret.
-            if (current.chrome == ReplyChrome.Restore) setSheetFontScale(fontScale)
+            if (current.chrome in setOf(ReplyChrome.Restore, ReplyChrome.Options)) setSheetFontScale(fontScale)
             current.chrome.tap?.let { compose.onNodeWithContentDescription(it).performClick() }
             if (current.chrome == ReplyChrome.Preview) assertSharedPreview()
             compose.runOnIdle { focusManager.clearFocus(force = true) }
@@ -248,11 +248,18 @@ class EditorBaselineRoborazziTest {
     @Test @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
     fun composePanelsLandscapeLargeFont() = captureComposeStates("landscape", 1.3f)
 
-    private fun captureComposeStates(orientation: String, scale: Float) {
+    // Separate methods: a divergence in an existing Options PNG must not skip the new Formats scene.
+    @Test fun composeOptionsFormatsPortrait() = captureComposeStates("portrait", 1f, formatsOnly = true)
+    @Test fun composeOptionsFormatsPortraitLargeFont() = captureComposeStates("portrait", 1.3f, formatsOnly = true)
+    @Test @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
+    fun composeOptionsFormatsLandscape() = captureComposeStates("landscape", 1f, formatsOnly = true)
+    @Test @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
+    fun composeOptionsFormatsLandscapeLargeFont() = captureComposeStates("landscape", 1.3f, formatsOnly = true)
+
+    private fun captureComposeStates(orientation: String, scale: Float, formatsOnly: Boolean = false) {
         val scenario = mutableStateOf(false to ComposeCapture.Header)
         lateinit var focus: FocusManager
         lateinit var bodyScroll: ScrollState
-        // Options still renders at the system font scale: prior gap, tracked outside PR B.
         compose.setContent {
             focus = LocalFocusManager.current
             activityResources = LocalContext.current.resources
@@ -266,23 +273,15 @@ class EditorBaselineRoborazziTest {
                 }
             }
         }
+        val scenes = if (formatsOnly) listOf(ComposeCapture.OptionsFormats)
+        else ComposeCapture.entries.filter { it != ComposeCapture.OptionsFormats }
         listOf(false, true).forEach { dark ->
-            ComposeCapture.entries.forEach { state ->
+            scenes.forEach { state ->
                 // The adapter pre-opens ↺ while mounting the scene: its dialog window takes the scale then.
                 if (state == ComposeCapture.Restore) setSheetFontScale(scale)
                 compose.runOnIdle { scenario.value = dark to state }
                 compose.waitForIdle()
-                if (state == ComposeCapture.Options) {
-                    // Open through the real gesture after autofocus reveals the caret. Pre-opening
-                    // the sheet before mounting the body correctly blocks that autofocus (ED-86).
-                    compose.onNode(hasSetTextAction()).assertIsFocused()
-                    val before = compose.runOnIdle {
-                        assertTrue("The body must reveal its caret before opening Options", bodyScroll.value > 0)
-                        bodyScroll.value
-                    }
-                    compose.onNodeWithContentDescription("Options").performClick()
-                    compose.runOnIdle { assertEquals(before, bodyScroll.value) }
-                }
+                if (state.options) openComposeOptions(state, scale, bodyScroll)
                 if (state == ComposeCapture.Preview) assertSharedPreview()
                 compose.runOnIdle { focus.clearFocus(force = true) }
                 compose.mainClock.advanceTimeBy(1_000L)
@@ -295,6 +294,22 @@ class EditorBaselineRoborazziTest {
                 setSheetFontScale(1f)
             }
         }
+    }
+
+    private fun openComposeOptions(state: ComposeCapture, scale: Float, bodyScroll: ScrollState) {
+        // Open through the real gesture after autofocus reveals the caret. Pre-opening
+        // the sheet before mounting the body correctly blocks that autofocus (ED-86).
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        val before = compose.runOnIdle {
+            assertTrue("The body must reveal its caret before opening Options", bodyScroll.value > 0)
+            bodyScroll.value
+        }
+        setSheetFontScale(scale)
+        compose.onNodeWithContentDescription("Options").performClick()
+        if (state == ComposeCapture.OptionsFormats) {
+            compose.onNodeWithTag("editor-options-tab-Formats").performClick()
+        }
+        compose.runOnIdle { assertEquals(before, bodyScroll.value) }
     }
 
     @Composable
@@ -348,10 +363,12 @@ class EditorBaselineRoborazziTest {
      */
     private enum class ComposeCapture(val routed: Boolean = true, val restorable: Boolean = false) {
         Normal, Header, Preview, Restore(restorable = true), Armed, Event(restorable = true),
-        States(restorable = true), EmptyEntry(routed = false), EmptySummary(routed = false), Options, FormError,
+        States(restorable = true), EmptyEntry(routed = false), EmptySummary(routed = false), Options, OptionsFormats,
+        FormError,
         ;
 
-        val sheet get() = this == Restore || this == Options
+        val options get() = this == Options || this == OptionsFormats
+        val sheet get() = this == Restore || options
     }
 
     private enum class EditorSurface(val fileName: String) {

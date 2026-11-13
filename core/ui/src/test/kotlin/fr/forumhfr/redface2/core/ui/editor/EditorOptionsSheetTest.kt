@@ -1,6 +1,7 @@
 package fr.forumhfr.redface2.core.ui.editor
 
 import androidx.activity.ComponentDialog
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.material3.Text
@@ -10,6 +11,8 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -19,6 +22,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.isSelectable
@@ -47,6 +51,7 @@ class EditorOptionsSheetTest {
     @get:Rule val compose = createComposeRule()
     private var tab by mutableStateOf(EditorOptionsTab.Options)
     private var sheetOpen by mutableStateOf(true)
+    private var extraOptionsHeight by mutableStateOf(0)
     private var dismissals = 0
     // As the hosts do: a dismissal removes the sheet from the composition.
     private val dismiss: () -> Unit = { dismissals++; sheetOpen = false }
@@ -60,9 +65,11 @@ class EditorOptionsSheetTest {
             RedfaceTheme(darkTheme = false, dynamicColor = false) {
                 if (sheetOpen) {
                     EditorOptionsSheet(dismiss, EditorOptionsFormats(tab, true, { tab = it }, { formatted += it })) {
-                        Text("Première option")
-                        Spacer(Modifier.height(optionsHeight.dp))
-                        Text("Dernière option")
+                        Column(Modifier.semantics { paneTitle = "Options HFR" }) {
+                            Text("Première option")
+                            Spacer(Modifier.height((optionsHeight + extraOptionsHeight).dp))
+                            Text("Dernière option")
+                        }
                     }
                 }
             }
@@ -101,12 +108,15 @@ class EditorOptionsSheetTest {
     @Config(qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
     fun switchExposesTwoTabsOf48DpAndSelectsTheTappedOne() {
         setSheet()
+        compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsProperties.SelectableGroup)).assertCountEquals(1)
         compose.onAllNodes(isSelectable()).assertCountEquals(2)
         listOf(EditorOptionsTab.Options to "Options", EditorOptionsTab.Formats to "Formats").forEach { (tab, label) ->
             tabNode(tab).assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Tab))
                 .assert(hasText(label)).assertHeightIsEqualTo(48.dp)
         }
         tabNode(EditorOptionsTab.Options).assertIsSelected()
+        // The tab is labelled by text; only the action bar's button uses contentDescription = "Options".
+        compose.onAllNodes(hasContentDescription("Options")).assertCountEquals(0)
         tabNode(EditorOptionsTab.Formats).assertIsNotSelected().performClick()
         compose.runOnIdle { assertEquals(EditorOptionsTab.Formats, tab) }
         tabNode(EditorOptionsTab.Formats).assertIsSelected()
@@ -131,6 +141,55 @@ class EditorOptionsSheetTest {
         tabNode(EditorOptionsTab.Options).performClick()
         assertEquals(switchTop, tabNode(EditorOptionsTab.Options).getUnclippedBoundsInRoot().top)
         assertEquals(bodyBounds, body().getUnclippedBoundsInRoot())
+    }
+
+    @Test
+    @Config(qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
+    fun firstFormatsFrameKeepsTheSheetAndBodyBounds() {
+        setSheet(optionsHeight = 200)
+        val sheetBounds = compose.onNodeWithTag(EDITOR_OPTIONS_SHEET_TAG).getUnclippedBoundsInRoot()
+        val bodyBounds = body().getUnclippedBoundsInRoot()
+        compose.mainClock.autoAdvance = false
+        tabNode(EditorOptionsTab.Formats).performClick()
+        compose.mainClock.advanceTimeByFrame()
+        assertEquals(sheetBounds, compose.onNodeWithTag(EDITOR_OPTIONS_SHEET_TAG).getUnclippedBoundsInRoot())
+        assertEquals(bodyBounds, body().getUnclippedBoundsInRoot())
+        compose.mainClock.autoAdvance = true
+    }
+
+    @Test
+    @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
+    fun recreatedOnFormatsUsesTheCurrentOptionsHeightWithoutAFallback() {
+        tab = EditorOptionsTab.Formats
+        setSheet(optionsHeight = 70)
+        val formatsBounds = body().getUnclippedBoundsInRoot()
+        tabNode(EditorOptionsTab.Options).performClick()
+        assertEquals(formatsBounds, body().getUnclippedBoundsInRoot())
+        compose.onNodeWithText("Dernière option").assertIsDisplayed()
+    }
+
+    @Test
+    @Config(qualifiers = "fr-rFR-w360dp-h640dp-xxhdpi")
+    fun formatsRemeasuresOptionsWhenTheirContentChanges() {
+        setSheet(optionsHeight = 70)
+        tabNode(EditorOptionsTab.Formats).performClick()
+        val initial = body().getUnclippedBoundsInRoot()
+        compose.runOnIdle { extraOptionsHeight = 100 }
+        val updated = body().getUnclippedBoundsInRoot()
+        assertEquals(initial.bottom - initial.top + 100.dp, updated.bottom - updated.top)
+        tabNode(EditorOptionsTab.Options).performClick()
+        assertEquals(updated, body().getUnclippedBoundsInRoot())
+    }
+
+    @Test fun formatsDoesNotExposeTheMeasuringOptionsPaneOrItsControls() {
+        setSheet(optionsHeight = 70)
+        val optionsPane = SemanticsMatcher.expectValue(SemanticsProperties.PaneTitle, "Options HFR")
+        compose.onNode(optionsPane).assertExists()
+        tabNode(EditorOptionsTab.Formats).performClick()
+        compose.onNode(optionsPane).assertDoesNotExist()
+        compose.onNodeWithText("Première option").assertDoesNotExist()
+        tabNode(EditorOptionsTab.Options).performClick()
+        compose.onNode(optionsPane).assertExists()
     }
 
     @Test fun backClosesTheSheetInOneGestureFromEitherTab() {

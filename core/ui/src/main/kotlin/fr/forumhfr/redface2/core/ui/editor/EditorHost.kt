@@ -119,6 +119,8 @@ open class EditorHost<S : Any>(
      */
     fun formatFromOptions(action: BbcodeAction) {
         if (!formatsTabOpen || !formatsEnabled) return
+        // ED-44: acknowledge information before changing text, selection or surface, as on the bar.
+        if (consumeInformation()) return
         val unchanged = body.text.toString() == memory.textBeforeSurface
         if (unchanged && body.selection != memory.selection) body.edit { selection = memory.selection }
         closeSurface()
