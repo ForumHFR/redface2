@@ -172,6 +172,7 @@ class PrivateMessageComposeChromeComposeTest {
         }
     }
     @Test fun settingsTapClosesOptionsBeforeCallingNavigationOnce() {
+        prefill()
         compose.setContent { Content() }
         compose.onNodeWithContentDescription("Options").performClick()
         compose.onNodeWithText("Réglages de l’éditeur").performScrollTo().performClick()
@@ -183,6 +184,7 @@ class PrivateMessageComposeChromeComposeTest {
     }
 
     @Test fun settingsAreDisabledDuringUploadAndSubmission() {
+        prefill()
         compose.setContent { Content() }
         compose.onNodeWithContentDescription("Options").performClick()
         compose.runOnIdle { f.state = f.state.copy(isUploading = true) }

@@ -13,6 +13,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.EditorPreviewState
+import fr.forumhfr.redface2.core.ui.editor.EditorRecipientState
 import fr.forumhfr.redface2.core.ui.editor.SmileyPickerController
 import io.mockk.every
 import io.mockk.mockk
@@ -63,6 +64,8 @@ class PrivateMessageEditorSettingsScreenTest {
 
     @Test fun composeSettingsTapStopsBeforeNavigatingExactlyOnce() {
         val fixture = PrivateMessageComposeChromeFixture()
+        fixture.state = fixture.state.copy(
+            recipientState = EditorRecipientState(listOf("alice")), subject = "Sujet privé")
         val model = mockk<PrivateMessageComposeViewModel>(relaxUnitFun = true)
         every { model.state } returns MutableStateFlow(fixture.state)
         every { model.effects } returns emptyFlow()
