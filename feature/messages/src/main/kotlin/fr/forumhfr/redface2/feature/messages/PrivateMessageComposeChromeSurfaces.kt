@@ -56,7 +56,8 @@ internal fun PrivateMessageComposeChromeSurfaces(
         restoreEnabled = adapter.state.restoreEnabled, discardEnabled = adapter.state.scaffold.controlsEnabled,
         message = stringResource(R.string.messages_draft_restore_message))
     when (adapter.surface) {
-        PrivateMessageComposeChromeSurface.Options -> EditorOptionsSheet(adapter::closeSurface) {
+        PrivateMessageComposeChromeSurface.Options -> EditorOptionsSheet(adapter::closeSurface,
+            adapter.optionsFormats) {
             EditorOptions(source.signatureEnabled, source.smileyDisabled, source.emailNotificationEnabled,
                 adapter.state.optionsEnabled, adapter::signature, adapter::smileyDisabled, adapter::notification,
                 EditorOptionsLabels(stringResource(R.string.messages_reply_options_title),
@@ -64,7 +65,8 @@ internal fun PrivateMessageComposeChromeSurfaces(
                     stringResource(R.string.messages_reply_option_smiley_disabled),
                     stringResource(R.string.messages_reply_option_email_notification)),
                 onOpenSettings = { adapter.openSettings(onOpenEditorSettings) },
-                settingsEnabled = !source.isUploading)
+                settingsEnabled = !source.isUploading,
+                settingsShortcut = source.editorShortcut)
         }
         PrivateMessageComposeChromeSurface.Smileys -> {
             val picker = smileys.state.collectAsStateWithLifecycle().value as? SmileyPickerState.Open

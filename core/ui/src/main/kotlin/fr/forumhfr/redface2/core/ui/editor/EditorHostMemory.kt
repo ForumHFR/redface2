@@ -15,6 +15,11 @@ class EditorHostMemory<S : Any> {
     val focus = EditorSurfaceFocusMemory()
     var surface by mutableStateOf<S?>(null)
         internal set
+    /** #1417: the tab of the open Options sheet; every opening and closing starts again on the options. */
+    var optionsTab by mutableStateOf(EditorOptionsTab.Options)
+        internal set
+    /** Options callbacks belong to one opening; closing and reset invalidate without reusing its identity. */
+    internal var optionsGeneration by mutableIntStateOf(0)
     var detail by mutableStateOf<EditorEvent?>(null)
         internal set
     var bar by mutableStateOf(EditorBarState())
@@ -27,6 +32,8 @@ class EditorHostMemory<S : Any> {
 
     fun reset() {
         surface = null
+        optionsTab = EditorOptionsTab.Options
+        optionsGeneration++
         detail = null
         bar = EditorBarState()
         selection = TextRange.Zero

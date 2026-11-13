@@ -62,4 +62,4 @@ fun EditorColorSwatch(hex: String, modifier: Modifier = Modifier) {
         })
 }
 
-private const val DISABLED_SWATCH_ALPHA = 0.38f
+internal const val DISABLED_SWATCH_ALPHA = 0.38f

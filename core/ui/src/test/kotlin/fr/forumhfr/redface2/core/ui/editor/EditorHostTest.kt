@@ -24,6 +24,7 @@ class EditorHostTest {
     private val body = TextFieldState("Bonjour", TextRange(6, 1))
     private var state = EditorHostState(EditorScaffoldChrome(), EditorSubmissionState.Ready, true, true)
     private val calls = mutableListOf<Any?>()
+    private var formatAction: (BbcodeAction) -> Unit = { calls.add(it) }
     private var uncertainty: Pair<EventKey, EditorDraftStore.AttemptToken>? = null
     private val events = object : EditorHostEvents {
         override var state = EditorEventState(session)
@@ -40,7 +41,7 @@ class EditorHostTest {
         { state }, body, events,
         EditorHostActions({ calls.add(it) }, { calls.add(it) }, {
             calls.add("disarm"); state = state.copy(submission = EditorSubmissionState.Ready)
-        }, { calls.add(it) }, {
+        }, formatAction, {
             calls.add("preview")
             state = state.copy(scaffold = state.scaffold.copy(previewVisible = !state.scaffold.previewVisible))
         }, { calls.add("close") }, onComplete = onComplete, onAcknowledgeUncertain = onAcknowledgeUncertain,
@@ -93,6 +94,206 @@ class EditorHostTest {
         staleTap()
         assertEquals(Surface.Picker, host.surface)
         assertEquals(listOf("picker"), calls)
+    }
+
+    // #1417 point 5: « Formats » is a tab of the Options sheet, not another surface nor a Back level.
+    @Test fun `ED22 ED80 a format from the formats tab applies once to the captured selection and closes`() {
+        val host = host()
+        host.barActions.onOptions()
+        assertEquals(EditorOptionsTab.Options, host.optionsFormats.tab)
+        host.optionsFormats.onTab(EditorOptionsTab.Formats)
+        assertEquals(Surface.Options, host.surface)
+        assertEquals(EditorOptionsTab.Formats, host.optionsFormats.tab)
+        assertTrue(host.optionsFormats.enabled)
+        // The field may collapse its selection while the sheet holds the focus.
+        body.edit { selection = TextRange(3) }
+        val staleTap = host.optionsFormats.onFormat
+        staleTap(BbcodeAction.Bold)
+        assertEquals(listOf<Any?>(BbcodeAction.Bold), calls)
+        assertEquals(TextRange(6, 1), body.selection)
+        assertNull(host.surface)
+        // A second tap of the same composition, or of a retained one, finds no live tab.
+        staleTap(BbcodeAction.Italic)
+        host.formatFromOptions(BbcodeAction.Italic)
+        assertEquals(listOf<Any?>(BbcodeAction.Bold), calls)
+        assertTrue(host.consumeReturn())
+        assertFalse(host.consumeReturn())
+        host.returnToBody { body.edit { selection = TextRange.Zero } }
+        assertEquals(TextRange(6, 1), body.selection)
+    }
+
+    @Test fun `ED22 a format from the formats tab keeps a selection made after an insertion changed the text`() {
+        val host = host()
+        host.barActions.onOptions()
+        host.selectOptionsTab(EditorOptionsTab.Formats)
+        body.edit { replace(length, length, " image"); selection = TextRange(length) }
+        val inserted = body.selection
+        host.formatFromOptions(BbcodeAction.Bold)
+        assertEquals(listOf<Any?>(BbcodeAction.Bold), calls)
+        assertEquals(inserted, body.selection)
+    }
+
+    @Test fun `callbacks from closed Options cannot change a reopened sheet`() {
+        assertOptionsCallbacksExpire { it.closeSurface() }
+    }
+
+    @Test fun `reset invalidates Options callbacks before a new opening`() {
+        assertOptionsCallbacksExpire { memory.reset() }
+    }
+
+    @Test fun `opening Options again invalidates callbacks even without an explicit close`() {
+        assertOptionsCallbacksExpire {}
+    }
+
+    private fun assertOptionsCallbacksExpire(close: (EditorHost<Surface>) -> Unit) {
+        formatAction = { action ->
+            calls.add(action)
+            body.editBbcode { text, start, end -> applyBbcodeAction(action, text, start, end) }
+        }
+        val initial = host()
+        initial.barActions.onOptions()
+        val stale = initial.optionsFormats
+        stale.onTab(EditorOptionsTab.Formats)
+        close(initial)
+        // The memory, including its opening identity, also survives recreation of the host.
+        val reopened = host()
+        reopened.barActions.onOptions()
+        val returnGeneration = reopened.returnGeneration
+        body.edit { selection = TextRange(3) }
+        stale.onTab(EditorOptionsTab.Formats)
+        assertEquals(EditorOptionsTab.Options, reopened.optionsFormats.tab)
+        reopened.optionsFormats.onTab(EditorOptionsTab.Formats)
+        stale.onTab(EditorOptionsTab.Options)
+        assertEquals(EditorOptionsTab.Formats, reopened.optionsFormats.tab)
+        stale.onFormat(BbcodeAction.Bold)
+        assertTrue(calls.isEmpty())
+        assertEquals("Bonjour", body.text.toString())
+        assertEquals(TextRange(3), body.selection)
+        assertEquals(EditorOptionsTab.Formats, reopened.optionsFormats.tab)
+        assertEquals(Surface.Options, reopened.surface)
+        assertEquals(returnGeneration, reopened.returnGeneration)
+        // A callback from the new opening still formats the captured selection and closes once.
+        reopened.optionsFormats.onFormat(BbcodeAction.Bold)
+        assertEquals(listOf<Any?>(BbcodeAction.Bold), calls)
+        assertEquals("B[b]onjou[/b]r", body.text.toString())
+        assertNull(reopened.surface)
+        assertEquals(returnGeneration + 1, reopened.returnGeneration)
+        assertTrue(reopened.consumeReturn())
+        assertFalse(reopened.consumeReturn())
+    }
+
+    @Test fun `ED44 information consumes a formats tap without changing the selection or closing the sheet`() {
+        val host = host()
+        host.barActions.onOptions()
+        host.selectOptionsTab(EditorOptionsTab.Formats)
+        error(EditorErrors.noImageReceived)
+        body.edit { selection = TextRange(3) }
+        host.formatFromOptions(BbcodeAction.Bold)
+        assertNull(events.visibleEvent)
+        assertTrue(calls.isEmpty())
+        assertEquals("Bonjour", body.text.toString())
+        assertEquals(TextRange(3), body.selection)
+        assertEquals(Surface.Options, host.surface)
+        assertEquals(EditorOptionsTab.Formats, host.optionsFormats.tab)
+        assertFalse(host.consumeReturn())
+        // The next gesture applies the format to the selection captured when Options opened.
+        host.formatFromOptions(BbcodeAction.Bold)
+        assertEquals(listOf<Any?>(BbcodeAction.Bold), calls)
+        assertEquals(TextRange(6, 1), body.selection)
+        assertNull(host.surface)
+    }
+
+    @Test fun `ED44 stale formats callbacks cannot consume information on another surface`() {
+        val host = host()
+        host.barActions.onOptions()
+        host.selectOptionsTab(EditorOptionsTab.Formats)
+        val stale = host.optionsFormats.onFormat
+        host.closeSurface()
+        host.imageActions.onUpload()
+        val information = error(EditorErrors.noImageReceived)
+        stale(BbcodeAction.Bold)
+        assertEquals(information, events.visibleEvent)
+        assertEquals(Surface.Picker, host.surface)
+        assertEquals(listOf<Any?>("picker"), calls)
+    }
+
+    @Test fun `formats need the live formats tab and never apply from the options tab or another surface`() {
+        val host = host()
+        host.formatFromOptions(BbcodeAction.Bold)
+        host.selectOptionsTab(EditorOptionsTab.Formats)
+        assertEquals(EditorOptionsTab.Options, host.optionsFormats.tab)
+        host.barActions.onOptions()
+        host.formatFromOptions(BbcodeAction.Bold)
+        assertEquals(Surface.Options, host.surface)
+        host.selectOptionsTab(EditorOptionsTab.Formats)
+        val staleTap = host.optionsFormats.onFormat
+        val staleTab = host.optionsFormats.onTab
+        host.closeSurface()
+        host.imageActions.onUpload()
+        staleTap(BbcodeAction.Bold)
+        staleTab(EditorOptionsTab.Formats)
+        assertEquals(Surface.Picker, host.surface)
+        assertEquals(EditorOptionsTab.Options, host.optionsFormats.tab)
+        assertEquals(listOf<Any?>("picker"), calls)
+    }
+
+    @Test fun `ED34 formats are disabled and rejected while armed uploading read-only or locked`() {
+        val host = host()
+        host.barActions.onOptions()
+        host.selectOptionsTab(EditorOptionsTab.Formats)
+        val ready = state
+        listOf(
+            ready.copy(submission = EditorSubmissionState.Armed(ArmToken(1, session, 0, 4_000L))),
+            ready.copy(scaffold = EditorScaffoldChrome(uploading = true)),
+            ready.copy(scaffold = EditorScaffoldChrome(bodyReadOnly = true)),
+            ready.copy(scaffold = EditorScaffoldChrome(controlsEnabled = false)),
+        ).forEach { locked ->
+            state = locked
+            assertEquals(EditorOptionsTab.Formats, host.optionsFormats.tab)
+            assertFalse(host.optionsFormats.enabled)
+            host.formatFromOptions(BbcodeAction.Bold)
+            assertEquals(Surface.Options, host.surface)
+            // The list stays readable: changing tab is never locked.
+            host.selectOptionsTab(EditorOptionsTab.Options)
+            host.selectOptionsTab(EditorOptionsTab.Formats)
+        }
+        assertTrue(calls.isEmpty())
+        state = ready
+        assertTrue(host.optionsFormats.enabled)
+        host.formatFromOptions(BbcodeAction.Bold)
+        assertEquals(listOf<Any?>(BbcodeAction.Bold), calls)
+    }
+
+    @Test fun `ED85 ED86 the formats tab survives rotation and Back closes the sheet in one gesture`() {
+        val initial = host()
+        initial.barActions.onOptions()
+        initial.selectOptionsTab(EditorOptionsTab.Formats)
+        val rotated = host()
+        assertEquals(Surface.Options, rotated.surface)
+        assertEquals(EditorOptionsTab.Formats, rotated.optionsFormats.tab)
+        val layers = mutableListOf<EditorBackAction>()
+        rotated.back(onLayerBack = layers::add)
+        assertNull(rotated.surface)
+        assertEquals(listOf<EditorBackAction>(EditorBackAction.CloseSheet(EditorSheet.Options)), layers)
+        assertTrue(rotated.consumeReturn())
+        assertTrue(calls.isEmpty())
+    }
+
+    @Test fun `the options sheet always reopens on the options tab`() {
+        val host = host()
+        val closings = listOf<() -> Unit>(
+            { host.closeSurface() }, { host.back() }, { host.openSettings {} },
+            { host.formatFromOptions(BbcodeAction.Bold) }, { memory.reset() },
+        )
+        closings.forEach { close ->
+            host.barActions.onOptions()
+            host.selectOptionsTab(EditorOptionsTab.Formats)
+            close()
+            assertNull(host.surface)
+            host.barActions.onOptions()
+            assertEquals(EditorOptionsTab.Options, host.optionsFormats.tab)
+            host.closeSurface()
+        }
     }
 
     // v0.7.8 ED-40/44: the offer has one entry, with no information exception.

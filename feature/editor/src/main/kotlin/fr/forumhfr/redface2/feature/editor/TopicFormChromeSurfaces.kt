@@ -52,7 +52,7 @@ internal fun TopicFormChromeSurfaces(
 @Composable
 private fun TopicFormOptionsSurface(adapter: TopicFormChromeAdapter, onOpenEditorSettings: () -> Unit) {
     val source = adapter.state.source
-    EditorOptionsSheet(adapter.host::closeSurface) {
+    EditorOptionsSheet(adapter.host::closeSurface, adapter.host.optionsFormats) {
         val enabled = adapter.state.scaffold.controlsEnabled && !source.isLoadingForm
         EditorOptions(source.signatureEnabled, source.smileyDisabled, source.emailNotificationEnabled, enabled,
             { adapter.option(TopicFormIntent.ToggleSignature(it)) },
@@ -63,7 +63,8 @@ private fun TopicFormOptionsSurface(adapter: TopicFormChromeAdapter, onOpenEdito
                 stringResource(R.string.editor_option_smiley_disabled),
                 stringResource(R.string.editor_option_email_notification)),
             onOpenSettings = { adapter.host.openSettings(onOpenEditorSettings) },
-            settingsEnabled = !source.isUploading) {
+            settingsEnabled = !source.isUploading,
+            settingsShortcut = source.editorShortcut) {
             MessageIconPicker(source.msgIcon, enabled, { adapter.option(TopicFormIntent.MsgIconSelected(it)) })
         }
     }

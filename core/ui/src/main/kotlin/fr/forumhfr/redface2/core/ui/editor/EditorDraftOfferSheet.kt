@@ -30,6 +30,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.ui.R
+import fr.forumhfr.redface2.core.ui.sheet.settledSheetWindowInsets
 
 /**
  * Shared full-screen editors' draft offer; quick reply keeps its own chrome (R4).
@@ -72,8 +73,10 @@ fun EditorDraftOfferSheet(
 
     // Open fully expanded, including compact height; scroll rather than truncate large text.
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    // Tagbug DEV #2805926: ↺ is tapped over the keyboard; size by its destination, not by its retraction.
     ModalBottomSheet(onDismissRequest = onDismiss, sheetState = sheetState,
-        modifier = modifier.testTag("editor-draft-offer-sheet")) {
+        modifier = modifier.testTag("editor-draft-offer-sheet"),
+        contentWindowInsets = { settledSheetWindowInsets() }) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 8.dp).navigationBarsPadding(),
             verticalArrangement = Arrangement.spacedBy(8.dp)) {
