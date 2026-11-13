@@ -392,7 +392,10 @@ class TopicViewModel @AssistedInject constructor(
         val overflowRedirectAllowed: Boolean,
         val submittedElsewhereNotificationAllowed: Boolean,
         val lastPageRedirectAllowed: Boolean = false,
-    )
+    ) {
+        fun needsTailRedirect(target: Int, totalPages: Int): Boolean =
+            if (lastPageRedirectAllowed) totalPages != target else totalPages > target
+    }
 
     /** #782 — departure page + return landing captured before resolving the jump. */
     private data class TopicJumpFrame(val page: Int, val landing: PendingLanding?)
@@ -1180,7 +1183,7 @@ class TopicViewModel @AssistedInject constructor(
                     // #877 — this is a LOCAL transformation of the page already on screen : it must
                     // carry the provenance over, or a re-filter landing between the provisional
                     // cache emission and the settled one would fake-settle the pill (gate finding).
-                    current.copy(mode = loadedMode(loaded.topic, provisional = loaded.provisional))
+                    current.copy(mode = relocalizedMode(loaded))
                 }
             }
             // This collector is independent of any load job, so an unhandled error here would tear
@@ -1209,7 +1212,7 @@ class TopicViewModel @AssistedInject constructor(
             staffByPseudo = staff
             _state.update { current ->
                 val loaded = current.mode as? TopicUiState.Mode.Loaded ?: return@update current
-                current.copy(mode = loadedMode(loaded.topic, provisional = loaded.provisional))
+                current.copy(mode = relocalizedMode(loaded))
             }
         }
     }
@@ -1639,6 +1642,8 @@ class TopicViewModel @AssistedInject constructor(
         topic: Topic,
         provisional: Boolean = false,
         previousLoaded: TopicUiState.Mode.Loaded? = _state.value.mode as? TopicUiState.Mode.Loaded,
+        // #1437 — default false : every canonical producer replaces a search view by a topic page.
+        fromSearch: Boolean = false,
     ): TopicUiState.Mode.Loaded =
         TopicUiState.Mode.Loaded(
             topic = topic,
@@ -1652,7 +1657,15 @@ class TopicViewModel @AssistedInject constructor(
             pollVote = resyncPollVote(previousLoaded?.pollVote, topic.pollVoteForm),
             pollJustVoted = previousLoaded?.pollJustVoted == true &&
                 isSamePollPage(previousLoaded.topic, topic),
+            fromSearch = fromSearch,
         )
+
+    /**
+     * LOCAL rebuild of the page already on screen (blacklist / staff change): the content is the
+     * same, so both provenances — #877 provisional and #1437 search view — are carried over.
+     */
+    private fun relocalizedMode(loaded: TopicUiState.Mode.Loaded): TopicUiState.Mode.Loaded =
+        loadedMode(loaded.topic, provisional = loaded.provisional, fromSearch = loaded.fromSearch)
 
     /** #1296 — results change counters, not the identity of the page's single HFR poll. */
     private fun isSamePollPage(previous: Topic, current: Topic): Boolean {
@@ -2085,10 +2098,25 @@ class TopicViewModel @AssistedInject constructor(
         jumpStack.clear()
         syncJumpAvailability()
         val acknowledgementId = submitAcknowledgements.accept(
-            _state.value.connectedPseudo?.let(::canonicalizePseudo).orEmpty(), operation,
+            _state.value.connectedPseudo?.let(::canonicalizePseudo).orEmpty(),
+            operation,
+            predictedLastPage = predictedSubmitLastPage(plan),
         )
         performSubmitRefresh(plan, TopicRefreshKind.PostSubmit, acknowledgementId)
     }
+
+    /**
+     * #1437 — the last-page offer is already certain at acceptance when the canonical pager known
+     * BEFORE the refresh ends beyond the submit target: such a submit never redirects, and a pager
+     * that shrank meanwhile (deletions) is resolved by the click's own redirect. The acknowledgement
+     * then carries the offer at once instead of gaining it after a slow refresh. The canonical
+     * pager is read, not the displayed topic: a transsearch page has its own, and the plan excludes
+     * submissions from its results from both prediction and terminal enrichment.
+     */
+    private fun predictedSubmitLastPage(plan: SubmitRefreshPlan): Int? =
+        _state.value.availablePages.lastOrNull()?.takeIf {
+            plan.submittedElsewhereNotificationAllowed && !plan.overflowRedirectAllowed && it > plan.initialTarget
+        }
 
     /** Resolve a possibly stale last-page offer with its own single redirect, only after the click. */
     fun openSubmittedPostPage(page: Int, departureAnchor: TopicScrollAnchor? = null) {
@@ -2115,13 +2143,19 @@ class TopicViewModel @AssistedInject constructor(
      * genuinely stable :
      * - the #226 overflow redirect is allowed only for a plain reply from the known tail. A quote
      *   submit never chases the new tail, because the user is resuming from the cited post ;
-     * - the last-page offer is decided after the refresh, when the refreshed
+     * - the last-page offer is predicted at acceptance when the known pager proves it
+     *   ([predictedSubmitLastPage]), otherwise decided after the refresh, when the refreshed
      *   [Topic.totalPages] is known and no redirect has already happened. This keeps stale-origin,
      *   unknown-count and quote-overflow submits on their source page while still offering an
      *   explicit jump to the end of the topic; totalPages does not locate the submitted post.
      */
     private fun submitRefreshPlan(target: Int, scrollTo: Int?, quotedNumreponse: Int?): SubmitRefreshPlan {
-        val loadedMode = _state.value.mode as? TopicUiState.Mode.Loaded
+        val current = _state.value
+        val loadedMode = current.mode as? TopicUiState.Mode.Loaded
+        // Capture before performSubmitRefresh takes ownership and replaces the page. The provenance
+        // is read from the DISPLAYED page, never from the search cursor / filtered flag: a later
+        // search without result resets both while the previous transsearch page stays on screen.
+        val fromSearchResults = loadedMode?.fromSearch == true
         val displayedTargetTopic = loadedMode?.topic?.takeIf { it.page == target }
         val terminalTargetTopic = displayedTargetTopic?.takeIf { !loadedMode.provisional }
         val targetWasKnownTail = terminalTargetTopic?.totalPages == target
@@ -2139,7 +2173,8 @@ class TopicViewModel @AssistedInject constructor(
                 else -> null
             },
             overflowRedirectAllowed = scrollTo == null && quotedNumreponse == null && targetWasKnownTail,
-            submittedElsewhereNotificationAllowed = scrollTo == null || quotedNumreponse != null,
+            submittedElsewhereNotificationAllowed = !fromSearchResults &&
+                (scrollTo == null || quotedNumreponse != null),
         )
     }
 
@@ -2246,7 +2281,7 @@ class TopicViewModel @AssistedInject constructor(
                 try {
                     val topic = topicRepository.refreshTopicPage(request.cat, request.post, target)
                     if (generation != ownerGeneration) return@launch
-                    val shouldRedirect = redirectAvailable && topic.totalPages > target
+                    val shouldRedirect = redirectAvailable && plan.needsTailRedirect(target, topic.totalPages)
                     _state.update {
                         it.copy(
                             mode = loadedMode(topic),
@@ -2272,6 +2307,7 @@ class TopicViewModel @AssistedInject constructor(
                         adoptSubmitTarget(target, plan.landing)
                         continue
                     }
+                    alignSubmittedPage(plan, topic)
                     recordSnapshot(topic)
                     dispatchPendingLanding(topic, terminal = true)
                     val offeredLastPage = topic.totalPages.takeIf {
@@ -2290,6 +2326,14 @@ class TopicViewModel @AssistedInject constructor(
                 }
                 return@launch
             }
+        }
+    }
+
+    /** HFR may normalize the page even after our single redirect: the response owns the cursor. */
+    private fun alignSubmittedPage(plan: SubmitRefreshPlan, topic: Topic) {
+        if (plan.lastPageRedirectAllowed && topic.page != request.page) {
+            updateCanonicalPage(topic.page)
+            armLanding(plan.landing)
         }
     }
 
@@ -3365,7 +3409,8 @@ class TopicViewModel @AssistedInject constructor(
     ) {
         _state.update {
             it.copy(
-                mode = loadedMode(topic),
+                // #1437 — the page itself carries its transsearch provenance.
+                mode = loadedMode(topic, fromSearch = true),
                 search = it.search.copy(
                     status = status,
                     canGoPreviousResult = canPrev,

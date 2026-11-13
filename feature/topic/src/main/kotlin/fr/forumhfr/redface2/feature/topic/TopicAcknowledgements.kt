@@ -26,7 +26,10 @@ internal data class TopicAcknowledgement(
 
 /**
  * Save acceptance before consuming the relay. The 1 s deadline confirms acceptance, but only the
- * first terminal refresh closes it: a Published acknowledgement may gain one late last-page offer.
+ * first terminal refresh closes it. A Published acknowledgement carries its last-page offer from
+ * acceptance when the known pager already proves it (#1437): the confirmation and the offer are
+ * then one presentation, and a late refresh only retargets the destination in place. Without a
+ * prediction, it may still gain one late last-page offer (a page the refresh alone revealed).
  * Identity fences departures/accounts/new submissions; revision fences callbacks from replaced
  * presentations. An offer's accessible expiry starts only when it actually acquires the host.
  * Restoring a known offer never repeats a confirmation already presented by the previous process.
@@ -41,6 +44,7 @@ internal class TopicAcknowledgements(
     private var sequence = saved.get<Long>(KEY_SEQUENCE) ?: 0L
     private var accepted: TopicAcknowledgement? = null
     private var wasPresented = false
+    private var offerConsumed = false
     private var phase = Phase.Finished
     private var confirmationExpiresAtMillis: Long? = null
     private var waitUntilMillis: Long? = null
@@ -54,13 +58,19 @@ internal class TopicAcknowledgements(
         restore()
     }
 
-    fun accept(account: String, operation: PostSubmitOperation): Long {
+    /**
+     * [predictedLastPage] is a last page the caller already knows to lie beyond the submit target.
+     * An edit never offers a destination, whatever the caller predicted.
+     */
+    fun accept(account: String, operation: PostSubmitOperation, predictedLastPage: Int? = null): Long {
         clear()
-        val ack = TopicAcknowledgement(
-            nextId(), account,
-            if (operation == PostSubmitOperation.Edit) TopicAcknowledgement.Kind.Edited
-            else TopicAcknowledgement.Kind.Published,
-        )
+        val kind = if (operation == PostSubmitOperation.Edit) {
+            TopicAcknowledgement.Kind.Edited
+        } else {
+            TopicAcknowledgement.Kind.Published
+        }
+        val offered = predictedLastPage?.takeIf { kind == TopicAcknowledgement.Kind.Published && it > 0 }
+        val ack = TopicAcknowledgement(nextId(), account, kind, lastPage = offered)
         accepted = ack
         wasPresented = false
         phase = Phase.Waiting
@@ -91,19 +101,51 @@ internal class TopicAcknowledgements(
         if (phase == Phase.Finished) return
         val late = phase == Phase.Deadline
         phase = Phase.Finished
-        deadlineJob?.cancel()
         val page = lastPage.takeIf { ack.kind == TopicAcknowledgement.Kind.Published }
-        if (!late || page != null) {
-            val confirmationVisible = confirmationExpiresAtMillis?.let { it > now() } == true
-            val ready = ack.copy(
-                lastPage = page,
-                revision = if (late) ack.revision + 1 else ack.revision,
-                offerOnly = late && wasPresented && !confirmationVisible,
-            )
-            accepted = ready
-            mutableFeedback.value = ready
+        when {
+            // Nothing was published yet: the refreshed pager wins over the prediction, both ways.
+            !late -> {
+                deadlineJob?.cancel()
+                settle(ack.copy(lastPage = page))
+            }
+            // The predicted offer already went out with the confirmation: never present it again.
+            // Its expiry job (which replaced the deadline job) must keep running.
+            ack.lastPage != null -> retargetPredictedOffer(ack, page)
+            page != null -> {
+                val confirmationVisible = confirmationExpiresAtMillis?.let { it > now() } == true
+                settle(
+                    ack.copy(
+                        lastPage = page,
+                        revision = ack.revision + 1,
+                        offerOnly = wasPresented && !confirmationVisible,
+                    ),
+                )
+            }
         }
         saveAcknowledgement()
+    }
+
+    private fun settle(ready: TopicAcknowledgement) {
+        accepted = ready
+        mutableFeedback.value = ready
+    }
+
+    /**
+     * Same id and revision: the host keeps its snackbar and only the action's destination moves.
+     * A contradicted prediction removes the displayed offer, or leaves only the still-unshown
+     * confirmation. Neither case presents the success a second time.
+     */
+    private fun retargetPredictedOffer(ack: TopicAcknowledgement, page: Int?) {
+        if (page == ack.lastPage) return
+        accepted = ack.copy(lastPage = page)
+        val shown = feedback.value?.takeIf { it.id == ack.id && it.lastPage != null } ?: return
+        if (page == null && wasPresented) {
+            dismiss(ack.id, ack.revision)
+        } else {
+            mutableFeedback.value = shown.copy(lastPage = page)
+        }
+        // Also cancel unshown work: it may already be queued with an immutable action label.
+        if (page == null) mutableInvalidations.value += 1
     }
 
     fun refreshFailed(id: Long) {
@@ -114,7 +156,8 @@ internal class TopicAcknowledgements(
         mutableFeedback.value = if (wasPresented) {
             TopicAcknowledgement(nextId(), ack.account, TopicAcknowledgement.Kind.RefreshWarning)
         } else {
-            ack.copy(refreshFailed = true, revision = ack.revision + 1).also { accepted = it }
+            // No destination survives a failed refresh, predicted or not.
+            ack.copy(lastPage = null, refreshFailed = true, revision = ack.revision + 1).also { accepted = it }
         }
         saveAcknowledgement()
     }
@@ -150,7 +193,10 @@ internal class TopicAcknowledgements(
             confirmationExpiresAtMillis = deadline
             mutableFeedback.value = null
         } else {
-            mutableFeedback.value = ack.copy(expiresAtMillis = deadline)
+            // The current host already owns the success text. Any later host gets only the offer.
+            val presented = ack.copy(expiresAtMillis = deadline, offerOnly = true)
+            if (accepted?.id == id) accepted = presented
+            mutableFeedback.value = presented
             deadlineJob?.cancel()
             deadlineJob = scope.launch {
                 delay((deadline - now()).coerceAtLeast(0))
@@ -176,7 +222,8 @@ internal class TopicAcknowledgements(
     /** Old host callbacks must not dismiss a newer revision of the same accepted submission. */
     fun dismiss(id: Long, revision: Int? = null) {
         if (accepted?.matches(id, revision) == true) confirmationExpiresAtMillis = null
-        if (current(id, revision) == null) return
+        val ack = current(id, revision) ?: return
+        if (accepted?.matches(id, revision) == true && ack.lastPage != null) offerConsumed = true
         mutableFeedback.value = null
         saveAcknowledgement()
     }
@@ -201,6 +248,7 @@ internal class TopicAcknowledgements(
         deadlineJob?.cancel()
         accepted = null
         wasPresented = false
+        offerConsumed = false
         phase = Phase.Finished
         confirmationExpiresAtMillis = null
         waitUntilMillis = null
@@ -213,13 +261,14 @@ internal class TopicAcknowledgements(
     private fun saveAcknowledgement() {
         val pending = feedback.value ?: accepted?.takeIf { phase != Phase.Finished }
         saved[KEY_OFFER] = pending?.let {
-            // Append to the legacy nine fields; old settled records remain terminal on restore.
+            // Append to legacy fields; consumption remains saved while the refresh is in flight.
             arrayListOf(
                 it.id.toString(), it.account, it.lastPage?.toString().orEmpty(),
                 it.expiresAtMillis?.toString().orEmpty(), it.kind.name,
                 it.refreshFailed.toString(), waitUntilMillis?.toString().orEmpty(),
                 (phase != Phase.Waiting).toString(), wasPresented.toString(),
                 phase.name, it.revision.toString(), it.offerOnly.toString(),
+                (offerConsumed && it.id == accepted?.id).toString(),
             )
         }
     }
@@ -242,7 +291,8 @@ internal class TopicAcknowledgements(
         when {
             phase == Phase.Waiting -> awaitDeadline(ack.id)
             // A process death loses the in-flight refresh and the old host, not an unshown offer.
-            phase == Phase.Deadline && wasPresented -> Unit
+            // A predicted offer was presented with that confirmation: it is restored as an offer.
+            phase == Phase.Deadline && wasPresented && ack.lastPage == null -> Unit
             else -> mutableFeedback.value = ack.forRestoredPresentation()
         }
     }
@@ -258,6 +308,7 @@ internal class TopicAcknowledgements(
         val kind = TopicAcknowledgement.Kind.entries.firstOrNull { it.name == record.getOrNull(4) }
         return when {
             id == null || account == null || kind == null -> null
+            record.getOrNull(12) == "true" -> null
             deadline != null && deadline <= now() -> null
             else -> TopicAcknowledgement(
                 id, account, kind, page,
