@@ -6283,6 +6283,17 @@ class PostEditorViewModelTest {
             submitException?.let { throw it }
             return submitResult ?: error("submitResult not set")
         }
+
+        override suspend fun fetchEditPostForm(
+            context: fr.forumhfr.redface2.core.model.write.PrivateMessageEditContext,
+        ): ReplyForm = error("not used")
+
+        override suspend fun submitEditPost(
+            context: fr.forumhfr.redface2.core.model.write.PrivateMessageEditContext,
+            form: ReplyForm,
+            bbcodeContent: String,
+            options: fr.forumhfr.redface2.core.model.write.ReplyFormOptions,
+        ): ReplySubmitResult = error("not used")
     }
 
     /**

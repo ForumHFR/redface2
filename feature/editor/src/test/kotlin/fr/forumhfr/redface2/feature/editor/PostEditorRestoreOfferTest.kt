@@ -20,6 +20,7 @@ import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
+import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import io.mockk.coEvery
 import io.mockk.coVerify
@@ -71,7 +72,7 @@ class PostEditorRestoreOfferTest {
         every { preferences.observeImagePickerMode() } returns flowOf(ImagePickerMode.DEFAULT)
         every { preferences.observeEditorShortcut() } returns flowOf(EditorShortcut.NONE)
         every { auth.observeAuthState() } returns flowOf(AuthState.Anonymous)
-        coEvery { editRepository.fetchEditPostForm(any()) } returns form(SEED)
+        coEvery { editRepository.fetchEditPostForm(any<EditPostContext>()) } returns form(SEED)
         coEvery { replyRepository.fetchReplyForm(any()) } returns form("")
     }
 
@@ -188,7 +189,7 @@ class PostEditorRestoreOfferTest {
     @Test
     fun restoreDisabledWhileSeedFormLoads() = runTest(dispatcher) {
         val gate = CompletableDeferred<ReplyForm>()
-        coEvery { editRepository.fetchEditPostForm(any()) } coAnswers { gate.await() }
+        coEvery { editRepository.fetchEditPostForm(any<EditPostContext>()) } coAnswers { gate.await() }
         val editor = open()
         runCurrent()
         assertTrue(editor.state.value.isLoadingForm)
@@ -206,7 +207,7 @@ class PostEditorRestoreOfferTest {
 
     @Test
     fun restoreAllowedWithEmptySeedAfterFormFailure() = runTest(dispatcher) {
-        coEvery { editRepository.fetchEditPostForm(any()) } throws IOException("offline")
+        coEvery { editRepository.fetchEditPostForm(any<EditPostContext>()) } throws IOException("offline")
         val editor = open()
         runCurrent()
         assertFalse(editor.state.value.isLoadingForm)
@@ -222,7 +223,7 @@ class PostEditorRestoreOfferTest {
         assertEquals(OFFER + " suffix", editor.bodyFieldState.text.toString())
         advanceUntilIdle()
         assertEquals(OFFER + " suffix", store.saved[editKey]?.body)
-        coEvery { editRepository.fetchEditPostForm(any()) } returns form(SEED)
+        coEvery { editRepository.fetchEditPostForm(any<EditPostContext>()) } returns form(SEED)
         editor.submit(PostEditorIntent.ReloadRequested)
         runCurrent()
         assertEquals(OFFER + " suffix", editor.bodyFieldState.text.toString())
@@ -230,7 +231,7 @@ class PostEditorRestoreOfferTest {
 
     @Test
     fun blankDraftCannotUnlockEditAfterFormFailure() = runTest(dispatcher) {
-        coEvery { editRepository.fetchEditPostForm(any()) } throws IOException("offline")
+        coEvery { editRepository.fetchEditPostForm(any<EditPostContext>()) } throws IOException("offline")
         for (body in listOf("", " \n")) {
             store.preload(editKey, Draft(body))
             val editor = open()
@@ -247,13 +248,13 @@ class PostEditorRestoreOfferTest {
 
     @Test
     fun restorationAfterFormFailureDecidesTheBodyEvenIfClearedBeforeReload() = runTest(dispatcher) {
-        coEvery { editRepository.fetchEditPostForm(any()) } throws IOException("offline")
+        coEvery { editRepository.fetchEditPostForm(any<EditPostContext>()) } throws IOException("offline")
         val editor = open()
         runCurrent()
         editor.submit(PostEditorIntent.DraftRestoreRequested)
         assertRestored(editor, OFFER)
         type(editor, "")
-        coEvery { editRepository.fetchEditPostForm(any()) } returns form(SEED)
+        coEvery { editRepository.fetchEditPostForm(any<EditPostContext>()) } returns form(SEED)
         editor.submit(PostEditorIntent.ReloadRequested)
         runCurrent()
         assertEquals("", editor.bodyFieldState.text.toString())
@@ -272,7 +273,7 @@ class PostEditorRestoreOfferTest {
     @Test
     fun rejectedTypingLeavesServerSeedAvailableForRestore() = runTest(dispatcher) {
         val gate = CompletableDeferred<ReplyForm>()
-        coEvery { editRepository.fetchEditPostForm(any()) } coAnswers { gate.await() }
+        coEvery { editRepository.fetchEditPostForm(any<EditPostContext>()) } coAnswers { gate.await() }
         val editor = open()
         runCurrent()
         type(editor, "typed before server form")
@@ -346,7 +347,7 @@ class PostEditorRestoreOfferTest {
         assertEquals(TextRange(expected.length), editor.bodyFieldState.selection)
         assertNull(editor.bodyFieldState.composition)
         assertNull(state.restorableDraft)
-        coVerify(exactly = 0) { editRepository.submitEditPost(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { editRepository.submitEditPost(any<EditPostContext>(), any(), any(), any()) }
         coVerify(exactly = 0) { replyRepository.submitReply(any(), any(), any(), any()) }
     }
 

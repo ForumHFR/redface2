@@ -83,6 +83,7 @@ import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
+import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyForm
@@ -173,7 +174,7 @@ class PostEditorRestorationScreenTest {
         val route = request.copy(mode = PostEditorMode.Edit, numreponse = 101)
         val body = "Restored editor line\n".repeat(200)
         store.preload(EditorDraftKey.editPost(23, 101), EditorDraftStore.Draft(body = body))
-        coEvery { edits.fetchEditPostForm(any()) } returns
+        coEvery { edits.fetchEditPostForm(any<EditPostContext>()) } returns
             ReplyForm("hash", "topic", emptyMap(), false, "Server editor line\n".repeat(100))
         val owner = host().get()
         val model = editor(owner, route)
@@ -684,7 +685,7 @@ class PostEditorRestorationScreenTest {
     private fun checkFormContext(mode: PostEditorMode, subject: String) {
         val form = CompletableDeferred<ReplyForm>()
         coEvery { replies.fetchReplyForm(any()) } coAnswers { form.await() }
-        coEvery { edits.fetchEditPostForm(any()) } coAnswers { form.await() }
+        coEvery { edits.fetchEditPostForm(any<EditPostContext>()) } coAnswers { form.await() }
         val route = request.copy(mode = mode, numreponse = if (mode == PostEditorMode.Edit) 101 else null)
         val owner = host().get()
         val model = editor(owner, route)
@@ -706,7 +707,7 @@ class PostEditorRestorationScreenTest {
         val form = CompletableDeferred<ReplyForm>()
         var fail = reload
         coEvery { replies.fetchReplyForm(any()) } coAnswers { form.await() }
-        coEvery { edits.fetchEditPostForm(any()) } coAnswers {
+        coEvery { edits.fetchEditPostForm(any<EditPostContext>()) } coAnswers {
             if (fail) throw IOException("offline")
             form.await()
         }
