@@ -123,7 +123,10 @@ class EditorDraftOfferSheetTest {
         }
     }
 
-    @Test fun `ordinary information consumes the first offer tap in both bars`() {
+    // The compact action bar only keeps ↺ beside a visible information when it is wide enough.
+    @Test
+    @Config(qualifiers = "fr-rFR-w760dp-h400dp-xxhdpi")
+    fun `ordinary information consumes the first offer tap in both bars`() {
         compose.setContent { fixture.Content() }
         listOf(false, true).forEach { compact ->
             compose.runOnIdle { fixture.compact = compact; fixture.notice() }

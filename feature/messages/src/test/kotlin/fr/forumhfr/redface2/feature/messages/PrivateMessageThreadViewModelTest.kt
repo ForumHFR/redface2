@@ -140,7 +140,7 @@ class PrivateMessageThreadViewModelTest {
         assertEquals(quotes, stored.pendingInlineQuoteRequest?.quotes)
         assertFalse(navigated)
         returned.complete(Unit)
-        kotlinx.coroutines.test.runCurrent()
+        testScheduler.runCurrent()
         assertTrue(navigated)
     }
 

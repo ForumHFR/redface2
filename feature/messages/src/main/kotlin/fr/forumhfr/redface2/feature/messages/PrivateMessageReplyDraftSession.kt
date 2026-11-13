@@ -251,7 +251,7 @@ internal class PrivateMessageReplyDraftSession(
         val needsMerge = mergedDraftOffer != offeredBody
         mergedDraftOffer = offeredBody
         restoredOfferAwaitingWrite = offeredBody
-        if (needsMerge && merge.body != liveBody) replaceBody(merge.body)
+        if (needsMerge) replaceBody(merge.body)
         if (needsMerge) submission.drafts.stageBodyMerge(merge)
         restoration.decide(EditorSessionField.Body)
         updateState { it.copy(restorableDraft = null, draftHydratedFromForm = true) }

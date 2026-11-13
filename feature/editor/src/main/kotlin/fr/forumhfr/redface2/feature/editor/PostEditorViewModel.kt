@@ -1098,7 +1098,7 @@ class PostEditorViewModel @AssistedInject constructor(
         val needsMerge = mergedDraftOffer != offeredBody
         mergedDraftOffer = offeredBody
         restoredOfferAwaitingWrite = offeredBody
-        if (needsMerge && merge.body != liveBody) replaceBody(merge.body)
+        if (needsMerge) replaceBody(merge.body)
         if (needsMerge) submission.drafts.stageBodyMerge(merge)
         updateChromeState { it.copy(restorableDraft = null, draftHydratedFromForm = true) }
         viewModelScope.launch {

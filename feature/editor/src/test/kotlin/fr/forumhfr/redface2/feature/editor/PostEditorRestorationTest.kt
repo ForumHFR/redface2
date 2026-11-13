@@ -339,8 +339,10 @@ class PostEditorRestorationTest {
         assertEquals("offered body", store.saved[key]?.body)
         assertEquals(pending(), store.saved[key]?.pendingInlineQuoteRequest)
         assertEquals(0, store.saveCount)
-        coVerify(exactly = 1) { replies.fetchReplyForm(match { !it.isQuote }) }
-        coVerify(exactly = 0) { replies.fetchReplyForm(match { it.isQuote }) }
+        // ED-132 (v0.7.8): the quote is fetched at once, without waiting for the offer decision; its
+        // form also carries the ordinary metadata, so no separate ordinary GET is made.
+        coVerify(exactly = 1) { replies.fetchReplyForm(match { it.isQuote }) }
+        coVerify(exactly = 0) { replies.fetchReplyForm(match { !it.isQuote }) }
     }
 
     @Test
