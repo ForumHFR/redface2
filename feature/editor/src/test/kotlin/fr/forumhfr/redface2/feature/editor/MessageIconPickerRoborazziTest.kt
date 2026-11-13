@@ -1,6 +1,5 @@
 package fr.forumhfr.redface2.feature.editor
 
-import android.graphics.Bitmap
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -20,15 +19,10 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
-import androidx.test.core.app.ApplicationProvider
-import coil3.ImageLoader
 import coil3.SingletonImageLoader
-import coil3.asImage
-import coil3.request.ErrorResult
-import coil3.test.FakeImageLoaderEngine
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.testing.captureRoboImage
-import java.io.IOException
+import org.junit.After
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -43,6 +37,9 @@ import org.robolectric.annotation.GraphicsMode
 @OptIn(ExperimentalTestApi::class, coil3.annotation.DelicateCoilApi::class)
 class MessageIconPickerRoborazziTest {
     @get:Rule val compose = createComposeRule()
+
+    @After
+    fun resetImageLoader() = SingletonImageLoader.reset()
 
     @Test
     fun spritesAt360Dp() = captureMatrix(width = 360, offline = false)
@@ -59,7 +56,7 @@ class MessageIconPickerRoborazziTest {
     fun offlineAt411Dp() = captureMatrix(width = 411, offline = true)
 
     private fun captureMatrix(width: Int, offline: Boolean) {
-        installImages(offline)
+        installMessageIconPickerTestImages(offline)
         val sample = mutableStateOf(Sample("light", 1f))
         compose.setContent {
             val current = sample.value
@@ -89,24 +86,6 @@ class MessageIconPickerRoborazziTest {
                 target.captureRoboImage("src/test/screenshots/message_tone_${width}_fs${scale}_${theme}_$state.png")
             }
         }
-    }
-
-    private fun installImages(offline: Boolean) {
-        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
-        val builder = FakeImageLoaderEngine.Builder()
-        if (offline) {
-            builder.default { chain ->
-                ErrorResult(image = null, request = chain.request, throwable = IOException("Offline"))
-            }
-        } else {
-            // Synthetic pixel art, not an HFR fixture: edges make accidental filtering visible in the captures.
-            val bitmap = Bitmap.createBitmap(15, 15, Bitmap.Config.ARGB_8888)
-            for (y in 0 until 15) for (x in 0 until 15) {
-                bitmap.setPixel(x, y, if ((x + y) % 2 == 0) 0xFF1565C0.toInt() else 0xFFFFC107.toInt())
-            }
-            builder.default(bitmap.asImage())
-        }
-        SingletonImageLoader.setUnsafe(ImageLoader.Builder(context).components { add(builder.build()) }.build())
     }
 
     private data class Sample(val theme: String, val scale: Float)

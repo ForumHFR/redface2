@@ -52,6 +52,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.roundToInt
 import kotlinx.coroutines.CompletableDeferred
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -72,6 +73,9 @@ class MessageIconPickerTest {
 
     @Before
     fun installImages() = install(FakeImageLoaderEngine.Builder().default(ColorImage(0xFF1565C0.toInt())).build())
+
+    @After
+    fun resetImageLoader() = SingletonImageLoader.reset()
 
     @Test
     fun sixColumnsAt360Dp() = assertGrid(360.dp, columns = 6)

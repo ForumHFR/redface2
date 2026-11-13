@@ -19,6 +19,7 @@ import coil3.ImageLoader
 import coil3.SingletonImageLoader
 import coil3.test.FakeImageLoaderEngine
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
 import org.junit.Rule
@@ -41,6 +42,10 @@ class PostEditorOptionsTest {
         val engine = FakeImageLoaderEngine.Builder().default(ColorImage(0xFF1565C0.toInt())).build()
         SingletonImageLoader.setUnsafe(ImageLoader.Builder(context).components { add(engine) }.build())
     }
+
+    @OptIn(coil3.annotation.DelicateCoilApi::class)
+    @After
+    fun resetImageLoader() = SingletonImageLoader.reset()
 
     @Test
     fun `ED71 real post options expose 16 tones immediately and emit intent`() {
