@@ -17,8 +17,8 @@ import fr.forumhfr.redface2.core.model.persoSmileyUrl
  *    degrade to plain text rather than blowing up the preview.
  * 2. **Subset coverage.** Phase 2B covers the inlines and blocks the toolbar can
  *    insert plus the constructs HFR pre-fills (notably `[quotemsg=…]`). Anything
- *    outside the subset is preserved as raw text so the editor stays usable while
- *    follow-up issues (#11 smileys/images, color picker UX) catch up.
+ *    outside the subset is preserved as raw text. Images become blocks at top level
+ *    and inline images inside links, formatting and color containers.
  *
  * The parser intentionally lives in `:core:parser` per ADR-011 and the contract
  * documented in `docs/specs/architecture.md` (`fun parsePostContentFromBbcode(...)`).
@@ -224,6 +224,7 @@ class BbcodeContentParser {
             "i" -> wrapInline(tokens, from, to, depth, tag) { PostInline.Emphasis(it) }
             "u" -> wrapInline(tokens, from, to, depth, tag) { PostInline.Underline(it) }
             "strike" -> wrapInline(tokens, from, to, depth, tag) { PostInline.Strike(it) }
+            "img" -> parseInlineImage(tokens, from, to)
             "url" -> parseInlineUrl(tokens, from, to, depth, open)
             "email" -> parseInlineEmail(tokens, from, to, depth, open)
             else -> {
@@ -252,6 +253,23 @@ class BbcodeContentParser {
         }
         val children = parseInlinesOnly(tokens, from + 1, close, depth + 1)
         return InlineSlice(wrap(children), close - from + 1)
+    }
+
+    private fun parseInlineImage(tokens: List<Token>, from: Int, to: Int): InlineSlice {
+        val close = findMatchingClose(tokens, from, to, "img")
+        if (close <= from) {
+            return InlineSlice(PostInline.Text((tokens[from] as Token.Open).raw), 1)
+        }
+        val rawUrl = flattenRawText(tokens, from + 1, close).trim()
+        // Nested or crossed tags belong to the draft text, never to an image URL.
+        val containsTag = tokens.subList(from + 1, close).any { it !is Token.Text }
+        val url = if (containsTag) null else sanitizeImageHref(rawUrl)
+        val node = if (url == null) {
+            PostInline.Text(flattenRawText(tokens, from, close + 1))
+        } else {
+            PostInline.InlineImage(url = url, description = null)
+        }
+        return InlineSlice(node, close - from + 1)
     }
 
     private fun parseInlineUrl(
@@ -393,7 +411,7 @@ class BbcodeContentParser {
                 is PostInline.Strike -> append(flattenInlineText(node.children))
                 is PostInline.Color -> append(flattenInlineText(node.children))
                 is PostInline.Link -> append(flattenInlineText(node.children))
-                is PostInline.InlineImage -> Unit
+                is PostInline.InlineImage -> append(node.url)
                 is PostInline.Smiley -> Unit
             }
         }
