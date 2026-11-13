@@ -4378,8 +4378,9 @@ class TopicViewModelTest {
     }
 
     @Test
-    fun `quote from a transsearch page kept by a later empty search never gets the canonical tail`() = runTest {
-        // Astra r2 (A): the empty search resets cursor and filter, the transsearch page stays.
+    fun `quote from an unfiltered transsearch page kept by an empty search never gets the canonical tail`() = runTest {
+        // Astra r2 (A): an empty fresh search clears cursor history, keeping the displayed transsearch page.
+        // The filter stays false because both searches explicitly run without filtering.
         repeat(2) { pass ->
             val refreshedBeforeBound = pass == 1
             val gate = CompletableDeferred<Unit>()
@@ -4404,14 +4405,17 @@ class TopicViewModelTest {
             viewModel.effects.test {
                 viewModel.send(TopicIntent.OpenSearch)
                 viewModel.send(TopicIntent.SearchWordChanged("iwds"))
+                viewModel.send(TopicIntent.SearchOnlyMatchesChanged(false))
                 viewModel.send(TopicIntent.SubmitSearch)
-                assertEquals(TopicEffect.ScrollToTopOfResults, awaitItem())
+                assertEquals(TopicEffect.ScrollToPost(640), awaitItem())
+                assertTrue(viewModel.state.value.search.canGoNextResult)
                 viewModel.send(TopicIntent.SearchWordChanged("nothing"))
                 viewModel.send(TopicIntent.SubmitSearch)
                 runCurrent()
                 val search = viewModel.state.value.search
                 assertEquals(2, searchRepo.requests.size)
                 assertEquals(TopicSearchStatus.NoResults, search.status)
+                assertFalse(search.onlyMatches)
                 assertFalse(search.showingFilteredResults)
                 assertFalse(search.canGoPreviousResult)
                 assertFalse(search.canGoNextResult)
