@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
@@ -102,7 +103,6 @@ private fun MessageIconGrid(selectedIcon: Int, enabled: Boolean, onIconSelected:
                             enabled = enabled,
                             spriteSize = spriteSize,
                             onIconSelected = onIconSelected,
-                            modifier = Modifier.weight(1f),
                         )
                     }
                 }
@@ -122,14 +122,14 @@ internal fun messageIconSpritePx(targetPx: Float, roomPx: Int): Int {
     return MSG_ICON_SOURCE_PX * scale.coerceAtLeast(1)
 }
 
+/** One equal-width cell of a grid row (hence the [RowScope] receiver, which carries its weight). */
 @Composable
-private fun MessageIconOption(
+private fun RowScope.MessageIconOption(
     icon: Int,
     selected: Boolean,
     enabled: Boolean,
     spriteSize: Dp,
     onIconSelected: (Int) -> Unit,
-    modifier: Modifier = Modifier,
 ) {
     val description = messageIconName(icon)
     val shape = MaterialTheme.shapes.small
@@ -140,7 +140,7 @@ private fun MessageIconOption(
         Modifier
     }
     Box(
-        modifier = modifier.height(MSG_ICON_TARGET_HEIGHT).clip(shape).then(selection)
+        modifier = Modifier.weight(1f).height(MSG_ICON_TARGET_HEIGHT).clip(shape).then(selection)
             .testTag("$MSG_ICON_OPTION_TAG_PREFIX$icon")
             .selectable(selected = selected, enabled = enabled, role = Role.RadioButton,
                 onClick = { onIconSelected(icon) })
