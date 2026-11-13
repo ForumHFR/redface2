@@ -117,7 +117,7 @@ Codex n'a pas de runner CI : c'est une **discipline**, signalée (pas imposée) 
 Le pipeline canonique (`choix techno → … → review`, `[advisory]`) est défini dans
 **`docs/specs/methodology.md` § Pipeline de développement** (source canonique) — `AGENTS.md` ne le
 redéfinit pas. Conséquences opérationnelles pour les agents :
-- **Validation** = reproduire la CI via le skill **`/validate`** ; **jamais `:app:testDevDebugUnitTest`
+- **Validation** = reproduire la CI via le skill **`/validate`** ; **jamais `:app:testProdDebugUnitTest`
   seul** (il compile mais n'exécute pas les tests des modules `feature`/`core`).
 - **Review** = Codex (cf. § Cadence Codex ci-dessus) + `/code-review`.
 

@@ -192,6 +192,16 @@ android {
     }
 }
 
+// beta and dev have no source set of their own (app/src = main, debug, test): their unit tests
+// replayed prod's. Only prod keeps unit-test components; the unqualified `test` stays on prod
+// across build types. The beta/dev variants are still built by release.yml.
+androidComponents {
+    beforeVariants { variantBuilder ->
+        val channel = variantBuilder.productFlavors.firstOrNull { it.first == "channel" }?.second
+        if (channel != null && channel != "prod") variantBuilder.enableUnitTest = false
+    }
+}
+
 // Play Console upload is delegated to the GitHub Action `r0adkll/upload-google-play` in
 // .github/workflows/release.yml — it consumes the AAB artefact produced by `:app:bundleRelease`
 // and pushes it via the Play Developer API directly. Keeping the upload step out of Gradle
@@ -261,12 +271,22 @@ dependencies {
     testImplementation(libs.turbine)
 }
 
-// Guard B (#1045): DocsConsistencyTest reads docs/specs/reading-parity.md at runtime, so the page
-// must be a declared input of the test tasks. Without it, both the local UP-TO-DATE check and the
-// CI-restored build cache (setup-gradle) could serve a stale green result to a docs-only PR that
-// breaks a symbol citation.
+// DocsConsistencyTest and ArchitectureKonsistTest read the repository at runtime (repo root found
+// from `user.dir`): root docs, every docs/**/*.md, and every kt/kts/java/xml file under a module's
+// `src`. They must be declared inputs, otherwise UP-TO-DATE and the CI build cache (written from
+// `dev`) can serve a stale green result. Guard B (#1045) is one of these reads.
+val docsReadByAppTests = rootProject.fileTree("docs") { include("**/*.md") }
+val sourcesReadByAppTests = rootProject.fileTree(rootProject.projectDir) {
+    listOf("app", "core/*", "feature/*", "build-logic").forEach { module ->
+        listOf("kt", "kts", "java", "xml").forEach { ext -> include("$module/src/**/*.$ext") }
+    }
+}
 tasks.withType<Test>().configureEach {
-    inputs.file(rootProject.layout.projectDirectory.file("docs/specs/reading-parity.md"))
+    inputs.files(rootProject.file("AGENTS.md"), rootProject.file("CHANGELOG.md"), rootProject.file("README.md"))
         .withPathSensitivity(PathSensitivity.RELATIVE)
-        .withPropertyName("readingParityMatrix")
+        .withPropertyName("repoRootDocs")
+    inputs.files(docsReadByAppTests)
+        .withPathSensitivity(PathSensitivity.RELATIVE).ignoreEmptyDirectories().withPropertyName("siteDocs")
+    inputs.files(sourcesReadByAppTests)
+        .withPathSensitivity(PathSensitivity.RELATIVE).ignoreEmptyDirectories().withPropertyName("repoSources")
 }
