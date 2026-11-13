@@ -334,6 +334,164 @@ class TopicAcknowledgementsTest {
     }
 
     @Test
+    fun `predicted offer rides the single acknowledgement and a late refresh never presents again`() = runTest {
+        val store = TopicAcknowledgements(SavedStateHandle(), backgroundScope) { testScheduler.currentTime }
+        val id = store.accept("xaat", PostSubmitOperation.Publish, predictedLastPage = 5)
+        assertNull(store.feedback.value)
+        advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
+        runCurrent()
+        val confirmation = requireNotNull(store.feedback.value)
+        assertEquals(TopicAcknowledgement.Kind.Published, confirmation.kind)
+        assertEquals(5, confirmation.lastPage)
+        assertEquals(0, confirmation.revision)
+        assertFalse(confirmation.offerOnly)
+        store.presented(id, 10_000, confirmation.revision)
+        val presented = requireNotNull(store.feedback.value)
+        store.refreshed(id, lastPage = 5)
+        assertEquals(presented, store.feedback.value)
+        store.refreshed(id, lastPage = 9)
+        assertEquals(presented, store.feedback.value)
+        assertEquals(5, store.takeOffer(id, "xaat", confirmation.revision))
+        assertNull(store.takeOffer(id, "xaat", confirmation.revision))
+    }
+
+    @Test
+    fun `late refresh retargets a presented predicted offer in place and keeps its expiry`() = runTest {
+        val store = TopicAcknowledgements(SavedStateHandle(), backgroundScope) { testScheduler.currentTime }
+        val id = store.accept("xaat", PostSubmitOperation.Publish, predictedLastPage = 5)
+        advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
+        runCurrent()
+        store.presented(id, 10_000)
+        val presented = requireNotNull(store.feedback.value)
+        advanceTimeBy(500)
+        runCurrent()
+        store.refreshed(id, lastPage = 6)
+        assertEquals(presented.copy(lastPage = 6), store.feedback.value)
+        assertEquals(9_500L, store.remainingMillis(id, presented.revision))
+        advanceTimeBy(9_499)
+        runCurrent()
+        assertEquals(6, store.feedback.value?.lastPage)
+        advanceTimeBy(1)
+        runCurrent()
+        assertNull(store.feedback.value)
+        assertNull(store.takeOffer(id, "xaat"))
+    }
+
+    @Test
+    fun `late refresh retargets a predicted offer still waiting for the host`() = runTest {
+        val store = TopicAcknowledgements(SavedStateHandle(), backgroundScope) { testScheduler.currentTime }
+        val id = store.accept("xaat", PostSubmitOperation.Publish, predictedLastPage = 5)
+        advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
+        runCurrent()
+        val queued = requireNotNull(store.feedback.value)
+        store.refreshed(id, lastPage = 6)
+        assertEquals(queued.copy(lastPage = 6), store.forPresentation(id, queued.revision))
+        store.presented(id, 10_000, queued.revision)
+        assertEquals(6, store.takeOffer(id, "xaat", queued.revision))
+    }
+
+    @Test
+    fun `late refresh without a later page leaves the presented predicted offer alone`() = runTest {
+        val store = TopicAcknowledgements(SavedStateHandle(), backgroundScope) { testScheduler.currentTime }
+        val id = store.accept("xaat", PostSubmitOperation.Publish, predictedLastPage = 5)
+        advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
+        runCurrent()
+        store.presented(id, 10_000)
+        val presented = store.feedback.value
+        store.refreshed(id, lastPage = null)
+        assertEquals(presented, store.feedback.value)
+        assertEquals(5, store.takeOffer(id, "xaat"))
+    }
+
+    @Test
+    fun `fast refresh settles a predicted offer once with the refreshed pager`() = runTest {
+        repeat(2) { stillOffered ->
+            val store = TopicAcknowledgements(SavedStateHandle(), backgroundScope) { testScheduler.currentTime }
+            val id = store.accept("xaat", PostSubmitOperation.Publish, predictedLastPage = 5)
+            store.refreshed(id, lastPage = if (stillOffered == 1) 6 else null)
+            val ack = requireNotNull(store.feedback.value)
+            assertEquals(if (stillOffered == 1) 6 else null, ack.lastPage)
+            assertEquals(0, ack.revision)
+            advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS + 1)
+            runCurrent()
+            assertEquals(ack, store.feedback.value)
+        }
+    }
+
+    @Test
+    fun `an edit ignores a predicted destination`() = runTest {
+        val store = TopicAcknowledgements(SavedStateHandle(), backgroundScope) { testScheduler.currentTime }
+        val id = store.accept("xaat", PostSubmitOperation.Edit, predictedLastPage = 5)
+        advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
+        runCurrent()
+        val ack = requireNotNull(store.feedback.value)
+        assertEquals(TopicAcknowledgement.Kind.Edited, ack.kind)
+        assertNull(ack.lastPage)
+        store.presented(id, 4_000)
+        store.refreshed(id, lastPage = 6)
+        assertNull(store.feedback.value)
+    }
+
+    @Test
+    fun `failed refresh never keeps a predicted destination`() = runTest {
+        repeat(2) { presented ->
+            val store = TopicAcknowledgements(SavedStateHandle(), backgroundScope) { testScheduler.currentTime }
+            val id = store.accept("xaat", PostSubmitOperation.Publish, predictedLastPage = 5)
+            advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
+            runCurrent()
+            if (presented == 1) store.presented(id, 10_000)
+            store.refreshFailed(id)
+            val failure = requireNotNull(store.feedback.value)
+            assertNull(failure.lastPage)
+            if (presented == 1) {
+                assertEquals(TopicAcknowledgement.Kind.RefreshWarning, failure.kind)
+            } else {
+                assertEquals(id, failure.id)
+                assertTrue(failure.refreshFailed)
+            }
+            assertNull(store.takeOffer(id, "xaat"))
+        }
+    }
+
+    @Test
+    fun `predicted offer presented at the deadline survives process death as an offer only`() = runTest {
+        val saved = SavedStateHandle()
+        val oldScope = CoroutineScope(backgroundScope.coroutineContext + Job())
+        val store = TopicAcknowledgements(saved, oldScope) { testScheduler.currentTime }
+        val id = store.accept("xaat", PostSubmitOperation.Publish, predictedLastPage = 5)
+        advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
+        runCurrent()
+        store.presented(id, 30_000)
+        val offer = requireNotNull(store.feedback.value)
+        val snapshot = copyHandle(saved)
+        oldScope.cancel()
+
+        val restored = TopicAcknowledgements(snapshot, backgroundScope) { testScheduler.currentTime }
+        assertEquals(offer.copy(offerOnly = true), restored.feedback.value)
+        restored.refreshed(id, lastPage = 6)
+        assertEquals(offer.copy(offerOnly = true, lastPage = 6), restored.feedback.value)
+        restored.presented(id, 60_000, offer.revision)
+        assertEquals(offer.expiresAtMillis, restored.feedback.value?.expiresAtMillis)
+        assertEquals(6, restored.takeOffer(id, "xaat", offer.revision))
+    }
+
+    @Test
+    fun `prediction saved while waiting is restored with the original wait bound`() = runTest {
+        val saved = SavedStateHandle()
+        val store = TopicAcknowledgements(saved, backgroundScope) { testScheduler.currentTime }
+        val id = store.accept("xaat", PostSubmitOperation.Publish, predictedLastPage = 5)
+        advanceTimeBy(600)
+        runCurrent()
+        val restored = TopicAcknowledgements(copyHandle(saved), backgroundScope) { testScheduler.currentTime }
+        assertNull(restored.feedback.value)
+        advanceTimeBy(400)
+        runCurrent()
+        assertEquals(id, restored.feedback.value?.id)
+        assertEquals(5, restored.feedback.value?.lastPage)
+        assertFalse(requireNotNull(restored.feedback.value).offerOnly)
+    }
+
+    @Test
     fun `legacy settled records remain terminal and retain their offer`() = runTest {
         val saved = SavedStateHandle(
             mapOf("topic_ack_offer" to arrayListOf(

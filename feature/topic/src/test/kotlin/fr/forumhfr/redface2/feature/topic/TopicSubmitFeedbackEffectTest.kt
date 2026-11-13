@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.topic
 
+import androidx.compose.material3.SnackbarData
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -367,6 +368,40 @@ class TopicSubmitFeedbackEffectTest {
     }
 
     @Test
+    fun `predicted offer is the only snackbar and a late refresh retargets it in place`() {
+        val fixture = lateFeedback()
+        val host = fixture.host
+        var opened: Int? = null
+        val shown = mutableListOf<SnackbarData>()
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                LaunchedEffect(host) {
+                    snapshotFlow { host.currentSnackbarData }.filterNotNull().collect { shown += it }
+                }
+                SnackbarHost(host)
+                TopicSubmitFeedbackEffect(fixture.store, host, true, "xaat") { opened = it }
+            }
+        }
+        var id = 0L
+        compose.runOnIdle { id = fixture.acceptAtDeadline(predictedLastPage = 5) }
+        compose.waitUntil { host.currentSnackbarData != null }
+        val first = host.currentSnackbarData!!
+        assertEquals("Message publié", first.visuals.message)
+        assertEquals("Dernière page", first.visuals.actionLabel)
+        assertEquals(SnackbarDuration.Long, first.visuals.duration)
+        compose.waitUntil { fixture.store.feedback.value?.expiresAtMillis != null }
+        compose.runOnIdle { fixture.store.refreshed(id, 6) }
+        compose.waitForIdle()
+        assertSame(first, host.currentSnackbarData)
+        assertEquals(listOf(first), shown)
+        compose.runOnIdle { host.currentSnackbarData!!.performAction() }
+        compose.waitUntil { opened == 6 }
+        assertNull(fixture.store.feedback.value)
+        compose.waitUntil { host.currentSnackbarData == null }
+        assertEquals(listOf(first), shown)
+    }
+
+    @Test
     fun `delete success uses the common short snackbar`() {
         val host = SnackbarHostState()
         lateinit var store: TopicAcknowledgements
@@ -391,8 +426,8 @@ private class LateFeedback {
     val host = SnackbarHostState()
     val store = TopicAcknowledgements(SavedStateHandle(), scope) { clock.currentTime }
 
-    fun acceptAtDeadline(): Long {
-        val id = store.accept("xaat", PostSubmitOperation.Publish)
+    fun acceptAtDeadline(predictedLastPage: Int? = null): Long {
+        val id = store.accept("xaat", PostSubmitOperation.Publish, predictedLastPage)
         clock.advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
         clock.runCurrent()
         return id

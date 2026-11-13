@@ -4265,6 +4265,133 @@ class TopicViewModelTest {
     }
 
     @Test
+    fun `slow plain reply from an older page offers the known tail with its single acknowledgement`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flowOf(fakeTopic(2, 5))),
+            refreshTopicsToReturn = listOf(fakeTopic(2, 6)),
+        ).apply { refreshHook = { _, _, _ -> gate.await() } }
+        val viewModel = topicViewModel(
+            request = topicRequest(2), topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        viewModel.applySubmitResult(2, null)
+        assertNull("the one-second bound still gates it", viewModel.submitAcknowledgements.feedback.value)
+        advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
+        runCurrent()
+        val confirmation = requireNotNull(viewModel.submitAcknowledgements.feedback.value)
+        assertEquals(TopicAcknowledgement.Kind.Published, confirmation.kind)
+        assertEquals(5, confirmation.lastPage)
+        assertEquals(0, confirmation.revision)
+        viewModel.submitAcknowledgements.presented(confirmation.id, 10_000, confirmation.revision)
+        val presented = requireNotNull(viewModel.submitAcknowledgements.feedback.value)
+        gate.complete(Unit)
+        runCurrent()
+        // Same id, same revision, same expiry: nothing for the host to present a second time.
+        assertEquals(presented.copy(lastPage = 6), viewModel.submitAcknowledgements.feedback.value)
+        assertEquals(2, viewModel.state.value.request.page)
+        assertEquals(listOf(2), repository.refreshCalls.map { it.third })
+        assertEquals(6, viewModel.submitAcknowledgements.takeOffer(confirmation.id, "xaat", confirmation.revision))
+        destroyViewModel(viewModel)
+    }
+
+    @Test
+    fun `slow plain reply from the last page acknowledges once without any offer`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flowOf(fakeTopic(2, 2))),
+            refreshTopicsToReturn = listOf(fakeTopic(2, 2)),
+        ).apply { refreshHook = { _, _, _ -> gate.await() } }
+        val viewModel = topicViewModel(
+            request = topicRequest(2), topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        viewModel.applySubmitResult(2, null)
+        advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
+        runCurrent()
+        val confirmation = requireNotNull(viewModel.submitAcknowledgements.feedback.value)
+        assertEquals(TopicAcknowledgement.Kind.Published, confirmation.kind)
+        assertNull(confirmation.lastPage)
+        viewModel.submitAcknowledgements.presented(confirmation.id, 4_000, confirmation.revision)
+        gate.complete(Unit)
+        runCurrent()
+        assertNull(viewModel.submitAcknowledgements.feedback.value)
+        assertNull(viewModel.submitAcknowledgements.takeOffer(confirmation.id, "xaat"))
+        destroyViewModel(viewModel)
+    }
+
+    @Test
+    fun `a page only the slow refresh reveals replaces the short confirmation exactly once`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flowOf(fakeTopic(2, 2))),
+            refreshTopicsToReturn = listOf(fakeTopic(2, 3, posts = listOf(fakePost(640)))),
+        ).apply { refreshHook = { _, _, _ -> gate.await() } }
+        val viewModel = topicViewModel(
+            request = topicRequest(2), topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        viewModel.applySubmitResult(2, 640, listOf(640))
+        advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
+        runCurrent()
+        val confirmation = requireNotNull(viewModel.submitAcknowledgements.feedback.value)
+        assertNull("nothing known at acceptance proved a later page", confirmation.lastPage)
+        viewModel.submitAcknowledgements.presented(confirmation.id, 4_000, confirmation.revision)
+        gate.complete(Unit)
+        runCurrent()
+        val offer = requireNotNull(viewModel.submitAcknowledgements.feedback.value)
+        assertEquals(confirmation.id, offer.id)
+        assertEquals(3, offer.lastPage)
+        assertEquals(confirmation.revision + 1, offer.revision)
+        destroyViewModel(viewModel)
+    }
+
+    @Test
+    fun `fast reply from an older page settles one acknowledgement with the refreshed tail`() = runTest {
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flowOf(fakeTopic(2, 5))),
+            refreshTopicsToReturn = listOf(fakeTopic(2, 6)),
+        )
+        val viewModel = topicViewModel(
+            request = topicRequest(2), topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        viewModel.applySubmitResult(2, null)
+        runCurrent()
+        val ack = requireNotNull(viewModel.submitAcknowledgements.feedback.value)
+        assertEquals(6, ack.lastPage)
+        assertEquals(0, ack.revision)
+        advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS + 1)
+        runCurrent()
+        assertEquals(ack, viewModel.submitAcknowledgements.feedback.value)
+        destroyViewModel(viewModel)
+    }
+
+    @Test
+    fun `slow edit on an older page never predicts a destination`() = runTest {
+        val gate = CompletableDeferred<Unit>()
+        val repository = FakeTopicRepository(
+            flowsToReturn = listOf(flowOf(fakeTopic(2, 5))),
+            refreshTopicsToReturn = listOf(fakeTopic(2, 6, posts = listOf(fakePost(777)))),
+        ).apply { refreshHook = { _, _, _ -> gate.await() } }
+        val viewModel = topicViewModel(
+            request = topicRequest(2), topicRepository = repository,
+            authRepository = FakeAuthRepository(AuthState.Authenticated("xaat")),
+        )
+        viewModel.applySubmitResult(2, 777, operation = PostSubmitOperation.Edit)
+        advanceTimeBy(TOPIC_SUBMIT_ACK_WAIT_MILLIS)
+        runCurrent()
+        val ack = requireNotNull(viewModel.submitAcknowledgements.feedback.value)
+        assertEquals(TopicAcknowledgement.Kind.Edited, ack.kind)
+        assertNull(ack.lastPage)
+        viewModel.submitAcknowledgements.presented(ack.id, 4_000, ack.revision)
+        gate.complete(Unit)
+        runCurrent()
+        assertNull(viewModel.submitAcknowledgements.feedback.value)
+        destroyViewModel(viewModel)
+    }
+
+    @Test
     fun `duplicate full editor handoff refreshes and acknowledges only once`() = runTest {
         val repository = FakeTopicRepository(
             flowsToReturn = listOf(flow { emit(fakeTopic(2, 2)) }),

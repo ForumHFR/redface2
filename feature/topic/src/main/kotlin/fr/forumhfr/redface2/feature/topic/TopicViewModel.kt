@@ -2085,10 +2085,24 @@ class TopicViewModel @AssistedInject constructor(
         jumpStack.clear()
         syncJumpAvailability()
         val acknowledgementId = submitAcknowledgements.accept(
-            _state.value.connectedPseudo?.let(::canonicalizePseudo).orEmpty(), operation,
+            _state.value.connectedPseudo?.let(::canonicalizePseudo).orEmpty(),
+            operation,
+            predictedLastPage = predictedSubmitLastPage(plan),
         )
         performSubmitRefresh(plan, TopicRefreshKind.PostSubmit, acknowledgementId)
     }
+
+    /**
+     * #1437 — the last-page offer is already certain at acceptance when the canonical pager known
+     * BEFORE the refresh ends beyond the submit target: such a submit never redirects, and a pager
+     * that shrank meanwhile (deletions) is resolved by the click's own redirect. The acknowledgement
+     * then carries the offer at once instead of gaining it after a slow refresh. The canonical
+     * pager is read, not the displayed topic: a transsearch page has its own.
+     */
+    private fun predictedSubmitLastPage(plan: SubmitRefreshPlan): Int? =
+        _state.value.availablePages.lastOrNull()?.takeIf {
+            plan.submittedElsewhereNotificationAllowed && !plan.overflowRedirectAllowed && it > plan.initialTarget
+        }
 
     /** Resolve a possibly stale last-page offer with its own single redirect, only after the click. */
     fun openSubmittedPostPage(page: Int, departureAnchor: TopicScrollAnchor? = null) {
@@ -2115,7 +2129,8 @@ class TopicViewModel @AssistedInject constructor(
      * genuinely stable :
      * - the #226 overflow redirect is allowed only for a plain reply from the known tail. A quote
      *   submit never chases the new tail, because the user is resuming from the cited post ;
-     * - the last-page offer is decided after the refresh, when the refreshed
+     * - the last-page offer is predicted at acceptance when the known pager proves it
+     *   ([predictedSubmitLastPage]), otherwise decided after the refresh, when the refreshed
      *   [Topic.totalPages] is known and no redirect has already happened. This keeps stale-origin,
      *   unknown-count and quote-overflow submits on their source page while still offering an
      *   explicit jump to the end of the topic; totalPages does not locate the submitted post.
