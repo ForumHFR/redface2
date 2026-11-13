@@ -48,6 +48,62 @@ class BbcodeBulletTest {
     }
 
     @Test
+    fun `leading formatted bullet separates from the preceding paragraph text`() {
+        val item = listOf(PostInline.Text("• un"))
+        val formats = listOf(
+            "[b][*]un[/b]" to PostInline.Strong(item),
+            "[b]\n[*]un[/b]" to PostInline.Strong(item),
+            "[b]\r\n[*]un[/b]" to PostInline.Strong(item),
+            "[i][*]un[/i]" to PostInline.Emphasis(item),
+            "[u][*]un[/u]" to PostInline.Underline(item),
+            "[strike][*]un[/strike]" to PostInline.Strike(item),
+            "[#FF0000][*]un[/#FF0000]" to PostInline.Color("#FF0000", item),
+            "[url=https://example.com][*]un[/url]" to PostInline.Link("https://example.com", item),
+            "[email=a@b.c][*]un[/email]" to PostInline.Link("mailto:a@b.c", item),
+            "[b][i][*]un[/i][/b]" to PostInline.Strong(listOf(PostInline.Emphasis(item))),
+        )
+        formats.forEach { (bbcode, formatted) ->
+            val inlines = (parser.parse("avant$bbcode").blocks.single() as PostBlock.Paragraph).inlines
+            assertEquals(bbcode, listOf(PostInline.Text("avant"), PostInline.LineBreak, formatted), inlines)
+        }
+    }
+
+    @Test
+    fun `formatted bullets at paragraph and line starts add no extra line break`() {
+        val item = PostInline.Strong(listOf(PostInline.Text("• un")))
+        listOf("[b][*]un[/b]", "\n[b][*]un[/b]").forEach { bbcode ->
+            assertEquals(listOf(item), (parser.parse(bbcode).blocks.single() as PostBlock.Paragraph).inlines)
+        }
+        val afterBreak = parser.parse("avant\n[b][*]un[/b]").blocks.single() as PostBlock.Paragraph
+        assertEquals(listOf(PostInline.Text("avant"), PostInline.LineBreak, item), afterBreak.inlines)
+        val italic = parser.parse("[i][*]a[*]b[/i]").blocks.single() as PostBlock.Paragraph
+        assertEquals(listOf(PostInline.Emphasis(listOf(PostInline.Text("• a"), PostInline.LineBreak,
+            PostInline.Text("• b")))), italic.inlines)
+    }
+
+    @Test
+    fun `raw sequences inside formatting keep literal bullet markers`() {
+        // Nested raw blocks still display their tags; only the bullet conversion is a regression here.
+        listOf("fixed", "code", "cpp", "img").forEach { tag ->
+            val raw = "[$tag][*]x[/$tag]"
+            val paragraph = parser.parse("[b]$raw[/b]").blocks.single() as PostBlock.Paragraph
+            assertEquals(tag, listOf(PostInline.Strong(listOf(PostInline.Text(raw)))), paragraph.inlines)
+        }
+        val nested = parser.parse("[b][fixed][i][*]x[/i][/fixed][/b]")
+            .blocks.single() as PostBlock.Paragraph
+        assertEquals(listOf(PostInline.Strong(listOf(PostInline.Text("[fixed]"),
+            PostInline.Emphasis(listOf(PostInline.Text("[*]x"))), PostInline.Text("[/fixed]")))), nested.inlines)
+    }
+
+    @Test
+    fun `raw blocks preserve bullet markers inside formatting`() {
+        val raw = "[b][*]x[/b]"
+        assertEquals(listOf(PostBlock.CodeBlock(raw, null)), parser.parse("[code]$raw[/code]").blocks)
+        assertEquals(listOf(PostBlock.Fixed(raw)), parser.parse("[fixed]$raw[/fixed]").blocks)
+        assertEquals(listOf(PostBlock.CodeBlock(raw, "cpp")), parser.parse("[cpp]$raw[/cpp]").blocks)
+    }
+
+    @Test
     fun `preview bullets match the real HFR reading list without changing the AST model`() {
         // Existing capture, topic_page_multipage.html:161-162. No fabricated HTML fixture.
         val html = requireNotNull(javaClass.getResource("/fixtures/topic_page_multipage.html")).readText()
