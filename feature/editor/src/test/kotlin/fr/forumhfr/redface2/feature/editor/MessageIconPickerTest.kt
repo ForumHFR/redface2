@@ -187,7 +187,7 @@ class MessageIconPickerTest {
         install(FakeImageLoaderEngine.Builder().default { chain ->
             release.await()
             failures.incrementAndGet()
-            ErrorResult(request = chain.request, throwable = IOException("Offline"))
+            ErrorResult(image = null, request = chain.request, throwable = IOException("Offline"))
         }.build())
         compose.setContent {
             RedfaceTheme(darkTheme = false, dynamicColor = false) {

@@ -95,7 +95,9 @@ class MessageIconPickerRoborazziTest {
         val context = ApplicationProvider.getApplicationContext<android.content.Context>()
         val builder = FakeImageLoaderEngine.Builder()
         if (offline) {
-            builder.default { chain -> ErrorResult(request = chain.request, throwable = IOException("Offline")) }
+            builder.default { chain ->
+                ErrorResult(image = null, request = chain.request, throwable = IOException("Offline"))
+            }
         } else {
             // Synthetic pixel art, not an HFR fixture: edges make accidental filtering visible in the captures.
             val bitmap = Bitmap.createBitmap(15, 15, Bitmap.Config.ARGB_8888)
