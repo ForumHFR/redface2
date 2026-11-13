@@ -230,6 +230,31 @@ class BbcodeContentParserTest {
     }
 
     @Test
+    fun `crossed tags inside inline img preserve the exact text`() {
+        val ast = parser.parse("[b][img]https://h/a.png[i]SECRET[/img][/i][/b]")
+        assertEquals(
+            PostContent(listOf(PostBlock.Paragraph(listOf(
+                PostInline.Strong(listOf(PostInline.Text("[img]https://h/a.png[i]SECRET[/img][/i]"))),
+            )))),
+            ast,
+        )
+    }
+
+    @Test
+    fun `tags inside linked img preserve the exact text`() {
+        listOf("[b]x[/b]", "[unknown]x", "x[/unknown]").forEach { markup ->
+            val image = "[img]https://h/a.png$markup[/img]"
+            val ast = parser.parse("[url=https://h/f.jpg]$image[/url]")
+            assertEquals(
+                PostContent(listOf(PostBlock.Paragraph(listOf(
+                    PostInline.Link("https://h/f.jpg", listOf(PostInline.Text(image))),
+                )))),
+                ast,
+            )
+        }
+    }
+
+    @Test
     fun `unclosed inline img keeps its open tag and URL as text`() {
         val ast = parser.parse("[url=https://h/f.jpg][img]https://h/r.jpg[/url]")
         assertEquals(

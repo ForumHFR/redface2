@@ -138,6 +138,65 @@ class EditorPreviewImageMediaTest {
         }
     }
 
+    @Test fun `reopening preview waits for parsed content and retries only once`() {
+        installLoader(DELAYED_RETRY_URL)
+        failRequests = true
+        val ledger = ProcessMediaAttemptLedger.instance
+        var content by mutableStateOf(linkedImage(DELAYED_RETRY_URL))
+        var visible by mutableStateOf(false)
+        val body = TextFieldState("draft")
+        val focus = FocusRequester()
+        val cache = DefaultIntrinsicMediaSizeCache()
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, dynamicColor = false) {
+                CompositionLocalProvider(LocalIntrinsicMediaSizeCache provides cache) {
+                    Box(Modifier.size(340.dp, 600.dp)) {
+                        EditorPreview(visible, content, body, focus, PostMediaDiskCachePolicy.DISABLED, "Aperçu") {
+                            BbcodeTextField(body, "Message")
+                        }
+                    }
+                }
+            }
+        }
+        compose.runOnIdle { visible = true }
+        compose.waitForIdle()
+        compose.waitUntil(5_000) {
+            ledger.isFailedFresh(DELAYED_RETRY_URL, MediaAttemptKind.PAINTER, System.currentTimeMillis())
+        }
+        compose.runOnIdle {
+            assertEquals(listOf(DELAYED_RETRY_URL), requests.map { it.data })
+            visible = false
+            content = PostContent(emptyList())
+        }
+        compose.waitForIdle()
+        compose.runOnIdle { visible = true }
+        compose.waitForIdle()
+        compose.runOnIdle {
+            assertEquals("empty preview must not consume the opening retry", 0, ledger.generationOf(DELAYED_RETRY_URL))
+            assertEquals(1, requests.size)
+            // The ViewModel publishes the asynchronous parse after reopening with empty content.
+            content = linkedImage(DELAYED_RETRY_URL)
+        }
+        compose.waitForIdle()
+        compose.waitUntil(5_000) {
+            requests.size == 2 &&
+                ledger.isFailedFresh(DELAYED_RETRY_URL, MediaAttemptKind.PAINTER, System.currentTimeMillis())
+        }
+        compose.runOnIdle {
+            assertEquals(listOf(DELAYED_RETRY_URL, DELAYED_RETRY_URL), requests.map { it.data })
+            assertEquals(1, ledger.generationOf(DELAYED_RETRY_URL))
+            // Keep the second attempt failing: typing must not grant another retry.
+            body.edit { append(" typed") }
+            content = PostContent(content.blocks + PostBlock.Paragraph(listOf(PostInline.Text("typed"))))
+        }
+        compose.waitForIdle()
+        compose.runOnIdle {
+            assertEquals("typing after the delayed parse must not retry", 2, requests.size)
+            assertEquals(1, ledger.generationOf(DELAYED_RETRY_URL))
+            assertTrue(requests.all { it.diskCachePolicy == CachePolicy.DISABLED })
+        }
+    }
+
     @Test fun `opening preview retries only failed media in the current content`() {
         installLoader(CURRENT_URL)
         val ledger = ProcessMediaAttemptLedger.instance
@@ -201,5 +260,6 @@ class EditorPreviewImageMediaTest {
 
 private const val IMAGE_URL = "https://images.example.org/editor-preview-linked.jpg"
 private const val RETRY_URL = "https://images.example.org/editor-preview-retry.jpg"
+private const val DELAYED_RETRY_URL = "https://images.example.org/editor-preview-delayed-retry.jpg"
 private const val PREVIOUS_URL = "https://images.example.org/editor-preview-previous.jpg"
 private const val CURRENT_URL = "https://images.example.org/editor-preview-current.jpg"

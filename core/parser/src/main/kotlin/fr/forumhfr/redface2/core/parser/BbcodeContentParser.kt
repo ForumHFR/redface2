@@ -261,7 +261,9 @@ class BbcodeContentParser {
             return InlineSlice(PostInline.Text((tokens[from] as Token.Open).raw), 1)
         }
         val rawUrl = flattenRawText(tokens, from + 1, close).trim()
-        val url = sanitizeImageHref(rawUrl)
+        // Nested or crossed tags belong to the draft text, never to an image URL.
+        val containsTag = tokens.subList(from + 1, close).any { it !is Token.Text }
+        val url = if (containsTag) null else sanitizeImageHref(rawUrl)
         val node = if (url == null) {
             PostInline.Text(flattenRawText(tokens, from, close + 1))
         } else {
