@@ -30,6 +30,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -53,11 +54,13 @@ import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorSubmissionSummary
+import fr.forumhfr.redface2.core.ui.editor.EditorUnsavedCloseDialog
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsCallbacks
 import fr.forumhfr.redface2.core.ui.editor.QuoteCardsColumn
 import fr.forumhfr.redface2.core.ui.editor.bannerText
 import fr.forumhfr.redface2.core.ui.editor.hasSubmissionSummary
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
+import kotlinx.coroutines.launch
 
 /**
  * Vague 4 (#604) lot 1 — the quick-reply bottom sheet: a plain text field, Send, and a
@@ -66,7 +69,7 @@ import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
  * route ; the ViewModel is scoped to the topic's nav entry, so the field survives an
  * accidental dismiss, and the #405 draft row survives everything else.
  */
-@Suppress("LongParameterList") // Request, three outcome callbacks and the two opening seeds of the topic surface.
+@Suppress("LongParameterList") // Request, four outcome callbacks and the two opening seeds of the topic surface.
 @Composable
 @OptIn(ExperimentalMaterial3Api::class)
 internal fun QuickReplySheet(
@@ -81,6 +84,8 @@ internal fun QuickReplySheet(
     // for « Citer N » under the full-screen threshold (empty from the reply FAB).
     initialQuotes: List<QuoteSelection> = emptyList(),
     legacyQuoteRequestDropped: Boolean = false,
+    // ED-88 (#1616) — the inline citations of this opening are durable in the draft row.
+    onQuotesDelivered: () -> Unit = {},
 ) {
     val viewModel = hiltViewModel<QuickReplyViewModel, QuickReplyViewModel.Factory>(
         creationCallback = { factory -> factory.create(request) },
@@ -108,9 +113,13 @@ internal fun QuickReplySheet(
                 is QuickReplyEffect.SubmitSucceeded ->
                     onSubmitted(effect.targetPage, effect.scrollTo, effect.quotedNumreponses)
                 is QuickReplyEffect.EscalateToFullEditor -> onEscalate(effect.quotes)
+                // ED-10 (#1450) — the ONLY place a plain close unmounts the sheet.
+                QuickReplyEffect.CloseCommitted -> onDismiss()
             }
         }
     }
+    val currentOnQuotesDelivered by rememberUpdatedState(onQuotesDelivered)
+    LaunchedEffect(viewModel) { viewModel.quotesDelivered.collect { currentOnQuotesDelivered() } }
     val timeoutMillis = LocalAccessibilityManager.current?.calculateRecommendedTimeoutMillis(
         4_000L, containsIcons = false, containsText = true, containsControls = true,
     ) ?: 4_000L
@@ -130,6 +139,7 @@ internal fun QuickReplySheet(
         skipPartiallyExpanded = true,
         confirmValueChange = { target -> target != SheetValue.Hidden || !submitting.value },
     )
+    val sheetScope = rememberCoroutineScope()
     val density = LocalDensity.current
     val screenHeightDp = LocalConfiguration.current.screenHeightDp.toFloat()
     val imeHeightDp = with(density) { WindowInsets.ime.getBottom(density).toDp().value }
@@ -147,10 +157,12 @@ internal fun QuickReplySheet(
     ModalBottomSheet(
         sheetState = sheetState,
         onDismissRequest = {
-            if (!submitting.value) {
-                viewModel.onDismissed()
-                onDismiss()
-            }
+            // ED-10 (#1450) — closing is a REQUEST. material3 calls this once the sheet has slid
+            // away ; it stays composed (hidden) while the ViewModel awaits the last draft write,
+            // and only CloseCommitted unmounts it. material3 also calls this after a vetoed back
+            // (settleToDismiss ignores the veto's outcome) : bring the sheet back rather than
+            // leave an invisible modal over the topic.
+            if (submitting.value) sheetScope.launch { sheetState.show() } else viewModel.onDismissed()
         },
     ) {
         Column(
@@ -230,6 +242,28 @@ internal fun QuickReplySheet(
         onConfirm = { viewModel.onSubmitConfirmed(armToken) },
         onDismiss = viewModel::onSubmitConfirmDismissed,
     )
+    QuickReplyUnsavedCloseDialog(
+        visible = state.unsavedCloseVisible,
+        onStay = {
+            viewModel.onUnsavedCloseDecided(leave = false)
+            // The sheet was only hidden : same session, same field, the keyboard comes back with it.
+            sheetScope.launch {
+                sheetState.show()
+                focusRequester.requestFocus()
+            }
+        },
+        onLeave = { viewModel.onUnsavedCloseDecided(leave = true) },
+    )
+}
+
+/**
+ * ED-10 on the sheet (#1450) — UX switch point, pending XaTriX. Option A : the editors' own
+ * « Brouillon non enregistré » dialog, shown over the topic while the refused sheet is hidden ;
+ * « Rester » brings the sheet back, « Quitter sans enregistrer » lets it go.
+ */
+@Composable
+internal fun QuickReplyUnsavedCloseDialog(visible: Boolean, onStay: () -> Unit, onLeave: () -> Unit) {
+    if (visible) EditorUnsavedCloseDialog(onStay = onStay, onLeave = onLeave)
 }
 
 @Composable

@@ -6,6 +6,7 @@ import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -46,6 +47,42 @@ class MultiQuoteBasketTest {
             .toggled(topicScope, selection(101, "alice"))
 
         assertNull(basket)
+    }
+
+    @Test
+    fun `ED88 a basket-consuming session of the same target consumes the basket`() {
+        val basket = (null as MultiQuoteBasket?).toggled(topicScope, selection(101, "alice"))
+
+        assertTrue(basket.isConsumedBy(topicScope, consumesBasket = true))
+    }
+
+    @Test
+    fun `ED88 a session that never shipped the basket leaves it armed`() {
+        val basket = (null as MultiQuoteBasket?).toggled(topicScope, selection(101, "alice"))
+
+        // « Citer » simple, plain reply, #823 long-press: decided by the open path, not the quotes.
+        assertFalse(basket.isConsumedBy(topicScope, consumesBasket = false))
+    }
+
+    @Test
+    fun `ED88 a basket re-armed on another target is never consumed`() {
+        val elsewhere = (null as MultiQuoteBasket?)
+            .toggled(QuoteScope.Topic(CAT, POST + 1), selection(555, "dave"))
+        val privateBasket = (null as MultiQuoteBasket?)
+            .toggled(QuoteScope.PrivateMessage(POST), selection(101, "alice"))
+
+        assertFalse(elsewhere.isConsumedBy(topicScope, consumesBasket = true))
+        assertFalse(privateBasket.isConsumedBy(topicScope, consumesBasket = true))
+        assertTrue(privateBasket.isConsumedBy(QuoteScope.PrivateMessage(POST), consumesBasket = true))
+    }
+
+    @Test
+    fun `ED88 no basket and no writing target consume nothing`() {
+        val basket = (null as MultiQuoteBasket?).toggled(topicScope, selection(101, "alice"))
+
+        assertFalse((null as MultiQuoteBasket?).isConsumedBy(topicScope, consumesBasket = true))
+        // A new-topic editor has no topic id, hence no scope.
+        assertFalse(basket.isConsumedBy(null, consumesBasket = true))
     }
 
     @Test

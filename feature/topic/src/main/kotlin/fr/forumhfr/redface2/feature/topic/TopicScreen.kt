@@ -200,7 +200,8 @@ fun TopicScreen(
      * typed text) WITHOUT a banner — re-proposing a draft the user is visibly continuing would be
      * noise. Defaults to a no-op for non-topic callers (previews/tests never escalate).
      * #868-#870 — `consumesBasket` forwards the sheet session's basket consumption : true only when
-     * the escalated sheet was opened by « Citer N » (its successful submit then empties the basket).
+     * the escalated sheet was opened by « Citer N » (its durable quote delivery or, at the latest,
+     * its successful submit then empties the basket, ED-88).
      */
     onEscalateToFullEditor: (
         subcat: Int,
@@ -308,7 +309,8 @@ fun TopicScreen(
     /**
      * #1553: « Citer N » to the full editor, after durable preparation. [quotes] contains only
      * transient cards; inline coordinates are already in Room. The topic's basket is consumed
-     * only after successful submission, including an inline opening with an empty card handoff.
+     * once its citations are durable in the draft, a successful submission at the latest (ED-88),
+     * including an inline opening with an empty card handoff.
      */
     onMultiQuote: (subcat: Int, page: Int, quotes: List<QuoteSelection>) -> Unit = { _, _, _ -> },
     /**
@@ -1487,16 +1489,18 @@ internal fun TopicContent(
                     }
                 },
                 // #1553: both surfaces choose rendering and await durable inline entry at the
-                // gesture. Only transient cards travel in the launch; success consumes the basket.
+                // gesture. Only transient cards travel in the launch; the durable delivery of the
+                // citations consumes the basket, a successful send at the latest (ED-88).
                 onMultiQuote = { subcat, page ->
                     val selection = multiQuoteSelections.toList()
                     when (writingSurfaceFor(state.writingSurfacePreset, quoteCount = selection.size)) {
                         WritingSurface.FULL_EDITOR -> onMultiQuote(subcat, page, selection)
                         WritingSurface.SHEET -> {
-                            // #868/#869 — the basket is NO LONGER cleared here : closing the sheet
-                            // without sending keeps the selection armed (the « Citer N » FAB and
-                            // counter survive a cancel). The clear happens on the sheet's
-                            // SubmitSucceeded (or its escalation's) via consumesBasket below.
+                            // #868/#869 — the basket is NOT cleared here : the selection stays
+                            // armed until this session proves it took it. ED-88 (#1616) — that
+                            // proof is the durable delivery of its citations (onQuotesDelivered),
+                            // with the sheet's SubmitSucceeded (or its escalation's) as safety net,
+                            // both via consumesBasket below.
                             prepareSheetQuotes(selection) { cards ->
                                 quickReplyFor = QuickReplyLaunch(
                                     request = QuickReplyRequest(
@@ -1752,9 +1756,18 @@ internal fun TopicContent(
                     launch.consumesBasket,
                 )
             },
+            // ED-88 (#1616) — the basket is emptied as soon as its citations are durable in the
+            // draft (sealed C/Q transaction) : « Citer N » would only offer what is already done.
+            // A failed or dormant delivery never signals, so the basket stays armed. Cards (opt-in
+            // rendering) are transient and never signal either : they wait for the send below.
+            onQuotesDelivered = {
+                if (launch.consumesBasket) {
+                    onClearMultiQuote()
+                }
+            },
             onSubmitted = { targetPage, scrollTo, quotedNumreponses ->
-                // #868/#869 — a SUCCESSFUL send of a basket-consuming session (« Citer N » ≤ 2)
-                // finally consumes the selection ; a dismiss/cancel above never does.
+                // #868/#869 — safety net (ED-88) : a SUCCESSFUL send of a basket-consuming session
+                // (« Citer N » ≤ 2) consumes whatever selection the delivery left armed (cards).
                 if (launch.consumesBasket) {
                     onClearMultiQuote()
                 }

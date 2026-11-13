@@ -63,8 +63,12 @@ fun PostEditorScreen(
         creationCallback = { factory -> factory.create(request) },
     ),
     onOpenEditorSettings: () -> Unit = {},
+    // ED-88 (#1616) — the inline citations of this editor are durable in its draft row.
+    onQuotesDelivered: () -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
+    val currentOnQuotesDelivered by rememberUpdatedState(onQuotesDelivered)
+    LaunchedEffect(viewModel) { viewModel.quotesDelivered.collect { currentOnQuotesDelivered() } }
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner, viewModel) {
         val observer = LifecycleEventObserver { _, event ->

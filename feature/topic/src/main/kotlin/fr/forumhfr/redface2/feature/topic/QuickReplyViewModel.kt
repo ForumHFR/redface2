@@ -94,6 +94,11 @@ data class QuickReplyUiState(
     val submitError: EditorError? = null,
     /** #312 — « Confirmation avant publication » : the pending-confirmation dialog is showing. */
     val confirmVisible: Boolean = false,
+    /**
+     * ED-10 on the sheet (#1450) — the awaited last save of a close was refused : the sheet is
+     * hidden but still mounted, and « Brouillon non enregistré » asks before the text is abandoned.
+     */
+    val unsavedCloseVisible: Boolean = false,
 ) {
     /** With quote cards armed, an empty body is a valid submit (quotes-only reply). */
     val canSubmit: Boolean
@@ -136,6 +141,13 @@ sealed interface QuickReplyEffect {
      * the same cards (mockup P3) and defers the `[quotemsg]` materialisation to its own submit.
      */
     data class EscalateToFullEditor(val quotes: List<QuoteSelection>) : QuickReplyEffect
+
+    /**
+     * ED-10 on the sheet (#1450) — the close is settled : the last save is durable (or there was
+     * nothing to write), or the user chose « Quitter sans enregistrer ». Only now may the topic
+     * surface unmount the sheet ; until then it stays composed, hidden, so its collector lives.
+     */
+    data object CloseCommitted : QuickReplyEffect
 }
 
 /**
@@ -167,6 +179,15 @@ class QuickReplyViewModel @AssistedInject constructor(
 
     private val _effects: Channel<QuickReplyEffect> = Channel(capacity = Channel.BUFFERED)
     val effects: Flow<QuickReplyEffect> = _effects.receiveAsFlow()
+
+    /**
+     * ED-88 (#1616) — one signal per SEALED C/Q transaction : the quoted body is in the row and
+     * its request is erased, together. The topic surface empties the multi-quote basket on it. Its
+     * own conflated channel, not an effect : a delivery is not a navigation outcome, and nothing
+     * here may reorder or delay the close and submit effects.
+     */
+    private val _quotesDelivered: Channel<Unit> = Channel(capacity = Channel.CONFLATED)
+    val quotesDelivered: Flow<Unit> = _quotesDelivered.receiveAsFlow()
 
     /**
      * The VM is scoped to the topic nav entry, so [request] is the page of the FIRST sheet creation
@@ -329,6 +350,8 @@ class QuickReplyViewModel @AssistedInject constructor(
         hasOpened = true
         sheetOpen = true
         closeStarted = false
+        // ED-88 — the VM outlives the sheet : a delivery nobody collected belongs to a past opening.
+        _quotesDelivered.tryReceive()
         materializeJob?.cancel()
         autosaveJob?.cancel()
         openJob?.cancel()
@@ -476,6 +499,8 @@ class QuickReplyViewModel @AssistedInject constructor(
             opening.resolveDraftWrite(result)
             finishInlineQuoteDelivery()
             deliveredQuoteBody = null
+            // ED-88 — only here : « Ignorer la citation » erases Q without delivering anything.
+            _quotesDelivered.trySend(Unit)
             scheduleAutosave() // Preserve keystrokes made while the CAS returned.
         } else {
             quoteStorageFailed(result)
@@ -714,9 +739,11 @@ class QuickReplyViewModel @AssistedInject constructor(
     }
 
     /**
-     * Dirty close — flush the pending debounce so the last keystrokes reach the row (the sheet
-     * preserves, it never asks) ; runs in [viewModelScope], which outlives the sheet (the VM is
-     * scoped to the topic's nav entry).
+     * Close request — the sheet has slid away but is still mounted. Flush the pending debounce so
+     * the last keystrokes reach the row, AWAIT that write, then settle (ED-10, #1450) :
+     * [QuickReplyEffect.CloseCommitted] when nothing is abandoned, the unsaved-close question
+     * otherwise. Never silent, never a blind unmount. Runs in [viewModelScope], which outlives
+     * the sheet (the VM is scoped to the topic's nav entry).
      */
     fun onDismissed() {
         if (closeStarted || submission.blocksClose || _state.value.isDiscardingDraft) return
@@ -729,14 +756,75 @@ class QuickReplyViewModel @AssistedInject constructor(
         // #953 F2 — owner AND body captured NOW : the flush persists what the DISMISSED session
         // showed, under the owner of that session — regardless of what a subsequent re-opening
         // re-snapshots or masks before this write lands. If that re-opening seals this session
-        // before its owner ever resolved, the await cancels the flush : a write with an unknown
-        // owner never happens (gate Sol).
-        val session = submission
-        val ready = sessionReady
-        val draft = draftSnapshot()
+        // before its owner ever resolved, the await is cancelled and nothing is written : a write
+        // with an unknown owner never happens (gate Sol).
+        val closing = ClosingSheet(submission, sessionReady, draftSnapshot(), shownDraft())
         viewModelScope.launch {
-            ready.await()
-            session.flush(draft)
+            val saved = saveForClose(closing)
+            // A re-opening superseded this close : its outcome belongs to no mounted sheet.
+            if (submission !== closing.session) return@launch
+            if (saved) _effects.send(QuickReplyEffect.CloseCommitted) else onFinalSaveRefused()
+        }
+    }
+
+    /** What one close request froze : its session, that session's owner gate, and its field. */
+    private class ClosingSheet(
+        val session: EditorSubmissionBinding<QuickReplyEffect, EditorError>,
+        val ready: CompletableDeferred<Unit>,
+        val draft: EditorDraftStore.Draft?,
+        val shown: EditorDraftStore.Draft,
+    )
+
+    private fun shownDraft() = EditorDraftStore.Draft(body = _state.value.text.text)
+
+    /**
+     * True when closing abandons nothing (same rule as the full-screen editors,
+     * [EditorSubmissionBinding.flushForClose]). A sealed session — account change, or a
+     * re-opening before the owner resolved — can never write again : nothing to save, the close
+     * goes through. Only this coroutine's own cancellation propagates.
+     */
+    private suspend fun saveForClose(closing: ClosingSheet): Boolean {
+        try {
+            closing.ready.await()
+        } catch (_: CancellationException) {
+            currentCoroutineContext().ensureActive()
+            return true
+        }
+        return try {
+            closing.session.flushForClose(
+                // The hidden sheet takes no input ; a superseding opening must not be read as typing.
+                live = { if (submission === closing.session) shownDraft() else closing.shown },
+                snapshot = { closing.draft },
+            )
+        } catch (_: IOException) {
+            false
+        }
+    }
+
+    /**
+     * UX switch point (#1450, pending XaTriX) — what a refused final save does. Current choice
+     * (option A) : keep the hidden sheet mounted and ask with the editors' dialog. Option B
+     * (immediate close + Topic snackbar) would commit the close here and emit a dedicated effect.
+     */
+    private fun onFinalSaveRefused() {
+        _state.update { it.copy(unsavedCloseVisible = true) }
+    }
+
+    /**
+     * The informed choice of « Brouillon non enregistré ». Leaving commits the close exactly once,
+     * without a write. Staying re-opens THIS session with its field intact — never a reload from
+     * the row, which does not hold the text — and a later dismiss retries the save.
+     */
+    fun onUnsavedCloseDecided(leave: Boolean) {
+        if (!_state.value.unsavedCloseVisible) return
+        _state.update { it.copy(unsavedCloseVisible = false) }
+        if (leave) {
+            _effects.trySend(QuickReplyEffect.CloseCommitted)
+        } else {
+            closeStarted = false
+            sheetOpen = true
+            // The close cancelled a quote GET in flight ; its durable request is still pending.
+            resumePendingInlineQuotes()
         }
     }
 

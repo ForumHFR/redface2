@@ -598,6 +598,77 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `ED88 a sealed inline delivery signals the basket once`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
+        replyRepository.formResult = Result.success(authenticatedForm("[quotemsg=101]quote[/quotemsg]"))
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        vm.quotesDelivered.test {
+            syncBody()
+            expectNoEvents() // Requested, not delivered: the basket stays armed.
+            get.complete(Unit)
+            settleBody()
+            awaitItem()
+            assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+            assertEquals("[quotemsg=101]quote[/quotemsg]\n", draftStore.saved[key]?.body)
+            settleBody()
+            expectNoEvents()
+        }
+    }
+
+    @Test
+    fun `ED88 a refused C-Q transaction keeps the basket armed until its retry seals`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val get = CompletableDeferred<Unit>()
+        replyRepository.formGate = get
+        replyRepository.formResult = Result.success(authenticatedForm("[quotemsg=101]quote[/quotemsg]"))
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        vm.quotesDelivered.test {
+            // Another writer bumps the row: the delivery CAS loses, the quote is only in the field.
+            val other = EditorDraftSession(draftStore, key)
+            other.load()
+            assertTrue(other.save(EditorDraftStore.Draft("")) is EditorDraftStore.StoreWriteResult.Written)
+            get.complete(Unit)
+            syncBody()
+            assertTrue(vm.state.value.quoteStorageUnavailable)
+            assertNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+            expectNoEvents()
+
+            vm.dispatch(PostEditorIntent.ReloadRequested)
+            settleBody()
+            awaitItem()
+            assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        }
+    }
+
+    @Test
+    fun `ED88 a failed quote fetch keeps the basket armed`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        replyRepository.formResult = Result.failure(IOException("offline"))
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        vm.quotesDelivered.test {
+            settleBody()
+            expectNoEvents()
+        }
+        assertNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+    }
+
+    @Test
+    fun `ED88 transient cards never signal the basket before the send`() = runTest {
+        replyRepository.formResult = Result.success(authenticatedForm("[quotemsg=101]quote[/quotemsg]"))
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)))
+        vm.quotesDelivered.test {
+            settleBody()
+            assertEquals(listOf(card(101)), vm.state.value.quotes)
+            expectNoEvents() // Nothing durable: closing the editor loses the cards, the basket re-arms them.
+        }
+    }
+
+    @Test
     fun `ED52 Room reconciliation does not replay an already consumed card handoff`() = runTest {
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
         val pending = PendingInlineQuoteRequest(SAMPLE_CAT, SAMPLE_TOPIC_ID,

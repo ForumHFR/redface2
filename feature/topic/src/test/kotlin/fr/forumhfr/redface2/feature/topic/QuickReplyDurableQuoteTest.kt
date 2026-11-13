@@ -3,6 +3,7 @@ package fr.forumhfr.redface2.feature.topic
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
+import app.cash.turbine.test
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsClock
 import fr.forumhfr.redface2.core.domain.diagnostics.DiagnosticsLog
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
@@ -828,6 +829,110 @@ class QuickReplyDurableQuoteTest {
         assertEquals("C\n\nD continued", recreated.state.value.text.text)
         assertNull(recreated.state.value.restorableDraft)
         assertTrue(scenario.store.loadOffers("tester", scenario.key).isEmpty())
+    }
+
+    @Test
+    fun `ED88 a sealed delivery signals the basket once, after the row holds the quote`() = runTest {
+        val scenario = Scenario()
+        scenario.enqueue()
+        val gate = CompletableDeferred<Unit>().also { scenario.quoteGate = it }
+        val sheet = scenario.create()
+        sheet.quotesDelivered.test {
+            sheet.onSheetOpened()
+            runCurrent()
+            expectNoEvents() // Requested, not delivered: the basket stays armed.
+            gate.complete(Unit)
+            awaitItem()
+            assertNull(scenario.pending)
+            assertEquals("[quotemsg=101]quote[/quotemsg]\n", scenario.body)
+            advanceUntilIdle()
+            expectNoEvents()
+        }
+    }
+
+    @Test
+    fun `ED88 a failed quote fetch keeps the basket armed`() = runTest {
+        val scenario = Scenario().apply { offline = true }
+        scenario.enqueue()
+        val sheet = scenario.create()
+        sheet.quotesDelivered.test {
+            sheet.onSheetOpened()
+            advanceUntilIdle()
+            expectNoEvents()
+        }
+        assertEquals(scenario.request, scenario.pending)
+    }
+
+    @Test
+    fun `ED88 a refused C-Q transaction keeps the basket armed until its retry seals`() = runTest {
+        val scenario = Scenario()
+        scenario.enqueue()
+        val gate = CompletableDeferred<Unit>().also { scenario.quoteGate = it }
+        val sheet = scenario.create()
+        sheet.quotesDelivered.test {
+            sheet.onSheetOpened()
+            runCurrent()
+            scenario.store.saveFailure = IOException("disk")
+            gate.complete(Unit)
+            advanceUntilIdle()
+            expectNoEvents() // The quote sits in the field, not in the row.
+            assertEquals(scenario.request, scenario.pending)
+
+            scenario.store.saveFailure = null
+            sheet.onQuoteReloadRequested()
+            advanceUntilIdle()
+            awaitItem()
+            assertNull(scenario.pending)
+        }
+    }
+
+    @Test
+    fun `ED88 a dormant request keeps the basket armed`() = runTest {
+        val scenario = Scenario()
+        scenario.uncertain()
+        scenario.enqueue()
+        val sheet = scenario.create()
+        sheet.quotesDelivered.test {
+            sheet.onSheetOpened()
+            advanceUntilIdle()
+            assertTrue(sheet.state.value.hasDormantQuote)
+            expectNoEvents()
+        }
+        assertEquals(scenario.request, scenario.pending)
+    }
+
+    @Test
+    fun `ED88 ignoring a quote that was never delivered keeps the basket armed`() = runTest {
+        val scenario = Scenario().apply { offline = true }
+        scenario.enqueue()
+        val sheet = scenario.create()
+        sheet.quotesDelivered.test {
+            sheet.onSheetOpened()
+            advanceUntilIdle()
+            sheet.onQuoteReloadRequested()
+            advanceUntilIdle()
+            assertTrue(sheet.state.value.canIgnorePendingQuote)
+            sheet.onPendingQuoteIgnored()
+            advanceUntilIdle()
+            assertNull(scenario.pending) // Q is erased, nothing was quoted.
+            expectNoEvents()
+        }
+    }
+
+    @Test
+    fun `ED88 a delivery nobody collected never reaches a later opening`() = runTest {
+        val scenario = Scenario()
+        scenario.enqueue()
+        val sheet = scenario.open()
+        advanceUntilIdle()
+        assertNull(scenario.pending)
+        sheet.onDismissed()
+        advanceUntilIdle()
+        sheet.quotesDelivered.test {
+            sheet.onSheetOpened() // e.g. the reply FAB: this opening shipped no basket.
+            advanceUntilIdle()
+            expectNoEvents()
+        }
     }
 
     private inner class Scenario {
