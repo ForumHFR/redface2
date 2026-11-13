@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.PlatformTextInputInterceptor
 import androidx.compose.ui.platform.SoftwareKeyboardController
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertHeightIsEqualTo
 import androidx.compose.ui.test.assertIsDisplayed
@@ -68,6 +69,7 @@ import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.model.SmileyKind
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.persoSmileyUrl
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.core.ui.editor.EditorBarMode
@@ -173,9 +175,11 @@ class PrivateMessageComposeChromeComposeTest {
     }
     @Test fun settingsTapClosesOptionsBeforeCallingNavigationOnce() {
         prefill()
+        f.state = f.state.copy(editorShortcut = EditorShortcut.BOLD)
         compose.setContent { Content() }
         compose.onNodeWithContentDescription("Options").performClick()
-        compose.onNodeWithText("Réglages de l’éditeur").performScrollTo().performClick()
+        compose.onNodeWithText("Réglages de l’éditeur").performScrollTo()
+            .assert(hasText("Raccourci : Gras, confirmation avant envoi")).performClick()
         compose.onNodeWithTag("editor-options-sheet").assertDoesNotExist()
         compose.runOnIdle {
             assertEquals(1, settingsOpens)

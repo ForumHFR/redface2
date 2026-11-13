@@ -27,6 +27,7 @@ import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -47,6 +48,7 @@ import fr.forumhfr.redface2.core.domain.editor.ArmToken
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.SubmissionToken
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
@@ -110,9 +112,11 @@ class PostEditorChromeComposeTest {
 
     // ED-40/41/95 v0.7.8 replaces the timed information and its second entry.
     @Test fun settingsTapClosesOptionsBeforeCallingNavigationOnce() {
+        host.state = host.state.copy(editorShortcut = EditorShortcut.SEARCH_SMILEYS)
         compose.setContent { Content() }
         compose.onNodeWithContentDescription("Options").performClick()
-        compose.onNodeWithText("Réglages de l’éditeur").performScrollTo().performClick()
+        compose.onNodeWithText("Réglages de l’éditeur").performScrollTo()
+            .assert(hasText("Raccourci : Smileys Wiki, confirmation avant envoi")).performClick()
         compose.onNodeWithTag("editor-options-sheet").assertDoesNotExist()
         compose.runOnIdle {
             assertEquals(1, settingsOpens)

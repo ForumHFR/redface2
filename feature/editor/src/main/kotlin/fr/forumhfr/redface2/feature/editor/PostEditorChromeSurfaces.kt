@@ -110,7 +110,8 @@ private fun PostEditorOptionsSurface(
                 stringResource(R.string.editor_option_smiley_disabled),
                 stringResource(R.string.editor_option_email_notification)),
             onOpenSettings = { adapter.openSettings(onOpenEditorSettings) },
-            settingsEnabled = !source.isUploading) {
+            settingsEnabled = !source.isUploading,
+            settingsShortcut = source.editorShortcut) {
             MessageIconPicker(source.msgIcon, enabled, adapter::tone)
         }
     }

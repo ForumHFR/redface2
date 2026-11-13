@@ -64,7 +64,8 @@ internal fun PrivateMessageComposeChromeSurfaces(
                     stringResource(R.string.messages_reply_option_smiley_disabled),
                     stringResource(R.string.messages_reply_option_email_notification)),
                 onOpenSettings = { adapter.openSettings(onOpenEditorSettings) },
-                settingsEnabled = !source.isUploading)
+                settingsEnabled = !source.isUploading,
+                settingsShortcut = source.editorShortcut)
         }
         PrivateMessageComposeChromeSurface.Smileys -> {
             val picker = smileys.state.collectAsStateWithLifecycle().value as? SmileyPickerState.Open

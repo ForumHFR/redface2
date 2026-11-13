@@ -312,4 +312,5 @@
     <string name="editor_draft_discard_description">Ignorer ce brouillon, %1$s</string>
     <string name="editor_settings_title">Réglages de l’éditeur</string>
     <string name="editor_settings_description">Raccourci de la barre, confirmation avant envoi</string>
+    <string name="editor_settings_description_shortcut">Raccourci : %1$s, confirmation avant envoi</string>
 </resources>

@@ -22,6 +22,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -100,6 +101,19 @@ class EditorOptionsTest {
         compose.runOnIdle { assertEquals(1, opens) }
     }
 
+    @Test fun settingsNameTheCurrentShortcutIncludingNoneAndFallBackForNull() {
+        val shortcut = mutableStateOf<EditorShortcut?>(EditorShortcut.SEARCH_SMILEYS)
+        setContent(shortcut = { shortcut.value }, onOpenSettings = {})
+        compose.onNodeWithText("Réglages de l’éditeur")
+            .assert(hasText("Raccourci : Smileys Wiki, confirmation avant envoi"))
+        compose.runOnIdle { shortcut.value = EditorShortcut.NONE }
+        compose.onNodeWithText("Réglages de l’éditeur")
+            .assert(hasText("Raccourci : Aucun, confirmation avant envoi"))
+        compose.runOnIdle { shortcut.value = null }
+        compose.onNodeWithText("Réglages de l’éditeur")
+            .assert(hasText("Raccourci de la barre, confirmation avant envoi"))
+    }
+
     @Test fun disabledSettingsRejectTaps() {
         var opens = 0
         setContent { opens++ }
@@ -108,7 +122,7 @@ class EditorOptionsTest {
         compose.runOnIdle { assertEquals(0, opens) }
     }
 
-    private fun setContent(onOpenSettings: (() -> Unit)? = null) {
+    private fun setContent(shortcut: () -> EditorShortcut? = { null }, onOpenSettings: (() -> Unit)? = null) {
         compose.setContent {
             RedfaceTheme(darkTheme = false, dynamicColor = false) {
                 EditorOptions(
@@ -121,6 +135,7 @@ class EditorOptionsTest {
                     onEmailNotificationChanged = { changed(2, it) },
                     labels = labels,
                     onOpenSettings = onOpenSettings,
+                    settingsShortcut = shortcut(),
                 )
             }
         }

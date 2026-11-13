@@ -23,6 +23,7 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
+import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.ui.R
 
 /** Notification wording belongs to the surface (topic or private conversation). */
@@ -33,9 +34,12 @@ data class EditorOptionsLabels(
     val emailNotification: String,
 )
 
-/** Shared HFR toggles. MP editors omit [tone]; the post supplies its existing expanded tone picker. */
+/**
+ * Shared HFR toggles. MP editors omit [tone]; the post supplies its existing expanded tone picker.
+ * [settingsShortcut] names the current catalogue choice in the settings row; null keeps the generic description.
+ */
 @Composable
-@Suppress("LongParameterList") // HFR options + callbacks + enabled — each is user-editable.
+@Suppress("LongParameterList") // HFR options, callbacks and settings context are independent inputs.
 fun EditorOptions(
     signatureEnabled: Boolean,
     smileyDisabled: Boolean,
@@ -47,6 +51,7 @@ fun EditorOptions(
     labels: EditorOptionsLabels,
     onOpenSettings: (() -> Unit)? = null,
     settingsEnabled: Boolean = enabled,
+    settingsShortcut: EditorShortcut? = null,
     tone: (@Composable () -> Unit)? = null,
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(4.dp), modifier = Modifier.fillMaxWidth()) {
@@ -76,7 +81,7 @@ fun EditorOptions(
         tone?.invoke()
         if (onOpenSettings != null) {
             HorizontalDivider()
-            EditorSettingsOption(enabled && settingsEnabled, onOpenSettings)
+            EditorSettingsOption(enabled && settingsEnabled, settingsShortcut, onOpenSettings)
         }
     }
 }
@@ -110,7 +115,10 @@ private fun OptionToggle(
 }
 
 @Composable
-private fun EditorSettingsOption(enabled: Boolean, onClick: () -> Unit) {
+private fun EditorSettingsOption(enabled: Boolean, shortcut: EditorShortcut?, onClick: () -> Unit) {
+    val description = editorShortcutCatalog.firstOrNull { it.choice == shortcut }
+        ?.let { stringResource(R.string.editor_settings_description_shortcut, stringResource(it.labelRes)) }
+        ?: stringResource(R.string.editor_settings_description)
     val color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
     Row(
         modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp)
@@ -129,7 +137,7 @@ private fun EditorSettingsOption(enabled: Boolean, onClick: () -> Unit) {
                 color = color,
             )
             Text(
-                stringResource(R.string.editor_settings_description), style = MaterialTheme.typography.bodyMedium,
+                description, style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }

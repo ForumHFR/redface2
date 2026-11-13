@@ -78,7 +78,8 @@ internal fun PrivateMessageReplyChromeSheets(
                     stringResource(R.string.messages_reply_option_smiley_disabled),
                     stringResource(R.string.messages_reply_option_email_notification)),
                 onOpenSettings = { adapter.openSettings(onOpenEditorSettings) },
-                settingsEnabled = !source.isUploading)
+                settingsEnabled = !source.isUploading,
+                settingsShortcut = source.editorShortcut)
         }
         else -> Unit
     }
