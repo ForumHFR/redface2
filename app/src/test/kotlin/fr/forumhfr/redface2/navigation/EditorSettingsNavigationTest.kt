@@ -42,6 +42,48 @@ class EditorSettingsNavigationTest {
         assertTrue(active.hidesNavigationSuite())
     }
 
+    @Test fun diagnosticsAboveEditorSettingsKeepNavigationHiddenForAllFourEditors() {
+        val editors = listOf(
+            ForumRoute to PostEditorRoute(PostEditorMode.Reply, 23, 42, page = 1, subcat = 0),
+            ForumRoute to TopicFormRoute(TopicFormMode.New, cat = 23),
+            MessagesRoute to PrivateMessageReplyRoute(42, page = 1),
+            MessagesRoute to PrivateMessageComposeRoute(),
+        )
+        editors.forEach { (root, editor) ->
+            val active = mutableListOf<NavKey>(root, editor)
+            openEditorSettings(active)
+            active.add(DiagnosticsRoute)
+            assertTrue("Diagnostics must not allow switching away from $editor", active.hidesNavigationSuite())
+        }
+    }
+
+    @Test fun diagnosticsWithoutAnEditorKeepNavigationVisible() {
+        val active = mutableListOf<NavKey>(SettingsRoute, DiagnosticsRoute)
+        assertFalse(active.hidesNavigationSuite())
+        active.add(1, SettingsCategoryRoute("editing"))
+        assertFalse(active.hidesNavigationSuite())
+    }
+
+    @Test fun topicWithoutAnEditorKeepsNavigationVisible() {
+        val active = listOf<NavKey>(ForumRoute, TopicRoute(cat = 23, post = 42))
+        assertFalse(active.hidesNavigationSuite())
+    }
+
+    @Test fun settingsOpenedAfterClosingTheEditorKeepNavigationVisible() {
+        val active = mutableListOf<NavKey>(ForumRoute, TopicFormRoute(TopicFormMode.New, cat = 23))
+        active.removeAt(active.lastIndex)
+        openEditorSettings(active)
+        assertFalse(active.hidesNavigationSuite())
+        active.add(DiagnosticsRoute)
+        assertFalse(active.hidesNavigationSuite())
+    }
+
+    @Test fun settingsBelowAnEditorDoNotHideNavigationOnDiagnostics() {
+        val active = listOf<NavKey>(ForumRoute, SettingsCategoryRoute("editing"),
+            TopicFormRoute(TopicFormMode.New, cat = 23), DiagnosticsRoute)
+        assertFalse(active.hidesNavigationSuite())
+    }
+
     @Test fun settingsAboveANonEditorDoNotHideNavigation() {
         val active = listOf<NavKey>(ForumRoute, SettingsCategoryRoute("editing"))
         assertFalse(active.hidesNavigationSuite())

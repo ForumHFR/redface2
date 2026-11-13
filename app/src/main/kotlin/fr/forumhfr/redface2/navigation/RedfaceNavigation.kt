@@ -266,9 +266,10 @@ private fun NavKey?.isEditorRoute(): Boolean = when (this) {
     else -> false
 }
 
-/** Settings covering a live editor must keep tab switching unavailable until the editor is uncovered. */
+/** Settings above a live editor keep tab switching unavailable even when another route covers them. */
 internal fun List<NavKey>.hidesNavigationSuite(): Boolean {
-    val settingsCoverEditor = lastOrNull() is SettingsCategoryRoute && dropLast(1).any { it.isEditorRoute() }
+    val editorIndex = indexOfFirst { it.isEditorRoute() }
+    val settingsCoverEditor = editorIndex >= 0 && indexOfLast { it is SettingsCategoryRoute } > editorIndex
     return lastOrNull().hidesNavigationSuite() || settingsCoverEditor
 }
 
