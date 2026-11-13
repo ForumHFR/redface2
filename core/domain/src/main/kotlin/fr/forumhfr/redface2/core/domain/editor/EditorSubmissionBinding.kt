@@ -247,18 +247,40 @@ class EditorSubmissionBinding<E, F>(
     }
 
     /**
-     * ED-10: the awaited last save of a close. False when the field holds content the store refused
-     * (failure or conflict), so the caller asks before abandoning it. Nothing to write is not a
-     * failure: no snapshot, unchanged content already held by the row, or an invalidated owner,
-     * whose editor is retired and can never write again.
+     * ED-10: the awaited last save of a close. False when the editor holds content that is not
+     * durable, so the caller asks before abandoning it:
+     * - a conflict always asks: another writer replaced the row, this session's last view of it
+     *   proves nothing;
+     * - a failure asks unless the row already holds this exact content;
+     * - content changed while the write was suspended asks too, whatever the write returned: the
+     *   live fields are read again and must still be what was just written or held.
+     * Nothing to write is not a failure: no snapshot, or an invalidated owner, whose editor is
+     * retired and can never write again. [recipients] gives stored and live recipients one form.
      */
-    suspend fun flushForClose(snapshot: () -> EditorDraftStore.Draft?): Boolean {
+    suspend fun flushForClose(
+        snapshot: () -> EditorDraftStore.Draft?,
+        recipients: (String) -> Any = { it },
+    ): Boolean {
         autosave?.cancelAndJoin()
         val draft = snapshot()
         val result = persist(draft)
-        return result == null || result is StoreWriteResult.Written || drafts.invalidated ||
-            draft == null || drafts.holds(draft)
+        if (drafts.invalidated) return true
+        val durable = when (result) {
+            null, is StoreWriteResult.Written -> true
+            StoreWriteResult.Conflict -> false
+            else -> draft != null && drafts.holds(draft, recipients)
+        }
+        return durable && sameContent(draft, snapshot(), recipients)
     }
+
+    /** Same content rule as [EditorDraftSession.holds]: body, subject and recipients only. */
+    private fun sameContent(
+        written: EditorDraftStore.Draft?,
+        live: EditorDraftStore.Draft?,
+        recipients: (String) -> Any,
+    ): Boolean = if (written == null || live == null) written == live else written.body == live.body &&
+        written.subject.orEmpty() == live.subject.orEmpty() &&
+        recipients(written.recipients.orEmpty()) == recipients(live.recipients.orEmpty())
 
     fun launch(
         permit: SubmissionRequest.Accepted,

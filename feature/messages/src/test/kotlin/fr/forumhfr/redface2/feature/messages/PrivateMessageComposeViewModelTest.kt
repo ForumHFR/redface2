@@ -1286,6 +1286,26 @@ class PrivateMessageComposeViewModelTest {
     }
 
     @Test
+    fun `compose close over restored historical recipients never asks when storage fails - ED10`() = runTest {
+        val key = EditorDraftKey.mpCompose()
+        // A row written before the recipients envelope: plain CSV.
+        draftStore.preload(key, EditorDraftStore.Draft(
+            body = "old text", subject = "old subject", recipients = "alice,bob", isPrivate = true))
+        val (vm, effects) = closableComposer()
+        draftStore.saveFailure = IOException("disk full")
+        vm.onDraftRestoreRequested()
+        runCurrent()
+        assertEquals("old text", vm.bodyFieldState.text.toString())
+        assertEquals(EditorRecipientState(listOf("alice", "bob")), vm.state.value.recipientState)
+        // The fields are exactly what the row holds; only the recipients encoding differs.
+        vm.onCloseRequested()
+        runCurrent()
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(1, effects.count { it == PrivateMessageComposeEffect.CloseCommitted })
+        assertEquals("alice,bob", draftStore.saved[key]?.recipients)
+    }
+
+    @Test
     fun `onCloseRequested with blank live fields preserves a pending restore offer`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchComposeForm(any()) } returns composeForm()

@@ -150,9 +150,12 @@ class EditorDraftSession(private val store: EditorDraftStore, private val key: S
      * ED-10: the user content of [draft] (body, subject, recipients) is what this session last read
      * or wrote durably, so a failed rewrite loses nothing. Absent headers compare as empty ones.
      * Timestamps, provenance, offers, quote requests and the constant privacy flag are not content.
+     * [recipients] maps both sides to one comparable form: a row may hold a historical encoding of
+     * the same list. This is the session's own last view; after a conflict it proves nothing.
      */
-    fun holds(draft: Draft): Boolean = draft.body == lastBody &&
-        draft.subject.orEmpty() == lastSubject && draft.recipients.orEmpty() == lastRecipients
+    fun holds(draft: Draft, recipients: (String) -> Any = { it }): Boolean = draft.body == lastBody &&
+        draft.subject.orEmpty() == lastSubject &&
+        recipients(draft.recipients.orEmpty()) == recipients(lastRecipients)
 
     /** A certified resume is C, not a new offered D. Existing durable offers remain untouched. */
     fun resumeContent() { protectedOffer = null }

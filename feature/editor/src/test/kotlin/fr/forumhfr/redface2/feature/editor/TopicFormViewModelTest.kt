@@ -3274,6 +3274,32 @@ class TopicFormViewModelTest {
     }
 
     @Test
+    fun `typing while the final save is suspended asks instead of closing over it - ED10`() = runTest {
+        val (vm, effects) = closableNewTopic()
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("Mon titre")))
+        vm.editBody(TextFieldValue("A"))
+        val gate = CompletableDeferred<Unit>()
+        draftStore.saveReturnGate = gate
+        vm.submit(TopicFormIntent.CloseRequested)
+        syncBody()
+        // The close captured A and its write is in flight; the field moves to B meanwhile.
+        vm.editBody(TextFieldValue("A then B"))
+        gate.complete(Unit)
+        syncBody()
+        testScheduler.runCurrent()
+        assertEquals("A", draftStore.saved[key]?.body)
+        assertTrue(vm.state.value.showUnsavedCloseDialog)
+        assertFalse(TopicFormEffect.CloseCommitted in effects)
+        // "Rester" then a new Back writes what is in the field now and closes once.
+        vm.submit(TopicFormIntent.UnsavedCloseDismissed)
+        requestClose(vm)
+        assertEquals("A then B", draftStore.saved[key]?.body)
+        assertFalse(vm.state.value.showUnsavedCloseDialog)
+        assertEquals(1, effects.count { it == TopicFormEffect.CloseCommitted })
+    }
+
+    @Test
     fun `CloseRequested with blank live fields preserves a pending restore offer`() = runTest {
         val key = EditorDraftKey.newTopic(SAMPLE_CAT)
         draftStore.preload(key, EditorDraftStore.Draft(body = "stale", subject = "stale title"))

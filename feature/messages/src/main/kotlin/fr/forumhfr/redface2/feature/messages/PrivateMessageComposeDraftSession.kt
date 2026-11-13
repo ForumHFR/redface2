@@ -228,14 +228,16 @@ internal class PrivateMessageComposeDraftSession(
 
     /**
      * ED-10: the awaited last save of a close. False when recipients, subject or body hold content
-     * the store refused, so the caller asks before abandoning it. An entirely empty composer has
-     * nothing to abandon: its recipients envelope is never the empty value of an absent row.
+     * that is not durable, so the caller asks before abandoning it. Recipients compare decoded: a
+     * historical CSV row, an absent row and the envelope written today can all name the same list.
      */
-    suspend fun flushForClose(): Boolean {
-        if (submission.flushForClose(::draftSnapshot)) return true
-        val snapshot = readState()
-        return bodyFieldState.text.isEmpty() && snapshot.subject.isBlank() &&
-            snapshot.recipientState == EditorRecipientState()
+    suspend fun flushForClose(): Boolean = submission.flushForClose(::draftSnapshot, ::decodedRecipients)
+
+    /** An unreadable value only equals itself; the stored format is never rewritten here. */
+    private fun decodedRecipients(stored: String): Any = try {
+        EditorRecipientState.decode(stored)
+    } catch (_: IOException) {
+        stored
     }
 
     private fun replaceBody(body: String) {
