@@ -227,19 +227,18 @@ class HfrClient @Inject constructor(
     }
 
     /**
-     * MPStorage read (#6, ADR-014) — GET the edit form of a private-message post the user
-     * owns. The textarea `content_form` carries the RAW storage document (not rendered
-     * HTML), exactly how `MPStorage.user.js` reads it. Same `message.php` family as
-     * [getEditForm], with `cat=prive` (a String — the typed public variant cannot carry it).
+     * GET the edit form of an owned private message (#1625), on its actual [page].
+     * MPStorage (#6, ADR-014) keeps the default page 1 to read its first post's raw document.
+     * Same `message.php` family as [getEditPostForm], with `cat=prive` rather than a numeric category.
      */
-    suspend fun getPrivateMessageEditForm(threadId: Int, numreponse: Int): String {
+    suspend fun getPrivateMessageEditForm(threadId: Int, numreponse: Int, page: Int = 1): String {
         val url = baseUrl.newBuilder()
             .addPathSegment("message.php")
             .addQueryParameter("config", "hfr.inc")
             .addQueryParameter("cat", "prive")
             .addQueryParameter("post", threadId.toString())
             .addQueryParameter("numreponse", numreponse.toString())
-            .addQueryParameter("page", "1")
+            .addQueryParameter("page", page.toString())
             .addQueryParameter("p", "1")
             .addQueryParameter("subcat", "0")
             .addQueryParameter("sondage", "0")

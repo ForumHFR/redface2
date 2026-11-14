@@ -35,6 +35,7 @@ import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
+import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyForm
@@ -96,7 +97,7 @@ class PostEditorRestorationTest {
         every { preferences.observeImagePickerMode() } returns flowOf(ImagePickerMode.DEFAULT)
         every { preferences.observeEditorShortcut() } returns flowOf(EditorShortcut.NONE)
         coEvery { replies.fetchReplyForm(any()) } returns form("")
-        coEvery { edits.fetchEditPostForm(any()) } returns form("server body")
+        coEvery { edits.fetchEditPostForm(any<EditPostContext>()) } returns form("server body")
     }
 
     @After
@@ -437,7 +438,7 @@ class PostEditorRestorationTest {
     fun failedInitialEditGetDoesNotCheckpointUnknownBodyOrUnlockAfterDeath() = runTest(dispatcher) {
         val request = request().copy(mode = PostEditorMode.Edit, numreponse = 101)
         val saved = SavedStateHandle()
-        coEvery { edits.fetchEditPostForm(any()) } throws IOException("offline")
+        coEvery { edits.fetchEditPostForm(any<EditPostContext>()) } throws IOException("offline")
         val first = open(saved, request)
         runCurrent()
         assertEquals(EditorErrors.formNetwork, first.state.value.submitError)
@@ -454,7 +455,7 @@ class PostEditorRestorationTest {
         first.viewModelScope.cancel()
 
         val formGate = CompletableDeferred<ReplyForm>()
-        coEvery { edits.fetchEditPostForm(any()) } coAnswers { formGate.await() }
+        coEvery { edits.fetchEditPostForm(any<EditPostContext>()) } coAnswers { formGate.await() }
         val restored = open(frozen, request)
         runCurrent()
         assertTrue(restored.state.value.isLoadingForm)
@@ -471,7 +472,7 @@ class PostEditorRestorationTest {
         assertFalse(restored.state.value.isAwaitingInitialBody)
         type(restored, "intentional replacement after hydration")
         assertEquals("intentional replacement after hydration", restored.bodyFieldState.text.toString())
-        coVerify(exactly = 2) { edits.fetchEditPostForm(any()) }
+        coVerify(exactly = 2) { edits.fetchEditPostForm(any<EditPostContext>()) }
     }
 
     @Test
@@ -499,7 +500,7 @@ class PostEditorRestorationTest {
         val checkpoint = checkNotNull(frozen.get<String>("postEditor.resumeVersion"))
         first.viewModelScope.cancel()
 
-        coEvery { edits.fetchEditPostForm(any()) } throws IOException("offline")
+        coEvery { edits.fetchEditPostForm(any<EditPostContext>()) } throws IOException("offline")
         val restored = open(frozen, request)
         runCurrent()
         assertTrue(restored.state.value.isAwaitingInitialBody)
@@ -514,7 +515,7 @@ class PostEditorRestorationTest {
         assertEquals(saves, store.saveCount) // #1574: the failed GET cannot certify a new blank checkpoint.
         assertEquals(checkpoint, frozen.get<String>("postEditor.resumeVersion"))
 
-        coEvery { edits.fetchEditPostForm(any()) } returns form("server body")
+        coEvery { edits.fetchEditPostForm(any<EditPostContext>()) } returns form("server body")
         restored.submit(PostEditorIntent.ReloadRequested)
         runCurrent()
         assertResumed(restored, "server body")
@@ -525,14 +526,14 @@ class PostEditorRestorationTest {
         assertEquals("replacement after successful GET", restored.bodyFieldState.text.toString())
         assertEquals(EditorErrors.uncertain, restored.state.value.submitError)
         assertTrue(restored.state.value.submission is EditorSubmissionState.Uncertain)
-        coVerify(exactly = 3) { edits.fetchEditPostForm(any()) }
+        coVerify(exactly = 3) { edits.fetchEditPostForm(any<EditPostContext>()) }
     }
 
     @Test
     fun closeFlushAfterFailedInitialEditGetDoesNotWriteOrCertifyUnknownBody() = runTest(dispatcher) {
         val request = request().copy(mode = PostEditorMode.Edit, numreponse = 101)
         val saved = SavedStateHandle()
-        coEvery { edits.fetchEditPostForm(any()) } throws IOException("offline")
+        coEvery { edits.fetchEditPostForm(any<EditPostContext>()) } throws IOException("offline")
         val editor = open(saved, request)
         runCurrent()
         assertTrue(editor.state.value.isAwaitingInitialBody)
@@ -550,7 +551,7 @@ class PostEditorRestorationTest {
         val editKey = EditorDraftKey.editPost(23, 101)
         store.preload(editKey, Draft("offered edit"))
         val saved = SavedStateHandle()
-        coEvery { edits.fetchEditPostForm(any()) } throws IOException("offline")
+        coEvery { edits.fetchEditPostForm(any<EditPostContext>()) } throws IOException("offline")
         val first = open(saved, request)
         runCurrent()
         assertEquals("offered edit", first.state.value.restorableDraft)
@@ -566,7 +567,7 @@ class PostEditorRestorationTest {
         assertEquals(1, store.saveCount)
         val frozen = freeze(saved)
         first.viewModelScope.cancel()
-        coEvery { edits.fetchEditPostForm(any()) } returns form("server body")
+        coEvery { edits.fetchEditPostForm(any<EditPostContext>()) } returns form("server body")
         val restored = open(frozen, request)
         runCurrent()
         assertResumed(restored, "server body")
@@ -589,7 +590,7 @@ class PostEditorRestorationTest {
         first.viewModelScope.cancel()
 
         val formGate = CompletableDeferred<ReplyForm>()
-        coEvery { edits.fetchEditPostForm(any()) } coAnswers { formGate.await() }
+        coEvery { edits.fetchEditPostForm(any<EditPostContext>()) } coAnswers { formGate.await() }
         val restored = open(frozen, request)
         runCurrent()
         assertResumed(restored, "")
@@ -870,7 +871,7 @@ class PostEditorRestorationTest {
         assertEquals(body, editor.bodyFieldState.text.toString())
         assertNull(editor.state.value.restorableDraft)
         coVerify(exactly = 0) { replies.submitReply(any(), any(), any(), any()) }
-        coVerify(exactly = 0) { edits.submitEditPost(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { edits.submitEditPost(any<EditPostContext>(), any(), any(), any()) }
     }
 
     @Suppress("DEPRECATION") // Bundle.get is sufficient for this deliberately primitive-only contract.

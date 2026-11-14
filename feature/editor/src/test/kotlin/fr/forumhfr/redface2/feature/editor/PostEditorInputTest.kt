@@ -41,6 +41,7 @@ import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
+import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
@@ -312,7 +313,7 @@ class PostEditorInputTest {
             hiddenFields = emptyMap(), options = ReplyFormOptions(), msgIcon = "1", isAnonymous = false,
         )
         val editRepository = mockk<EditPostRepository> {
-            coEvery { fetchEditPostForm(any()) } coAnswers {
+            coEvery { fetchEditPostForm(any<EditPostContext>()) } coAnswers {
                 editFormFailure?.let { throw it }
                 form
             }

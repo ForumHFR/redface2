@@ -603,6 +603,12 @@ data class PrivateMessageReplyContext(
     val quote: PrivateMessageQuote? = null, // null = réponse simple qui suit le lien réel ; non-null = GET citation typé
 )
 
+data class PrivateMessageEditContext(       // #1625 : distinct du contexte public EditPostContext, inchangé
+    val threadId: Int,                     // post > 0, catégorie implicite prive (jamais un faux cat=0)
+    val page: Int,                         // >= 1, page réellement éditée
+    val numreponse: Int,                   // > 0, unique dans la catégorie prive, pas globalement sur HFR
+)
+
 data class ReplyForm(
     val hashCheck: String,           // CSRF token HFR, jamais loggué
     val sujet: String,
@@ -610,6 +616,8 @@ data class ReplyForm(
     val isAnonymous: Boolean,
     val initialContent: String = "",  // Phase 2C (#146) : reply → "" ; quote → bloc `[quotemsg=…]` prérempli par HFR (verbatim, jamais reconstruit côté app)
     val favoriteSmileys: List<EditorSmiley> = emptyList(), // #1481 : favoris du compte, ordre du formulaire
+    val isSubjectEditable: Boolean = false, // #1625 : input sujet non caché, notamment au premier message MP
+    val submitFieldOrder: List<String> = emptyList(), // noms input/textarea dans l'ordre DOM, radios dédupliqués
 )
 
 data class PollVoteForm(              // #779 : extrait du form action*=vote.php de la page topic
@@ -675,7 +683,7 @@ data class TopicPollForm(
 sealed interface ReplySubmitResult {
     data class Success(
         val refreshUrl: String?,     // <meta http-equiv="Refresh" content="N; url=…">
-        val targetPage: Int?,        // dérivé du shape sujet_X_Y.htm
+        val targetPage: Int?,        // dérivé du shape sujet_X_Y.htm ; édition MP : page de la cible connue
         val numreponse: Int? = null, // dérivé du fragment #t{N} ; quote / edit / edit-FP exposent
                                      // le post id, reply pur anchor #bas et reste null (issue #200)
     ) : ReplySubmitResult
@@ -698,6 +706,11 @@ remet `Topic.pollVoteForm` à `null`. Les gardes pré-POST produisent tous les
 `PollVoteFailureReason` sauf `UnexpectedResponse`, réservé au parser de réponse.
 
 Les contrats HFR sous-jacents sont documentés dans [`protocol-hfr.md` § Form fields critiques]({{ site.baseurl }}/specs/protocol-hfr#form-fields-critiques). Les `ReplyFailureReason` mappent un-à-un sur les fixtures `write_*_error.html` / `write_*_response.html` capturées en Phase 2A.
+
+`PrivateMessageEditContext` ne contient que les coordonnées de la cible privée ; aucun token ou
+contenu. Le formulaire reste transitoire. Le sujet du premier message MP peut changer si
+`ReplyForm.isSubjectEditable` est vrai, via `form.copy(sujet = ...)`. Le contrat et les limites de
+capture restent canoniques dans [`protocol-hfr.md` § Édition MP]({{ site.baseurl }}/specs/protocol-hfr#private-message-edit).
 
 ---
 
