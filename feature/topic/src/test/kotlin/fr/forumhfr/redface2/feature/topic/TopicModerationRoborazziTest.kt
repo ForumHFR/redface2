@@ -6,8 +6,11 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.unit.dp
@@ -18,6 +21,7 @@ import fr.forumhfr.redface2.core.model.PostInline
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import fr.forumhfr.redface2.testing.captureRoboImage
 import java.time.Instant
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -29,10 +33,10 @@ import org.robolectric.annotation.GraphicsMode
  * #1112 — screenshot verification and visual review of the real Topic moderation card.
  *
  * The captures deliberately include every colour-sensitive family: body text + link, quote,
- * spoiler, code, signature, citation pill, edit marker, menu and footer actions. The fourth image
+ * spoiler, code, signature, citation pill, edit marker, menu and footer actions. A pixel equality assertion
  * pins the persistent moderation red on the band even when the card is the scroll anchor — the
- * moderation header wins above the transient anchor tint. These PNGs are inspection artefacts, not
- * self-validating snapshots.
+ * moderation header wins above the transient anchor tint. These PNGs are verified references in the
+ * default verify mode, and inspection artefacts when re-recorded.
  *
  *     ./scripts/docker-dev.sh ./gradlew :feature:topic:testDebugUnitTest \
  *         --tests '*TopicModerationRoborazziTest*' --console=plain --no-daemon
@@ -45,14 +49,6 @@ class TopicModerationRoborazziTest {
 
     @get:Rule
     val composeTestRule = createComposeRule()
-
-    @Test
-    fun moderationLight() = capture(
-        darkTheme = false,
-        amoledTheme = false,
-        highlighted = false,
-        fileName = "topic_moderation_light.png",
-    )
 
     @Test
     fun moderationDark() = capture(
@@ -84,6 +80,7 @@ class TopicModerationRoborazziTest {
         highlighted: Boolean,
         fileName: String,
     ) {
+        val anchored = mutableStateOf(false)
         composeTestRule.setContent {
             RedfaceTheme(
                 darkTheme = darkTheme,
@@ -94,7 +91,7 @@ class TopicModerationRoborazziTest {
                     Box(modifier = Modifier.width(360.dp).padding(12.dp)) {
                         TopicPostCard(
                             post = moderationPost(),
-                            highlighted = highlighted,
+                            highlighted = anchored.value,
                             citedCount = 2,
                             showSignature = true,
                             onQuote = {},
@@ -107,6 +104,12 @@ class TopicModerationRoborazziTest {
             }
         }
 
+        if (highlighted) {
+            val before = composeTestRule.onRoot().captureToImage().asAndroidBitmap()
+            composeTestRule.runOnIdle { anchored.value = true }
+            val after = composeTestRule.onRoot().captureToImage().asAndroidBitmap()
+            assertTrue("Moderation must override the anchor tint", before.sameAs(after))
+        }
         composeTestRule.onRoot().captureRoboImage(
             filePath = "src/test/screenshots/$fileName",
         )

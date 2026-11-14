@@ -41,7 +41,7 @@ import org.robolectric.annotation.GraphicsMode
  * #1040 lot 6 — pixel proof for the extraction of the topic draw layer. The `before` branch is the
  * exact pre-extraction graphicsLayer body; the `after` branch is [topicZoomTransform]. Both render
  * the SAME deterministic topic harness at 1× and at one fixed non-trivial transform. Roborazzi
- * verifies all four references, while Bitmap.sameAs compares the two current renders exactly.
+ * verifies one reference per transform, while Bitmap.sameAs compares the two current renders exactly.
  *
  * This proves draw-layer equivalence only. Gesture/state behaviour remains the responsibility of
  * TopicZoomMathTest, TopicZoomGestureTest, TopicZoomQuoteFoldTest and TopicSwipeMultiTouchTest.
@@ -94,7 +94,7 @@ class TopicZoomExtractionRoborazziTest {
             }
         }
 
-        val before = captureHarness(name = "topic_zoom_extraction_before_$suffix")
+        val before = compose.onNodeWithTag(CAPTURE_TAG).captureToImage().asAndroidBitmap()
         compose.runOnIdle { useSharedTransform.value = true }
         val after = captureHarness(name = "topic_zoom_extraction_after_$suffix")
 

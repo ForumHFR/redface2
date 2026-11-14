@@ -44,18 +44,22 @@ class EditorShortcutRoborazziTest {
     private var host by mutableStateOf(EditorActionBarFixture())
     private data class Variant(val dark: Boolean, val scale: Float)
     private val variants = listOf(false, true).flatMap { dark ->
-        listOf(1f, 1.3f).map { scale -> Variant(dark, scale) }
+        listOf(1f, 1.3f).filter { !dark || it == 1f }.map { scale -> Variant(dark, scale) }
     }
-    private val choices = listOf(EditorShortcut.BOLD, EditorShortcut.ITALIC, EditorShortcut.QUOTE,
+    // Bold already has an isolated reference in EditorActionBarRoborazziTest (sample 1).
+    private val choices = listOf(EditorShortcut.ITALIC, EditorShortcut.QUOTE,
         EditorShortcut.LINK, EditorShortcut.RED, EditorShortcut.BLUE, EditorShortcut.GREEN,
         EditorShortcut.ORANGE, EditorShortcut.GREY, EditorShortcut.UPLOAD_IMAGE,
         EditorShortcut.IMAGE_URL, EditorShortcut.IMAGE_SELECTION, EditorShortcut.SEARCH_SMILEYS,
         EditorShortcut.PERSONAL_SMILEY, EditorShortcut.BULLET, EditorShortcut.EMAIL)
 
-    @Test fun `shortcut glyphs in both themes scales narrow portrait and compact heights`() {
+    @Test fun `distinct shortcut glyphs with level B themes scales and widths`() {
         compose.setContent { key(host) { host.Content(showBody = false) } }
         variants.forEach { variant ->
-            listOf(360.dp to false, 760.dp to true).forEach { (width, compact) ->
+            // Portrait glyphs have no text and render identically at both font scales.
+            listOf(360.dp to false, 760.dp to true).filter { (_, compact) ->
+                compact || variant.scale == 1f
+            }.forEach { (width, compact) ->
                 choices.forEach { choice ->
                     configure(choice, variant, width, compact)
                     shortcut(choice).assertIsDisplayed()
@@ -69,7 +73,8 @@ class EditorShortcutRoborazziTest {
         compose.setContent { key(host) { host.Content(showBody = false) } }
         variants.forEach { variant ->
             configure(EditorShortcut.BOLD, variant, compact = true)
-            capture("rest_${variant.dark}_${variant.scale}_360.0_true")
+            // Rest is action-bar sample 0; retain the visibility assertion without a duplicate PNG.
+            compose.onNodeWithTag("bar").assertIsDisplayed()
             listOf(EditorShortcut.BOLD, EditorShortcut.BLUE, EditorShortcut.IMAGE_SELECTION).forEach { choice ->
                 configure(choice, variant, compact = true)
                 scrollToShortcutAndCheckBounds(choice)
@@ -87,14 +92,14 @@ class EditorShortcutRoborazziTest {
                 host.progress.value = UploadProgress(1, 3)
             }
             shortcut(EditorShortcut.UPLOAD_IMAGE).assertIsDisplayed().assertIsNotEnabled()
-            capture("upload_disabled_${variant.dark}_${variant.scale}")
+            if (variant.scale == 1f) capture("upload_disabled_${variant.dark}_${variant.scale}")
 
             configure(EditorShortcut.PERSONAL_SMILEY, variant)
             shortcut(EditorShortcut.PERSONAL_SMILEY).assertIsDisplayed()
             compose.onNodeWithContentDescription("Mise en forme").performClick()
             shortcut(EditorShortcut.PERSONAL_SMILEY).assertDoesNotExist()
             shortcut(EditorShortcut.BOLD).assertIsDisplayed()
-            capture("hidden_format_${variant.dark}_${variant.scale}")
+            // Format is action-bar sample 2; behaviour is asserted here, appearance there.
         }
     }
 

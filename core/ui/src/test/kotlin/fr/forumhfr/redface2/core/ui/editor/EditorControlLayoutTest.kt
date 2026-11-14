@@ -106,7 +106,8 @@ class EditorControlLayoutTest {
                 assertEquals(185f, bounds.width.value, 0.5f)
                 assertEquals(48f, bounds.height.value, 0.5f)
                 val capture = (content as? EditorEventContent.Problem)?.error?.let(::budgetCaptureName)
-                if (capture != null) {
+                // The control is always 48 dp high: keep assertions at both constraints, one PNG.
+                if (capture != null && injectedHeight == 48.dp) {
                     compose.onNodeWithTag("control").captureRoboImage(
                         "src/test/screenshots/editor_budget_${capture}_${injectedHeight.value}.png",
                     )

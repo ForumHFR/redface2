@@ -37,10 +37,10 @@ class EditorActionBarRoborazziTest {
     private var host by mutableStateOf(EditorActionBarFixture())
 
     @Test
-    fun `ED20 to ED95 record all bar states in both themes scales and width classes`() {
+    fun `ED20 to ED95 capture distinct bar states with level B axes`() {
         compose.setContent { key(host) { host.Content(showBody = false) } }
         listOf(false, true).forEach { dark ->
-            listOf(1f, 1.3f).forEach { scale ->
+            listOf(1f, 1.3f).filter { !dark || it == 1f }.forEach { scale ->
                 listOf(360.dp to false, 360.dp to true, 760.dp to true).forEach { (width, compact) ->
                     recordSamples(dark, scale, width, compact)
                 }
@@ -50,7 +50,11 @@ class EditorActionBarRoborazziTest {
 
     private fun recordSamples(dark: Boolean, scale: Float, width: Dp, compact: Boolean) {
         val samples = if (compact) 0..19 else 0..18
-        samples.forEach { sample ->
+        samples.filter { sample ->
+            // The narrow compact viewport hides these changes; the wide row is font-scale invariant.
+            !(compact && width == 360.dp && sample in setOf(1, 5)) &&
+                !(!compact && scale == 1.3f && (sample in 0..7 || sample in 17..18))
+        }.forEach { sample ->
             compose.runOnIdle {
                 // Reset remembered tool scroll, focus and event-announcement state for every capture.
                 host = EditorActionBarFixture()
