@@ -551,13 +551,14 @@ class PostEditorViewModel @AssistedInject constructor(
         submission.disarm()
         updateChromeState { it.copy(isLoadingForm = true) }
         viewModelScope.launch {
-            // ED-88 — ignoring a quote already inserted in the field still seals ITS delivery.
+            // ED-88: Ignore seals an inserted delivery only while all its quotes remain in the field.
+            val present = QuotedNumreponses.fromBbcode(bodyFieldState.text.toString())
             val sealsDelivery = pending != null && pending == deliveredInlineQuoteRequest &&
-                !_state.value.unreadableQuoteRequest
+                !_state.value.unreadableQuoteRequest && present.containsAll(pending.quotes.map { it.numreponse })
             val result = if (_state.value.unreadableQuoteRequest) {
                 submission.drafts.discardUnreadableInlineQuoteRequest()
             } else {
-                if (pending == deliveredInlineQuoteRequest) {
+                if (sealsDelivery) {
                     submission.drafts.consumeInlineQuoteRequest(checkNotNull(pending), deliveredDraft(),
                         deliveredBody = deliveredQuoteBody)
                 } else submission.drafts.consumeInlineQuoteRequest(checkNotNull(pending))

@@ -1138,6 +1138,96 @@ class QuickReplyDurableQuoteTest {
     }
 
     @Test
+    fun `ED88 Ignore of a deleted inserted quote consumes Q without delivering or clearing the basket`() = runTest {
+        val scenario = Scenario().apply { offline = true }
+        scenario.enqueue()
+        val sheet = scenario.open()
+        advanceUntilIdle()
+        sheet.onQuoteReloadRequested()
+        advanceUntilIdle()
+        scenario.offline = false
+        scenario.store.saveFailure = IOException("disk")
+        sheet.onQuoteReloadRequested()
+        advanceUntilIdle()
+        assertEquals("[quotemsg=101]quote[/quotemsg]\n", sheet.state.value.text.text)
+        assertEquals(scenario.request, scenario.pending)
+        assertTrue(sheet.state.value.canIgnorePendingQuote)
+
+        val edited = "my text without the quote"
+        sheet.onTextChanged(TextFieldValue(edited))
+        scenario.store.saveFailure = null
+        sheet.quotesDelivered.test {
+            sheet.onPendingQuoteIgnored()
+            advanceUntilIdle()
+            assertNull(scenario.pending)
+            assertTrue(sheet.state.value.pendingQuotes.isEmpty())
+            assertEquals(edited, sheet.state.value.text.text)
+            assertEquals(edited, scenario.body)
+            assertTrue(scenario.store.saved[scenario.key]?.bodyProvenance?.deliveries.isNullOrEmpty())
+            expectNoEvents() // No sealed delivery: the basket stays armed.
+            sheet.effects.test {
+                sheet.onDismissed()
+                advanceUntilIdle()
+                assertTrue(awaitItem() is QuickReplyEffect.CloseCommitted)
+                expectNoEvents()
+            }
+            expectNoEvents() // Closing cannot resurrect the retired seal.
+        }
+    }
+
+    @Test
+    fun `ED88 Ignore of an inserted quote during close delivers once before CloseCommitted`() = runTest {
+        val scenario = Scenario().apply { offline = true }
+        scenario.enqueue()
+        val sheet = scenario.open()
+        advanceUntilIdle()
+        sheet.onQuoteReloadRequested()
+        advanceUntilIdle()
+        scenario.offline = false
+        scenario.store.saveFailure = IOException("disk")
+        sheet.onQuoteReloadRequested()
+        advanceUntilIdle()
+        val inserted = sheet.state.value.text.text
+        assertEquals("[quotemsg=101]quote[/quotemsg]\n", inserted)
+        assertEquals(scenario.request, scenario.pending)
+        assertTrue(sheet.state.value.canIgnorePendingQuote)
+
+        scenario.store.saveFailure = null
+        val commit = CompletableDeferred<Unit>().also { scenario.store.saveReturnGate = it }
+        sheet.quotesDelivered.test delivery@ {
+            sheet.effects.test {
+                sheet.onPendingQuoteIgnored()
+                runCurrent() // C/Q is durable, but Ignore has not received its write result yet.
+                assertNull(scenario.pending)
+                assertEquals(inserted, scenario.body)
+                assertTrue(sheet.state.value.isPreparingQuotes)
+                this@delivery.expectNoEvents()
+                sheet.onDismissed()
+                runCurrent()
+                assertTrue(sheet.state.value.isClosing)
+                expectNoEvents() // saveForClose must wait for Ignore's delivery signal too.
+                this@delivery.expectNoEvents()
+                sheet.onPendingQuoteIgnored() // A repeated click during the write is inert.
+                commit.complete(Unit)
+                val delivery = this@delivery.awaitItem()
+                assertEquals(QuickReplyEffect.CloseCommitted(delivery.openingId), awaitItem())
+                advanceUntilIdle()
+                sheet.onPendingQuoteIgnored()
+                sheet.onDismissed()
+                advanceUntilIdle()
+                expectNoEvents() // One close, even after repeated actions.
+            }
+            expectNoEvents() // One delivery: the basket is consumed only once.
+        }
+        assertFalse(sheet.state.value.unsavedCloseVisible)
+        assertFalse(sheet.state.value.isPreparingQuotes)
+        assertEquals(inserted, sheet.state.value.text.text)
+        assertEquals(inserted, scenario.body)
+        assertNull(scenario.pending)
+        assertEquals(listOf(101, 101, 101), scenario.fetches)
+    }
+
+    @Test
     fun `ED88 Ignore of an inserted quote keeps the basket armed when its write is refused`() = runTest {
         val scenario = Scenario().apply { offline = true }
         scenario.enqueue()

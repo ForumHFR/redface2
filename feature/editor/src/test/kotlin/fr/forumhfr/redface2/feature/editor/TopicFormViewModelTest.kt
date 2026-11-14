@@ -2173,22 +2173,23 @@ class TopicFormViewModelTest {
     }
 
     @Test
-    fun restoreOfferKeepsTitleChangedByUser() = runTest {
-        topicFormRepository.formResult = topicFormRepository.formResult.copy(
-            subject = "served title", initialContent = "seed",
-        )
+    fun restoreNewTopicOfferKeepsTitleChangedByUser() = runTest {
         for (offeredBody in listOf("", "draft")) {
             draftStore = FakeEditorDraftStore()
             draftStore.preload(
-                EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE),
+                EditorDraftKey.newTopic(SAMPLE_CAT),
                 EditorDraftStore.Draft(body = offeredBody, subject = "stored title"),
             )
-            val vm = newViewModel()
+            val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
             vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("typed title")))
+            // New-topic offers retain their stored title, so restoring must respect the live title.
+            assertEquals("typed title", vm.state.value.subject.text)
+            assertEquals("", vm.state.value.subjectHydratedContent)
             assertEquals(offeredBody, vm.state.value.restorableDraft)
+            assertEquals("stored title", vm.state.value.restorableSubject)
             vm.submit(TopicFormIntent.DraftRestoreRequested)
             assertEquals("typed title", vm.state.value.subject.text)
-            assertEquals(if (offeredBody.isBlank()) "seed" else offeredBody, vm.bodyFieldState.text.toString())
+            assertEquals(offeredBody, vm.bodyFieldState.text.toString())
             assertNull(vm.state.value.restorableDraft)
             assertNull(vm.state.value.restorableSubject)
             vm.viewModelScope.cancel()
