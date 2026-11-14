@@ -1202,8 +1202,9 @@ class PostEditorViewModel @AssistedInject constructor(
             replaceBody(merge.body)
             // An untouched server subject is still a restore seed. Without a form, retain the
             // offered subject too: consuming the offer must not replace it with null on disk.
+            // A blank offered subject never replaces anything (same rule as the Topic first post).
             if (snapshot.subject.isBlank() || snapshot.subject == loadedForm?.sujet) {
-                selected?.draft?.let(::restoreSubject)
+                selected?.draft?.takeUnless { it.subject.isNullOrBlank() }?.let(::restoreSubject)
             }
         }
         if (needsMerge) submission.drafts.stageBodyMerge(merge)

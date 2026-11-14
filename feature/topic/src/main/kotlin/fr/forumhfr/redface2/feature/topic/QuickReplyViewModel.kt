@@ -602,10 +602,15 @@ class QuickReplyViewModel @AssistedInject constructor(
         submission.disarm()
         autosaveJob?.cancel()
         launchQuoteWork(opening) {
-            val result = if (unreadable) opening.drafts.discardUnreadableInlineQuoteRequest() else {
-                opening.drafts.consumeInlineQuoteRequest(checkNotNull(pending))
+            // ED-88: Ignore still seals a quote already inserted, like the full post editor.
+            if (quoteSeal != null && !unreadable) {
+                commitInlineQuoteDelivery(opening)
+            } else {
+                val result = if (unreadable) opening.drafts.discardUnreadableInlineQuoteRequest() else {
+                    opening.drafts.consumeInlineQuoteRequest(checkNotNull(pending))
+                }
+                settleIgnoredQuote(opening, result, unreadable)
             }
-            settleIgnoredQuote(opening, result, unreadable)
         }
     }
 
