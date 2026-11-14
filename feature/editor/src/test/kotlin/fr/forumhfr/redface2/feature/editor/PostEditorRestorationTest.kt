@@ -35,6 +35,9 @@ import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.EditorShortcut
 import fr.forumhfr.redface2.core.model.editor.ImagePickerMode
+import fr.forumhfr.redface2.core.model.write.PrivateMessageEditContext
+import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
+import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
@@ -50,8 +53,10 @@ import java.io.IOException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
@@ -841,6 +846,147 @@ class PostEditorRestorationTest {
         assertNull(restored.state.value.uploadError)
         assertEquals(2, calls)
     }
+
+    @Test
+    fun privateEditLoadsItsOwnOverloadAndRestoresBodyAndSubjectAfterProcessDeath() = runTest(dispatcher) {
+        coEvery { edits.fetchEditPostForm(any<PrivateMessageEditContext>()) } returns
+            form("private server body").copy(isSubjectEditable = true, msgIcon = "3")
+        val saved = SavedStateHandle()
+        val editor = open(saved, privateRequest())
+        runCurrent()
+        assertNull(editor.state.value.cat)
+        assertNull(editor.state.value.subcat)
+        assertTrue(editor.state.value.isSubjectEditable)
+        assertTrue(editor.state.value.hasMessageTone)
+        assertEquals(3, editor.state.value.msgIcon)
+        editor.submit(PostEditorIntent.SubjectChanged("private edited subject"))
+        type(editor, "private edited body", TextRange(3))
+        sync()
+        editor.submit(PostEditorIntent.Stopped)
+        runCurrent()
+        val frozen = freeze(saved)
+        editor.viewModelScope.cancel()
+        val restored = open(frozen, privateRequest())
+        runCurrent()
+        assertEquals("private edited body", restored.bodyFieldState.text.toString())
+        assertEquals(TextRange(3), restored.bodyFieldState.selection)
+        assertEquals("private edited subject", restored.state.value.subject)
+        assertNull(restored.state.value.restorableDraft)
+        assertEquals("private edited body", store.saved[EditorDraftKey.mpEdit(101)]?.body)
+        coVerify(exactly = 0) { edits.fetchEditPostForm(any<EditPostContext>()) }
+        coVerify(exactly = 0) { edits.submitEditPost(any<PrivateMessageEditContext>(), any(), any(), any()) }
+    }
+
+    @Test
+    fun privateEditOffersDraftAndMergesAgainstTheServerSeedOnExplicitRestore() = runTest(dispatcher) {
+        val mpKey = EditorDraftKey.mpEdit(101)
+        store.preload(mpKey, Draft("offered private draft"))
+        coEvery { edits.fetchEditPostForm(any<PrivateMessageEditContext>()) } returns form("server seed")
+        val editor = open(request = privateRequest())
+        runCurrent()
+        assertEquals("server seed", editor.bodyFieldState.text.toString())
+        assertEquals("offered private draft", editor.state.value.restorableDraft)
+        type(editor, "server seed plus typing")
+        sync()
+        editor.submit(PostEditorIntent.DraftRestoreRequested)
+        runCurrent()
+        assertEquals("offered private draft\n\nplus typing", editor.bodyFieldState.text.toString())
+        assertNull(editor.state.value.restorableDraft)
+    }
+
+    @Test
+    fun privateEditPersistsAttemptBeforeSendingAndNeverResendsAnUncertainAttempt() = runTest(dispatcher) {
+        every { preferences.observeConfirmBeforePosting() } returns flowOf(false)
+        coEvery { edits.fetchEditPostForm(any<PrivateMessageEditContext>()) } returns
+            form("server body").copy(isSubjectEditable = true, msgIcon = null)
+        var calls = 0
+        coEvery { edits.submitEditPost(any<PrivateMessageEditContext>(), any(), any(), any()) } answers {
+            calls++
+            val durable = checkNotNull(store.entries[EditorDraftKey.mpEdit(101)])
+            assertEquals("private body", durable.draft.body)
+            assertEquals("changed subject", durable.draft.subject)
+            assertEquals(AttemptStatus.IN_PROGRESS, durable.attempt?.status)
+            assertEquals("changed subject", secondArg<ReplyForm>().sujet)
+            assertNull(secondArg<ReplyForm>().msgIcon)
+            ReplySubmitResult.Failure(ReplyFailureReason.Unknown)
+        }
+        val saved = SavedStateHandle()
+        val editor = open(saved, privateRequest())
+        runCurrent()
+        assertFalse(editor.state.value.hasMessageTone)
+        editor.submit(PostEditorIntent.SubjectChanged("changed subject"))
+        type(editor, "private body")
+        sync()
+        store.beginGate = CompletableDeferred()
+        editor.submit(PostEditorIntent.SubmitClicked())
+        runCurrent()
+        assertEquals(0, calls)
+        store.beginGate?.complete(Unit)
+        runCurrent()
+        assertEquals(1, calls)
+        assertEquals(EditorErrors.uncertain, editor.state.value.submitError)
+        assertEquals(AttemptStatus.UNCERTAIN, store.entries[EditorDraftKey.mpEdit(101)]?.attempt?.status)
+        val frozen = freeze(saved)
+        editor.viewModelScope.cancel()
+        val restored = open(frozen, privateRequest())
+        runCurrent()
+        assertEquals("private body", restored.bodyFieldState.text.toString())
+        assertEquals("changed subject", restored.state.value.subject)
+        assertEquals(EditorErrors.uncertain, restored.state.value.submitError)
+        assertEquals(1, calls)
+        restored.submit(PostEditorIntent.ReloadRequested)
+        runCurrent()
+        assertEquals(1, calls)
+    }
+
+    @Test
+    fun privateEditSubmitsServedOptionsAndToneThroughThePrivateOverload() = runTest(dispatcher) {
+        every { preferences.observeConfirmBeforePosting() } returns flowOf(false)
+        coEvery { edits.fetchEditPostForm(any<PrivateMessageEditContext>()) } returns form("server body").copy(msgIcon = "1")
+        coEvery { edits.submitEditPost(any<PrivateMessageEditContext>(), any(), any(), any()) } returns
+            ReplySubmitResult.Success(null, 3, 101, 42)
+        val editor = open(request = privateRequest())
+        runCurrent()
+        editor.submit(PostEditorIntent.ToggleSignature(true))
+        editor.submit(PostEditorIntent.ToggleSmileyDisabled(true))
+        editor.submit(PostEditorIntent.ToggleEmailNotification(true))
+        editor.submit(PostEditorIntent.MsgIconSelected(7))
+        val effect = async { editor.effects.first() }
+        editor.submit(PostEditorIntent.SubmitClicked())
+        runCurrent()
+        coVerify(exactly = 1) {
+            edits.submitEditPost(PrivateMessageEditContext(42, 3, 101), match { it.msgIcon == "7" }, "server body",
+                fr.forumhfr.redface2.core.model.write.ReplyFormOptions(true, true, true))
+        }
+        assertEquals(fr.forumhfr.redface2.core.model.write.PostSubmitOperation.Edit,
+            (effect.await() as PostEditorEffect.SubmitSucceeded).operation)
+        coVerify(exactly = 0) { edits.submitEditPost(any<EditPostContext>(), any(), any(), any()) }
+    }
+
+    @Test
+    fun privateEditCloseWaitsForThePrivateDraftWrite() = runTest(dispatcher) {
+        coEvery { edits.fetchEditPostForm(any<PrivateMessageEditContext>()) } returns form("server body")
+        val editor = open(request = privateRequest())
+        runCurrent()
+        type(editor, "last private edit")
+        sync()
+        store.beforeSave = CompletableDeferred()
+        val close = async { editor.effects.first() }
+        editor.submit(PostEditorIntent.CloseRequested)
+        runCurrent()
+        assertFalse(close.isCompleted)
+        assertNull(store.saved[EditorDraftKey.mpEdit(101)])
+        store.beforeSave?.complete(Unit)
+        runCurrent()
+        assertEquals("last private edit", store.saved[EditorDraftKey.mpEdit(101)]?.body)
+        assertEquals(PostEditorEffect.CloseCommitted, close.await())
+        assertFalse(editor.state.value.showUnsavedCloseDialog)
+    }
+
+    private fun privateRequest() = PostEditorRequest(
+        mode = PostEditorMode.Edit, cat = null, topicId = null, numreponse = 101, page = 3, subcat = null,
+        target = PostEditorTarget.PrivateMessage(42),
+    )
 
     private fun checkpoint(body: String): SavedStateHandle {
         val saved = SavedStateHandle()

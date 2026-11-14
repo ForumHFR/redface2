@@ -1661,6 +1661,48 @@ class PrivateMessageThreadContentTest {
         mountState(state)
     }
 
+    @Test
+    fun `own editable message opens the shared editor in a one to one thread`() = editMenuRoutes(false)
+
+    @Test
+    fun `own editable message opens the shared editor in a group thread`() = editMenuRoutes(true)
+
+    private fun editMenuRoutes(group: Boolean) {
+        var edited: Int? = null
+        val state = contentState(listOf(message(101, "Alice", "Owned body").copy(isEditable = true)),
+            isMultiRecipient = group).copy(connectedPseudo = "Alice", editActionsAvailable = true)
+        mountState(state, NO_OP_CALLBACKS.copy(onEdit = { edited = it.numreponse }))
+        compose.onNodeWithContentDescription("Options du message").performClick()
+        compose.onNodeWithText("Modifier").assertIsDisplayed().performClick()
+        compose.waitUntil(timeoutMillis = 2_000) { edited == 101 }
+    }
+
+    @Test
+    fun `another authors message never offers edit in a one to one thread`() = editMenuAbsent(false)
+
+    @Test
+    fun `another authors message never offers edit in a group thread`() = editMenuAbsent(true)
+
+    private fun editMenuAbsent(group: Boolean) {
+        val state = contentState(listOf(message(101, "Bob", "Other body")),
+            isMultiRecipient = group).copy(connectedPseudo = "Alice", editActionsAvailable = true)
+        mountState(state, NO_OP_CALLBACKS.copy(onEdit = {}))
+        compose.onNodeWithContentDescription("Options du message").performClick()
+        compose.onNodeWithText("Modifier").assertDoesNotExist()
+    }
+
+    @Test
+    fun `storage conversation never offers edit even with a cold location cache`() {
+        val state = contentState(listOf(message(101, "Alice", "Storage").copy(isEditable = true)))
+        val mode = state.mode as PrivateMessageThreadUiState.Mode.Content
+        mountState(state.copy(connectedPseudo = "Alice", editActionsAvailable = true,
+            mode = mode.copy(thread = mode.thread.copy(
+                subject = fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository.STORAGE_SUBJECT_HASH))),
+            NO_OP_CALLBACKS.copy(onEdit = {}))
+        compose.onNodeWithContentDescription("Options du message").performClick()
+        compose.onNodeWithText("Modifier").assertDoesNotExist()
+    }
+
     private fun mountState(
         state: PrivateMessageThreadUiState,
         callbacks: PrivateMessageThreadCallbacks = NO_OP_CALLBACKS,

@@ -333,7 +333,7 @@ class RoomEditorDraftStore @Inject constructor(
             subject = subject,
             recipients = recipients,
             updatedAt = clock.millis(),
-            isPrivate = isPrivate || key.startsWith("mpreply:") || key == "mpnew",
+            isPrivate = isPrivate || EditorDraftKey.isPrivate(key),
             pendingInlineQuoteRequest = pendingInlineQuoteRequest?.let {
                 PendingInlineQuoteRequestCodec.encode(it, key)
             },
@@ -358,7 +358,7 @@ class RoomEditorDraftStore @Inject constructor(
 
     private fun DraftOffer.toEntity(owner: String, key: String): EditorDraftOfferEntity = EditorDraftOfferEntity(
         owner, key, id, sourceVersion, draft.body, draft.subject, draft.recipients, draft.updatedAt,
-        draft.isPrivate || key.startsWith("mpreply:") || key == "mpnew",
+        draft.isPrivate || EditorDraftKey.isPrivate(key),
     )
 
     private fun EditorDraftOfferEntity.toOffer(): DraftOffer = DraftOffer(

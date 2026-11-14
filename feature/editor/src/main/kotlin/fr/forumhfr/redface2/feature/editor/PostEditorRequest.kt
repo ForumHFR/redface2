@@ -8,15 +8,16 @@ import fr.forumhfr.redface2.core.model.write.QuoteSelection
  * types into the feature module.
  *
  * Phase 2C-A (#145) extends the payload with [page] and [subcat] : both are
- * required by HFR's `message.php` reply form contract (cf.
+ * required by HFR's public `message.php` reply form contract (cf.
  * `docs/specs/protocol-hfr.md` § POST `bddpost.php`). The caller (TopicScreen)
  * is responsible for supplying real values; passing `null` here implies "Phase
  * 2C wiring not yet ready for this entry point" and the editor stays in a
- * read-only / local-preview-only mode for that session.
+ * read-only / local-preview-only mode for that session. Private edits instead carry a
+ * [PostEditorTarget.PrivateMessage] and leave public category/topic/subcategory coordinates null.
  */
 data class PostEditorRequest(
     val mode: PostEditorMode,
-    val cat: Int,
+    val cat: Int?,
     val topicId: Int?,
     val numreponse: Int?,
     val page: Int?,
@@ -42,4 +43,17 @@ data class PostEditorRequest(
      * surfaced. Only `RedfaceNavigation.onEscalateToFullEditor` sets it `true`.
      */
     val resumeSharedDraft: Boolean = false,
-)
+    val target: PostEditorTarget = PostEditorTarget.Public,
+) {
+    init {
+        when (target) {
+            PostEditorTarget.Public -> require(cat != null)
+            is PostEditorTarget.PrivateMessage -> {
+                require(mode == PostEditorMode.Edit && cat == null && topicId == null && subcat == null)
+                require(initialQuotes.isEmpty() && !resumeSharedDraft)
+            }
+        }
+    }
+
+    override fun toString(): String = "PostEditorRequest(mode=$mode, target=$target)"
+}

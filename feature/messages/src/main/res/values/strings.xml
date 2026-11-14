@@ -130,4 +130,6 @@
         <item quantity="one">%1$d destinataire</item>
         <item quantity="other">%1$d destinataires</item>
     </plurals>
+    <string name="messages_message_menu_edit">Modifier</string>
+    <string name="messages_message_edited">Message modifié</string>
 </resources>

@@ -1,5 +1,6 @@
 package fr.forumhfr.redface2.feature.messages
 
+import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.assisted.Assisted
@@ -20,6 +21,7 @@ import fr.forumhfr.redface2.core.domain.media.PostImageSaver
 import fr.forumhfr.redface2.core.domain.messages.MessagesRepository
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageReadPositionStore
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
+import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageLocationStore
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
@@ -29,6 +31,7 @@ import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import fr.forumhfr.redface2.core.model.mpstorage.MpStorageFlagEntry
 import fr.forumhfr.redface2.core.model.write.PrivateMessageReplyContext
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -71,6 +74,8 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     private val writeRepository: PrivateMessageWriteRepository,
     private val postImageSaver: PostImageSaver,
     private val draftStore: EditorDraftStore,
+    private val mpStorageLocationStore: MpStorageLocationStore,
+    savedStateHandle: SavedStateHandle,
 ) : ViewModel() {
 
     /**
@@ -182,7 +187,27 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
     private var rosterJob: Job? = null
     private var cachedRosterForm: ReplyForm? = null
 
+    private val editAcknowledgements = PrivateMessageEditAcknowledgements(savedStateHandle, viewModelScope)
+
+    fun editAcknowledgementPresented(id: Long) = editAcknowledgements.presented(id)
+
+    private fun loadEditCapability(account: String) {
+        viewModelScope.launch {
+            val location = try {
+                mpStorageLocationStore.read(account)
+            } catch (_: java.io.IOException) {
+                return@launch
+            }
+            if (authenticatedPseudo == account) {
+                _state.update { it.copy(editActionsAvailable = location?.threadId != request.threadId) }
+            }
+        }
+    }
+
     init {
+        viewModelScope.launch {
+            editAcknowledgements.ready.collect { id -> _state.update { it.copy(editAcknowledgement = id) } }
+        }
         // #221 — one screen-lifetime load, deliberately outside the auth collector and every job
         // cancelled by clearPrivateState. It is public decoration, not private session state.
         loadStaff()
@@ -204,6 +229,8 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
                                 clearPrivateState(nextMode = PrivateMessageThreadUiState.Mode.Loading)
                             }
                             authenticatedPseudo = authState.pseudo
+                            editAcknowledgements.bind(authState.pseudo)
+                            loadEditCapability(authState.pseudo)
                             // #1050 — expose the session pseudo for the Ego markers. The list
                             // derives both markers from this session-bound value (never from the
                             // cached Post.isOwnPost bit), so an A → B switch re-resolves them.
@@ -315,14 +342,21 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
      * without replacing the navigation entry (and therefore without losing [pageAnchors]).
      */
     fun applySubmitResult(result: PrivateMessageSubmitResult) {
+        val account = authenticatedPseudo ?: return
         if (result.eventId == lastSubmitEventId) return
         lastSubmitEventId = result.eventId
+        if (result.operation == PostSubmitOperation.Edit) {
+            editAcknowledgements.accept(account, result.eventId)
+        }
         val landing = if (result.page == _state.value.page) {
             LandingRequest.None
         } else {
             LandingRequest.RestoreOrTop
         }
-        load(result.page, landing)
+        load(
+            result.page, landing,
+            editEventId = result.eventId.takeIf { result.operation == PostSubmitOperation.Edit },
+        )
     }
 
     /** Clears exactly the landing the screen applied; a newer owner/value is never erased. */
@@ -515,6 +549,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         val egoPostEnabled = _state.value.egoPostEnabled
         val showPageFabs = _state.value.showPageFabs
         authenticatedPseudo = null
+        editAcknowledgements.clear()
         landingGeneration++
         pendingPageLanding = null
         activeLoadOwner = null
@@ -595,7 +630,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         }
     }
 
-    private fun load(page: Int, landingRequest: LandingRequest) {
+    private fun load(page: Int, landingRequest: LandingRequest, editEventId: Long? = null) {
         val account = authenticatedPseudo
         if (account == null) {
             clearPrivateState()
@@ -625,7 +660,12 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
             try {
                 fetchPage(owner)
             } finally {
-                if (activeLoadOwner == owner) activeLoadOwner = null
+                if (activeLoadOwner == owner) {
+                    activeLoadOwner = null
+                    if (editEventId != null && authenticatedPseudo == owner.account) {
+                        editAcknowledgements.refreshed(editEventId)
+                    }
+                }
             }
         }
     }

@@ -39,6 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.postContentPlainText
+import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
 import fr.forumhfr.redface2.core.ui.post.hideThenDismiss
 
@@ -71,6 +72,7 @@ internal fun MessageMenuSheet(
     multiQuoteSelected: Boolean = false,
     onToggleMultiQuote: (() -> Unit)? = null,
     onToggleBlockAuthor: (() -> Unit)? = null,
+    onEdit: (() -> Unit)? = null,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val coroutineScope = rememberCoroutineScope()
@@ -143,6 +145,22 @@ internal fun MessageMenuSheet(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(stringResource(R.string.messages_message_menu_copy_text))
+            }
+
+            if (onEdit != null && message.isEditable) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        hideThenDismiss(coroutineScope, sheetState) {
+                            onDismiss()
+                            onEdit()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    RedfaceVectorIcon(fr.forumhfr.redface2.core.ui.R.drawable.ic_edit)
+                    Text(stringResource(R.string.messages_message_menu_edit))
+                }
             }
 
             if (onToggleMultiQuote != null) {

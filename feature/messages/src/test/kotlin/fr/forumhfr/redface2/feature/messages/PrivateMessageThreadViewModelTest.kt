@@ -1,5 +1,7 @@
 package fr.forumhfr.redface2.feature.messages
 
+import androidx.lifecycle.SavedStateHandle
+
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
@@ -94,6 +96,9 @@ class PrivateMessageThreadViewModelTest {
         writeRepository: PrivateMessageWriteRepository = mockk(relaxed = true),
         postImageSaver: PostImageSaver = mockk(relaxed = true),
         draftStore: EditorDraftStore = VersionedEditorDraftStore(),
+        mpStorageLocationStore: fr.forumhfr.redface2.core.domain.mpstorage.MpStorageLocationStore =
+            mockk(relaxed = true),
+        savedStateHandle: SavedStateHandle = SavedStateHandle(),
     ) = PrivateMessageThreadViewModel(
         request = threadRequest,
         repository = repository,
@@ -106,6 +111,8 @@ class PrivateMessageThreadViewModelTest {
         writeRepository = writeRepository,
         postImageSaver = postImageSaver,
         draftStore = draftStore,
+        mpStorageLocationStore = mpStorageLocationStore,
+        savedStateHandle = savedStateHandle,
     )
 
     @Suppress("LongParameterList") // test helper: every param is an optional, defaulted preference flow.
@@ -286,6 +293,8 @@ class PrivateMessageThreadViewModelTest {
             writeRepository = mockk(relaxed = true),
             postImageSaver = mockk(relaxed = true),
             draftStore = VersionedEditorDraftStore(),
+            mpStorageLocationStore = mockk(relaxed = true),
+            savedStateHandle = SavedStateHandle(),
         )
 
         assertEquals(PrivateMessageThreadUiState.Mode.RequiresLogin, viewModel.state.value.mode)
@@ -876,6 +885,58 @@ class PrivateMessageThreadViewModelTest {
         viewModel.selectPage(1)
         val restored = viewModel.state.value.pageLanding as PrivateMessagePageLanding.Anchor
         assertEquals(anchor, restored.anchor)
+    }
+
+    @Test
+    fun `edit result refreshes exactly the edited page once and retains the viewport anchor`() = runTest {
+        val repository = mockk<MessagesRepository>()
+        coEvery { repository.getPrivateMessageThread(42, any(), null) } answers {
+            network(thread(page = secondArg(), totalPages = 5))
+        }
+        val vm = threadViewModel(repository, threadRequest = request.copy(page = 3))
+        vm.acknowledgePageLanding(requireNotNull(vm.state.value.pageLanding))
+        val anchor = PrivateMessageScrollAnchor(index = 4, offset = 37)
+        vm.reportPageAnchor(anchor)
+        val result = PrivateMessageSubmitResult(18L, 3,
+            fr.forumhfr.redface2.core.model.write.PostSubmitOperation.Edit)
+        vm.applySubmitResult(result)
+        vm.applySubmitResult(result)
+        assertEquals(3, vm.state.value.page)
+        assertNull(vm.state.value.pageLanding)
+        coVerify(exactly = 2) { repository.getPrivateMessageThread(42, 3, null) }
+        coVerify(exactly = 0) { repository.getPrivateMessageThread(42, 5, null) }
+        assertEquals(18L, vm.state.value.editAcknowledgement)
+        vm.editAcknowledgementPresented(18L)
+        assertNull(vm.state.value.editAcknowledgement)
+        vm.selectPage(2)
+        vm.acknowledgePageLanding(requireNotNull(vm.state.value.pageLanding))
+        vm.selectPage(3)
+        assertEquals(anchor, (vm.state.value.pageLanding as PrivateMessagePageLanding.Anchor).anchor)
+    }
+
+    @Test
+    fun `successful edit still gets its acknowledgement when the refresh fails`() = runTest {
+        val repository = loadedRepository()
+        val vm = threadViewModel(repository)
+        coEvery { repository.getPrivateMessageThread(42, 1, null) } throws IOException("offline")
+        vm.effects.test {
+            vm.applySubmitResult(PrivateMessageSubmitResult(19L, 1,
+                fr.forumhfr.redface2.core.model.write.PostSubmitOperation.Edit))
+            assertEquals(PrivateMessageThreadEffect.RefreshFailed, awaitItem())
+            assertEquals(19L, vm.state.value.editAcknowledgement)
+            assertTrue(vm.state.value.mode is PrivateMessageThreadUiState.Mode.Content)
+        }
+    }
+
+    @Test
+    fun `storage cache hides all edit actions and never performs discovery`() = runTest {
+        val location = mockk<fr.forumhfr.redface2.core.domain.mpstorage.MpStorageLocationStore>()
+        coEvery { location.read(any()) } returns
+            fr.forumhfr.redface2.core.domain.mpstorage.MpStorageLocation(42, 101)
+        val storage = FakeMpStorageRepository()
+        val vm = threadViewModel(loadedRepository(), mpStorageLocationStore = location, mpStorageRepository = storage)
+        assertFalse(vm.state.value.editActionsAvailable)
+        coVerify(exactly = 1) { location.read(any()) }
     }
 
     @Test
@@ -1589,6 +1650,8 @@ class PrivateMessageThreadViewModelTest {
             writeRepository = mockk(relaxed = true),
             postImageSaver = mockk(relaxed = true),
             draftStore = VersionedEditorDraftStore(),
+            mpStorageLocationStore = mockk(relaxed = true),
+            savedStateHandle = SavedStateHandle(),
         )
 
         coVerify(exactly = 1) {
@@ -1617,6 +1680,8 @@ class PrivateMessageThreadViewModelTest {
             writeRepository = mockk(relaxed = true),
             postImageSaver = mockk(relaxed = true),
             draftStore = VersionedEditorDraftStore(),
+            mpStorageLocationStore = mockk(relaxed = true),
+            savedStateHandle = SavedStateHandle(),
         )
 
         coVerify(exactly = 1) {
@@ -1648,6 +1713,8 @@ class PrivateMessageThreadViewModelTest {
                 writeRepository = mockk(relaxed = true),
                 postImageSaver = mockk(relaxed = true),
             draftStore = VersionedEditorDraftStore(),
+            mpStorageLocationStore = mockk(relaxed = true),
+            savedStateHandle = SavedStateHandle(),
             )
         assertEquals(1, store.saved[42])
 

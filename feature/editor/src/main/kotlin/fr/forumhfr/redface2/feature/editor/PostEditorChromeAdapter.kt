@@ -41,7 +41,10 @@ internal class PostEditorChromeAdapter(
     ),
     EditorHostSurfaces(PostEditorChromeSurface.Smileys, PostEditorChromeSurface.Options,
         PostEditorChromeSurface.Picker, imageUrl = PostEditorChromeSurface.Url, canWrapSelection = true,
-        returnsToBody = { it !in setOf(PostEditorChromeSurface.Quotes, PostEditorChromeSurface.PendingQuote) },
+        returnsToBody = {
+            it !in setOf(PostEditorChromeSurface.Quotes, PostEditorChromeSurface.PendingQuote,
+                PostEditorChromeSurface.Subject)
+        },
         draftOffer = PostEditorChromeSurface.Restore),
     launchPicker, openSmileys, memory, openSmileySearch,
 ) {
@@ -62,6 +65,15 @@ internal class PostEditorChromeAdapter(
             showDot = true,
         ),
     )
+
+    fun openSubject() {
+        if (source().isSubjectEditable && !source().isLoadingForm) open(PostEditorChromeSurface.Subject)
+    }
+    fun subject(value: String) {
+        if (state.scaffold.controlsEnabled && !source().isLoadingForm) {
+            onIntent(PostEditorIntent.SubjectChanged(value))
+        }
+    }
 
     fun openDraftOffer() = open(PostEditorChromeSurface.Restore)
 
