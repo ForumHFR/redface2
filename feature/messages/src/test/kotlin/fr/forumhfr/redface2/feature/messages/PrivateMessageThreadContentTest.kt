@@ -38,6 +38,7 @@ import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onAllNodesWithContentDescription
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
@@ -1668,14 +1669,99 @@ class PrivateMessageThreadContentTest {
     @Test
     fun `own editable message opens the shared editor in a group thread`() = editMenuRoutes(true)
 
-    private fun editMenuRoutes(group: Boolean) {
+    @Test
+    fun `own message without toolbar opens the shared editor in a one to one thread`() = editMenuRoutes(false, false)
+
+    @Test
+    fun `own message without toolbar opens the shared editor in a group thread`() = editMenuRoutes(true, false)
+
+    private fun editMenuRoutes(group: Boolean, isEditable: Boolean = true) {
         var edited: Int? = null
-        val state = contentState(listOf(message(101, "Alice", "Owned body").copy(isEditable = true)),
-            isMultiRecipient = group).copy(connectedPseudo = "Alice", editActionsAvailable = true)
+        val state = contentState(listOf(message(101, "Alice", "Owned body").copy(isEditable = isEditable)),
+            isMultiRecipient = group, canReply = true).copy(connectedPseudo = "  aLiCe  ", editActionsAvailable = true)
         mountState(state, NO_OP_CALLBACKS.copy(onEdit = { edited = it.numreponse }))
         compose.onNodeWithContentDescription("Options du message").performClick()
         compose.onNodeWithText("Modifier").assertIsDisplayed().performClick()
         compose.waitUntil(timeoutMillis = 2_000) { edited == 101 }
+    }
+
+    @Test
+    fun `own message without toolbar never offers edit in a read only one to one thread`() =
+        readOnlyEditMenuAbsent(false)
+
+    @Test
+    fun `own message without toolbar never offers edit in a read only group thread`() = readOnlyEditMenuAbsent(true)
+
+    private fun readOnlyEditMenuAbsent(group: Boolean) {
+        val state = contentState(listOf(message(101, "Alice", "Owned body")),
+            isMultiRecipient = group, canReply = false).copy(connectedPseudo = "Alice", editActionsAvailable = true)
+        mountState(state, NO_OP_CALLBACKS.copy(onEdit = {}))
+        compose.onNodeWithContentDescription("Options du message").performClick()
+        compose.onNodeWithText("Modifier").assertDoesNotExist()
+    }
+
+    @Test
+    fun `own previous page recap never offers fallback edit in a one to one thread`() = recapEditMenuAbsent(false, 0)
+
+    @Test
+    fun `own previous page recap never offers fallback edit in a group thread`() = recapEditMenuAbsent(true, 0)
+
+    @Test
+    fun `own previous page recap without tools never offers edit in a one to one thread`() =
+        recapEditMenuAbsent(false, null)
+
+    @Test
+    fun `own previous page recap without tools never offers edit in a group thread`() = recapEditMenuAbsent(true, null)
+
+    private fun recapEditMenuAbsent(group: Boolean, quoteRef: Int?) {
+        val state = contentState(
+            messages = listOf(
+                message(101, "Alice", "Previous page recap").copy(quoteRef = quoteRef),
+                message(102, "Alice", "Current page body"),
+            ),
+            page = 2,
+            totalPages = 2,
+            isMultiRecipient = group,
+            canReply = true,
+        ).copy(connectedPseudo = "Alice", editActionsAvailable = true)
+        mountState(state, NO_OP_CALLBACKS.copy(onEdit = {}))
+        compose.onAllNodesWithContentDescription("Options du message")[0].performClick()
+        compose.onNodeWithText("Modifier").assertDoesNotExist()
+    }
+
+    @Test
+    fun `open menu follows refreshed edit permission and dispatches the current message`() {
+        // Different pseudos isolate toolbar permission from the ownership fallback.
+        val original = message(101, "Alice", "Cached body")
+        val refreshed = original.copy(isEditable = true, citedCount = 2)
+        val state = mutableStateOf(contentState(listOf(original), canReply = true).copy(
+            connectedPseudo = "Bob",
+            editActionsAvailable = true,
+        ))
+        var edited: Post? = null
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                PrivateMessageThreadContent(
+                    state = state.value,
+                    isMultiRecipientHint = false,
+                    callbacks = NO_OP_CALLBACKS.copy(onEdit = { edited = it }),
+                )
+            }
+        }
+        compose.onNodeWithContentDescription("Options du message").performClick()
+        compose.onNodeWithText("Modifier").assertDoesNotExist()
+
+        compose.runOnIdle {
+            val content = state.value.mode as PrivateMessageThreadUiState.Mode.Content
+            state.value = state.value.copy(mode = content.copy(thread = content.thread.copy(
+                messages = listOf(message(102, "Other", "Other body"), refreshed),
+            )))
+        }
+
+        compose.onNodeWithText("Cité 2 fois").assertIsDisplayed()
+        compose.onNodeWithText("Modifier").assertIsDisplayed().performClick()
+        compose.waitUntil(timeoutMillis = 2_000) { edited != null }
+        assertEquals(refreshed, edited)
     }
 
     @Test
@@ -1686,7 +1772,7 @@ class PrivateMessageThreadContentTest {
 
     private fun editMenuAbsent(group: Boolean) {
         val state = contentState(listOf(message(101, "Bob", "Other body")),
-            isMultiRecipient = group).copy(connectedPseudo = "Alice", editActionsAvailable = true)
+            isMultiRecipient = group, canReply = true).copy(connectedPseudo = "Alice", editActionsAvailable = true)
         mountState(state, NO_OP_CALLBACKS.copy(onEdit = {}))
         compose.onNodeWithContentDescription("Options du message").performClick()
         compose.onNodeWithText("Modifier").assertDoesNotExist()
@@ -1694,7 +1780,7 @@ class PrivateMessageThreadContentTest {
 
     @Test
     fun `storage conversation never offers edit even with a cold location cache`() {
-        val state = contentState(listOf(message(101, "Alice", "Storage").copy(isEditable = true)))
+        val state = contentState(listOf(message(101, "Alice", "Storage").copy(isEditable = true)), canReply = true)
         val mode = state.mode as PrivateMessageThreadUiState.Mode.Content
         mountState(state.copy(connectedPseudo = "Alice", editActionsAvailable = true,
             mode = mode.copy(thread = mode.thread.copy(

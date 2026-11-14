@@ -611,7 +611,7 @@ internal fun PrivateMessageThreadContent(
     val openMessageMenu = remember<(Post, Boolean) -> Unit> {
         { message, contentRevealed ->
             imageMenuTarget = null
-            messageMenuTarget = MessageMenuTarget(message, contentRevealed)
+            messageMenuTarget = MessageMenuTarget(message.numreponse, contentRevealed)
         }
     }
     val content = mode as? PrivateMessageThreadUiState.Mode.Content
@@ -843,7 +843,7 @@ private data class PrivateMessageReaderPresentation(
 
 /** Ephemeral menu target; explicit reveal prevents a hidden body from escaping through copy. */
 private data class MessageMenuTarget(
-    val message: Post,
+    val numreponse: Int,
     val contentRevealed: Boolean,
 )
 
@@ -1200,16 +1200,16 @@ private fun ThreadMessageMenuHost(
     onSetAuthorBlocked: (author: String, blocked: Boolean) -> Unit,
     onClear: () -> Unit,
 ) {
-    val targetStillOnPage = mode is PrivateMessageThreadUiState.Mode.Content &&
-        target != null &&
-        mode.thread.messages.any { message -> message.numreponse == target.message.numreponse }
+    // Resolve every action and metadata line against the displayed page, including a refresh
+    // that changes edit permission while the sheet is open.
+    val message = (mode as? PrivateMessageThreadUiState.Mode.Content)?.thread?.messages
+        ?.firstOrNull { it.numreponse == target?.numreponse }
 
     LaunchedEffect(mode, target) {
-        if (!targetStillOnPage) onClear()
+        if (message == null) onClear()
     }
 
-    if (mode is PrivateMessageThreadUiState.Mode.Content && target != null && targetStillOnPage) {
-        val message = target.message
+    if (mode is PrivateMessageThreadUiState.Mode.Content && target != null && message != null) {
         val authorCanonical = remember(message.author) { canonicalizePseudo(message.author) }
         val connectedCanonical = remember(connectedPseudo) {
             connectedPseudo?.let(::canonicalizePseudo)
@@ -1219,11 +1219,12 @@ private fun ThreadMessageMenuHost(
         val quoteSelection = message.toPrivateMessageQuoteSelectionOrNull(mode.thread.page)
         MessageMenuSheet(
             message = message,
+            connectedPseudo = connectedPseudo,
             authorBlocked = authorBlocked,
             contentVisible = contentVisible,
             onDismiss = onClear,
             onEdit = onEdit?.takeIf {
-                canEditPrivateMessage(message, connectedPseudo, editActionsAvailable, mode.thread.subject)
+                canEditPrivateMessage(message, connectedPseudo, editActionsAvailable, mode.thread)
             }?.let { edit -> { edit(message) } },
             onOpenProfile = message.profileId?.let { profileId ->
                 { onOpenProfile(profileId, message.author, message.avatarUrl) }

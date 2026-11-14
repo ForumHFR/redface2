@@ -1005,6 +1005,37 @@ class PrivateMessageThreadViewModelTest {
     }
 
     @Test
+    fun `refresh retries a failed local storage read before restoring edit actions`() = runTest {
+        val location = mockk<fr.forumhfr.redface2.core.domain.mpstorage.MpStorageLocationStore>()
+        coEvery { location.read(any()) } throws IOException("local read failed")
+        val storage = FakeMpStorageRepository()
+        val vm = threadViewModel(loadedRepository(), mpStorageLocationStore = location, mpStorageRepository = storage)
+        assertFalse(vm.state.value.editActionsAvailable)
+
+        coEvery { location.read(any()) } returns null
+        vm.refresh()
+        testScheduler.runCurrent()
+
+        assertTrue(vm.state.value.editActionsAvailable)
+        coVerify(exactly = 2) { location.read(any()) }
+    }
+
+    @Test
+    fun `refresh still excludes storage when the retried local read identifies it`() = runTest {
+        val location = mockk<fr.forumhfr.redface2.core.domain.mpstorage.MpStorageLocationStore>()
+        coEvery { location.read(any()) } throws IOException("local read failed")
+        val vm = threadViewModel(loadedRepository(), mpStorageLocationStore = location)
+
+        coEvery { location.read(any()) } returns
+            fr.forumhfr.redface2.core.domain.mpstorage.MpStorageLocation(42, 101)
+        vm.refresh()
+        testScheduler.runCurrent()
+
+        assertFalse(vm.state.value.editActionsAvailable)
+        coVerify(exactly = 2) { location.read(any()) }
+    }
+
+    @Test
     fun `account switch and logout purge every page anchor`() = runTest {
         val repository = mockk<MessagesRepository>()
         coEvery {
