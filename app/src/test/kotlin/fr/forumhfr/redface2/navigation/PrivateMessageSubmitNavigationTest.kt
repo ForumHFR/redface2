@@ -52,7 +52,7 @@ class PrivateMessageSubmitNavigationTest {
         val pending = PrivateMessagePendingSubmit(
             account = canonicalizePseudo("XaAT"),
             threadId = 42,
-            result = PrivateMessageSubmitResult(eventId = 9L, page = 3),
+            result = PrivateMessageSubmitResult(eventId = 9L, page = 3, account = canonicalizePseudo("XaAT")),
         )
 
         assertTrue(pending.matches(canonicalizePseudo("xaat"), threadId = 42))

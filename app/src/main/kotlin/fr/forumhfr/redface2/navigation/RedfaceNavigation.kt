@@ -1521,7 +1521,9 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                                 account = authenticatedCanonicalPseudo,
                                 pending = privateMessagePendingSubmit,
                                 onPublish = { threadId, page, operation, submittingAccount ->
-                                    authenticatedCanonicalPseudo?.takeIf { it == submittingAccount }?.let { account ->
+                                    authenticatedCanonicalPseudo?.takeIf {
+                                        it.isNotBlank() && it == submittingAccount
+                                    }?.let { account ->
                                         // A retained nav-entry ViewModel survives activity recreation,
                                         // while this plain remember counter does not. Seed from wall time
                                         // so the first post-recreation event cannot reuse the last small
@@ -1536,6 +1538,7 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                                             result = PrivateMessageSubmitResult(
                                                 eventId = privateMessageSubmitEventId,
                                                 page = page,
+                                                account = account,
                                                 operation = operation,
                                             ),
                                         )

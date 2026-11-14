@@ -1705,6 +1705,43 @@ class PrivateMessageThreadContentTest {
     }
 
     @Test
+    fun `pending submit retries when connected pseudo changes without a new event`() {
+        val result = PrivateMessageSubmitResult(18L, 1, "Alice")
+        val pending = mutableStateOf<PrivateMessageSubmitResult?>(result)
+        val connectedPseudo = mutableStateOf<String?>(null)
+        val attempts = mutableListOf<String?>()
+        val consumed = mutableListOf<PrivateMessageSubmitResult>()
+        compose.setContent {
+            PrivateMessageSubmitResultEffect(
+                pendingSubmitResult = pending.value,
+                connectedPseudo = connectedPseudo.value,
+                applySubmitResult = {
+                    attempts += connectedPseudo.value
+                    connectedPseudo.value != null
+                },
+                onSubmitResultConsumed = {
+                    consumed += it
+                    pending.value = null
+                },
+            )
+        }
+        compose.runOnIdle {
+            assertEquals(listOf<String?>(null), attempts)
+            assertTrue(consumed.isEmpty())
+            connectedPseudo.value = "Alice"
+        }
+        compose.runOnIdle {
+            assertEquals(listOf(null, "Alice"), attempts)
+            assertEquals(listOf(result), consumed)
+            connectedPseudo.value = "Bob"
+        }
+        compose.runOnIdle {
+            assertEquals(listOf(null, "Alice"), attempts)
+            assertEquals(listOf(result), consumed)
+        }
+    }
+
+    @Test
     fun `edit acknowledgement is displayed once and never replayed after presentation`() {
         compose.mainClock.autoAdvance = false
         val state = mutableStateOf(contentState(listOf(message(101, "Alice", "Edited body")))

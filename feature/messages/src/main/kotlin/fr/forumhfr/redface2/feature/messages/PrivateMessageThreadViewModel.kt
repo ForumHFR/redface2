@@ -341,12 +341,15 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
      * same [PrivateMessageSubmitResult.eventId] is inert; a fresh event force-refetches its page
      * without replacing the navigation entry (and therefore without losing [pageAnchors]).
      * Returns false until the account is known so the screen retains the handoff for a retry.
+     * A result from another account is consumed without refreshing or acknowledging it.
      */
-    @Suppress("ReturnCount") // Unknown account and duplicate guards precede one accepted handoff.
+    @Suppress("ReturnCount") // Unknown account, duplicate and owner guards precede one accepted handoff.
     fun applySubmitResult(result: PrivateMessageSubmitResult): Boolean {
         val account = authenticatedPseudo ?: return false
         if (result.eventId == lastSubmitEventId) return true
         lastSubmitEventId = result.eventId
+        // The handoff carries the canonical pseudo; compare in the same form, never raw cookie text.
+        if (canonicalizePseudo(account) != canonicalizePseudo(result.account)) return true
         if (result.operation == PostSubmitOperation.Edit) {
             editAcknowledgements.accept(account, result.eventId)
         }

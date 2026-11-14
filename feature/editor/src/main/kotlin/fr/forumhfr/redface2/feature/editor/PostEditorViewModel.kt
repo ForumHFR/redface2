@@ -212,6 +212,9 @@ class PostEditorViewModel @AssistedInject constructor(
     private val _quotesDelivered: Channel<Unit> = Channel(capacity = Channel.CONFLATED)
     val quotesDelivered: Flow<Unit> = _quotesDelivered.receiveAsFlow()
 
+    // Keep the last served capability across token invalidation; null means no form has loaded yet.
+    private var servedSubjectEditable: Boolean? = null
+
     /**
      * Cached form pulled lazily on [PostEditorMode.Reply]. Keeping it on the
      * ViewModel rather than the [PostEditorState] avoids leaking `hash_check`
@@ -220,6 +223,7 @@ class PostEditorViewModel @AssistedInject constructor(
     private var loadedForm: ReplyForm? = null
         set(value) {
             field = value
+            if (value != null) servedSubjectEditable = value.isSubjectEditable
             _state.update { it.copy(hasLoadedForm = value != null,
                 hasAuthenticatedForm = value?.isAnonymous == false, topicTitle = value?.sujet.orEmpty()) }
             if (value == null) smileyPicker.refreshFavorites(null)
@@ -977,8 +981,10 @@ class PostEditorViewModel @AssistedInject constructor(
         )
     }
 
+    // Preserve a restored subject while the form is unavailable; never checkpoint a served hidden subject.
     private fun draftSubject(snapshot: PostEditorState = _state.value): String? = snapshot.subject.takeIf {
-        snapshot.target is PostEditorTarget.PrivateMessage && snapshot.subjectHydrated
+        snapshot.target is PostEditorTarget.PrivateMessage && snapshot.subjectHydrated &&
+            servedSubjectEditable != false
     }
 
     private fun draftSnapshot(): EditorDraftStore.Draft? {

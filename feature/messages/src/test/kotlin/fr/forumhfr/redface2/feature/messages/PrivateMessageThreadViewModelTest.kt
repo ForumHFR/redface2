@@ -25,6 +25,7 @@ import fr.forumhfr.redface2.core.domain.preferences.PostHeaderEmphasis
 import fr.forumhfr.redface2.core.domain.preferences.ThemeColorPreferences
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.write.PrivateMessageWriteRepository
+import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.AuthState
 import fr.forumhfr.redface2.core.model.AuthorRole
@@ -871,7 +872,7 @@ class PrivateMessageThreadViewModelTest {
         viewModel.refresh()
         assertNull("same-page refresh must not arm a scroll", viewModel.state.value.pageLanding)
 
-        val submit = PrivateMessageSubmitResult(eventId = 17L, page = 1)
+        val submit = PrivateMessageSubmitResult(eventId = 17L, page = 1, account = "xaat")
         viewModel.applySubmitResult(submit)
         viewModel.applySubmitResult(submit)
         assertNull("same-page post-submit refetch stays at the current position", viewModel.state.value.pageLanding)
@@ -897,8 +898,7 @@ class PrivateMessageThreadViewModelTest {
         vm.acknowledgePageLanding(requireNotNull(vm.state.value.pageLanding))
         val anchor = PrivateMessageScrollAnchor(index = 4, offset = 37)
         vm.reportPageAnchor(anchor)
-        val result = PrivateMessageSubmitResult(18L, 3,
-            fr.forumhfr.redface2.core.model.write.PostSubmitOperation.Edit)
+        val result = PrivateMessageSubmitResult(18L, 3, "XaAT", PostSubmitOperation.Edit)
         vm.applySubmitResult(result)
         vm.applySubmitResult(result)
         assertEquals(3, vm.state.value.page)
@@ -922,8 +922,7 @@ class PrivateMessageThreadViewModelTest {
         }
         val repository = loadedRepository()
         val vm = threadViewModel(repository, authRepository = auth)
-        val result = PrivateMessageSubmitResult(20L, 1,
-            fr.forumhfr.redface2.core.model.write.PostSubmitOperation.Edit)
+        val result = PrivateMessageSubmitResult(20L, 1, "xaat", PostSubmitOperation.Edit)
         assertFalse(vm.applySubmitResult(result))
         assertNull(vm.state.value.editAcknowledgement)
         coVerify(exactly = 0) { repository.getPrivateMessageThread(42, any(), null) }
@@ -942,13 +941,52 @@ class PrivateMessageThreadViewModelTest {
     }
 
     @Test
+    fun `results from the previous account are consumed without refresh or edit acknowledgement`() = runTest {
+        val auth = FakeAuthRepository(AuthState.Authenticated("alice"))
+        val repository = loadedRepository()
+        val saved = SavedStateHandle()
+        val vm = threadViewModel(repository, authRepository = auth, savedStateHandle = saved)
+        auth.emit(AuthState.Authenticated("bob"))
+        testScheduler.runCurrent()
+        val landing = vm.state.value.pageLanding
+
+        val reply = PrivateMessageSubmitResult(21L, 3, "alice")
+        val edit = PrivateMessageSubmitResult(22L, 3, "alice", PostSubmitOperation.Edit)
+        listOf(reply, edit).forEach { result ->
+            assertTrue(vm.applySubmitResult(result))
+            assertTrue(vm.applySubmitResult(result))
+        }
+
+        assertEquals("bob", vm.state.value.connectedPseudo)
+        assertEquals(1, vm.state.value.page)
+        assertEquals(landing, vm.state.value.pageLanding)
+        assertNull(vm.state.value.editAcknowledgement)
+        assertFalse(saved.keys().any { it.startsWith("mpEditAck.") })
+        coVerify(exactly = 2) { repository.getPrivateMessageThread(42, 1, null) }
+        coVerify(exactly = 0) { repository.getPrivateMessageThread(42, 3, null) }
+    }
+
+    @Test
+    fun `a raw cookie pseudo matches the canonical submitting account`() = runTest {
+        // md_user is decoded without trimming: spacing and case differ from the canonical handoff.
+        val auth = FakeAuthRepository(AuthState.Authenticated("  Bob   Le  Bricoleur "))
+        val repository = loadedRepository()
+        val vm = threadViewModel(repository, authRepository = auth)
+        testScheduler.runCurrent()
+
+        val edit = PrivateMessageSubmitResult(23L, 1, "bob le bricoleur", PostSubmitOperation.Edit)
+        assertTrue(vm.applySubmitResult(edit))
+        assertEquals(23L, vm.state.value.editAcknowledgement)
+        coVerify(exactly = 2) { repository.getPrivateMessageThread(42, 1, null) }
+    }
+
+    @Test
     fun `successful edit still gets its acknowledgement when the refresh fails`() = runTest {
         val repository = loadedRepository()
         val vm = threadViewModel(repository)
         coEvery { repository.getPrivateMessageThread(42, 1, null) } throws IOException("offline")
         vm.effects.test {
-            vm.applySubmitResult(PrivateMessageSubmitResult(19L, 1,
-                fr.forumhfr.redface2.core.model.write.PostSubmitOperation.Edit))
+            vm.applySubmitResult(PrivateMessageSubmitResult(19L, 1, "xaat", PostSubmitOperation.Edit))
             assertEquals(PrivateMessageThreadEffect.RefreshFailed, awaitItem())
             assertEquals(19L, vm.state.value.editAcknowledgement)
             assertTrue(vm.state.value.mode is PrivateMessageThreadUiState.Mode.Content)
