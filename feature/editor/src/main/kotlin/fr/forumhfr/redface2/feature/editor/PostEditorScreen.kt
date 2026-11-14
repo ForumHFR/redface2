@@ -216,7 +216,8 @@ private fun PostEditorChrome(
         onOpenHeader = if (state.isSubjectEditable) host::openSubject else null,
         headerLabel = stringResource(R.string.editor_topic_open_title),
         fieldArea = { draft ->
-            PostEditorPreview(state.isPreviewVisible, state.preview, body, focus) {
+            PostEditorPreview(state.isPreviewVisible, state.preview, body, focus,
+                host.state.mediaDiskCachePolicy) {
                 draft()
             }
         }, overlay = { restore, content ->

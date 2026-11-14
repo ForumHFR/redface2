@@ -58,7 +58,7 @@ class PostEditorTransientRoborazziTest {
                         val focus = remember { FocusRequester() }
                         if (preview) PostEditorPreview(true, PostContent(listOf(
                             PostBlock.Paragraph(listOf(PostInline.Text("Aperçu du message avec une citation."))),
-                        )), host.body, focus) {
+                        )), host.body, focus, host.adapter.state.mediaDiskCachePolicy) {
                             BbcodeTextField(host.body, "Message", Modifier.fillMaxSize().focusRequester(focus),
                                 showKeyboardOnFocus = false)
                         } else PostEditorTestContent(host.state, host::dispatch, host.body, host.events, host.memory)
