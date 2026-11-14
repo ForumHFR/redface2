@@ -14,7 +14,8 @@ import androidx.room.PrimaryKey
  * account's drafts exactly (CacheInvalidator), without a LIKE-prefix scan. [isPrivate] rows are
  * MP drafts — their content is wiped on the same transition (an MP draft reveals a recipient +
  * message); only durable attempt metadata survives, still bound to its owner. Public
- * post drafts survive logout but are bounded by the 30-day retention purge run on app start.
+ * post drafts survive logout but are bounded by the 30-day retention purge run on app start,
+ * which never ages out a row whose send is still IN_PROGRESS or UNCERTAIN.
  * Stored content is never logged or sent to diagnostics (#405).
  */
 @Entity(tableName = "editor_drafts")

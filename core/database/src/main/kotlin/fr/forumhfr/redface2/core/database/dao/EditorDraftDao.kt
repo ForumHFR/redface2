@@ -169,7 +169,8 @@ interface EditorDraftDao {
     /**
      * Logout/account switch: erase every private content field for this owner. Keep only durable
      * attempt metadata (including PUBLISHED), never readable as another account's draft (#1080).
-     * Ordinary private drafts are deleted; retention remains responsible for the surviving markers.
+     * Ordinary private drafts are deleted. Retention later expires the PUBLISHED markers; an erased
+     * IN_PROGRESS/UNCERTAIN marker stays until its explicit resolution.
      */
     @Transaction
     suspend fun deletePrivateForUser(ownerId: String) {
@@ -190,14 +191,24 @@ interface EditorDraftDao {
     )
     suspend fun erasePrivateAttemptContent(ownerId: String)
 
-    /** Retention purge run on app start: drops drafts last touched before [cutoffMillis]. */
+    /**
+     * Retention purge run on app start: drops drafts and offers last touched before [cutoffMillis].
+     * A row whose send is unresolved (IN_PROGRESS or UNCERTAIN) is never aged out: its text and attempt
+     * marker are the only protection against a duplicate send, so it lives until an explicit resolution.
+     */
     @Transaction
     suspend fun deleteOlderThan(cutoffMillis: Long) {
         deleteOldOffers(cutoffMillis)
         deleteOldContent(cutoffMillis)
     }
 
-    @Query("DELETE FROM editor_drafts WHERE updatedAt < :cutoffMillis")
+    // `NOT IN` alone is NULL for an ordinary draft (attemptState IS NULL) and would keep it forever.
+    @Query(
+        """
+        DELETE FROM editor_drafts WHERE updatedAt < :cutoffMillis
+            AND (attemptState IS NULL OR attemptState NOT IN ('IN_PROGRESS', 'UNCERTAIN'))
+        """,
+    )
     suspend fun deleteOldContent(cutoffMillis: Long)
 
     @Query("DELETE FROM editor_draft_offers WHERE updatedAt < :cutoffMillis")
