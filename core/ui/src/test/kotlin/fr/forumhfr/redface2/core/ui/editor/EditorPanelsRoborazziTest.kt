@@ -136,7 +136,8 @@ class EditorPanelsRoborazziTest {
     }
 
     private fun capture(details: Boolean, dark: Boolean, scale: Float, state: String) {
-        val panel = if (details) "details" else "header"
+        // Both closed panels render the same body; verify both against one unchanged reference.
+        val panel = if (details || state == "closed") "details" else "header"
         compose.onNodeWithTag("panel-sample").captureRoboImage(
             "src/test/screenshots/editor_panel_${panel}_${dark}_${scale}_$state.png",
         )

@@ -53,14 +53,21 @@ class EditorScaffoldRoborazziTest {
         Profile("low-window", 360, 470, 357, fieldHeight = 41f),
     )
     private val matrix = listOf(false, true).flatMap { dark ->
-        listOf(1f, 1.3f).flatMap { scale -> profiles.map { Triple(dark, scale, it) } }
+        listOf(1f, 1.3f).filter { !dark || it == 1f }.flatMap { scale ->
+            profiles.map { Triple(dark, scale, it) }
+        }
     }
 
     @Test
-    fun `final B5 assembly matrix in both themes at 1 and 1_3 times L`() {
+    fun `level B assembly matrix keeps full axes for six structural states`() {
         compose.setContent { key(host) { host.Content() } }
         matrix.forEach { (dark, scale, profile) ->
-            (0..17).forEach { sample -> capture(dark, scale, profile, sample) }
+            // Normal, Format, read-only sending, upload error, details and header own the geometry.
+            // Other states only change the bar: light 1x portrait/landscape is sufficient here.
+            (0..17).filter { sample ->
+                sample in setOf(0, 2, 7, 10, 15, 16) ||
+                    (!dark && scale == 1f && profile.name != "low-window")
+            }.forEach { sample -> capture(dark, scale, profile, sample) }
         }
     }
 

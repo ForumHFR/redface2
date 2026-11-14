@@ -57,8 +57,8 @@ import org.robolectric.annotation.GraphicsMode
 /**
  * Actual reply and new-MP content on the common scaffold; the legacy submit bar and options were removed at
  * the R3/C4 junction. Both ↺ offers open the shared draft offer sheet, captured through its dialog window.
- * Reply: portrait/landscape × font scale 1.0/1.3 × light/dark × empty/multiline, plus restore/event/preview/
- * owner states, an armed send, both statuses at rest and under an event, and the full-screen form failure.
+ * Level B: no dark × 1.3; bar-only states at portrait 1x in both themes. Other states retain both layouts.
+ * The new Options Formats scene uses a star: light 1x at both layouts, portrait light 1.3 and dark 1x.
  * Light names are historical; dark reply names end in `_dark`.
  * New MP: `private_message_new_<scene>_<orientation>_fs<scale>_dark<theme>.png` for every [ComposeCapture],
  * plus the historical empty-body `private_message_new_<orientation>_fs<scale>_empty.png`. Its multiline body
@@ -110,15 +110,8 @@ class EditorBaselineRoborazziTest {
     fun portraitFontScale1_0Dark() = captureMatrix(orientation = "portrait", fontScale = 1.0f, dark = true)
 
     @Test
-    fun portraitFontScale1_3Dark() = captureMatrix(orientation = "portrait", fontScale = 1.3f, dark = true)
-
-    @Test
     @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
     fun landscapeFontScale1_0Dark() = captureMatrix(orientation = "landscape", fontScale = 1.0f, dark = true)
-
-    @Test
-    @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
-    fun landscapeFontScale1_3Dark() = captureMatrix(orientation = "landscape", fontScale = 1.3f, dark = true)
 
     private fun captureMatrix(orientation: String, fontScale: Float, dark: Boolean) {
         val scenario = mutableStateOf(Scenario(EditorSurface.Reply, filled = false))
@@ -148,7 +141,9 @@ class EditorBaselineRoborazziTest {
         } + ReplyChrome.entries.filter { it != ReplyChrome.Ready }.map {
             Scenario(EditorSurface.Reply, filled = true, chrome = it)
         }
-        cases.forEach { current ->
+        val barOnly = setOf(ReplyChrome.Armed, ReplyChrome.Owner, ReplyChrome.Statuses,
+            ReplyChrome.Error, ReplyChrome.EventStatuses)
+        cases.filter { it.chrome !in barOnly || (orientation == "portrait" && fontScale == 1f) }.forEach { current ->
             compose.runOnIdle { scenario.value = current }
             compose.waitForIdle()
             // The ↺ sheet window takes the scale when it opens, after the body has revealed its caret.
@@ -253,9 +248,6 @@ class EditorBaselineRoborazziTest {
     @Test fun composeOptionsFormatsPortraitLargeFont() = captureComposeStates("portrait", 1.3f, formatsOnly = true)
     @Test @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
     fun composeOptionsFormatsLandscape() = captureComposeStates("landscape", 1f, formatsOnly = true)
-    @Test @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
-    fun composeOptionsFormatsLandscapeLargeFont() = captureComposeStates("landscape", 1.3f, formatsOnly = true)
-
     private fun captureComposeStates(orientation: String, scale: Float, formatsOnly: Boolean = false) {
         val scenario = mutableStateOf(false to ComposeCapture.Header)
         lateinit var focus: FocusManager
@@ -275,8 +267,8 @@ class EditorBaselineRoborazziTest {
         }
         val scenes = if (formatsOnly) listOf(ComposeCapture.OptionsFormats)
         else ComposeCapture.entries.filter { it != ComposeCapture.OptionsFormats }
-        listOf(false, true).forEach { dark ->
-            scenes.forEach { state ->
+        listOf(false, true).filter { !it || scale == 1f }.forEach { dark ->
+            scenes.filter { it.recorded(orientation, scale, dark) }.forEach { state ->
                 // The adapter pre-opens ↺ while mounting the scene: its dialog window takes the scale then.
                 if (state == ComposeCapture.Restore) setSheetFontScale(scale)
                 compose.runOnIdle { scenario.value = dark to state }
@@ -294,6 +286,13 @@ class EditorBaselineRoborazziTest {
                 setSheetFontScale(1f)
             }
         }
+    }
+
+    private fun ComposeCapture.recorded(orientation: String, scale: Float, dark: Boolean): Boolean = when (this) {
+        ComposeCapture.States, ComposeCapture.Armed, ComposeCapture.Event ->
+            orientation == "portrait" && scale == 1f
+        ComposeCapture.OptionsFormats -> (!dark && scale == 1f) || orientation == "portrait"
+        else -> true
     }
 
     private fun openComposeOptions(state: ComposeCapture, scale: Float, bodyScroll: ScrollState) {

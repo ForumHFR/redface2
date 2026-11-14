@@ -57,16 +57,17 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * #1509 / #1450 — record-only baseline of the integrated post chrome and new-topic form.
+ * #1509 / #1450 — verified baseline of the integrated post chrome and new-topic form.
  * Uses the real content and routing fixtures from [EditorScreenLayoutTest], without a ViewModel.
  * Reply represents the shared reply/edit post chrome; transient states use the production adapter.
- * Post: portrait/compact × light/dark × scale 1/1.3 × normal/format/arm/event/restore/cards/panel/preview/options.
+ * Level B: no dark × 1.3; bar-only scenes at portrait 1x in both themes. Other scenes retain both layouts.
+ * New Options tabs use a star: light 1x in both layouts, portrait light 1.3 and portrait dark 1x.
  * OptionsFormats uses separate methods per orientation/scale so an older reference failure cannot skip it.
  * Topic: both modes, header, poll, restore, preview, options, event, arm and app bar states (poll + restore, no tap);
  * the post and topic Restore/Options scenes open their sheet by its tap and capture its dialog window;
  * refused/missing FP context; historical names kept, each byte-identical capture recorded under one name only.
  *
- * Output: `feature/editor/build/outputs/roborazzi/<surface>_<orientation>_fs<scale>_<state>.png`.
+ * References: `feature/editor/src/test/screenshots/`.
  * This harness deliberately uses no M3 1.5 API so it can also be applied before the pin.
  */
 @RunWith(RobolectricTestRunner::class)
@@ -113,10 +114,6 @@ class EditorBaselineRoborazziTest {
     @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
     fun optionsFormatsLandscapeFontScale1_0() = captureMatrix("landscape", 1f, formatsOnly = true)
 
-    @Test
-    @Config(qualifiers = "fr-rFR-w760dp-h360dp-land-xxhdpi")
-    fun optionsFormatsLandscapeFontScale1_3() = captureMatrix("landscape", 1.3f, formatsOnly = true)
-
     private fun captureMatrix(orientation: String, fontScale: Float, formatsOnly: Boolean = false) {
         val scenario = mutableStateOf(Scenario(Surface.NewTopic, filled = false))
         val dark = mutableStateOf(false)
@@ -158,8 +155,8 @@ class EditorBaselineRoborazziTest {
         }
         val formatsScenes = listOf(PostScene.OptionsFormats, PostScene.OptionsFormatsEnd)
         val scenes = if (formatsOnly) formatsScenes else PostScene.entries.filter { it !in formatsScenes }
-        listOf(false, true).forEach { isDark ->
-            scenes.forEach { scene ->
+        listOf(false, true).filter { !it || fontScale == 1f }.forEach { isDark ->
+            scenes.filter { it.recorded(orientation, fontScale, isDark) }.forEach { scene ->
                 compose.runOnIdle {
                     dark.value = isDark
                     scenario.value = Scenario(Surface.Post, filled = true, scene = scene)
@@ -175,6 +172,14 @@ class EditorBaselineRoborazziTest {
                         PostScene.OptionsFormatsEnd))
             }
         }
+    }
+
+    private fun PostScene.recorded(orientation: String, scale: Float, dark: Boolean): Boolean = when (this) {
+        PostScene.Format, PostScene.Armed, PostScene.Event, PostScene.Cards ->
+            orientation == "portrait" && scale == 1f
+        PostScene.OptionsFormats, PostScene.OptionsFormatsEnd ->
+            (!dark && scale == 1f) || orientation == "portrait"
+        else -> true
     }
 
     private fun openPostScene(scene: PostScene, previewLabel: String) {
@@ -229,7 +234,9 @@ class EditorBaselineRoborazziTest {
         previewLabel: String,
     ) {
         for (scene in TopicScene.entries) {
-            for (isDark in listOf(false, true).filter { scene.recorded(surface, orientation, it) }) {
+            for (isDark in listOf(false, true).filter {
+                (!it || fontScale == 1f) && scene.recorded(surface, orientation, fontScale, it)
+            }) {
                 compose.runOnIdle {
                     dark.value = isDark
                     scenario.value = Scenario(surface, filled = true, topicScene = scene)
@@ -262,8 +269,11 @@ class EditorBaselineRoborazziTest {
      * `new_topic_<orientation>_fs<scale>_multiline`. Event and Armed only change the action bar, as on the
      * post's single surface; an existing poll (Poll, States) only occurs when editing a first post.
      */
-    private fun TopicScene.recorded(surface: Surface, orientation: String, isDark: Boolean): Boolean {
+    private fun TopicScene.recorded(surface: Surface, orientation: String, scale: Float, isDark: Boolean): Boolean {
         val newTopic = surface == Surface.NewTopic
+        val barOnly = if (newTopic) this in setOf(TopicScene.Armed, TopicScene.Event)
+        else this in setOf(TopicScene.EmptyTitle, TopicScene.States)
+        if (barOnly && (orientation != "portrait" || scale != 1f)) return false
         return when (this) {
             TopicScene.Normal -> if (newTopic) isDark else orientation == "portrait"
             TopicScene.EmptyTitle, TopicScene.Preview -> newTopic || orientation == "portrait"

@@ -276,6 +276,7 @@ expose `CompareOptions(changeThreshold, imageComparator)`. Le plugin amont n'est
   Les tests unitaires ordinaires comparent aussi par défaut, y compris les captures des classes
   `ImageViewerScreenTest`, `PostRendererContentGeometryTest`, `ForumCategoryContentInsetsTest` et
   `ForumCategoryCollapseTest`. Il n'existe pas de tâche amont `verifyRoborazzi` sans suffixe.
+  **`verify` reste bloquant**, y compris pendant la refonte de l'éditeur après l'élagage B (#1417).
 - **Références** : PNG versionnés dans `<module>/src/test/screenshots/`. Une référence absente ou
   différente fait échouer la vérification ; `verify` ne la crée ni ne l'écrase. Les captures passent
   par le helper partagé `build-logic/src/roborazziTest/kotlin/` : `changeThreshold = 0f` et
@@ -295,6 +296,32 @@ expose `CompareOptions(changeThreshold, imageComparator)`. Le plugin amont n'est
 - Couverture étendue au cas par cas ; aucune obligation de snapshot pour chaque écran.
   Décision : [ADR-016, évolution #1571]({{ site.baseurl }}/adr/016-roborazzi-screenshot-testing).
 
+**Règles de capture (élagage B, décision XaTriX du 13 novembre 2026, #1417) :**
+
+- Une couche par préoccupation : glyphes et états de barre isolés, géométrie dans le scaffold,
+  routage et panneaux sur l'écran intégré. Une invariance s'affirme par une assertion d'égalité.
+- Les nouvelles scènes se capturent **en étoile**, autour du cas clair à échelle 1, sans produit
+  cartésien : largeur/orientation toujours, sombre un état par scène, échelle 1,3 s'il y a du texte.
+  Chaque axe supplémentaire doit couvrir un risque identifié. Pour le ton, les deux largeurs sont
+  conservées en clair à 1 ; texte à 1,3, sombre et AMOLED restent à 360 dp, pour les sprites et le mode hors ligne.
+- La suite éditeur existante conserve le **niveau B** de l'audit : sans le coin sombre × 1,3 ; scènes
+  « barre seule » des écrans en portrait à 1 dans les deux thèmes. Le scaffold garde ses trois profils
+  pour les six états structurants (normal, Format, envoi en lecture seule, erreur d'upload, détails,
+  en-tête), et le portrait/paysage clair à 1 pour les douze autres. Les références J à preset M restent.
+  Les nouveaux onglets Options suivent l'étoile ci-dessus. Ne pas étendre cet élagage au niveau C.
+- **Zéro doublon exact dans un même module** : `python3 scripts/check-roborazzi-duplicates.py`
+  calcule le SHA-256 des **octets PNG**, sans dépendance Python externe. La garde est bloquante dans
+  `repo-guards`, y compris sur une PR documentaire. Elle inclut les nouvelles références non suivies,
+  exclut les sorties de build, et ne compare pas les modules entre eux. La liste d'exceptions dans le
+  script est vide ; toute exception doit nommer le groupe exact et justifier sa présence.
+- **À chaque `record`, relire la planche avant/après** avant d'approuver les références. Le script
+  `scripts/roborazzi-contact-sheet.py` compare une base Git explicite à l'arbre courant (changements
+  indexés, non indexés et nouveaux PNG non suivis). Il produit des PNG paginés et un index HTML local
+  avec liens vers les originaux à pleine résolution, sans réseau. Utiliser Python 3 avec
+  **Pillow ≥ 10.1 déjà installé** (sur la box, `/usr/bin/python3` ;
+  aucune installation implicite dans le script). La planche complète la vérification automatique :
+  une référence enregistrée peut elle-même contenir un défaut visuel.
+
 ```bash
 # Vérification globale (également exécutée par le job CI test).
 ./scripts/docker-dev.sh ./gradlew verifyRoborazziDebug -Proborazzi.mode=verify
@@ -308,6 +335,13 @@ expose `CompareOptions(changeThreshold, imageComparator)`. Le plugin amont n'est
 # Mise à jour ciblée d'un changement visuel voulu, puis comparaison sans réenregistrement.
 ./scripts/docker-dev.sh ./gradlew :core:ui:testDebugUnitTest \
   -Proborazzi.mode=record --tests '*PostRendererQuoteRoborazziTest*' --rerun-tasks
+# Après chaque record : choisir le commit AVANT l'enregistrement (HEAD pour un record non commité,
+# ou la base de la branche pour relire tout le changement), puis ouvrir l'index et les planches.
+/usr/bin/python3 scripts/roborazzi-contact-sheet.py --base HEAD \
+  --output build/reports/roborazzi-contact-sheet
+# Ouvrir build/reports/roborazzi-contact-sheet/index.html, agrandir les PNG pour les détails.
+# --include-deleted ajoute les suppressions ; un renommage apparaît comme suppression + ajout.
+python3 scripts/check-roborazzi-duplicates.py
 ./scripts/docker-dev.sh ./gradlew verifyRoborazziDebug -Proborazzi.mode=verify --rerun-tasks
 ```
 

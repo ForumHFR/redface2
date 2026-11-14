@@ -6,7 +6,7 @@ nav_order: 16
 permalink: /adr/016-roborazzi-screenshot-testing
 ---
 
-# ADR-016 — Roborazzi pour le rendu visuel (screenshot testing JVM), mode record en Phase 4
+# ADR-016 — Roborazzi pour le rendu visuel (screenshot testing JVM), vérification bloquante
 
 ## Statut
 
@@ -26,6 +26,15 @@ Références initiales enregistrées et garde prouvée sur box le 8 novembre 202
 assouplissement de tolérance exige d'abord la répétabilité sur une seconde box et en CI.
 Cette évolution remplace le report du gate CI et des références versionnées décidé initialement.
 
+Évolution acceptée — 2026-11-13, décision de XaTriX après l'audit Roborazzi de la refonte
+[#1417](https://github.com/ForumHFR/redface2/issues/1417) : **élagage au niveau B**, à la source des
+paramétrages de test, avec suppression des références devenues orphelines. **`verify` reste bloquant**
+une fois la suite élaguée ; aucun retour au mode record par défaut. Les nouvelles captures suivent
+une matrice en étoile avec des axes justifiés, une seule couche par préoccupation et zéro doublon
+exact par module (garde d'empreinte PNG dans `repo-guards`). À chaque enregistrement explicite,
+la relecture visuelle passe par une planche-contact avant/après. Les règles de capture et commandes
+vivent dans [contributing.md]({{ site.baseurl }}/guides/contributing#tests).
+
 ## Contexte
 
 La méthodologie ([ADR-000]({{ site.baseurl }}/adr/000-methodologie-triple-hybride)) prototype l'UI Compose
@@ -44,7 +53,7 @@ Roborazzi 1.63 (sur Robolectric, rendu JVM) a été introduit de fait sur `:core
 code, smiley, citation) et la coquille réglages v2. Il est consommé comme **artefact de test simple**
 (sans le plugin Gradle), avec `roborazzi.test.record=true` forcé.
 
-## Décision
+## Décision initiale (remplacée par les évolutions ci-dessus)
 
 Adopter **Roborazzi comme test de rendu visuel JVM** en Phase 4, en **mode `record`** :
 - les tests `captureRoboImage` génèrent des PNG dans `<module>/build/outputs/roborazzi/` (non versionnés)
@@ -58,7 +67,7 @@ Adopter **Roborazzi comme test de rendu visuel JVM** en Phase 4, en **mode `reco
 Couverture initiale : `:core:ui` (PostRenderer) + `:feature:topic` + coquille réglages. La couverture
 s'étend au cas par cas — **pas** d'obligation « tout écran doit avoir un snapshot ».
 
-## Conséquences
+## Conséquences de la décision initiale
 
 - **+** Filet visuel reproductible (~40 s, JVM, sans device) qui complète Compose Preview ; capture
   inspectable hors IDE et en revue.

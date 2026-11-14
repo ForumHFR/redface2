@@ -121,7 +121,7 @@ jobs:
             **/build/test-results/roborazzi/**
           if-no-files-found: warn
 
-  # Repo hygiene guards (no Gradle/SDK needed — pure bash). Fixture provenance is BLOCKING;
+  # Repo hygiene guards (no Gradle/SDK needed — bash/Python standard library). Fixture provenance is BLOCKING;
   # the large-file report is advisory (writes to the job summary, never fails). Wired into the
   # required aggregate check below so the guard is actually enforced on `main` (dev→main promotion).
   # Job-level permissions REPLACE the workflow-level block: `pull-requests: read` lets the
@@ -138,6 +138,8 @@ jobs:
         uses: actions/checkout@v7
       - name: Fixture provenance (blocking)
         run: bash scripts/check-fixtures-provenance.sh
+      - name: No duplicate Roborazzi references within a module (blocking)
+        run: python3 scripts/check-roborazzi-duplicates.py
       - name: Changelog updated on versionName bump (PR, blocking)
         if: github.event_name == 'pull_request'
         shell: bash

@@ -30,7 +30,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** #1417: isolated tone block, deterministic 15 px sprites or offline, 360/411 dp × 1/1.3 × three themes. */
+/** #1417: star matrix per sprites/offline scene: both widths, text at 1.3, dark and AMOLED once. */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34], qualifiers = "fr-rFR-w360dp-h780dp-xxhdpi")
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -77,7 +77,10 @@ class MessageIconPickerRoborazziTest {
             }
         }
         listOf("light", "dark", "amoled").forEach { theme ->
-            listOf(1f, 1.3f).forEach { scale ->
+            listOf(1f, 1.3f).filter { scale ->
+                (theme == "light" && scale == 1f) ||
+                    (width == 360 && (theme == "light" || scale == 1f))
+            }.forEach { scale ->
                 compose.runOnIdle { sample.value = Sample(theme, scale) }
                 compose.waitForIdle()
                 compose.onNodeWithText("Clin d'œil").assertIsDisplayed()

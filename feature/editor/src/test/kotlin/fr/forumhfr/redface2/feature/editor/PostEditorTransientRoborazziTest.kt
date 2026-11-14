@@ -66,7 +66,7 @@ class PostEditorTransientRoborazziTest {
                 }
             }
         }
-        listOf(false, true).forEach { dark ->
+        listOf(false, true).filter { !it || fontScale == 1f }.forEach { dark ->
             listOf(false, true).forEach { preview ->
                 compose.runOnIdle { scenario.value = dark to preview }
                 compose.waitForIdle()
