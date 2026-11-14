@@ -3,12 +3,16 @@
 
 Requires Python 3 and Pillow already installed locally; never downloads dependencies.
 Includes staged/unstaged changes and untracked references. Renames appear as delete/add.
+A relative --output is resolved against the repository root. Each run first removes the sheets,
+originals and index a previous run left there. It refuses a directory it does not own: an index.html
+without its marker, or sheet-named files without that index.
 """
 
 import argparse
 from html import escape
 from io import BytesIO
 from pathlib import Path
+import re
 import subprocess
 import textwrap
 
@@ -23,6 +27,9 @@ CELL_HEIGHT = 640
 GAP = 20
 LABEL_HEIGHT = 90
 ROWS_PER_PAGE = 3
+SHEET_NAME = re.compile(r"contact-\d{3}\.png")
+ORIGINAL_NAME = re.compile(r"\d{4}-(before|after)\.png")
+INDEX_MARKER = "<title>Roborazzi</title>"
 
 
 def git(root: Path, *args: str) -> bytes:
@@ -57,12 +64,41 @@ def draw_image(page: Image.Image, data: bytes | None, x: int, y: int, font: Imag
     page.paste(image, (x + (CELL_WIDTH - image.width) // 2, y + (CELL_HEIGHT - image.height) // 2), image)
 
 
+def purge_previous_run(output: Path) -> int:
+    """Delete a previous run's outputs, so a stale page never mixes with the current run.
+
+    Ownership comes from the index this script writes: without it, files that merely share the
+    generated names are someone else's, and the run stops before touching anything.
+    """
+    index = output / "index.html"
+    originals = output / "originals"
+    if originals.is_symlink() or (originals.exists() and not originals.is_dir()):
+        raise SystemExit(f"Refusing {output}: 'originals' is not a plain directory.")
+    stale = [path for path in output.glob("contact-*.png") if SHEET_NAME.fullmatch(path.name)]
+    stale += [path for path in originals.glob("*.png") if ORIGINAL_NAME.fullmatch(path.name)]
+    if any(not path.is_file() or path.is_symlink() for path in stale):
+        raise SystemExit(f"Refusing {output}: a generated name is not a regular file.")
+    owned = index.is_file() and INDEX_MARKER in index.read_text(encoding="utf-8", errors="replace")
+    if index.exists() and not owned:
+        raise SystemExit(f"Refusing {output}: index.html was not written by this script.")
+    if stale and not owned:
+        raise SystemExit(f"Refusing {output}: contact sheet files without this script's index.html.")
+    for path in stale + ([index] if owned else []):
+        path.unlink()
+    return len(stale) + int(owned)
+
+
+def output_dir(root: Path, value: Path) -> Path:
+    return (value if value.is_absolute() else root / value).resolve()
+
+
 def generate(root: Path, base: str, output: Path, include_deleted: bool) -> None:
     # Resolve once: all git-show calls use the exact same commit, even if the branch later moves.
     commit = git(root, "rev-parse", "--verify", f"{base}^{{commit}}").decode().strip()
     names = changed_references(root, commit, include_deleted)
     base_paths = set(git(root, "ls-tree", "-r", "--name-only", "-z", commit).decode().split("\0"))
     output.mkdir(parents=True, exist_ok=True)
+    purged = purge_previous_run(output)
     originals = output / "originals"
     originals.mkdir(exist_ok=True)
     font = ImageFont.load_default(size=16)
@@ -94,22 +130,22 @@ def generate(root: Path, base: str, output: Path, include_deleted: bool) -> None
         page.save(output / filename)
         pages.append(filename)
 
-    # This index only links the current run's pages, even if an older run produced more pages.
-    content = f"<!doctype html><meta charset='utf-8'><title>Roborazzi</title><h1>{len(names)} références</h1>"
+    content = f"<!doctype html><meta charset='utf-8'>{INDEX_MARKER}<h1>{len(names)} références</h1>"
     content += f"<p>Base : {escape(base)} ({commit}). Avant à gauche, après à droite.</p>"
     content += "<p>Ouvrir les planches à leur taille réelle pour relire les détails.</p>"
     content += "".join(f"<p><a href='{name}'>{name}</a></p><img src='{name}' style='max-width:100%'>"
                        for name in pages)
     content += "<h2>Originaux à pleine résolution</h2><ul>" + "".join(links) + "</ul>"
     (output / "index.html").write_text(content, encoding="utf-8")
-    print(f"{len(names)} references, {len(pages)} sheets: {output / 'index.html'}")
+    print(f"{len(names)} references, {len(pages)} sheets ({purged} stale files removed): {output / 'index.html'}")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base", required=True, help="Commit or local ref to compare with the working tree")
-    parser.add_argument("--output", type=Path, default=Path("build/reports/roborazzi-contact-sheet"))
+    parser.add_argument("--output", type=Path, default=Path("build/reports/roborazzi-contact-sheet"),
+                        help="Relative paths are resolved against the repository root")
     parser.add_argument("--include-deleted", action="store_true", help="Also show removed references")
     args = parser.parse_args()
     repo = Path(git(Path.cwd(), "rev-parse", "--show-toplevel").decode().strip())
-    generate(repo, args.base, args.output.resolve(), args.include_deleted)
+    generate(repo, args.base, output_dir(repo, args.output), args.include_deleted)
