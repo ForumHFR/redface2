@@ -90,18 +90,18 @@ internal class PrivateMessageReplyChromeAdapter(
         closeSurface()
     }
     fun restoreOffer(id: String) {
-        if (state.restoreEnabled) { actions.restoreOffer(id); closeDraftOffer() }
+        if (state.restoreEnabled && source().canDecideDraftOffer(id)) { actions.restoreOffer(id); closeDraftOffer() }
     }
     fun discardOffer(id: String) {
-        if (state.scaffold.controlsEnabled) actions.discardOffer(id)
+        if (state.discardEnabled && source().canDecideDraftOffer(id)) actions.discardOffer(id)
     }
     fun resumeQuote() { if (source().hasDormantQuote) actions.resumeQuote() }
     fun ignoreQuote() { if (source().canIgnorePendingQuote) actions.ignoreQuote() }
     fun restoreDraft() {
-        if (state.restoreEnabled) { actions.restoreDraft(); closeDraftOffer() }
+        if (state.restoreEnabled && source().canDecideDraftOffer()) { actions.restoreDraft(); closeDraftOffer() }
     }
     fun discardDraft() {
-        if (state.scaffold.controlsEnabled) { actions.discardDraft(); closeDraftOffer() }
+        if (state.discardEnabled && source().canDecideDraftOffer()) { actions.discardDraft(); closeDraftOffer() }
     }
     fun reload(key: EventKey) {
         val error = (detail?.takeIf { it.key == key }?.content as? EditorEventContent.Problem)?.error

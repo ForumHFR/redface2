@@ -111,25 +111,25 @@ internal class PostEditorChromeAdapter(
     }
     fun pickerCancelled() = closeSurface()
     fun restoreOffer(id: String) {
-        if (source().canRestoreDraft && state.scaffold.controlsEnabled && !source().isUploading) {
+        if (state.restoreEnabled && source().canDecideDraftOffer(id)) {
             onIntent(PostEditorIntent.DraftOfferRestored(id))
             closeDraftOffer()
         }
     }
     fun discardOffer(id: String) {
-        if (state.scaffold.controlsEnabled) {
+        if (state.discardEnabled && source().canDecideDraftOffer(id)) {
             onIntent(PostEditorIntent.DraftOfferDiscarded(id))
         }
     }
     fun restoreDraft() {
         // A non-blank restore can resolve an unknown edit body after the initial GET failed (#1574).
-        if (source().canRestoreDraft && state.scaffold.controlsEnabled && !source().isUploading) {
+        if (state.restoreEnabled && source().canDecideDraftOffer()) {
             onIntent(PostEditorIntent.DraftRestoreRequested)
             closeDraftOffer()
         }
     }
     fun discardDraft() {
-        if (state.scaffold.controlsEnabled) {
+        if (state.discardEnabled && source().canDecideDraftOffer()) {
             onIntent(PostEditorIntent.DraftDiscardRequested)
             closeDraftOffer()
         }

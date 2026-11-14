@@ -126,6 +126,10 @@ data class PostEditorState(
     val restorableDraft: String? = null,
     /** ED-40/121: every offered version, most recent first; a reply decides one by its identity. */
     val draftOffers: List<DraftOffer> = emptyList(),
+    /** A Restore/Ignore write locks every offer until its result, including a failed result. */
+    val draftOfferDecisionPending: Boolean = false,
+    /** After a failed Restore, settle that merged offer before deciding a different one (ED-121). */
+    val draftOfferToResolveId: String? = null,
     /** ED-10/85: a close could not save the field; the dialog asks before anything is abandoned. */
     val showUnsavedCloseDialog: Boolean = false,
     /**
@@ -155,6 +159,11 @@ data class PostEditorState(
     val subjectHydrated: Boolean = false,
     val hasMessageTone: Boolean = true,
 ) {
+    val draftDecisionsEnabled: Boolean get() = !draftOfferDecisionPending && !quoteCommitPending
+
+    fun canDecideDraftOffer(id: String? = draftOffers.firstOrNull()?.id): Boolean =
+        draftDecisionsEnabled && (draftOfferToResolveId == null || draftOfferToResolveId == id)
+
     /** A failed initial edit fetch keeps the body locked until reload or a non-blank restore. */
     val isAwaitingInitialBody: Boolean
         get() = mode == PostEditorMode.Edit && !draftHydratedFromForm

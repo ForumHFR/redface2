@@ -29,6 +29,9 @@ internal data class TopicFormChromeState(val source: TopicFormState) {
     val host = EditorHostState(scaffold, source.submission, sendActivatable, postAllowed)
     val headerEnabled = !busy && (!source.isInitializing || source.isRestoringSession)
     val headerReadOnly = source.isRestoringSession
+    val restoreEnabled = headerEnabled && !headerReadOnly && !source.isLoadingForm && !source.isUploading &&
+        source.draftDecisionsEnabled
+    val discardEnabled = scaffold.controlsEnabled && source.draftDecisionsEnabled
     val showSubcategory = source.hasSubcategorySelect && !unsupportedFirstPost && source.subcategoryChoices.isNotEmpty()
     val subcategoryEnabled = headerEnabled && !headerReadOnly && !source.isLoadingForm
     val selectedSubcategory = source.subcategoryChoices.firstOrNull {

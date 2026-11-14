@@ -265,7 +265,7 @@ private fun ReplyFormFailure(
                     Text(stringResource(R.string.messages_draft_restore_message),
                         style = MaterialTheme.typography.bodyMedium)
                     EditorDraftOfferList(offers, host::restoreOffer, host::discardOffer,
-                        state.restoreEnabled, state.scaffold.controlsEnabled)
+                        state.restoreEnabled, state.discardEnabled, state.source::canDecideDraftOffer)
                 }
             }
             MessageFormErrorState(onRetry = host::retryFormLoad,

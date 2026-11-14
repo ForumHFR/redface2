@@ -52,7 +52,13 @@ internal class PrivateMessageComposeDraftSession(
     private val clearToolSelection: () -> Unit,
 ) {
     private val readState = state.read
-    private val updateState = state.update
+    private val publishState = state.update
+    private fun updateState(transform: (PrivateMessageComposeUiState) -> PrivateMessageComposeUiState) {
+        publishState {
+            transform(it).copy(draftOfferDecisionPending = decidingOffer != null,
+                draftOfferToResolveId = submission.drafts.available(pendingOfferResolution())?.id)
+        }
+    }
     val bodyFieldState = TextFieldState()
     val bodyScrollState = ScrollState(0)
     var bodyCaretRevealResetKey by mutableIntStateOf(0)
@@ -237,8 +243,7 @@ internal class PrivateMessageComposeDraftSession(
      */
     fun restoreOfferedDraft(offerId: String? = null) {
         val offer = readState().draftOffer(offerId)
-        if (offer == null || decidingOffer != null) return
-        if (!submission.drafts.canDecideOffer(offer, pendingOfferResolution())) return
+        if (offer == null || !readState().canDecideDraftOffer(offer.id)) return
         if (mergedOffer?.id != offer.id) applyOffer(offer.draft)
         mergedOffer = offer
         decideOffer(offer) { submission.persist(liveDraft()) }
@@ -266,8 +271,7 @@ internal class PrivateMessageComposeDraftSession(
     /** ED-121: « Ignorer » consumes this offer only; the fields are written as they are, never blanked. */
     fun discardOfferedDraft(offerId: String? = null) {
         val offer = readState().draftOffer(offerId)
-        if (offer == null || decidingOffer != null) return
-        if (!submission.drafts.canDecideOffer(offer, pendingOfferResolution())) return
+        if (offer == null || !readState().canDecideDraftOffer(offer.id)) return
         saved[IGNORED_OFFER] = offer.draft.restoreOfferFingerprint()
         decideOffer(offer, keepVisible = offerId != null) {
             submission.drafts.resolveOffer(offer, liveDraft().copy(offerToResolve = null))

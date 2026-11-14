@@ -116,6 +116,10 @@ data class TopicFormState(
      */
     val restorableDraft: String? = null,
     val draftOffers: List<DraftOffer> = emptyList(),
+    /** A Restore/Ignore write locks every offer until its result, including a failed result. */
+    val draftOfferDecisionPending: Boolean = false,
+    /** After a failed Restore, settle that merged offer before deciding a different one (ED-121). */
+    val draftOfferToResolveId: String? = null,
     val restorableSubject: String? = null,
     /** ED-10/85: a close could not save the fields; the dialog asks before anything is abandoned. */
     val showUnsavedCloseDialog: Boolean = false,
@@ -133,6 +137,11 @@ data class TopicFormState(
     val imagePickerMode: ImagePickerMode = ImagePickerMode.DEFAULT,
     val editorShortcut: EditorShortcut = EditorShortcut.NONE,
 ) {
+    val draftDecisionsEnabled: Boolean get() = !draftOfferDecisionPending
+
+    fun canDecideDraftOffer(id: String? = draftOffers.firstOrNull()?.id): Boolean =
+        draftDecisionsEnabled && (draftOfferToResolveId == null || draftOfferToResolveId == id)
+
     /** A failed initial fetch leaves the first post unknown until reload or explicit restore. */
     val isAwaitingInitialBody: Boolean
         get() = mode == TopicFormMode.EditFirstPost && !draftHydratedFromServer

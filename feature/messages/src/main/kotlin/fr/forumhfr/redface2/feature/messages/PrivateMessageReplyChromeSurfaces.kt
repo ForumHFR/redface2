@@ -35,7 +35,8 @@ internal fun PrivateMessageReplyChromeSurfaces(
         adapter::closeDraftOffer, adapter::restoreDraft, adapter::discardDraft,
         offers = adapter.state.source.draftOffers,
         onRestoreOffer = adapter::restoreOffer, onDiscardOffer = adapter::discardOffer,
-        restoreEnabled = adapter.state.restoreEnabled, discardEnabled = adapter.state.scaffold.controlsEnabled,
+        restoreEnabled = adapter.state.restoreEnabled, discardEnabled = adapter.state.discardEnabled,
+        canDecideOffer = adapter.state.source::canDecideDraftOffer,
         message = stringResource(R.string.messages_draft_restore_message))
     PrivateMessageReplyChromeSheets(adapter, autoOpenRecipients, onReturnToBody, onOpenEditorSettings)
     if (adapter.surface == PrivateMessageReplyChromeSurface.Smileys && adapter.state.canInsert) {

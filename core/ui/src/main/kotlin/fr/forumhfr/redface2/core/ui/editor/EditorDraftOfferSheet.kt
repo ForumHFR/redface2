@@ -47,6 +47,7 @@ import fr.forumhfr.redface2.core.ui.sheet.settledSheetWindowInsets
  * through [onRestoreOffer]/[onDiscardOffer] with its offer id; both default to the single-offer
  * callbacks for hosts that only ever hold one. A listed discard keeps the sheet open until the
  * confirmed state has no offer left; keep the offer available while its write is pending or failed.
+ * [canDecideOffer] applies the session's per-version guard, including a Restore awaiting a retry.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -65,6 +66,7 @@ fun EditorDraftOfferSheet(
     discardEnabled: Boolean = true,
     title: String = stringResource(R.string.editor_draft_offer_title),
     message: String = stringResource(R.string.editor_draft_offer_message),
+    canDecideOffer: (String) -> Boolean = { true },
 ) {
     val dismiss = rememberUpdatedState(onDismiss)
     LaunchedEffect(isOpen, offerAvailable) {
@@ -88,7 +90,8 @@ fun EditorDraftOfferSheet(
             }
             Text(message, style = MaterialTheme.typography.bodyMedium)
             if (offers.isEmpty()) EditorDraftOfferDecisions(onRestore, onDiscard, restoreEnabled, discardEnabled)
-            else EditorDraftOfferList(offers, onRestoreOffer, onDiscardOffer, restoreEnabled, discardEnabled)
+            else EditorDraftOfferList(offers, onRestoreOffer, onDiscardOffer, restoreEnabled, discardEnabled,
+                canDecideOffer)
         }
     }
 }
@@ -105,6 +108,7 @@ fun EditorDraftOfferList(
     onDiscard: (String) -> Unit,
     restoreEnabled: Boolean = true,
     discardEnabled: Boolean = true,
+    canDecideOffer: (String) -> Boolean = { true },
 ) {
     val context = LocalContext.current
     val now = System.currentTimeMillis()
@@ -118,8 +122,10 @@ fun EditorDraftOfferList(
                 // A header-only offer (title or recipients, blank body) has no excerpt line.
                 if (excerpt.isNotEmpty()) Text(excerpt, style = MaterialTheme.typography.bodyMedium, maxLines = 2,
                     overflow = TextOverflow.Ellipsis)
+                val enabled = canDecideOffer(offer.id)
                 EditorDraftOfferDecisions({ onRestore(offer.id) }, { onDiscard(offer.id) },
-                    restoreEnabled, discardEnabled, listOf(date, excerpt).filter(String::isNotEmpty).joinToString())
+                    restoreEnabled && enabled, discardEnabled && enabled,
+                    listOf(date, excerpt).filter(String::isNotEmpty).joinToString())
             }
         }
 }

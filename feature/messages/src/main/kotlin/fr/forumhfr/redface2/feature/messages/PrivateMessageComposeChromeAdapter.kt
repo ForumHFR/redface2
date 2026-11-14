@@ -71,17 +71,17 @@ internal class PrivateMessageComposeChromeAdapter(
         actions.picker(event)
     }
     fun restoreDraft() {
-        if (state.restoreEnabled) { actions.restore(); closeDraftOffer() }
+        if (state.restoreEnabled && source().canDecideDraftOffer()) { actions.restore(); closeDraftOffer() }
     }
     fun discardDraft() {
-        if (state.scaffold.controlsEnabled) { actions.discard(); closeDraftOffer() }
+        if (state.discardEnabled && source().canDecideDraftOffer()) { actions.discard(); closeDraftOffer() }
     }
     /** ED-40/121: one decision per listed version, under the same guards as the single offer. */
     fun restoreOffer(id: String) {
-        if (state.restoreEnabled) { actions.restoreOffer(id); closeDraftOffer() }
+        if (state.restoreEnabled && source().canDecideDraftOffer(id)) { actions.restoreOffer(id); closeDraftOffer() }
     }
     fun discardOffer(id: String) {
-        if (state.scaffold.controlsEnabled) actions.discardOffer(id)
+        if (state.discardEnabled && source().canDecideDraftOffer(id)) actions.discardOffer(id)
     }
     fun retryFormLoad() = actions.reload()
     /** ED-130 replaces the whole editor: no header, sheet or detail comes back after « Réessayer ». */

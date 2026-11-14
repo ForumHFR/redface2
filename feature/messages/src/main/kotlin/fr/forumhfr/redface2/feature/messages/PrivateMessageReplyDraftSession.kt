@@ -47,7 +47,13 @@ internal class PrivateMessageReplyDraftSession(
     private val clearToolSelection: () -> Unit,
 ) {
     private val readState = state.read
-    private val updateState = state.update
+    private val publishState = state.update
+    private fun updateState(transform: (PrivateMessageReplyUiState) -> PrivateMessageReplyUiState) {
+        publishState {
+            transform(it).copy(draftOfferDecisionPending = resolvingOffer, quoteCommitPending = deliveryPending,
+                draftOfferToResolveId = submission.drafts.available(pendingOfferResolution())?.id)
+        }
+    }
     val bodyFieldState = TextFieldState()
     val bodyScrollState = ScrollState(0)
     var bodyCaretRevealResetKey by mutableIntStateOf(0)
@@ -307,7 +313,7 @@ internal class PrivateMessageReplyDraftSession(
         val snapshot = readState()
         val selected = if (offerId == null) snapshot.draftOffers.firstOrNull()
             else snapshot.draftOffers.firstOrNull { it.id == offerId }
-        if (!submission.drafts.canDecideOffer(selected, pendingOfferResolution())) return null
+        if (!snapshot.canDecideDraftOffer(selected?.id)) return null
         selectedOffer = selected
         val legacy = snapshot.restorableDraft.takeIf { offerId == null && snapshot.draftOffers.isEmpty() }
         return selectedOffer?.draft?.body ?: legacy
@@ -315,7 +321,6 @@ internal class PrivateMessageReplyDraftSession(
 
     /** ED-89: D, retained delivered quotes, then live typing; apply one undoable mutation. */
     fun restoreOfferedDraft(offerId: String? = null) {
-        if (resolvingOffer || deliveryPending) return
         val offeredBody = selectOffer(offerId) ?: return
         val liveBody = bodyFieldState.text.toString()
         val merge = mergeEditorBody(offeredBody, liveBody, provenance = submission.drafts.provenanceFor(liveBody))
@@ -332,6 +337,7 @@ internal class PrivateMessageReplyDraftSession(
     private fun resolveOffer(body: String, restoring: Boolean = false) {
         if (resolvingOffer) return
         resolvingOffer = true
+        updateState { it }
         decisionCompleted = CompletableDeferred()
         scope.launch {
             try {
@@ -356,6 +362,7 @@ internal class PrivateMessageReplyDraftSession(
             } finally {
                 restoredOfferAwaitingWrite = null
                 resolvingOffer = false
+                updateState { it }
                 decisionCompleted?.complete(Unit)
                 decisionCompleted = null
                 scheduleAutosave()
@@ -365,7 +372,6 @@ internal class PrivateMessageReplyDraftSession(
 
     /** ED-121: consume only this offer, preserving live input and any pending request. */
     fun discardOfferedDraft(offerId: String? = null) {
-        if (resolvingOffer || deliveryPending) return
         val body = selectOffer(offerId) ?: return
         // A listed discard closes the sheet only after the durable result removes its last offer.
         if (offerId == null) updateState { it.copy(restorableDraft = null) }

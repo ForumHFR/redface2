@@ -190,7 +190,10 @@ class TopicFormViewModel @AssistedInject constructor(
     /** Deliver transitions before StateFlow can conflate repeated failures or synchronous operations. */
     private fun updateState(transform: (TopicFormState) -> TopicFormState) {
         val previous = _state.value
-        _state.update(transform)
+        _state.update {
+            transform(it).copy(draftOfferDecisionPending = decidingOffer != null,
+                draftOfferToResolveId = submission.drafts.available(pendingOfferResolution())?.id)
+        }
         editorEvents.open(submission.session)
         editorEvents.observe(previous, _state.value)
     }
@@ -787,7 +790,7 @@ class TopicFormViewModel @AssistedInject constructor(
      * and any later write of C consumes it too ([pendingOfferResolution]).
      */
     private fun restoreOffer(offer: EditorDraftStore.DraftOffer) {
-        if (decidingOffer != null || !submission.drafts.canDecideOffer(offer, pendingOfferResolution())) return
+        if (!_state.value.canDecideDraftOffer(offer.id)) return
         if (mergedOffer?.id != offer.id) applyOfferedDraft(offer.draft.body, offer.draft.subject)
         mergedOffer = offer
         decideOffer(offer) { submission.persist(liveDraft()) }
@@ -795,7 +798,7 @@ class TopicFormViewModel @AssistedInject constructor(
 
     /** ED-121: « Ignorer » consumes this offer only; the fields are written as they are, never blanked. */
     private fun discardOffer(offer: EditorDraftStore.DraftOffer, keepVisible: Boolean) {
-        if (decidingOffer != null || !submission.drafts.canDecideOffer(offer, pendingOfferResolution())) return
+        if (!_state.value.canDecideDraftOffer(offer.id)) return
         markDraftRestoreOfferIgnored(offer.draft)
         decideOffer(offer, keepVisible = keepVisible) {
             submission.drafts.resolveOffer(offer, liveDraft().copy(offerToResolve = null))

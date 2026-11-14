@@ -25,5 +25,8 @@ internal data class PostEditorChromeState(val source: PostEditorState) {
     )
     val host: EditorHostState = EditorHostState(scaffold, source.submission, sendActivatable, postAllowed)
     val canInsert: Boolean get() = host.canInsert
+    val restoreEnabled = scaffold.controlsEnabled && source.canRestoreDraft && !source.isUploading &&
+        source.draftDecisionsEnabled
+    val discardEnabled = scaffold.controlsEnabled && source.draftDecisionsEnabled
 }
 internal enum class PostEditorChromeSurface { Smileys, Options, Url, Picker, Restore, Quotes, PendingQuote, Subject }

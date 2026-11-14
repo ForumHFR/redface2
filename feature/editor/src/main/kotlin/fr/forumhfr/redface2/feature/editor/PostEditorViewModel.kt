@@ -195,7 +195,12 @@ class PostEditorViewModel @AssistedInject constructor(
     /** Capture operation transitions synchronously; observing StateFlow would lose short operations. */
     private fun updateChromeState(transform: (PostEditorState) -> PostEditorState) {
         val previous = _state.value
-        _state.update { transform(it).copy(blocksFormReload = submission.blocksMutation) }
+        _state.update {
+            transform(it).copy(blocksFormReload = submission.blocksMutation,
+                draftOfferDecisionPending = draftRestoreDeciding,
+                quoteCommitPending = deliveredInlineQuoteRequest != null,
+                draftOfferToResolveId = submission.drafts.available(pendingOfferResolution())?.id)
+        }
         if (chromeEvents.state.session != submission.session) chromeMemory.reset()
         chromeEvents.open(submission.session)
         chromeEvents.observe(previous, _state.value)
@@ -1186,14 +1191,14 @@ class PostEditorViewModel @AssistedInject constructor(
     @Suppress("CyclomaticComplexMethod") // Selected offer, ED-89 merge and the durable, retryable resolution.
     private fun onDraftRestoreRequested(offerId: String? = null) {
         val snapshot = _state.value
-        if (!snapshot.canRestoreDraft || snapshot.isUploading || draftRestoreDeciding) return
+        if (!snapshot.canRestoreDraft || snapshot.isUploading) return
         val selected = if (offerId == null) snapshot.draftOffers.firstOrNull()
             else snapshot.draftOffers.firstOrNull { it.id == offerId }
         val legacy = snapshot.restorableDraft.takeIf { offerId == null && snapshot.draftOffers.isEmpty() }
         val offeredBody = (selected?.draft?.body ?: legacy)?.takeIf {
             (it.isNotBlank() || request.target is PostEditorTarget.PrivateMessage &&
                 !selected?.draft?.subject.isNullOrBlank()) &&
-                submission.drafts.canDecideOffer(selected, pendingOfferResolution())
+                snapshot.canDecideDraftOffer(selected?.id)
         } ?: return
         selectedDraftOffer = selected.takeIf { request.mode == PostEditorMode.Reply }
         val seed = snapshot.draftRestoreSeed.orEmpty()
@@ -1239,6 +1244,7 @@ class PostEditorViewModel @AssistedInject constructor(
             } finally {
                 restoredOfferAwaitingWrite = null
                 draftRestoreDeciding = false
+                updateChromeState { it }
                 draftDecisionCompleted?.complete(Unit)
                 draftDecisionCompleted = null
                 scheduleAutosave()
@@ -1249,18 +1255,17 @@ class PostEditorViewModel @AssistedInject constructor(
 
     /** Discard only the offered body; retain current typing and the session-owned request. */
     private fun onDraftDiscardRequested(offerId: String? = null) {
-        if (draftRestoreDeciding || deliveredInlineQuoteRequest != null) return
         val snapshot = _state.value
         val selected = if (offerId == null) snapshot.draftOffers.firstOrNull()
             else snapshot.draftOffers.firstOrNull { it.id == offerId }
         val legacy = snapshot.restorableDraft.takeIf { offerId == null && snapshot.draftOffers.isEmpty() }
         val body = (selected?.draft?.body ?: legacy)?.takeIf {
-            submission.drafts.canDecideOffer(selected, pendingOfferResolution())
+            snapshot.canDecideDraftOffer(selected?.id)
         } ?: return
         draftRestoreDeciding = true
         draftDecisionCompleted = CompletableDeferred()
         // Listed decisions keep the sheet and its row until the durable result is known.
-        if (offerId == null) updateChromeState { it.copy(restorableDraft = null) }
+        updateChromeState { it.copy(restorableDraft = it.restorableDraft.takeIf { offerId != null }) }
         viewModelScope.launch {
             try {
                 submission.flush(null)
@@ -1281,6 +1286,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 else updateChromeState { it.copy(restorableDraft = null, draftOffers = emptyList()) }
             } finally {
                 draftRestoreDeciding = false
+                updateChromeState { it }
                 draftDecisionCompleted?.complete(Unit)
                 draftDecisionCompleted = null
             }

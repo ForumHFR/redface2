@@ -9,6 +9,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasAnyAncestor
@@ -82,6 +83,66 @@ class PrivateMessageDraftOfferSheetTest {
 
     @Test fun `1450 new message offer returns focus once for every dismissal and decision`() =
         checkOffer(isReply = false)
+
+    @Test fun replyDecisionsFollowPendingWriteAndMergedOfferGuards() = checkDecisionGuards(isReply = true)
+
+    @Test fun composeDecisionsFollowPendingWriteAndMergedOfferGuards() = checkDecisionGuards(isReply = false)
+
+    private fun checkDecisionGuards(isReply: Boolean) {
+        val older = EditorDraftStore.DraftOffer("older", 1, EditorDraftStore.Draft("Older draft", updatedAt = 1))
+        val newer = EditorDraftStore.DraftOffer("newer", 2, EditorDraftStore.Draft("Newer draft", updatedAt = 2))
+        reply.state = reply.state.copy(restorableDraft = "Newer draft", draftOffers = listOf(newer, older),
+            draftOfferDecisionPending = true)
+        message.state = message.state.copy(restorableDraft = "Newer draft", draftOffers = listOf(newer, older),
+            draftOfferDecisionPending = true)
+        val calls = if (isReply) reply.calls else message.calls
+        compose.setContent { Content(isReply) }
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
+        assertDecisionsDisabled()
+        compose.runOnIdle {
+            if (isReply) { reply.adapter.restoreOffer(older.id); reply.adapter.discardOffer(older.id) }
+            else { message.adapter.restoreOffer(older.id); message.adapter.discardOffer(older.id) }
+            assertTrue(host(isReply).draftOfferOpen)
+            assertTrue(calls.isEmpty())
+            assertEquals(0, returns)
+        }
+        if (isReply) {
+            compose.runOnIdle {
+                reply.state = reply.state.copy(draftOfferDecisionPending = false, quoteCommitPending = true)
+            }
+            assertDecisionsDisabled()
+        }
+        compose.runOnIdle {
+            reply.state = reply.state.copy(draftOfferDecisionPending = false, quoteCommitPending = false,
+                draftOfferToResolveId = older.id)
+            message.state = message.state.copy(draftOfferDecisionPending = false, draftOfferToResolveId = older.id)
+            if (isReply) { reply.adapter.restoreOffer(newer.id); reply.adapter.discardOffer(newer.id) }
+            else { message.adapter.restoreOffer(newer.id); message.adapter.discardOffer(newer.id) }
+            assertTrue(host(isReply).draftOfferOpen)
+            assertTrue(calls.isEmpty())
+        }
+        for (label in listOf("Restaurer", "Ignorer")) {
+            compose.onNode(hasText(label) and hasAnyAncestor(hasTestTag("editor-draft-offer-newer")))
+                .assertIsNotEnabled()
+            compose.onNode(hasText(label) and hasAnyAncestor(hasTestTag("editor-draft-offer-older")))
+                .assertIsEnabled()
+        }
+        compose.runOnIdle {
+            reply.state = reply.state.copy(draftOfferToResolveId = null)
+            message.state = message.state.copy(draftOfferToResolveId = null)
+        }
+        compose.onNode(hasText("Ignorer") and hasAnyAncestor(hasTestTag("editor-draft-offer-newer")))
+            .assertIsEnabled().performScrollTo().performClick()
+        compose.onNodeWithTag("editor-draft-offer-sheet").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(listOf("discard:newer"), calls); assertEquals(0, returns) }
+    }
+
+    private fun assertDecisionsDisabled() {
+        for (id in listOf("older", "newer")) for (label in listOf("Restaurer", "Ignorer")) {
+            compose.onNode(hasText(label) and hasAnyAncestor(hasTestTag("editor-draft-offer-$id")))
+                .assertIsNotEnabled()
+        }
+    }
 
     @Test fun replyListedDiscardsKeepSheetUntilConfirmedExhaustion() = checkListedDiscards(isReply = true)
 

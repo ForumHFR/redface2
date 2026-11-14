@@ -18,6 +18,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsSelected
@@ -111,6 +112,52 @@ class PostEditorChromeComposeTest {
     }
 
     // ED-40/41/95 v0.7.8 replaces the timed information and its second entry.
+    @Test fun listedDecisionsFollowPendingWriteAndMergedOfferGuards() {
+        val older = EditorDraftStore.DraftOffer("older", 1, EditorDraftStore.Draft("Older draft", updatedAt = 1))
+        val newer = EditorDraftStore.DraftOffer("newer", 2, EditorDraftStore.Draft("Newer draft", updatedAt = 2))
+        host.state = host.state.copy(restorableDraft = "Newer draft", draftOffers = listOf(newer, older),
+            draftOfferDecisionPending = true)
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
+        for (id in listOf("older", "newer")) for (label in listOf("Restaurer", "Ignorer")) {
+            compose.onNode(hasText(label) and hasAnyAncestor(hasTestTag("editor-draft-offer-$id")))
+                .assertIsNotEnabled()
+        }
+        compose.runOnIdle {
+            host.adapter.restoreOffer(older.id)
+            host.adapter.discardOffer(older.id)
+            assertTrue(host.adapter.draftOfferOpen)
+            assertTrue(host.calls.isEmpty())
+            assertEquals(0, returns)
+        }
+        compose.runOnIdle {
+            host.state = host.state.copy(draftOfferDecisionPending = false, quoteCommitPending = true)
+        }
+        for (id in listOf("older", "newer")) for (label in listOf("Restaurer", "Ignorer")) {
+            compose.onNode(hasText(label) and hasAnyAncestor(hasTestTag("editor-draft-offer-$id")))
+                .assertIsNotEnabled()
+        }
+        compose.runOnIdle {
+            host.state = host.state.copy(draftOfferDecisionPending = false, quoteCommitPending = false,
+                draftOfferToResolveId = older.id)
+            host.adapter.restoreOffer(newer.id)
+            host.adapter.discardOffer(newer.id)
+            assertTrue(host.adapter.draftOfferOpen)
+            assertTrue(host.calls.isEmpty())
+        }
+        for (label in listOf("Restaurer", "Ignorer")) {
+            compose.onNode(hasText(label) and hasAnyAncestor(hasTestTag("editor-draft-offer-newer")))
+                .assertIsNotEnabled()
+            compose.onNode(hasText(label) and hasAnyAncestor(hasTestTag("editor-draft-offer-older")))
+                .assertIsEnabled()
+        }
+        compose.runOnIdle { host.state = host.state.copy(draftOfferToResolveId = null) }
+        compose.onNode(hasText("Ignorer") and hasAnyAncestor(hasTestTag("editor-draft-offer-newer")))
+            .assertIsEnabled().performScrollTo().performClick()
+        compose.onNodeWithTag("editor-draft-offer-sheet").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(1, host.calls.size); assertEquals(0, returns) }
+    }
+
     @Test fun settingsTapClosesOptionsBeforeCallingNavigationOnce() {
         host.state = host.state.copy(editorShortcut = EditorShortcut.SEARCH_SMILEYS)
         compose.setContent { Content() }

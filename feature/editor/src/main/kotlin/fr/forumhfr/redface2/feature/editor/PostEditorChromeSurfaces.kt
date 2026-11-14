@@ -78,8 +78,8 @@ private fun PostEditorDraftOffer(adapter: PostEditorChromeAdapter) {
     EditorDraftOfferSheet(adapter.draftOfferOpen, source.restorableDraft != null, adapter::closeDraftOffer,
         adapter::restoreDraft, adapter::discardDraft,
         offers = source.draftOffers, onRestoreOffer = adapter::restoreOffer, onDiscardOffer = adapter::discardOffer,
-        restoreEnabled = source.canRestoreDraft && !source.isUploading && adapter.state.scaffold.controlsEnabled,
-        discardEnabled = adapter.state.scaffold.controlsEnabled)
+        restoreEnabled = adapter.state.restoreEnabled, discardEnabled = adapter.state.discardEnabled,
+        canDecideOffer = source::canDecideDraftOffer)
 }
 
 @Composable
