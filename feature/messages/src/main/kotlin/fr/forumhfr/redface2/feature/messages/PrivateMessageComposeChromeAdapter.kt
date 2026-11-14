@@ -81,7 +81,7 @@ internal class PrivateMessageComposeChromeAdapter(
         if (state.restoreEnabled) { actions.restoreOffer(id); closeDraftOffer() }
     }
     fun discardOffer(id: String) {
-        if (state.scaffold.controlsEnabled) { actions.discardOffer(id); closeDraftOffer() }
+        if (state.scaffold.controlsEnabled) actions.discardOffer(id)
     }
     fun retryFormLoad() = actions.reload()
     /** ED-130 replaces the whole editor: no header, sheet or detail comes back after « Réessayer ». */

@@ -19,7 +19,10 @@ import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasSetTextAction
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isDialog
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onNodeWithContentDescription
@@ -178,6 +181,39 @@ class TopicFormChromeComposeTest {
         compose.onNodeWithText("Ce sujet contient un sondage.", substring = true).assertDoesNotExist()
         compose.runOnIdle { assertTrue(chrome.firstStatus == null); assertTrue(fixture.calls.isEmpty()) }
     }
+    @Test fun listedDiscardsKeepSheetUntilConfirmedExhaustion() {
+        val older = EditorDraftStore.DraftOffer("older", 1, EditorDraftStore.Draft("Older draft", updatedAt = 1))
+        val newer = EditorDraftStore.DraftOffer("newer", 2, EditorDraftStore.Draft("Newer draft", updatedAt = 2))
+        fixture.state = fixture.state.copy(restorableDraft = "Newer draft", draftOffers = listOf(newer, older))
+        compose.setContent { Content() }
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
+        compose.onNode(hasText("Ignorer") and hasAnyAncestor(hasTestTag("editor-draft-offer-newer")))
+            .performScrollTo().performClick()
+        compose.onNodeWithTag("editor-draft-offer-sheet").assertIsDisplayed()
+        compose.runOnIdle {
+            assertEquals(listOf(TopicFormIntent.DraftOfferDiscarded(newer.id)), fixture.calls)
+            fixture.error(EditorErrors.draftSaveFailed)
+            assertEquals(0, returns)
+        }
+        compose.onNodeWithText("Newer draft").assertIsDisplayed()
+        compose.runOnIdle {
+            fixture.state = fixture.state.copy(restorableDraft = "Older draft", draftOffers = listOf(older))
+        }
+        compose.onNodeWithText("Newer draft").assertDoesNotExist()
+        compose.onNodeWithText("Older draft").assertIsDisplayed()
+        compose.onNodeWithText("Ignorer").assertIsEnabled().performScrollTo().performClick()
+        compose.onNodeWithTag("editor-draft-offer-sheet").assertIsDisplayed()
+        compose.runOnIdle {
+            assertEquals(listOf(TopicFormIntent.DraftOfferDiscarded(newer.id),
+                TopicFormIntent.DraftOfferDiscarded(older.id)), fixture.calls)
+            assertEquals(0, returns)
+            fixture.state = fixture.state.copy(restorableDraft = null, draftOffers = emptyList())
+        }
+        compose.onNode(isDialog()).assertDoesNotExist()
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle { assertEquals(1, returns) }
+    }
+
     @Test fun `1450 topic offer sheet returns focus once for each closing path`() =
         checkDraftOffer(TopicFormMode.New)
 

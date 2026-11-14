@@ -367,7 +367,8 @@ internal class PrivateMessageReplyDraftSession(
     fun discardOfferedDraft(offerId: String? = null) {
         if (resolvingOffer || deliveryPending) return
         val body = selectOffer(offerId) ?: return
-        updateState { it.copy(restorableDraft = null) }
+        // A listed discard closes the sheet only after the durable result removes its last offer.
+        if (offerId == null) updateState { it.copy(restorableDraft = null) }
         resolveOffer(body)
     }
 

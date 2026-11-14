@@ -93,7 +93,7 @@ internal class PrivateMessageReplyChromeAdapter(
         if (state.restoreEnabled) { actions.restoreOffer(id); closeDraftOffer() }
     }
     fun discardOffer(id: String) {
-        if (state.scaffold.controlsEnabled) { actions.discardOffer(id); closeDraftOffer() }
+        if (state.scaffold.controlsEnabled) actions.discardOffer(id)
     }
     fun resumeQuote() { if (source().hasDormantQuote) actions.resumeQuote() }
     fun ignoreQuote() { if (source().canIgnorePendingQuote) actions.ignoreQuote() }

@@ -247,6 +247,16 @@ Formulaire complet :
 - **Sondage** (optionnel) : question + options + choix multiple oui/non
 - **Preview** : avant-première du rendu du BBCode
 
+### Offre de brouillons des éditeurs
+
+Dans les éditeurs plein écran (post, topic, nouveau MP et réponse MP), ↺ ouvre la feuille
+`EditorDraftOfferSheet` : un rang par brouillon, le plus récent en haut. « Ignorer » un rang
+laisse la feuille ouverte ; le rang reste visible pendant l'écriture et disparaît une fois
+la décision enregistrée. Un échec conserve le rang et la feuille, avec le traitement d'erreur existant.
+Si l'offre cesse pendant que la feuille est ouverte, la feuille se ferme. « Restaurer » un rang
+ferme toujours la feuille. Fermer sans décision ne restaure ni n'ignore aucun brouillon.
+Le corps d'offre unique et la réponse rapide du topic conservent leur comportement.
+
 ### Menu compte global
 
 Issue #198 — chaque écran principal (Drapeaux, Forum, Recherche, Messages) accepte un slot `topBarActions: @Composable (() -> Unit)? = null` dans son header. Le navigation host (`RedfaceApp` dans `app/.../RedfaceNavigation.kt`) instancie une seule `AppAccountViewModel` partagée et y branche un composant `RedfaceAccountMenu` (vivant dans `:core:ui/account/`) qui surface :

@@ -1135,6 +1135,37 @@ class PrivateMessageComposeViewModelTest {
     }
 
     @Test
+    fun listedDiscardRetainsOfferWhilePendingAndAfterFailure() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val key = EditorDraftKey.mpCompose()
+        draftStore.preload(key, EditorDraftStore.Draft("Offered draft", isPrivate = true))
+        val vm = viewModel(repository)
+        runCurrent()
+        val offer = vm.state.value.draftOffers.single()
+        draftStore.saveFailure = IOException("disk full")
+        vm.onDraftDiscardRequested(offer.id)
+        runCurrent()
+        assertEquals(listOf(offer), vm.state.value.draftOffers)
+        assertEquals("Offered draft", vm.state.value.restorableDraft)
+
+        draftStore.saveFailure = null
+        val write = CompletableDeferred<Unit>()
+        draftStore.saveReturnGate = write
+        try {
+            vm.onDraftDiscardRequested(offer.id)
+            runCurrent()
+            assertEquals(listOf(offer), vm.state.value.draftOffers)
+            assertEquals("Offered draft", vm.state.value.restorableDraft)
+        } finally {
+            write.complete(Unit)
+        }
+        runCurrent()
+        assertTrue(vm.state.value.draftOffers.isEmpty())
+        assertNull(vm.state.value.restorableDraft)
+    }
+
+    @Test
     fun `ignoring a new MP offer keeps the typed headers and consumes that offer only - ED121`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         val key = EditorDraftKey.mpCompose()

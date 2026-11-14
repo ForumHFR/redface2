@@ -1259,7 +1259,8 @@ class PostEditorViewModel @AssistedInject constructor(
         } ?: return
         draftRestoreDeciding = true
         draftDecisionCompleted = CompletableDeferred()
-        updateChromeState { it.copy(restorableDraft = null) }
+        // Listed decisions keep the sheet and its row until the durable result is known.
+        if (offerId == null) updateChromeState { it.copy(restorableDraft = null) }
         viewModelScope.launch {
             try {
                 submission.flush(null)
@@ -1276,8 +1277,8 @@ class PostEditorViewModel @AssistedInject constructor(
                 markDraftRestoreOfferIgnored(body)
                 restoredOfferAwaitingWrite = null
                 mergedDraftOffer = null
-                updateChromeState { it.copy(draftOffers = emptyList()) }
-                refreshDraftOffers()
+                if (request.mode == PostEditorMode.Reply) refreshDraftOffers()
+                else updateChromeState { it.copy(restorableDraft = null, draftOffers = emptyList()) }
             } finally {
                 draftRestoreDeciding = false
                 draftDecisionCompleted?.complete(Unit)

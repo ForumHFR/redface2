@@ -119,7 +119,6 @@ internal class PostEditorChromeAdapter(
     fun discardOffer(id: String) {
         if (state.scaffold.controlsEnabled) {
             onIntent(PostEditorIntent.DraftOfferDiscarded(id))
-            closeDraftOffer()
         }
     }
     fun restoreDraft() {

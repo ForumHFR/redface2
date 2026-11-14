@@ -75,7 +75,7 @@ internal class EditorDraftOfferFixture {
                         onDiscard = { calls += "discard"; host.closeDraftOffer() },
                         offers = offers,
                         onRestoreOffer = { calls += "restore:$it"; host.closeDraftOffer() },
-                        onDiscardOffer = { calls += "discard:$it"; host.closeDraftOffer() },
+                        onDiscardOffer = { calls += "discard:$it" },
                         restoreEnabled = restoreEnabled, discardEnabled = discardEnabled)
                 })
         }

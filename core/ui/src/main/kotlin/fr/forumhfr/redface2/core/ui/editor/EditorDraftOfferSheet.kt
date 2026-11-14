@@ -40,12 +40,13 @@ import fr.forumhfr.redface2.core.ui.sheet.settledSheetWindowInsets
  *
  * Dismissal (swipe, Back, outside tap or close button) is never a draft decision. The host owns the
  * exactly-once deferred focus/selection return through its usual consumeReturn/returnToBody effect.
- * Restore/discard callbacks own their guarded intent and closing. Do not also render this offer
- * through EditorHeaderPanel/EditorEventDetails: those panels have their own focus-return effect.
+ * Restore and single-offer discard callbacks own their guarded intent and closing. Do not also
+ * render this offer through EditorHeaderPanel/EditorEventDetails: those panels have their own focus-return effect.
  *
  * ED-41 — a non-empty [offers] replaces the single-offer body by one row per draft, each decided
  * through [onRestoreOffer]/[onDiscardOffer] with its offer id; both default to the single-offer
- * callbacks for hosts that only ever hold one.
+ * callbacks for hosts that only ever hold one. A listed discard keeps the sheet open until the
+ * confirmed state has no offer left; keep the offer available while its write is pending or failed.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable

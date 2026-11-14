@@ -210,6 +210,35 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun listedDiscardRetainsOfferWhilePendingAndAfterFailure() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        draftStore.preload(key, EditorDraftStore.Draft("Offered draft"))
+        val vm = newReplyViewModel(quoteAction = false)
+        settleBody()
+        val offer = vm.state.value.draftOffers.single()
+        draftStore.saveFailure = IOException("disk full")
+        vm.dispatch(PostEditorIntent.DraftOfferDiscarded(offer.id))
+        syncBody()
+        assertEquals(listOf(offer), vm.state.value.draftOffers)
+        assertEquals("Offered draft", vm.state.value.restorableDraft)
+
+        draftStore.saveFailure = null
+        val write = CompletableDeferred<Unit>()
+        draftStore.saveReturnGate = write
+        try {
+            vm.dispatch(PostEditorIntent.DraftOfferDiscarded(offer.id))
+            syncBody()
+            assertEquals(listOf(offer), vm.state.value.draftOffers)
+            assertEquals("Offered draft", vm.state.value.restorableDraft)
+        } finally {
+            write.complete(Unit)
+        }
+        syncBody()
+        assertTrue(vm.state.value.draftOffers.isEmpty())
+        assertNull(vm.state.value.restorableDraft)
+    }
+
+    @Test
     fun `multiple offered versions resolve only the selected identity and stale callbacks are inert`() = runTest {
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
         draftStore.preload(key, EditorDraftStore.Draft("old D", updatedAt = 1000))

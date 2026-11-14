@@ -3172,6 +3172,35 @@ class TopicFormViewModelTest {
     }
 
     @Test
+    fun listedDiscardRetainsOfferWhilePendingAndAfterFailure() = runTest {
+        val key = EditorDraftKey.newTopic(SAMPLE_CAT)
+        draftStore.preload(key, EditorDraftStore.Draft("Offered draft"))
+        val vm = newTopicViewModel(entrySubcat = SAMPLE_SUBCAT)
+        syncBody()
+        val offer = vm.state.value.draftOffers.single()
+        draftStore.saveFailure = IOException("disk full")
+        vm.submit(TopicFormIntent.DraftOfferDiscarded(offer.id))
+        syncBody()
+        assertEquals(listOf(offer), vm.state.value.draftOffers)
+        assertEquals("Offered draft", vm.state.value.restorableDraft)
+
+        draftStore.saveFailure = null
+        val write = CompletableDeferred<Unit>()
+        draftStore.saveReturnGate = write
+        try {
+            vm.submit(TopicFormIntent.DraftOfferDiscarded(offer.id))
+            syncBody()
+            assertEquals(listOf(offer), vm.state.value.draftOffers)
+            assertEquals("Offered draft", vm.state.value.restorableDraft)
+        } finally {
+            write.complete(Unit)
+        }
+        syncBody()
+        assertTrue(vm.state.value.draftOffers.isEmpty())
+        assertNull(vm.state.value.restorableDraft)
+    }
+
+    @Test
     fun `a new topic lists every offered version and decides the chosen one - ED121`() = runTest {
         val key = EditorDraftKey.newTopic(SAMPLE_CAT)
         val older = EditorDraftStore.DraftOffer.from(EditorDraftStore.DraftEntry(

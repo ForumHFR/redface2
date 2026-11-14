@@ -3155,6 +3155,37 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
+    fun listedDiscardRetainsOfferWhilePendingAndAfterFailure() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val key = EditorDraftKey.mpReply(request.threadId)
+        draftStore.preload(key, EditorDraftStore.Draft("Offered draft", isPrivate = true))
+        val vm = viewModel(repository)
+        runCurrent()
+        val offer = vm.state.value.draftOffers.single()
+        draftStore.saveFailure = IOException("disk full")
+        vm.onDraftDiscardRequested(offer.id)
+        runCurrent()
+        assertEquals(listOf(offer), vm.state.value.draftOffers)
+        assertEquals("Offered draft", vm.state.value.restorableDraft)
+
+        draftStore.saveFailure = null
+        val write = CompletableDeferred<Unit>()
+        draftStore.saveReturnGate = write
+        try {
+            vm.onDraftDiscardRequested(offer.id)
+            runCurrent()
+            assertEquals(listOf(offer), vm.state.value.draftOffers)
+            assertEquals("Offered draft", vm.state.value.restorableDraft)
+        } finally {
+            write.complete(Unit)
+        }
+        runCurrent()
+        assertTrue(vm.state.value.draftOffers.isEmpty())
+        assertNull(vm.state.value.restorableDraft)
+    }
+
+    @Test
     fun failedReplyRestoreBlocksOtherDecisionsUntilPersistedAndResumesWithoutEitherOffer() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } returns form()
