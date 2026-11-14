@@ -59,7 +59,8 @@ class ReplyFormTest {
 
         val rendered = replyForm.toString()
 
-        (hiddenFields.values + listOf(icon, roster, userId.toString(), smiley.token, smiley.imageUrl)).forEach { secret ->
+        val secrets = hiddenFields.values + listOf(icon, roster, userId.toString(), smiley.token, smiley.imageUrl)
+        secrets.forEach { secret ->
             assertFalse("toString must not expose private form values", rendered.contains(secret))
         }
         assertEquals(
