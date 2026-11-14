@@ -1176,6 +1176,49 @@ class QuickReplyDurableQuoteTest {
     }
 
     @Test
+    fun `ED88 Ignore of one deleted quote out of two keeps the entire basket through close`() = runTest {
+        val scenario = Scenario(quoteNumbers = listOf(101, 202)).apply { offline = true }
+        scenario.enqueue()
+        val sheet = scenario.open()
+        advanceUntilIdle()
+        sheet.onQuoteReloadRequested()
+        advanceUntilIdle()
+        scenario.offline = false
+        scenario.store.saveFailure = IOException("disk")
+        sheet.onQuoteReloadRequested()
+        advanceUntilIdle()
+        assertTrue(sheet.state.value.text.text.contains("[quotemsg=101]quote[/quotemsg]"))
+        assertTrue(sheet.state.value.text.text.contains("[quotemsg=202]quote[/quotemsg]"))
+        assertEquals(scenario.request, scenario.pending)
+        assertTrue(sheet.state.value.canIgnorePendingQuote)
+
+        val edited = "[quotemsg=202]quote[/quotemsg]\n\nmy text"
+        sheet.onTextChanged(TextFieldValue(edited))
+        scenario.store.saveFailure = null
+        sheet.quotesDelivered.test {
+            sheet.onPendingQuoteIgnored()
+            advanceUntilIdle()
+            assertNull(scenario.pending)
+            assertTrue(sheet.state.value.pendingQuotes.isEmpty())
+            assertEquals(edited, sheet.state.value.text.text)
+            assertEquals(edited, scenario.body)
+            assertTrue(scenario.store.saved[scenario.key]?.bodyProvenance?.deliveries.isNullOrEmpty())
+            expectNoEvents() // One surviving quote cannot consume any of the basket.
+            sheet.effects.test {
+                sheet.onDismissed()
+                advanceUntilIdle()
+                assertTrue(awaitItem() is QuickReplyEffect.CloseCommitted)
+                assertFalse(sheet.state.value.unsavedCloseVisible)
+                expectNoEvents()
+            }
+            expectNoEvents()
+        }
+        assertEquals(edited, scenario.body)
+        assertNull(scenario.pending)
+        assertEquals(0, scenario.posts)
+    }
+
+    @Test
     fun `ED88 Ignore of an inserted quote during close delivers once before CloseCommitted`() = runTest {
         val scenario = Scenario().apply { offline = true }
         scenario.enqueue()
@@ -1382,9 +1425,12 @@ class QuickReplyDurableQuoteTest {
         assertEquals(listOf(101), scenario.fetches)
     }
 
-    private inner class Scenario(val store: VersionedEditorDraftStore = VersionedEditorDraftStore()) {
+    private inner class Scenario(
+        val store: VersionedEditorDraftStore = VersionedEditorDraftStore(),
+        quoteNumbers: List<Int> = listOf(101),
+    ) {
         val key = EditorDraftKey.reply(23, 35421)
-        val request = PendingInlineQuoteRequest(23, 35421, listOf(PendingInlineQuoteRequest.Quote(101, 1)))
+        val request = PendingInlineQuoteRequest(23, 35421, quoteNumbers.map { PendingInlineQuoteRequest.Quote(it, 1) })
         val body get() = store.saved[key]?.body
         val pending get() = store.saved[key]?.pendingInlineQuoteRequest
         val fetches = mutableListOf<Int>()

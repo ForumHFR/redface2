@@ -1200,6 +1200,96 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
+    fun `ED88 MP Ignore consumes a deleted quote without a seal`() =
+        assertMpQuoteSettlement(PrivateMessageReplyViewModel::onPendingQuoteIgnored,
+            intact = false, quoteNumbers = listOf(101))
+
+    @Test
+    fun `ED88 MP Ignore consumes a partial two-quote delivery without a seal`() =
+        assertMpQuoteSettlement(PrivateMessageReplyViewModel::onPendingQuoteIgnored, intact = false)
+
+    @Test
+    fun `ED88 MP close consumes a partial two-quote delivery without a seal`() =
+        assertMpQuoteSettlement(PrivateMessageReplyViewModel::onCloseRequested, intact = false)
+
+    @Test
+    fun `ED88 MP Reload consumes a partial two-quote delivery without a seal`() =
+        assertMpQuoteSettlement(PrivateMessageReplyViewModel::retryFormLoad, intact = false)
+
+    @Test
+    fun `ED88 MP Ignore seals an intact two-quote delivery`() =
+        assertMpQuoteSettlement(PrivateMessageReplyViewModel::onPendingQuoteIgnored, intact = true)
+
+    @Test
+    fun `ED88 MP close seals an intact two-quote delivery`() =
+        assertMpQuoteSettlement(PrivateMessageReplyViewModel::onCloseRequested, intact = true)
+
+    @Test
+    fun `ED88 MP Reload seals an intact two-quote delivery`() =
+        assertMpQuoteSettlement(PrivateMessageReplyViewModel::retryFormLoad, intact = true)
+
+    private fun assertMpQuoteSettlement(
+        action: (PrivateMessageReplyViewModel) -> Unit,
+        intact: Boolean,
+        quoteNumbers: List<Int> = listOf(101, 202),
+    ) = runTest {
+        val vm = refusedMpQuoteDelivery(quoteNumbers)
+        val key = EditorDraftKey.mpReply(request.threadId)
+        val retained = if (intact) quoteNumbers else quoteNumbers.drop(1)
+        val edited = (retained.map { "[quotemsg=$it]quote[/quotemsg]" } + "my text").joinToString("\n\n")
+        vm.editBody(TextFieldValue(edited))
+        advanceUntilIdle() // No autosave snapshot while the delivery is pending.
+        draftStore.saveFailure = null
+        vm.quotesDelivered.test delivery@ {
+            expectNoEvents()
+            vm.effects.test {
+                action(vm)
+                advanceUntilIdle()
+                assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+                assertFalse(vm.state.value.quoteCommitPending)
+                assertEquals(edited, vm.bodyFieldState.text.toString())
+                assertEquals(edited, draftStore.saved[key]?.body)
+                assertTrue(draftStore.saved[key]?.isPrivate == true)
+                assertEquals(intact, draftStore.saved[key]?.bodyProvenance?.deliveries?.isNotEmpty() == true)
+                if (intact) this@delivery.awaitItem() else this@delivery.expectNoEvents()
+                vm.onCloseRequested() // Also proves that Ignore released the delivery latch.
+                advanceUntilIdle()
+                assertEquals(PrivateMessageReplyEffect.CloseCommitted, awaitItem())
+                assertFalse(vm.state.value.showUnsavedCloseDialog)
+                expectNoEvents()
+            }
+            expectNoEvents() // Neither close nor repeated close may emit another delivery.
+        }
+        assertEquals(edited, draftStore.saved[key]?.body)
+        assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+    }
+
+    private fun TestScope.refusedMpQuoteDelivery(quoteNumbers: List<Int>): PrivateMessageReplyViewModel {
+        val pending = PendingInlineQuoteRequest.privateMessage(request.threadId,
+            quoteNumbers.map { PendingInlineQuoteRequest.Quote(it, 2, 7) })
+        draftStore.preload(pending.key, EditorDraftStore.Draft("", isPrivate = true,
+            pendingInlineQuoteRequest = pending))
+        val gate = CompletableDeferred<Unit>()
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } coAnswers {
+            gate.await()
+            val number = firstArg<PrivateMessageReplyContext>().quote?.numreponse
+            form(initialContent = number?.let { "[quotemsg=$it]quote[/quotemsg]" }.orEmpty())
+        }
+        val vm = viewModel(repository)
+        draftStore.saveFailure = IOException("disk")
+        gate.complete(Unit)
+        runCurrent()
+        vm.retryFormLoad()
+        runCurrent() // A second refused write makes Ignore available, without a second insertion.
+        assertEquals(pending, draftStore.saved[pending.key]?.pendingInlineQuoteRequest)
+        quoteNumbers.forEach { assertTrue(vm.bodyFieldState.text.contains("[quotemsg=$it]quote[/quotemsg]")) }
+        assertTrue(vm.state.value.quoteCommitPending)
+        assertTrue(vm.state.value.canIgnorePendingQuote)
+        return vm
+    }
+
+    @Test
     fun `late quote form prefixes the prefill once without clobbering typed text`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         val formGate = CompletableDeferred<ReplyForm>()
