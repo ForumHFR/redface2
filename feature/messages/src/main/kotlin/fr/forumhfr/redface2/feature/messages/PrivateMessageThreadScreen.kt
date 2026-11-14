@@ -194,11 +194,9 @@ fun PrivateMessageThreadScreen(
     // #1040 lot 6 — editor→retained-ViewModel handoff. The event id keys one consumption even when
     // the editor payload is identical to the previous one; :app clears its slot once applied.
     // The auth flow may arrive after the handoff: retry it when the account becomes known.
-    LaunchedEffect(pendingSubmitResult?.eventId, state.connectedPseudo) {
-        pendingSubmitResult?.let { result ->
-            if (viewModel.applySubmitResult(result)) onSubmitResultConsumed(result)
-        }
-    }
+    PrivateMessageSubmitResultEffect(
+        pendingSubmitResult, state.connectedPseudo, viewModel::applySubmitResult, onSubmitResultConsumed,
+    )
 
     // #351 — one-shot effects (same idiom as TopicScreen): a keep-content load failure keeps the
     // page on screen and surfaces a Toast inviting a retry (pull again / tap the pager again).
@@ -313,6 +311,21 @@ fun PrivateMessageThreadScreen(
         ),
         topBarActions = topBarActions,
     )
+}
+
+/** Retries the same pending handoff when authentication becomes available to the retained reader. */
+@Composable
+internal fun PrivateMessageSubmitResultEffect(
+    pendingSubmitResult: PrivateMessageSubmitResult?,
+    connectedPseudo: String?,
+    applySubmitResult: (PrivateMessageSubmitResult) -> Boolean,
+    onSubmitResultConsumed: (PrivateMessageSubmitResult) -> Unit,
+) {
+    LaunchedEffect(pendingSubmitResult?.eventId, connectedPseudo) {
+        pendingSubmitResult?.let { result ->
+            if (applySubmitResult(result)) onSubmitResultConsumed(result)
+        }
+    }
 }
 
 /**

@@ -873,8 +873,50 @@ class PostEditorRestorationTest {
         assertEquals("private edited subject", restored.state.value.subject)
         assertNull(restored.state.value.restorableDraft)
         assertEquals("private edited body", store.saved[EditorDraftKey.mpEdit(101)]?.body)
+        assertEquals("private edited subject", store.saved[EditorDraftKey.mpEdit(101)]?.subject)
         coVerify(exactly = 0) { edits.fetchEditPostForm(any<EditPostContext>()) }
         coVerify(exactly = 0) { edits.submitEditPost(any<PrivateMessageEditContext>(), any(), any(), any()) }
+    }
+
+    @Test
+    fun nonFirstPrivateEditNeverCheckpointsItsHiddenSubjectAndStillSubmitsTheServedForm() = runTest(dispatcher) {
+        val mpKey = EditorDraftKey.mpEdit(101)
+        val served = form("server body").copy(
+            sujet = "Served hidden subject", hiddenFields = mapOf("sujet" to "Served hidden subject"),
+            isSubjectEditable = false,
+        )
+        every { preferences.observeConfirmBeforePosting() } returns flowOf(false)
+        coEvery { edits.fetchEditPostForm(any<PrivateMessageEditContext>()) } returns served
+        coEvery { edits.submitEditPost(any<PrivateMessageEditContext>(), any(), any(), any()) } answers {
+            val durable = checkNotNull(store.entries[mpKey])
+            assertNull(durable.draft.subject)
+            assertEquals(AttemptStatus.IN_PROGRESS, durable.attempt?.status)
+            assertEquals(served.sujet, secondArg<ReplyForm>().sujet)
+            assertEquals(served.hiddenFields, secondArg<ReplyForm>().hiddenFields)
+            ReplySubmitResult.Failure(ReplyFailureReason.InvalidHashCheck)
+        }
+        val editor = open(request = privateRequest())
+        runCurrent()
+        assertFalse(editor.state.value.isSubjectEditable)
+        assertEquals(served.sujet, editor.state.value.subject)
+        type(editor, "edited body")
+        sync()
+        advanceTimeBy(751)
+        sync()
+        assertEquals("edited body", store.saved[mpKey]?.body)
+        assertNull(store.saved[mpKey]?.subject)
+        editor.submit(PostEditorIntent.Stopped)
+        runCurrent()
+        assertNull(store.saved[mpKey]?.subject)
+        editor.submit(PostEditorIntent.Started)
+        coEvery { edits.fetchEditPostForm(any<PrivateMessageEditContext>()) } throws IOException("offline")
+        editor.submit(PostEditorIntent.SubmitClicked())
+        runCurrent()
+        coVerify(exactly = 1) { edits.submitEditPost(any<PrivateMessageEditContext>(), any(), "edited body", any()) }
+        assertFalse(editor.state.value.hasLoadedForm)
+        editor.submit(PostEditorIntent.Stopped)
+        runCurrent()
+        assertNull(store.saved[mpKey]?.subject)
     }
 
     @Test

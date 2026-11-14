@@ -1536,6 +1536,7 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                                             result = PrivateMessageSubmitResult(
                                                 eventId = privateMessageSubmitEventId,
                                                 page = page,
+                                                account = account,
                                                 operation = operation,
                                             ),
                                         )

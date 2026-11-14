@@ -834,6 +834,22 @@ data class NewMultiMP(
 )
 ```
 
+Le relais transitoire de succès, défini dans `:feature:messages`, porte le compte qui a envoyé :
+
+```kotlin
+data class PrivateMessageSubmitResult(
+    val eventId: Long,
+    val page: Int,
+    val account: String,
+    val operation: PostSubmitOperation = PostSubmitOperation.Publish,
+)
+```
+
+`eventId` et `page` sont strictement positifs ; `account` est un pseudo non vide, comparé sans tenir
+compte de la casse, comme les propriétaires de brouillons et les accusés Topic. Ce résultat reste
+hors des routes et de Room. Son cycle de consommation et ses limites sont définis dans
+[MVI — Accusé d’édition MP]({{ site.baseurl }}/specs/mvi).
+
 Le MVP Phase 3 #298 ne couvrait que la **lecture** des MPs classiques
 (`PrivateMessageSummary`, `PrivateMessageListPage`, `PrivateMessageThread`). La suite
 Phase 3 est **désormais livrée** (Phase 3 close) : `NewMP` et `NewMultiMP` (composition),
