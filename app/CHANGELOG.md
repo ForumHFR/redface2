@@ -16,6 +16,10 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.69.22` — `internal` (dev) — 2026-11-14
+
+« Ignorer » une citation ([#1417](https://github.com/ForumHFR/redface2/issues/1417), PR [#1642](https://github.com/ForumHFR/redface2/pull/1642)) : si la citation insérée a été effacée du champ, « Ignorer » ne vide plus le panier, dans la réponse rapide comme dans l'éditeur de post ; le texte saisi est alors enregistré dans le brouillon.
+
 ## `0.69.21` — `internal` (dev) — 2026-11-14
 
 Décisions de XaTriX sur l'éditeur ([#1417](https://github.com/ForumHFR/redface2/issues/1417), PR [#1640](https://github.com/ForumHFR/redface2/pull/1640)). Réponse rapide : « Ignorer » sur une citation déjà insérée dans le champ la garde dans le texte et vide le panier, comme dans l'éditeur de post. Sans citation insérée, ou si l'enregistrement échoue, le panier reste armé. Édition du premier post d'un sujet : « Restaurer » reprend le titre du brouillon tant que le titre affiché est celui servi par HFR ; un titre modifié à la main reste prioritaire. Édition MP ([#1625](https://github.com/ForumHFR/redface2/issues/1625)) : la réponse de HFR à l'envoi d'une édition est maintenant capturée sur un vrai envoi (PR [#1637](https://github.com/ForumHFR/redface2/pull/1637)) et reconnue comme un succès ; le retour au fil est lié au compte qui a envoyé, et le brouillon d'un message autre que le premier n'enregistre plus le sujet de la conversation (PR [#1639](https://github.com/ForumHFR/redface2/pull/1639)).

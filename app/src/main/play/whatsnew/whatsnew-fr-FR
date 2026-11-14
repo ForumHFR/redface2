@@ -1,4 +1,2 @@
-Redface 2 v0.69.21 — dev.
-- Réponse rapide : « Ignorer » une citation déjà insérée vide le panier.
-- Premier post : « Restaurer » reprend le titre du brouillon.
-- MP : édition vérifiée sur HFR.
+Redface 2 v0.69.22 — dev.
+- « Ignorer » une citation effacée du texte garde le panier.
