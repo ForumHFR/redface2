@@ -152,6 +152,22 @@ class ReplySubmitResponseParserTest {
     }
 
     @Test
+    fun `private message edit success refreshes to forum2 query form without a sujet segment`() {
+        // #1625 — real capture (`private_message_edit_success_response.html`, 2026-11-14). Same
+        // sentence as a Topic edit, but the refresh is `/forum2.php?…cat=prive&post=…&page=1…#t{N}`,
+        // not `…sujet_{topic}_{page}.htm`: topic id and page stay null here, only the anchor is read.
+        // `DefaultEditPostRepository` takes thread and page from the known edit target.
+        val result = parser.parse(readFixture("private_message_edit_success_response.html"))
+        assertTrue("MP edit success must classify as Success — got $result", result is ReplySubmitResult.Success)
+        val success = result as ReplySubmitResult.Success
+        val refreshUrl = requireNotNull(success.refreshUrl) { "refreshUrl must be present" }
+        assertTrue(refreshUrl.startsWith("/forum2.php?") && refreshUrl.contains("cat=prive"))
+        assertNull(success.targetPage)
+        assertNull(success.topicId)
+        assertEquals(1_980_000_302, success.numreponse)
+    }
+
+    @Test
     fun `create-topic success is classified via its own marker and exposes no topic id`() {
         // #214 — real capture (`write_create_topic_success_response.html`, 2026-05-29).
         // HFR's create-topic success uses « Votre message a été posté avec succès ! » —

@@ -17,7 +17,9 @@ import org.jsoup.Jsoup
  * Reply and edit successes use different literal sentences («Votre réponse a été
  * postée avec succès » vs. « Votre message a été édité avec succès ») but
  * everything else — refresh URL shape, error variants — is identical, so a
- * single parser covers both flows.
+ * single parser covers both flows. Exception: an MP edit refreshes to
+ * `/forum2.php?…cat=prive…#t{numreponse}` with no `sujet_` segment (#1625), so
+ * topic id and page stay null and the caller supplies them.
  *
  * Each match maps to a concrete fixture under
  * `core/parser/src/test/resources/fixtures/write_*` ; pinned by tests in
@@ -58,9 +60,9 @@ class ReplySubmitResponseParser {
 
             body.contains(SUCCESS_MARKER, ignoreCase = true) -> parseSuccess(html)
 
-            // Phase 2D (#147) : edit-post success uses its own sentence ; the
-            // refresh URL shape is identical (`sujet_{topic}_{page}.htm#t{numreponse}`)
-            // so `parseSuccess` reuses the same extraction.
+            // Phase 2D (#147) : edit-post success uses its own sentence ; a Topic edit
+            // refreshes to `sujet_{topic}_{page}.htm#t{numreponse}`, an MP edit to the
+            // forum2.php query form (#1625) : `parseSuccess` reads what is there.
             body.contains(EDIT_SUCCESS_MARKER, ignoreCase = true) -> parseSuccess(html)
 
             // #214 — create-topic success uses its OWN sentence, distinct from reply and

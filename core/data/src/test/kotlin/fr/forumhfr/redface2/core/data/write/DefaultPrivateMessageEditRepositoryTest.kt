@@ -194,11 +194,33 @@ class DefaultPrivateMessageEditRepositoryTest {
     }
 
     @Test
-    fun `recognised edit marker returns known coordinates without a sujet URL`() = runTest {
-        // Synthetic classifier payload only: MP edit success has not been observed live.
-        server.enqueue(MockResponse().setBody("<div class=hop>Votre message a été édité avec succès</div>"))
-        val result = repository.submitEditPost(context.copy(page = 4), form(), "Updated body")
-        assertEquals(ReplySubmitResult.Success(null, 4, context.numreponse, context.threadId), result)
+    fun `captured MP edit success returns the edit target coordinates once`() = runTest {
+        // Real HFR response to the edit POST (#1625): forum2.php refresh, no `sujet_` segment.
+        val response = fixture("private_message_edit_success_response.html")
+        server.enqueue(MockResponse().setBody(response))
+        val result = repository.submitEditPost(context, form(), "Updated body [:fictif c:2]")
+        val success = result as ReplySubmitResult.Success
+        assertEquals(1, success.targetPage)
+        assertEquals(context.numreponse, success.numreponse)
+        assertEquals(context.threadId, success.topicId)
+        assertEquals("1", fields(server.takeRequest().body.readUtf8()).toMap()["page"])
+        assertEquals(1, server.requestCount)
+        // Success records the smiley the edit added; failures above never record any.
+        assertEquals(listOf(mapOf("[:fictif c:2]" to 1)), usage.calls.map { it.usages })
+        assertTrue(diagnostics.entries.value.any { it.message == "POST MP edit Success" })
+    }
+
+    @Test
+    fun `edit success takes thread page and message from the target not from the refresh`() = runTest {
+        // The captured refresh says post=3000003, page=1, #t1980000302; the editor's own target wins.
+        server.enqueue(MockResponse().setBody(fixture("private_message_edit_success_response.html")))
+        // A target distinct from the refresh anchor: page 4 and another message of the same thread.
+        val served = form(target = context.copy(page = 4))
+        val form = served.copy(hiddenFields = served.hiddenFields + ("numreponse" to "1980000399"))
+        val target = context.copy(page = 4, numreponse = 1980000399)
+        val result = repository.submitEditPost(target, form, "Updated body")
+        val refresh = (result as ReplySubmitResult.Success).refreshUrl
+        assertEquals(ReplySubmitResult.Success(refresh, 4, 1980000399, context.threadId), result)
         assertEquals("4", fields(server.takeRequest().body.readUtf8()).toMap()["page"])
         assertEquals(1, server.requestCount)
     }

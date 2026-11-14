@@ -340,6 +340,7 @@ Inbox **mono-onglet** : `MessagesScreen` (`feature/messages/.../MessagesScreen.k
 ---
 
 ### Édition d'un message privé (#1625)
+{: #private-message-edit }
 
 `PrivateMessageEditRoute(threadId, page, numreponse)` ouvre `PostEditorScreen` en mode édition,
 avec une cible scellée `PostEditorTarget.PrivateMessage` dans la requête et l'état. Aucun faux

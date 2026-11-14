@@ -207,7 +207,7 @@ class DefaultEditPostRepository @Inject constructor(
         }
     }
 
-    /** PENDING(#1625): MP edit success response not yet observed live. */
+    /** MP edit success observed live (#1625): same sentence as Topic, `forum2.php?cat=prive…#t{N}` refresh. */
     override suspend fun submitEditPost(
         context: PrivateMessageEditContext,
         form: ReplyForm,
@@ -224,7 +224,8 @@ class DefaultEditPostRepository @Inject constructor(
         val parsed = replySubmitResponseParser.parse(hfrClient.submitEditPost(body))
         val outcome = if (parsed is ReplySubmitResult.Success) {
             smileyUsageRecorder.record(owner, body, options.smileyDisabled, form.initialContent)
-            // Private refresh URL syntax is unobserved; the edit target already owns these coordinates.
+            // The private refresh has no `sujet_` segment (fixture private_message_edit_success_response):
+            // thread and page come from the edit target, which already owns these coordinates.
             parsed.copy(targetPage = context.page, numreponse = context.numreponse, topicId = context.threadId)
         } else {
             // Unknown stays Unknown: the durable submission adapter treats it as UNCERTAIN.

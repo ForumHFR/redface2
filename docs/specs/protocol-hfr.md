@@ -1369,22 +1369,25 @@ signature?, smiley?, emaill?
   ligne de destinataires dans les trois captures : ce chemin refuse leur présence et ne gère pas
   les membres.
 
-**Réponse POST MP non observée live** (`PENDING(#1625)`). `ReplySubmitResponseParser` est réutilisé
-sous cette réserve : ses marqueurs de succès existants donnent un succès, avec fil/page/message
-issus de la cible connue, sans dépendre d'une URL `sujet_ID_PAGE`. Ses refus connus restent des
-refus. Toute réponse non reconnue reste `ReplyFailureReason.Unknown`, donc **résultat incertain**
-dans le chemin de tentative durable de l'éditeur ; aucun renvoi automatique. Les corps neutres et
-les marqueurs synthétiques des tests unitaires ne sont pas des captures de réponse MP ; aucune
-réponse Topic n'est présentée comme telle.
+**Réponse POST MP** capturée le 2026-11-14 (`private_message_edit_success_response.html`, édition
+à contenu identique du 2e message de la conversation 1:1 de test) : HTTP 200, `div.hop` « Votre
+message a été édité avec succès ! », la même phrase que l'édition Topic, et un `meta Refresh` vers
+`/forum2.php?config=hfr.inc&cat=prive&post={fil}&page=1&…#t{numreponse}`. Cette URL est la forme
+query de `forum2.php`, sans segment `sujet_{id}_{page}` : `ReplySubmitResponseParser` n'en tire que
+l'ancre, et le repository prend fil, page et message dans la cible connue. Les refus connus restent
+des refus. Toute réponse non reconnue reste `ReplyFailureReason.Unknown`, donc **résultat incertain**
+dans le chemin de tentative durable de l'éditeur ; aucun renvoi automatique. Les marqueurs de refus
+des tests unitaires restent synthétiques : aucun refus MP n'a été capturé.
 
 Les diagnostics d'édition MP n'exposent ni sujet, ni corps, ni pseudo, ni identifiants privés, ni
 jeton, ni URL de retour ou message brut d'exception. Le repository refuse le message MPStorage
 identifié par le cache local par compte (`MpStorageLocationStore`) **avant GET et avant POST**, sans
 découverte réseau. À cache froid, le sujet hash du formulaire bloque également le chargement et le
-POST ; masquer l'action depuis le sujet du fil chargé relève du parcours de la PR 2.
+POST ; le parcours masque en plus l'action depuis le sujet du fil chargé.
 
-Ce lot fournit uniquement le contrat et les données. Le menu, l'éditeur partagé, les brouillons
-privés, la navigation et le retour avec accusé « Message modifié » restent à brancher en PR 2.
+Le menu, l'éditeur partagé, les brouillons privés, la navigation et le retour avec accusé « Message
+modifié » sont décrits dans [navigation.md]({{ site.baseurl }}/specs/navigation#private-message-edit)
+et [mvi.md]({{ site.baseurl }}/specs/mvi).
 
 ### Écriture MPStorage — read-modify-write `bdd.php cat=prive` (#593/#597)
 
