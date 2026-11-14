@@ -831,6 +831,47 @@ class EditorSubmissionBindingTest {
         assertEquals(listOf("D"), store.loadOffers("tester", key).map { it.draft.body })
     }
 
+    @Test
+    fun `a send before any autosave still copies the unread ordinary row aside - ED121`() = runTest {
+        val (store, binding) = unreadOrdinaryRow()
+        val permit = binding.request(4_000, true) as SubmissionRequest.Accepted
+        binding.launch(permit, Draft("C")) { EditorDelivery(effect = Unit) }
+        runCurrent()
+        assertEquals(1, store.beginCalls)
+        assertEquals(AttemptStatus.PUBLISHED, store.entries[UNREAD_KEY]?.attempt?.status)
+        assertEquals(listOf("D"), store.loadOffers("tester", UNREAD_KEY).map { it.draft.body })
+    }
+
+    @Test
+    fun `a refused send keeps the unread ordinary row protected for the next autosave - ED121`() = runTest {
+        val (store, binding) = unreadOrdinaryRow()
+        store.beginFailure = IOException("disk full")
+        val permit = binding.request(4_000, true) as SubmissionRequest.Accepted
+        binding.launch(permit, Draft("C")) { error("a refused attempt never sends") }
+        runCurrent()
+        assertEquals(1, store.beginCalls)
+        assertEquals("D", store.saved[UNREAD_KEY]?.body)
+        assertTrue(store.loadOffers("tester", UNREAD_KEY).isEmpty())
+        store.beginFailure = null
+        listOf("C", "C continued").forEach { binding.persist(Draft(it)) }
+        assertEquals("C continued", store.saved[UNREAD_KEY]?.body)
+        assertEquals(listOf("D"), store.loadOffers("tester", UNREAD_KEY).map { it.draft.body })
+    }
+
+    /** An ordinary D with no durable offer, opened while the offers cannot be read: Ready, D not shown. */
+    private suspend fun TestScope.unreadOrdinaryRow():
+        Pair<VersionedEditorDraftStore, EditorSubmissionBinding<Unit, String>> {
+        val store = VersionedEditorDraftStore()
+        store.entries[UNREAD_KEY] = EditorDraftStore.DraftEntry(Draft("D"), 1)
+        store.loadOffersFailure = IOException("disk read")
+        val binding = binding(store, UNREAD_KEY)
+        assertNull(binding.restore(UNREAD_KEY))
+        store.loadOffersFailure = null
+        assertEquals(EditorSubmissionState.Ready, binding.state)
+        binding.setPreference(false)
+        return store to binding
+    }
+
     private fun TestScope.binding(
         store: VersionedEditorDraftStore,
         key: String = "key",
@@ -849,4 +890,8 @@ class EditorSubmissionBindingTest {
         ),
         EditorSubmissionErrors("uncertain", "draft", "session", "unknown", draftSaveFailed = "save"),
     )
+
+    private companion object {
+        val UNREAD_KEY = EditorDraftKey.reply(23, 35421)
+    }
 }

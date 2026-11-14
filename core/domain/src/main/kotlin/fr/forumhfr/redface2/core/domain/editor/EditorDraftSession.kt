@@ -36,8 +36,9 @@ class EditorDraftSession(
     private var protectedOffer: DraftOffer? = null
     /**
      * ED-121: the next write asks the store to copy the row aside first, because this session could
-     * not tell whether it is already offered. It holds for one write only: the row is this session's
-     * own C afterwards. An attempt read at [load] is restored to the user (ED-170), never offered.
+     * not tell whether it is already offered. It holds until one content write succeeds, a send
+     * included: the row is this session's own C afterwards. An attempt read at [load] is restored
+     * to the user (ED-170), never offered.
      */
     private var protectsUnreadRow = false
     /** The last [load] returned the row without its offers; a complete [load] clears it. */
@@ -177,7 +178,7 @@ class EditorDraftSession(
                 writeComposition(ownedDraft(draft))
             } else StoreWriteResult.OwnerChanged
             if (result is StoreWriteResult.Written) adoptBody(ownedDraft(draft))
-            adopt(result)
+            adoptMutation(result)
             result
         }
     }
@@ -207,7 +208,7 @@ class EditorDraftSession(
                 restoredBody = null
                 stagedBody = null
             }
-            adopt(result)
+            adoptMutation(result)
             result
         }
     }
@@ -238,7 +239,7 @@ class EditorDraftSession(
                 adoptResolvedOffer(offer, snapshot)
                 adoptBody(snapshot)
             }
-            adopt(result)
+            adoptMutation(result)
             result
         }
     }
@@ -259,7 +260,7 @@ class EditorDraftSession(
                 }
                 pendingInlineQuoteRequest = pendingInlineQuoteRequest?.merge(request) ?: request
             }
-            adopt(result)
+            adoptMutation(result)
             result
         }
     }
@@ -290,7 +291,7 @@ class EditorDraftSession(
                 delivered?.offerToResolve?.let { adoptResolvedOffer(it, delivered) }
                 if (delivered != null) adoptBody(delivered)
             }
-            adopt(result)
+            adoptMutation(result)
             result
         }
     }
@@ -318,10 +319,11 @@ class EditorDraftSession(
         if (!canWrite()) return@withLock BeginAttemptResult.Rejected(StoreWriteResult.OwnerChanged)
         val snapshot = ownedDraft(draft)
         val needsResolution = snapshot.offerToResolve?.id?.let { it !in resolvedOffers } == true
+        // No write yet: this result adopts nothing and leaves the protection of an unread row armed
+        // for beginAttempt, which may be the first write of the session.
         val prepared = if (published || needsResolution) {
-            writeComposition(snapshot)
+            writeComposition(snapshot).also(::adoptMutation)
         } else StoreWriteResult.Written(version)
-        adopt(prepared)
         if (prepared !is StoreWriteResult.Written) return@withLock BeginAttemptResult.Rejected(prepared)
         store.beginAttempt(owner, checkNotNull(key), protected(snapshot), version, attemptId).also { result ->
             if (result is BeginAttemptResult.Started) {
@@ -441,10 +443,19 @@ class EditorDraftSession(
         }
     }
 
+    /**
+     * A content mutation that really reached the store: it carried the protection of the unread row,
+     * or the store protected D itself (Q), so the next write replaces this session's own C. Never
+     * called for a synthetic result nor for attempt metadata ([finish]).
+     */
+    private fun adoptMutation(result: StoreWriteResult) {
+        adopt(result)
+        if (result is StoreWriteResult.Written) protectsUnreadRow = false
+    }
+
     private fun adopt(result: StoreWriteResult) {
         if (result is StoreWriteResult.Written) {
             version = result.version
-            protectsUnreadRow = false
             if (published) expectedAttemptStatus = null
             published = false
         }
