@@ -1334,9 +1334,10 @@ en page > 1 n'est disponible ; le client transmet la page demandée sans l'impos
 conserve sa page 1 par défaut. Le lien capturé ne porte pas `new` ; le client conserve son `new=0`
 historique.
 
-Dans les MP 1:1 comme les DT, « Modifier » exige une session active et une conversation répondable
-(`PrivateMessageThread.canReply`), comme les topics. L'action utilise le lien d'édition parsé ou,
-dès qu'HFR ne sert pas ce lien (notamment avec `affichoutils=0`), un repli sur l'égalité entre
+Dans les MP 1:1 comme les DT, « Modifier » exige une session active. L'action utilise le lien
+d'édition parsé, même si la conversation n'est pas répondable. Dès qu'HFR ne sert pas ce lien
+(notamment avec `affichoutils=0`), le repli exige une conversation répondable
+(`PrivateMessageThread.canReply`) et l'égalité entre
 l'auteur du message et le pseudo de la session active, via `canonicalizePseudo`. Le contenu cité
 et `isOwnPost` ne participent pas à ce repli. Le premier message des pages N > 1 est exclu du repli :
 la « Reprise du message précédent » appartient à la page N−1, et son `ref=0` peut être absent quand

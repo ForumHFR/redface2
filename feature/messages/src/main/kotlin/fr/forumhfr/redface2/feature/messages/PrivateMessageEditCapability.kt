@@ -19,7 +19,7 @@ internal fun canEditPrivateMessage(
     editActionsAvailable: Boolean,
     thread: PrivateMessageThread,
 ): Boolean {
-    if (connectedPseudo == null || !editActionsAvailable || !thread.canReply ||
+    if (connectedPseudo == null || !editActionsAvailable ||
         thread.subject == MpStorageRepository.STORAGE_SUBJECT_HASH
     ) {
         return false
@@ -27,5 +27,6 @@ internal fun canEditPrivateMessage(
     // Pages 2+ start with the previous page's recap. Its quoteRef can be absent with the tools,
     // so exclude the first message from the fallback even without a parsed ref=0.
     val isPreviousPageRecap = thread.page > 1 && thread.messages.firstOrNull()?.numreponse == message.numreponse
-    return isPrivateMessageEditable(message, connectedPseudo) && (message.isEditable || !isPreviousPageRecap)
+    return message.isEditable ||
+        (thread.canReply && isPrivateMessageEditable(message, connectedPseudo) && !isPreviousPageRecap)
 }

@@ -208,12 +208,12 @@ class MessageMenuSheetTest {
     }
 
     @Test
-    fun `edit eligibility requires a replyable thread with or without a served link`() {
+    fun `only the edit fallback requires a replyable thread`() {
         val message = sampleMessage()
         val thread = sampleThread().copy(canReply = false)
 
         assertFalse(canEditPrivateMessage(message, "Alice", true, thread))
-        assertFalse(canEditPrivateMessage(message.copy(isEditable = true), "Alice", true, thread))
+        assertTrue(canEditPrivateMessage(message.copy(isEditable = true), "Alice", true, thread))
     }
 
     @Test
