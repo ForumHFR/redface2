@@ -967,6 +967,20 @@ class PrivateMessageThreadViewModelTest {
     }
 
     @Test
+    fun `a raw cookie pseudo matches the canonical submitting account`() = runTest {
+        // md_user is decoded without trimming: spacing and case differ from the canonical handoff.
+        val auth = FakeAuthRepository(AuthState.Authenticated("  Bob   Le  Bricoleur "))
+        val repository = loadedRepository()
+        val vm = threadViewModel(repository, authRepository = auth)
+        testScheduler.runCurrent()
+
+        val edit = PrivateMessageSubmitResult(23L, 1, "bob le bricoleur", PostSubmitOperation.Edit)
+        assertTrue(vm.applySubmitResult(edit))
+        assertEquals(23L, vm.state.value.editAcknowledgement)
+        coVerify(exactly = 2) { repository.getPrivateMessageThread(42, 1, null) }
+    }
+
+    @Test
     fun `successful edit still gets its acknowledgement when the refresh fails`() = runTest {
         val repository = loadedRepository()
         val vm = threadViewModel(repository)

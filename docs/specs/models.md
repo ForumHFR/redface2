@@ -845,8 +845,9 @@ data class PrivateMessageSubmitResult(
 )
 ```
 
-`eventId` et `page` sont strictement positifs ; `account` est un pseudo non vide, comparé sans tenir
-compte de la casse, comme les propriétaires de brouillons et les accusés Topic. Ce résultat reste
+`eventId` et `page` sont strictement positifs ; `account` est le pseudo canonique non vide du compte
+qui a envoyé (`canonicalizePseudo` : casse, espaces et forme Unicode normalisés), comparé sous la même
+forme canonique au compte authentifié du fil. Ce résultat reste
 hors des routes et de Room. Son cycle de consommation et ses limites sont définis dans
 [MVI — Accusé d’édition MP]({{ site.baseurl }}/specs/mvi).
 

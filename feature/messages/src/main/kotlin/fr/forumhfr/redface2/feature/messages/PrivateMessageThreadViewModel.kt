@@ -348,7 +348,8 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         val account = authenticatedPseudo ?: return false
         if (result.eventId == lastSubmitEventId) return true
         lastSubmitEventId = result.eventId
-        if (!result.account.equals(account, ignoreCase = true)) return true
+        // The handoff carries the canonical pseudo; compare in the same form, never raw cookie text.
+        if (canonicalizePseudo(account) != canonicalizePseudo(result.account)) return true
         if (result.operation == PostSubmitOperation.Edit) {
             editAcknowledgements.accept(account, result.eventId)
         }
