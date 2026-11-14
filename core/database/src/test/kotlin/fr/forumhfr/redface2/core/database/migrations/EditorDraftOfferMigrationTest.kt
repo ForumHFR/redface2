@@ -7,6 +7,7 @@ import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.platform.app.InstrumentationRegistry
 import fr.forumhfr.redface2.core.database.RedfaceDatabase
+import fr.forumhfr.redface2.core.database.entities.EditorDraftOfferEntity
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -59,6 +60,59 @@ class EditorDraftOfferMigrationTest {
                 assertTrue(dao.offers("alice", "mpreply:$index").isEmpty())
             }
             assertEquals(22, database.openHelper.readableDatabase.version)
+        } finally {
+            database.close()
+        }
+    }
+
+    /** Upgrade path of a 0.68/0.69 install: migrations keep the rows, the start-up purge must too. */
+    @Test fun `20 to 22 then retention keeps 31-day-old unresolved sends and expires the rest`() = runTest {
+        val name = "draft-retention-20-to-22.db"
+        val day = 86_400_000L
+        val now = 1_800_000_000_000L
+        val stale = now - 31 * day
+        val states = listOf(null, "IN_PROGRESS", "UNCERTAIN", "PUBLISHED")
+        val keys = listOf(0, 1).flatMap { isPrivate -> states.indices.map { index -> isPrivate to index } }
+        fun key(isPrivate: Int, index: Int) = "alice|${if (isPrivate == 1) "mpreply" else "reply:23"}:$index"
+        helper.createDatabase(name, 20).use { old ->
+            keys.forEach { (isPrivate, index) ->
+                val state = states[index]
+                old.execSQL("""INSERT INTO editor_drafts (draftKey, ownerId, body, subject, recipients,
+                    updatedAt, isPrivate, contentVersion, attemptId, attemptVersion, attemptState)
+                    VALUES (?, 'alice', ?, 'title', 'bob', ?, ?, 7, ?, ?, ?)""",
+                    arrayOf<Any?>(key(isPrivate, index), "body $index", stale, isPrivate,
+                        state?.let { "attempt-$index" }, state?.let { 5 }, state))
+            }
+        }
+        val database = Room.databaseBuilder(ApplicationProvider.getApplicationContext<Context>(),
+            RedfaceDatabase::class.java, name).addMigrations(MIGRATION_20_21, MIGRATION_21_22).build()
+        try {
+            val dao = database.editorDraftDao()
+            dao.insertOffer(EditorDraftOfferEntity("alice", "reply:23:1", "stale", 7, "offered", null, null,
+                stale, false))
+            dao.insertOffer(EditorDraftOfferEntity("alice", "reply:23:1", "fresh", 7, "offered", null, null,
+                now, false))
+
+            dao.deleteOlderThan(now - 30 * day)
+
+            keys.forEach { (isPrivate, index) ->
+                val state = states[index]
+                val row = dao.get(key(isPrivate, index))
+                if (state == "IN_PROGRESS" || state == "UNCERTAIN") {
+                    checkNotNull(row) { "unresolved $state row was purged" }
+                    assertEquals("body $index", row.body)
+                    assertEquals("title", row.subject)
+                    assertEquals("bob", row.recipients)
+                    assertEquals(stale, row.updatedAt)
+                    assertEquals("attempt-$index", row.attemptId)
+                    assertEquals(5L, row.attemptVersion)
+                    assertEquals(state, row.attemptState)
+                    assertEquals(isPrivate == 1, row.isPrivate)
+                } else {
+                    assertNull("${state ?: "ordinary"} row outlived retention", row)
+                }
+            }
+            assertEquals(listOf("fresh"), dao.offers("alice", "reply:23:1").map { it.offerId })
         } finally {
             database.close()
         }

@@ -16,9 +16,13 @@ import kotlinx.coroutines.launch
 /**
  * One-shot retention sweep of active drafts and immutable offers run at app start (#405/#1450).
  * Each version (public or MP) is dropped when last touched more than [RETENTION] ago, so abandoned
- * content cannot linger on disk indefinitely. Independent of the auth state — unlike the logout purge owned by
- * `CacheInvalidator` — hence its own component rather than a branch inside the auth-driven
- * invalidator.
+ * content cannot linger on disk indefinitely. Exception: a draft whose send is unresolved
+ * (`IN_PROGRESS` or `UNCERTAIN`) is never aged out. Its text, headers and attempt marker are what
+ * prevents a duplicate send, so the row lives until an explicit resolution (acknowledgement, « Ignorer »
+ * or a certain outcome); `PUBLISHED` markers and ordinary drafts keep the [RETENTION] rule, and offers
+ * expire on their own date. Independent of the auth state — unlike the logout purge owned by
+ * `CacheInvalidator`, which still erases private content — hence its own component rather than a
+ * branch inside the auth-driven invalidator.
  *
  * The cutoff is sourced from an injectable [Clock] so the sweep is testable, and the DAO call
  * runs on the IO dispatcher off the main thread. Nothing about draft content is ever logged.

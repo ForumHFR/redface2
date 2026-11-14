@@ -938,7 +938,8 @@ class PostEditorTransientComposeTest {
                         // to EditorPreview; their now-open scaffold guard cannot catch a scope regression.
                         bodyFocusRestoreAllowed = !host.state.isPreviewVisible,
                         fieldArea = { body ->
-                            PostEditorPreview(host.state.isPreviewVisible, host.state.preview, host.body, focus, body)
+                            PostEditorPreview(host.state.isPreviewVisible, host.state.preview, host.body, focus,
+                                host.adapter.state.mediaDiskCachePolicy, body)
                         })
                 }
             }
@@ -984,7 +985,8 @@ class PostEditorTransientComposeTest {
                     }
                     Column {
                         TextButton(onClick = { host.adapter.barActions.onPreview() }) { Text("Aperçu") }
-                        PostEditorPreview(host.state.isPreviewVisible, PostContent(emptyList()), host.body, focus) {
+                        PostEditorPreview(host.state.isPreviewVisible, PostContent(emptyList()), host.body, focus,
+                            host.adapter.state.mediaDiskCachePolicy) {
                             DisposableEffect(Unit) { mounts++; onDispose { disposals++ } }
                             BbcodeTextField(host.body, "Message", Modifier.fillMaxSize().focusRequester(focus),
                                 showKeyboardOnFocus = false)
