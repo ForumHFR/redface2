@@ -411,12 +411,32 @@ class EditorDraftOfferSessionTest {
         store.saveIfVersion(store.activeOwner, key, Draft("D", protectCurrent = false), 0)
         store.loadOffersFailure = IOException("disk read")
         val editor = EditorDraftSession(store, key)
-        val failure = runCatching { editor.load() }.exceptionOrNull()
-        assertTrue(failure is IOException)
+        // The row just read is never hidden by the failed offer read; the failure is reported apart.
+        assertEquals("D", editor.load()?.draft?.body)
+        assertTrue(editor.offersUnavailable)
+        assertTrue(editor.availableOffers.isEmpty())
         store.loadOffersFailure = null
         assertTrue(editor.save(Draft("C")) is StoreWriteResult.Written)
         assertEquals("C", store.saved[key]?.body)
         assertEquals(listOf("D"), store.loadOffers(store.activeOwner, key).map { it.draft.body })
+    }
+
+    @Test fun `a session without its offers protects D once and never offers its own autosaves`() = runBlocking {
+        val store = VersionedEditorDraftStore()
+        store.preload(key, Draft("D"))
+        store.saveIfVersion(store.activeOwner, key, Draft("D", protectCurrent = false), 0)
+        store.loadOffersFailure = IOException("disk read")
+        val editor = EditorDraftSession(store, key)
+        editor.load()
+        store.loadOffersFailure = null
+        listOf("a", "ab", "abc").forEach { assertTrue(editor.save(Draft(it)) is StoreWriteResult.Written) }
+        assertEquals("abc", store.saved[key]?.body)
+        assertEquals(listOf("D"), store.loadOffers(store.activeOwner, key).map { it.draft.body })
+        // A complete reload lists D again and clears the degraded state.
+        val reopened = EditorDraftSession(store, key)
+        reopened.load()
+        assertFalse(reopened.offersUnavailable)
+        assertEquals(listOf("D"), reopened.offers.map { it.draft.body })
     }
 
     @Test fun `a raw writer also protects the old reply before its first replacement`() = runBlocking {

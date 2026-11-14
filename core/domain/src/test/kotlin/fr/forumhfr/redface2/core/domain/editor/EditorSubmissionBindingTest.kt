@@ -769,6 +769,68 @@ class EditorSubmissionBindingTest {
         assertEquals(store.attemptedIds[1], store.entries["key"]?.attempt?.token?.id)
     }
 
+    @Test
+    fun `an attempt read without its offers still opens as uncertain with its content - ED170`() = runTest {
+        for (status in listOf(AttemptStatus.IN_PROGRESS, AttemptStatus.UNCERTAIN)) {
+            val key = EditorDraftKey.mpCompose()
+            val store = VersionedEditorDraftStore()
+            val attempt = EditorDraftStore.AttemptToken("tester", key, "attempt-$status", 1)
+            val sent = Draft("sent body", "sent subject", "bob", isPrivate = true)
+            store.entries[key] = EditorDraftStore.DraftEntry(sent, 1, EditorDraftStore.Attempt(attempt, status))
+            store.loadOffersFailure = IOException("disk read")
+            val failures = mutableListOf<String?>()
+            val binding = binding(store, key, failures = failures)
+            val restored = binding.restore(key)
+            store.loadOffersFailure = null
+            // The surface receives the body and the headers of the attempt, never an empty Ready field.
+            assertEquals(sent, restored?.draft)
+            assertEquals(attempt, restored?.attempt?.token)
+            assertEquals(EditorSubmissionState.Uncertain(attempt), binding.state)
+            assertEquals(listOf<String?>("uncertain"), failures)
+            assertTrue(binding.isInitialized)
+            assertEquals(sent, store.saved[key])
+            assertEquals(0, store.writes)
+            // Edits of the restored text stay on the unresolved attempt and are never offered as D.
+            binding.autosave { sent.copy(body = "sent body, edited") }
+            advanceTimeBy(751)
+            runCurrent()
+            assertEquals("sent body, edited", store.saved[key]?.body)
+            assertEquals(AttemptStatus.UNCERTAIN, store.entries[key]?.attempt?.status)
+            var acknowledged = false
+            binding.acknowledge { acknowledged = true }
+            runCurrent()
+            assertTrue(acknowledged)
+            assertEquals(EditorSubmissionState.Ready, binding.state)
+            binding.persist(sent.copy(body = "next"))
+            binding.persist(sent.copy(body = "next again"))
+            assertEquals("next again", store.saved[key]?.body)
+            assertTrue(store.loadOffers("tester", key).isEmpty())
+            // The offers are readable again: a reopening is complete and reports nothing.
+            val reopened = binding(store, key, failures = failures)
+            assertEquals("next again", reopened.restore(key)?.draft?.body)
+            assertFalse(reopened.drafts.offersUnavailable)
+        }
+    }
+
+    @Test
+    fun `an ordinary row read without its offers is reported and copied aside before its replacement`() = runTest {
+        val key = EditorDraftKey.reply(23, 35421)
+        val store = VersionedEditorDraftStore()
+        store.entries[key] = EditorDraftStore.DraftEntry(Draft("D"), 1)
+        store.loadOffersFailure = IOException("disk read")
+        val states = mutableListOf<EditorSubmissionState>()
+        val failures = mutableListOf<String?>()
+        val binding = binding(store, key, states, failures)
+        assertNull(binding.restore(key))
+        store.loadOffersFailure = null
+        assertTrue(binding.drafts.offersUnavailable)
+        assertEquals(listOf(EditorSubmissionState.Ready), states)
+        assertEquals(listOf<String?>("save"), failures)
+        listOf("a", "ab").forEach { binding.persist(Draft(it)) }
+        assertEquals("ab", store.saved[key]?.body)
+        assertEquals(listOf("D"), store.loadOffers("tester", key).map { it.draft.body })
+    }
+
     private fun TestScope.binding(
         store: VersionedEditorDraftStore,
         key: String = "key",

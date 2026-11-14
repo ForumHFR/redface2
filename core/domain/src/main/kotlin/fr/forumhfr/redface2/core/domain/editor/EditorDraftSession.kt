@@ -34,7 +34,15 @@ class EditorDraftSession(
     var offers: List<DraftOffer> = emptyList()
         private set
     private var protectedOffer: DraftOffer? = null
-    private var offersLoaded = false
+    /**
+     * ED-121: the next write asks the store to copy the row aside first, because this session could
+     * not tell whether it is already offered. It holds for one write only: the row is this session's
+     * own C afterwards. An attempt read at [load] is restored to the user (ED-170), never offered.
+     */
+    private var protectsUnreadRow = false
+    /** The last [load] returned the row without its offers; a complete [load] clears it. */
+    var offersUnavailable = false
+        private set
     private val resolvedOffers = mutableSetOf<String>()
     private var lastBody = ""
     /** ED-10: the headers last read or written durably with [lastBody], in their editor form. */
@@ -87,7 +95,8 @@ class EditorDraftSession(
 
     suspend fun load(): DraftEntry? {
         readable = false
-        offersLoaded = false
+        protectsUnreadRow = true
+        offersUnavailable = false
         resolvedOffers.clear()
         restoredBody = null
         stagedBody = null
@@ -119,13 +128,16 @@ class EditorDraftSession(
         published = entry?.attempt?.status == AttemptStatus.PUBLISHED
         unresolved = entry?.attempt?.token?.takeUnless { published }
         pendingInlineQuoteRequest = entry?.draft?.pendingInlineQuoteRequest.takeUnless { published }
-        // Offer reads are best effort too: keep the loaded revision writable and let the store
-        // protect the current row when offersLoaded remains false after an IOException.
+        // Offer reads are best effort too: a failed one never hides the row just read (ED-170). The
+        // loaded revision stays writable and the store protects an ordinary row before replacing it.
         readable = true
-        offers = key?.let { store.loadOffers(owner, it) }.orEmpty()
-        offersLoaded = true
+        val read = readOffers()
+        offers = read.orEmpty()
+        offersUnavailable = read == null
+        protectsUnreadRow = read == null && entry?.attempt == null
         val eligible = entry?.takeIf {
-            it.attempt == null && isOfferable(it.draft) && bodyProvenance?.isQuoteOnly(it.draft.body) != true
+            read != null && it.attempt == null && isOfferable(it.draft) &&
+                bodyProvenance?.isQuoteOnly(it.draft.body) != true
         }
         protectedOffer = eligible?.let { candidate ->
             offers.firstOrNull { it.draft.restoreOfferFingerprint() == candidate.draft.restoreOfferFingerprint() &&
@@ -133,6 +145,12 @@ class EditorDraftSession(
             } ?: DraftOffer.from(candidate)
         }
         return entry
+    }
+
+    private suspend fun readOffers(): List<DraftOffer>? = try {
+        key?.let { store.loadOffers(owner, it) }.orEmpty()
+    } catch (_: IOException) {
+        null
     }
 
     /**
@@ -265,7 +283,7 @@ class EditorDraftSession(
             val result = if (blocked) StoreWriteResult.Conflict else checkpointWrite(delivered) {
                 mutation { store.consumeInlineQuoteRequest(owner, checkNotNull(key), request, version,
                     delivered?.let(::protected), offerToPreserve = protectedOffer,
-                    protectCurrent = !offersLoaded) }
+                    protectCurrent = protectsUnreadRow) }
             }
             if (result is StoreWriteResult.Written) {
                 pendingInlineQuoteRequest = null
@@ -309,6 +327,7 @@ class EditorDraftSession(
             if (result is BeginAttemptResult.Started) {
                 version = result.token.version
                 unresolved = result.token
+                protectsUnreadRow = false
                 expectedAttemptStatus = AttemptStatus.IN_PROGRESS
                 adoptBody(snapshot)
             }
@@ -370,7 +389,7 @@ class EditorDraftSession(
     )
 
     private fun protected(draft: Draft): Draft = draft.copy(
-        offerToPreserve = protectedOffer, protectCurrent = !offersLoaded,
+        offerToPreserve = protectedOffer, protectCurrent = protectsUnreadRow,
     )
 
     private fun adoptBody(draft: Draft) {
@@ -425,6 +444,7 @@ class EditorDraftSession(
     private fun adopt(result: StoreWriteResult) {
         if (result is StoreWriteResult.Written) {
             version = result.version
+            protectsUnreadRow = false
             if (published) expectedAttemptStatus = null
             published = false
         }

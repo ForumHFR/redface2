@@ -56,7 +56,13 @@ class RoomEditorDraftStore @Inject constructor(
 
     override suspend fun loadEntry(owner: String?, key: String): DraftEntry? = withContext(ioDispatcher) {
         if (owner == null || owner != activeOwnerId()) return@withContext null
-        editorDraftDao.get(rowKey(owner, key))?.let { entity ->
+        val row = try {
+            editorDraftDao.get(rowKey(owner, key))
+        } catch (error: SQLiteException) {
+            // Same contract as loadOffers: callers handle a failed read as an IOException.
+            throw IOException("Editor draft read failed", error)
+        }
+        row?.let { entity ->
             val attempt = entity.attemptId?.let { id ->
                 Attempt(
                     AttemptToken(owner, key, id, checkNotNull(entity.attemptVersion)),

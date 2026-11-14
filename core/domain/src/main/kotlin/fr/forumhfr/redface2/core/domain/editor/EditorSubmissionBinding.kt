@@ -84,6 +84,12 @@ class EditorSubmissionBinding<E, F>(
         }
     }
 
+    /**
+     * ED-170: a row read with its attempt always opens as uncertain with its content, even when the
+     * offers of the key could not be read; that failure is reported apart, as draft information.
+     * Without its offers an ordinary row is not handed back: the field stays as the surface opened
+     * it and the store copies the row aside before the first write replaces it (ED-121).
+     */
     @Suppress("ReturnCount") // Guard clauses (load failure / invalidated owner) + the restore tail.
     suspend fun restore(key: String): EditorDraftStore.DraftEntry? {
         initialized = false
@@ -102,8 +108,12 @@ class EditorSubmissionBinding<E, F>(
         controller.openSession(session(drafts.owner, key), attempt)
         initialized = true
         publish()
+        // Deferred behind the uncertainty when there is one; shown at once on an ordinary row.
+        if (drafts.offersUnavailable) draftSaveFailed()
         if (attempt != null) showError(errors.uncertain)
-        return entry?.takeUnless { it.attempt?.status == AttemptStatus.PUBLISHED }
+        return entry?.takeUnless {
+            it.attempt?.status == AttemptStatus.PUBLISHED || (drafts.offersUnavailable && it.attempt == null)
+        }
     }
 
     fun accountChanged() {
