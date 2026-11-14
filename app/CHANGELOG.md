@@ -44,6 +44,10 @@ Promotion bêta du lot développé en dev de `0.69.0` à `0.69.24`, depuis la pr
 - **Lecture et aperçu** ([#1447](https://github.com/ForumHFR/redface2/issues/1447), [#1452](https://github.com/ForumHFR/redface2/issues/1452)) :
   - Depuis « cité N fois », un seul Back ramène au post de départ.
   - Une image placée dans un lien ou un style s'affiche dans l'aperçu comme dans le sujet.
+- **Corrections de la revue de promotion** ([#1651](https://github.com/ForumHFR/redface2/pull/1651)) :
+  - Un brouillon dont l'envoi est resté incertain n'est plus effacé au bout de 30 jours ; il reste jusqu'à ce qu'on le traite. Le défaut existait depuis la 0.68.0 ([#1652](https://github.com/ForumHFR/redface2/pull/1652)).
+  - La modification d'un MP n'écrit plus les images de son aperçu dans le cache disque ([#1652](https://github.com/ForumHFR/redface2/pull/1652)).
+  - Si les brouillons ↺ ne peuvent pas être lus à l'ouverture d'un éditeur, un envoi incertain s'affiche avec son texte au lieu d'être écrasé par la frappe ([#1653](https://github.com/ForumHFR/redface2/pull/1653)).
 - **Technique** :
   - Material 3 passe en `1.5.0-beta02`, sur la BOM Compose stable. Conséquence visible : après un arrêt du doigt, il faut tirer une feuille au-delà de la moitié pour la fermer. Porte Gm : en dev depuis le 6/11 sans retour bloquant.
   - KSP est épinglé en 2.3.12, et la CD refuse un build auquel manquent des modules Hilt ([#1581](https://github.com/ForumHFR/redface2/issues/1581)).
