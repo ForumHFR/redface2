@@ -139,7 +139,8 @@ class RoomEditorDraftPartialRestoreTest {
         dao.rowFailures = 1
         val failure = runCatching { store.loadEntry("alice", key) }.exceptionOrNull()
         assertTrue(failure is IOException)
-        assertTrue(failure?.cause is SQLiteException)
+        // Coroutine stack-trace recovery may wrap the thrown exception in a copy of itself.
+        assertTrue(generateSequence(failure) { it.cause }.any { it is SQLiteException })
         val errors = mutableListOf<String?>()
         val binding = binding(key, errors)
         dao.rowFailures = 1

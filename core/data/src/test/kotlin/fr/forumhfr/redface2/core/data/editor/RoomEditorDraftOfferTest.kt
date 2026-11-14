@@ -76,13 +76,9 @@ class RoomEditorDraftOfferTest {
                 }
             }
             val editor = EditorDraftSession(store(flaky), "mpnew")
-            var failed = false
-            try {
-                editor.load()
-            } catch (_: IOException) {
-                failed = true
-            }
-            assertTrue(failed)
+            // The row is handed back without its offers; the failed read is reported apart.
+            assertEquals(original.recipients, editor.load()?.draft?.recipients)
+            assertTrue(editor.offersUnavailable)
             failRead = false
             assertTrue(editor.save(Draft("typed C", recipients = empty)) is StoreWriteResult.Written)
             val offers = store.loadOffers("alice", "mpnew")
@@ -510,7 +506,8 @@ class RoomEditorDraftOfferTest {
             }
         }
         val editor = EditorDraftSession(store(unreadable), key)
-        assertTrue(runCatching { editor.load() }.isFailure)
+        assertEquals("D", editor.load()?.draft?.body)
+        assertTrue(editor.offersUnavailable)
         assertEquals(q, editor.pendingInlineQuoteRequest)
         assertEquals(q, store().load("alice", key)?.pendingInlineQuoteRequest)
         assertTrue(editor.consumeInlineQuoteRequest(q) is StoreWriteResult.Written)
