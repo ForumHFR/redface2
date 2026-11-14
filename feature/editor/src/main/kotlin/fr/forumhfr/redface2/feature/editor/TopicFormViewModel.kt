@@ -190,7 +190,10 @@ class TopicFormViewModel @AssistedInject constructor(
     /** Deliver transitions before StateFlow can conflate repeated failures or synchronous operations. */
     private fun updateState(transform: (TopicFormState) -> TopicFormState) {
         val previous = _state.value
-        _state.update(transform)
+        _state.update {
+            transform(it).copy(draftOfferDecisionPending = decidingOffer != null,
+                draftOfferToResolveId = submission.drafts.available(pendingOfferResolution())?.id)
+        }
         editorEvents.open(submission.session)
         editorEvents.observe(previous, _state.value)
     }
@@ -298,8 +301,9 @@ class TopicFormViewModel @AssistedInject constructor(
     /** ED-121: the offered draft a Restore merged into the fields, until a write of C has consumed it. */
     private var mergedOffer: EditorDraftStore.DraftOffer? = null
 
-    /** ED-121: the offer whose decision is being written. Hidden meanwhile; one decision at a time. */
+    /** ED-121: the offer whose decision is being written; only one decision at a time. */
     private var decidingOffer: EditorDraftStore.DraftOffer? = null
+    private var keepDecidingOfferVisible = false
 
     /**
      * #459 — lowercased pseudo of the authenticated session, or null when anonymous. The upload
@@ -479,14 +483,14 @@ class TopicFormViewModel @AssistedInject constructor(
      * ED-121, new topic: the drafts still offered for this category, most recent first. The row found
      * at opening and the versions already copied aside are listed together; the first one feeds the
      * single-offer fields. An offer identical to the fields is hidden, never deleted, and comes back
-     * once they differ. The offer being decided is hidden until its write returns: a refused write
-     * shows it again. Editing a first post keeps its single in-memory offer (#1415).
+     * once they differ. Restoring hides the offer until its write returns; a listed discard keeps
+     * it visible until the write succeeds. Editing a first post keeps its single in-memory offer (#1415).
      */
     private fun refreshDraftOffers() {
         if (request.mode != TopicFormMode.New) return
         val available = submission.drafts.availableOffers.takeUnless { submission.drafts.invalidated }.orEmpty()
         if (available.none { it.id == mergedOffer?.id }) mergedOffer = null
-        val deciding = decidingOffer?.id
+        val deciding = decidingOffer?.id.takeUnless { keepDecidingOfferVisible }
         val merged = mergedOffer?.id
         updateState { current ->
             val offers = available.filterNot { offer ->
@@ -786,17 +790,17 @@ class TopicFormViewModel @AssistedInject constructor(
      * and any later write of C consumes it too ([pendingOfferResolution]).
      */
     private fun restoreOffer(offer: EditorDraftStore.DraftOffer) {
-        if (decidingOffer != null || !submission.drafts.canDecideOffer(offer, pendingOfferResolution())) return
+        if (!_state.value.canDecideDraftOffer(offer.id)) return
         if (mergedOffer?.id != offer.id) applyOfferedDraft(offer.draft.body, offer.draft.subject)
         mergedOffer = offer
         decideOffer(offer) { submission.persist(liveDraft()) }
     }
 
     /** ED-121: « Ignorer » consumes this offer only; the fields are written as they are, never blanked. */
-    private fun discardOffer(offer: EditorDraftStore.DraftOffer) {
-        if (decidingOffer != null || !submission.drafts.canDecideOffer(offer, pendingOfferResolution())) return
+    private fun discardOffer(offer: EditorDraftStore.DraftOffer, keepVisible: Boolean) {
+        if (!_state.value.canDecideDraftOffer(offer.id)) return
         markDraftRestoreOfferIgnored(offer.draft)
-        decideOffer(offer) {
+        decideOffer(offer, keepVisible = keepVisible) {
             submission.drafts.resolveOffer(offer, liveDraft().copy(offerToResolve = null))
                 .also(submission::resolveDraftWrite)
         }
@@ -804,9 +808,11 @@ class TopicFormViewModel @AssistedInject constructor(
 
     private fun decideOffer(
         offer: EditorDraftStore.DraftOffer,
+        keepVisible: Boolean = false,
         write: suspend () -> EditorDraftStore.StoreWriteResult?,
     ) {
         decidingOffer = offer
+        keepDecidingOfferVisible = keepVisible
         refreshDraftOffers()
         viewModelScope.launch {
             var written = false
@@ -815,6 +821,7 @@ class TopicFormViewModel @AssistedInject constructor(
                 written = write() is EditorDraftStore.StoreWriteResult.Written
             } finally {
                 decidingOffer = null
+                keepDecidingOfferVisible = false
                 refreshDraftOffers()
                 // A refused decision keeps the fields; the next autosave retries their write.
                 if (!written) scheduleAutosave()
@@ -853,7 +860,7 @@ class TopicFormViewModel @AssistedInject constructor(
     private fun onDraftDiscardRequested(offerId: String? = null) {
         if (request.mode == TopicFormMode.New) {
             _state.value.draftOffer(offerId)?.let { offer ->
-                discardOffer(offer)
+                discardOffer(offer, keepVisible = offerId != null)
             }
             return
         }

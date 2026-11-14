@@ -76,6 +76,10 @@ data class PrivateMessageReplyUiState(
      */
     val restorableDraft: String? = null,
     val draftOffers: List<DraftOffer> = emptyList(),
+    /** A Restore/Ignore write locks every offer until its result, including a failed result. */
+    val draftOfferDecisionPending: Boolean = false,
+    /** After a failed Restore, settle that merged offer before deciding a different one (ED-121). */
+    val draftOfferToResolveId: String? = null,
     /** ED-10/85: a close could not save the field; the dialog asks before anything is abandoned. */
     val showUnsavedCloseDialog: Boolean = false,
     /**
@@ -111,6 +115,11 @@ data class PrivateMessageReplyUiState(
     val imagePickerMode: ImagePickerMode = ImagePickerMode.DEFAULT,
     val editorShortcut: EditorShortcut = EditorShortcut.NONE,
 ) {
+    val draftDecisionsEnabled: Boolean get() = !draftOfferDecisionPending && !quoteCommitPending
+
+    fun canDecideDraftOffer(id: String? = draftOffers.firstOrNull()?.id): Boolean =
+        draftDecisionsEnabled && (draftOfferToResolveId == null || draftOfferToResolveId == id)
+
     val hasDormantQuote: Boolean get() = quotePending && submission is EditorSubmissionState.Uncertain
     val canIgnorePendingQuote: Boolean
         get() = (unreadableQuoteRequest || quoteRecoveryAllowed) && !isLoadingForm

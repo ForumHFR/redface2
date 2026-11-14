@@ -7,6 +7,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.TextRange
 import androidx.lifecycle.SavedStateHandle
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSession
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
@@ -36,6 +37,22 @@ import org.junit.Test
 class PrivateMessageComposeChromeAdapterTest {
     private val f = PrivateMessageComposeChromeFixture()
     private val uncertain = EditorErrors.uncertain(EditorErrorSurface.MessageCompose)
+
+    @Test fun discardOfferKeepsSheetAndRestoreClosesIt() {
+        val older = EditorDraftStore.DraftOffer("older", 1, EditorDraftStore.Draft("Older draft", updatedAt = 1))
+        val newer = EditorDraftStore.DraftOffer("newer", 2, EditorDraftStore.Draft("Newer draft", updatedAt = 2))
+        f.state = f.state.copy(restorableDraft = "Newer draft", draftOffers = listOf(newer, older))
+        f.adapter.open(PrivateMessageComposeChromeSurface.Restore)
+        f.adapter.discardOffer(newer.id)
+        assertEquals(listOf("discard:newer"), f.calls)
+        assertTrue(f.adapter.draftOfferOpen)
+        assertFalse(f.adapter.consumeReturn())
+        f.state = f.state.copy(restorableDraft = "Older draft", draftOffers = listOf(older))
+        f.adapter.restoreOffer(older.id)
+        assertEquals(listOf("discard:newer", "restore:older"), f.calls)
+        assertFalse(f.adapter.draftOfferOpen)
+        assertTrue(f.adapter.consumeReturn())
+    }
 
     @Test fun `1450 Back closes the draft sheet before disarming and leaves the header return to its panel`() {
         f.state = f.state.copy(restorableDraft = "Brouillon privé")
@@ -377,7 +394,8 @@ internal class PrivateMessageComposeChromeFixture {
             {}, { state = state.copy(isPreviewVisible = !state.isPreviewVisible) }, { calls += "close" },
             onAcknowledgeUncertain = { calls += "acknowledge" }, onAcknowledgeLocal = { calls += "acknowledge local" }),
         signature = { calls += "signature:$it" }, smileyDisabled = {}, notification = {}, smiley = {}, picker = {},
-        restore = { calls += "restore" }, discard = { calls += "discard" }, reload = { calls += "reload" })
+        restore = { calls += "restore" }, discard = { calls += "discard" }, reload = { calls += "reload" },
+        restoreOffer = { calls += "restore:$it" }, discardOffer = { calls += "discard:$it" })
     val adapter = createAdapter()
     fun createAdapter(memory: PrivateMessageComposeChromeMemory = this.memory) = PrivateMessageComposeChromeAdapter(
         { state }, body, events, actions, { launches++ }, { openSmileys() }, memory)

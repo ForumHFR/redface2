@@ -29,6 +29,23 @@ import org.junit.Test
 class PostEditorChromeAdapterTest {
     private val host = PostEditorChromeFixture()
 
+    @Test fun discardOfferKeepsSheetAndRestoreClosesIt() {
+        val f = PostEditorChromeFixture()
+        val older = EditorDraftStore.DraftOffer("older", 1, EditorDraftStore.Draft("Older draft", updatedAt = 1))
+        val newer = EditorDraftStore.DraftOffer("newer", 2, EditorDraftStore.Draft("Newer draft", updatedAt = 2))
+        f.state = f.state.copy(restorableDraft = "Newer draft", draftOffers = listOf(newer, older))
+        f.adapter.open(PostEditorChromeSurface.Restore)
+        f.adapter.discardOffer(newer.id)
+        assertEquals(listOf(PostEditorIntent.DraftOfferDiscarded(newer.id)), f.calls)
+        assertTrue(f.adapter.draftOfferOpen)
+        assertFalse(f.adapter.consumeReturn())
+        f.state = f.state.copy(restorableDraft = "Older draft", draftOffers = listOf(older))
+        f.adapter.restoreOffer(older.id)
+        assertEquals(PostEditorIntent.DraftOfferRestored(older.id), f.calls.last())
+        assertFalse(f.adapter.draftOfferOpen)
+        assertTrue(f.adapter.consumeReturn())
+    }
+
     @Test fun `v078 the draft status opens directly and closing never decides the offer`() {
         host.transition(host.state.copy(restorableDraft = "D", bodyText = "live quote"))
         assertNull(host.events.visibleEvent)

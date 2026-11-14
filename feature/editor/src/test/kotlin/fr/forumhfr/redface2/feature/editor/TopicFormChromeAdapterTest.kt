@@ -109,6 +109,23 @@ internal fun TopicFormTestContent(
 }
 
 class TopicFormChromeAdapterTest {
+    @Test fun discardOfferKeepsSheetAndRestoreClosesIt() {
+        val f = TopicFormChromeFixture()
+        val older = EditorDraftStore.DraftOffer("older", 1, EditorDraftStore.Draft("Older draft", updatedAt = 1))
+        val newer = EditorDraftStore.DraftOffer("newer", 2, EditorDraftStore.Draft("Newer draft", updatedAt = 2))
+        f.state = f.state.copy(restorableDraft = "Newer draft", draftOffers = listOf(newer, older))
+        f.adapter.host.open(TopicFormChromeSurface.Restore)
+        f.adapter.discardOffer(newer.id)
+        assertEquals(listOf(TopicFormIntent.DraftOfferDiscarded(newer.id)), f.calls)
+        assertTrue(f.adapter.host.draftOfferOpen)
+        assertFalse(f.adapter.host.consumeReturn())
+        f.state = f.state.copy(restorableDraft = "Older draft", draftOffers = listOf(older))
+        f.adapter.restoreOffer(older.id)
+        assertEquals(TopicFormIntent.DraftOfferRestored(older.id), f.calls.last())
+        assertFalse(f.adapter.host.draftOfferOpen)
+        assertTrue(f.adapter.host.consumeReturn())
+    }
+
     @Test fun `ED36 projects exactly the allowed shortcuts on this surface`() {
         val f = TopicFormChromeFixture()
         val surface = EditorShortcutSurface.TOPIC

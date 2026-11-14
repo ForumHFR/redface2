@@ -46,6 +46,35 @@ class EditorDraftOfferSheetTest {
     @get:Rule val compose = createComposeRule()
     private val fixture = EditorDraftOfferFixture()
 
+    @Test fun listedDiscardWaitsForStateAndClosesOnlyWhenNoOfferRemains() {
+        val old = EditorDraftStore.DraftOffer("old", 1, EditorDraftStore.Draft("Older draft", updatedAt = 1))
+        val recent = EditorDraftStore.DraftOffer("new", 2, EditorDraftStore.Draft("Newer draft", updatedAt = 2))
+        fixture.offers = listOf(recent, old)
+        compose.setContent { fixture.Content() }
+        status().performClick()
+        compose.onAllNodes(hasText("Ignorer")).onFirst().performClick()
+        compose.onNodeWithText("Newer draft").assertIsDisplayed()
+        compose.runOnIdle {
+            assertEquals(listOf("discard:new"), fixture.calls)
+            assertEquals(0, fixture.returns)
+            // The host publishes only the confirmed deletion, not a speculative local count.
+            fixture.offers = listOf(old)
+        }
+        compose.onNodeWithText("Newer draft").assertDoesNotExist()
+        compose.onNodeWithText("Older draft").assertIsDisplayed()
+        compose.onNodeWithText("Ignorer").performScrollTo().performClick()
+        compose.onNode(isDialog()).assertExists()
+        compose.runOnIdle {
+            assertEquals(listOf("discard:new", "discard:old"), fixture.calls)
+            assertEquals(0, fixture.returns)
+            fixture.offers = emptyList()
+            fixture.available = false
+        }
+        compose.onNode(isDialog()).assertDoesNotExist()
+        compose.onNode(hasSetTextAction()).assertIsFocused()
+        compose.runOnIdle { assertEquals(1, fixture.returns) }
+    }
+
     @Test fun `multiple versions are ordered by date and decisions identify the selected offer`() {
         val old = EditorDraftStore.DraftOffer("old", 1, EditorDraftStore.Draft("[b]Ancien[/b]", updatedAt = 1000))
         val recent = EditorDraftStore.DraftOffer("new", 2,

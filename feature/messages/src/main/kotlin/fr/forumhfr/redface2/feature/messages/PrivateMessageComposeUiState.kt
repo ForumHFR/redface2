@@ -56,6 +56,10 @@ data class PrivateMessageComposeUiState(
      */
     val restorableDraft: String? = null,
     val draftOffers: List<DraftOffer> = emptyList(),
+    /** A Restore/Ignore write locks every offer until its result, including a failed result. */
+    val draftOfferDecisionPending: Boolean = false,
+    /** After a failed Restore, settle that merged offer before deciding a different one (ED-121). */
+    val draftOfferToResolveId: String? = null,
     val restorableSubject: String? = null,
     val restorableRecipients: String? = null,
     /** ED-10/85: a close could not save the fields; the dialog asks before anything is abandoned. */
@@ -73,6 +77,11 @@ data class PrivateMessageComposeUiState(
     val imagePickerMode: ImagePickerMode = ImagePickerMode.DEFAULT,
     val editorShortcut: EditorShortcut = EditorShortcut.NONE,
 ) {
+    val draftDecisionsEnabled: Boolean get() = !draftOfferDecisionPending
+
+    fun canDecideDraftOffer(id: String? = draftOffers.firstOrNull()?.id): Boolean =
+        draftDecisionsEnabled && (draftOfferToResolveId == null || draftOfferToResolveId == id)
+
     val armToken: ArmToken? get() = (submission as? EditorSubmissionState.Armed)?.token
 
     /** ED-35: missing routing fields are explained before arming, while POST remains strict. */

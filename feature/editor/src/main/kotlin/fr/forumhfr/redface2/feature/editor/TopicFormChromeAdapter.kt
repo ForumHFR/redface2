@@ -71,14 +71,20 @@ internal class TopicFormChromeAdapter(
     fun discardDraft() = discard(TopicFormIntent.DraftDiscardRequested)
     /** ED-40/121: one decision per listed version, under the same guards as the single offer. */
     fun restoreOffer(id: String) = restore(TopicFormIntent.DraftOfferRestored(id))
-    fun discardOffer(id: String) = discard(TopicFormIntent.DraftOfferDiscarded(id))
+    fun discardOffer(id: String) {
+        if (state.discardEnabled && source().canDecideDraftOffer(id)) {
+            onIntent(TopicFormIntent.DraftOfferDiscarded(id))
+        }
+    }
     private fun restore(intent: TopicFormIntent) {
-        val headerWritable = state.headerEnabled && !state.headerReadOnly
-        val enabled = headerWritable && !source().isLoadingForm && !source().isUploading
-        if (enabled) { onIntent(intent); host.closeDraftOffer() }
+        val id = (intent as? TopicFormIntent.DraftOfferRestored)?.id ?: source().draftOffers.firstOrNull()?.id
+        if (state.restoreEnabled && source().canDecideDraftOffer(id)) {
+            onIntent(intent)
+            host.closeDraftOffer()
+        }
     }
     private fun discard(intent: TopicFormIntent) {
-        if (state.scaffold.controlsEnabled) {
+        if (state.discardEnabled && source().canDecideDraftOffer()) {
             onIntent(intent)
             host.closeDraftOffer()
         }

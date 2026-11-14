@@ -52,7 +52,13 @@ internal class PrivateMessageComposeDraftSession(
     private val clearToolSelection: () -> Unit,
 ) {
     private val readState = state.read
-    private val updateState = state.update
+    private val publishState = state.update
+    private fun updateState(transform: (PrivateMessageComposeUiState) -> PrivateMessageComposeUiState) {
+        publishState {
+            transform(it).copy(draftOfferDecisionPending = decidingOffer != null,
+                draftOfferToResolveId = submission.drafts.available(pendingOfferResolution())?.id)
+        }
+    }
     val bodyFieldState = TextFieldState()
     val bodyScrollState = ScrollState(0)
     var bodyCaretRevealResetKey by mutableIntStateOf(0)
@@ -71,8 +77,9 @@ internal class PrivateMessageComposeDraftSession(
     private var headersEdited = false
     /** ED-121: the offered draft a Restore merged into the fields, until a write of C has consumed it. */
     private var mergedOffer: EditorDraftStore.DraftOffer? = null
-    /** ED-121: the offer whose decision is being written. Hidden meanwhile; one decision at a time. */
+    /** ED-121: the offer whose decision is being written; only one decision at a time. */
     private var decidingOffer: EditorDraftStore.DraftOffer? = null
+    private var keepDecidingOfferVisible = false
 
     init {
         submission.drafts.checkpointObserver = { draft, version, result ->
@@ -144,14 +151,14 @@ internal class PrivateMessageComposeDraftSession(
      * ED-121: the drafts still offered for a new message, most recent first. The row found at
      * opening and the versions already copied aside are listed together; the first one feeds the
      * single-offer fields. An offer identical to the fields is hidden, never deleted, and comes back
-     * once they differ. The offer being decided is hidden until its write returns: a refused write
-     * shows it again. An offer that shows nothing (raw fallback of the store) is never listed.
+     * once they differ. Restoring hides the offer until its write returns; a listed discard keeps
+     * it visible until the write succeeds. An offer that shows nothing (raw fallback) is never listed.
      */
     fun refreshOffers() {
         val usable = !unreadableRecipients && !submission.drafts.invalidated
         val available = submission.drafts.availableOffers.takeIf { usable }.orEmpty()
         if (available.none { it.id == mergedOffer?.id }) mergedOffer = null
-        val deciding = decidingOffer?.id
+        val deciding = decidingOffer?.id.takeUnless { keepDecidingOfferVisible }
         val merged = mergedOffer?.id
         updateState { current ->
             val offers = available.filterNot { offer ->
@@ -236,8 +243,7 @@ internal class PrivateMessageComposeDraftSession(
      */
     fun restoreOfferedDraft(offerId: String? = null) {
         val offer = readState().draftOffer(offerId)
-        if (offer == null || decidingOffer != null) return
-        if (!submission.drafts.canDecideOffer(offer, pendingOfferResolution())) return
+        if (offer == null || !readState().canDecideDraftOffer(offer.id)) return
         if (mergedOffer?.id != offer.id) applyOffer(offer.draft)
         mergedOffer = offer
         decideOffer(offer) { submission.persist(liveDraft()) }
@@ -265,10 +271,9 @@ internal class PrivateMessageComposeDraftSession(
     /** ED-121: « Ignorer » consumes this offer only; the fields are written as they are, never blanked. */
     fun discardOfferedDraft(offerId: String? = null) {
         val offer = readState().draftOffer(offerId)
-        if (offer == null || decidingOffer != null) return
-        if (!submission.drafts.canDecideOffer(offer, pendingOfferResolution())) return
+        if (offer == null || !readState().canDecideDraftOffer(offer.id)) return
         saved[IGNORED_OFFER] = offer.draft.restoreOfferFingerprint()
-        decideOffer(offer) {
+        decideOffer(offer, keepVisible = offerId != null) {
             submission.drafts.resolveOffer(offer, liveDraft().copy(offerToResolve = null))
                 .also(submission::resolveDraftWrite)
         }
@@ -276,9 +281,11 @@ internal class PrivateMessageComposeDraftSession(
 
     private fun decideOffer(
         offer: EditorDraftStore.DraftOffer,
+        keepVisible: Boolean = false,
         write: suspend () -> EditorDraftStore.StoreWriteResult?,
     ) {
         decidingOffer = offer
+        keepDecidingOfferVisible = keepVisible
         refreshOffers()
         scope.launch {
             var written = false
@@ -287,6 +294,7 @@ internal class PrivateMessageComposeDraftSession(
                 written = write() is EditorDraftStore.StoreWriteResult.Written
             } finally {
                 decidingOffer = null
+                keepDecidingOfferVisible = false
                 refreshOffers()
                 // A refused decision keeps the fields; the next autosave retries their write.
                 if (!written) scheduleAutosave()

@@ -342,6 +342,7 @@ class PrivateMessageReplyViewModelTest {
         gate.complete(form(initialContent = quote))
         runCurrent()
         assertEquals(pending, draftStore.saved[key]?.pendingInlineQuoteRequest)
+        assertFalse(vm.state.value.draftDecisionsEnabled)
         val typed = "$quote\n\ntyped after the delivery"
         vm.editBody(TextFieldValue(typed))
         draftStore.saveFailure = null
@@ -355,6 +356,7 @@ class PrivateMessageReplyViewModelTest {
         }
         assertEquals(typed, draftStore.saved[key]?.body)
         assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+        assertTrue(vm.state.value.draftDecisionsEnabled)
         coVerify(exactly = 0) { repository.submitReply(any(), any(), any(), any(), any()) }
     }
 
@@ -3155,6 +3157,87 @@ class PrivateMessageReplyViewModelTest {
     }
 
     @Test
+    fun listedDiscardDisablesDecisionsUntilResultThenAcceptsAnotherDiscard() = runTest {
+        val older = EditorDraftStore.DraftOffer("older", 1,
+            EditorDraftStore.Draft("Older draft", updatedAt = 1, isPrivate = true))
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val key = EditorDraftKey.mpReply(request.threadId)
+        draftStore.preload(key, EditorDraftStore.Draft("Newer draft", isPrivate = true, updatedAt = 2))
+        draftStore.preloadOffer(key, older)
+        val vm = viewModel(repository)
+        runCurrent()
+        val adapter = PrivateMessageReplyChromeAdapter({ vm.state.value }, vm.bodyFieldState, vm.editorEvents,
+            vm.chromeActions(), {}, {})
+        adapter.open(PrivateMessageReplyChromeSurface.Restore)
+        val newer = vm.state.value.draftOffers.first { it.id != older.id }
+        val write = CompletableDeferred<Unit>()
+        draftStore.saveReturnGate = write
+        try {
+            adapter.discardOffer(newer.id)
+            runCurrent()
+            val writes = draftStore.writes
+            assertFalse(adapter.state.restoreEnabled)
+            assertFalse(adapter.state.discardEnabled)
+            adapter.restoreOffer(older.id)
+            adapter.discardOffer(older.id)
+            vm.onDraftDiscardRequested(older.id)
+            runCurrent()
+            assertTrue(adapter.draftOfferOpen)
+            assertFalse(adapter.consumeReturn())
+            assertEquals("", vm.bodyFieldState.text.toString())
+            assertEquals(2, vm.state.value.draftOffers.size)
+            assertEquals(writes, draftStore.writes)
+        } finally {
+            write.complete(Unit)
+        }
+        runCurrent()
+        assertEquals(listOf(older), vm.state.value.draftOffers)
+        assertTrue(adapter.state.restoreEnabled)
+        assertTrue(adapter.state.discardEnabled)
+        adapter.discardOffer(older.id)
+        runCurrent()
+        assertTrue(vm.state.value.draftOffers.isEmpty())
+        assertTrue(draftStore.loadOffers("tester", key).isEmpty())
+        assertTrue(adapter.draftOfferOpen) // Exhaustion is closed by the composed sheet, not this adapter.
+    }
+
+    @Test
+    fun listedDiscardRetainsOfferWhilePendingAndAfterFailure() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchReplyForm(any(), any()) } returns form()
+        val key = EditorDraftKey.mpReply(request.threadId)
+        draftStore.preload(key, EditorDraftStore.Draft("Offered draft", isPrivate = true))
+        val vm = viewModel(repository)
+        runCurrent()
+        val offer = vm.state.value.draftOffers.single()
+        draftStore.saveFailure = IOException("disk full")
+        vm.onDraftDiscardRequested(offer.id)
+        runCurrent()
+        assertEquals(listOf(offer), vm.state.value.draftOffers)
+        assertEquals("Offered draft", vm.state.value.restorableDraft)
+        assertTrue(PrivateMessageReplyChromeState(vm.state.value).restoreEnabled)
+        assertTrue(PrivateMessageReplyChromeState(vm.state.value).discardEnabled)
+
+        draftStore.saveFailure = null
+        val write = CompletableDeferred<Unit>()
+        draftStore.saveReturnGate = write
+        try {
+            vm.onDraftDiscardRequested(offer.id)
+            runCurrent()
+            assertEquals(listOf(offer), vm.state.value.draftOffers)
+            assertEquals("Offered draft", vm.state.value.restorableDraft)
+            assertFalse(PrivateMessageReplyChromeState(vm.state.value).restoreEnabled)
+            assertFalse(PrivateMessageReplyChromeState(vm.state.value).discardEnabled)
+        } finally {
+            write.complete(Unit)
+        }
+        runCurrent()
+        assertTrue(vm.state.value.draftOffers.isEmpty())
+        assertNull(vm.state.value.restorableDraft)
+    }
+
+    @Test
     fun failedReplyRestoreBlocksOtherDecisionsUntilPersistedAndResumesWithoutEitherOffer() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         coEvery { repository.fetchReplyForm(any(), any()) } returns form()
@@ -3174,6 +3257,8 @@ class PrivateMessageReplyViewModelTest {
         runCurrent()
         assertEquals("first D\n\ntyped", vm.bodyFieldState.text.toString())
         assertEquals("second D", draftStore.saved[key]?.body)
+        assertTrue(vm.state.value.canDecideDraftOffer(first.id))
+        assertFalse(vm.state.value.canDecideDraftOffer(second.id))
 
         draftStore.saveFailure = null
         val writes = draftStore.saveCount

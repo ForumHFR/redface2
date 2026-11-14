@@ -1135,6 +1135,128 @@ class PrivateMessageComposeViewModelTest {
     }
 
     @Test
+    fun listedDiscardDisablesDecisionsUntilResultThenAcceptsAnotherDiscard() = runTest {
+        val older = EditorDraftStore.DraftOffer("older", 1,
+            EditorDraftStore.Draft("Older draft", updatedAt = 1, isPrivate = true))
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val key = EditorDraftKey.mpCompose()
+        draftStore.preload(key, EditorDraftStore.Draft("Newer draft", isPrivate = true, updatedAt = 2))
+        draftStore.preloadOffer(key, older)
+        val vm = viewModel(repository)
+        runCurrent()
+        val adapter = PrivateMessageComposeChromeAdapter({ vm.state.value }, vm.bodyFieldState, vm.editorEvents,
+            vm.chromeActions(), {}, {}, vm.chromeMemory)
+        adapter.open(PrivateMessageComposeChromeSurface.Restore)
+        val newer = vm.state.value.draftOffers.first { it.id != older.id }
+        val write = CompletableDeferred<Unit>()
+        draftStore.saveReturnGate = write
+        try {
+            adapter.discardOffer(newer.id)
+            runCurrent()
+            val writes = draftStore.writes
+            assertFalse(adapter.state.restoreEnabled)
+            assertFalse(adapter.state.discardEnabled)
+            adapter.restoreOffer(older.id)
+            adapter.discardOffer(older.id)
+            vm.onDraftDiscardRequested(older.id)
+            runCurrent()
+            assertTrue(adapter.draftOfferOpen)
+            assertFalse(adapter.consumeReturn())
+            assertEquals("", vm.bodyFieldState.text.toString())
+            assertEquals(2, vm.state.value.draftOffers.size)
+            assertEquals(writes, draftStore.writes)
+        } finally {
+            write.complete(Unit)
+        }
+        runCurrent()
+        assertEquals(listOf(older), vm.state.value.draftOffers)
+        assertTrue(adapter.state.restoreEnabled)
+        assertTrue(adapter.state.discardEnabled)
+        adapter.discardOffer(older.id)
+        runCurrent()
+        assertTrue(vm.state.value.draftOffers.isEmpty())
+        assertTrue(draftStore.loadOffers("tester", key).isEmpty())
+        assertTrue(adapter.draftOfferOpen) // Exhaustion is closed by the composed sheet, not this adapter.
+    }
+
+    @Test
+    fun failedComposeRestoreKeepsOtherOfferUndecidableInTheOpenSheet() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val key = EditorDraftKey.mpCompose()
+        val older = EditorDraftStore.DraftOffer("older", 1,
+            EditorDraftStore.Draft("Older draft", isPrivate = true, updatedAt = 1))
+        draftStore.preload(key, EditorDraftStore.Draft("Newer draft", isPrivate = true, updatedAt = 2))
+        draftStore.preloadOffer(key, older)
+        val vm = viewModel(repository)
+        runCurrent()
+        val newer = vm.state.value.draftOffers.first { it.id != older.id }
+        draftStore.saveFailure = IOException("disk full")
+        vm.onDraftRestoreRequested(older.id)
+        runCurrent()
+        assertTrue(vm.state.value.canDecideDraftOffer(older.id))
+        assertFalse(vm.state.value.canDecideDraftOffer(newer.id))
+        val adapter = PrivateMessageComposeChromeAdapter({ vm.state.value }, vm.bodyFieldState, vm.editorEvents,
+            vm.chromeActions(), {}, {}, vm.chromeMemory)
+        // ED-44: the failed save information consumes the first gesture before the sheet can reopen.
+        assertEquals(EditorEventContent.Problem(EditorErrors.draftSaveFailed), vm.editorEvents.visibleEvent?.content)
+        adapter.open(PrivateMessageComposeChromeSurface.Restore)
+        assertFalse(adapter.draftOfferOpen)
+        assertNull(vm.editorEvents.visibleEvent)
+        adapter.open(PrivateMessageComposeChromeSurface.Restore)
+        assertTrue(adapter.draftOfferOpen)
+        adapter.restoreOffer(newer.id)
+        adapter.discardOffer(newer.id)
+        runCurrent()
+        assertTrue(adapter.draftOfferOpen)
+        assertFalse(adapter.consumeReturn())
+        assertEquals("Older draft", vm.bodyFieldState.text.toString())
+        assertEquals(2, vm.state.value.draftOffers.size)
+        draftStore.saveFailure = null
+        adapter.restoreOffer(older.id)
+        runCurrent()
+        assertFalse(adapter.draftOfferOpen)
+        assertEquals("Older draft", vm.bodyFieldState.text.toString())
+        assertEquals(listOf(newer), vm.state.value.draftOffers)
+    }
+
+    @Test
+    fun listedDiscardRetainsOfferWhilePendingAndAfterFailure() = runTest {
+        val repository = mockk<PrivateMessageWriteRepository>()
+        coEvery { repository.fetchComposeForm(any()) } returns composeForm()
+        val key = EditorDraftKey.mpCompose()
+        draftStore.preload(key, EditorDraftStore.Draft("Offered draft", isPrivate = true))
+        val vm = viewModel(repository)
+        runCurrent()
+        val offer = vm.state.value.draftOffers.single()
+        draftStore.saveFailure = IOException("disk full")
+        vm.onDraftDiscardRequested(offer.id)
+        runCurrent()
+        assertEquals(listOf(offer), vm.state.value.draftOffers)
+        assertEquals("Offered draft", vm.state.value.restorableDraft)
+        assertTrue(PrivateMessageComposeChromeState(vm.state.value).restoreEnabled)
+        assertTrue(PrivateMessageComposeChromeState(vm.state.value).discardEnabled)
+
+        draftStore.saveFailure = null
+        val write = CompletableDeferred<Unit>()
+        draftStore.saveReturnGate = write
+        try {
+            vm.onDraftDiscardRequested(offer.id)
+            runCurrent()
+            assertEquals(listOf(offer), vm.state.value.draftOffers)
+            assertEquals("Offered draft", vm.state.value.restorableDraft)
+            assertFalse(PrivateMessageComposeChromeState(vm.state.value).restoreEnabled)
+            assertFalse(PrivateMessageComposeChromeState(vm.state.value).discardEnabled)
+        } finally {
+            write.complete(Unit)
+        }
+        runCurrent()
+        assertTrue(vm.state.value.draftOffers.isEmpty())
+        assertNull(vm.state.value.restorableDraft)
+    }
+
+    @Test
     fun `ignoring a new MP offer keeps the typed headers and consumes that offer only - ED121`() = runTest {
         val repository = mockk<PrivateMessageWriteRepository>()
         val key = EditorDraftKey.mpCompose()

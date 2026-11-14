@@ -25,7 +25,9 @@ internal data class PrivateMessageComposeChromeState(val source: PrivateMessageC
     )
     val host = EditorHostState(scaffold, source.submission, source.sendActivatable, source.canSubmit)
     val optionsEnabled = scaffold.controlsEnabled && !source.isLoadingForm
-    val restoreEnabled = scaffold.controlsEnabled && !source.isUploading && !source.isLoadingForm
+    val restoreEnabled = scaffold.controlsEnabled && !source.isUploading && !source.isLoadingForm &&
+        source.draftDecisionsEnabled
+    val discardEnabled = scaffold.controlsEnabled && source.draftDecisionsEnabled
 }
 
 /** D4: an uncommitted pseudo wins over missing chips; no implicit comma is ever inserted. */

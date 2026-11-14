@@ -6,6 +6,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.text.TextRange
 import fr.forumhfr.redface2.core.domain.editor.ArmToken
+import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore.AttemptToken
 import fr.forumhfr.redface2.core.domain.editor.EditorSession
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
@@ -32,6 +33,22 @@ import org.junit.Test
 class PrivateMessageReplyChromeAdapterTest {
     private val f = PrivateMessageReplyChromeFixture()
     private val uncertain = EditorErrors.uncertain(EditorErrorSurface.MessageReply)
+
+    @Test fun discardOfferKeepsSheetAndRestoreClosesIt() {
+        val older = EditorDraftStore.DraftOffer("older", 1, EditorDraftStore.Draft("Older draft", updatedAt = 1))
+        val newer = EditorDraftStore.DraftOffer("newer", 2, EditorDraftStore.Draft("Newer draft", updatedAt = 2))
+        f.state = f.state.copy(restorableDraft = "Newer draft", draftOffers = listOf(newer, older))
+        f.adapter.open(PrivateMessageReplyChromeSurface.Restore)
+        f.adapter.discardOffer(newer.id)
+        assertEquals(listOf("discard:newer"), f.calls)
+        assertTrue(f.adapter.draftOfferOpen)
+        assertFalse(f.adapter.consumeReturn())
+        f.state = f.state.copy(restorableDraft = "Older draft", draftOffers = listOf(older))
+        f.adapter.restoreOffer(older.id)
+        assertEquals(listOf("discard:newer", "restore:older"), f.calls)
+        assertFalse(f.adapter.draftOfferOpen)
+        assertTrue(f.adapter.consumeReturn())
+    }
 
     @Test fun `1450 Back closes the draft sheet before disarming and schedules one return without a decision`() {
         f.state = f.state.copy(restorableDraft = "Brouillon privé")
@@ -378,7 +395,8 @@ internal class PrivateMessageReplyChromeFixture {
             onAcknowledgeLocal = { calls += "acknowledgeLocal" }),
         { calls += "signature:$it" }, { calls += "smileyDisabled:$it" }, { calls += "notification:$it" },
         { calls += "smiley:$it" }, {}, { calls += "restore" }, { calls += "discard" },
-        { calls += "add:$it" }, { calls += "remove:$it" }, { calls += "reload" })
+        { calls += "add:$it" }, { calls += "remove:$it" }, { calls += "reload" },
+        restoreOffer = { calls += "restore:$it" }, discardOffer = { calls += "discard:$it" })
     val adapter = createAdapter()
     fun createAdapter() = PrivateMessageReplyChromeAdapter({ state }, body, events, actions,
         { launches++ }, {}, memory)

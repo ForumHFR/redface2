@@ -25,7 +25,8 @@ internal data class PrivateMessageReplyChromeState(val source: PrivateMessageRep
     val canInsert get() = host.canInsert
     val optionsEnabled = scaffold.controlsEnabled && !source.isLoadingForm
     val recipientsEnabled = optionsEnabled && source.formAvailable && source.canManageRecipients
-    val restoreEnabled = scaffold.controlsEnabled && !source.isUploading && !source.quoteCommitPending
+    val restoreEnabled = scaffold.controlsEnabled && !source.isUploading && source.draftDecisionsEnabled
+    val discardEnabled = scaffold.controlsEnabled && source.draftDecisionsEnabled
     val mediaDiskCachePolicy = PostMediaDiskCachePolicy.DISABLED
 }
 

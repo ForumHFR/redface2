@@ -16,6 +16,10 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.69.23` — `internal` (dev) — 2026-11-14
+
+Brouillons proposés sous ↺ ([#1417](https://github.com/ForumHFR/redface2/issues/1417), PR [#1645](https://github.com/ForumHFR/redface2/pull/1645)) : quand il y en a plusieurs, « Ignorer » en retire un et laisse la feuille ouverte, dans l'éditeur de post, le formulaire de sujet et les deux éditeurs MP. La feuille se ferme quand il n'en reste plus ; « Restaurer » la ferme toujours. Pendant l'enregistrement d'un choix, les boutons sont désactivés un instant. Citations (PR [#1644](https://github.com/ForumHFR/redface2/pull/1644)) : à la fermeture et au « Recharger » de l'éditeur de post, et dans l'éditeur de réponse MP (fermeture, « Ignorer », « Recharger »), une livraison de citations ne vide le panier que si toutes les citations sont encore dans le champ ; sinon le panier reste entier et le texte saisi est enregistré.
+
 ## `0.69.22` — `internal` (dev) — 2026-11-14
 
 « Ignorer » une citation ([#1417](https://github.com/ForumHFR/redface2/issues/1417), PR [#1642](https://github.com/ForumHFR/redface2/pull/1642)) : si la citation insérée a été effacée du champ, « Ignorer » ne vide plus le panier, dans la réponse rapide comme dans l'éditeur de post ; le texte saisi est alors enregistré dans le brouillon.

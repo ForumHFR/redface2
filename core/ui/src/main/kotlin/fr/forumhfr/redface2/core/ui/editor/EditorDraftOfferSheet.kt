@@ -40,12 +40,14 @@ import fr.forumhfr.redface2.core.ui.sheet.settledSheetWindowInsets
  *
  * Dismissal (swipe, Back, outside tap or close button) is never a draft decision. The host owns the
  * exactly-once deferred focus/selection return through its usual consumeReturn/returnToBody effect.
- * Restore/discard callbacks own their guarded intent and closing. Do not also render this offer
- * through EditorHeaderPanel/EditorEventDetails: those panels have their own focus-return effect.
+ * Restore and single-offer discard callbacks own their guarded intent and closing. Do not also
+ * render this offer through EditorHeaderPanel/EditorEventDetails: those panels have their own focus-return effect.
  *
  * ED-41 — a non-empty [offers] replaces the single-offer body by one row per draft, each decided
  * through [onRestoreOffer]/[onDiscardOffer] with its offer id; both default to the single-offer
- * callbacks for hosts that only ever hold one.
+ * callbacks for hosts that only ever hold one. A listed discard keeps the sheet open until the
+ * confirmed state has no offer left; keep the offer available while its write is pending or failed.
+ * [canDecideOffer] applies the session's per-version guard, including a Restore awaiting a retry.
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -64,6 +66,7 @@ fun EditorDraftOfferSheet(
     discardEnabled: Boolean = true,
     title: String = stringResource(R.string.editor_draft_offer_title),
     message: String = stringResource(R.string.editor_draft_offer_message),
+    canDecideOffer: (String) -> Boolean = { true },
 ) {
     val dismiss = rememberUpdatedState(onDismiss)
     LaunchedEffect(isOpen, offerAvailable) {
@@ -87,7 +90,10 @@ fun EditorDraftOfferSheet(
             }
             Text(message, style = MaterialTheme.typography.bodyMedium)
             if (offers.isEmpty()) EditorDraftOfferDecisions(onRestore, onDiscard, restoreEnabled, discardEnabled)
-            else EditorDraftOfferList(offers, onRestoreOffer, onDiscardOffer, restoreEnabled, discardEnabled)
+            else EditorDraftOfferList(offers, onRestoreOffer, onDiscardOffer) { id ->
+                val enabled = canDecideOffer(id)
+                EditorDraftOfferDecisionState(restoreEnabled && enabled, discardEnabled && enabled)
+            }
         }
     }
 }
@@ -96,14 +102,14 @@ fun EditorDraftOfferSheet(
  * ED-40: offered versions, most recent first, each with its own date, a two-line excerpt and its
  * decisions. Also used inline on the MP form-failure surface, which has no chrome to open a sheet.
  * The excerpt is recomputed from the offer and never saved (ED-81).
+ * [decisions] combines the host's global and per-offer guards for each row.
  */
 @Composable
 fun EditorDraftOfferList(
     offers: List<DraftOffer>,
     onRestore: (String) -> Unit,
     onDiscard: (String) -> Unit,
-    restoreEnabled: Boolean = true,
-    discardEnabled: Boolean = true,
+    decisions: (String) -> EditorDraftOfferDecisionState = { EditorDraftOfferDecisionState() },
 ) {
     val context = LocalContext.current
     val now = System.currentTimeMillis()
@@ -117,8 +123,10 @@ fun EditorDraftOfferList(
                 // A header-only offer (title or recipients, blank body) has no excerpt line.
                 if (excerpt.isNotEmpty()) Text(excerpt, style = MaterialTheme.typography.bodyMedium, maxLines = 2,
                     overflow = TextOverflow.Ellipsis)
+                val decisionState = decisions(offer.id)
                 EditorDraftOfferDecisions({ onRestore(offer.id) }, { onDiscard(offer.id) },
-                    restoreEnabled, discardEnabled, listOf(date, excerpt).filter(String::isNotEmpty).joinToString())
+                    decisionState.restoreEnabled, decisionState.discardEnabled,
+                    listOf(date, excerpt).filter(String::isNotEmpty).joinToString())
             }
         }
 }
