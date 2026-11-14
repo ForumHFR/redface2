@@ -318,7 +318,10 @@ expose `CompareOptions(changeThreshold, imageComparator)`. Le plugin amont n'est
 - **À chaque `record`, relire la planche avant/après** avant d'approuver les références. Le script
   `scripts/roborazzi-contact-sheet.py` compare une base Git explicite à l'arbre courant (changements
   indexés, non indexés et nouveaux PNG non suivis). Il produit des PNG paginés et un index HTML local
-  avec liens vers les originaux à pleine résolution, sans réseau. Utiliser Python 3 avec
+  avec liens vers les originaux à pleine résolution, sans réseau. Un `--output` relatif part de la
+  racine du dépôt ; chaque run efface d'abord les planches, originaux et index d'un run précédent. Le
+  script refuse un dossier qui n'est pas le sien (`index.html` sans sa marque, planches sans cet index)
+  et ne touche alors à rien. Utiliser Python 3 avec
   **Pillow ≥ 10.1 déjà installé** (sur la box, `/usr/bin/python3` ;
   aucune installation implicite dans le script). La planche complète la vérification automatique :
   une référence enregistrée peut elle-même contenir un défaut visuel.
