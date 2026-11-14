@@ -302,8 +302,9 @@ expose `CompareOptions(changeThreshold, imageComparator)`. Le plugin amont n'est
   routage et panneaux sur l'écran intégré. Une invariance s'affirme par une assertion d'égalité.
 - Les nouvelles scènes se capturent **en étoile**, autour du cas clair à échelle 1, sans produit
   cartésien : largeur/orientation toujours, sombre un état par scène, échelle 1,3 s'il y a du texte.
-  Chaque axe supplémentaire doit couvrir un risque identifié. Pour le ton, les deux largeurs sont
-  conservées en clair à 1 ; texte à 1,3, sombre et AMOLED restent à 360 dp, pour les sprites et le mode hors ligne.
+  Chaque axe supplémentaire doit couvrir un risque identifié. Le ton du message (famille
+  antérieure à l'audit) reste au niveau B : aux deux largeurs, clair à 1 et 1,3, sombre et AMOLED à 1, pour les sprites
+  et le mode hors ligne.
 - La suite éditeur existante conserve le **niveau B** de l'audit : sans le coin sombre × 1,3 ; scènes
   « barre seule » des écrans en portrait à 1 dans les deux thèmes. Le scaffold garde ses trois profils
   pour les six états structurants (normal, Format, envoi en lecture seule, erreur d'upload, détails,

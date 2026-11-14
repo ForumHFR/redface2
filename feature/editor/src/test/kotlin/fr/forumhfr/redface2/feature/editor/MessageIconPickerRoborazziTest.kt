@@ -77,10 +77,7 @@ class MessageIconPickerRoborazziTest {
             }
         }
         listOf("light", "dark", "amoled").forEach { theme ->
-            listOf(1f, 1.3f).filter { scale ->
-                (theme == "light" && scale == 1f) ||
-                    (width == 360 && (theme == "light" || scale == 1f))
-            }.forEach { scale ->
+            listOf(1f, 1.3f).filter { scale -> theme == "light" || scale == 1f }.forEach { scale ->
                 compose.runOnIdle { sample.value = Sample(theme, scale) }
                 compose.waitForIdle()
                 compose.onNodeWithText("Clin d'œil").assertIsDisplayed()

@@ -35,8 +35,8 @@ import org.robolectric.annotation.GraphicsMode
  * The captures deliberately include every colour-sensitive family: body text + link, quote,
  * spoiler, code, signature, citation pill, edit marker, menu and footer actions. A pixel equality assertion
  * pins the persistent moderation red on the band even when the card is the scroll anchor — the
- * moderation header wins above the transient anchor tint. These PNGs are inspection artefacts, not
- * self-validating snapshots.
+ * moderation header wins above the transient anchor tint. These PNGs are verified references in the
+ * default verify mode, and inspection artefacts when re-recorded.
  *
  *     ./scripts/docker-dev.sh ./gradlew :feature:topic:testDebugUnitTest \
  *         --tests '*TopicModerationRoborazziTest*' --console=plain --no-daemon
