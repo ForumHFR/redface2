@@ -2,12 +2,33 @@ package fr.forumhfr.redface2.navigation
 
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.feature.messages.PrivateMessageSubmitResult
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.descriptors.elementNames
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /** #1040 lot 6 — pure guards around the editor→retained-conversation handoff. */
 class PrivateMessageSubmitNavigationTest {
+
+    @Test
+    @OptIn(ExperimentalSerializationApi::class)
+    fun `private edit route carries only opaque coordinates without changing the public route format`() {
+        val route = PrivateMessageEditRoute(threadId = 42, page = 3, numreponse = 101)
+        assertEquals(
+            listOf("threadId", "page", "numreponse"),
+            PrivateMessageEditRoute.serializer().descriptor.elementNames.toList(),
+        )
+        assertEquals(42, route.threadId)
+        assertEquals(3, route.page)
+        assertEquals(101, route.numreponse)
+        assertTrue(route.hidesNavigationSuite())
+        assertEquals(
+            listOf("mode", "cat", "topicId", "numreponse", "page", "subcat", "resumeSharedDraft"),
+            PostEditorRoute.serializer().descriptor.elementNames.toList(),
+        )
+    }
 
     @Test
     fun `publish guard accepts only the matching conversation directly below editor`() {

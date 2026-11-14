@@ -112,6 +112,7 @@ import fr.forumhfr.redface2.core.ui.viewer.ImageViewerScreen
 import fr.forumhfr.redface2.core.ui.viewer.SystemBarsOwnerEffect
 import fr.forumhfr.redface2.feature.auth.LoginScreen
 import fr.forumhfr.redface2.feature.editor.PostEditorMode
+import fr.forumhfr.redface2.feature.editor.PostEditorTarget
 import fr.forumhfr.redface2.feature.editor.PostEditorRequest
 import fr.forumhfr.redface2.feature.editor.TopicFormRequest
 import fr.forumhfr.redface2.feature.editor.PostEditorScreen
@@ -208,6 +209,17 @@ data class PrivateMessageThreadRoute(
     val submitSignal: Long? = null,
 ) : RedfaceNavKey
 
+/** Private edit restoration carries coordinates only, never a body, subject or token. */
+@Serializable
+data class PrivateMessageEditRoute(
+    val threadId: Int,
+    val page: Int,
+    val numreponse: Int,
+) : RedfaceNavKey {
+    init { require(threadId > 0 && page > 0 && numreponse > 0) }
+    override fun toString(): String = "PrivateMessageEditRoute([redacted])"
+}
+
 @Serializable
 data class PrivateMessageReplyRoute(
     val threadId: Int,
@@ -262,7 +274,8 @@ internal fun NavKey?.hidesNavigationSuite(): Boolean =
     isEditorRoute() || this is ImageViewerRoute || this is ReportContentRoute
 
 private fun NavKey?.isEditorRoute(): Boolean = when (this) {
-    is PostEditorRoute, is TopicFormRoute, is PrivateMessageReplyRoute, is PrivateMessageComposeRoute -> true
+    is PostEditorRoute, is TopicFormRoute, is PrivateMessageReplyRoute,
+    is PrivateMessageEditRoute, is PrivateMessageComposeRoute -> true
     else -> false
 }
 
@@ -1507,8 +1520,8 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                             privateMessageSubmitNavState = PrivateMessageSubmitNavState(
                                 account = authenticatedCanonicalPseudo,
                                 pending = privateMessagePendingSubmit,
-                                onPublish = { threadId, page ->
-                                    authenticatedCanonicalPseudo?.let { account ->
+                                onPublish = { threadId, page, operation, submittingAccount ->
+                                    authenticatedCanonicalPseudo?.takeIf { it == submittingAccount }?.let { account ->
                                         // A retained nav-entry ViewModel survives activity recreation,
                                         // while this plain remember counter does not. Seed from wall time
                                         // so the first post-recreation event cannot reuse the last small
@@ -1523,6 +1536,7 @@ internal fun RedfaceApp(intentDelivery: IntentDelivery?) {
                                             result = PrivateMessageSubmitResult(
                                                 eventId = privateMessageSubmitEventId,
                                                 page = page,
+                                                operation = operation,
                                             ),
                                         )
                                     }
@@ -2001,7 +2015,7 @@ internal fun isPrivateMessageThreadEntryFor(below: Any?, threadId: Int): Boolean
 private data class PrivateMessageSubmitNavState(
     val account: String?,
     val pending: PrivateMessagePendingSubmit?,
-    val onPublish: (threadId: Int, page: Int) -> Unit,
+    val onPublish: (threadId: Int, page: Int, operation: PostSubmitOperation, account: String?) -> Unit,
     val onConsumed: (eventId: Long) -> Unit,
 )
 
@@ -2583,6 +2597,9 @@ private fun RedfaceNavHost(
                     onSubmitResultConsumed = { result ->
                         privateMessageSubmitNavState.onConsumed(result.eventId)
                     },
+                    onEdit = { threadId, page, numreponse ->
+                        backStack.add(PrivateMessageEditRoute(threadId, page, numreponse))
+                    },
                     onReply = { threadId, page ->
                         backStack.add(PrivateMessageReplyRoute(threadId = threadId, page = page))
                     },
@@ -2627,7 +2644,31 @@ private fun RedfaceNavHost(
                     topBarActions = accountMenu,
                 )
             }
+            entry<PrivateMessageEditRoute> { route ->
+                val submitAccount = rememberSubmitAccount(privateMessageSubmitNavState.account)
+                PostEditorScreen(
+                    request = PostEditorRequest(
+                        mode = PostEditorMode.Edit,
+                        target = PostEditorTarget.PrivateMessage(route.threadId),
+                        cat = null, topicId = null, subcat = null,
+                        page = route.page, numreponse = route.numreponse,
+                    ),
+                    onOpenEditorSettings = { openEditorSettings(backStack) },
+                    onClose = { if (backStack.size > 1) backStack.removeAt(backStack.lastIndex) },
+                    onSubmitSucceeded = { _, _, _, _ ->
+                        val below = backStack.getOrNull(backStack.lastIndex - 1)
+                        if (isPrivateMessageThreadEntryFor(below, route.threadId)) {
+                            // Edit the originating page in place, regardless of HFR's redirect page.
+                            privateMessageSubmitNavState.onPublish(
+                                route.threadId, route.page, PostSubmitOperation.Edit, submitAccount,
+                            )
+                        }
+                        if (backStack.size > 1) backStack.removeAt(backStack.lastIndex)
+                    },
+                )
+            }
             entry<PrivateMessageReplyRoute> { route ->
+                val submitAccount = rememberSubmitAccount(privateMessageSubmitNavState.account)
                 val privateMessageQuoteScope = QuoteScope.PrivateMessage(route.threadId)
                 PrivateMessageReplyScreen(
                     onOpenEditorSettings = { openEditorSettings(backStack) },
@@ -2642,7 +2683,9 @@ private fun RedfaceNavHost(
                         // retains its ViewModel/anchor map and force-refetches exactly once.
                         val below = backStack.getOrNull(backStack.lastIndex - 1)
                         if (isPrivateMessageThreadEntryFor(below, threadId)) {
-                            privateMessageSubmitNavState.onPublish(threadId, page)
+                            privateMessageSubmitNavState.onPublish(
+                                threadId, page, PostSubmitOperation.Publish, submitAccount,
+                            )
                         }
                         // ED-88 — safety net : the durable delivery below normally emptied it.
                         if (multiQuoteNavState.basket

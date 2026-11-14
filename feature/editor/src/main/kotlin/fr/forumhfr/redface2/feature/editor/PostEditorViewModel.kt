@@ -28,10 +28,6 @@ import fr.forumhfr.redface2.core.domain.diagnostics.recordImagesPicked
 import fr.forumhfr.redface2.core.domain.editor.BbcodePreviewParser
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftKey
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftSession
-import fr.forumhfr.redface2.core.domain.editor.mergeEditorBody
-import fr.forumhfr.redface2.core.domain.editor.insertEditorQuotes
-import fr.forumhfr.redface2.core.domain.editor.narrowDraftOffers
-import fr.forumhfr.redface2.core.domain.editor.visibleOver
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorPreparationException
 import fr.forumhfr.redface2.core.domain.editor.EditorSendOutcome
@@ -39,7 +35,11 @@ import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionErrors
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionState
 import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.domain.editor.SubmissionRequest
+import fr.forumhfr.redface2.core.domain.editor.insertEditorQuotes
+import fr.forumhfr.redface2.core.domain.editor.mergeEditorBody
+import fr.forumhfr.redface2.core.domain.editor.narrowDraftOffers
 import fr.forumhfr.redface2.core.domain.editor.validateBbcodeDraft
+import fr.forumhfr.redface2.core.domain.editor.visibleOver
 import fr.forumhfr.redface2.core.domain.preferences.UserPreferencesRepository
 import fr.forumhfr.redface2.core.domain.smiley.HfrFavoriteSmileyRepository
 import fr.forumhfr.redface2.core.domain.smiley.SmileyLocalCollections
@@ -58,6 +58,7 @@ import fr.forumhfr.redface2.core.model.editor.EditorImageInsert
 import fr.forumhfr.redface2.core.model.editor.ImagePickerEvent
 import fr.forumhfr.redface2.core.model.write.EditPostContext
 import fr.forumhfr.redface2.core.model.write.PostSubmitOperation
+import fr.forumhfr.redface2.core.model.write.PrivateMessageEditContext
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.model.write.ReplyContext
@@ -65,13 +66,13 @@ import fr.forumhfr.redface2.core.model.write.ReplyFailureReason
 import fr.forumhfr.redface2.core.model.write.ReplyForm
 import fr.forumhfr.redface2.core.model.write.ReplyFormOptions
 import fr.forumhfr.redface2.core.model.write.ReplySubmitResult
-import fr.forumhfr.redface2.core.ui.editor.EditorPreviewState
 import fr.forumhfr.redface2.core.ui.editor.BbcodeAction
 import fr.forumhfr.redface2.core.ui.editor.BbcodeFormatResult
 import fr.forumhfr.redface2.core.ui.editor.EditorCause
 import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorErrors
 import fr.forumhfr.redface2.core.ui.editor.EditorHostMemory
+import fr.forumhfr.redface2.core.ui.editor.EditorPreviewState
 import fr.forumhfr.redface2.core.ui.editor.EditorSessionCheckpoint
 import fr.forumhfr.redface2.core.ui.editor.EditorSessionField
 import fr.forumhfr.redface2.core.ui.editor.EditorSessionRestoration
@@ -92,8 +93,8 @@ import fr.forumhfr.redface2.core.ui.editor.pickedImagesForUpload
 import fr.forumhfr.redface2.core.ui.editor.toEditorError
 import fr.forumhfr.redface2.core.ui.editor.toEditorUploadError
 import java.io.IOException
-import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -172,6 +173,8 @@ class PostEditorViewModel @AssistedInject constructor(
         PostEditorState(
             isInitializing = true,
             mode = request.mode,
+            target = request.target,
+            hasMessageTone = request.target == PostEditorTarget.Public,
             cat = request.cat,
             topicId = request.topicId,
             numreponse = request.numreponse,
@@ -273,8 +276,13 @@ class PostEditorViewModel @AssistedInject constructor(
      * purpose (cf. [EditorDraftKey]). Edit needs the numreponse to identify the post.
      */
     private val draftKey: String? = when (request.mode) {
-        PostEditorMode.Reply -> request.topicId?.let { EditorDraftKey.reply(request.cat, it) }
-        PostEditorMode.Edit -> request.numreponse?.let { EditorDraftKey.editPost(request.cat, it) }
+        PostEditorMode.Reply -> request.topicId?.let { EditorDraftKey.reply(checkNotNull(request.cat), it) }
+        PostEditorMode.Edit -> request.numreponse?.let {
+            when (request.target) {
+                PostEditorTarget.Public -> EditorDraftKey.editPost(checkNotNull(request.cat), it)
+                is PostEditorTarget.PrivateMessage -> EditorDraftKey.mpEdit(it)
+            }
+        }
     }
 
     /** #405 — debounced autosave coroutine ; relaunched (cancelling the previous) on each edit. */
@@ -482,7 +490,7 @@ class PostEditorViewModel @AssistedInject constructor(
             val inlinePosts = pending?.quotes?.map { it.numreponse }.orEmpty().toSet()
             val delivered = request.initialQuotes.takeUnless { restoration.isRecreation }.orEmpty()
                 .filterNot { it.numreponse in inlinePosts }
-            val cards = distinctQuoteCards(request.cat, delivered)
+            val cards = distinctQuoteCards(checkNotNull(request.cat), delivered)
             _state.update { it.copy(quotes = cards) }
             quoteCardsDelivered = true
             if (cards.size < delivered.size) chromeEvents.quoteAlreadyDelivered()
@@ -681,7 +689,7 @@ class PostEditorViewModel @AssistedInject constructor(
         val existing = bodyFieldState.text.toString()
         val delivery = filterInlineQuoteDelivery(
             pending.cat,
-            request.cat, form.initialContent.trimEnd(), existing,
+            checkNotNull(request.cat), form.initialContent.trimEnd(), existing,
         )
         duplicateQuoteDelivery = delivery.duplicates > 0
         val prefills = delivery.bbcode
@@ -776,6 +784,7 @@ class PostEditorViewModel @AssistedInject constructor(
                 if (restoration.matches(entry, owner, draftKey)) restoreViewport(entry.draft.body.length)
             } else if (restore == EditorSessionRestore.Resume) {
                 submission.drafts.resumeContent()
+                restoreSubject(entry.draft)
                 replaceBody(entry.draft.body)
                 previousBody = entry.draft.body
                 restoreViewport(entry.draft.body.length)
@@ -839,7 +848,7 @@ class PostEditorViewModel @AssistedInject constructor(
 
     private fun restoreOrdinaryDraft(draft: EditorDraftStore.Draft, reconcile: Boolean) {
         val body = draft.body
-        if (body.isBlank()) return
+        if (body.isBlank() && draft.subject.isNullOrBlank()) return
         // #1574 keeps the shared resume to Reply; ED-81 never replays it on a recreation.
         val resumesSharedReply = request.mode == PostEditorMode.Reply && request.resumeSharedDraft
         if (resumesSharedReply && !reconcile && !restoration.isRecreation) {
@@ -848,7 +857,8 @@ class PostEditorViewModel @AssistedInject constructor(
             val fingerprint = draft.restoreOfferFingerprint()
             val ignored = savedStateHandle.get<String>(DRAFT_RESTORE_OFFER_FINGERPRINT_KEY) == fingerprint
             val shouldOffer = if (reconcile) bodyFieldState.text.toString() != body else {
-                !ignored && _state.value.canOfferDraftRestore(body, bodyFieldState.text.toString())
+                !ignored && (_state.value.canOfferDraftRestore(body, bodyFieldState.text.toString()) ||
+                    canOfferPrivateSubject(draft))
             }
             if (shouldOffer) _state.update { it.copy(restorableDraft = body) }
             // A reconciled row equal to the field is this composition's own C, never an offered D.
@@ -869,8 +879,19 @@ class PostEditorViewModel @AssistedInject constructor(
         sharedDraftResumed = true
     }
 
+    private fun canOfferPrivateSubject(draft: EditorDraftStore.Draft): Boolean =
+        request.target is PostEditorTarget.PrivateMessage && draft.subject != null &&
+            draft.subject != _state.value.subject
+
+    private fun restoreSubject(draft: EditorDraftStore.Draft) {
+        if (request.target !is PostEditorTarget.PrivateMessage || draft.subject == null) return
+        _state.update { it.copy(subject = draft.subject.orEmpty(), subjectHydrated = true) }
+        restoration.decide(EditorSessionField.Subject)
+    }
+
     private fun restoreAttempt(draft: EditorDraftStore.Draft) {
         if (submission.blocksMutation) return
+        restoreSubject(draft)
         val liveBody = bodyFieldState.text.toString()
         if (liveBody.isBlank()) {
             replaceBody(draft.body)
@@ -944,7 +965,7 @@ class PostEditorViewModel @AssistedInject constructor(
     private fun captureCheckpoint(draft: EditorDraftStore.Draft, version: Long) {
         // A queued write may start after a later ON_STOP has already reserved its revision.
         if (version < lastCheckpointVersion) return
-        if (bodyFieldState.text.toString() == draft.body) {
+        if (bodyFieldState.text.toString() == draft.body && draftSubject() == draft.subject) {
             captureSessionCheckpoint(draft, version)
         }
     }
@@ -956,6 +977,10 @@ class PostEditorViewModel @AssistedInject constructor(
         )
     }
 
+    private fun draftSubject(snapshot: PostEditorState = _state.value): String? = snapshot.subject.takeIf {
+        snapshot.target is PostEditorTarget.PrivateMessage && snapshot.subjectHydrated
+    }
+
     private fun draftSnapshot(): EditorDraftStore.Draft? {
         val snapshot = _state.value
         if (deliveredInlineQuoteRequest != null) return null
@@ -965,7 +990,7 @@ class PostEditorViewModel @AssistedInject constructor(
         // #1574: only a known body can resume ED-81, including an intentional user clearing.
         return if (restoration.canCheckpoint(!snapshot.isAwaitingInitialBody, undecidedBlank)) {
             val provenance = submission.drafts.provenanceFor(liveBody)
-            EditorDraftStore.Draft(body = liveBody, bodyProvenance = provenance,
+            EditorDraftStore.Draft(body = liveBody, subject = draftSubject(), bodyProvenance = provenance,
                 offerToResolve = pendingOfferResolution())
         } else null
     }
@@ -1043,7 +1068,7 @@ class PostEditorViewModel @AssistedInject constructor(
         // Still not durable: nothing typed since the delivery can be saved without risking a
         // duplicate quote. Otherwise the last write of the field must itself succeed.
         deliveredInlineQuoteRequest == null && submission.flushForClose(
-            live = { EditorDraftStore.Draft(body = bodyFieldState.text.toString()) },
+            live = { EditorDraftStore.Draft(body = bodyFieldState.text.toString(), subject = draftSubject()) },
             snapshot = ::draftSnapshot,
         )
     } catch (_: IOException) {
@@ -1081,6 +1106,7 @@ class PostEditorViewModel @AssistedInject constructor(
             PostEditorIntent.PendingQuoteIgnored -> ignorePendingQuote()
             PostEditorIntent.PendingQuoteResumed -> resumeDormantQuote()
             PostEditorIntent.LegacyQuoteNoticeDismissed -> _state.update { it.copy(legacyQuoteRequestDropped = false) }
+            is PostEditorIntent.SubjectChanged -> onSubjectChanged(intent.value)
             is PostEditorIntent.ToggleSignature ->
                 _state.update { it.copy(signatureEnabled = intent.enabled) }
             is PostEditorIntent.ToggleSmileyDisabled ->
@@ -1108,6 +1134,13 @@ class PostEditorViewModel @AssistedInject constructor(
             PostEditorIntent.UnsavedCloseDismissed -> onUnsavedCloseDecided(leave = false)
             PostEditorIntent.UnsavedCloseConfirmed -> onUnsavedCloseDecided(leave = true)
         }
+    }
+
+    private fun onSubjectChanged(value: String) {
+        if (!_state.value.isSubjectEditable || _state.value.isLoadingForm) return
+        restoration.decide(EditorSessionField.Subject)
+        _state.update { it.copy(subject = value.take(70), subjectHydrated = true) }
+        scheduleAutosave()
     }
 
     /** An exact snapshot distinguishes two portions of one post; legacy callers use numreponse. */
@@ -1143,7 +1176,9 @@ class PostEditorViewModel @AssistedInject constructor(
             else snapshot.draftOffers.firstOrNull { it.id == offerId }
         val legacy = snapshot.restorableDraft.takeIf { offerId == null && snapshot.draftOffers.isEmpty() }
         val offeredBody = (selected?.draft?.body ?: legacy)?.takeIf {
-            it.isNotBlank() && submission.drafts.canDecideOffer(selected, pendingOfferResolution())
+            (it.isNotBlank() || request.target is PostEditorTarget.PrivateMessage &&
+                !selected?.draft?.subject.isNullOrBlank()) &&
+                submission.drafts.canDecideOffer(selected, pendingOfferResolution())
         } ?: return
         selectedDraftOffer = selected.takeIf { request.mode == PostEditorMode.Reply }
         val seed = snapshot.draftRestoreSeed.orEmpty()
@@ -1157,7 +1192,14 @@ class PostEditorViewModel @AssistedInject constructor(
         val needsMerge = mergedDraftOffer != offeredBody
         mergedDraftOffer = offeredBody
         restoredOfferAwaitingWrite = offeredBody
-        if (needsMerge) replaceBody(merge.body)
+        if (needsMerge) {
+            replaceBody(merge.body)
+            // An untouched server subject is still a restore seed. Without a form, retain the
+            // offered subject too: consuming the offer must not replace it with null on disk.
+            if (snapshot.subject.isBlank() || snapshot.subject == loadedForm?.sujet) {
+                selected?.draft?.let(::restoreSubject)
+            }
+        }
         if (needsMerge) submission.drafts.stageBodyMerge(merge)
         updateChromeState { it.copy(restorableDraft = null, draftHydratedFromForm = true) }
         viewModelScope.launch {
@@ -1205,7 +1247,7 @@ class PostEditorViewModel @AssistedInject constructor(
         viewModelScope.launch {
             try {
                 submission.flush(null)
-                val draft = EditorDraftStore.Draft(body = bodyFieldState.text.toString())
+                val draft = EditorDraftStore.Draft(body = bodyFieldState.text.toString(), subject = draftSubject())
                 val offer = selected.takeIf { request.mode == PostEditorMode.Reply } ?: submission.drafts.offered(body)
                 val result = if (offer != null) {
                     submission.drafts.resolveOffer(offer, draft)
@@ -1464,11 +1506,20 @@ class PostEditorViewModel @AssistedInject constructor(
     }
 
     private fun loadEditFormIfPossible() {
-        val context = buildEditPostContext() ?: run {
-            updateChromeState { it.copy(submitError = EditorErrors.missingSubcat, draftRestoreSeed = "") }
-            return
+        when (request.target) {
+            PostEditorTarget.Public -> {
+                val context = buildEditPostContext() ?: return missingEditContext()
+                launchFormFetch { editPostRepository.fetchEditPostForm(context) }
+            }
+            is PostEditorTarget.PrivateMessage -> {
+                val context = buildPrivateEditContext() ?: return missingEditContext()
+                launchFormFetch { editPostRepository.fetchEditPostForm(context) }
+            }
         }
-        launchFormFetch { editPostRepository.fetchEditPostForm(context) }
+    }
+
+    private fun missingEditContext() {
+        updateChromeState { it.copy(submitError = EditorErrors.missingSubcat, draftRestoreSeed = "") }
     }
 
     /** Form hydration and metadata are separate from the single asynchronous preview pipeline. */
@@ -1522,7 +1573,7 @@ class PostEditorViewModel @AssistedInject constructor(
     ): PostEditorState {
         if (this@PostEditorViewModel.submission.blocksMutation) return copy(isLoadingForm = false)
         val hydrateOptions = !optionsHydratedFromForm
-        val (visibleOffers, firstOffer) = narrowDraftOffers(draftOffers, restorableDraft, liveBody)
+        val (visibleOffers, firstOffer) = visibleFormOffers(form, liveBody)
         return copy(
             isLoadingForm = false,
             draftOffers = visibleOffers,
@@ -1537,6 +1588,7 @@ class PostEditorViewModel @AssistedInject constructor(
             } else {
                 emailNotificationEnabled
             },
+            hasMessageTone = target !is PostEditorTarget.PrivateMessage || form.msgIcon != null,
             msgIcon = if (hydrateOptions) form.msgIcon.toEditorMsgIcon() else msgIcon,
             optionsHydratedFromForm = true,
             // Phase 2F-B (#11) — keep the parsed userId around for the wiki smiley search.
@@ -1544,7 +1596,25 @@ class PostEditorViewModel @AssistedInject constructor(
             // refetch on an anonymous fallback does not erase a previously known id.
             userId = userId ?: form.userId,
             submitError = submitError.afterFormLoaded() ?: EditorErrors.loginRequired.takeIf { form.isAnonymous },
-        )
+        ).withSubjectHydration(form)
+    }
+
+    private fun PostEditorState.withSubjectHydration(form: ReplyForm): PostEditorState {
+        if (target !is PostEditorTarget.PrivateMessage) return this
+        return copy(isSubjectEditable = form.isSubjectEditable,
+            subject = if (subjectHydrated) subject else form.sujet, subjectHydrated = true)
+    }
+
+    private fun PostEditorState.visibleFormOffers(
+        form: ReplyForm,
+        liveBody: String,
+    ): Pair<List<EditorDraftStore.DraftOffer>, String?> {
+        if (target == PostEditorTarget.Public) return narrowDraftOffers(draftOffers, restorableDraft, liveBody)
+        val nextSubject = if (subjectHydrated) subject else form.sujet
+        val visible = draftOffers.filterNot {
+            it.draft.body == liveBody && (it.draft.subject == null || it.draft.subject == nextSubject)
+        }
+        return visible to if (restorableDraft != null) visible.firstOrNull()?.draft?.body else null
     }
 
     private fun handleFetchFailure(error: Throwable, quoteFetch: Boolean = false) {
@@ -1576,7 +1646,7 @@ class PostEditorViewModel @AssistedInject constructor(
         diagnostics.record(
             DiagnosticsLog.Level.WARN,
             LOG_TAG_VM,
-            "fetch bubbled: ${error::class.simpleName}: ${error.message ?: "(no message)"} " +
+            "fetch bubbled: ${error::class.simpleName} " +
                 "→ ${mapped::class.simpleName}",
         )
         updateChromeState {
@@ -1622,7 +1692,9 @@ class PostEditorViewModel @AssistedInject constructor(
         snapshot: PostEditorState,
         form: ReplyForm,
     ) {
-        val draft = EditorDraftStore.Draft(body = snapshot.bodyText, offerToResolve = pendingOfferResolution())
+        val draft = EditorDraftStore.Draft(
+            body = snapshot.bodyText, subject = draftSubject(snapshot), offerToResolve = pendingOfferResolution(),
+        )
         submission.launch(permit, draft) {
             val options = ReplyFormOptions(
                 signatureEnabled = snapshot.signatureEnabled,
@@ -1633,15 +1705,37 @@ class PostEditorViewModel @AssistedInject constructor(
                 PostEditorMode.Reply -> submitReply(
                     checkNotNull(buildReplyContext()), form, snapshot, options,
                 )
-                PostEditorMode.Edit -> editPostRepository.submitEditPost(
-                    context = checkNotNull(buildEditPostContext()),
-                    form = form.copy(msgIcon = snapshot.msgIcon.toString()),
-                    bbcodeContent = snapshot.bodyText,
-                    options = options,
-                )
+                PostEditorMode.Edit -> submitEdit(form, snapshot, options)
             }
             submissionDelivery(snapshot, result)
         }
+    }
+
+    private suspend fun submitEdit(
+        form: ReplyForm,
+        snapshot: PostEditorState,
+        options: ReplyFormOptions,
+    ): ReplySubmitResult {
+        val editedForm = form.copy(
+            sujet = if (snapshot.isSubjectEditable) snapshot.subject else form.sujet,
+            msgIcon = if (snapshot.hasMessageTone) snapshot.msgIcon.toString() else form.msgIcon,
+        )
+        return when (snapshot.target) {
+            PostEditorTarget.Public -> editPostRepository.submitEditPost(
+                checkNotNull(buildEditPostContext()), editedForm, snapshot.bodyText, options,
+            )
+            is PostEditorTarget.PrivateMessage -> editPostRepository.submitEditPost(
+                checkNotNull(buildPrivateEditContext()), editedForm, snapshot.bodyText, options,
+            )
+        }
+    }
+
+    @Suppress("ReturnCount") // Reject unknown private coordinates before any network request.
+    private fun buildPrivateEditContext(): PrivateMessageEditContext? {
+        val target = request.target as? PostEditorTarget.PrivateMessage ?: return null
+        val page = request.page?.takeIf { it > 0 } ?: return null
+        val numreponse = request.numreponse?.takeIf { it > 0 } ?: return null
+        return PrivateMessageEditContext(target.threadId, page, numreponse)
     }
 
     private fun submissionDelivery(
@@ -1728,7 +1822,7 @@ class PostEditorViewModel @AssistedInject constructor(
         val body = snapshot.bodyText
         // Compare materialised content, not card excerpts: keep another portion of the same post.
         val prefills = filterInlineQuoteDelivery(
-            request.cat, request.cat, quoteForm.initialContent.trimEnd(), body,
+            checkNotNull(request.cat), checkNotNull(request.cat), quoteForm.initialContent.trimEnd(), body,
         ).bbcode
         val content = listOf(prefills, body).filter { it.isNotBlank() }.joinToString("\n\n")
         return replyRepository.submitReply(
@@ -1759,6 +1853,7 @@ class PostEditorViewModel @AssistedInject constructor(
     @Suppress("ReturnCount") // Each guard returns null with a distinct reason
     private fun buildEditPostContext(): EditPostContext? {
         val snapshot = state.value
+        if (snapshot.target != PostEditorTarget.Public) return null
         val page = snapshot.page ?: return null
         val subcat = snapshot.subcat ?: return null
         val topicId = snapshot.topicId ?: return null
@@ -1767,7 +1862,7 @@ class PostEditorViewModel @AssistedInject constructor(
         // SUBCAT_UNKNOWN sentinel (-1) is blocking. Keep `> 0` for topicId / numreponse.
         if (subcat < 0 || topicId <= 0 || numreponse <= 0) return null
         return EditPostContext(
-            cat = snapshot.cat,
+            cat = checkNotNull(snapshot.cat),
             subcat = subcat,
             topicId = topicId,
             page = page,
@@ -1778,6 +1873,7 @@ class PostEditorViewModel @AssistedInject constructor(
     @Suppress("ReturnCount") // Each guard returns null with a distinct reason
     private fun buildReplyContext(): ReplyContext? {
         val snapshot = state.value
+        if (snapshot.target != PostEditorTarget.Public) return null
         val page = snapshot.page ?: return null
         val subcat = snapshot.subcat ?: return null
         val topicId = snapshot.topicId ?: return null
@@ -1787,7 +1883,7 @@ class PostEditorViewModel @AssistedInject constructor(
         // #604 lot 3 — always the PLAIN context : citations are cards, and [submitReply]
         // derives the quote context (first card's numreponse) when materialising.
         return ReplyContext(
-            cat = snapshot.cat,
+            cat = checkNotNull(snapshot.cat),
             subcat = subcat,
             topicId = topicId,
             page = page,

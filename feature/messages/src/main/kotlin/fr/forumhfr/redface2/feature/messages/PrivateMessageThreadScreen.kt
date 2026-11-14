@@ -27,6 +27,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -83,6 +85,7 @@ import androidx.lifecycle.compose.currentStateAsState
 import fr.forumhfr.redface2.core.domain.author.isRf2Creator
 import fr.forumhfr.redface2.core.domain.author.resolveAuthorRolePill
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
+import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.domain.ego.deriveEgoCanonicalPseudo
 import fr.forumhfr.redface2.core.domain.ego.isEgoPost
 import fr.forumhfr.redface2.core.domain.messages.PrivateMessageThreadPage
@@ -91,11 +94,11 @@ import fr.forumhfr.redface2.core.model.AuthorRole
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import fr.forumhfr.redface2.core.model.postContentExcerpt
-import fr.forumhfr.redface2.core.domain.editor.PendingInlineQuoteRequest
 import fr.forumhfr.redface2.core.model.write.PrivateMessageQuote
 import fr.forumhfr.redface2.core.model.write.QuoteLocator
 import fr.forumhfr.redface2.core.model.write.QuoteSelection
 import fr.forumhfr.redface2.core.ui.error.sharedLabelResOrNull
+import fr.forumhfr.redface2.core.ui.feedback.showAcknowledgement
 import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.pager.PageFab
 import fr.forumhfr.redface2.core.ui.pager.PageFabDefaults
@@ -132,6 +135,7 @@ import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filter
+import kotlinx.coroutines.flow.filterNotNull
 
 /**
  * One private-message conversation (#298): renders the messages of a `cat=prive` thread,
@@ -152,6 +156,7 @@ fun PrivateMessageThreadScreen(
     pendingSubmitResult: PrivateMessageSubmitResult? = null,
     onSubmitResultConsumed: (PrivateMessageSubmitResult) -> Unit = {},
     onReply: (threadId: Int, page: Int) -> Unit,
+    onEdit: (threadId: Int, page: Int, numreponse: Int) -> Unit = { _, _, _ -> },
     // #1074 — per-message footer action. The quote target is typed before navigation; no private
     // href or BBCode enters the route.
     onQuote: (threadId: Int, page: Int, quote: PrivateMessageQuote) -> Unit,
@@ -187,11 +192,11 @@ fun PrivateMessageThreadScreen(
     }
 
     // #1040 lot 6 — editor→retained-ViewModel handoff. The event id keys one consumption even when
-    // the editor payload is identical to the previous one; :app clears its slot after this call.
-    LaunchedEffect(pendingSubmitResult?.eventId) {
+    // the editor payload is identical to the previous one; :app clears its slot once applied.
+    // The auth flow may arrive after the handoff: retry it when the account becomes known.
+    LaunchedEffect(pendingSubmitResult?.eventId, state.connectedPseudo) {
         pendingSubmitResult?.let { result ->
-            viewModel.applySubmitResult(result)
-            onSubmitResultConsumed(result)
+            if (viewModel.applySubmitResult(result)) onSubmitResultConsumed(result)
         }
     }
 
@@ -260,6 +265,8 @@ fun PrivateMessageThreadScreen(
         isMultiRecipientHint = isMultiRecipientHint,
         callbacks = PrivateMessageThreadCallbacks(
             onBack = onBack,
+            onEdit = { message -> onEdit(request.threadId, state.page, message.numreponse) },
+            onEditAcknowledgementPresented = viewModel::editAcknowledgementPresented,
             onReply = { onReply(request.threadId, state.page) },
             onQuote = { message ->
                 message.quoteRef?.let { ref ->
@@ -519,6 +526,8 @@ internal data class PrivateMessageThreadCallbacks(
     val onPageLandingConsumed: (PrivateMessagePageLanding) -> Unit = {},
     /** Null only in isolated hosts; production supplies it and the list applies reply/ref gates. */
     val onQuote: ((Post) -> Unit)? = null,
+    val onEdit: ((Post) -> Unit)? = null,
+    val onEditAcknowledgementPresented: (Long) -> Unit = {},
     val onToggleMultiQuote: (QuoteSelection) -> Unit = {},
     val onMultiQuote: () -> Unit = {},
     val onClearMultiQuote: () -> Unit = {},
@@ -550,6 +559,15 @@ internal fun PrivateMessageThreadContent(
     topBarActions: @Composable (() -> Unit)? = null,
 ) {
     val mode = state.mode
+    val snackbarHost = remember(state.connectedPseudo) { SnackbarHostState() }
+    val editedMessage = stringResource(R.string.messages_message_edited)
+    val acknowledgement by rememberUpdatedState(state.editAcknowledgement)
+    val onAcknowledgementPresented by rememberUpdatedState(callbacks.onEditAcknowledgementPresented)
+    LaunchedEffect(snackbarHost) {
+        snapshotFlow { acknowledgement }.filterNotNull().collect { id ->
+            snackbarHost.showAcknowledgement(editedMessage, onPresented = { onAcknowledgementPresented(id) })
+        }
+    }
     val multiQuoteSelections = presentation.multiQuoteSelections
     val listState = rememberLazyListState()
     // Account is part of the alignment owner even when the numeric page stays identical across an
@@ -611,6 +629,7 @@ internal fun PrivateMessageThreadContent(
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHost) },
         topBar = {
             TopAppBar(
                 title = {
@@ -766,6 +785,13 @@ internal fun PrivateMessageThreadContent(
         mode = mode,
         connectedPseudo = state.connectedPseudo,
         target = messageMenuTarget,
+        editActionsAvailable = state.editActionsAvailable,
+        onEdit = callbacks.onEdit?.let { edit ->
+            { message ->
+                pageInteraction.alignedDepartureAnchor()?.let(callbacks.onAnchorSettled)
+                edit(message)
+            }
+        },
         onOpenProfile = callbacks.onOpenProfile,
         multiQuoteSelections = multiQuoteSelections,
         onToggleMultiQuote = callbacks.onToggleMultiQuote,
@@ -1153,6 +1179,8 @@ private fun ThreadMessageMenuHost(
     mode: PrivateMessageThreadUiState.Mode,
     connectedPseudo: String?,
     target: MessageMenuTarget?,
+    editActionsAvailable: Boolean,
+    onEdit: ((Post) -> Unit)?,
     onOpenProfile: (userId: Int, pseudo: String, avatarUrl: String?) -> Unit,
     multiQuoteSelections: List<QuoteSelection>,
     onToggleMultiQuote: (QuoteSelection) -> Unit,
@@ -1181,6 +1209,9 @@ private fun ThreadMessageMenuHost(
             authorBlocked = authorBlocked,
             contentVisible = contentVisible,
             onDismiss = onClear,
+            onEdit = onEdit?.takeIf {
+                canEditPrivateMessage(message, connectedPseudo, editActionsAvailable, mode.thread.subject)
+            }?.let { edit -> { edit(message) } },
             onOpenProfile = message.profileId?.let { profileId ->
                 { onOpenProfile(profileId, message.author, message.avatarUrl) }
             },

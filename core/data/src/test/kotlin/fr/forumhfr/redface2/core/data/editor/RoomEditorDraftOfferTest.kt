@@ -250,6 +250,30 @@ class RoomEditorDraftOfferTest {
         assertTrue(store.loadOffers("alice", key).isEmpty())
     }
 
+    @Test fun `MP edit rows attempts and explicitly preserved offers are private without a caller flag`() = runTest {
+        val store = store()
+        val edit = fr.forumhfr.redface2.core.domain.editor.EditorDraftKey.mpEdit(101)
+        store.saveIfVersion("alice", edit, Draft("D", subject = "original"), 0)
+        val entry = checkNotNull(store.loadEntry("alice", edit))
+        assertTrue(entry.draft.isPrivate)
+        val offer = EditorDraftStore.DraftOffer.from(entry).copy(draft = entry.draft.copy(isPrivate = false))
+        store.saveIfVersion("alice", edit, Draft("C", offerToPreserve = offer), entry.version)
+        assertTrue(store.loadOffers("alice", edit).single().draft.isPrivate)
+        val revision = checkNotNull(store.loadEntry("alice", edit)).version
+        val attempt = store.beginAttempt("alice", edit, Draft("sending"), revision) as BeginAttemptResult.Started
+        store.finishAttempt(attempt.token, AttemptOutcome.UNCERTAIN)
+
+        auth.value = AuthState.Authenticated("Bob")
+        assertTrue(store.loadOffers("alice", edit).isEmpty())
+        store.purgePrivateForUser("alice")
+        auth.value = AuthState.Authenticated("Alice")
+        assertTrue(store.loadOffers("alice", edit).isEmpty())
+        val purged = checkNotNull(store.loadEntry("alice", edit))
+        assertEquals("", purged.draft.body)
+        assertNull(purged.draft.subject)
+        assertEquals(AttemptStatus.UNCERTAIN, purged.attempt?.status)
+    }
+
     @Test fun `MP request is private at creation and its offers are purged with its account`() = runTest {
         val store = store()
         val mp = PendingInlineQuoteRequest.privateMessage(42, listOf(PendingInlineQuoteRequest.Quote(101, 1, 0)))

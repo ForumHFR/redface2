@@ -71,6 +71,7 @@ internal fun MessageMenuSheet(
     multiQuoteSelected: Boolean = false,
     onToggleMultiQuote: (() -> Unit)? = null,
     onToggleBlockAuthor: (() -> Unit)? = null,
+    onEdit: (() -> Unit)? = null,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val coroutineScope = rememberCoroutineScope()
@@ -143,6 +144,21 @@ internal fun MessageMenuSheet(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 Text(stringResource(R.string.messages_message_menu_copy_text))
+            }
+
+            if (onEdit != null && message.isEditable) {
+                Spacer(Modifier.height(8.dp))
+                OutlinedButton(
+                    onClick = {
+                        hideThenDismiss(coroutineScope, sheetState) {
+                            onDismiss()
+                            onEdit()
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(stringResource(R.string.messages_message_menu_edit))
+                }
             }
 
             if (onToggleMultiQuote != null) {

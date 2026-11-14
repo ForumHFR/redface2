@@ -339,6 +339,22 @@ Inbox **mono-onglet** : `MessagesScreen` (`feature/messages/.../MessagesScreen.k
 
 ---
 
+### Édition d'un message privé (#1625)
+
+`PrivateMessageEditRoute(threadId, page, numreponse)` ouvre `PostEditorScreen` en mode édition,
+avec une cible scellée `PostEditorTarget.PrivateMessage` dans la requête et l'état. Aucun faux
+identifiant de catégorie publique, contenu, sujet ou jeton ne passe dans la route ; les routes
+`PostEditorRoute` publiques sauvegardées gardent leur format. L'entrée masque la navigation de
+l'application, y compris sous les réglages de l'éditeur. Le retour attend la sauvegarde du brouillon
+privé selon les mêmes règles que l'édition Topic.
+
+Un succès publie `PrivateMessageSubmitResult(operation = Edit)` **avant** le dépilement, seulement
+pour le même compte et le fil immédiatement sous l'éditeur. Le ViewModel de lecture conservé recharge
+la page d'origine de l'édition en place, sans destination de dernière page et sans déplacer le
+viewport. L'accusé « Message modifié » est défini dans [MVI]({{ site.baseurl }}/specs/mvi).
+Un résultat incertain laisse l'éditeur ouvert et conserve sa tentative durable, sans renvoi
+automatique. Le préchargement reste régi par l'ADR-018.
+
 ## Deep Linking
 
 Les URLs HFR doivent ouvrir directement le bon écran dans l'app.
@@ -421,6 +437,12 @@ Implémentation via **Compose Navigation 3** (1.1.0+, stable depuis 08/04/2026).
     val threadId: Int,                     // id `post` HFR de la conversation `cat=prive`
     val page: Int = 1,
 ) : RedfaceNavKey                         // route opaque : pas de sujet/correspondant privé
+// #1625 : route d'édition MP opaque ; PostEditorRoute public reste inchangé.
+@Serializable data class PrivateMessageEditRoute(
+    val threadId: Int,
+    val page: Int,
+    val numreponse: Int,
+) : RedfaceNavKey
 @Serializable data class PrivateMessageReplyRoute(
     val threadId: Int,
     val page: Int = 1,

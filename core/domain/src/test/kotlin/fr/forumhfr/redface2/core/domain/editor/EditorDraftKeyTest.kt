@@ -58,6 +58,17 @@ class EditorDraftKeyTest {
     }
 
     @Test
+    fun `private edit key is separate from replies and public edits`() {
+        val edit = EditorDraftKey.mpEdit(42)
+        assertEquals("mpedit:42", edit)
+        assertNotEquals(EditorDraftKey.mpReply(42), edit)
+        assertNotEquals(EditorDraftKey.editPost(23, 42), edit)
+        assertEquals(true, EditorDraftKey.isPrivate(edit))
+        assertEquals(false, EditorDraftKey.isReply(edit))
+        assertEquals(false, EditorDraftKey.keepsOfferedDrafts(edit))
+    }
+
+    @Test
     fun `mp compose key is a fixed singleton`() {
         assertEquals("mpnew", EditorDraftKey.mpCompose())
     }

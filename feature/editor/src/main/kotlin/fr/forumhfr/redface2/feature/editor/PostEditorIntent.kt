@@ -15,6 +15,7 @@ sealed interface PostEditorIntent {
     data class DraftOfferRestored(val id: String) : PostEditorIntent
     /** ED-121: « Ignorer » removes only the chosen offered version; the field and Q are untouched. */
     data class DraftOfferDiscarded(val id: String) : PostEditorIntent
+    data class SubjectChanged(val value: String) : PostEditorIntent
     data object Started : PostEditorIntent
     /** Lifecycle ON_STOP: persist without closing the editor or cancelling an upload. */
     data object Stopped : PostEditorIntent

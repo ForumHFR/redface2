@@ -15,6 +15,7 @@ class EditorSettingsNavigationTest {
             ForumRoute to PostEditorRoute(PostEditorMode.Reply, 23, 42, page = 1, subcat = 0),
             ForumRoute to TopicFormRoute(TopicFormMode.New, cat = 23),
             MessagesRoute to PrivateMessageReplyRoute(42, page = 1),
+            MessagesRoute to PrivateMessageEditRoute(42, page = 3, numreponse = 101),
             MessagesRoute to PrivateMessageComposeRoute(),
         )
         editors.forEach { (root, editor) ->
@@ -47,6 +48,7 @@ class EditorSettingsNavigationTest {
             ForumRoute to PostEditorRoute(PostEditorMode.Reply, 23, 42, page = 1, subcat = 0),
             ForumRoute to TopicFormRoute(TopicFormMode.New, cat = 23),
             MessagesRoute to PrivateMessageReplyRoute(42, page = 1),
+            MessagesRoute to PrivateMessageEditRoute(42, page = 3, numreponse = 101),
             MessagesRoute to PrivateMessageComposeRoute(),
         )
         editors.forEach { (root, editor) ->

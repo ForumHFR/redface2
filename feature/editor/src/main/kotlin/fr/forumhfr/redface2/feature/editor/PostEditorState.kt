@@ -16,11 +16,12 @@ import fr.forumhfr.redface2.core.ui.editor.UploadProgress
  * write submit lifecycle. Reply (#145) and quote (#146) reach HFR through
  * `ReplyRepository` (POST `bddpost.php`) ; edit (#147) goes through
  * `EditPostRepository` (POST `bdd.php`). All three share this state. Topic-level
- * writes (edit FP #148 and create topic #149) live in [TopicFormState].
+ * writes (public edit FP #148 and create topic #149) live in [TopicFormState]. Private edits
+ * share this state, including a subject only when their first-message form exposes it.
  */
 data class PostEditorState(
     val mode: PostEditorMode,
-    val cat: Int,
+    val cat: Int?,
     val topicId: Int?,
     val numreponse: Int?,
     /** Page index of the topic for the reply form GET (Phase 2C). Null when unknown. */
@@ -147,6 +148,12 @@ data class PostEditorState(
     /** #1128 — observed continuously so the next image pick uses the current preference. */
     val imagePickerMode: ImagePickerMode = ImagePickerMode.DEFAULT,
     val editorShortcut: EditorShortcut = EditorShortcut.NONE,
+    val target: PostEditorTarget = PostEditorTarget.Public,
+    /** Editable only when the private first-message form exposes its subject. */
+    val subject: String = "",
+    val isSubjectEditable: Boolean = false,
+    val subjectHydrated: Boolean = false,
+    val hasMessageTone: Boolean = true,
 ) {
     /** A failed initial edit fetch keeps the body locked until reload or a non-blank restore. */
     val isAwaitingInitialBody: Boolean
@@ -168,8 +175,8 @@ data class PostEditorState(
             // #213 — reject the `null` unknown and the `-1` SUBCAT_UNKNOWN sentinel.
             // `subcat = 0` is postable (cat without sub-category, e.g. IA) — see
             // `Topic.subcat` / `Topic.canReply`.
-            (subcat != null && subcat >= 0) &&
-            topicId != null &&
+            hasRoutingContext &&
+            (!isSubjectEditable || subject.isNotBlank()) &&
             // #604 lot 3 — a quotes-only reply is sendable (same rule as the quick-reply
             // sheet : the materialised [quotemsg] blocks ARE the content). Edit keeps
             // requiring a non-blank body — its cards list is always empty.
@@ -179,6 +186,15 @@ data class PostEditorState(
             !submission.blocksBodyMutation &&
             !isLoadingForm && !quoteStorageUnavailable && pendingQuotes.isEmpty() &&
             !isUploading
+
+    private val hasRoutingContext: Boolean
+        get() = when (target) {
+            PostEditorTarget.Public -> cat != null && subcat != null && subcat >= 0 && topicId != null
+            is PostEditorTarget.PrivateMessage -> mode == PostEditorMode.Edit && page != null && page > 0 &&
+                numreponse != null && numreponse > 0
+        }
+
+    override fun toString(): String = "PostEditorState(mode=$mode, target=$target)"
 
     val hasDormantQuote: Boolean
         get() = pendingQuotes.isNotEmpty() && submission is EditorSubmissionState.Uncertain

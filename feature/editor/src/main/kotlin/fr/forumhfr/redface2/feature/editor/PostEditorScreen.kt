@@ -205,13 +205,16 @@ private fun PostEditorChrome(
     }
     val focus = remember { FocusRequester() }
     EditorScaffold(body, window, stringResource(state.mode.titleResId),
-        state.topicTitle.takeUnless { state.isLoadingForm }.orEmpty(),
+        (if (state.isSubjectEditable) state.subject else state.topicTitle)
+            .takeUnless { state.isLoadingForm }.orEmpty(),
         host.chrome(), host.barActions, host.submitState, host.submitActions,
         host.imageActions, host::closeRequested, bodyFocusRequester = focus, bodyScrollState = scroll,
         modifier = modifier, inputTransformation = transformation, autoFocus = true, surfaceFocus = host.focusMemory,
         bodyFocusRestoreAllowed = host.surface == null && host.detail == null,
         bodyCaretRevealResetKey = bodyCaretRevealResetKey,
         onSystemBack = back,
+        onOpenHeader = if (state.isSubjectEditable) host::openSubject else null,
+        headerLabel = stringResource(R.string.editor_topic_open_title),
         fieldArea = { draft ->
             PostEditorPreview(state.isPreviewVisible, state.preview, body, focus) {
                 draft()

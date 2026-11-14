@@ -58,6 +58,10 @@ data class PrivateMessageThreadUiState(
      * on screen entry) and cached for the life of the screen. See [Roster].
      */
     val roster: Roster = Roster.Hidden,
+    /** Local MPStorage identity checked for this account; no discovery request is permitted. */
+    val editActionsAvailable: Boolean = false,
+    /** Accepted edit, ready for one short snackbar without any navigation action. */
+    val editAcknowledgement: Long? = null,
 ) {
     val canGoPrevious: Boolean get() = page > 1
     val canGoNext: Boolean get() = page < totalPages

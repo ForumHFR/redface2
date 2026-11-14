@@ -19,6 +19,11 @@ object EditorDraftKey {
     fun editPost(cat: Int, numreponse: Int): String = "edit:$cat:$numreponse"
     fun editFirstPost(cat: Int, numreponse: Int): String = "editfp:$cat:$numreponse"
     fun mpReply(threadId: Int): String = "mpreply:$threadId"
+    /** numreponse is unique within the private category; this namespace separates public edits. */
+    fun mpEdit(numreponse: Int): String = "mpedit:$numreponse"
+
+    fun isPrivate(key: String): Boolean =
+        key.startsWith("mpreply:") || key.startsWith("mpedit:") || key == MP_COMPOSE_KEY
 
     fun report(): String = REPORT_KEY
 

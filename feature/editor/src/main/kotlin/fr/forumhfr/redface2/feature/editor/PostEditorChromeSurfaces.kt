@@ -44,7 +44,9 @@ internal fun PostEditorChromeSurfaces(
         onIgnoreQuote = if (source.canIgnorePendingQuote && !source.hasDormantQuote) adapter::ignoreQuote else null,
         onDismiss = adapter::dismissDetails,
         body = {
-            PostEditorHeaderSurface(adapter, bodyState, onReturnToBody, body)
+            PostEditorSubjectPanel(adapter, bodyState, onReturnToBody) {
+                PostEditorHeaderSurface(adapter, bodyState, onReturnToBody, body)
+            }
         }) { event -> PostEditorEventRemedies(adapter, event) }
     PostEditorDraftOffer(adapter)
     when (adapter.surface) {
@@ -111,9 +113,11 @@ private fun PostEditorOptionsSurface(
                 stringResource(R.string.editor_option_email_notification)),
             onOpenSettings = { adapter.openSettings(onOpenEditorSettings) },
             settingsEnabled = !source.isUploading,
-            settingsShortcut = source.editorShortcut) {
-            MessageIconPicker(source.msgIcon, enabled, adapter::tone)
-        }
+            settingsShortcut = source.editorShortcut,
+            tone = if (source.hasMessageTone) {
+                { MessageIconPicker(source.msgIcon, enabled, adapter::tone) }
+            } else null,
+        )
     }
 }
 
