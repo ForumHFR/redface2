@@ -42,6 +42,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import fr.forumhfr.redface2.core.ui.R as UiR
 import fr.forumhfr.redface2.core.ui.editor.LocalEditorPreviewState
+import fr.forumhfr.redface2.core.ui.editor.EditorDraftOfferDecisionState
 import fr.forumhfr.redface2.core.ui.editor.EditorDraftOfferList
 import fr.forumhfr.redface2.core.ui.editor.EditorBackAction
 import fr.forumhfr.redface2.core.ui.editor.EditorBackState
@@ -264,8 +265,10 @@ private fun ReplyFormFailure(
                 } else Column(Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(stringResource(R.string.messages_draft_restore_message),
                         style = MaterialTheme.typography.bodyMedium)
-                    EditorDraftOfferList(offers, host::restoreOffer, host::discardOffer,
-                        state.restoreEnabled, state.discardEnabled, state.source::canDecideDraftOffer)
+                    EditorDraftOfferList(offers, host::restoreOffer, host::discardOffer) { id ->
+                        val enabled = state.source.canDecideDraftOffer(id)
+                        EditorDraftOfferDecisionState(state.restoreEnabled && enabled, state.discardEnabled && enabled)
+                    }
                 }
             }
             MessageFormErrorState(onRetry = host::retryFormLoad,

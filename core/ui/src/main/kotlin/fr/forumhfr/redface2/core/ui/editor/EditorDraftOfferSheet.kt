@@ -90,8 +90,10 @@ fun EditorDraftOfferSheet(
             }
             Text(message, style = MaterialTheme.typography.bodyMedium)
             if (offers.isEmpty()) EditorDraftOfferDecisions(onRestore, onDiscard, restoreEnabled, discardEnabled)
-            else EditorDraftOfferList(offers, onRestoreOffer, onDiscardOffer, restoreEnabled, discardEnabled,
-                canDecideOffer)
+            else EditorDraftOfferList(offers, onRestoreOffer, onDiscardOffer) { id ->
+                val enabled = canDecideOffer(id)
+                EditorDraftOfferDecisionState(restoreEnabled && enabled, discardEnabled && enabled)
+            }
         }
     }
 }
@@ -100,15 +102,14 @@ fun EditorDraftOfferSheet(
  * ED-40: offered versions, most recent first, each with its own date, a two-line excerpt and its
  * decisions. Also used inline on the MP form-failure surface, which has no chrome to open a sheet.
  * The excerpt is recomputed from the offer and never saved (ED-81).
+ * [decisions] combines the host's global and per-offer guards for each row.
  */
 @Composable
 fun EditorDraftOfferList(
     offers: List<DraftOffer>,
     onRestore: (String) -> Unit,
     onDiscard: (String) -> Unit,
-    restoreEnabled: Boolean = true,
-    discardEnabled: Boolean = true,
-    canDecideOffer: (String) -> Boolean = { true },
+    decisions: (String) -> EditorDraftOfferDecisionState = { EditorDraftOfferDecisionState() },
 ) {
     val context = LocalContext.current
     val now = System.currentTimeMillis()
@@ -122,9 +123,9 @@ fun EditorDraftOfferList(
                 // A header-only offer (title or recipients, blank body) has no excerpt line.
                 if (excerpt.isNotEmpty()) Text(excerpt, style = MaterialTheme.typography.bodyMedium, maxLines = 2,
                     overflow = TextOverflow.Ellipsis)
-                val enabled = canDecideOffer(offer.id)
+                val decisionState = decisions(offer.id)
                 EditorDraftOfferDecisions({ onRestore(offer.id) }, { onDiscard(offer.id) },
-                    restoreEnabled && enabled, discardEnabled && enabled,
+                    decisionState.restoreEnabled, decisionState.discardEnabled,
                     listOf(date, excerpt).filter(String::isNotEmpty).joinToString())
             }
         }
