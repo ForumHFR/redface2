@@ -1,4 +1,2 @@
-Redface 2 v0.69.21 — dev.
-- Quick reply: "Ignore" on an inserted quote clears the basket.
-- First post: "Restore" brings back the draft title.
-- PM: editing verified against HFR.
+Redface 2 v0.69.22 — dev.
+- "Ignore" on a quote erased from the text keeps the basket.

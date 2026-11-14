@@ -731,7 +731,44 @@ class PostEditorViewModelTest {
             awaitItem()
             assertEquals(body, draftStore.saved[key]?.body)
             assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+            assertTrue(draftStore.saved[key]?.bodyProvenance?.isQuoteOnly(body) == true)
+            vm.dispatch(PostEditorIntent.PendingQuoteIgnored)
+            settleBody()
             expectNoEvents()
+        }
+    }
+
+    @Test
+    fun `ED88 ignoring a deleted inserted quote consumes Q without delivering or clearing the basket`() = runTest {
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        replyRepository.formResult = Result.failure(IOException("offline"))
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        settleBody()
+        vm.dispatch(PostEditorIntent.ReloadRequested)
+        settleBody()
+        replyRepository.formResult = Result.success(authenticatedForm("[quotemsg=101]quote[/quotemsg]"))
+        draftStore.saveFailure = IOException("disk")
+        vm.quotesDelivered.test {
+            vm.dispatch(PostEditorIntent.ReloadRequested)
+            settleBody()
+            assertEquals("[quotemsg=101]quote[/quotemsg]\n", vm.bodyFieldState.text.toString())
+            assertNotNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+            assertTrue(vm.state.value.canIgnorePendingQuote)
+            expectNoEvents()
+
+            val edited = "my text without the quote"
+            vm.editBody(TextFieldValue(edited))
+            settleBody() // The edit's own autosave is spent (no snapshot while Q is delivered).
+            draftStore.saveFailure = null
+            vm.dispatch(PostEditorIntent.PendingQuoteIgnored)
+            settleBody()
+            assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+            assertTrue(vm.state.value.pendingQuotes.isEmpty())
+            assertEquals(edited, vm.bodyFieldState.text.toString())
+            assertEquals(edited, draftStore.saved[key]?.body)
+            assertTrue(draftStore.saved[key]?.bodyProvenance?.deliveries.isNullOrEmpty())
+            expectNoEvents() // No sealed delivery: the basket stays armed.
         }
     }
 
