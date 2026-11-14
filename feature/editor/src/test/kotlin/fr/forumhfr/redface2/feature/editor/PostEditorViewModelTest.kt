@@ -773,6 +773,90 @@ class PostEditorViewModelTest {
     }
 
     @Test
+    fun `ED88 Ignore consumes a partial two-quote delivery without a seal`() =
+        assertTwoQuoteSettlement(PostEditorIntent.PendingQuoteIgnored, intact = false)
+
+    @Test
+    fun `ED88 close consumes a partial two-quote delivery without a seal`() =
+        assertTwoQuoteSettlement(PostEditorIntent.CloseRequested, intact = false)
+
+    @Test
+    fun `ED88 Reload consumes a partial two-quote delivery without a seal`() =
+        assertTwoQuoteSettlement(PostEditorIntent.ReloadRequested, intact = false)
+
+    @Test
+    fun `ED88 Ignore seals an intact two-quote delivery`() =
+        assertTwoQuoteSettlement(PostEditorIntent.PendingQuoteIgnored, intact = true)
+
+    @Test
+    fun `ED88 close seals an intact two-quote delivery`() =
+        assertTwoQuoteSettlement(PostEditorIntent.CloseRequested, intact = true)
+
+    @Test
+    fun `ED88 Reload seals an intact two-quote delivery`() =
+        assertTwoQuoteSettlement(PostEditorIntent.ReloadRequested, intact = true)
+
+    private fun assertTwoQuoteSettlement(action: PostEditorIntent, intact: Boolean) = runTest {
+        val vm = refusedTwoQuoteDelivery()
+        val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
+        val edited = (if (intact) "[quotemsg=101]quote[/quotemsg]\n\n" else "") +
+            "[quotemsg=202]quote[/quotemsg]\n\nmy text"
+        vm.editBody(TextFieldValue(edited))
+        settleBody() // Spend the edit's debounce while the failed C/Q still blocks snapshots.
+        val fetches = replyRepository.formFetches
+        draftStore.saveFailure = null
+        vm.quotesDelivered.test delivery@ {
+            expectNoEvents()
+            vm.effects.test {
+                vm.dispatch(action)
+                settleBody()
+                assertNull(draftStore.saved[key]?.pendingInlineQuoteRequest)
+                assertTrue(vm.state.value.pendingQuotes.isEmpty())
+                assertFalse(vm.state.value.quoteCommitPending)
+                assertEquals(edited, vm.bodyFieldState.text.toString())
+                assertEquals(edited, draftStore.saved[key]?.body)
+                assertEquals(intact, draftStore.saved[key]?.bodyProvenance?.deliveries?.isNotEmpty() == true)
+                assertEquals(fetches, replyRepository.formFetches) // No GET or reinsertion on retry.
+                if (intact) this@delivery.awaitItem() else this@delivery.expectNoEvents()
+                if (action != PostEditorIntent.CloseRequested) {
+                    expectNoEvents()
+                    vm.dispatch(PostEditorIntent.CloseRequested)
+                    settleBody()
+                }
+                assertEquals(PostEditorEffect.CloseCommitted, awaitItem())
+                assertFalse(vm.state.value.showUnsavedCloseDialog)
+                expectNoEvents()
+            }
+            expectNoEvents() // A partial delivery keeps the entire basket armed, including on close.
+        }
+        assertEquals(edited, draftStore.saved[key]?.body)
+        assertEquals(0, replyRepository.submitCalls)
+    }
+
+    private fun refusedTwoQuoteDelivery(): PostEditorViewModel {
+        replyRepository.formResult = Result.failure(IOException("offline"))
+        val vm = newReplyViewModel(initialQuotes = listOf(card(101), card(202)),
+            userPreferencesRepository = FakeUserPreferencesRepository(quoteCardsEnabled = false))
+        settleBody()
+        vm.dispatch(PostEditorIntent.ReloadRequested)
+        settleBody()
+        assertTrue(vm.state.value.canIgnorePendingQuote)
+        replyRepository.formResultsByNumrep = listOf(101, 202).associateWith {
+            Result.success(authenticatedForm("[quotemsg=$it]quote[/quotemsg]"))
+        }
+        draftStore.saveFailure = IOException("disk")
+        vm.dispatch(PostEditorIntent.ReloadRequested)
+        settleBody()
+        assertTrue(vm.bodyFieldState.text.contains("[quotemsg=101]quote[/quotemsg]"))
+        assertTrue(vm.bodyFieldState.text.contains("[quotemsg=202]quote[/quotemsg]"))
+        val pending = draftStore.saved[EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)]?.pendingInlineQuoteRequest
+        assertEquals(listOf(101, 202), pending?.quotes?.map { it.numreponse })
+        assertTrue(vm.state.value.quoteCommitPending)
+        assertTrue(vm.state.value.canIgnorePendingQuote)
+        return vm
+    }
+
+    @Test
     fun `ED52 Room reconciliation does not replay an already consumed card handoff`() = runTest {
         val key = EditorDraftKey.reply(SAMPLE_CAT, SAMPLE_TOPIC_ID)
         val pending = PendingInlineQuoteRequest(SAMPLE_CAT, SAMPLE_TOPIC_ID,

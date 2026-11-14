@@ -17,6 +17,7 @@ import fr.forumhfr.redface2.core.domain.editor.visibleOver
 import fr.forumhfr.redface2.core.domain.editor.mergeEditorBody
 import fr.forumhfr.redface2.core.domain.editor.EditorDraftStore
 import fr.forumhfr.redface2.core.domain.editor.EditorSubmissionBinding
+import fr.forumhfr.redface2.core.domain.write.QuotedNumreponses
 import fr.forumhfr.redface2.core.ui.editor.BbcodeFormatResult
 import fr.forumhfr.redface2.core.ui.editor.EditorError
 import fr.forumhfr.redface2.core.ui.editor.EditorSessionCheckpoint
@@ -135,7 +136,8 @@ internal class PrivateMessageReplyDraftSession(
 
     /**
      * ED-88 (#1616) — called once per SEALED delivery : the quoted body and the erased request were
-     * written together. Erasing a request without a staged body (« Ignorer ») never calls it.
+     * written together, with every requested quote still in the field. Ignoring without delivery
+     * never calls it, including when an inserted quote was deleted before the write succeeded.
      */
     var quoteDeliveryObserver: () -> Unit = {}
 
@@ -151,10 +153,14 @@ internal class PrivateMessageReplyDraftSession(
         val snapshot = EditorDraftStore.Draft(bodyFieldState.text.toString(), isPrivate = true,
             bodyProvenance = submission.drafts.provenanceFor(bodyFieldState.text.toString()),
             offerToResolve = pendingOfferResolution())
-        val result = submission.drafts.consumeInlineQuoteRequest(request, snapshot, deliveredBody)
+        val sealsDelivery = containsAllRequestedQuotes(request)
+        val result = if (sealsDelivery) {
+            submission.drafts.consumeInlineQuoteRequest(request, snapshot, deliveredBody)
+        } else submission.drafts.consumeInlineQuoteRequest(request)
         if (result is EditorDraftStore.StoreWriteResult.Written) {
             deliveryPending = false
-            quoteDeliveryObserver()
+            stagedDelivery = null
+            if (sealsDelivery) quoteDeliveryObserver()
         }
         recordQuoteWrite(result)
         updateState { it.copy(quoteCommitPending = deliveryPending) }
@@ -162,6 +168,10 @@ internal class PrivateMessageReplyDraftSession(
         if (!deliveryPending) scheduleAutosave()
         return result
     }
+
+    private fun containsAllRequestedQuotes(pending: PendingInlineQuoteRequest): Boolean =
+        QuotedNumreponses.fromBbcode(bodyFieldState.text.toString())
+            .containsAll(pending.quotes.map { it.numreponse })
 
     init {
         submission.drafts.checkpointObserver = { draft, version, result ->
@@ -385,7 +395,8 @@ internal class PrivateMessageReplyDraftSession(
 
     /**
      * ED-132: a delivered quote whose C/Q transaction is pending or failed seals [draftSnapshot].
-     * A close settles it first, then saves the field as it is now, typing made since included.
+     * A close settles it first (without a delivery seal if any quote is missing), then saves the
+     * field as it is now, typing made since included.
      * When that transaction still fails, nothing typed since the delivery can be saved without
      * risking a duplicate quote: false. False as well when the last write of the field is refused
      * by the store (failure or conflict) while the field holds content the row does not. The caller

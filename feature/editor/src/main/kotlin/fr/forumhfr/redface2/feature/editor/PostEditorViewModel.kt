@@ -552,9 +552,8 @@ class PostEditorViewModel @AssistedInject constructor(
         updateChromeState { it.copy(isLoadingForm = true) }
         viewModelScope.launch {
             // ED-88: Ignore seals an inserted delivery only while all its quotes remain in the field.
-            val present = QuotedNumreponses.fromBbcode(bodyFieldState.text.toString())
             val sealsDelivery = pending != null && pending == deliveredInlineQuoteRequest &&
-                !_state.value.unreadableQuoteRequest && present.containsAll(pending.quotes.map { it.numreponse })
+                !_state.value.unreadableQuoteRequest && containsAllRequestedQuotes(pending)
             val result = if (_state.value.unreadableQuoteRequest) {
                 submission.drafts.discardUnreadableInlineQuoteRequest()
             } else {
@@ -723,20 +722,27 @@ class PostEditorViewModel @AssistedInject constructor(
         commitInlineQuoteDelivery()
     }
 
-    /** Deliver the current body and remove exactly this request in one awaited CAS. */
+    private fun containsAllRequestedQuotes(pending: PendingInlineQuoteRequest): Boolean =
+        QuotedNumreponses.fromBbcode(bodyFieldState.text.toString())
+            .containsAll(pending.quotes.map { it.numreponse })
+
+    /** Settle this request; only a field holding every requested quote seals its delivery. */
     private suspend fun commitInlineQuoteDelivery(): Unit = quoteCommit.withLock {
         // A close settling this delivery may queue behind the first CAS: it then finds Q consumed.
         val pending = submission.drafts.pendingInlineQuoteRequest ?: return@withLock
         submission.flush(null)
-        val result = submission.drafts.consumeInlineQuoteRequest(
-            pending, deliveredDraft(), deliveredBody = deliveredQuoteBody,
-        )
+        val sealsDelivery = containsAllRequestedQuotes(pending)
+        val result = if (sealsDelivery) {
+            submission.drafts.consumeInlineQuoteRequest(pending, deliveredDraft(), deliveredBody = deliveredQuoteBody)
+        } else submission.drafts.consumeInlineQuoteRequest(pending)
         if (result is EditorDraftStore.StoreWriteResult.Written && !submission.drafts.invalidated) {
             submission.resolveDraftWrite(result)
             finishInlineQuoteDelivery()
             deliveredQuoteBody = null
-            _quotesDelivered.trySend(Unit) // ED-88: the citations are durable, the basket may go.
-            if (duplicateQuoteDelivery) chromeEvents.quoteAlreadyDelivered()
+            if (sealsDelivery) {
+                _quotesDelivered.trySend(Unit) // ED-88: all citations are durable, the basket may go.
+                if (duplicateQuoteDelivery) chromeEvents.quoteAlreadyDelivered()
+            }
             duplicateQuoteDelivery = false
             // Preserve keystrokes made while the CAS was suspended.
             scheduleAutosave()
@@ -1072,7 +1078,7 @@ class PostEditorViewModel @AssistedInject constructor(
      */
     private suspend fun saveForClose(): Boolean = try {
         // ED-132: a delivered quote whose C/Q transaction is pending or failed seals the autosave.
-        // Settle it first, then save the field as it is now, typing made since included.
+        // Settle it first (without a delivery seal if a quote was deleted), then save the live field.
         if (deliveredInlineQuoteRequest != null) commitInlineQuoteDelivery()
         // Still not durable: nothing typed since the delivery can be saved without risking a
         // duplicate quote. Otherwise the last write of the field must itself succeed.
