@@ -193,6 +193,42 @@ class MessageMenuSheetTest {
     }
 
     @Test
+    fun `own message without toolbar uses the same canonical pseudo fallback as topics`() {
+        val message = sampleMessage().copy(author = "  A\u200Blice   Du\u00A0Forum  ")
+
+        assertFalse(message.isEditable)
+        assertFalse(message.isOwnPost)
+        assertTrue(canEditPrivateMessage(message, "alice du forum", true, "Subject"))
+        assertFalse(canEditPrivateMessage(message, null, true, "Subject"))
+        assertFalse(canEditPrivateMessage(message, "  ", true, "Subject"))
+        assertFalse(canEditPrivateMessage(message, "alice du forum", false, "Subject"))
+        assertFalse(canEditPrivateMessage(message, "alice du forum", true,
+            fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository.STORAGE_SUBJECT_HASH))
+    }
+
+    @Test
+    fun `similar pseudo and a quote from the account never grant edit permission`() {
+        // This message quotes Alice, but its author is a different participant.
+        val message = richMessage().copy(author = "Alice_", isOwnPost = true)
+
+        assertFalse(canEditPrivateMessage(message, "Alice", true, "Subject"))
+        assertFalse(canEditPrivateMessage(sampleMessage().copy(author = "Alïce"), "Alice", true, "Subject"))
+    }
+
+    @Test
+    fun `own message without toolbar opens the editor after dismissing the menu`() {
+        var edits = 0
+        mount(
+            message = sampleMessage(),
+            connectedPseudo = "  aLiCe  ",
+            callbacks = MenuCallbacks(onEdit = { edits++ }),
+        )
+
+        compose.onNodeWithText("Modifier").assertIsDisplayed().performClick()
+        compose.waitUntil(timeoutMillis = 2_000) { edits == 1 }
+    }
+
+    @Test
     fun `editable message opens the editor after dismissing the menu`() {
         var edits = 0
         mount(
@@ -205,7 +241,7 @@ class MessageMenuSheetTest {
 
     @Test
     fun `another message never exposes edit even if a callback is supplied`() {
-        mount(sampleMessage(), callbacks = MenuCallbacks(onEdit = {}))
+        mount(richMessage().copy(author = "Alice_"), connectedPseudo = "Alice", callbacks = MenuCallbacks(onEdit = {}))
         compose.onNodeWithText("Modifier").assertDoesNotExist()
     }
 
@@ -214,6 +250,7 @@ class MessageMenuSheetTest {
         authorBlocked: Boolean = false,
         contentVisible: Boolean = true,
         callbacks: MenuCallbacks = MenuCallbacks(),
+        connectedPseudo: String? = null,
     ) {
         compose.setContent {
             RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
@@ -227,6 +264,7 @@ class MessageMenuSheetTest {
                     onToggleMultiQuote = callbacks.onToggleMultiQuote,
                     onToggleBlockAuthor = callbacks.onToggleBlockAuthor,
                     onEdit = callbacks.onEdit,
+                    connectedPseudo = connectedPseudo,
                 )
             }
         }

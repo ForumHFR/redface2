@@ -325,6 +325,8 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
         // #221 — retry an initial offline empty result on the user's explicit refresh. The
         // repository's 24 h cache and single-flight absorb fresh/concurrent calls.
         loadStaff()
+        // Retry a failed local MPStorage read; the subject and cached thread exclusion still apply.
+        if (!current.editActionsAvailable) authenticatedPseudo?.let(::loadEditCapability)
         load(current.page, LandingRequest.None)
     }
 

@@ -72,6 +72,7 @@ internal fun MessageMenuSheet(
     onToggleMultiQuote: (() -> Unit)? = null,
     onToggleBlockAuthor: (() -> Unit)? = null,
     onEdit: (() -> Unit)? = null,
+    connectedPseudo: String? = null,
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val coroutineScope = rememberCoroutineScope()
@@ -146,7 +147,7 @@ internal fun MessageMenuSheet(
                 Text(stringResource(R.string.messages_message_menu_copy_text))
             }
 
-            if (onEdit != null && message.isEditable) {
+            if (onEdit != null && isPrivateMessageEditable(message, connectedPseudo)) {
                 Spacer(Modifier.height(8.dp))
                 OutlinedButton(
                     onClick = {
