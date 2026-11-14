@@ -1224,7 +1224,7 @@ private fun ThreadMessageMenuHost(
             contentVisible = contentVisible,
             onDismiss = onClear,
             onEdit = onEdit?.takeIf {
-                canEditPrivateMessage(message, connectedPseudo, editActionsAvailable, mode.thread.subject)
+                canEditPrivateMessage(message, connectedPseudo, editActionsAvailable, mode.thread)
             }?.let { edit -> { edit(message) } },
             onOpenProfile = message.profileId?.let { profileId ->
                 { onOpenProfile(profileId, message.author, message.avatarUrl) }

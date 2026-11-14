@@ -3,8 +3,9 @@ package fr.forumhfr.redface2.feature.messages
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository
 import fr.forumhfr.redface2.core.model.Post
+import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 
-/** Like topics, own messages remain editable when affichoutils=0 hides the toolbar edit link. */
+/** Toolbar evidence or session ownership; page-level guards live in [canEditPrivateMessage]. */
 internal fun isPrivateMessageEditable(message: Post, connectedPseudo: String?): Boolean {
     val isOwnMessage = !connectedPseudo.isNullOrBlank() &&
         canonicalizePseudo(message.author) == canonicalizePseudo(connectedPseudo)
@@ -16,6 +17,15 @@ internal fun canEditPrivateMessage(
     message: Post,
     connectedPseudo: String?,
     editActionsAvailable: Boolean,
-    subject: String,
-): Boolean = isPrivateMessageEditable(message, connectedPseudo) && connectedPseudo != null && editActionsAvailable &&
-    subject != MpStorageRepository.STORAGE_SUBJECT_HASH
+    thread: PrivateMessageThread,
+): Boolean {
+    if (connectedPseudo == null || !editActionsAvailable || !thread.canReply ||
+        thread.subject == MpStorageRepository.STORAGE_SUBJECT_HASH
+    ) {
+        return false
+    }
+    // Pages 2+ start with the previous page's recap. Its quoteRef can be absent with the tools,
+    // so exclude the first message from the fallback even without a parsed ref=0.
+    val isPreviousPageRecap = thread.page > 1 && thread.messages.firstOrNull()?.numreponse == message.numreponse
+    return isPrivateMessageEditable(message, connectedPseudo) && (message.isEditable || !isPreviousPageRecap)
+}

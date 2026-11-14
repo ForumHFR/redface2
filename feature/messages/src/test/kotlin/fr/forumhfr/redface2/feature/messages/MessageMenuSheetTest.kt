@@ -20,6 +20,7 @@ import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.PostBlock
 import fr.forumhfr.redface2.core.model.PostContent
 import fr.forumhfr.redface2.core.model.PostInline
+import fr.forumhfr.redface2.core.model.messages.PrivateMessageThread
 import fr.forumhfr.redface2.core.ui.RedfaceTheme
 import java.time.Instant
 import org.junit.Assert.assertEquals
@@ -185,11 +186,11 @@ class MessageMenuSheetTest {
     @Test
     fun `edit eligibility requires a live session and excludes both local storage identities`() {
         val editable = sampleMessage().copy(isEditable = true)
-        assertTrue(canEditPrivateMessage(editable, "Alice", true, "Subject"))
-        assertFalse(canEditPrivateMessage(editable, null, true, "Subject"))
-        assertFalse(canEditPrivateMessage(editable, "Alice", false, "Subject"))
-        assertFalse(canEditPrivateMessage(editable, "Alice", true,
-            fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository.STORAGE_SUBJECT_HASH))
+        assertTrue(canEditPrivateMessage(editable, "Alice", true, sampleThread()))
+        assertFalse(canEditPrivateMessage(editable, null, true, sampleThread()))
+        assertFalse(canEditPrivateMessage(editable, "Alice", false, sampleThread()))
+        assertFalse(canEditPrivateMessage(editable, "Alice", true, sampleThread().copy(
+            subject = fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository.STORAGE_SUBJECT_HASH)))
     }
 
     @Test
@@ -198,12 +199,34 @@ class MessageMenuSheetTest {
 
         assertFalse(message.isEditable)
         assertFalse(message.isOwnPost)
-        assertTrue(canEditPrivateMessage(message, "alice du forum", true, "Subject"))
-        assertFalse(canEditPrivateMessage(message, null, true, "Subject"))
-        assertFalse(canEditPrivateMessage(message, "  ", true, "Subject"))
-        assertFalse(canEditPrivateMessage(message, "alice du forum", false, "Subject"))
-        assertFalse(canEditPrivateMessage(message, "alice du forum", true,
-            fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository.STORAGE_SUBJECT_HASH))
+        assertTrue(canEditPrivateMessage(message, "alice du forum", true, sampleThread()))
+        assertFalse(canEditPrivateMessage(message, null, true, sampleThread()))
+        assertFalse(canEditPrivateMessage(message, "  ", true, sampleThread()))
+        assertFalse(canEditPrivateMessage(message, "alice du forum", false, sampleThread()))
+        assertFalse(canEditPrivateMessage(message, "alice du forum", true, sampleThread().copy(
+            subject = fr.forumhfr.redface2.core.domain.mpstorage.MpStorageRepository.STORAGE_SUBJECT_HASH)))
+    }
+
+    @Test
+    fun `edit eligibility requires a replyable thread with or without a served link`() {
+        val message = sampleMessage()
+        val thread = sampleThread().copy(canReply = false)
+
+        assertFalse(canEditPrivateMessage(message, "Alice", true, thread))
+        assertFalse(canEditPrivateMessage(message.copy(isEditable = true), "Alice", true, thread))
+    }
+
+    @Test
+    fun `previous page recap is excluded from the fallback even when quote ref is missing`() {
+        for (ref in listOf(0, null)) {
+            val recap = sampleMessage().copy(quoteRef = ref)
+            val current = sampleMessage().copy(numreponse = 43)
+            val thread = sampleThread().copy(page = 2, totalPages = 2, messages = listOf(recap, current))
+
+            assertFalse(canEditPrivateMessage(recap, "Alice", true, thread))
+            assertTrue(canEditPrivateMessage(current, "Alice", true, thread))
+            assertTrue(canEditPrivateMessage(recap.copy(isEditable = true), "Alice", true, thread))
+        }
     }
 
     @Test
@@ -211,8 +234,8 @@ class MessageMenuSheetTest {
         // This message quotes Alice, but its author is a different participant.
         val message = richMessage().copy(author = "Alice_", isOwnPost = true)
 
-        assertFalse(canEditPrivateMessage(message, "Alice", true, "Subject"))
-        assertFalse(canEditPrivateMessage(sampleMessage().copy(author = "Alïce"), "Alice", true, "Subject"))
+        assertFalse(canEditPrivateMessage(message, "Alice", true, sampleThread()))
+        assertFalse(canEditPrivateMessage(sampleMessage().copy(author = "Alïce"), "Alice", true, sampleThread()))
     }
 
     @Test
@@ -300,6 +323,16 @@ class MessageMenuSheetTest {
                 ),
             ),
         ),
+    )
+
+    private fun sampleThread(): PrivateMessageThread = PrivateMessageThread(
+        threadId = 1,
+        subject = "Subject",
+        correspondent = "Bob",
+        messages = listOf(sampleMessage()),
+        page = 1,
+        totalPages = 1,
+        canReply = true,
     )
 
     private fun sampleMessage(): Post = Post(
