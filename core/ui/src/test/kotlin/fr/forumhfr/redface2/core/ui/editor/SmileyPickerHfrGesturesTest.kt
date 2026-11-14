@@ -397,29 +397,23 @@ class SmileyPickerHfrGesturesTest {
 
     @Test
     fun `wiki feedback expires and the last row accepts touch insertion again`() {
-        // #1417 Q2: the tab body has a fixed height and the feedback is centered in it, so enough
-        // results are needed for a row to lie under the feedback.
-        val results = (1..48).map { other.copy(token = "[:fictif $it]") }
-        val controller = controller(wikiItems = results)
+        val controller = controller(wikiItems = listOf(other, other.copy(token = "[:fictif c]"), wiki))
         showWiki(controller)
         mount(controller)
         compose.mainClock.autoAdvance = false
         val search = compose.onNode(hasSetTextAction())
+        // Three results fit in a single row; the third cell lies under the centered feedback.
+        val cell = compose.onNodeWithContentDescription(description(wiki))
         val searchBounds = search.fetchSemanticsNode().boundsInRoot
+        val cellBounds = cell.fetchSemanticsNode().boundsInRoot
         compose.runOnIdle {
-            controller.onFavoriteClicked(results.first())
+            controller.onFavoriteClicked(wiki)
             dispatcher.scheduler.runCurrent()
         }
         compose.mainClock.advanceTimeByFrame()
         val message = compose.onNodeWithText(context.getString(R.string.editor_smiley_favorite_added))
         message.assertIsDisplayed()
-        val messageBounds = message.fetchSemanticsNode().boundsInRoot
-        val (target, cellBounds) = results.firstNotNullOf { item ->
-            compose.onAllNodesWithContentDescription(description(item)).fetchSemanticsNodes().firstOrNull()
-                ?.boundsInRoot?.takeIf { it.overlaps(messageBounds) }?.let { item to it }
-        }
-        val cell = compose.onNodeWithContentDescription(description(target))
-        val coveredBounds = cellBounds.intersect(messageBounds)
+        val coveredBounds = cellBounds.intersect(message.fetchSemanticsNode().boundsInRoot)
         assertTrue(coveredBounds.width > 0f && coveredBounds.height > 0f)
         val touchPosition = coveredBounds.center - cellBounds.topLeft
         compose.mainClock.advanceTimeBy(3500L)
@@ -437,7 +431,7 @@ class SmileyPickerHfrGesturesTest {
         cell.performTouchInput { click(touchPosition) }
         compose.mainClock.advanceTimeByFrame()
         compose.runOnIdle {
-            assertEquals(target.token, inserted)
+            assertEquals(wiki.token, inserted)
             assertEquals(SmileyPickerState.Hidden, controller.state.value)
         }
     }

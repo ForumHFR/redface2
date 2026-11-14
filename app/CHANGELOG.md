@@ -16,6 +16,10 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.69.24` — `internal` (dev) — 2026-11-14
+
+Smileys ([#1417](https://github.com/ForumHFR/redface2/issues/1417)) : à la demande de XaTriX, la feuille des smileys reprend la hauteur de chaque onglet, comme avant la 0.69.19 ; la hauteur commune aux trois onglets (PR [#1630](https://github.com/ForumHFR/redface2/pull/1630)) est retirée. Les autres feuilles gardent leur cran unique. Édition MP ([#1625](https://github.com/ForumHFR/redface2/issues/1625), PR [#1647](https://github.com/ForumHFR/redface2/pull/1647)) : quand HFR ne fournit pas le lien d'édition d'un de ses propres messages, le menu « … » propose quand même « Modifier » dans une conversation où l'on peut répondre, sauf sur le message de la page précédente repris en tête de page ; le menu relit le message affiché après un rafraîchissement, et une lecture MPStorage en échec est retentée au rafraîchissement.
+
 ## `0.69.23` — `internal` (dev) — 2026-11-14
 
 Brouillons proposés sous ↺ ([#1417](https://github.com/ForumHFR/redface2/issues/1417), PR [#1645](https://github.com/ForumHFR/redface2/pull/1645)) : quand il y en a plusieurs, « Ignorer » en retire un et laisse la feuille ouverte, dans l'éditeur de post, le formulaire de sujet et les deux éditeurs MP. La feuille se ferme quand il n'en reste plus ; « Restaurer » la ferme toujours. Pendant l'enregistrement d'un choix, les boutons sont désactivés un instant. Citations (PR [#1644](https://github.com/ForumHFR/redface2/pull/1644)) : à la fermeture et au « Recharger » de l'éditeur de post, et dans l'éditeur de réponse MP (fermeture, « Ignorer », « Recharger »), une livraison de citations ne vide le panier que si toutes les citations sont encore dans le champ ; sinon le panier reste entier et le texte saisi est enregistré.

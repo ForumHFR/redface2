@@ -7,7 +7,6 @@ import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithContentDescription
-import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.test.core.app.ApplicationProvider
@@ -98,18 +97,6 @@ class SmileyPickerFavoritesTest {
         composeTestRule.onAllNodesWithText(context.getString(R.string.editor_smiley_tab_standard))
             .assertCountEquals(1)
         composeTestRule.onNodeWithContentDescription(description(BUILTIN_HFR_SMILEYS.first())).assertExists()
-    }
-
-    // #1417 Q2: two favorites or the whole Standard grid, the sheet keeps one height.
-    @Test
-    fun `the sheet keeps one height between a short Favorites tab and the full Standard tab`() {
-        val controller = controller(favorites)
-        composeSheet(controller) {}
-        val sheet = composeTestRule.onNodeWithTag("smiley_picker_sheet")
-        val favoritesHeight = sheet.fetchSemanticsNode().boundsInRoot.height
-        composeTestRule.onNodeWithText(context.getString(R.string.editor_smiley_tab_standard)).performClick()
-        composeTestRule.waitForIdle()
-        assertEquals(favoritesHeight, sheet.fetchSemanticsNode().boundsInRoot.height)
     }
 
     private fun controller(items: List<EditorSmiley>) = SmileyPickerController(
