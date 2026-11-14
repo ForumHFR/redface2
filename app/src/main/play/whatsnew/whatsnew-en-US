@@ -1,2 +1,3 @@
-Redface 2 v0.69.22 — dev.
-- "Ignore" on a quote erased from the text keeps the basket.
+Redface 2 v0.69.23 — dev.
+- Several drafts: "Ignore" keeps the sheet open.
+- Erased quote: the basket is kept on close.
