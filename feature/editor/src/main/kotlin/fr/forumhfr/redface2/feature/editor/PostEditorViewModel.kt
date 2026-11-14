@@ -1194,8 +1194,9 @@ class PostEditorViewModel @AssistedInject constructor(
         restoredOfferAwaitingWrite = offeredBody
         if (needsMerge) {
             replaceBody(merge.body)
-            val offeredSubject = selected?.draft?.subject
-            if (snapshot.isSubjectEditable && snapshot.subject.isBlank() && offeredSubject != null) {
+            // An untouched server subject is still a restore seed. Without a form, retain the
+            // offered subject too: consuming the offer must not replace it with null on disk.
+            if (snapshot.subject.isBlank() || snapshot.subject == loadedForm?.sujet) {
                 selected?.draft?.let(::restoreSubject)
             }
         }
@@ -1587,7 +1588,7 @@ class PostEditorViewModel @AssistedInject constructor(
             } else {
                 emailNotificationEnabled
             },
-            hasMessageTone = form.msgIcon != null,
+            hasMessageTone = target !is PostEditorTarget.PrivateMessage || form.msgIcon != null,
             msgIcon = if (hydrateOptions) form.msgIcon.toEditorMsgIcon() else msgIcon,
             optionsHydratedFromForm = true,
             // Phase 2F-B (#11) — keep the parsed userId around for the wiki smiley search.

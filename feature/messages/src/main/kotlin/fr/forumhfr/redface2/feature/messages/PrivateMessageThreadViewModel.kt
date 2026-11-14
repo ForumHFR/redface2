@@ -340,10 +340,12 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
      * Applies one successful editor handoff to this retained ViewModel. Repeated delivery of the
      * same [PrivateMessageSubmitResult.eventId] is inert; a fresh event force-refetches its page
      * without replacing the navigation entry (and therefore without losing [pageAnchors]).
+     * Returns false until the account is known so the screen retains the handoff for a retry.
      */
-    fun applySubmitResult(result: PrivateMessageSubmitResult) {
-        val account = authenticatedPseudo ?: return
-        if (result.eventId == lastSubmitEventId) return
+    @Suppress("ReturnCount") // Unknown account and duplicate guards precede one accepted handoff.
+    fun applySubmitResult(result: PrivateMessageSubmitResult): Boolean {
+        val account = authenticatedPseudo ?: return false
+        if (result.eventId == lastSubmitEventId) return true
         lastSubmitEventId = result.eventId
         if (result.operation == PostSubmitOperation.Edit) {
             editAcknowledgements.accept(account, result.eventId)
@@ -357,6 +359,7 @@ class PrivateMessageThreadViewModel @AssistedInject constructor(
             result.page, landing,
             editEventId = result.eventId.takeIf { result.operation == PostSubmitOperation.Edit },
         )
+        return true
     }
 
     /** Clears exactly the landing the screen applied; a newer owner/value is never erased. */

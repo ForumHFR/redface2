@@ -895,6 +895,118 @@ class PostEditorRestorationTest {
     }
 
     @Test
+    fun privateEditRestoresOfferedBodyAndChangedSubjectAfterClosingAndReopening() = runTest(dispatcher) {
+        val mpKey = EditorDraftKey.mpEdit(101)
+        coEvery { edits.fetchEditPostForm(any<PrivateMessageEditContext>()) } returns
+            form("server body").copy(sujet = "Hello", isSubjectEditable = true)
+        val first = open(request = privateRequest())
+        runCurrent()
+        first.submit(PostEditorIntent.SubjectChanged("Hello v2"))
+        type(first, "edited body")
+        sync()
+        val close = async { first.effects.first() }
+        first.submit(PostEditorIntent.CloseRequested)
+        runCurrent()
+        assertEquals(PostEditorEffect.CloseCommitted, close.await())
+        assertEquals("Hello v2", store.saved[mpKey]?.subject)
+        first.viewModelScope.cancel()
+
+        val reopened = open(request = privateRequest())
+        runCurrent()
+        assertEquals("Hello", reopened.state.value.subject)
+        assertEquals("edited body", reopened.state.value.restorableDraft)
+        reopened.submit(PostEditorIntent.DraftRestoreRequested)
+        runCurrent()
+        assertEquals("edited body", reopened.bodyFieldState.text.toString())
+        assertEquals("Hello v2", reopened.state.value.subject)
+        assertEquals("Hello v2", store.saved[mpKey]?.subject)
+        assertNull(reopened.state.value.restorableDraft)
+        assertTrue(reopened.state.value.draftOffers.isEmpty())
+    }
+
+    @Test
+    fun privateEditRestoresAnOfferWithOnlyTheSubjectChanged() = runTest(dispatcher) {
+        val mpKey = EditorDraftKey.mpEdit(101)
+        store.preload(mpKey, Draft("server body", subject = "Hello v2"))
+        coEvery { edits.fetchEditPostForm(any<PrivateMessageEditContext>()) } returns
+            form("server body").copy(sujet = "Hello", isSubjectEditable = true)
+        val editor = open(request = privateRequest())
+        runCurrent()
+        assertEquals("server body", editor.state.value.restorableDraft)
+        editor.submit(PostEditorIntent.DraftRestoreRequested)
+        runCurrent()
+        assertEquals("server body", editor.bodyFieldState.text.toString())
+        assertEquals("Hello v2", editor.state.value.subject)
+        assertEquals("Hello v2", store.saved[mpKey]?.subject)
+        assertNull(editor.state.value.restorableDraft)
+        assertTrue(editor.state.value.draftOffers.isEmpty())
+    }
+
+    @Test
+    fun privateEditRetainsTheOfferedSubjectWhenRestoringAfterFormFailure() = runTest(dispatcher) {
+        val mpKey = EditorDraftKey.mpEdit(101)
+        store.preload(mpKey, Draft("edited body", subject = "Hello v2"))
+        coEvery { edits.fetchEditPostForm(any<PrivateMessageEditContext>()) } throws IOException("offline")
+        val editor = open(request = privateRequest())
+        runCurrent()
+        assertFalse(editor.state.value.isSubjectEditable)
+        assertEquals(EditorErrors.formNetwork, editor.state.value.submitError)
+        editor.submit(PostEditorIntent.DraftRestoreRequested)
+        runCurrent()
+        assertEquals("edited body", editor.bodyFieldState.text.toString())
+        assertEquals("Hello v2", editor.state.value.subject)
+        assertEquals("Hello v2", store.saved[mpKey]?.subject)
+        assertNull(editor.state.value.restorableDraft)
+        editor.submit(PostEditorIntent.Stopped)
+        runCurrent()
+        assertEquals("Hello v2", store.saved[mpKey]?.subject)
+
+        coEvery { edits.fetchEditPostForm(any<PrivateMessageEditContext>()) } returns
+            form("server body").copy(sujet = "Hello", isSubjectEditable = true)
+        editor.submit(PostEditorIntent.ReloadRequested)
+        runCurrent()
+        assertTrue(editor.state.value.isSubjectEditable)
+        assertEquals("Hello v2", editor.state.value.subject)
+        assertEquals("edited body", editor.bodyFieldState.text.toString())
+    }
+
+    @Test
+    fun privateEditRestoreKeepsASubjectTypedSinceFormHydration() = runTest(dispatcher) {
+        val mpKey = EditorDraftKey.mpEdit(101)
+        store.preload(mpKey, Draft("edited body", subject = "Hello v2"))
+        coEvery { edits.fetchEditPostForm(any<PrivateMessageEditContext>()) } returns
+            form("server body").copy(sujet = "Hello", isSubjectEditable = true)
+        val editor = open(request = privateRequest())
+        runCurrent()
+        editor.submit(PostEditorIntent.SubjectChanged("live subject"))
+        editor.submit(PostEditorIntent.DraftRestoreRequested)
+        runCurrent()
+        assertEquals("edited body", editor.bodyFieldState.text.toString())
+        assertEquals("live subject", editor.state.value.subject)
+        assertEquals("live subject", store.saved[mpKey]?.subject)
+    }
+
+    @Test
+    fun publicEditWithoutAServedToneStillSubmitsTheSelectedTone() = runTest(dispatcher) {
+        every { preferences.observeConfirmBeforePosting() } returns flowOf(false)
+        coEvery { edits.fetchEditPostForm(any<EditPostContext>()) } returns
+            form("server body").copy(msgIcon = null)
+        coEvery { edits.submitEditPost(any<EditPostContext>(), any(), any(), any()) } returns
+            ReplySubmitResult.Success(null, 1, 101, 35421)
+        val editor = open(request = request().copy(mode = PostEditorMode.Edit, numreponse = 101))
+        runCurrent()
+        assertTrue(editor.state.value.hasMessageTone)
+        assertEquals(DEFAULT_MSG_ICON, editor.state.value.msgIcon)
+        editor.submit(PostEditorIntent.MsgIconSelected(7))
+        editor.submit(PostEditorIntent.SubmitClicked())
+        runCurrent()
+        coVerify(exactly = 1) {
+            edits.submitEditPost(any<EditPostContext>(), match { it.msgIcon == "7" }, "server body", any())
+        }
+        coVerify(exactly = 0) { edits.submitEditPost(any<PrivateMessageEditContext>(), any(), any(), any()) }
+    }
+
+    @Test
     fun privateEditPersistsAttemptBeforeSendingAndNeverResendsAnUncertainAttempt() = runTest(dispatcher) {
         every { preferences.observeConfirmBeforePosting() } returns flowOf(false)
         coEvery { edits.fetchEditPostForm(any<PrivateMessageEditContext>()) } returns

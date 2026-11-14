@@ -915,6 +915,33 @@ class PrivateMessageThreadViewModelTest {
     }
 
     @Test
+    fun `edit result waits for authentication before being consumed and applies once on retry`() = runTest {
+        val authenticated = CompletableDeferred<AuthState>()
+        val auth = mockk<AuthRepository> {
+            every { observeAuthState() } returns flow { emit(authenticated.await()) }
+        }
+        val repository = loadedRepository()
+        val vm = threadViewModel(repository, authRepository = auth)
+        val result = PrivateMessageSubmitResult(20L, 1,
+            fr.forumhfr.redface2.core.model.write.PostSubmitOperation.Edit)
+        assertFalse(vm.applySubmitResult(result))
+        assertNull(vm.state.value.editAcknowledgement)
+        coVerify(exactly = 0) { repository.getPrivateMessageThread(42, any(), null) }
+
+        authenticated.complete(AuthState.Authenticated("xaat"))
+        testScheduler.runCurrent()
+        assertEquals("xaat", vm.state.value.connectedPseudo)
+        assertTrue(vm.applySubmitResult(result))
+        assertTrue(vm.applySubmitResult(result))
+        coVerify(exactly = 2) { repository.getPrivateMessageThread(42, 1, null) }
+        assertEquals(20L, vm.state.value.editAcknowledgement)
+        vm.editAcknowledgementPresented(20L)
+        assertTrue(vm.applySubmitResult(result))
+        assertNull(vm.state.value.editAcknowledgement)
+        coVerify(exactly = 2) { repository.getPrivateMessageThread(42, 1, null) }
+    }
+
+    @Test
     fun `successful edit still gets its acknowledgement when the refresh fails`() = runTest {
         val repository = loadedRepository()
         val vm = threadViewModel(repository)

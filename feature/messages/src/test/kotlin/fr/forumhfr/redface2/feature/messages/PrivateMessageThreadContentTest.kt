@@ -69,6 +69,7 @@ import fr.forumhfr.redface2.feature.messages.NoopShadowMagnifier
 import java.time.Instant
 import org.junit.Before
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -1701,6 +1702,52 @@ class PrivateMessageThreadContentTest {
             NO_OP_CALLBACKS.copy(onEdit = {}))
         compose.onNodeWithContentDescription("Options du message").performClick()
         compose.onNodeWithText("Modifier").assertDoesNotExist()
+    }
+
+    @Test
+    fun `edit acknowledgement is displayed once and never replayed after presentation`() {
+        compose.mainClock.autoAdvance = false
+        val state = mutableStateOf(contentState(listOf(message(101, "Alice", "Edited body")))
+            .copy(connectedPseudo = "Alice"))
+        val mounted = mutableStateOf(true)
+        val presentations = mutableListOf<Long>()
+        val callbacks = NO_OP_CALLBACKS.copy(onEditAcknowledgementPresented = { id ->
+            presentations += id
+            state.value = state.value.copy(editAcknowledgement = null)
+        })
+        compose.setContent {
+            RedfaceTheme(darkTheme = false, amoledTheme = false, dynamicColor = false) {
+                if (mounted.value) {
+                    PrivateMessageThreadContent(state.value, isMultiRecipientHint = false, callbacks = callbacks)
+                }
+            }
+        }
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithText("Message modifié").assertDoesNotExist()
+
+        compose.runOnIdle { state.value = state.value.copy(editAcknowledgement = 18L) }
+        compose.mainClock.advanceTimeBy(500)
+        compose.waitForIdle()
+        compose.onAllNodes(hasText("Message modifié")).assertCountEquals(1)
+        compose.onNodeWithText("Message modifié").assertIsDisplayed()
+        assertEquals(listOf(18L), presentations)
+        assertNull(state.value.editAcknowledgement)
+
+        // Clearing the pending id and an unrelated recomposition must leave the visible snackbar.
+        compose.runOnIdle { state.value = state.value.copy(showSignatures = true) }
+        compose.mainClock.advanceTimeByFrame()
+        compose.onNodeWithText("Message modifié").assertIsDisplayed()
+        assertEquals(listOf(18L), presentations)
+        compose.mainClock.advanceTimeBy(5_000)
+        compose.onNodeWithText("Message modifié").assertDoesNotExist()
+
+        // A fresh content host after navigation/rotation must not present the acknowledged id again.
+        compose.runOnIdle { mounted.value = false }
+        compose.mainClock.advanceTimeByFrame()
+        compose.runOnIdle { mounted.value = true }
+        compose.mainClock.advanceTimeBy(5_000)
+        compose.onNodeWithText("Message modifié").assertDoesNotExist()
+        assertEquals(listOf(18L), presentations)
     }
 
     private fun mountState(

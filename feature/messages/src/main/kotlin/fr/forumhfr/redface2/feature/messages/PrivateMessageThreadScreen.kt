@@ -192,11 +192,11 @@ fun PrivateMessageThreadScreen(
     }
 
     // #1040 lot 6 — editor→retained-ViewModel handoff. The event id keys one consumption even when
-    // the editor payload is identical to the previous one; :app clears its slot after this call.
-    LaunchedEffect(pendingSubmitResult?.eventId) {
+    // the editor payload is identical to the previous one; :app clears its slot once applied.
+    // The auth flow may arrive after the handoff: retry it when the account becomes known.
+    LaunchedEffect(pendingSubmitResult?.eventId, state.connectedPseudo) {
         pendingSubmitResult?.let { result ->
-            viewModel.applySubmitResult(result)
-            onSubmitResultConsumed(result)
+            if (viewModel.applySubmitResult(result)) onSubmitResultConsumed(result)
         }
     }
 
