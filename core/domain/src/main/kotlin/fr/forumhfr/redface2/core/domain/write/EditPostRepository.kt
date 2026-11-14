@@ -39,9 +39,8 @@ interface EditPostRepository {
      * Edits an MP without changing its recipients or deleting it. A first-message subject can be
      * changed through `form.copy(sujet = ...)` only when [ReplyForm.isSubjectEditable] is true.
      * Unknown responses remain [ReplyFailureReason.Unknown]: callers must keep the durable attempt
-     * unresolved and surface uncertainty, without automatic resubmission.
-     *
-     * PENDING(#1625): MP edit success response not yet observed live.
+     * unresolved and surface uncertainty, without automatic resubmission. Success is the Topic edit
+     * sentence, observed live on an MP (#1625), with thread and page taken from [context].
      */
     suspend fun submitEditPost(
         context: PrivateMessageEditContext,
