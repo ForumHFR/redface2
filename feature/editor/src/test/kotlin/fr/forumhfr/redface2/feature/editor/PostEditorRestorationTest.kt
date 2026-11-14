@@ -942,7 +942,8 @@ class PostEditorRestorationTest {
     @Test
     fun privateEditSubmitsServedOptionsAndToneThroughThePrivateOverload() = runTest(dispatcher) {
         every { preferences.observeConfirmBeforePosting() } returns flowOf(false)
-        coEvery { edits.fetchEditPostForm(any<PrivateMessageEditContext>()) } returns form("server body").copy(msgIcon = "1")
+        coEvery { edits.fetchEditPostForm(any<PrivateMessageEditContext>()) } returns
+            form("server body").copy(msgIcon = "1")
         coEvery { edits.submitEditPost(any<PrivateMessageEditContext>(), any(), any(), any()) } returns
             ReplySubmitResult.Success(null, 3, 101, 42)
         val editor = open(request = privateRequest())

@@ -41,7 +41,9 @@ class PrivateMessageEditAcknowledgementsTest {
         assertEquals(42L, restored.ready.value)
         restored.presented(42L)
         val presentedState = SavedStateHandle(restoredState.keys().associateWith { restoredState.get<Any?>(it) })
-        val recreated = PrivateMessageEditAcknowledgements(presentedState, backgroundScope) { testScheduler.currentTime }
+        val recreated = PrivateMessageEditAcknowledgements(presentedState, backgroundScope) {
+            testScheduler.currentTime
+        }
         recreated.bind("alice")
         runCurrent()
         assertNull(recreated.ready.value)

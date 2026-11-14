@@ -39,7 +39,6 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import fr.forumhfr.redface2.core.model.Post
 import fr.forumhfr.redface2.core.model.postContentPlainText
-import fr.forumhfr.redface2.core.ui.icon.RedfaceVectorIcon
 import fr.forumhfr.redface2.core.ui.avatar.RedfaceUserAvatar
 import fr.forumhfr.redface2.core.ui.post.hideThenDismiss
 
@@ -158,7 +157,6 @@ internal fun MessageMenuSheet(
                     },
                     modifier = Modifier.fillMaxWidth(),
                 ) {
-                    RedfaceVectorIcon(fr.forumhfr.redface2.core.ui.R.drawable.ic_edit)
                     Text(stringResource(R.string.messages_message_menu_edit))
                 }
             }

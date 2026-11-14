@@ -195,7 +195,10 @@ class MessageMenuSheetTest {
     @Test
     fun `editable message opens the editor after dismissing the menu`() {
         var edits = 0
-        mount(sampleMessage().copy(isEditable = true, isOwnPost = true), callbacks = MenuCallbacks(onEdit = { edits++ }))
+        mount(
+            message = sampleMessage().copy(isEditable = true, isOwnPost = true),
+            callbacks = MenuCallbacks(onEdit = { edits++ }),
+        )
         compose.onNodeWithText("Modifier").assertIsDisplayed().performClick()
         compose.waitUntil(timeoutMillis = 2_000) { edits == 1 }
     }

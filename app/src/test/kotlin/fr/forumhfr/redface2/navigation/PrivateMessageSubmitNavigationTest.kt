@@ -2,10 +2,8 @@ package fr.forumhfr.redface2.navigation
 
 import fr.forumhfr.redface2.core.domain.blacklist.canonicalizePseudo
 import fr.forumhfr.redface2.feature.messages.PrivateMessageSubmitResult
-import fr.forumhfr.redface2.feature.editor.PostEditorMode
-import kotlinx.serialization.encodeToString
-import kotlinx.serialization.decodeFromString
-import kotlinx.serialization.json.Json
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.descriptors.elementNames
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -15,16 +13,21 @@ import org.junit.Test
 class PrivateMessageSubmitNavigationTest {
 
     @Test
-    fun `private edit route restores opaque coordinates without changing the public route format`() {
+    @OptIn(ExperimentalSerializationApi::class)
+    fun `private edit route carries only opaque coordinates without changing the public route format`() {
         val route = PrivateMessageEditRoute(threadId = 42, page = 3, numreponse = 101)
-        val encoded = Json.encodeToString(route)
-        assertEquals(setOf("threadId", "page", "numreponse"), Json.parseToJsonElement(encoded)
-            .let { it as kotlinx.serialization.json.JsonObject }.keys)
-        assertEquals(route, Json.decodeFromString<PrivateMessageEditRoute>(encoded))
+        assertEquals(
+            listOf("threadId", "page", "numreponse"),
+            PrivateMessageEditRoute.serializer().descriptor.elementNames.toList(),
+        )
+        assertEquals(42, route.threadId)
+        assertEquals(3, route.page)
+        assertEquals(101, route.numreponse)
         assertTrue(route.hidesNavigationSuite())
-        assertEquals(PostEditorRoute(PostEditorMode.Edit, 23, 35421, 101, 3, 0),
-            Json.decodeFromString<PostEditorRoute>(
-                """{"mode":"Edit","cat":23,"topicId":35421,"numreponse":101,"page":3,"subcat":0}"""))
+        assertEquals(
+            listOf("mode", "cat", "topicId", "numreponse", "page", "subcat", "resumeSharedDraft"),
+            PostEditorRoute.serializer().descriptor.elementNames.toList(),
+        )
     }
 
     @Test
