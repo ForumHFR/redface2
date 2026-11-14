@@ -257,8 +257,11 @@ class QuickReplyDurableQuoteTest {
         val token = scenario.uncertain()
         scenario.enqueue()
         val sheet = scenario.open()
-        sheet.onPendingQuoteIgnored()
-        runCurrent()
+        sheet.quotesDelivered.test {
+            sheet.onPendingQuoteIgnored()
+            runCurrent()
+            expectNoEvents()
+        }
         assertNull(scenario.pending)
         assertEquals(token, scenario.store.entries[scenario.key]?.attempt?.token)
         assertEquals(AttemptStatus.UNCERTAIN, scenario.store.entries[scenario.key]?.attempt?.status)
@@ -415,12 +418,17 @@ class QuickReplyDurableQuoteTest {
     }
 
     @Test
-    fun `card launch cannot be reinterpreted by a changed inline preference`() = runTest {
+    fun `ED88 card launch stays armed without inline delivery despite a changed preference`() = runTest {
         val scenario = Scenario()
         val card = QuoteSelection(QuoteLocator(1, 101, null), "alice", "preview")
         val sheet = scenario.create()
-        sheet.onSheetOpened(listOf(card))
-        runCurrent()
+        sheet.quotesDelivered.test {
+            sheet.onSheetOpened(listOf(card))
+            runCurrent()
+            sheet.onPendingQuoteIgnored()
+            advanceUntilIdle()
+            expectNoEvents()
+        }
         assertEquals(listOf(card), sheet.state.value.quotes)
         assertNull(scenario.pending)
         assertTrue(scenario.fetches.isEmpty())
@@ -1090,7 +1098,7 @@ class QuickReplyDurableQuoteTest {
     }
 
     @Test
-    fun `ED10 a close after Ignore resolved an unsealed delivery saves the body normally`() = runTest {
+    fun `ED88 Ignore seals an inserted quote once before close - ED10`() = runTest {
         val scenario = Scenario().apply { offline = true }
         scenario.enqueue()
         val sheet = scenario.open()
@@ -1108,10 +1116,14 @@ class QuickReplyDurableQuoteTest {
         scenario.store.saveFailure = null
         assertTrue(sheet.state.value.canIgnorePendingQuote)
         sheet.onPendingQuoteIgnored()
-        runCurrent() // Q is erased ; the autosave of C has not fired yet.
+        runCurrent() // C and Q settle together, before the autosave debounce.
         assertNull(scenario.pending)
+        assertEquals(inserted, scenario.body)
+        assertTrue(scenario.store.saved[scenario.key]?.bodyProvenance?.isQuoteOnly(inserted) == true)
         assertFalse(sheet.state.value.isPreparingQuotes)
         sheet.quotesDelivered.test delivery@ {
+            awaitItem() // The durable delivery consumes the basket.
+            sheet.onPendingQuoteIgnored() // Repeated Ignore cannot deliver twice.
             sheet.effects.test {
                 sheet.onDismissed()
                 advanceUntilIdle()
@@ -1119,10 +1131,49 @@ class QuickReplyDurableQuoteTest {
                 assertTrue(awaitItem() is QuickReplyEffect.CloseCommitted)
                 expectNoEvents()
             }
-            expectNoEvents() // An ignored quote is never announced as delivered, before or at close.
+            expectNoEvents() // Neither repeated Ignore nor close delivers again.
         }
         assertEquals(inserted, scenario.body)
         assertNull(scenario.pending)
+    }
+
+    @Test
+    fun `ED88 Ignore of an inserted quote keeps the basket armed when its write is refused`() = runTest {
+        val scenario = Scenario().apply { offline = true }
+        scenario.enqueue()
+        val sheet = scenario.open()
+        advanceUntilIdle()
+        sheet.onQuoteReloadRequested()
+        advanceUntilIdle()
+        scenario.offline = false
+        scenario.store.saveFailure = IOException("disk")
+        sheet.onQuoteReloadRequested()
+        advanceUntilIdle()
+        val inserted = sheet.state.value.text.text
+        assertTrue(inserted.contains("[quotemsg=101]"))
+        assertTrue(sheet.state.value.canIgnorePendingQuote)
+
+        sheet.quotesDelivered.test {
+            sheet.onPendingQuoteIgnored()
+            advanceUntilIdle()
+            expectNoEvents()
+            assertEquals(scenario.request, scenario.pending)
+            assertEquals("", scenario.body)
+            assertEquals(inserted, sheet.state.value.text.text)
+            assertFalse(sheet.state.value.canSubmit)
+            assertFalse(sheet.state.value.isPreparingQuotes)
+            assertEquals(EditorErrors.draftSaveFailed, sheet.state.value.submitError)
+
+            scenario.store.saveFailure = null
+            sheet.onPendingQuoteIgnored()
+            runCurrent()
+            awaitItem()
+            assertNull(scenario.pending)
+            assertEquals(inserted, scenario.body)
+            assertTrue(scenario.store.saved[scenario.key]?.bodyProvenance?.isQuoteOnly(inserted) == true)
+            advanceUntilIdle()
+            expectNoEvents()
+        }
     }
 
     @Test

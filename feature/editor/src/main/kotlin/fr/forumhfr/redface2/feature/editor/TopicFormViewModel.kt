@@ -737,6 +737,7 @@ class TopicFormViewModel @AssistedInject constructor(
      * (a blank suffix counts as untouched), keep text typed after the seed after the draft, or append the
      * draft after the trimmed field otherwise.
      * Same rule as the post editor and the private message editors (R0c, #1512 / #1553).
+     * A title the user changed wins; the untouched served title is a seed.
      * A new topic restores the offer chosen in the sheet's list ([offerId]), the first one by default.
      */
     private fun onDraftRestoreRequested(offerId: String? = null) {
@@ -754,14 +755,18 @@ class TopicFormViewModel @AssistedInject constructor(
     private fun TopicFormState.draftOffer(id: String?): EditorDraftStore.DraftOffer? =
         if (id == null) draftOffers.firstOrNull() else draftOffers.firstOrNull { it.id == id }
 
-    /** ED-89: one undoable body edit, caret at the end; a live title always wins over the offered one. */
+    /**
+     * ED-89: one undoable body edit, caret at the end. A title the user changed wins;
+     * the untouched served title is a seed.
+     */
     private fun applyOfferedDraft(offeredBody: String, offeredSubject: String?) {
         val body = restoredBody(bodyFieldState.text.toString(), offeredBody, _state.value.draftHydratedContent)
         // A title-only offer leaves the body (and its caret) alone; any other restore is one edit, caret at the end.
         if (offeredBody.isNotBlank()) replaceBody(body)
         updateState { current ->
-            // A live subject wins, including for a title-only offer.
-            val subject = current.subject.text.ifBlank { offeredSubject.orEmpty() }
+            val subject = if (!offeredSubject.isNullOrBlank() &&
+                (current.subject.text.isBlank() || current.subject.text == current.subjectHydratedContent)
+            ) offeredSubject else current.subject.text
             current.copy(
                 subject = TextFieldValue(text = subject, selection = TextRange(subject.length)),
                 restorableDraft = null,

@@ -2149,9 +2149,9 @@ class TopicFormViewModelTest {
     }
 
     @Test
-    fun restoreTitleOnlyOfferKeepsNonBlankLiveTitle() = runTest {
+    fun restoreTitleOnlyOfferReplacesUntouchedServedTitle() = runTest {
         topicFormRepository.formResult = topicFormRepository.formResult.copy(
-            subject = "live title", initialContent = "seed",
+            subject = "served title", initialContent = "seed",
         )
         for (offeredBody in listOf("", "   ")) {
             draftStore = FakeEditorDraftStore()
@@ -2165,8 +2165,54 @@ class TopicFormViewModelTest {
             vm.submit(TopicFormIntent.DraftRestoreRequested)
             assertEquals("seed", vm.bodyFieldState.text.toString())
             assertEquals(TextRange(1, 3), vm.bodyFieldState.selection)
-            assertEquals("live title", vm.state.value.subject.text)
+            assertEquals("stored title", vm.state.value.subject.text)
             assertNull(vm.state.value.restorableDraft)
+            assertNull(vm.state.value.restorableSubject)
+            vm.viewModelScope.cancel()
+        }
+    }
+
+    @Test
+    fun restoreOfferKeepsTitleChangedByUser() = runTest {
+        topicFormRepository.formResult = topicFormRepository.formResult.copy(
+            subject = "served title", initialContent = "seed",
+        )
+        for (offeredBody in listOf("", "draft")) {
+            draftStore = FakeEditorDraftStore()
+            draftStore.preload(
+                EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE),
+                EditorDraftStore.Draft(body = offeredBody, subject = "stored title"),
+            )
+            val vm = newViewModel()
+            vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("typed title")))
+            assertEquals(offeredBody, vm.state.value.restorableDraft)
+            vm.submit(TopicFormIntent.DraftRestoreRequested)
+            assertEquals("typed title", vm.state.value.subject.text)
+            assertEquals(if (offeredBody.isBlank()) "seed" else offeredBody, vm.bodyFieldState.text.toString())
+            assertNull(vm.state.value.restorableDraft)
+            assertNull(vm.state.value.restorableSubject)
+            vm.viewModelScope.cancel()
+        }
+    }
+
+    @Test
+    fun restoreBlankOfferedTitleKeepsServedTitle() = runTest {
+        topicFormRepository.formResult = topicFormRepository.formResult.copy(
+            subject = "served title", initialContent = "seed",
+        )
+        for (offeredSubject in listOf(null, "", "   ")) {
+            draftStore = FakeEditorDraftStore()
+            draftStore.preload(
+                EditorDraftKey.editFirstPost(SAMPLE_CAT, SAMPLE_NUMREPONSE),
+                EditorDraftStore.Draft(body = "draft", subject = offeredSubject),
+            )
+            val vm = newViewModel()
+            assertEquals("draft", vm.state.value.restorableDraft)
+            vm.submit(TopicFormIntent.DraftRestoreRequested)
+            assertEquals("served title", vm.state.value.subject.text)
+            assertEquals("draft", vm.bodyFieldState.text.toString())
+            assertNull(vm.state.value.restorableDraft)
+            assertNull(vm.state.value.restorableSubject)
             vm.viewModelScope.cancel()
         }
     }
@@ -2313,7 +2359,7 @@ class TopicFormViewModelTest {
         vm.submit(TopicFormIntent.DraftRestoreRequested)
         syncBody()
         assertEquals("draft", vm.bodyFieldState.text.toString())
-        assertEquals(topicFormRepository.formResult.subject, vm.state.value.subject.text)
+        assertEquals("draft title", vm.state.value.subject.text)
         assertEquals(seed, vm.state.value.draftHydratedContent)
         assertNull(vm.state.value.restorableDraft)
         assertEquals(TextRange(5), vm.bodyFieldState.selection)
