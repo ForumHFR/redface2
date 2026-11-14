@@ -16,6 +16,45 @@ Workflow (depuis #304, CD rev. 4) : le **`versionCode` n'est plus bumpé à la m
 
 ---
 
+## `0.70.0` — `open` (bêta) — 2026-11-14
+
+Promotion bêta du lot développé en dev de `0.69.0` à `0.69.24`, depuis la précédente bêta `0.68.0`. Le détail par version dev figure dans les entrées ci-dessous. Contenu :
+
+- **Éditeur refait** ([#1417](https://github.com/ForumHFR/redface2/issues/1417)) : la réponse et la modification d'un post, la création et la modification d'un sujet, la réponse MP et le nouveau MP passent par un même éditeur.
+  - En haut : une app bar (« Répondre », « Modifier », catégorie du sujet, « Nouveau message ») et un panneau d'en-tête. Il porte le titre et la sous-catégorie d'un sujet ; pour un MP, les destinataires en puces et le sujet limité à 70 caractères.
+  - En bas : une barre d'action avec les rangées Format, Couleur et Image, et un bouton d'envoi en avion en papier. Un raccourci configurable s'y ajoute (réglage « Édition et publication », « Aucun » par défaut).
+  - Les citations en cartes passent dans un panneau (❝ N). L'aperçu s'ouvre à côté du texte et se masque pendant la frappe.
+  - Une feuille Options à deux onglets, Options et Formats, propose douze formats, dont Puce et E-mail, nouveaux. Le ton du message est refait et les icônes sont plus fines.
+  - Après une rotation ou un arrêt de l'app par le système, l'éditeur reprend le texte, la sélection, le défilement et l'en-tête. Le texte d'un MP ne passe jamais par l'état sauvegardé du système.
+- **Brouillons et citations** ([#1450](https://github.com/ForumHFR/redface2/issues/1450), [#1553](https://github.com/ForumHFR/redface2/issues/1553), [#1616](https://github.com/ForumHFR/redface2/issues/1616)) :
+  - « Citer » insère la citation tout de suite, même quand un brouillon non envoyé existe. Ce brouillon attend sous ↺ et n'est jamais restauré d'office. La feuille ↺ liste les brouillons avec leur date et un extrait. « Restaurer » les remet ; « Ignorer » en retire un et laisse la feuille ouverte s'il en reste.
+  - Une demande de citation survit à l'arrêt de l'app.
+  - Le panier multi-citation se vide dès que les citations sont enregistrées dans le brouillon, à condition qu'elles soient encore dans le champ.
+  - Si le brouillon ne peut pas être enregistré à la fermeture d'un éditeur plein écran ou de la réponse rapide, l'app demande « Rester » ou « Quitter sans enregistrer » au lieu de perdre la saisie.
+- **Modifier un message** : le texte est verrouillé tant que le message d'origine n'est pas chargé. Un message ne peut plus être écrasé par un texte tapé trop tôt.
+- **Envoi** ([#1456](https://github.com/ForumHFR/redface2/issues/1456), [#1437](https://github.com/ForumHFR/redface2/issues/1437)) :
+  - Une coupure prouvée avant le départ du message affiche une erreur réseau, et le message peut être renvoyé. Après un départ possible, l'envoi reste « incertain » : il faut vérifier avant de renvoyer.
+  - Les textes d'erreur sont réécrits et communs aux cinq éditeurs.
+  - L'offre « Dernière page » apparaît aussi quand le rechargement après envoi est lent.
+- **MP : modifier ses propres messages** ([#1625](https://github.com/ForumHFR/redface2/issues/1625)) : « Modifier » apparaît dans le menu « … » de ses messages, en 1:1 comme à plusieurs, y compris quand HFR ne fournit pas le lien d'édition. Au retour, la page est rafraîchie et « Message modifié » s'affiche.
+- **Feuilles** ([#1630](https://github.com/ForumHFR/redface2/pull/1630)) : plus aucune feuille ne s'arrête à mi-hauteur. Les feuilles ouvertes clavier visible prennent leur taille d'après la position finale du clavier.
+- **Visionneuse** ([#1411](https://github.com/ForumHFR/redface2/issues/1411), [#1309](https://github.com/ForumHFR/redface2/issues/1309)) :
+  - Un seul GIF animé est décodé à la fois, ce qui supprime les gels et les ANR sur les appareils à faible mémoire.
+  - Un balayage vertical sur une image zoomée ne fait plus réapparaître la barre d'actions.
+- **Lecture et aperçu** ([#1447](https://github.com/ForumHFR/redface2/issues/1447), [#1452](https://github.com/ForumHFR/redface2/issues/1452)) :
+  - Depuis « cité N fois », un seul Back ramène au post de départ.
+  - Une image placée dans un lien ou un style s'affiche dans l'aperçu comme dans le sujet.
+- **Technique** :
+  - Material 3 passe en `1.5.0-beta02`, sur la BOM Compose stable. Conséquence visible : après un arrêt du doigt, il faut tirer une feuille au-delà de la moitié pour la fermer. Porte Gm : en dev depuis le 6/11 sans retour bloquant.
+  - KSP est épinglé en 2.3.12, et la CD refuse un build auquel manquent des modules Hilt ([#1581](https://github.com/ForumHFR/redface2/issues/1581)).
+  - Les captures Roborazzi sont comparées à des références versionnées.
+  - La CI est plus rapide ([#1619](https://github.com/ForumHFR/redface2/issues/1619)).
+- Limites connues :
+  - Après le retrait ou le déplacement d'une carte de citation, le focus TalkBack n'est pas encore replacé.
+  - Sur émulateur, un saut reste visible quand le clavier se ferme sous une feuille ouverte.
+
+---
+
 ## `0.69.24` — `internal` (dev) — 2026-11-14
 
 Smileys ([#1417](https://github.com/ForumHFR/redface2/issues/1417)) : à la demande de XaTriX, la feuille des smileys reprend la hauteur de chaque onglet, comme avant la 0.69.19 ; la hauteur commune aux trois onglets (PR [#1630](https://github.com/ForumHFR/redface2/pull/1630)) est retirée. Les autres feuilles gardent leur cran unique. Édition MP ([#1625](https://github.com/ForumHFR/redface2/issues/1625), PR [#1647](https://github.com/ForumHFR/redface2/pull/1647)) : quand HFR ne fournit pas le lien d'édition d'un de ses propres messages, le menu « … » propose quand même « Modifier » dans une conversation où l'on peut répondre, sauf sur le message de la page précédente repris en tête de page ; le menu relit le message affiché après un rafraîchissement, et une lecture MPStorage en échec est retentée au rafraîchissement.

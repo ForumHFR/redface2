@@ -1,3 +1,6 @@
-Redface 2 v0.69.24 — dev.
-- Smileys: each tab has its own height again.
-- PM: "Edit" on your own messages even without an HFR link.
+Redface 2 v0.70.0 — beta.
+- Redesigned editor: bottom action bar, formats, preview beside the text, Options sheet.
+- Drafts under ↺: "Quote" inserts right away, the draft waits.
+- PM: edit your own messages.
+- Sending: clearer errors, uncertain sends better delimited.
+- Viewer: lighter animated GIFs.
