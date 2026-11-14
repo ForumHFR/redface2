@@ -1199,7 +1199,13 @@ class PrivateMessageComposeViewModelTest {
         assertFalse(vm.state.value.canDecideDraftOffer(newer.id))
         val adapter = PrivateMessageComposeChromeAdapter({ vm.state.value }, vm.bodyFieldState, vm.editorEvents,
             vm.chromeActions(), {}, {}, vm.chromeMemory)
+        // ED-44: the failed save information consumes the first gesture before the sheet can reopen.
+        assertEquals(EditorEventContent.Problem(EditorErrors.draftSaveFailed), vm.editorEvents.visibleEvent?.content)
         adapter.open(PrivateMessageComposeChromeSurface.Restore)
+        assertFalse(adapter.draftOfferOpen)
+        assertNull(vm.editorEvents.visibleEvent)
+        adapter.open(PrivateMessageComposeChromeSurface.Restore)
+        assertTrue(adapter.draftOfferOpen)
         adapter.restoreOffer(newer.id)
         adapter.discardOffer(newer.id)
         runCurrent()

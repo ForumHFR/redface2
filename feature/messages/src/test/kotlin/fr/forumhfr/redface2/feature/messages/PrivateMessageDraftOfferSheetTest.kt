@@ -94,10 +94,12 @@ class PrivateMessageDraftOfferSheetTest {
         reply.state = reply.state.copy(restorableDraft = "Newer draft", draftOffers = listOf(newer, older),
             draftOfferDecisionPending = true)
         message.state = message.state.copy(restorableDraft = "Newer draft", draftOffers = listOf(newer, older),
-            draftOfferDecisionPending = true)
+            draftOfferDecisionPending = true,
+            recipientState = EditorRecipientState(listOf("alice")), subject = "Subject")
         val calls = if (isReply) reply.calls else message.calls
         compose.setContent { Content(isReply) }
-        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer").performClick()
+        compose.onNodeWithContentDescription("Brouillon retrouvé, restaurer ou ignorer")
+            .assertIsEnabled().performClick()
         assertDecisionsDisabled()
         compose.runOnIdle {
             if (isReply) { reply.adapter.restoreOffer(older.id); reply.adapter.discardOffer(older.id) }
