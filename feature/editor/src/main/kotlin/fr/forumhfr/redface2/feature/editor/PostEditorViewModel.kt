@@ -570,7 +570,9 @@ class PostEditorViewModel @AssistedInject constructor(
                     resolveQuoteRenderingThenLoad()
                 } else {
                     finishInlineQuoteDelivery()
-                    if (sealsDelivery) _quotesDelivered.trySend(Unit)
+                    // Sealed: C was written with Q. Not sealed: edits made while the delivery was
+                    // pending were never autosaved (draftSnapshot is null until now), so persist C.
+                    if (sealsDelivery) _quotesDelivered.trySend(Unit) else scheduleAutosave()
                     if (loadedForm == null) {
                         loadReplyFormIfPossible(preserveDraft = true)
                     }

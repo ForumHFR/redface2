@@ -759,6 +759,7 @@ class PostEditorViewModelTest {
 
             val edited = "my text without the quote"
             vm.editBody(TextFieldValue(edited))
+            settleBody() // The edit's own autosave is spent (no snapshot while Q is delivered).
             draftStore.saveFailure = null
             vm.dispatch(PostEditorIntent.PendingQuoteIgnored)
             settleBody()

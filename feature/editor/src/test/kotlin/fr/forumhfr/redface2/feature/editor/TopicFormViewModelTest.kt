@@ -2184,7 +2184,7 @@ class TopicFormViewModelTest {
             vm.submit(TopicFormIntent.SubjectChanged(TextFieldValue("typed title")))
             // New-topic offers retain their stored title, so restoring must respect the live title.
             assertEquals("typed title", vm.state.value.subject.text)
-            assertEquals("", vm.state.value.subjectHydratedContent)
+            assertNull(vm.state.value.subjectHydratedContent) // A new topic has no served title.
             assertEquals(offeredBody, vm.state.value.restorableDraft)
             assertEquals("stored title", vm.state.value.restorableSubject)
             vm.submit(TopicFormIntent.DraftRestoreRequested)
